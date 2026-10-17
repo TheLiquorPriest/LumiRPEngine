@@ -4,13 +4,14 @@
 
 What the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.
 
-Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1.
+Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1.
 
 ## Contents
 
 - [Engine built-ins](#engine-built-ins)
 - [Calendar & time pack](#calendar--time-pack-calendar)
 - [Cast life pack](#cast-life-pack-castlife)
+- [Combat pack](#combat-pack-combat)
 - [Economy pack](#economy-pack-economy)
 - [Gear & containers pack](#gear--containers-pack-gear)
 - [Relationships pack](#relationships-pack-relationships)
@@ -236,6 +237,46 @@ Panels: `castlife.cast`. Slots it writes: `people`.
 ### Lint codes
 
 `castlife.double_booking`.
+
+## Combat pack (`combat`)
+
+Version 1 · realism domain none · requires none.
+
+### Effects
+
+| Effect | Arguments |
+|---|---|
+| `combat.end` | `winner?` |
+| `combat.end_turn` | `who?` |
+| `combat.spend` | `who?`, `cost` |
+| `combat.start` | `foes?` |
+
+### Formula functions
+
+- `budget_left(e, budget)`
+- `can_fight(e)`
+- `encounter_round()`
+- `has_turn(e)`
+- `in_encounter(e)`
+- `is_ally(a, b)`
+- `is_down(e)`
+- `is_foe(a, b)`
+- `standing(side)`
+
+### Actions
+
+| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |
+|---|---|---|---|---|---|---|
+| `end_turn` | End turn |  |  | `default` | `0` | end my turn, end turn |
+| `fight` | Fight | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |
+
+### Events
+
+Its own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.
+
+### Panels and slots
+
+Panels: `combat.encounter`. Slots it writes: none.
 
 ## Economy pack (`economy`)
 

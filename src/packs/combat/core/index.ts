@@ -288,9 +288,10 @@ export const combatPack: PackDef = {
   register(r) {
     for (const def of events) r.event<PackEvent>(def);
 
-    r.effect({ type: "combat.start", resolve: (a, ctx) => startFight(a, ctx) });
+    r.effect({ type: "combat.start", args: ["foes?"], resolve: (a, ctx) => startFight(a, ctx) });
     r.effect({
       type: "combat.end",
+      args: ["winner?"],
       resolve(a, ctx) {
         const enc = encounterOf(ctx.state);
         if (!enc) return reject("no_fight", "no fight is under way");
@@ -300,6 +301,7 @@ export const combatPack: PackDef = {
     });
     r.effect({
       type: "combat.end_turn",
+      args: ["who?"],
       resolve(a, ctx) {
         const rules = rulesOf(ctx.world);
         const enc = encounterOf(ctx.state);
@@ -310,7 +312,7 @@ export const combatPack: PackDef = {
         return next ? [next] : reject("no_one", "no one is left to take a turn");
       },
     });
-    r.effect({ type: "combat.spend", resolve: (a, ctx) => spendFor(ctx, strOf(a.who) || ctx.world.pov, { combat: { cost: counts(a.cost) ?? {} } }) });
+    r.effect({ type: "combat.spend", args: ["who?", "cost"], resolve: (a, ctx) => spendFor(ctx, strOf(a.who) || ctx.world.pov, { combat: { cost: counts(a.cost) ?? {} } }) });
 
     r.service("combat.spend", spendFor);
     r.service("combat.round", openRound);
