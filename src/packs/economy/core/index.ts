@@ -165,10 +165,12 @@ function offersAtPlace(ctx: ReadContext, place: string | null): Offer[] {
 /**
  * The catalog row a free-text item names (DESIGN §9.5), or null. A row fits only when the item's
  * main noun is one the row names, word for word with simple plurals ("bran muffin" fits "Pastry or
- * muffin"; "desk lamp" doesn't fit "Desk", nor "chocolate bar" "Bar or club cover charge"). Of the
- * rows that fit, the one holding the most of the item's words wins ("pint of beer" is "Beer at a
- * bar", by its id); then one whose own noun is that noun, one in the category the purchase gives,
- * one the place sells, one that mentions a place tag (a pint at a bar), then the first id.
+ * muffin"; "desk lamp" doesn't fit "Desk", nor "chocolate bar" "Bar or club cover charge"), and
+ * isn't another kind of it: an item with a qualifier the row lacks doesn't fit a row with
+ * qualifiers of its own ("lantern oil" isn't "Vegetable or canola oil"; "coffee" is "Drip coffee").
+ * Of the rows that fit, the one holding the most of the item's words wins ("pint of beer" is "Beer
+ * at a bar", by its id); then one whose own noun is that noun, one in the category the purchase
+ * gives, one the place sells, one that mentions a place tag (a pint at a bar), then the first id.
  */
 export function matchCatalog(ctx: ReadContext, text: string, place: string | null, category = ""): string | null {
   const item = itemName(text);
@@ -182,6 +184,8 @@ export function matchCatalog(ctx: ReadContext, text: string, place: string | nul
     const row = rows[id];
     const name = catalogName(id, strOf(row?.name, id));
     if (!name.heads.has(item.head)) continue;
+    const unnamed = [...item.words].some((w) => w !== item.head && !name.words.has(w));
+    if (unnamed && [...name.qualifiers].some((q) => !said.has(q))) continue;
     const rowCategory = strOf(row?.category);
     const score = [[...said].filter((w) => name.words.has(w)).length, name.main === item.head ? 1 : 0, rowCategory === category ? 1 : 0, trade.categories.includes(rowCategory) ? 1 : 0, tags.some((t) => name.words.has(t)) ? 1 : 0];
     const first = best ? score.findIndex((s, i) => s !== best?.score[i]) : 0;

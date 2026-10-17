@@ -60,8 +60,13 @@ describe("a catalog row prices an item only when it names it", () => {
     expect(matchCatalog(ctx, "tin kazoo", null)).toBeNull();
     expect(name(matchCatalog(ctx, "chocolate bar", null))).not.toMatch(/cover charge/i);
     expect(name(matchCatalog(ctx, "coffee machine", null))).not.toMatch(/drip coffee/i);
-    expect(name(matchCatalog(ctx, "desk lamp", null))).not.toBe("Desk");
     expect(name(matchCatalog(ctx, "coffees", null))).toMatch(/coffee/i);
+    // Another kind of the thing isn't the thing: lantern oil is neither vegetable nor canola oil,
+    // while a plain coffee is still the drip coffee row.
+    expect(matchCatalog(ctx, "lantern oil", null)).toBeNull();
+    expect(name(matchCatalog(ctx, "coffee", null))).toMatch(/^drip coffee/i);
+    expect(name(matchCatalog(ctx, "whole milk", null))).toBe("Milk, whole");
+    expect(name(matchCatalog(ctx, "desk lamp", null))).not.toBe("Desk");
   });
 
   test("a desk lamp typed at $25 costs $25, and an automatic purchase's chip shows what it charged", async () => {

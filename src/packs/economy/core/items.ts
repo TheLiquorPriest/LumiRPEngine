@@ -80,6 +80,8 @@ export interface CatalogName {
   heads: Set<string>;
   /** The head of the noun phrase as a whole (its last alternative's). */
   main: string;
+  /** The noun phrase's other words: what kind of the thing the row is ("Vegetable or canola oil": vegetable, canola; "Drip coffee, 12 oz": drip). */
+  qualifiers: Set<string>;
   /** Every word of the row's id and name, stemmed, without filler. */
   words: Set<string>;
 }
@@ -111,5 +113,6 @@ export function catalogName(id: string, name: string): CatalogName {
     if (word.includes("-")) heads.add(stem(word.split("-").at(-1) ?? word));
   }
   const words = new Set([...wordsOf(tokens(lower)), ...wordsOf(id.split("_"))]);
-  return { heads, main: stem(last.at(-1) ?? ""), words };
+  const qualifiers = new Set(named.flat().filter((w) => !/^\d/.test(w)).map((w) => stem(w)).filter((w) => !heads.has(w)));
+  return { heads, main: stem(last.at(-1) ?? ""), qualifiers, words };
 }

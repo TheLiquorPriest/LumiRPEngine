@@ -76,7 +76,8 @@ describe("a narrated purchase that tells the turn's own Buy again", () => {
   });
 
   test("a different head noun keeps its chip: 'lantern oil' after a typed lantern, 'credit card reader' after a holder", async () => {
-    expect(await chipsAfter("lantern", 40, { item: "lantern oil", price: 6 })).toEqual([expect.stringMatching(/^Bought lantern oil: /)]);
+    // No catalog row is lantern oil, so the narrated $6 is its price.
+    expect(await chipsAfter("lantern", 40, { item: "lantern oil", price: 6 })).toEqual(["Bought lantern oil: $6.00"]);
     expect(await chipsAfter("credit card holder", 12, { item: "credit card reader", price: 12 })).toEqual([expect.stringMatching(/^Bought credit card reader: /)]);
   });
 
