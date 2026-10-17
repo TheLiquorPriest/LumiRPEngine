@@ -37497,10 +37497,17 @@ class EngineBook {
     if (!bookId || !await this.host.books.exists(bookId, userId)) {
       bookId = await this.host.books.create(`LumiRPEngine \xB7 ${world.name}`, "Engine-managed slots. Entries here are activated only by LumiRPEngine.", userId);
       await this.worlds.setLoreBook(world.id, bookId, userId);
-      this.slots.delete(bookId);
     }
-    this.slots.delete(bookId);
-    const existing = await this.slotEntries(bookId, userId);
+    const existing = new Map;
+    const leftoverLore = [];
+    for (const e of await this.host.books.entries(bookId, userId)) {
+      const slot = slotOfEntry(e.extensions);
+      if (slot)
+        existing.set(slot, e.id);
+      else if (loreOfEntry(e.extensions) !== null)
+        leftoverLore.push(e.id);
+    }
+    this.slots.set(bookId, existing);
     for (const section of sectionsOf(world)) {
       if (existing.has(section.id))
         continue;
@@ -37519,13 +37526,9 @@ class EngineBook {
       }, userId);
       existing.set(section.id, id);
     }
-    await this.removeLore(bookId, userId);
+    for (const id of leftoverLore)
+      await this.host.books.deleteEntry(id, userId);
     return bookId;
-  }
-  async removeLore(bookId, userId) {
-    for (const e of await this.host.books.entries(bookId, userId))
-      if (loreOfEntry(e.extensions) !== null)
-        await this.host.books.deleteEntry(e.id, userId);
   }
   async slotEntries(bookId, userId) {
     const known = this.slots.get(bookId);
@@ -40366,7 +40369,7 @@ class Runtime {
     this.planNotes = new PlanNotes(this.host);
     this.book = new EngineBook(this.host, this.worlds);
     this.steps = new Steps(this.host, this.meter);
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792257185" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792258261" }));
     this.push = new StatePush(this.host, (chatId, userId) => this.view(chatId, userId));
   }
   start() {
@@ -40950,7 +40953,7 @@ class Runtime {
     const { world, state } = render;
     const index = await this.worlds.index(run.worldId, input.userId);
     const settings = await this.settings.get(input.userId);
-    const result = { disabled: [], enabled: [], forced: [], mutated: [], disableRecursion: false };
+    const result = { disabled: [], enabled: [], forced: [], mutated: [] };
     const bookId = index?.loreBookId ?? null;
     const slotIds = bookId ? await this.book.slotEntries(bookId, input.userId) : new Map;
     const present = new Set(input.entries.filter((e) => e.bookId === bookId).map((e) => e.id));
@@ -42052,28 +42055,18 @@ function usageTokens(raw) {
   return (num3(u, "input_tokens") ?? num3(u, "prompt_tokens") ?? 0) + (num3(u, "output_tokens") ?? num3(u, "completion_tokens") ?? 0);
 }
 function entryInput(entry) {
-  const out = {};
-  if (entry.comment !== undefined)
-    out.comment = entry.comment;
-  if (entry.content !== undefined)
-    out.content = entry.content;
-  if (entry.keys !== undefined)
-    out.key = entry.keys;
-  if (entry.disabled !== undefined)
-    out.disabled = entry.disabled;
-  if (entry.constant !== undefined)
-    out.constant = entry.constant;
-  if (entry.position !== undefined)
-    out.position = entry.position;
-  if (entry.depth !== undefined)
-    out.depth = entry.depth;
-  if (entry.role !== undefined && entry.role !== null)
-    out.role = entry.role;
-  if (entry.order !== undefined)
-    out.order_value = entry.order;
-  if (entry.extensions !== undefined)
-    out.extensions = entry.extensions;
-  return out;
+  return {
+    comment: entry.comment,
+    content: entry.content,
+    key: entry.keys,
+    disabled: entry.disabled,
+    constant: entry.constant,
+    position: entry.position,
+    depth: entry.depth,
+    ...entry.role !== null ? { role: entry.role } : {},
+    order_value: entry.order,
+    extensions: entry.extensions
+  };
 }
 var DIAGNOSTICS_LOG = "diagnostics/backend.log";
 var USER_DIAGNOSTICS_LOG = "diagnostics.log";
@@ -42213,20 +42206,7 @@ function createSpindleHost() {
         const input = {
           chatId: ctx.chatId,
           userId,
-          messages: ctx.messages.map((m) => ({ id: m.id, content: m.content, isUser: m.is_user })),
-          entries: ctx.entries.map((e) => ({
-            id: e.id,
-            bookId: e.world_book_id,
-            comment: e.comment,
-            content: e.content,
-            keys: [...e.key],
-            constant: e.constant,
-            disabled: e.disabled,
-            group: e.group_name === "" ? null : e.group_name,
-            groupOverride: e.group_override,
-            groupWeight: e.group_weight,
-            extensions: toJsonObject(e.extensions)
-          }))
+          entries: ctx.entries.map((e) => ({ id: e.id, bookId: e.world_book_id, extensions: toJsonObject(e.extensions) }))
         };
         const result = await handler(input);
         if (!result)
@@ -42235,8 +42215,7 @@ function createSpindleHost() {
           disabled: result.disabled,
           enabled: result.enabled,
           forced: result.forced,
-          mutated: result.mutated.map((m) => ({ id: m.id, ...m.content !== undefined ? { content: m.content } : {}, ...m.placement ? { placement: m.placement } : {} })),
-          ...result.disableRecursion ? { activationOverrides: { disableRecursion: true } } : {}
+          mutated: result.mutated.map((m) => ({ id: m.id, ...m.content !== undefined ? { content: m.content } : {}, ...m.placement ? { placement: m.placement } : {} }))
         };
       }, priority);
     },
