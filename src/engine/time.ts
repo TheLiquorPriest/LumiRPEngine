@@ -12,7 +12,7 @@ import { calendarOf, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, shorte
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
-import { allSchedules, nextStart, scheduleOwners } from "./schedules";
+import { allSchedules, nextStartFor, scheduleOwners } from "./schedules";
 import { bandOf, fieldDef, placeOfEntity } from "./scope";
 import { advance, ALL_NOTE, lod1Agents, type AdvanceResult } from "./simulate";
 import type { WorldState } from "./state";
@@ -137,12 +137,13 @@ export interface ResolvedTarget {
 /** The POV's next commitment start (a shift when `shiftOnly`) from its activity schedules, or null. */
 export function nextCommitment(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, who: EntityId, shiftOnly: boolean): { at: number; label: string } | null {
   let best: { at: number; label: string } | null = null;
+  const ctx = reg.context(world, state);
   for (const s of allSchedules(reg, world)) {
     if (!COMMITMENT_TARGETS.has(s.target)) continue;
     if (!scheduleOwners(reg, world, state, s).includes(who)) continue;
     let probe = state.clock;
     for (let i = 0; i < 16; i++) {
-      const n = nextStart(world, s, probe);
+      const n = nextStartFor(reg, ctx, s, who, probe);
       if (!n) break;
       const v = n.slot.value ?? n.slot.weighted?.[0]?.value;
       if (typeof v === "string" && !IDLE.has(v) && (!shiftOnly || SHIFT.test(v))) {

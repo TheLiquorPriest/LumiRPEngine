@@ -16,8 +16,10 @@
 //   4  needs and drives, invitations, NPC↔NPC encounters (regard through relationship.appraise)
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
-import type { EntityId, PlaceId } from "../../../shared/ids";
-import type { WorldDoc } from "../../../shared/world";
+import type { EntityId, PlaceId, TierId } from "../../../shared/ids";
+import { facetsInOrder, facetTree } from "../../../shared/classes";
+import { tierLabel, tierOf, tiersInOrder } from "../../../shared/tiers";
+import type { FacetId, FacetValueId, WorldDoc } from "../../../shared/world";
 import { minutesBetween } from "../../../engine/world-state";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, MINUTES_PER_DAY } from "../../../engine/calendar";
@@ -27,8 +29,9 @@ import { planDay, type FixedBlock, type PlanBlock, type PlanOption } from "../..
 import type { EventTypeDef, PackDef, ReadContext, SlotInfo } from "../../../engine/registry";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
-import { activeSlot, allSchedules, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
-import { kindIs, placeOfEntity } from "../../../engine/scope";
+import { activeSlot, allSchedules, ownerRank, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
+import { kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
+import { classValues, isGroup, isMemberOf, MEMBER_OF, tagsOf } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
 
@@ -73,13 +76,16 @@ interface Commitment extends FixedBlock {
   kind: "work" | "school" | "appointment" | "trip" | "other";
 }
 
+/** Where a person's place schedules have them at `at`: the most specific schedule with a slot running wins (DESIGN §8 precedence). */
 function personPlaceFor(ctx: ReadContext, who: EntityId, at: number): PlaceId | null {
+  let best: { rank: number; place: PlaceId } | null = null;
   for (const s of allSchedules(ctx.registry, ctx.world)) {
     if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who)) continue;
+    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
     const a = activeSlot(ctx.world, s, at);
-    if (a && typeof a.slot.value === "string") return a.slot.value;
+    if (a && typeof a.slot.value === "string" && (!best || rank < best.rank)) best = { rank, place: a.slot.value };
   }
-  return null;
+  return best?.place ?? null;
 }
 
 function homeOf(ctx: ReadContext, who: EntityId): PlaceId | null {
@@ -94,14 +100,32 @@ function workPlace(ctx: ReadContext, who: EntityId): PlaceId | null {
   return placeOfEntity(ctx.state, employer);
 }
 
+/** `blocks` with every span a cutter covers taken out: a block overlapping one keeps only its parts outside it. */
+function cutAround(blocks: Commitment[], cutters: readonly Commitment[]): Commitment[] {
+  return cutters.reduce<Commitment[]>(
+    (list, cutter) =>
+      list.flatMap((c) => {
+        if (c.end <= cutter.start || c.start >= cutter.end) return [c];
+        const parts: Commitment[] = [];
+        if (c.start < cutter.start) parts.push({ ...c, end: cutter.start });
+        if (c.end > cutter.end) parts.push({ ...c, start: cutter.end });
+        return parts;
+      }),
+    blocks,
+  );
+}
+
 /**
- * A person's commitments overlapping [start, end): activity schedules, appointments and trips. A trip
- * preempts the routine and appointments it overlaps: they are cut around it.
+ * A person's commitments overlapping [start, end): activity schedules, appointments and trips. A
+ * more specific activity schedule (their own over a group's, a group's over their kind's) cuts the
+ * blocks of less specific ones it overlaps, and a trip preempts the routine and appointments it
+ * overlaps: they are cut around it.
  */
 export function commitments(ctx: ReadContext, who: EntityId, start: number, end: number): Commitment[] {
-  const out: Commitment[] = [];
+  const ranked: { block: Commitment; rank: number }[] = [];
   for (const s of allSchedules(ctx.registry, ctx.world)) {
     if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who)) continue;
+    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
     const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
     for (const e of edges) {
       if (e.edge !== "start") continue;
@@ -110,9 +134,10 @@ export function commitments(ctx: ReadContext, who: EntityId, start: number, end:
       if (!close || typeof value !== "string" || close.at <= start || e.at >= end) continue;
       const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
       const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
-      out.push({ start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind });
+      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind }, rank });
     }
   }
+  const out = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
   const f = own(ctx.state.entities, who)?.fields;
   for (const raw of Array.isArray(f?.appointments) ? f.appointments : []) {
     const a = objOf(raw);
@@ -129,18 +154,7 @@ export function commitments(ctx: ReadContext, who: EntityId, start: number, end:
     if (!(until > start && from < end)) continue;
     trips.push({ start: from, end: until, label: strOf(t.label, "Away"), activity: "trip", place: strOf(t.place) || null, reason: "trip", kind: "trip" });
   }
-  const cut = trips.reduce<Commitment[]>(
-    (list, trip) =>
-      list.flatMap((c) => {
-        if (c.end <= trip.start || c.start >= trip.end) return [c];
-        const parts: Commitment[] = [];
-        if (c.start < trip.start) parts.push({ ...c, end: trip.start });
-        if (c.end > trip.end) parts.push({ ...c, start: trip.end });
-        return parts;
-      }),
-    out,
-  );
-  return [...cut, ...trips].sort((a, b) => a.start - b.start);
+  return [...cutAround(out, trips), ...trips].sort((a, b) => a.start - b.start);
 }
 
 // ---------------------------------------------------------------- planning
@@ -404,12 +418,36 @@ export interface CastPerson {
   timeline?: { start: string; end: string; label: string; kind: "work" | "sleep" | "free" | "travel" | "other"; reasons: string[] }[];
   agenda?: { label: string; stage: string }[];
   next?: { at: string; label: string };
+  /** For grouping and filters: the person's tier, classification values by facet, tags and groups. */
+  tier: TierId;
+  classes: Record<FacetId, FacetValueId[]>;
+  tags: string[];
+  /** Every group shown that the person belongs to, directly or through a member group; `role` from a direct membership. */
+  groups: { id: EntityId; role?: string }[];
+}
+
+/** A group as Cast shows it, with the POV's own membership details when it is one of theirs. */
+export interface CastGroup {
+  id: EntityId;
+  name: string;
+  kind: string;
+  role?: string;
+  rank?: number;
+  since?: string;
 }
 
 export interface CastView {
   level: number;
   needs: { need: string; value: number; label: string }[];
   people: CastPerson[];
+  /** The world's facets in order, each value with its parent, depth first: Cast groups and filters by them. */
+  facets: { id: FacetId; label: string; multiple: boolean; values: { id: FacetValueId; label: string; parent?: FacetValueId }[] }[];
+  /** The tiers people are in, in the world's order. */
+  tiers: { id: TierId; label: string }[];
+  /** Every group shown that someone listed belongs to, by name. */
+  groups: CastGroup[];
+  /** The groups the POV belongs to, with its role in each. */
+  mine: CastGroup[];
 }
 
 function kindOfBlock(activity: string): "work" | "sleep" | "free" | "travel" | "other" {
@@ -426,14 +464,41 @@ export function buildCastView(ctx: ReadContext): CastView {
   const cal = calendarOf(ctx.world);
   const here = placeOfEntity(ctx.state, pov);
   const view = optionalQuery(ctx, "relationships.view");
+  const shown = (id: EntityId): boolean => {
+    const vis = own(ctx.world.entities, id)?.visibility ?? "public";
+    return vis !== "secret" && (vis !== "known_by" || !!own(ctx.state.entities, pov)?.relations.some((r) => r.type === "knows" && r.to === id));
+  };
+  const groupIds = Object.keys(ctx.state.entities)
+    .sort()
+    .filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && shown(id));
+  const membershipsOf = (who: EntityId): { id: EntityId; role?: string; rank?: number; since?: string }[] =>
+    groupIds
+      .filter((g) => isMemberOf(ctx.state, who, g))
+      .map((g) => {
+        const direct = objOf(own(ctx.state.entities, who)?.relations.find((r) => r.type === MEMBER_OF && r.to === g)?.fields);
+        return { id: g, ...(typeof direct.role === "string" && direct.role !== "" ? { role: direct.role } : {}), ...(typeof direct.rank === "number" ? { rank: direct.rank } : {}), ...(typeof direct.since === "string" ? { since: direct.since } : {}) };
+      });
+  const facets = facetsInOrder(ctx.world);
   const people: CastPerson[] = [];
   for (const id of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, id);
-    if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
-    const vis = own(ctx.world.entities, id)?.visibility ?? "public";
-    if (vis === "secret" || (vis === "known_by" && !own(ctx.state.entities, pov)?.relations.some((r) => r.type === "knows" && r.to === id))) continue;
+    if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !shown(id)) continue;
     const place = placeOfEntity(ctx.state, id);
-    const p: CastPerson = { id, name: e.name, role: strOf(e.fields.role, strOf(e.fields.occupation).replace(/_/g, " ")), here: place !== null && place === here };
+    const classes: Record<FacetId, FacetValueId[]> = {};
+    for (const [facet] of facets) {
+      const values = classValues(ctx.world, ctx.state, id, facet);
+      if (values.length > 0) classes[facet] = [...values];
+    }
+    const p: CastPerson = {
+      id,
+      name: e.name,
+      role: strOf(e.fields.role, strOf(e.fields.occupation).replace(/_/g, " ")),
+      here: place !== null && place === here,
+      tier: e.tier,
+      classes,
+      tags: [...tagsOf(ctx.world, ctx.state, id)],
+      groups: membershipsOf(id).map((m) => ({ id: m.id, ...(m.role !== undefined ? { role: m.role } : {}) })),
+    };
     if (typeof e.fields.activity === "string") p.activity = e.fields.activity.replace(/_/g, " ");
     if (place && (p.here || level >= 2)) p.place = own(ctx.world.places, place)?.name ?? place;
     const regard = view ? view(ctx, id, pov) : [];
@@ -447,7 +512,25 @@ export function buildCastView(ctx: ReadContext): CastView {
     people.push(p);
   }
   const needs = level >= 4 ? Object.entries(NEEDS).map(([need, def]) => ({ need, value: Math.round(needValue(ctx, pov, need)), label: def.label })) : [];
-  return { level, needs, people };
+  const group = (id: EntityId): CastGroup => {
+    const g = own(ctx.state.entities, id);
+    return { id, name: g?.name ?? id, kind: kindDef(ctx.registry, ctx.world, g?.kind ?? "")?.label ?? g?.kind ?? "" };
+  };
+  const listed = new Set(people.flatMap((p) => p.groups.map((m) => m.id)));
+  const byName = (a: CastGroup, b: CastGroup): number => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  const tierIds = new Set(people.map((p) => p.tier));
+  const tiers = [...tiersInOrder(ctx.world).map(([id]) => id).filter((id) => tierIds.has(id)), ...[...tierIds].filter((id) => !tierOf(ctx.world, id)).sort()];
+  return {
+    level,
+    needs,
+    people,
+    facets: facets.map(([id, f]) => ({ id, label: f.label, multiple: f.multiple === true, values: facetTree(f.values).map((v) => ({ id: v.id, label: v.value.label, ...(v.value.parent !== undefined ? { parent: v.value.parent } : {}) })) })),
+    tiers: tiers.map((id) => ({ id, label: tierLabel(ctx.world, id) })),
+    groups: groupIds.filter((g) => listed.has(g)).map(group).sort(byName),
+    mine: membershipsOf(pov)
+      .map((m) => ({ ...group(m.id), ...(m.role !== undefined ? { role: m.role } : {}), ...(m.rank !== undefined ? { rank: m.rank } : {}), ...(m.since !== undefined ? { since: m.since } : {}) }))
+      .sort(byName),
+  };
 }
 
 declare module "../../../engine/registry" {
@@ -541,27 +624,14 @@ export const castlifePack: PackDef = {
     });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) as unknown as JsonValue });
 
+    // Two schedules setting the same field of the same person at once are the engine's
+    // `schedule_overlap`; this rule covers what a schedule can't express: dated appointments and trips.
     r.lint({
       code: "castlife.double_booking",
       check(world) {
         const issues = [];
         for (const e of Object.values(world.entities)) {
           const owned = Object.values(world.schedules).filter((s) => s.owner === e.id && s.target === "activity");
-          for (let i = 0; i < owned.length; i++) {
-            for (let j = i + 1; j < owned.length; j++) {
-              const a = owned[i];
-              const b = owned[j];
-              if (!a || !b) continue;
-              const days = (s: typeof a): number[] => (s.recurrence.every === "week" ? (s.recurrence.weekdays ?? [0, 1, 2, 3, 4, 5, 6]) : [0, 1, 2, 3, 4, 5, 6]);
-              const sharedDay = days(a).some((d) => days(b).includes(d));
-              const overlap = a.slots.some((x) => b.slots.some((y) => x.start < y.end && y.start < x.end));
-              // Recurrences whose date ranges don't meet (two school terms) never run on the same day. ISO dates compare as strings.
-              const ra = a.recurrence;
-              const rb = b.recurrence;
-              const apart = (ra.until !== undefined && rb.from !== undefined && ra.until < rb.from) || (rb.until !== undefined && ra.from !== undefined && rb.until < ra.from);
-              if (sharedDay && overlap && !apart) issues.push({ severity: "warning" as const, code: "castlife.double_booking", message: `${e.name} is double-booked: ${a.id} and ${b.id} overlap.`, path: `schedules.${b.id}` });
-            }
-          }
           // Appointments clash with each other, with trips, and with the person's activity schedules.
           const dated = [
             ...(Array.isArray(e.fields.appointments) ? e.fields.appointments : []).map((raw, i) => ({ path: `entities.${e.id}.fields.appointments.${i}`, label: strOf(objOf(raw).label, "an appointment"), start: numOf(objOf(raw).at, NaN), end: numOf(objOf(raw).at, NaN) + numOf(objOf(raw).minutes, 60), trip: false })),

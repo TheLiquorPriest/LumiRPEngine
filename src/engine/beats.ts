@@ -12,7 +12,7 @@ import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import type { Registry } from "./registry-impl";
 import type { Resolution } from "./resolve";
 import type { Rng } from "./rng";
-import { allSchedules, nextStart, scheduleOwners } from "./schedules";
+import { allSchedules, nextStartFor, scheduleOwners } from "./schedules";
 import { asObject, placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
@@ -86,9 +86,10 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
     }
   }
   const cal = calendarOf(world);
+  const ctx = reg.context(world, state);
   for (const s of allSchedules(reg, world)) {
     if (s.target !== "activity" || !scheduleOwners(reg, world, state, s).includes(pov)) continue;
-    const n = nextStart(world, s, state.clock, 1);
+    const n = nextStartFor(reg, ctx, s, pov, state.clock, 1);
     const v = n?.slot.value;
     if (n && typeof v === "string" && n.at - state.clock <= 60) {
       lines.push(`${v.replace(/_/g, " ")} starts at ${formatHHMM(dateAt(cal, n.at).minuteOfDay)}.`);

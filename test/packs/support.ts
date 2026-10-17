@@ -12,6 +12,7 @@ import type { PackDef } from "../../src/engine/registry";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import type { WorldState } from "../../src/engine/state";
 import { initialState } from "../../src/engine/world-state";
+import type { RelationTypes } from "../../src/engine/relations";
 
 export const POV = "sam";
 
@@ -101,8 +102,11 @@ export function registryOf(packs: readonly PackDef[] = []): Registry {
   return createRegistry([enginePack, ...packs]);
 }
 
-export function startState(world: WorldDoc): WorldState {
-  return initialState(world, hashJson(world));
+const ENGINE_ONLY = registryOf();
+
+/** The world's starting state. Pass the test's registry when the world relies on pack relation types (kinship, groups). */
+export function startState(world: WorldDoc, types: RelationTypes = ENGINE_ONLY): WorldState {
+  return initialState(world, hashJson(world), types);
 }
 
 /** Folds events onto a copy of `state`, validating each; a rejection is a test failure. */

@@ -5,7 +5,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { Band, DomainId, EntityId, InterruptClass, InterruptPolicy, KindId, Level, PackId, RevisionId, SceneTypeId, StageId, TierId, TrackId } from "../shared/ids";
-import type { RelationInstance } from "../shared/world";
+import type { FacetId, FacetValueId, RelationInstance } from "../shared/world";
 
 export interface EntityState {
   kind: KindId;
@@ -16,6 +16,12 @@ export interface EntityState {
   relations: RelationInstance[];
   levels: Partial<Record<DomainId, Level>>;
   agent: boolean;
+  /**
+   * A spawned entity's classes and tags, as its spawn gave them. Entities the world defines read
+   * theirs live from the world instead, so these are absent for them.
+   */
+  class?: Record<FacetId, FacetValueId[]>;
+  tags?: string[];
 }
 
 export interface TrackState {

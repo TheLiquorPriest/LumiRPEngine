@@ -139,21 +139,6 @@ describe("castlife: needs, encounters and invitations (level 4)", () => {
     expect(again.events.some((e) => e.type === "engine.choice" && e.data.key === key && e.data.via === "recorded")).toBe(true);
   });
 
-  test("lint flags a double-booked person", () => {
-    const world = modernUsWorld("w", "R");
-    world.schedules.maya_class = { id: "maya_class", owner: "maya", target: "activity", recurrence: { every: "week", weekdays: [3] }, slots: [{ start: "09:00", end: "11:00", value: "school" }] };
-    const issues = reg.lints.flatMap((l) => (l.code === "castlife.double_booking" ? l.check(world) : []));
-    expect(issues.map((i) => i.path)).toEqual(["schedules.maya_class"]);
-  });
-
-  test("two terms of the same timetable with disjoint dates are not double-booked", () => {
-    const world = modernUsWorld("w", "R");
-    world.schedules.term1 = { id: "term1", owner: "maya", target: "activity", recurrence: { every: "week", weekdays: [1, 2, 3, 4, 5], from: "2026-08-31", until: "2026-11-20" }, slots: [{ start: "08:00", end: "15:10", value: "school" }] };
-    world.schedules.term2 = { id: "term2", owner: "maya", target: "activity", recurrence: { every: "week", weekdays: [1, 2, 3, 4, 5], from: "2026-11-30", until: "2026-12-18" }, slots: [{ start: "08:00", end: "15:10", value: "school" }] };
-    const issues = reg.lints.flatMap((l) => (l.code === "castlife.double_booking" ? l.check(world) : []));
-    expect(issues.filter((i) => i.message.includes("term1 and term2"))).toEqual([]);
-  });
-
   test("a trip preempts the routine it overlaps and starts on time (Danny's Friday drinks give way to Chicago)", () => {
     const make = STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc;
     const world = make("w", "Port Alder");

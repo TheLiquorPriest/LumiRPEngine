@@ -44,7 +44,7 @@ export default function run(proc: SpindleBackendProcessContext): void {
     count = turns.length;
     step = (state, i) => playtestTurn(registry, pipeline, world, state, turns[i] ?? "", runSeed, i);
   }
-  let state = playtestStart(world, p.revision);
+  let state = playtestStart(registry, world, p.revision);
   const out: PlaytestTurn[] = [];
   const next = (i: number): void => {
     if (stopped) return;

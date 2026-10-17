@@ -14,6 +14,7 @@ import type { JsonObject } from "../shared/json";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import type { Registry } from "./registry-impl";
 import { kindIs } from "./scope";
+import { selectorMatches } from "./selector";
 import type { WorldState } from "./state";
 import type { InterpretOutput } from "./steps";
 import { canSeeEntity, canSeePlace } from "./visibility";
@@ -216,7 +217,7 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
             def.ref === "place"
               ? Object.values(world.places).filter((p) => canSeePlace(world, state, pov, p.id))
               : Object.entries(state.entities)
-                  .filter(([id, e]) => id !== pov && canSeeEntity(world, state, pov, id) && (!def.ref || kindIs(reg, world, e.kind, def.ref)))
+                  .filter(([id, e]) => id !== pov && canSeeEntity(world, state, pov, id) && (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state, def.of, id)))
                   .map(([id, e]) => ({ id, name: e.name }));
           const id = byName(named, pool);
           if (id) params[name] = id;

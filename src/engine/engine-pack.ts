@@ -1,18 +1,23 @@
 // The built-in `engine` pack: bookkeeping events the runtime records (rule firings, interrupt
 // signals, agent catch-up cursors, recorded choices, puzzle attempts, reveals, the paused scene,
-// checks rolled by the `check` effect), the GM view and the engine's narration channels (`knows`,
-// `spawn`). Every registry is built with it first: `createRegistry([enginePack, ...packs])`. Its
+// checks rolled by the `check` effect), the GM view, the engine's narration channels (`knows`,
+// `spawn`) and the taxonomy formulas (`kind_is`, `in_class`, `has_tag`, `member_of`, `tier_of`,
+// `band_of`). Every registry is built with it first: `createRegistry([enginePack, ...packs])`. Its
 // state lives in `state.packs.engine`.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import type { InterruptClass, Visibility } from "../shared/ids";
+import type { EntityId, InterruptClass, Visibility } from "../shared/ids";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { PackEvent } from "../shared/ledger";
 import type { GmView } from "../shared/state-view";
+import { tierBand } from "../shared/tiers";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
+import type { Value } from "./expr";
 import { knowsChannel, spawnChannel } from "./narration-channels";
-import type { WorldState } from "./state";
+import { kindIs } from "./scope";
+import { inClass, isMemberOf, tagsOf } from "./selector";
+import type { EntityState, WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
 
 export const ENGINE_PACK = "engine";
@@ -242,6 +247,13 @@ function buildGm(ctx: ReadContext): GmView {
   return { label: GM_LABEL, previews, truths, agendas, money };
 }
 
+/** A formula argument naming an entity in the state, with that entity; null otherwise. */
+function entityArg(ctx: ReadContext, v: Value | undefined): [EntityId, EntityState] | null {
+  const id = typeof v === "string" ? v : "";
+  const e = own(ctx.state.entities, id);
+  return e ? [id, e] : null;
+}
+
 export const enginePack: PackDef = {
   id: ENGINE_PACK,
   label: "Engine",
@@ -253,5 +265,27 @@ export const enginePack: PackDef = {
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     r.view({ panel: "core.gm", build: (ctx) => buildGm(ctx) as unknown as JsonValue });
+    // Taxonomy (DESIGN §4.1): what a selector tests, one constraint at a time. An unknown entity is false (or "").
+    r.formula("kind_is", (ctx, e, kind) => {
+      const hit = entityArg(ctx, e);
+      return hit !== null && kindIs(ctx.registry, ctx.world, hit[1].kind, String(kind ?? ""));
+    });
+    r.formula("in_class", (ctx, e, facet, value) => {
+      const hit = entityArg(ctx, e);
+      return hit !== null && inClass(ctx.world, ctx.state, hit[0], String(facet ?? ""), [String(value ?? "")]);
+    });
+    r.formula("has_tag", (ctx, e, tag) => {
+      const hit = entityArg(ctx, e);
+      return hit !== null && tagsOf(ctx.world, ctx.state, hit[0]).includes(String(tag ?? ""));
+    });
+    r.formula("member_of", (ctx, e, group) => {
+      const hit = entityArg(ctx, e);
+      return hit !== null && isMemberOf(ctx.state, hit[0], String(group ?? ""));
+    });
+    r.formula("tier_of", (ctx, e) => entityArg(ctx, e)?.[1].tier ?? "");
+    r.formula("band_of", (ctx, e) => {
+      const hit = entityArg(ctx, e);
+      return hit ? (tierBand(ctx.world, hit[1].tier) ?? "") : "";
+    });
   },
 };

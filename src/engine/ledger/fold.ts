@@ -136,7 +136,7 @@ export class LedgerFold {
     // A kept state (a cached step's, a snapshot's) is shared: it is copied once, only if a step runs
     // on it or the output takes it. The working state is local to this fold, so the output takes it as is.
     let shared: WorldState | null = from?.state ?? null;
-    let state: WorldState = shared ?? initialState(startWorld, input.revision);
+    let state: WorldState = shared ?? initialState(startWorld, input.revision, this.types);
     steps.length = base + 1;
     keys.length = base + 1;
     let parent: PathHash = from?.result.path ?? ROOT_PATH;

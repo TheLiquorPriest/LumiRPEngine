@@ -1,25 +1,32 @@
 // Relationships pack (DESIGN §9.3): per-pair multi-axis regard, appraisal rules, closed-form decay,
-// bands that feed the planner and the narrator's voice, history, and faction regard.
+// bands that feed the planner and the narrator's voice, history and group regard; groups
+// (factions, families, households, companies) with membership; and kinship.
 //
 // Representation (uniform at every level): a directed `regard` relation from A to B whose fields
 // hold one value per axis (world config `axes`, default warmth / trust / respect, −100…100), `t`
 // (when it last changed) and `history` (the latest changes). Regard is an accumulator: the
 // `relationships.regard` event carries deltas.
 //
+// Groups are entities of kind `group` or a kind extending it; `member_of` (with the member's role,
+// rank and since) joins one, and groups may be members of larger groups. Kinship is `parent_of` /
+// `child_of` (each other's inverse) and the symmetric `sibling_of`, `spouse_of` and `partner_of`:
+// the engine keeps both sides (`engine/relations.ts`).
+//
 // Level contract (domain `relationships`, read at the regarding party):
 //   0  off: appraisals are no-ops
 //   1  one band per pair (axes move together: an appraisal's mean delta)
 //   2  one number per pair (the axes' mean)
 //   3  multiple axes plus appraisal rules
-//   4  closed-form decay toward 0 at read time, history, faction regard
+//   4  closed-form decay toward 0 at read time, history, group regard
 
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
-import type { BandDef, KindDef } from "../../../shared/world";
+import type { BandDef, KindDef, RelationTypeDef } from "../../../shared/world";
 import { numOf, objOf, strOf, own } from "../../../engine/pack-kit";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { bandOf, kindIs, placeOfEntity } from "../../../engine/scope";
+import { GROUP_KIND, MEMBER_OF, membersOf } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 
 export interface Axis {
@@ -76,8 +83,8 @@ declare module "../../../engine/registry" {
     /** Current regard (decayed at level 4): one axis, or the axes' mean. */
     regard: (ctx: ReadContext, from: EntityId, to: EntityId, axis?: string) => number;
     regard_band: (ctx: ReadContext, from: EntityId, to: EntityId) => string;
-    /** A faction's regard toward someone: its own regard relation, else its members' mean (level 4). */
-    "relationships.faction_regard": (ctx: ReadContext, faction: EntityId, to: EntityId) => number;
+    /** A group's regard toward someone (any group, factions included): its own regard relation, else its members' mean. */
+    "relationships.faction_regard": (ctx: ReadContext, group: EntityId, to: EntityId) => number;
     /** Regard for panels at the regarding party's level: one band (1), one value (2), each axis (3+). */
     "relationships.view": (ctx: ReadContext, from: EntityId, to: EntityId) => { axis: string; band: string; value?: number }[];
   }
@@ -231,13 +238,33 @@ const regardEvent: EventTypeDef<PackEvent> = {
   },
 };
 
-export const FACTION: KindDef = { id: "faction", label: "Faction", extends: "thing", pack: "relationships", fields: {} };
+/** The kind every group extends; authors add their own with `extends: "group"`. */
+export const GROUP: KindDef = { id: GROUP_KIND, label: "Group", extends: "thing", pack: "relationships", fields: {} };
+/** The pack's own groups. `faction` keeps its id, so worlds written before groups keep working. */
+export const GROUP_KINDS: readonly KindDef[] = [
+  { id: "faction", label: "Faction", extends: GROUP_KIND, pack: "relationships", fields: {} },
+  { id: "family", label: "Family", extends: GROUP_KIND, pack: "relationships", fields: {} },
+  { id: "household", label: "Household", extends: GROUP_KIND, pack: "relationships", fields: {} },
+  { id: "company", label: "Company", extends: GROUP_KIND, pack: "relationships", fields: {} },
+];
 
-function factionRegard(ctx: ReadContext, faction: EntityId, to: EntityId): number {
-  if (relationOf(ctx.state, faction, to)) return regardValue(ctx, faction, to);
-  const members = Object.keys(ctx.state.entities)
-    .sort()
-    .filter((id) => own(ctx.state.entities, id)?.relations.some((r) => r.type === "member_of" && r.to === faction));
+/** Kinship between people: an inverse pair and three symmetric bonds, all many-to-many. */
+export const KINSHIP: readonly RelationTypeDef[] = [
+  { id: "parent_of", label: "Parent of", from: "person", to: "person", cardinality: "many_many", symmetric: false, inverse: "child_of", fields: {}, pack: "relationships" },
+  { id: "child_of", label: "Child of", from: "person", to: "person", cardinality: "many_many", symmetric: false, inverse: "parent_of", fields: {}, pack: "relationships" },
+  { id: "sibling_of", label: "Sibling of", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: {}, pack: "relationships" },
+  { id: "spouse_of", label: "Spouse of", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: { since: { type: "date", label: "Since" } }, pack: "relationships" },
+  { id: "partner_of", label: "Partner of", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: { since: { type: "date", label: "Since" } }, pack: "relationships" },
+];
+
+/**
+ * Group regard (level 4 in spirit; read at any level): the group's own regard relation toward `to`
+ * when it has one, else the mean of its members' regard, every member that isn't a group itself,
+ * directly or through member groups. The `faction_regard` formula and query read it for any group.
+ */
+function groupRegard(ctx: ReadContext, group: EntityId, to: EntityId): number {
+  if (relationOf(ctx.state, group, to)) return regardValue(ctx, group, to);
+  const members = membersOf(ctx.registry, ctx.world, ctx.state, group);
   if (members.length === 0) return 0;
   return Math.round((members.reduce((a, m) => a + regardValue(ctx, m, to), 0) / members.length) * 10) / 10;
 }
@@ -266,19 +293,22 @@ export const relationshipsPack: PackDef = {
   domain: "relationships",
   requires: ["space"],
   register(r) {
-    r.kind(FACTION);
+    r.kind(GROUP);
+    for (const kind of GROUP_KINDS) r.kind(kind);
     r.relation({ id: "regard", label: "Regard", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: Object.fromEntries(DEFAULT_AXES.map((a) => [a.id, { type: "number", min: a.min, max: a.max, domain: "relationships", level: 1 }])), pack: "relationships" });
-    r.relation({ id: "member_of", label: "Member of", from: "*", to: "faction", cardinality: "many_many", symmetric: false, fields: {}, pack: "relationships" });
+    r.relation({ id: MEMBER_OF, label: "Member of", from: "*", to: GROUP_KIND, cardinality: "many_many", symmetric: false, fields: { role: { type: "text", label: "Role" }, rank: { type: "number", label: "Rank" }, since: { type: "date", label: "Since" } }, pack: "relationships" });
     r.relation({ id: "knows", label: "Knows", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: {}, pack: "relationships" });
+    for (const kin of KINSHIP) r.relation(kin);
     r.event(regardEvent);
     r.service("relationship.appraise", appraise);
     r.query("regard", regardValue);
     r.query("regard_band", regardBand);
-    r.query("relationships.faction_regard", factionRegard);
+    r.query("relationships.faction_regard", groupRegard);
     r.query("relationships.view", regardView);
     r.formula("regard", (ctx, from, to, axis) => regardValue(ctx, String(from ?? ""), String(to ?? ""), typeof axis === "string" && axis !== "" ? axis : undefined));
     r.formula("regard_band", (ctx, from, to) => regardBand(ctx, String(from ?? ""), String(to ?? "")));
-    r.formula("faction_regard", (ctx, faction, to) => factionRegard(ctx, String(faction ?? ""), String(to ?? "")));
+    // Group regard, under the name worlds already use.
+    r.formula("faction_regard", (ctx, group, to) => groupRegard(ctx, String(group ?? ""), String(to ?? "")));
 
     r.effect({ type: "relationships.appraise", resolve: (a, ctx) => [...appraise(ctx, strOf(a.from), strOf(a.to), typeof a.appraisal === "string" ? a.appraisal : (objOf(a.appraisal) as Record<string, number>), strOf(a.why) || undefined), ...(a.mutual === true ? appraise(ctx, strOf(a.to), strOf(a.from), typeof a.appraisal === "string" ? a.appraisal : (objOf(a.appraisal) as Record<string, number>), strOf(a.why) || undefined) : [])] });
     r.effect({

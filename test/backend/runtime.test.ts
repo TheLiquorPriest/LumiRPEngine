@@ -15,6 +15,7 @@ import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { DEFAULT_CURRENCY, formatMoney } from "../../src/shared/world";
+import { registryOf } from "../packs/support";
 import { Rig } from "../support/rig";
 import { POV, testWorld } from "../support/test-pack";
 
@@ -521,7 +522,7 @@ describe("Keep report chip", () => {
   test("a dropped group is one row: its payment's line leads, its unseen member counts as a linked change", () => {
     const rig = new Rig();
     const world = testWorld();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", rig.rt.registry);
     const dev = state.entities.dev;
     if (!dev) throw new Error("no dev");
     state.entities.ghost = { ...structuredClone(dev), name: "The Ghost", fields: { visibility: "secret" } };
@@ -540,7 +541,7 @@ describe("Keep report chip", () => {
   test("the Journal lists a dropped group once, led by its payment's line, with its linked changes counted", () => {
     const rig = new Rig();
     const world = testWorld();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", rig.rt.registry);
     const dev = state.entities.dev;
     if (!dev) throw new Error("no dev");
     state.entities.ghost = { ...structuredClone(dev), name: "The Ghost", fields: { visibility: "secret" } };
@@ -577,7 +578,7 @@ describe("Keep report chip", () => {
   test("drop notes and Keep lines never show a validator's reason: a visible event reads as its line, a hidden one neutrally", () => {
     const rig = new Rig();
     const world = testWorld();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", rig.rt.registry);
     const dev = state.entities.dev;
     if (!dev) throw new Error("no dev");
     state.entities.ghost = { ...structuredClone(dev), name: "The Ghost", fields: { visibility: "secret" } };
@@ -604,14 +605,14 @@ describe("Keep report chip", () => {
 describe("proposal labels", () => {
   test("a sheets condition reads 'who: condition' (the undo chip once said '? ? ?')", () => {
     const world = testWorld();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", registryOf());
     expect(describeProposal({ type: "condition", who: "dev", condition: "injured" }, world, state)).toBe("Dev: injured");
     expect(describeProposal({ type: "condition", condition: "tired", clear: true }, world, state)).toBe("you: no longer tired");
   });
 
   test("a transfer chip states the sum the transfer moves: cents as minor units, else the converted amount", () => {
     const world = testWorld();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", registryOf());
     expect(describeProposal({ type: "transfer", from: world.pov, to: "dev", cents: 1500 }, world, state)).toBe("Paid $15.00 to Dev");
     expect(describeProposal({ type: "transfer", from: world.pov, to: "dev", amount: 2000 }, world, state)).toBe("Paid $20.00 to Dev");
     expect(describeProposal({ type: "transfer", from: world.pov, to: "dev", amount: 2000, cents: 20 }, world, state)).toBe("Paid $0.20 to Dev");

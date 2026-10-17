@@ -10,8 +10,11 @@
 //   award   {entity, progression, amount}    adds to a progression's XP field (the level-up follows)
 //   check   {check, actor, target?, outcomes} anyone rolls a check; its outcome's effects see `roll.*`
 //   move    {entity, to}                     `place` := to; leaves any container (`in`)
-//   link    {rel, from, to, until?, fields?} unlink {rel, from, to}
-//   spawn   {id?, kind, name, tier?, fields?, relations?, agent?, place?}   tier: a world tier, else the world's spawn tier
+//   link    {rel, from, to, until?, fields?} unlink {rel, from, to}: the other side of a symmetric
+//                                            or inverse type with it; kinds and cardinality checked
+//   spawn   {id?, kind, name, tier?, fields?, relations?, agent?, place?, class?, tags?}
+//                                            tier: a world tier, else the world's spawn tier;
+//                                            class and tags stay with the entity in state
 //   stage   {track, to}
 //   post    {lines: [{account, amount}], memo}
 //   signal  {class, text, entity?, visibility?}   an interrupt-class event (timelapse policy)
@@ -38,8 +41,10 @@ import type { EnvVars, Value } from "./expr";
 import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
+import { linkEvents, unlinkEvents } from "./relations";
 import { progressionApplies, progressOf } from "./ruleset";
 import { evalArg, evalArgs, evalExpr, fieldDef, objects, poolMax, scopeEnv } from "./scope";
+import { classOf, classProblems } from "./selector";
 import type { Working } from "./working";
 import { labelOf, own } from "./pack-kit";
 
@@ -173,16 +178,11 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
     }
     case "link": {
       const rel = text(args.rel);
-      const from = text(args.from);
-      const to = text(args.to);
       if (rel === "") return reject("bad_args", "link needs rel");
-      const ev: LedgerEvent = { type: "link", rel, from, to };
-      if (isRecord(args.fields)) ev.fields = args.fields as JsonObject;
-      if (typeof args.until === "number") ev.until = Math.round(args.until);
-      return [ev];
+      return linkEvents(reg, world, state, { rel, from: text(args.from), to: text(args.to), ...(isRecord(args.fields) ? { fields: args.fields as JsonObject } : {}), ...(typeof args.until === "number" ? { until: Math.round(args.until) } : {}) });
     }
     case "unlink":
-      return [{ type: "unlink", rel: text(args.rel), from: text(args.from), to: text(args.to) }];
+      return unlinkEvents(reg, world, state, { rel: text(args.rel), from: text(args.from), to: text(args.to) });
     case "spawn": {
       const kind = text(args.kind);
       if (kind === "" || !(own(world.kinds, kind) ?? reg.kinds.get(kind))) return reject("missing_kind", `no kind ${kind}`);
@@ -192,6 +192,14 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       if (typeof args.place === "string") fields.place = args.place;
       const relations: RelationInstance[] = objects(args.relations).map((r) => ({ type: text(r.type), to: text(r.to) }));
       const entity: EntityDef = { id, kind, name: text(args.name) || id, tier, fields, relations };
+      if (args.class !== undefined) {
+        const classes = classOf(args.class);
+        const problem = classes ? classProblems(world, classes, entity.name)[0] : { code: "bad_args", message: "a spawn's class is facet → values" };
+        if (problem) return reject(problem.code, problem.message);
+        if (classes && Object.keys(classes).length > 0) entity.class = classes;
+      }
+      const tags = [...new Set((Array.isArray(args.tags) ? args.tags : []).filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim()))];
+      if (tags.length > 0) entity.tags = tags;
       const out: LedgerEvent[] = [];
       if (agentOf(world, { id, tier, agent: typeof args.agent === "boolean" ? args.agent : undefined })) {
         entity.agent = true;

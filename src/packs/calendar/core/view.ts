@@ -4,7 +4,7 @@
 
 import type { ReadContext } from "../../../engine/registry";
 import { calendarOf, dateAt, dayPartAt, formatClock, holidayDay, MINUTES_PER_DAY, monthName, placeOffset, weekdayName } from "../../../engine/calendar";
-import { allSchedules, nextStart, scheduleOwners } from "../../../engine/schedules";
+import { allSchedules, nextStartFor, scheduleOwners } from "../../../engine/schedules";
 import { placeOfEntity } from "../../../engine/scope";
 
 export interface CalendarView {
@@ -39,7 +39,7 @@ export function buildCalendarView(ctx: ReadContext): CalendarView {
   if (level >= 2) {
     for (const s of allSchedules(reg, ctx.world)) {
       if (s.target !== "activity" || !scheduleOwners(reg, ctx.world, ctx.state, s).includes(ctx.world.pov)) continue;
-      const n = nextStart(ctx.world, s, ctx.state.clock, 2);
+      const n = nextStartFor(reg, ctx, s, ctx.world.pov, ctx.state.clock, 2);
       const v = n?.slot.value;
       if (n && typeof v === "string") upcoming.push({ at: formatClock(cal, n.at, offset), label: v.replace(/_/g, " "), kind: "commitment" });
     }

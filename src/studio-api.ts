@@ -34,6 +34,8 @@ function registryOf(): Registry {
 const pipeline = { plan: planTurn, post: postTurn };
 
 const COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"] as const;
+/** Collections documents written before them lack; `migrate` adds them empty, so they're checked only when present. */
+const LATER_COLLECTIONS = ["classifications"] as const;
 const SINGLETONS = ["pins", "calendar", "realism", "time", "start", "currency"] as const;
 
 /** Shape checks for an untrusted document: every collection and singleton part present. */
@@ -48,6 +50,7 @@ export function validate(doc: unknown): LintIssue[] {
   if (typeof doc.name !== "string") err("name", "the world needs a name");
   if (typeof doc.pov !== "string") err("pov", "the world needs a POV entity id");
   for (const key of COLLECTIONS) if (!isRecord(doc[key])) err(key, `${key} must be an object`);
+  for (const key of LATER_COLLECTIONS) if (doc[key] !== undefined && !isRecord(doc[key])) err(key, `${key} must be an object`);
   for (const key of SINGLETONS) if (key !== "currency" && !isRecord(doc[key])) err(key, `${key} must be an object`);
   if (!Array.isArray(doc.suppressed)) err("suppressed", "suppressed must be a list");
   if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll") err("seedMode", "seedMode must be fresh or same_roll");
@@ -113,7 +116,7 @@ export interface RunResult {
 /** Playtest: typed turns through the engine with no narrator, from the world's start. */
 export function playtest(world: WorldDoc, turns: readonly string[], runSeed = "studio"): RunResult {
   const reg = registryOf();
-  let state: WorldState = playtestStart(world, revisionOf(world));
+  let state: WorldState = playtestStart(reg, world, revisionOf(world));
   const out: PlaytestTurn[] = [];
   turns.forEach((user, i) => {
     const step = playtestTurn(reg, pipeline, world, state, user, runSeed, i);
@@ -129,7 +132,7 @@ export function checkWorld(world: WorldDoc, days = 3, runSeed = "studio"): RunRe
   const overrides: Record<string, string> = {};
   for (const id of Object.keys(world.time.interrupts)) overrides[id] = "note";
   const intent = timelapseIntent({ type: "duration", minutes: 24 * 60 }, overrides);
-  let state: WorldState = playtestStart(world, revisionOf(world));
+  let state: WorldState = playtestStart(reg, world, revisionOf(world));
   const out: PlaytestTurn[] = [];
   const count = Math.max(1, Math.min(14, Math.floor(days)));
   for (let i = 0; i < count; i++) {

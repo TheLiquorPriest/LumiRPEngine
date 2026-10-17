@@ -1,10 +1,12 @@
-// The state a chat starts from: the world revision's document, before any marker or event.
+// The state a chat starts from: the world revision's document, before any marker or event. Its
+// symmetric and inverse relations are two-sided from the start (`completeRelations`).
 
 import type { Band, DomainId, Level, RevisionId } from "../shared/ids";
 import { BANDS, DOMAINS } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import { agentOf } from "../shared/tiers";
 import type { WorldDoc } from "../shared/world";
+import { completeRelations, type RelationTypes } from "./relations";
 import type { EntityState, TrackState, WorldState } from "./state";
 import { clampLevel, clampThreshold, clampTick, clampUnitCap } from "./time-limits";
 
@@ -33,7 +35,7 @@ function domainLevels(levels: Partial<Record<DomainId, unknown>>): Record<Domain
   return out;
 }
 
-export function initialState(world: WorldDoc, revision: RevisionId): WorldState {
+export function initialState(world: WorldDoc, revision: RevisionId, types: RelationTypes): WorldState {
   const entities: Record<string, EntityState> = {};
   for (const [id, e] of Object.entries(world.entities)) {
     entities[id] = {
@@ -46,6 +48,7 @@ export function initialState(world: WorldDoc, revision: RevisionId): WorldState 
       agent: agentOf(world, { id, tier: e.tier, agent: e.agent }),
     };
   }
+  completeRelations(types, world, entities);
   const tierCaps = {} as Record<Band, Partial<Record<DomainId, Level>>>;
   for (const band of BANDS) {
     const caps: unknown = world.realism.tierCaps[band];

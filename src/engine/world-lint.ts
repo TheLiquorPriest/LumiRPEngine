@@ -1,10 +1,11 @@
 // Structural world lint (DESIGN §13): references, field types, cycles, unreachable track stages,
-// tiers, expressions that don't parse, unbalanced authored postings, predicates frozen at the world's
-// current realism, and the ruleset primitives' own lint (engine/ruleset-lint). Pure; the authoring
-// lint runs it with the registry (pack kinds and fields).
+// tiers, classifications and selectors, relation kinds, cardinality and one-sided kinship,
+// overlapping schedules, expressions that don't parse, unbalanced authored postings, predicates
+// frozen at the world's current realism, and the ruleset primitives' own lint (engine/ruleset-lint).
+// Pure; the authoring lint runs it with the registry (pack kinds, fields and relation types).
 
 import type { JsonValue } from "../shared/json";
-import { isRecord } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
 import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
@@ -13,8 +14,11 @@ import { objectiveWhen } from "../shared/world";
 import { compile } from "./expr";
 import { frozenPredicates } from "./realism";
 import { rulesetFloor, type Registry } from "./registry-impl";
+import { relationIssues } from "./relations";
 import { effectLists, lintRuleset } from "./ruleset-lint";
-import { kindFields } from "./scope";
+import { scheduleOverlaps } from "./schedules";
+import { kindDef, kindFields } from "./scope";
+import { classOf, classProblems, selectorProblems } from "./selector";
 import { own } from "./pack-kit";
 
 function typeProblem(f: FieldDef, v: JsonValue, world: WorldDoc): string | null {
@@ -58,16 +62,53 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
     for (const r of e.relations) if (!known(r.to)) err(`entities.${id}.relations`, "refs", `${e.name}'s ${r.type} relation names "${r.to}", which isn't in the world.`);
   }
   for (const [id, s] of Object.entries(world.schedules)) {
-    if (s.owner && !own(world.entities, s.owner) && !own(world.kinds, s.owner) && !reg.kinds.has(s.owner)) err(`schedules.${id}.owner`, "refs", `Schedule ${id} belongs to "${s.owner}", which is neither a person nor a kind.`);
+    const owner = s.owner;
+    if (isRecord(owner)) for (const problem of selectorProblems(reg, world, owner)) err(`schedules.${id}.owner`, "refs", `Schedule ${id}'s owner selector ${problem}.`);
+    else if (typeof owner === "string" && owner !== "" && !own(world.entities, owner) && !kindDef(reg, world, owner)) err(`schedules.${id}.owner`, "refs", `Schedule ${id} belongs to "${owner}", which is neither an entity, a group nor a kind.`);
     if (s.target !== "place") continue;
     for (const slot of s.slots) {
       const values = [slot.value, ...(slot.weighted ?? []).map((w) => w.value)];
       for (const v of values) if (typeof v === "string" && !own(world.places, v)) err(`schedules.${id}.slots`, "refs", `Schedule ${id} sends its owner to "${v}", which isn't a place.`);
     }
   }
+  issues.push(...scheduleOverlaps(reg, world));
+  for (const [id, a] of Object.entries(world.actions)) {
+    for (const [name, p] of Object.entries(a.params)) {
+      if (p.of === undefined) continue;
+      if (p.type !== "ref") warn(`actions.${id}.params.${name}.of`, "selector", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so its selector never applies.`);
+      for (const problem of selectorProblems(reg, world, p.of)) err(`actions.${id}.params.${name}.of`, "refs", `${a.label}'s ${p.label ?? name} selector ${problem}.`);
+    }
+  }
   for (const [id, k] of Object.entries(world.kinds)) {
     if (k.extends && !own(world.kinds, k.extends) && !reg.kinds.has(k.extends)) err(`kinds.${id}.extends`, "refs", `Kind ${id} extends an unknown kind "${k.extends}".`);
   }
+
+  // Classifications (DESIGN §4.1): each value's parent is a value of the same facet, with no cycle;
+  // entities hold known values, at most one of a single-valued facet.
+  for (const [id, f] of Object.entries(isRecord(world.classifications) ? world.classifications : {})) {
+    if (f.id !== id) err(`classifications.${id}.id`, "id_mismatch", "the id must match its key");
+    const values = isRecord(f.values) ? f.values : {};
+    for (const [vid, v] of Object.entries(values)) {
+      const path = `classifications.${id}.values.${vid}.parent`;
+      if (v.parent === undefined) continue;
+      if (!hasOwn(values, v.parent)) {
+        err(path, "refs", `${f.label}: "${v.label}" nests under "${v.parent}", which isn't one of its values.`);
+        continue;
+      }
+      let cur: string | undefined = v.parent;
+      for (let guard = 0; cur !== undefined && guard < 64; guard++) {
+        if (cur === vid) {
+          err(path, "cycles", `${f.label}: "${v.label}" nests under itself.`);
+          break;
+        }
+        cur = own(values, cur)?.parent;
+      }
+    }
+  }
+  for (const [id, e] of Object.entries(world.entities)) for (const p of classProblems(world, e.class, e.name)) err(`entities.${id}.class`, p.code, p.message);
+
+  // Relation types and authored relations: kinds, cardinality, and kinship authored on one side.
+  issues.push(...relationIssues(reg, world));
 
   // Cycles: kinds that extend themselves, things inside themselves.
   for (const id of Object.keys(world.kinds)) {
@@ -103,8 +144,16 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   if (world.spawnTier !== undefined && !tierOf(world, world.spawnTier)) err("spawnTier", "unknown_tier", `New people would join tier "${world.spawnTier}", which isn't one of the world's tiers.`);
   for (const { path, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
+      if (spec.type !== "spawn") return;
       const tier = spec.args.tier;
-      if (spec.type === "spawn" && typeof tier === "string" && !tierOf(world, tier)) warn(`${path}.${i}`, "unknown_tier", `A spawn in ${path} names tier "${tier}", which isn't one of the world's tiers; it gets the spawn tier instead.`);
+      if (typeof tier === "string" && !tierOf(world, tier)) warn(`${path}.${i}`, "unknown_tier", `A spawn in ${path} names tier "${tier}", which isn't one of the world's tiers; it gets the spawn tier instead.`);
+      // A value given as a formula is checked when the spawn runs.
+      const raw: JsonValue | undefined = spec.args.class;
+      if (raw === undefined || (isRecord(raw) && Object.values(raw).some((v) => typeof v === "string" && v.startsWith("=")))) return;
+      const classes = classOf(raw);
+      const who = `A spawn in ${path}`;
+      const problems = classes ? classProblems(world, classes, who) : [{ code: "unknown_facet", message: `${who} gives a class that isn't a facet → values map.` }];
+      for (const p of problems) warn(`${path}.${i}`, p.code, `${p.message} The spawn is refused.`);
     });
   }
 

@@ -129,7 +129,18 @@ const spawnDef: EventTypeDef<SpawnEvent> = {
   apply: (e, state) => {
     const d = e.entity;
     if (!safeKey(d.id)) return;
-    state.entities[d.id] = { kind: d.kind, name: d.name, tier: d.tier, fields: structuredClone(d.fields), relations: structuredClone(d.relations), levels: { ...(d.levels ?? {}) }, agent: d.agent === true };
+    state.entities[d.id] = {
+      kind: d.kind,
+      name: d.name,
+      tier: d.tier,
+      fields: structuredClone(d.fields),
+      relations: structuredClone(d.relations),
+      levels: { ...(d.levels ?? {}) },
+      agent: d.agent === true,
+      // Only when given, so a spawn without them folds to the same state as before they existed.
+      ...(d.class ? { class: structuredClone(d.class) } : {}),
+      ...(d.tags ? { tags: [...d.tags] } : {}),
+    };
   },
   describe: (e) => `${e.entity.name} appears`,
 };

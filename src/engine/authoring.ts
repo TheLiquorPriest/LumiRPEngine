@@ -231,8 +231,8 @@ function applyAll(registry: Registry, world: WorldDoc, state: WorldState, events
   return dropped;
 }
 
-export function playtestStart(world: WorldDoc, revision: string): WorldState {
-  return initialState(world, revision);
+export function playtestStart(registry: Registry, world: WorldDoc, revision: string): WorldState {
+  return initialState(world, revision, registry);
 }
 
 /**

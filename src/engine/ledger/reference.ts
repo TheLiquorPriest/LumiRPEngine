@@ -9,13 +9,14 @@ import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, PathHash, Po
 import { ROOT_PATH } from "../../shared/ledger";
 import { applyEvent, applyMarker, validateEvent, type EventTypes } from "../events";
 import type { ReadContext } from "../registry";
+import type { RelationTypes } from "../relations";
 import type { WorldState } from "../state";
 import { initialState } from "../world-state";
 import type { WorldDoc } from "../../shared/world";
 import { FoldError, type FoldInput, type FoldOutput, type MessageResult } from "./chain";
 
-/** What the fold needs from the registry. */
-export interface FoldTypes extends EventTypes {
+/** What the fold needs from the registry: event types, relation types for the start state, read contexts. */
+export interface FoldTypes extends EventTypes, RelationTypes {
   context(world: WorldDoc, state: Readonly<WorldState>): ReadContext;
 }
 
@@ -28,7 +29,7 @@ function sameRef(a: EventRef, b: EventRef): boolean {
 export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
   const startWorld = input.worlds(input.revision);
   if (!startWorld) throw new FoldError(`unknown revision ${input.revision}`);
-  let state = initialState(startWorld, input.revision);
+  let state = initialState(startWorld, input.revision, types);
   const notes: JournalNote[] = [];
   const keepReport: KeepLine[] = [];
   const messages: MessageResult[] = [];

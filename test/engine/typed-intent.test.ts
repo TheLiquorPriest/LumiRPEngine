@@ -16,7 +16,7 @@ const portAlder = (): WorldDoc => (STARTER_WORLDS.modern_slice_of_life as (id: s
 describe("typed intent (Playtest, no model)", () => {
   test("the longest lexicon phrase picks the action; names fill its refs, the rest its text", () => {
     const world = portAlder();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", reg);
     expect(typedIntent(reg, world, state, "I walk to the marina")).toMatchObject({ action: "go", params: { to: "alder_harbor_marina" } });
     expect(typedIntent(reg, world, state, "I buy a coffee")?.params).toMatchObject({ item: "coffee" });
     expect(typedIntent(reg, world, state, "Hmm.")).toBeNull();
@@ -32,7 +32,7 @@ describe("typed intent (Playtest, no model)", () => {
 
   test("a lexicon phrase said with filler words inside it ('walk down to') still picks the action", () => {
     const world = portAlder();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", reg);
     expect(typedIntent(reg, world, state, "I walk down to Bluebird Coffee")).toMatchObject({ action: "go", params: { to: "bluebird_coffee" } });
     expect(typedIntent(reg, world, state, "I head back over to the marina")).toMatchObject({ action: "go", params: { to: "alder_harbor_marina" } });
     // 'walk over to' is also the grid step's phrase, but no square is said: the move whose place is named wins.
@@ -42,7 +42,7 @@ describe("typed intent (Playtest, no model)", () => {
 
   test("a phrase only counts when the player does it: no negation, other subject, hypothetical or idiom", () => {
     const world = portAlder();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", reg);
     for (const line of [
       "I don't want to walk to the market",
       "Danny says he'll walk over to the marina",
@@ -62,7 +62,7 @@ describe("typed intent (Playtest, no model)", () => {
 
   test("first person and bare commands still act, around negations and other people in other clauses", () => {
     const world = portAlder();
-    const state = initialState(world, "r");
+    const state = initialState(world, "r", reg);
     const go = { action: "go", params: { to: "alder_harbor_marina" } };
     for (const line of ["Walk to the marina", "Then I walk to the marina", "Let's walk to the marina", "I want to walk to the marina", "Danny and I walk to the marina", "I meet Danny and walk to the marina", "I'm not hungry, so I walk to the marina", "Danny stays. I walk to the marina"])
       expect({ line, intent: typedIntent(reg, world, state, line) }).toMatchObject({ line, intent: go });
@@ -74,7 +74,7 @@ describe("typed intent (Playtest, no model)", () => {
 
   test("Playtest leaves the player where they are for a negated move", () => {
     const world = portAlder();
-    const start = playtestStart(world, "r");
+    const start = playtestStart(reg, world, "r");
     const before = placeOfEntity(start, world.pov);
     const turn = playtestTurn(reg, { plan: planTurn, post: postTurn }, world, start, "I don't want to walk to the market.", "run", 0);
     expect(placeOfEntity(turn.state, world.pov)).toBe(before);
@@ -83,7 +83,7 @@ describe("typed intent (Playtest, no model)", () => {
 
   test("typed moves in Playtest move the player: 'walk down to Bluebird Coffee', then 'walk over to Alder Market'", () => {
     const world = portAlder();
-    const start = playtestStart(world, "r");
+    const start = playtestStart(reg, world, "r");
     expect(placeOfEntity(start, world.pov)).not.toBe("bluebird_coffee");
     const first = playtestTurn(reg, { plan: planTurn, post: postTurn }, world, start, "I walk down to Bluebird Coffee.", "run", 0);
     expect(placeOfEntity(first.state, world.pov)).toBe("bluebird_coffee");
@@ -103,7 +103,7 @@ describe("typed intent (Playtest, no model)", () => {
     pov.relations = pov.relations.filter((r) => r.to !== "priya_nair");
     priya.relations = priya.relations.filter((r) => r.to !== world.pov);
     const ids = [...Object.keys(world.places), ...Object.keys(world.entities)].filter((id) => id.includes("_"));
-    const start = playtestStart(world, "r");
+    const start = playtestStart(reg, world, "r");
     const unmet = Object.entries(start.entities).filter(([id, e]) => id !== world.pov && kindIs(reg, world, e.kind, "person") && !playerKnows(world, start, world.pov, id)).map(([, e]) => e.name);
     expect(unmet).toContain("Priya Nair");
     const turns = checkWorld(world, 2).turns;

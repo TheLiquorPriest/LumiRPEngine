@@ -145,14 +145,22 @@ export type Cardinality = "one_one" | "one_many" | "many_one" | "many_many";
 /** Built-in relation types (DESIGN §3 feature mapping). */
 export const BUILTIN_RELATIONS = ["in", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"] as const;
 
+/**
+ * A relation type. A link written through the `link` effect must run between the allowed kinds and
+ * stay within the cardinality (`many_one`: each source holds at most one; `one_many`: each target
+ * has at most one source; `one_one`: both). A symmetric type (siblings) and an inverse pair
+ * (`parent_of` / `child_of`) are kept two-sided: the effect writes and removes the other side too.
+ */
 export interface RelationTypeDef {
   id: RelationTypeId;
   label: string;
-  /** Allowed source and target kinds; `*` allows any. */
+  /** Allowed source and target kinds (with inheritance); `*` allows any. */
   from: KindId | "*";
   to: KindId | "*";
   cardinality: Cardinality;
   symmetric: boolean;
+  /** The relation the target holds back toward the source (`child_of` for `parent_of`). */
+  inverse?: RelationTypeId;
   fields: Record<FieldId, FieldDef>;
   pack?: PackId;
 }
@@ -182,6 +190,7 @@ export interface EntityDef {
   /** Lumiverse character id, for group chats. */
   characterId?: string;
   visibility?: Visibility;
+  /** Free-form labels selectors match (`tag`). Read live from the world. */
   tags?: string[];
   /** Classification values by facet (`WorldDoc.classifications`); a single-valued facet holds at most one. Read live from the world. */
   class?: Record<FacetId, FacetValueId[]>;
@@ -214,8 +223,9 @@ export interface FacetDef {
 
 /**
  * Which entities something applies to. Every constraint given must hold; a list matches any of
- * its values; an empty selector matches every entity. Classes and tags are read live from the
- * world (definitional); kind follows inheritance; tier and group membership come from state.
+ * its values; an empty selector matches every entity. Classes and tags are definitional: read live
+ * from the world for the entities it defines, from state for spawned ones. Kind follows
+ * inheritance; tier and group membership come from state.
  */
 export interface Selector {
   ids?: EntityId[];
@@ -303,6 +313,8 @@ export interface ParamDef {
   label?: string;
   ref?: KindId;
   optional?: boolean;
+  /** A ref param's candidates must also match this selector: the palette offers only those, and the resolver refuses others. */
+  of?: Selector;
 }
 
 /**
@@ -442,11 +454,19 @@ export interface ScheduleSlot {
   given?: Record<string, WeightedValue[]>;
 }
 
-/** Calendar recurrence plus a slot table: shifts, routines, weather, bills, paydays, price paths. */
+/**
+ * Calendar recurrence plus a slot table: shifts, routines, weather, bills, paydays, price paths.
+ * When several schedules set the same field of the same entity, the most specific owner wins:
+ * the entity's own, then a group it belongs to, then its kind, then a selector.
+ */
 export interface ScheduleDef {
   id: ScheduleId;
-  /** The entity or kind the schedule applies to; absent for world processes (weather, prices). */
-  owner?: EntityId | KindId;
+  /**
+   * Who the schedule applies to: an entity; a group (its members that aren't groups themselves,
+   * directly or through member groups); a kind (with inheritance); or a selector. Absent for world
+   * processes (weather, prices).
+   */
+  owner?: EntityId | KindId | Selector;
   /** The field or relation the slot value sets (`place`, `activity`, `weather`, …). */
   target: string;
   recurrence: Recurrence;
