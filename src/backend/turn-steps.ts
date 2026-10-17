@@ -429,7 +429,7 @@ export interface JudgeAsk {
  * call: no prose comes back. On the Decision route the rating is a score question and the outcome a
  * choice, so there is no reason. Null when the call fails or gives no rating.
  */
-export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: UserId, signal: AbortSignal): Promise<Judgement | null> {
+export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<Judgement | null> {
   const scale = `0 (no particular approach, or one that works against them) to ${ask.max} (a clever, prepared approach that fits the situation)`;
   const choices = ask.odds ? Object.keys(ask.odds) : [];
   const guidance = ask.odds ? Object.fromEntries(Object.entries(ask.odds).map(([o, p]) => [o, `${Math.round(p * 100)}%`])) : null;
@@ -443,7 +443,7 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
   if (run.config.route?.provider === "decision") {
     const questions: Questions = { rating: { type: "score", instructions: `${lead} Rate it from ${scale}.`, criteria: Array.from({ length: ask.max + 1 }, (_, i) => String(i)) } };
     if (guidance) questions.outcome = { type: "choice", instructions: "How does it turn out? The dice's exact odds are guidance: a strong approach moves them toward success, a weak one away.", criteria: guidance };
-    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run.config, userId, signal);
+    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run.config, userId, signal, lore);
     const rating = answer?.answers.rating;
     if (!rating || rating.type !== "score") return null;
     const outcome = answer?.answers.outcome;
@@ -458,7 +458,7 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
     .filter((line) => line !== "")
     .join("\n");
   const user = `Action: ${ask.action}\nThe player wrote: ${ask.text.slice(0, 2000)}\nScene: ${JSON.stringify(ask.scene)}${guidance ? `\nOutcomes with the dice's exact odds: ${JSON.stringify(guidance)}` : ""}`;
-  const raw = await steps.helperJson("judge", system, user, run.config, userId, signal);
+  const raw = await steps.helperJson("judge", system, user, run.config, userId, signal, { lore });
   // A reply without a rating is no answer: a made-up middle rating would read as the model's.
   if (!isRecord(raw) || typeof raw.rating !== "number" || !Number.isFinite(raw.rating)) return null;
   const reason = typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";

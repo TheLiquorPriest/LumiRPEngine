@@ -571,7 +571,7 @@ export class Runtime implements TurnHooks {
     trimMap(this.prePhase);
     if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${budget.spent} pre call(s)`, input.userId);
     await this.judgeAnswer(bridge, text, render, settings, facts, budget, at);
-    await this.judgeApproach(bridge, text, render, settings, facts, budget, input.userId);
+    await this.judgeApproach(bridge, text, render, settings, facts, budget, at);
   }
 
   /**
@@ -757,8 +757,12 @@ export class Runtime implements TurnHooks {
    * `judge` (DESIGN §11): when the policy would roll a check the player's words may shift, or leaves
    * it to the story, the described approach is rated (and the story's odds given) before the plan.
    * The answer rides on the intent, so a Re-run reads the same judgement and the fold never asks.
+   * It reads the lore its action, target, place and the player's words find (§5.4), a secret its
+   * audience allows included, so its reason, which the roll chip and the Journal show, is dropped
+   * when it carries a secret's unrevealed text the player didn't type (§7).
    */
-  private async judgeApproach(bridge: TurnBridge, text: string, render: { world: WorldDoc; state: WorldState }, settings: UserSettings, facts: SignalFacts, budget: StepBudget, userId: UserId): Promise<void> {
+  private async judgeApproach(bridge: TurnBridge, text: string, render: { world: WorldDoc; state: WorldState }, settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase): Promise<void> {
+    const userId = at.userId;
     const intent = bridge.intentOf(text);
     if (!intent?.action || intent.judgement || intent.action === TIMELAPSE_ACTION) return;
     const action = findAction(this.registry, render.world, intent.action);
@@ -771,13 +775,20 @@ export class Runtime implements TurnHooks {
     const odds = shown.odds;
     const story = shown.verdict.why === "story" ? Object.fromEntries(outcomeChoices(action, Object.keys(odds)).map((o) => [o, odds[o] ?? 0])) : null;
     const place = placeOfEntity(render.state, render.world.pov);
-    const scene = { you: render.state.entities[render.world.pov]?.name ?? render.world.pov, place: place ? (render.world.places[place]?.name ?? place) : null, present: presentNames(this.registry, render.world, render.state) };
-    const judgement = await judge(this.steps, run, { action: action.label, text, max: policy.description.max, odds: story, scene }, userId, budget.signal);
+    const placeName = place ? (render.world.places[place]?.name ?? place) : null;
+    const scene = { you: render.state.entities[render.world.pov]?.name ?? render.world.pov, place: placeName, present: presentNames(this.registry, render.world, render.state) };
+    const targets = Object.values(intent.params).filter((v): v is string => typeof v === "string" && (hasOwn(render.state.entities, v) || hasOwn(render.world.places, v)));
+    const names = targets.map((id) => render.state.entities[id]?.name ?? render.world.places[id]?.name ?? id);
+    const lore = this.stepLore(run, at, { text: [action.label, text, placeName ?? "", ...names].join("\n"), links: [...new Set([...this.sceneLinks(render.world, render.state), ...targets])] });
+    const judgement = await judge(this.steps, run, { action: action.label, text, max: policy.description.max, odds: story, scene }, userId, budget.signal, lore);
     if (!judgement) {
       this.host.log("warn", `[LumiRPEngine] judge: no judgement for ${action.id}; ${story ? "the unrolled rule decides" : "the roll stands as shown"}`, userId);
       return;
     }
-    bridge.setIntent(text, { ...intent, judgement }, bridge.wasInterpreted(text));
+    const typed = text.toLowerCase();
+    const leaks = findLeaks(judgement.reason, unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typed.includes(s.toLowerCase()))).length > 0;
+    if (leaks) this.host.log("info", `[LumiRPEngine] judge: the reason for ${action.id} carried an unrevealed secret; it isn't shown`, userId);
+    bridge.setIntent(text, { ...intent, judgement: leaks ? { ...judgement, reason: "" } : judgement }, bridge.wasInterpreted(text));
   }
 
   /** What `npc.choose` sees about one tie: who, where, when, and the options (private plans stay in this decision call). */

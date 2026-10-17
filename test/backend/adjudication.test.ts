@@ -36,11 +36,12 @@ describe("a new chat's policy", () => {
 });
 
 /** A test-world chat with a coin-flip check (d20 against 11) under `policy`; the helper answers `judge` with `judgement` and reads nothing from replies. */
-async function climbChat(rig: Rig, policy: AdjudicationDef, judgement: JsonObject): Promise<string> {
+async function climbChat(rig: Rig, policy: AdjudicationDef, judgement: JsonObject, lore: Record<string, JsonObject> = {}): Promise<string> {
   const worldId = await rig.newWorld();
   const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
   const action: JsonObject = { id: "climb", label: "Climb the wall", params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "actions", id: "climb", value: action }));
+  for (const [id, value] of Object.entries(lore)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "lore", id, value }));
   rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "ruleset", value: { adjudication: policy as unknown as JsonObject } }));
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
   rig.host.quietReply = (request) => (request.messages.some((m) => m.content.includes("Rate the approach")) ? JSON.stringify(judgement) : JSON.stringify({ proposals: [] }));
@@ -155,5 +156,27 @@ describe("what the narrator is told", () => {
     world.actions.climb = { id: "climb", label: "Climb", params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
     const resolution = resolveOn(registryOf(), world, startState(world), { action: "climb" }, createRng("p")).resolution;
     expect(rollChip("Climb", resolution)?.detail).toMatch(/^Rolled d20 = \d+ against 11\. Odds: failure 50% · success 50%\.$/);
+  });
+});
+
+describe("the judge step's lore", () => {
+  const SECRET = "The north wall's mortar is rotten behind the ivy";
+  const lore: Record<string, JsonObject> = {
+    wall: { id: "wall", title: "The garden wall", content: "The garden wall is old brick, eight feet high.", keys: ["wall"], links: [] },
+    rot: { id: "rot", title: "Rotten mortar", content: `${SECRET}.`, keys: ["wall"], links: [], secret: true, gate: "self.cash > 100000", audience: ["judge"] },
+  };
+
+  test("judge reads what its action and the player's words find, a secret listed for it included, and its reason can't carry the secret to the roll chip", async () => {
+    const rig = new Rig();
+    const chatId = await climbChat(rig, presetAdjudication("balanced"), { rating: 2, reason: `${SECRET.toLowerCase()}, so the climb is easy` }, lore);
+    await climbTurn(rig, chatId, "I climb the wall where the ivy grows thickest.");
+    expect(judgeCalls(rig)).toBe(1);
+    const system = rig.host.quietCalls.find((r) => r.messages.some((m) => m.content.includes("Rate the approach")))?.messages[0]?.content ?? "";
+    expect(system).toContain("The garden wall: The garden wall is old brick, eight feet high.");
+    expect(system).toContain(SECRET);
+    const roll = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "roll");
+    expect(roll?.detail).toContain("Your approach: 2 of 2.");
+    expect((roll?.detail ?? "").toLowerCase()).not.toContain(SECRET.toLowerCase());
+    expect(JSON.stringify((await rig.rt.view(chatId, rig.host.userId)).panels["core.context"])).toContain('"step":"judge"');
   });
 });
