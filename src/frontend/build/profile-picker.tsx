@@ -78,15 +78,16 @@ export function ProfilePicker(props: { draft: Draft; blocked: string | null; onD
         );
       })}
       {conflicts.length > 0 ? (
-        <div class="lre-stack" style={{ gap: "4px" }} data-lre-profile-conflicts>
+        <div class="lre-stack" style={{ gap: "8px" }} data-lre-profile-conflicts>
           <span class="lre-small">Already in this world, different ({conflicts.length})</span>
           {conflicts.map((c) => (
-            <Row
-              key={c.path}
-              k={c.label}
-              sub={c.path}
-              v={<Seg label={`${c.label}: keep yours or take the profile's`} value={choices[c.path] ?? "mine"} options={KEEP_OR_TAKE} disabled={busy} onChange={(choice) => setChoices({ ...choices, [c.path]: choice })} />}
-            />
+            // The choice sits under its label: two long buttons don't fit beside it at 390 px.
+            <div key={c.path} class="lre-stack" style={{ gap: "4px" }} data-lre-conflict={c.path}>
+              <span class="lre-small">
+                {c.label} <span class="lre-dim">{c.path}</span>
+              </span>
+              <Seg label={`${c.label}: keep yours or take the profile's`} value={choices[c.path] ?? "mine"} options={KEEP_OR_TAKE} disabled={busy} onChange={(choice) => setChoices((prev) => ({ ...prev, [c.path]: choice }))} />
+            </div>
           ))}
         </div>
       ) : null}
@@ -104,7 +105,7 @@ export function ProfilePicker(props: { draft: Draft; blocked: string | null; onD
         <Row key={`${v.entity}:${v.field}`} k={`${v.name}: ${v.field}`} v={`${JSON.stringify(v.from)} → ${v.to === null ? "the default" : JSON.stringify(v.to)}`} tone="warn" />
       ))}
       {props.blocked ? <span class="lre-small lre-warn">{props.blocked}</span> : null}
-      <div class="lre-savebar">
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
         <button type="button" class="lre-btn primary" disabled={busy || nothing || props.blocked !== null} onClick={apply}>
           {nothing ? "Nothing to apply" : "Apply to draft"}
         </button>
