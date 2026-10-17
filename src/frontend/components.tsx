@@ -45,6 +45,24 @@ export function Tabs<T extends string>(props: { value: T | null; tabs: readonly 
     props.onChange(tab.id);
     list.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
   };
+  // A strip wider than the drawer scrolls sideways: keep the selected tab in sight when it changes
+  // or the strip resizes (a phone rotating, the drawer opening narrower than it closed).
+  useEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const reveal = () => {
+      const tab = el.querySelectorAll<HTMLElement>('[role="tab"]')[selected];
+      if (!tab) return;
+      // The strip is positioned, so a tab's offsetLeft is measured from the strip's start.
+      const left = tab.offsetLeft;
+      if (left < el.scrollLeft) el.scrollLeft = left - 8;
+      else if (left + tab.offsetWidth > el.scrollLeft + el.clientWidth) el.scrollLeft = left + tab.offsetWidth - el.clientWidth + 8;
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [selected, props.tabs.length]);
   return (
     <div ref={list} class="lre-tabs" role="tablist" aria-label={props.label}>
       {props.tabs.map((tab, index) => (

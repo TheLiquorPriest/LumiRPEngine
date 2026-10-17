@@ -19,11 +19,11 @@ export const CSS = `
 .lre-btn.block{width:100%}
 .lre-btn.small{min-height:40px;padding:6px 10px;font-size:13px}
 .lre-seg{display:flex;gap:4px;flex-wrap:wrap}
-.lre-seg>button{flex:1 0 auto;max-width:100%;min-height:40px;min-width:40px;padding:4px 8px;border-radius:var(--lre-radius);border:1px solid var(--lre-border);background:var(--lre-subtle);font-size:13px;white-space:normal;overflow-wrap:anywhere}
+.lre-seg>button{flex:1 1 0;min-width:min-content;max-width:100%;min-height:40px;padding:4px 8px;border-radius:var(--lre-radius);border:1px solid var(--lre-border);background:var(--lre-subtle);font-size:13px;white-space:normal;overflow-wrap:break-word}
 .lre-seg>button[aria-pressed=true]{background:var(--lre-accent-fill);color:var(--lre-accent-fg);border-color:transparent}
-.lre-tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+.lre-tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;-webkit-overflow-scrolling:touch;position:relative;min-width:0;overscroll-behavior-x:contain}
 .lre-tabs::-webkit-scrollbar{display:none}
-.lre-tabs>button{flex:0 0 auto;min-height:40px;min-width:40px;padding:0 12px;border-radius:20px;border:1px solid var(--lre-border);background:var(--lre-subtle);font-size:13px;position:relative}
+.lre-tabs>button{flex:0 0 auto;min-height:40px;min-width:40px;padding:0 12px;border-radius:20px;border:1px solid var(--lre-border);background:var(--lre-subtle);font-size:13px;position:relative;white-space:nowrap}
 .lre-tabs>button[aria-selected=true]{background:var(--lre-accent-fill);color:var(--lre-accent-fg);border-color:transparent}
 .lre-tabs>button .lre-dot{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--lre-warn)}
 .lre-top{display:flex;gap:6px;align-items:center}

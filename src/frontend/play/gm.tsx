@@ -4,13 +4,13 @@
 // touches, all or none, one fix with its own Undo chip. Kinds, classifications and tags are the
 // world's definitions, edited in Build.
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useId, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import type { EditOp } from "../../shared/protocol";
 import type { GmEntity, GmField, GmMoney, GmRelation, GmView } from "../../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../shared/world";
 import { useApp } from "../app";
-import { Card, Empty, Row, Seg, useBusy } from "../components";
+import { Card, Empty, Row, Tabs, tabPanel, useBusy } from "../components";
 import { parseFixValue } from "../fix-editor";
 import type { PanelProps } from "../registry";
 import { adjustOp, editRequest, entityStateOp, relationFields } from "../requests";
@@ -480,55 +480,59 @@ function Body(props: { editor: Editor }) {
   const { editor } = props;
   const app = useApp();
   const [section, setSection] = useState<Section>("entities");
+  const panelId = useId();
   const { gm } = editor;
   return (
     <div class="lre-stack">
-      <Seg<Section>
+      <Tabs<Section>
         label="GM view"
+        panelId={panelId}
         value={section}
-        options={[
-          { value: "entities", label: "Entities" },
-          { value: "places", label: "Places" },
-          { value: "tracks", label: "Tracks" },
-          { value: "money", label: "Money" },
-          { value: "edits", label: "Edits" },
+        tabs={[
+          { id: "entities", label: "Entities" },
+          { id: "places", label: "Places" },
+          { id: "tracks", label: "Tracks" },
+          { id: "money", label: "Money" },
+          { id: "edits", label: "Edits" },
         ]}
         onChange={setSection}
       />
-      {section === "entities" ? <Entities editor={editor} /> : null}
-      {section === "places" ? (
-        <Card title="Places">
-          {gm.places.map((p) => (
-            <Row key={p.id} k={p.name} sub={p.parent ? `in ${nameOf(gm, p.parent)}` : undefined} v={<span class={p.visibility === "public" ? "lre-badge" : "lre-badge warn"}>{p.visibility.replace(/_/g, " ")}</span>} />
-          ))}
-        </Card>
-      ) : null}
-      {section === "tracks"
-        ? gm.tracks.map((t) => (
-            <Card key={t.id} title={t.label} aside={<span class="lre-badge">{t.kind}</span>}>
-              {t.owner ? <Row k="Owner" v={t.owner} /> : null}
-              <select class="lre-input" aria-label={`${t.label} stage`} value={t.stage} disabled={editor.busy} onChange={(event) => void editor.edit([{ op: "stage", track: t.id, to: event.currentTarget.value }])}>
-                {t.stages.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
+      <div class="lre-stack" {...tabPanel(panelId, section)}>
+        {section === "entities" ? <Entities editor={editor} /> : null}
+        {section === "places" ? (
+          <Card title="Places">
+            {gm.places.map((p) => (
+              <Row key={p.id} k={p.name} sub={p.parent ? `in ${nameOf(gm, p.parent)}` : undefined} v={<span class={p.visibility === "public" ? "lre-badge" : "lre-badge warn"}>{p.visibility.replace(/_/g, " ")}</span>} />
+            ))}
+          </Card>
+        ) : null}
+        {section === "tracks"
+          ? gm.tracks.map((t) => (
+              <Card key={t.id} title={t.label} aside={<span class="lre-badge">{t.kind}</span>}>
+                {t.owner ? <Row k="Owner" v={t.owner} /> : null}
+                <select class="lre-input" aria-label={`${t.label} stage`} value={t.stage} disabled={editor.busy} onChange={(event) => void editor.edit([{ op: "stage", track: t.id, to: event.currentTarget.value }])}>
+                  {t.stages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                {t.stages.filter((s) => s.truth).map((s) => (
+                  <Row key={s.id} k={s.label} v={s.truth} />
                 ))}
-              </select>
-              {t.stages.filter((s) => s.truth).map((s) => (
-                <Row key={s.id} k={s.label} v={s.truth} />
-              ))}
-            </Card>
-          ))
-        : null}
-      {section === "money" ? (gm.money.length === 0 ? <Empty>No one else's money is tracked.</Empty> : gm.money.map((m) => <PersonMoney key={m.entity} money={m} editor={editor} />)) : null}
-      {section === "edits" ? (
-        <Card title="Corrections in force">
-          {gm.refused.map((r) => (
-            <Row key={r.id} k="Didn't apply after a reply" v={r.reason} tone="warn" />
-          ))}
-          {gm.edits.length === 0 ? <Empty>No corrections on this path.</Empty> : gm.edits.map((e) => <Row key={`${e.messageId}:${e.seq}`} k={e.lines.join(" · ") || "(bookkeeping)"} />)}
-        </Card>
-      ) : null}
+              </Card>
+            ))
+          : null}
+        {section === "money" ? (gm.money.length === 0 ? <Empty>No one else's money is tracked.</Empty> : gm.money.map((m) => <PersonMoney key={m.entity} money={m} editor={editor} />)) : null}
+        {section === "edits" ? (
+          <Card title="Corrections in force">
+            {gm.refused.map((r) => (
+              <Row key={r.id} k="Didn't apply after a reply" v={r.reason} tone="warn" />
+            ))}
+            {gm.edits.length === 0 ? <Empty>No corrections on this path.</Empty> : gm.edits.map((e) => <Row key={`${e.messageId}:${e.seq}`} k={e.lines.join(" · ") || "(bookkeeping)"} />)}
+          </Card>
+        ) : null}
+      </div>
       <button type="button" class="lre-btn ghost" onClick={() => app.ui.update((ui) => ({ ...ui, section: "build" }))}>
         Kinds, classifications, tags and places are the world's: edit them in Build
       </button>
