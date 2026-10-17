@@ -2,12 +2,15 @@
 // helper (D10) for proposed world edits per pack, checked and deduplicated by `proposals.ts`
 // (the player reviews them and applies the ones they accept with `lre.editor put`); Playtest and
 // Check world run engine-only on the background lane, a child process (`backendProcesses`) that
-// heartbeats while it works and never blocks a turn.
+// heartbeats while it works and never blocks a turn. Each user's jobs are kept in
+// `userStorage/jobs.json` with their status, progress and result (an import's proposals as each
+// chunk is read), so Build still shows them after a reload or a restart; one that was running
+// when the extension stopped shows as interrupted, with what it had proposed by then.
 
 import type { UserId, WorldId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
-import { isRecord } from "../shared/json";
-import type { ErrorCode, JobKind, JobProposal, JobResult, JobUpdate } from "../shared/protocol";
+import { hasOwn, isRecord } from "../shared/json";
+import type { ErrorCode, JobKind, JobProposal, JobResult, JobSummary, JobUpdate, LintIssue, WorldCollection } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StepConfig } from "../shared/settings";
 import type { Registry } from "../engine/registry-impl";
@@ -15,10 +18,64 @@ import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
 import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
-import type { WorldStore } from "./worlds";
+import { readStoredJson } from "./stored-json";
+import { WORLD_COLLECTIONS, type WorldStore } from "./worlds";
 
 /** The background lane's entry, relative to the extension root (the host requires it to start with `dist/`; DESIGN §18.7). */
 export const BACKGROUND_LANE = "dist/worker/background-lane.js";
+
+/** Where each user's jobs are kept. */
+export const JOBS_PATH = "jobs.json";
+
+/** Jobs that have ended kept per user (the newest), with their results; running ones are always kept. */
+export const JOBS_KEPT = 8;
+
+const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, playtest: true, check_world: true };
+const JOB_STATUSES: Record<JobSummary["status"], true> = { running: true, done: true, failed: true, cancelled: true, interrupted: true };
+const SEVERITIES: Record<LintIssue["severity"], true> = { error: true, warning: true, info: true };
+
+function isJobKind(v: unknown): v is JobKind {
+  return typeof v === "string" && hasOwn(JOB_KINDS, v);
+}
+
+function isJobStatus(v: unknown): v is JobSummary["status"] {
+  return typeof v === "string" && hasOwn(JOB_STATUSES, v);
+}
+
+function isCollection(v: unknown): v is WorldCollection {
+  return typeof v === "string" && hasOwn(WORLD_COLLECTIONS, v);
+}
+
+function isProposal(raw: unknown): raw is JobProposal {
+  if (!isRecord(raw) || typeof raw.id !== "string" || !isCollection(raw.collection) || typeof raw.key !== "string" || !hasOwn(raw, "value")) return false;
+  if (typeof raw.source !== "string" || typeof raw.confidence !== "number") return false;
+  if (raw.note !== undefined && typeof raw.note !== "string") return false;
+  if (raw.pack !== undefined && typeof raw.pack !== "string") return false;
+  return raw.sourceNames === undefined || (isRecord(raw.sourceNames) && Object.values(raw.sourceNames).every((n) => typeof n === "string"));
+}
+
+/** A stored result as the review reads it: entries of the wrong shape are dropped (the file comes from storage, not from us). */
+function storedResult(raw: unknown): JobResult | undefined {
+  if (!isRecord(raw)) return undefined;
+  if (Array.isArray(raw.proposals)) return { proposals: (JSON.parse(JSON.stringify(raw.proposals)) as unknown[]).filter(isProposal) };
+  if (!Array.isArray(raw.turns) || !Array.isArray(raw.lint)) return undefined;
+  const turns = raw.turns.flatMap((t) => (isRecord(t) && typeof t.user === "string" && typeof t.reply === "string" && Array.isArray(t.notes) ? [{ user: t.user, reply: t.reply, notes: t.notes.filter((n): n is string => typeof n === "string") }] : []));
+  const lint = raw.lint.flatMap((l) => (isRecord(l) && typeof l.severity === "string" && hasOwn(SEVERITIES, l.severity) && typeof l.path === "string" && typeof l.code === "string" && typeof l.message === "string" ? [{ severity: l.severity as LintIssue["severity"], path: l.path, code: l.code, message: l.message }] : []));
+  return { turns, lint };
+}
+
+function storedJob(raw: unknown): JobSummary | null {
+  if (!isRecord(raw) || typeof raw.jobId !== "string" || !isJobKind(raw.kind) || typeof raw.worldId !== "string" || !isJobStatus(raw.status)) return null;
+  if (typeof raw.progress !== "number" || typeof raw.at !== "number" || !isRecord(raw.input)) return null;
+  const result = storedResult(raw.result);
+  return { jobId: raw.jobId, kind: raw.kind, worldId: raw.worldId, status: raw.status, progress: Math.max(0, Math.min(1, raw.progress)), ...(typeof raw.message === "string" ? { message: raw.message } : {}), ...(result ? { result } : {}), input: JSON.parse(JSON.stringify(raw.input)) as JsonObject, at: raw.at };
+}
+
+/** A job cut off by a stop or restart: what it says in Build. */
+function interruptedMessage(job: JobSummary): string {
+  const proposals = job.result && "proposals" in job.result ? job.result.proposals.length : 0;
+  return proposals > 0 ? `Interrupted by a restart. The ${proposals} proposal(s) it made before it stopped are below; run it again for the rest.` : "Interrupted by a restart. Run it again.";
+}
 
 /** A job request the runner refuses (too many running; not the user's job). */
 export class JobError extends Error {
@@ -34,6 +91,8 @@ interface Job {
   id: string;
   kind: JobKind;
   userId: UserId;
+  worldId: WorldId;
+  input: JsonObject;
   session: string | undefined;
   controller: AbortController;
   lane: ProcessHandle | null;
@@ -53,6 +112,10 @@ export class JobRunner {
   private seq = 0;
   /** In-process job work (model jobs, lane spawns); `idle()` waits for it. */
   private readonly running = new Set<Promise<void>>();
+  /** Each user's kept jobs, oldest first, once read from storage. */
+  private readonly kept = new Map<UserId, JobSummary[]>();
+  /** Each user's reads and writes of their kept jobs, in order. */
+  private readonly stores = new Map<UserId, Promise<void>>();
 
   constructor(
     private readonly host: HostPort,
@@ -73,20 +136,26 @@ export class JobRunner {
   /** How long one Import/Refine model call may run before it counts as failed. */
   static readonly CALL_MS = 120_000;
 
-  start(kind: JobKind, worldId: WorldId, input: JsonObject, userId: UserId, session?: string): Promise<string> {
-    if ([...this.jobs.values()].filter((j) => j.userId === userId).length >= JobRunner.MAX_PER_USER) return Promise.reject(new JobError("unavailable", `at most ${JobRunner.MAX_PER_USER} jobs run at once; wait for one to finish or cancel it`));
+  async start(kind: JobKind, worldId: WorldId, input: JsonObject, userId: UserId, session?: string): Promise<string> {
+    if ([...this.jobs.values()].filter((j) => j.userId === userId).length >= JobRunner.MAX_PER_USER) throw new JobError("unavailable", `at most ${JobRunner.MAX_PER_USER} jobs run at once; wait for one to finish or cancel it`);
     const id = `job${Date.now().toString(36)}${(++this.seq).toString(36)}`;
-    const job: Job = { id, kind, userId, session, controller: new AbortController(), lane: null };
+    const job: Job = { id, kind, userId, worldId, input: JSON.parse(JSON.stringify(input)) as JsonObject, session, controller: new AbortController(), lane: null };
     this.jobs.set(id, job);
+    // Kept before any of its updates: they queue behind it.
+    const kept = this.withKept(userId, (list) => {
+      list.push({ jobId: id, kind, worldId, status: "running", progress: 0, input: job.input, at: Date.now() });
+      return { value: undefined, changed: true };
+    });
     const work = this.run(job, worldId, input).catch((error: unknown) => this.update(job, { status: "failed", progress: 1, message: error instanceof Error ? error.message : String(error) }));
     this.running.add(work);
     void work.finally(() => this.running.delete(work));
-    return Promise.resolve(id);
+    await kept;
+    return id;
   }
 
-  /** Resolves once no in-process job work is pending (lane jobs continue in their child). */
+  /** Resolves once no in-process job work or job write is pending (lane jobs continue in their child). */
   async idle(): Promise<void> {
-    while (this.running.size > 0) await Promise.all([...this.running]);
+    while (this.running.size > 0 || this.stores.size > 0) await Promise.all([...this.running, ...this.stores.values()]);
   }
 
   /** Cancels the user's own job; another user's job id is unknown to them. */
@@ -96,6 +165,66 @@ export class JobRunner {
     job.controller.abort();
     await job.lane?.stop();
     this.update(job, { status: "cancelled", progress: 1 });
+  }
+
+  /** The user's kept jobs for a world, oldest first. */
+  list(worldId: WorldId, userId: UserId): Promise<JobSummary[]> {
+    return this.withKept(userId, (list) => ({ value: list.filter((j) => j.worldId === worldId).map((j) => JSON.parse(JSON.stringify(j)) as JobSummary), changed: false }));
+  }
+
+  /** Removes the user's own job that has ended, with its result. */
+  async dismiss(jobId: string, userId: UserId): Promise<void> {
+    const refused = await this.withKept(userId, (list): { value: JobError | null; changed: boolean } => {
+      const at = list.findIndex((j) => j.jobId === jobId);
+      if (at < 0) return { value: new JobError("not_found", "no such job"), changed: false };
+      if (list[at]?.status === "running") return { value: new JobError("bad_request", "the job is still running; cancel it first"), changed: false };
+      list.splice(at, 1);
+      return { value: null, changed: true };
+    });
+    if (refused) throw refused;
+  }
+
+  /**
+   * Runs `step` on the user's kept jobs after their earlier reads and writes, then writes them when
+   * `step` changed them. The first read marks a job stored as running that this process isn't
+   * running as interrupted (the extension stopped while it ran) and writes that too.
+   */
+  private withKept<T>(userId: UserId, step: (list: JobSummary[]) => { value: T; changed: boolean }): Promise<T> {
+    const done = (this.stores.get(userId) ?? Promise.resolve()).then(async () => {
+      let list = this.kept.get(userId);
+      let cut = false;
+      if (!list) {
+        const raw = await readStoredJson(this.host, JOBS_PATH, userId, "jobs", (r) => isRecord(r) && r.v === 1 && Array.isArray(r.jobs));
+        list = isRecord(raw) && Array.isArray(raw.jobs) ? raw.jobs.flatMap((j) => storedJob(j) ?? []) : [];
+        for (const j of list) {
+          if (j.status !== "running" || this.jobs.has(j.jobId)) continue;
+          j.status = "interrupted";
+          j.message = interruptedMessage(j);
+          cut = true;
+        }
+        this.kept.set(userId, list);
+        if (this.kept.size > 256) this.kept.delete(this.kept.keys().next().value ?? "");
+      }
+      const { value, changed } = step(list);
+      if (changed || cut) {
+        // Every running job stays; of the ended ones, the newest `JOBS_KEPT`.
+        const ended = list.filter((j) => j.status !== "running");
+        const dropped = new Set(ended.slice(0, Math.max(0, ended.length - JOBS_KEPT)));
+        if (dropped.size > 0) list.splice(0, list.length, ...list.filter((j) => !dropped.has(j)));
+        await this.host.storage.write(`${JOBS_PATH}.tmp`, JSON.stringify({ v: 1, jobs: list }), userId);
+        await this.host.storage.move(`${JOBS_PATH}.tmp`, JOBS_PATH, userId);
+      }
+      return value;
+    });
+    const queued = done.then(
+      () => undefined,
+      (error: unknown) => this.host.log("warn", `[LumiRPEngine] the jobs file wasn't saved (${error instanceof Error ? error.message : String(error)})`, userId),
+    );
+    this.stores.set(userId, queued);
+    void queued.finally(() => {
+      if (this.stores.get(userId) === queued) this.stores.delete(userId);
+    });
+    return done;
   }
 
   private onLifecycle(event: ProcessEvent): void {
@@ -126,10 +255,26 @@ export class JobRunner {
     if (typeof message.progress === "number") this.update(job, { status: "running", progress: message.progress });
   }
 
-  private update(job: Job, u: Omit<JobUpdate, "lre" | "type" | "jobId" | "kind">): void {
+  /**
+   * Sends a job's update and keeps it. `partial` is kept but not sent: an import's proposals so far,
+   * reviewable if the job is interrupted. A job that ended otherwise than done keeps no result.
+   */
+  private update(job: Job, u: Omit<JobUpdate, "lre" | "type" | "jobId" | "kind">, partial?: JobResult): void {
     const msg: JobUpdate = { lre: PROTOCOL_VERSION, type: "lre.job.update", jobId: job.id, kind: job.kind, ...u };
     this.host.frontend.send(msg, job.userId, job.session);
     if (u.status !== "running") this.jobs.delete(job.id);
+    void this.withKept(job.userId, (list) => {
+      const kept = list.find((j) => j.jobId === job.id);
+      // An update after the job ended (a lane message behind a cancel) changes nothing.
+      if (!kept || kept.status !== "running") return { value: undefined, changed: false };
+      const result = u.result ?? (u.status === "running" ? (partial ?? kept.result) : undefined);
+      Object.assign(kept, { status: u.status, progress: u.progress, at: Date.now() });
+      if (u.message === undefined) delete kept.message;
+      else kept.message = u.message;
+      if (result === undefined) delete kept.result;
+      else kept.result = JSON.parse(JSON.stringify(result)) as JobResult;
+      return { value: undefined, changed: true };
+    }).catch(() => undefined);
   }
 
   /**
@@ -187,17 +332,6 @@ export class JobRunner {
       const calls = Math.min(IMPORT_MAX_CALLS, Math.ceil(entries.length / IMPORT_CHUNK));
       // Retries spend only the calls no chunk needs, so a retry never costs a later chunk its read.
       let spare = IMPORT_MAX_CALLS - calls;
-      const raw: JobProposal[] = [];
-      for (let c = 0; c < calls; c++) {
-        if (signal.aborted) return;
-        const chunk = entries.slice(c * IMPORT_CHUNK, (c + 1) * IMPORT_CHUNK);
-        const { reply, calls: made } = await this.proposalReply("import", `chunk ${c + 1} of ${calls}`, system, loreChunk(chunk), config, job.userId, callSignal(), spare > 0);
-        spare -= made - 1;
-        // A proposal that cites no source stays unlinked rather than borrowing the chunk's first entry.
-        raw.push(...readProposals(reply, `lore${c}`).map((p) => ({ ...p, source: p.source === `lore${c}` ? "lore" : p.source })));
-        this.update(job, { status: "running", progress: Math.min(0.99, (c + 1) / calls) });
-      }
-      const skipped = entries.length - calls * IMPORT_CHUNK;
       // Back-links (DESIGN §9.7): a proposal cites its entry's id; a title works too.
       const links = new Map<string, string>();
       const titles = new Map<string, string>();
@@ -209,16 +343,30 @@ export class JobRunner {
         if (title !== "" && !links.has(title.toLowerCase())) links.set(title.toLowerCase(), link);
       }
       const linkOf = (source: string): string | null => links.get(source.trim()) ?? links.get(source.trim().toLowerCase()) ?? null;
-      const drops: DropCounts = new Map();
-      const proposals = checkProposals(world, this.registry, raw, "import", { linkOf }, drops).map((p) => {
-        // Show value names each cited entry by its title; the review adds its book's name.
-        const cited = isRecord(p.value) && Array.isArray(p.value.sources) ? p.value.sources.filter((link): link is string => typeof link === "string") : [];
-        const named = cited.flatMap((link) => {
-          const title = titles.get(link);
-          return title ? [[link, title] as const] : [];
+      const review = (raw: readonly JobProposal[], drops: DropCounts): JobProposal[] =>
+        checkProposals(world, this.registry, raw, "import", { linkOf }, drops).map((p) => {
+          // Show value names each cited entry by its title; the review adds its book's name.
+          const cited = isRecord(p.value) && Array.isArray(p.value.sources) ? p.value.sources.filter((link): link is string => typeof link === "string") : [];
+          const named = cited.flatMap((link) => {
+            const title = titles.get(link);
+            return title ? [[link, title] as const] : [];
+          });
+          return named.length > 0 ? { ...p, sourceNames: Object.fromEntries(named) } : p;
         });
-        return named.length > 0 ? { ...p, sourceNames: Object.fromEntries(named) } : p;
-      });
+      const raw: JobProposal[] = [];
+      for (let c = 0; c < calls; c++) {
+        if (signal.aborted) return;
+        const chunk = entries.slice(c * IMPORT_CHUNK, (c + 1) * IMPORT_CHUNK);
+        const { reply, calls: made } = await this.proposalReply("import", `chunk ${c + 1} of ${calls}`, system, loreChunk(chunk), config, job.userId, callSignal(), spare > 0);
+        spare -= made - 1;
+        // A proposal that cites no source stays unlinked rather than borrowing the chunk's first entry.
+        raw.push(...readProposals(reply, `lore${c}`).map((p) => ({ ...p, source: p.source === `lore${c}` ? "lore" : p.source })));
+        // The checked proposals so far are kept with the job, so a restart before the end loses none of them.
+        this.update(job, { status: "running", progress: Math.min(0.99, (c + 1) / calls) }, { proposals: review(raw, new Map()) });
+      }
+      const skipped = entries.length - calls * IMPORT_CHUNK;
+      const drops: DropCounts = new Map();
+      const proposals = review(raw, drops);
       const message = [skipped > 0 ? `${skipped} entries past the first ${calls * IMPORT_CHUNK} were not read; import them in another pass.` : null, dropSummary(raw.length, proposals.length, drops)].filter((m): m is string => m !== null).join(" ");
       this.update(job, { status: "done", progress: 1, result: { proposals }, ...(message ? { message } : {}) });
       return;

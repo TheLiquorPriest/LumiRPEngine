@@ -16,16 +16,19 @@ import { POV, testPack, testWorld, tieStubPack } from "./test-pack";
 export interface RigOptions {
   /** Every shipped pack and the starter worlds (templates by starter id), instead of the test pack. */
   shipped?: boolean;
+  /** The host to run on (a restart keeps the host's chats and storage). */
+  host?: FakeHost;
 }
 
 export class Rig {
-  readonly host = new FakeHost();
+  readonly host: FakeHost;
   readonly rt: Runtime;
   readonly jobs: JobRunner;
   readonly dispatch: Dispatcher;
   private req = 0;
 
-  constructor(options: RigOptions = {}) {
+  constructor(private readonly options: RigOptions = {}) {
+    this.host = options.host ?? new FakeHost();
     this.rt = options.shipped
       ? new Runtime({ host: this.host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS })
       : new Runtime({ host: this.host, packs: [enginePack, testPack, tieStubPack], pipeline: { plan: planTurn, post: postTurn }, templates: { test: () => testWorld() } });
@@ -38,7 +41,18 @@ export class Rig {
       await this.jobs.idle();
       await this.rt.ledger.idle();
       await this.rt.push.settle();
+      await this.rt.inspector.settle();
+      await this.rt.meter.settle();
     };
+  }
+
+  /**
+   * A server or extension restart: the host drops this backend's handlers and in-flight
+   * generations, and a new runtime, job runner and stores start over the same chats and storage.
+   */
+  restart(): Rig {
+    this.host.restart();
+    return new Rig({ ...this.options, host: this.host });
   }
 
   async cashOf(chatId: string): Promise<unknown> {

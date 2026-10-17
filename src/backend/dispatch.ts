@@ -259,7 +259,11 @@ export class Dispatcher {
       }
       case "lre.job": {
         if (r.op === "start") reply("lre.job", { jobId: await this.jobs.start(r.kind, r.worldId, r.input, userId, session) });
-        else {
+        else if (r.op === "list") reply("lre.job", { jobs: await this.jobs.list(r.worldId, userId) });
+        else if (r.op === "dismiss") {
+          await this.jobs.dismiss(r.jobId, userId);
+          reply("lre.job", { jobId: r.jobId });
+        } else {
           await this.jobs.cancel(r.jobId, userId);
           reply("lre.job", { jobId: r.jobId });
         }
@@ -570,7 +574,7 @@ export class Dispatcher {
         }
         const { state, world } = await this.head(chatId, userId);
         if (choice === "remove" || choice === "accept") {
-          this.rt.setOutcomeNote(chatId, chip.id, declineNote(proposal, reason, choice, state, world));
+          await this.rt.setOutcomeNote(chatId, userId, chip.id, declineNote(proposal, reason, choice, state, world));
           this.rt.push.changed(chatId, userId);
           return { applied: true, pending: false };
         }
@@ -594,7 +598,7 @@ export class Dispatcher {
           const w = new Working(this.rt.registry, world, state);
           const [outcome] = applyProposals(this.rt.registry, w, [{ ...proposal, method }], `${id}:${method}`, this.runSeedOf(chatId));
           if (!outcome || outcome.rejection || outcome.events.length === 0) continue;
-          this.rt.setOutcomeNote(chatId, chip.id, null);
+          await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
           const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
           return { applied: result.applied, pending: result.pending };
         }
@@ -620,7 +624,7 @@ export class Dispatcher {
           this.rt.setSwipeChoice(chatId, "renarrate");
           return { applied: true, pending: false };
         }
-        this.rt.setOutcomeNote(chatId, chip.id, null);
+        await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
         this.rt.push.changed(chatId, userId);
         return { applied: true, pending: false };
       }

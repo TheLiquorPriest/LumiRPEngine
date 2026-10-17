@@ -13,7 +13,7 @@ export const CORRUPT_SUFFIX = ".corrupt-";
  * The parsed file when it exists and `valid` accepts it; `undefined` when it is missing, or when it
  * is damaged (then it has been set aside). `what` names it in the warning.
  */
-export async function readStoredJson(host: HostPort, path: string, userId: UserId, what: string, valid: (raw: unknown) => boolean): Promise<unknown> {
+export async function readStoredJson(host: Pick<HostPort, "storage" | "log">, path: string, userId: UserId, what: string, valid: (raw: unknown) => boolean): Promise<unknown> {
   const text = await host.storage.read(path, userId);
   if (text === null) return undefined;
   let raw: unknown;
@@ -33,7 +33,7 @@ export async function readStoredJson(host: HostPort, path: string, userId: UserI
  * taken) and logs it; returns the kept path. A failed move is logged too and returns null (the
  * caller still starts fresh).
  */
-export async function setAside(host: HostPort, path: string, userId: UserId, what: string, why: string): Promise<string | null> {
+export async function setAside(host: Pick<HostPort, "storage" | "log">, path: string, userId: UserId, what: string, why: string): Promise<string | null> {
   try {
     let at = Date.now();
     while ((await host.storage.read(`${path}${CORRUPT_SUFFIX}${at}`, userId)) !== null) at++;

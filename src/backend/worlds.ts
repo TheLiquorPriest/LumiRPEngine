@@ -47,7 +47,8 @@ function revisionFile(worldId: WorldId, revision: RevisionId): string {
   return `${worldDir(worldId)}rev/${revision}.json`;
 }
 
-const COLLECTIONS: Record<WorldCollection, true> = {
+/** Every world collection the editors write (a stored or requested name is checked against it). */
+export const WORLD_COLLECTIONS: Record<WorldCollection, true> = {
   kinds: true,
   relations: true,
   entities: true,
@@ -219,7 +220,7 @@ export class WorldStore {
     if (request.op === "set") {
       setPart(doc, request.part, request.value);
     } else {
-      if (!hasOwn(COLLECTIONS, request.collection)) throw new WorldError("bad_request", `unknown collection ${request.collection}`);
+      if (!hasOwn(WORLD_COLLECTIONS, request.collection)) throw new WorldError("bad_request", `unknown collection ${request.collection}`);
       if (!safeKey(request.id)) throw new WorldError("bad_request", "not a valid id");
       const collection = collectionOf(doc, request.collection);
       if (request.op === "put") collection[request.id] = request.value;

@@ -45,18 +45,13 @@ import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
 import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, saidPayMethod, Steps } from "./steps";
 import { PlanNotes } from "./plan-notes";
+import { OutcomeNotes } from "./outcome-notes";
+import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TurnBridge } from "./turn-model";
 import { contradiction, factLines, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, refsExist, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, type PlanStart, type SignalFacts, type StepRun, type Tie } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, spanText, TIMELAPSE_ACTION } from "./view";
 import { WorldStore } from "./worlds";
-
-/** One interceptor run (`core.context`, DESIGN §6.5), with what the activation check and warnings need. */
-export interface InspectorRecord extends ContextGeneration {
-  /** Entries forced, for the activation check (not shown). */
-  forced: string[];
-  warnings?: string[];
-}
 
 export interface RuntimeOptions {
   host: HostPort;
@@ -348,7 +343,14 @@ export class Runtime implements TurnHooks {
   /** Planned-turn lines by seed, for Re-narrate after a restart. */
   readonly planNotes: PlanNotes;
   readonly book: EngineBook;
-  readonly meter = new CallMeter();
+  readonly meter: CallMeter;
+  /**
+   * Notes for the next turn's Outcome slot (DESIGN §9.5: "the next Outcome slot says so"), from the
+   * reply that produced them; dropped once a later message has committed and another follows.
+   */
+  readonly outcomeNotes: OutcomeNotes;
+  /** The inspector's history and delivery badges per chat. */
+  readonly inspector: InspectorLog;
   readonly steps: Steps;
   readonly ledger: LedgerService;
   readonly push: StatePush;
@@ -358,8 +360,6 @@ export class Runtime implements TurnHooks {
   private readonly runs = new Map<string, ChatRun | null>();
   private readonly bridges = new Map<ChatId, TurnBridge>();
   private readonly settingsCache = new Map<UserId, UserSettings>();
-  private readonly inspector = new Map<ChatId, InspectorRecord[]>();
-  private readonly delivery = new Map<ChatId, Record<string, "verified" | "unverified">>();
   /**
    * Host tokenizer counts of rendered section texts, by user and text hash: the host counts with each
    * user's own main model, so one user's count never prices another's section. A section costs its
@@ -375,12 +375,6 @@ export class Runtime implements TurnHooks {
   private readonly presetWarnings = new Map<ChatId, string[]>();
   /** Each open chat's pinned world revisions, by `user \0 chat`. */
   private readonly pins = new Map<string, Map<RevisionId, WorldDoc>>();
-  /**
-   * Notes for the next turn's Outcome slot (DESIGN §9.5: "the next Outcome slot says so"), from the
-   * reply that produced them; dropped once a later message has committed and another follows.
-   * In memory: a restart between the reply and the next turn loses them.
-   */
-  private readonly outcomeNotes = new Map<ChatId, OutcomeNote[]>();
   /** The pre-phase call budget per generation, shared by `beforePlan` and `afterPlan`. */
   private readonly preBudgets = new Map<string, StepBudget>();
   /** The POV's place after each chat's last plan (the `scene_change` signal). */
@@ -397,7 +391,10 @@ export class Runtime implements TurnHooks {
     this.settings = new SettingsStore(this.host);
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
+    this.outcomeNotes = new OutcomeNotes(this.host);
+    this.inspector = new InspectorLog(this.host);
     this.book = new EngineBook(this.host, this.worlds);
+    this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }));
@@ -897,7 +894,7 @@ export class Runtime implements TurnHooks {
       });
     });
     // Another swipe of this reply replaces its notes.
-    const notes = (this.outcomeNotes.get(chatId) ?? []).filter((n) => n.messageId !== messageId);
+    const notes = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.messageId !== messageId);
     declines.forEach((d, i) => {
       const id = `decline:${input.messageId}:${input.generationId}:${i}`;
       notes.push({ id, messageId, text: declineNote(d.proposal, d.reason, "accept", context.state, context.world) });
@@ -923,17 +920,18 @@ export class Runtime implements TurnHooks {
     choices.flat().forEach((choice, i) => {
       stored.push({ id: `choice:${messageId}:${key}:${i}`, kind: "choice", messageId, swipeId, label: choice, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: choice } });
     });
-    lruSet(this.outcomeNotes, chatId, notes, 256);
+    await this.outcomeNotes.save(chatId, userId, notes);
     await this.chips.add(input.chatId, input.userId, stored);
   }
 
   /** Replaces (or, with `null`, drops) a pending Outcome note. */
-  setOutcomeNote(chatId: ChatId, id: string, text: string | null): void {
-    const notes = this.outcomeNotes.get(chatId) ?? [];
-    const i = notes.findIndex((n) => n.id === id);
-    if (i < 0) return;
-    if (text === null) notes.splice(i, 1);
-    else notes[i] = { ...notes[i], text } as OutcomeNote;
+  async setOutcomeNote(chatId: ChatId, userId: UserId, id: string, text: string | null): Promise<void> {
+    const notes = await this.outcomeNotes.list(chatId, userId);
+    const note = notes.find((n) => n.id === id);
+    if (!note) return;
+    if (text === null) notes.splice(notes.indexOf(note), 1);
+    else note.text = text;
+    await this.outcomeNotes.save(chatId, userId, notes);
   }
 
   async afterCommit(input: TurnContext): Promise<void> {
@@ -978,7 +976,7 @@ export class Runtime implements TurnHooks {
     if (input.kind !== "continue" && userText.trim() !== "" && bridge.wasUnread(userText)) {
       stored.push({ id: `read_failed:${at}`, kind: "read_failed", ...base, label: "Couldn't read your action", detail: "The call that reads your message failed, so this turn ran as plain roleplay. Retry runs the turn again.", actions: [{ id: "rerun", label: "Retry", style: "primary" }], expires: "next_send", payload: {} });
     }
-    this.ageNotes(input.chatId, input.messageId);
+    await this.ageNotes(input.chatId, input.userId, input.messageId);
     const headState = input.core.fold(input.observed).state;
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
     for (const [i, chip] of (plan?.chips ?? []).entries()) {
@@ -1017,12 +1015,11 @@ export class Runtime implements TurnHooks {
   }
 
   /** Outcome notes are told to the turn after their reply (and its swipes), then dropped. */
-  private ageNotes(chatId: ChatId, messageId: MessageId): void {
-    const notes = this.outcomeNotes.get(chatId);
-    if (!notes) return;
+  private async ageNotes(chatId: ChatId, userId: UserId, messageId: MessageId): Promise<void> {
+    const notes = await this.outcomeNotes.list(chatId, userId);
     const kept = notes.filter((n) => n.messageId === messageId || n.toldTo === undefined || n.toldTo === messageId);
     for (const n of kept) if (n.messageId !== messageId) n.toldTo = messageId;
-    lruSet(this.outcomeNotes, chatId, kept, 256);
+    await this.outcomeNotes.save(chatId, userId, kept);
   }
 
   changed(chatId: ChatId, userId: UserId): void {
@@ -1103,7 +1100,7 @@ export class Runtime implements TurnHooks {
     const outline = turnPlan ? planOutline(turnPlan, prose) : (kept?.outline ?? []);
     const planned = turnPlan ? planLines(turnPlan, world, this.registry) : kept ? { outcome: kept.outcome, montage: kept.montage } : { outcome: [], montage: [] };
     // Declines from the last reply (DESIGN §9.5), for the next turn and its swipes only.
-    for (const n of this.outcomeNotes.get(input.chatId) ?? []) if (n.messageId !== plan?.messageId && (n.toldTo === undefined || n.toldTo === plan?.messageId)) planned.outcome.unshift(n.text);
+    for (const n of await this.outcomeNotes.list(input.chatId, input.userId)) if (n.messageId !== plan?.messageId && (n.toldTo === undefined || n.toldTo === plan?.messageId)) planned.outcome.unshift(n.text);
     const record: InspectorRecord = { id: plan?.generationId ?? `dry:${Date.now().toString(36)}`, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [] };
     if (bookId && present.size === 0) record.warnings = ["The world's book wasn't attached to this chat, so no engine sections reached the narrator. It is re-attached for the next turn."];
     else if (bookId && index) {
@@ -1115,7 +1112,7 @@ export class Runtime implements TurnHooks {
     }
     // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2).
     let budget = settings.modelUse.tokens.sections;
-    const delivery = this.delivery.get(input.chatId) ?? {};
+    const { delivery } = await this.inspector.load(input.chatId, input.userId);
     const uncounted = new Map<string, string>();
     for (const section of sectionsOf(world)) {
       const entryId = slotIds.get(section.id);
@@ -1176,10 +1173,7 @@ export class Runtime implements TurnHooks {
     record.forced = [...result.forced];
     // Only real turns enter the history; a dry run (inspector check, preview) records nothing.
     if (plan) {
-      const list = this.inspector.get(input.chatId) ?? [];
-      list.push(record);
-      if (list.length > 10) list.shift();
-      lruSet(this.inspector, input.chatId, list, 256);
+      await this.inspector.add(input.chatId, input.userId, record);
       this.push.changed(input.chatId, input.userId);
     }
     return result;
@@ -1187,10 +1181,11 @@ export class Runtime implements TurnHooks {
 
   /** `WORLD_INFO_ACTIVATED`: confirms the latest interceptor record when every forced entry activated. */
   private onActivated(chatId: ChatId, activated: readonly string[]): void {
-    const record = this.inspector.get(chatId)?.at(-1);
+    const record = this.inspector.records(chatId)?.at(-1);
     if (!record || record.activation !== "unconfirmed") return;
     const ids = new Set(activated);
     record.activation = record.forced.every((id) => ids.has(id)) ? "confirmed" : "unconfirmed";
+    this.inspector.save(chatId);
   }
 
   /**
@@ -1205,11 +1200,13 @@ export class Runtime implements TurnHooks {
     const assembly = await this.host.dryRun(chatId, userId);
     const text = assembly.messages.map((m) => m.content).join("\n");
     lruSet(this.presetWarnings, chatId, (await this.lintOf(chatId, assembly, userId)).map((c) => c.message), 256);
-    const last = this.inspector.get(chatId)?.at(-1);
+    const log = await this.inspector.load(chatId, userId);
+    const last = log.records.at(-1);
     const out: Record<string, "verified" | "unverified"> = {};
     for (const s of last?.sections ?? []) if (!s.clipped && !hasOwn(TURN_ONLY_SLOTS, s.slot)) out[s.slot] = text.includes(`[${neutralizeMacros(s.label)}]`) ? "verified" : "unverified";
-    lruSet(this.delivery, chatId, out, 256);
+    log.delivery = out;
     for (const s of last?.sections ?? []) s.delivery = s.clipped ? "unchecked" : (out[s.slot] ?? s.delivery);
+    this.inspector.save(chatId);
     this.push.changed(chatId, userId);
   }
 
@@ -1244,13 +1241,13 @@ export class Runtime implements TurnHooks {
 
   /** The interceptor records kept for a chat (newest last). */
   inspectorRecords(chatId: ChatId): readonly InspectorRecord[] | undefined {
-    return this.inspector.get(chatId);
+    return this.inspector.records(chatId);
   }
 
-  /** The inspector panel (`core.context`, `ContextView`). */
+  /** The inspector panel (`core.context`, `ContextView`), from the chat's loaded history (`view` loads it). */
   inspectorView(chatId: ChatId, userId: UserId): JsonValue {
     const warnings: string[] = [];
-    const records = this.inspector.get(chatId) ?? [];
+    const records = this.inspector.records(chatId) ?? [];
     for (const r of records) for (const w of r.warnings ?? []) if (!warnings.includes(w)) warnings.push(w);
     for (const w of this.presetWarnings.get(chatId) ?? []) if (!warnings.includes(w)) warnings.push(w);
     for (const w of this.ledger.notices(chatId, userId)) if (!warnings.includes(w)) warnings.push(w);
@@ -1267,6 +1264,9 @@ export class Runtime implements TurnHooks {
     if (!core) return notWorldView(chatId);
     const observed = toChain(await this.host.chats.messages(chatId, userId));
     const stored = await this.chips.list(chatId, userId);
+    // The inspector's history and the meter are read from storage the first time the chat is viewed.
+    await this.inspector.load(chatId, userId);
+    await this.meter.ready(userId);
     const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId) });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     return view;
@@ -1421,15 +1421,6 @@ export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Regis
     for (const a of m.money.slice(0, 4)) montage.push(`${a.label}: in ${formatMoney(a.in, world.currency)}, out ${formatMoney(a.out, world.currency)}`);
   }
   return { outcome, montage };
-}
-
-export interface OutcomeNote {
-  id: string;
-  /** The reply that produced the note. */
-  messageId: MessageId;
-  text: string;
-  /** The message the note was first told to (its swipes are told too). */
-  toldTo?: MessageId;
 }
 
 /** The thing a proposal is about, for chip labels ("coffee", "Toolbox"). */

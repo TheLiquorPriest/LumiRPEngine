@@ -1,11 +1,13 @@
 // Background-lane jobs (DESIGN §13): Import from lore, Build/Refine with AI, Playtest and Check world. A job's
 // updates arrive as `lre.job.update`; proposals are reviewed one by one and the accepted ones are
-// written to the draft as `lre.editor put` (then committed from the Build bar).
+// written to the draft as `lre.editor put` (then committed from the Build bar). The backend keeps
+// each job (`lre.job list`), so a reload or a restart shows the last run of each tool again, and a
+// job a restart cut off as interrupted, with its proposals so far and Run it again.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { hasOwn, isRecord } from "../../shared/json";
-import type { JsonValue } from "../../shared/json";
-import type { JobKind, JobProposal, JobResult, JobUpdate } from "../../shared/protocol";
+import type { JsonObject, JsonValue } from "../../shared/json";
+import type { JobKind, JobProposal, JobResult, JobSummary } from "../../shared/protocol";
 import type { App } from "../app";
 import { useApp } from "../app";
 import type { SegOption } from "../components";
@@ -21,10 +23,12 @@ export interface JobState {
   jobId: string;
   kind: JobKind;
   worldId: string;
-  status: JobUpdate["status"];
+  status: JobSummary["status"];
   progress: number;
   message?: string;
   result?: JobResult;
+  /** What the job was started with (kept jobs), for Run it again. */
+  input?: JsonObject;
 }
 
 /** Jobs by `${worldId}:${kind}`, the latest run of each. */
@@ -42,6 +46,13 @@ export function trackJobs(client: ProtocolClient): () => void {
   });
 }
 
+/** The world's kept jobs (oldest first) as the store holds them: the latest of each kind. */
+export function keptJobs(all: Readonly<Record<string, JobState>>, worldId: string, jobs: readonly JobSummary[]): Record<string, JobState> {
+  const next = { ...all };
+  for (const job of jobs) if (job.worldId === worldId) next[`${worldId}:${job.kind}`] = { jobId: job.jobId, kind: job.kind, worldId: job.worldId, status: job.status, progress: job.progress, message: job.message, result: job.result, input: job.input };
+  return next;
+}
+
 /** The draft writes for the accepted proposals, in proposal order. */
 export function proposalWrites(worldId: string, proposals: readonly JobProposal[], accepted: ReadonlySet<string>): Req<"lre.editor">[] {
   return proposals.filter((p) => accepted.has(p.id)).map((p) => ({ type: "lre.editor", worldId, base: null, op: "put", collection: p.collection, id: p.key, value: p.value }));
@@ -49,7 +60,7 @@ export function proposalWrites(worldId: string, proposals: readonly JobProposal[
 
 const TITLE: Record<JobKind, string> = { import_lore: "Import from lore", refine: "Build / Refine with AI", playtest: "Playtest", check_world: "Check world" };
 const CHECK_DAYS: readonly SegOption<number>[] = [1, 3, 7].map((days) => ({ value: days, label: `${days} day${days === 1 ? "" : "s"}` }));
-const STATUS_TONE: Record<JobUpdate["status"], string> = { running: "accent", done: "pos", failed: "neg", cancelled: "" };
+const STATUS_TONE: Record<JobState["status"], string> = { running: "accent", done: "pos", failed: "neg", cancelled: "", interrupted: "warn" };
 
 function JobInput(props: { kind: JobKind; onStart(input: Record<string, string | number | string[]>): void; busy: boolean }) {
   const app = useApp();
@@ -274,12 +285,23 @@ export function JobView(props: { worldId: string; kind: JobKind }) {
   const key = `${props.worldId}:${props.kind}`;
   const job = useSelect(jobStore, (all) => all[key] ?? null);
   const [busy, run] = useBusy();
-  const start = (input: Record<string, string | number | string[]>) =>
+  // The backend keeps each job: after a reload or a restart, the world's last runs come back from it.
+  useEffect(() => {
+    void app.request({ type: "lre.job", op: "list", worldId: props.worldId }).then((body) => {
+      if (body?.jobs) {
+        const jobs = body.jobs;
+        jobStore.update((all) => keptJobs(all, props.worldId, jobs));
+      }
+    });
+  }, [props.worldId]);
+  const start = (input: JsonObject) =>
     run(async () => {
       const result = await app.request({ type: "lre.job", op: "start", kind: props.kind, worldId: props.worldId, input });
-      if (result) jobStore.update((all) => ({ ...all, [key]: { jobId: result.jobId, kind: props.kind, worldId: props.worldId, status: "running", progress: 0 } }));
+      const jobId = result?.jobId;
+      if (jobId) jobStore.update((all) => ({ ...all, [key]: { jobId, kind: props.kind, worldId: props.worldId, status: "running", progress: 0, input } }));
     });
-  const result = job?.result;
+  // A running import keeps its proposals so far for a restart; they are reviewed once it ends.
+  const result = job?.status === "running" ? undefined : job?.result;
   return (
     <div class="lre-stack" data-lre-job={props.kind}>
       <div class="lre-h2">{TITLE[props.kind]}</div>
@@ -308,7 +330,28 @@ export function JobView(props: { worldId: string; kind: JobKind }) {
             >
               Cancel
             </button>
-          ) : null}
+          ) : (
+            <div class="lre-inline" style={{ marginTop: "8px" }}>
+              {job.status === "interrupted" && job.input ? (
+                <button type="button" class="lre-btn small primary" disabled={busy} onClick={() => job.input && start(job.input)}>
+                  Run it again
+                </button>
+              ) : null}
+              <button
+                type="button"
+                class="lre-btn small ghost"
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    if (!(await app.request({ type: "lre.job", op: "dismiss", jobId: job.jobId }))) return;
+                    jobStore.update((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k !== key)));
+                  })
+                }
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
         </Card>
       ) : null}
       {result && "proposals" in result ? result.proposals.length === 0 ? <Empty>No proposals.</Empty> : <ProposalReview key={job?.jobId} app={app} worldId={props.worldId} proposals={result.proposals} /> : null}

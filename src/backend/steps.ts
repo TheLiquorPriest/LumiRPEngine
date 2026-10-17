@@ -14,6 +14,7 @@ import type { InterpretOutput } from "../engine/steps";
 import { cashGift } from "../packs/gear/core/index";
 import type { HostPort } from "./host";
 import { HELPER_MAX_TOKENS } from "./settings-store";
+import { readStoredJson } from "./stored-json";
 
 export interface CallRecord {
   purpose: StepPurpose;
@@ -29,41 +30,112 @@ interface Tally {
   ms: number;
 }
 
-/** Per-turn call meter (DESIGN §5.3): calls, tokens and latency, kept per user (one user's turns never show in another's). */
+interface UserTallies {
+  turns: Tally[];
+  current: Tally;
+}
+
+/** Where a user's tallies are kept (`userStorage/call-meter.json`). */
+export const METER_PATH = "call-meter.json";
+
+/** Closed turns kept per user, for the average and the 95th percentile. */
+export const METER_TURNS = 200;
+
+function isTally(raw: unknown): raw is Tally {
+  return isRecord(raw) && [raw.calls, raw.tokens, raw.ms].every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
+}
+
+/** What the meter needs to keep its tallies. */
+export type MeterHost = Pick<HostPort, "storage" | "log">;
+
+/**
+ * Per-turn call meter (DESIGN §5.3): calls, tokens and latency, kept per user (one user's turns
+ * never show in another's). With a host, each user's tallies live in their `call-meter.json`, read
+ * the first time they are needed and written after every change, in order; a script's meter
+ * (no host) keeps them for the process.
+ */
 export class CallMeter {
-  private readonly users = new Map<UserId, { turns: Tally[]; current: Tally }>();
+  private readonly users = new Map<UserId, UserTallies>();
+  /** Each user's load and writes, in order. */
+  private readonly queues = new Map<UserId, Promise<void>>();
   /** The last calls, oldest first, with their user (diagnostics and the per-preset call tests). */
   readonly log: (CallRecord & { userId: UserId })[] = [];
 
-  private of(userId: UserId): { turns: Tally[]; current: Tally } {
-    let u = this.users.get(userId);
-    if (!u) {
-      u = { turns: [], current: { calls: 0, tokens: 0, ms: 0 } };
-      this.users.set(userId, u);
-      if (this.users.size > 256) this.users.delete(this.users.keys().next().value ?? "");
+  constructor(private readonly host: MeterHost | null = null) {}
+
+  private remember(userId: UserId, tallies: UserTallies): UserTallies {
+    this.users.set(userId, tallies);
+    if (this.users.size > 256) this.users.delete(this.users.keys().next().value ?? "");
+    return tallies;
+  }
+
+  private async load(userId: UserId): Promise<UserTallies> {
+    const known = this.users.get(userId);
+    if (known || !this.host) return known ?? this.remember(userId, { turns: [], current: { calls: 0, tokens: 0, ms: 0 } });
+    const raw = await readStoredJson(this.host, METER_PATH, userId, "call meter", (r) => isRecord(r) && r.v === 1 && Array.isArray(r.turns) && isTally(r.current));
+    const turns = isRecord(raw) && Array.isArray(raw.turns) ? raw.turns.filter(isTally).slice(-METER_TURNS) : [];
+    const current = isRecord(raw) && isTally(raw.current) ? raw.current : { calls: 0, tokens: 0, ms: 0 };
+    return this.remember(userId, { turns: turns.map((t) => ({ calls: t.calls, tokens: t.tokens, ms: t.ms })), current: { calls: current.calls, tokens: current.tokens, ms: current.ms } });
+  }
+
+  /** Queues `step` after the user's earlier work; the queue never rejects (a failed write is logged). */
+  private enqueue(userId: UserId, step: () => Promise<void>): Promise<void> {
+    const next = (this.queues.get(userId) ?? Promise.resolve()).then(step).catch((error: unknown) => this.host?.log("warn", `[LumiRPEngine] the call meter wasn't saved (${error instanceof Error ? error.message : String(error)})`, userId));
+    this.queues.set(userId, next);
+    void next.finally(() => {
+      if (this.queues.get(userId) === next) this.queues.delete(userId);
+    });
+    return next;
+  }
+
+  private change(userId: UserId, apply: (u: UserTallies) => void): void {
+    const host = this.host;
+    if (!host) {
+      const u = this.users.get(userId) ?? this.remember(userId, { turns: [], current: { calls: 0, tokens: 0, ms: 0 } });
+      apply(u);
+      return;
     }
-    return u;
+    void this.enqueue(userId, async () => {
+      const u = await this.load(userId);
+      apply(u);
+      await host.storage.write(`${METER_PATH}.tmp`, JSON.stringify({ v: 1, turns: u.turns, current: u.current }), userId);
+      await host.storage.move(`${METER_PATH}.tmp`, METER_PATH, userId);
+    });
   }
 
   record(call: CallRecord, userId: UserId): void {
-    const u = this.of(userId);
-    u.current.calls++;
-    u.current.tokens += call.tokens;
-    u.current.ms += call.ms;
     this.log.push({ ...call, userId });
     if (this.log.length > 500) this.log.shift();
+    this.change(userId, (u) => {
+      u.current.calls++;
+      u.current.tokens += call.tokens;
+      u.current.ms += call.ms;
+    });
   }
 
   /** Closes the user's turn tally. */
   close(userId: UserId): void {
-    const u = this.of(userId);
-    u.turns.push(u.current);
-    if (u.turns.length > 200) u.turns.shift();
-    u.current = { calls: 0, tokens: 0, ms: 0 };
+    this.change(userId, (u) => {
+      u.turns.push(u.current);
+      if (u.turns.length > METER_TURNS) u.turns.shift();
+      u.current = { calls: 0, tokens: 0, ms: 0 };
+    });
+  }
+
+  /** Resolves once the user's tallies are loaded and their queued changes applied (`view` reads them). */
+  ready(userId: UserId): Promise<void> {
+    return this.enqueue(userId, async () => {
+      await this.load(userId);
+    });
+  }
+
+  /** Resolves once every queued change is written. */
+  async settle(): Promise<void> {
+    while (this.queues.size > 0) await Promise.all([...this.queues.values()]);
   }
 
   view(userId: UserId): { turn: Tally; average: Tally; p95: Tally } {
-    const { turns, current } = this.of(userId);
+    const { turns, current } = this.users.get(userId) ?? { turns: [], current: { calls: 0, tokens: 0, ms: 0 } };
     const last = turns.at(-1) ?? current;
     const avg = (key: keyof Tally): number => (turns.length === 0 ? 0 : Math.round(turns.reduce((s, t) => s + t[key], 0) / turns.length));
     const p95 = (key: keyof Tally): number => {

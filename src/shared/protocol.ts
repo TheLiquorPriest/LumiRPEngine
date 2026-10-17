@@ -131,7 +131,12 @@ export interface UiRequest extends Request<"lre.ui"> {
  */
 export type JobKind = "import_lore" | "refine" | "playtest" | "check_world";
 
-export type JobRequest = Request<"lre.job"> & ({ op: "start"; kind: JobKind; worldId: WorldId; input: JsonObject } | { op: "cancel"; jobId: string });
+/**
+ * `list`: the user's kept jobs for a world (running ones, and the last few that ended), oldest
+ * first, so Build shows a job and its proposals after a reload or a restart. `dismiss` removes a
+ * job that has ended, with its result.
+ */
+export type JobRequest = Request<"lre.job"> & ({ op: "start"; kind: JobKind; worldId: WorldId; input: JsonObject } | { op: "cancel"; jobId: string } | { op: "list"; worldId: WorldId } | { op: "dismiss"; jobId: string });
 
 /** A proposed world edit; the UI applies accepted ones as `lre.editor put`, then `lre.world commit`. */
 export interface JobProposal {
@@ -159,6 +164,23 @@ export interface JobUpdate extends Envelope<"lre.job.update"> {
   progress: number;
   message?: string;
   result?: JobResult;
+}
+
+/**
+ * A kept job (`lre.job list`). `interrupted`: it was running when the extension stopped; its result
+ * holds the proposals it had made by then, and `input` runs it again as it was started.
+ */
+export interface JobSummary {
+  jobId: string;
+  kind: JobKind;
+  worldId: WorldId;
+  status: JobUpdate["status"] | "interrupted";
+  progress: number;
+  message?: string;
+  result?: JobResult;
+  input: JsonObject;
+  /** Epoch ms of the job's last change. */
+  at: number;
 }
 
 /** World document collections the editors write. */
@@ -280,7 +302,8 @@ export interface ResultBodies {
    */
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; functions?: string[]; sheet?: SheetSectionView[] | null };
   "lre.ui": { done: true };
-  "lre.job": { jobId: string };
+  /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
+  "lre.job": { jobId?: string; jobs?: JobSummary[] };
 }
 
 export type ResultMessage = {

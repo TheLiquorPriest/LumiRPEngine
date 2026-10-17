@@ -370,7 +370,7 @@ export class FakeHost implements HostPort {
     this.emit("MESSAGE_EDITED", { chatId, message: this.hostMessage(chatId, messageId) });
   }
 
-  /** Host restart: in-flight generations vanish and their staged empty replies are removed. */
+  /** Host restart: in-flight generations vanish and their staged empty replies are removed; the extension's handlers go with it. */
   restart(): void {
     for (const g of this.inFlight.values()) {
       if (g.messageId && g.type === "normal") {
@@ -385,6 +385,9 @@ export class FakeHost implements HostPort {
     this.handlers.clear();
     this.contextHandler = null;
     this.interceptor = null;
+    this.frontendHandlers.clear();
+    this.processHandlers.clear();
+    this.lifecycleHandlers.clear();
   }
 
   // ------------------------------------------------------------------ generations
