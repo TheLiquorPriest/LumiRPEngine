@@ -177,7 +177,7 @@ Six concepts plus one pipeline.
 - **World lore** (`WorldDoc.lore`: title, content, keys, links, group, priority, and an optional secret flag with a gate) is authored data, kept in the world document. It is not synced into the book and not delivered to the narrator for now; lint still rejects lore that contains a secret's truth. Lore entries an earlier build synced into the book are deleted (§6.4).
 - **User entries** are never linked, adopted, voted on or edited. Linking and adopting were planned and are retired with lore handling; `WorldDoc.suppressed` stays in the format and is not read.
 - **Secret truth** lives only in the world document and reaches a slot through `mutated.content` at reveal. Secret-gated entries hold cue text.
-- **Attachment:** the book is appended to the chat's `chat_world_book_ids` (read-merge through `runtimeState.write`). Lint warns about global, character or persona attachment.
+- **Attachment:** the book is appended to the chat's `chat_world_book_ids` (read-merge through `runtimeState.write`).
 
 ### 4.3 Run (per chat; D6)
 - **Chat metadata:** `lumi_rp_engine = {v, worldId, runSeed, startedAt}`.
@@ -666,7 +666,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
   - **presets (D32):** a dry run of the open (else last played) world chat flags max tokens below 1,500 with a reasoning model, and an enabled preset block that asks replies to carry JSON (such as the Default preset's "Caravan Ledger"). The preset is the one the host assembles with: the connection's linked preset, else the active Loom preset, learned from the host's change events or the last saved breakdown. A dry run sees exactly the blocks that assemble, because Spindle has no read API for the active preset setting.
 - **Check world, Playtest, Import from lore, Build/Refine with AI:** all run on the background lane. Playtest drives typed turns without a model: it finds an action's lexicon phrase as said or with filler words inside it ("walk down to" says "walk to"), and when several actions' phrases are said, the one whose required details the line fills wins (so "I walk over to Alder Market" goes to the market, not a map step with no square), then an exact phrase, then the longest. It fills references from names said and reports each turn as the player would see it, rather than bookkeeping. Check world's transcript is the author's view of each day: every event, worded with names like Playtest's (no ids or bookkeeping, at most 40 lines), including people the player has not met and secrets, so off-screen routines and unmet people's events can be checked. Dropped events, failures and leaks stay in the notes.
 - **Templates:** three starter worlds, each converted from a neutral template into `lre-world-v1` by `bun run templates`: **Brindlemere** (a fantasy town; Story preset, a custom 13-moon calendar), **Harrowmere Hall** (a 1934 mystery manor; Grounded preset) and **Port Alder** (a modern slice-of-life town; Simulation preset). They carry 24, 21 and 26 public lore entries. Each lints clean, runs eight days with its books balanced, and has scripted walkthrough tests: quests finish, secrets stay hidden until found, puzzles appear once found.
-- **World import/export:** `lre-world-v1` plus a lore-book bundle.
+- **World import/export:** `lre-world-v1`, one document with the world's lore inside; World Books are not exported.
 
 ## 14. Quality gates and acceptance (D15)
 

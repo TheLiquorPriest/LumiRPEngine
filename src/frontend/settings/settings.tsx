@@ -47,7 +47,7 @@ const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   transfer: "Money transfers",
   regard: "Feelings toward others",
   quantity: "Quantities",
-  spawn: "New people and things",
+  spawn: "New people",
 };
 
 const MODE_OPTIONS: { value: BoundMode; label: string }[] = [

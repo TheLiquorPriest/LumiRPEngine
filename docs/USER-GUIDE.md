@@ -377,7 +377,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Money transfers** (Payments) · `transfer` | Money moves between people, or between someone's own accounts | confirm |
 | **Feelings toward others** (Feelings) · `regard` | Someone's feelings change | confirm |
 | **Quantities** · `quantity` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
-| **New people and things** (New characters) · `spawn` | A new character appears (capped, and duplicates are removed) | confirm |
+| **New people** (New characters) · `spawn` | A new character appears (capped, and duplicates are removed) | confirm |
 
 Beyond the mode, every field has a limit on how much a single change may be, and **the strictest rule always wins**. Fields a world marks as locked are never offered to the model. If a narrated change contradicts the engine's own outcome, the engine's outcome wins. A purchase takes in the seller's handover and the payment, so one sale is not applied three times, and a payer has to be an account.
 
@@ -446,7 +446,7 @@ Each world has its own book, **"LumiRPEngine · *your world*"**, created for you
 
 The world's **Lore** list in Build stays in the world: each entry has a title, content, keywords and **links** to the places and people it describes, and can have a **group**, a **priority**, and a **secret** flag with a **gate** formula. LumiRPEngine doesn't deliver it to the AI yet, and it never edits your own lore books. The text of an entry is kept exactly as you wrote it, macros included, as in any World Book; that is why a world from someone else is worth a look before you play it (see [Import and export](#import-and-export)).
 
-Secret truth never lives in a World Book. It stays in the world and enters a section only at the moment it's revealed. Lint warns if the world's book is attached globally or to a character or persona instead of the chat.
+Secret truth never lives in a World Book. It stays in the world and enters a section only at the moment it's revealed.
 
 ### Import from lore
 
@@ -482,7 +482,7 @@ In **Build → New world**, pick a **Template** (**Blank**, **Fantasy town**, **
 
 ### Import and export
 
-The **Build** tab's world list gives each world an **Export** and a **Delete** button, and **Import an lre-world-v1 file…** brings one in. Worlds export in the published **`lre-world-v1`** format, together with a bundle of their lore books, and import from the same. A world is one document, so it can be copied, shared and read by other tools. It carries its own **currency** (a code, symbol, minor unit, number of decimals and display format), which is why a fantasy town can count in *bits* and the mystery manor in pence (*12d*); every amount in the panels and chips is written with it. Importing never changes your settings.
+The **Build** tab's world list gives each world an **Export** and a **Delete** button, and **Import an lre-world-v1 file…** brings one in. Worlds export in the published **`lre-world-v1`** format and import from the same; the world's own lore travels inside the file, and your World Books stay separate. A world is one document, so it can be copied, shared and read by other tools. It carries its own **currency** (a code, symbol, minor unit, number of decimals and display format), which is why a fantasy town can count in *bits* and the mystery manor in pence (*12d*); every amount in the panels and chips is written with it. Importing never changes your settings.
 
 **Imported worlds list any macros in their lore for your review.** After an import, a **Review before playing** card appears above the list of worlds if the file's lore, section templates or step templates contain macros, control characters or `<user>`, `<char>` or `<bot>` shorthands (all things Lumiverse's macro engine acts on): "“*name*” came from a file. Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play." Each row names the macro, control character or shorthand and where it is, and **Open** takes you to that lore entry, section or step; **Done reviewing** puts the card away (it is not kept, so open the Lore list and look for double braces if you come back later). The toast says how many items there are to review. Nothing is changed for you: macros in lore you write yourself are kept as written, just as in any World Book.
 

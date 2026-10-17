@@ -18,7 +18,7 @@ You choose how deep it goes. On the lowest setting it is a light layer that trac
 - **Your choice of model use.** Lean, Standard, Full or your own mix, with each step on the connection you pick, when it runs, a call budget for each phase of a turn, and a call meter that shows what each turn cost.
 - **Safe with swipes, edits and branches.** Every reply carries its own record of what happened. Swiping, editing or branching never corrupts the world, and when an earlier change affects later turns you get a report and a choice.
 - **Made for small screens too.** A drawer tab, a status pill, chips for what changed, an action palette in the input bar, and a fullscreen map.
-- **Portable worlds.** Worlds export to a published, versioned file format together with their lore books, and a world you import lists any macros in its lore and templates for your review.
+- **Portable worlds.** Worlds export to a published, versioned file format with their own lore inside, and a world you import lists any macros in its lore and templates for your review.
 
 The full walkthrough is in the [user guide](docs/USER-GUIDE.md).
 
