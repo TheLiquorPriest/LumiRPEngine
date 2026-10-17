@@ -53,6 +53,9 @@ import type { DataTable } from "./tables";
 
 export const WORLD_FORMAT = "lre-world-v1";
 
+/** The export file a world travels in (`lre.world export`, the studio's `exportFile`): `{format, world}`. */
+export const EXPORT_FORMAT = "lre-world-export-v1";
+
 /** The engine version stamped on documents it writes (`WorldDoc.engineVersion`). */
 export const ENGINE_VERSION = "0.1.0";
 

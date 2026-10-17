@@ -1,26 +1,26 @@
 // The studio seam (DESIGN §15, D23): what a studio built on Warp Studio needs to author worlds for
-// this engine without a host — load, validate, lint, Check world, Playtest, migrate, and the
-// format and engine versions. Pure (pack cores and the engine only; lint-enforced) and exported
-// through the package `exports` map as `lumi-rp-engine/studio`.
+// this engine without a host — load, validate, lint, Check world, Playtest, migrate, the format
+// and engine versions, and the schema reader for the published schemas. Pure (pack cores and the
+// engine only; lint-enforced) and exported through the package `exports` map as
+// `lumi-rp-engine/studio`. docs/STUDIO.md is its manual.
 
 import { hashJson } from "./shared/hash";
 import { isRecord } from "./shared/json";
 import type { JsonValue } from "./shared/json";
 import type { LintIssue } from "./shared/protocol";
 import type { SheetSectionView } from "./shared/state-view";
-import type { RulesetDef, StudioState, WorldDoc } from "./shared/world";
-import { ENGINE_VERSION, WORLD_FORMAT } from "./shared/world";
+import { MAP_SCHEMA } from "./shared/maps";
+import { checkSchema, pathText, type JsonPath, type Schema, type SchemaProblem } from "./shared/schema-check";
+import type { MapDoc, RulesetDef, StudioState, WorldDoc } from "./shared/world";
+import { ENGINE_VERSION, EXPORT_FORMAT, WORLD_FORMAT } from "./shared/world";
 import { blankWorld, checkWorldDay, isWorldDoc, lintWorld, migrateWorld, playtestStart, playtestTurn, previewSheet, type PlaytestTurn } from "./engine/authoring";
 import { createRegistry, type Registry } from "./engine/registry-impl";
 import type { WorldState } from "./engine/state";
 import { planTurn, postTurn, timelapseIntent } from "./engine/turn";
 import { ALL_PACKS } from "./packs/index";
 
-export { ENGINE_VERSION, WORLD_FORMAT };
-export type { LintIssue, PlaytestTurn, RulesetDef, SheetSectionView, StudioState, WorldDoc };
-
-/** The export file wrapper `lre.world export` writes. */
-export const EXPORT_FORMAT = "lre-world-export-v1";
+export { checkSchema, ENGINE_VERSION, EXPORT_FORMAT, MAP_SCHEMA, pathText, WORLD_FORMAT };
+export type { JsonPath, LintIssue, MapDoc, PlaytestTurn, RulesetDef, Schema, SchemaProblem, SheetSectionView, StudioState, WorldDoc };
 
 /** Every pack this engine ships, by id, with its version. */
 export const PACK_VERSIONS: Readonly<Record<string, number>> = Object.fromEntries(ALL_PACKS.map((p) => [p.id, p.version]));
@@ -33,34 +33,47 @@ function registryOf(): Registry {
 
 const pipeline = { plan: planTurn, post: postTurn };
 
+/** Collections every document has, each an object keyed by id. */
 const COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"] as const;
-/** Collections documents written before them lack; `migrate` adds them empty, so they're checked only when present. */
-const LATER_COLLECTIONS = ["classifications", "loreIndex"] as const;
-const SINGLETONS = ["pins", "calendar", "realism", "time", "start", "currency"] as const;
+/** Collections documents written before them lack; `migrate` adds them (empty, or the default tiers), so they're checked only when present. */
+const LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"] as const;
+/** Parts every document has. */
+const PARTS = ["pins", "calendar", "realism", "time", "start"] as const;
+/**
+ * Parts a document may leave out: `migrate` fills the currency (Modern US) and the lore lookup
+ * table (empty), and a world without a ruleset or map settings plays by the defaults.
+ */
+const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings"] as const;
 
-/** Shape checks for an untrusted document: every collection and singleton part present. */
+/**
+ * Shape checks for an untrusted document, before `migrate` and `lint` read it: every collection an
+ * object of objects, every part an object, the scalar parts of the right kind. The published
+ * schema (`schemas/lre-world-v1.schema.json`) checks everything inside them.
+ */
 export function validate(doc: unknown): LintIssue[] {
   const issues: LintIssue[] = [];
   const err = (path: string, message: string): void => {
     issues.push({ severity: "error", path, code: "shape", message });
   };
   if (!isRecord(doc)) return [{ severity: "error", path: "", code: "shape", message: "not a JSON object" }];
+  const collection = (key: string): void => {
+    const value = doc[key];
+    if (!isRecord(value)) return err(key, `${key} must be an object`);
+    for (const [id, item] of Object.entries(value)) if (!isRecord(item)) err(`${key}.${id}`, `each of ${key} must be an object`);
+  };
   if (doc.format !== WORLD_FORMAT) err("format", `format must be ${WORLD_FORMAT}`);
   if (typeof doc.id !== "string" || doc.id === "") err("id", "the world needs an id");
   if (typeof doc.name !== "string") err("name", "the world needs a name");
+  if (doc.engineVersion !== undefined && typeof doc.engineVersion !== "string") err("engineVersion", "engineVersion must be text");
   if (typeof doc.pov !== "string") err("pov", "the world needs a POV entity id");
-  for (const key of COLLECTIONS) if (!isRecord(doc[key])) err(key, `${key} must be an object`);
-  for (const key of LATER_COLLECTIONS) if (doc[key] !== undefined && !isRecord(doc[key])) err(key, `${key} must be an object`);
-  for (const key of SINGLETONS) if (key !== "currency" && !isRecord(doc[key])) err(key, `${key} must be an object`);
+  for (const key of COLLECTIONS) collection(key);
+  for (const key of LATER_COLLECTIONS) if (doc[key] !== undefined) collection(key);
+  for (const key of PARTS) if (!isRecord(doc[key])) err(key, `${key} must be an object`);
+  for (const key of OPTIONAL_PARTS) if (doc[key] !== undefined && !isRecord(doc[key])) err(key, `${key} must be an object`);
   if (!Array.isArray(doc.suppressed)) err("suppressed", "suppressed must be a list");
   if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll") err("seedMode", "seedMode must be fresh or same_roll");
   if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", "lenientPricing must be true or false");
-  // The ruleset is optional (DESIGN §11); lint checks its parts.
-  if (doc.ruleset !== undefined && !isRecord(doc.ruleset)) err("ruleset", "ruleset must be an object");
-  // A world written before maps has none (migration adds the collection); each map's shape is lint's.
-  if (doc.maps !== undefined && !isRecord(doc.maps)) err("maps", "maps must be an object");
-  // Map settings are optional (DESIGN §12): absent, the defaults; lint checks their parts.
-  if (doc.mapSettings !== undefined && !isRecord(doc.mapSettings)) err("mapSettings", "mapSettings must be an object");
+  if (doc.spawnTier !== undefined && typeof doc.spawnTier !== "string") err("spawnTier", "spawnTier must be a tier id");
   return issues;
 }
 
@@ -108,6 +121,7 @@ export function revisionOf(world: WorldDoc): string {
   return hashJson(world);
 }
 
+/** The export file `lre.world export` writes and Import reads: `{format: "lre-world-export-v1", world}`. */
 export function exportFile(world: WorldDoc): JsonValue {
   return JSON.parse(JSON.stringify({ format: EXPORT_FORMAT, world })) as JsonValue;
 }

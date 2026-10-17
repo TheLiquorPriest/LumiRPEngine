@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./studio": "./src/studio-api.ts"
+    "./studio": "./src/studio-api.ts",
+    "./schemas/lre-world-v1.schema.json": "./schemas/lre-world-v1.schema.json",
+    "./schemas/lre-map-v1.schema.json": "./src/shared/lre-map-v1.schema.json"
   },
   "scripts": {
     "build": "bun build src/backend.ts --outfile dist/backend.js --target bun --define process.env.LRE_BUILD_ID=\\\"$(date +%s)\\\" && bun build src/frontend.ts --outfile dist/frontend.js --target browser && bun build src/worker/background-lane.ts --outfile dist/worker/background-lane.js --target bun",

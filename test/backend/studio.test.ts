@@ -19,6 +19,18 @@ describe("studio seam", () => {
     expect(validate(world)).toEqual([]);
   });
 
+  test("validate reports each collection and part that isn't an object where it is, and lets migrate fill what older documents lack", () => {
+    const doc: Record<string, unknown> = JSON.parse(JSON.stringify(newWorld("w_shape", "Shape")));
+    const parts = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "maps", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "lore", "classifications", "tiers", "pins", "calendar", "realism", "time", "start", "currency", "loreIndex", "ruleset", "mapSettings"];
+    for (const part of parts) expect({ part, paths: validate({ ...doc, [part]: [] }).map((i) => i.path) }).toEqual({ part, paths: [part] });
+    expect(validate({ ...doc, entities: { you: 5 }, lore: { note: "text" }, spawnTier: 2 }).map((i) => i.path)).toEqual(["entities.you", "lore.note", "spawnTier"]);
+    // A document from before maps, lore, its lookup table, classifications, tiers and currency: load migrates it.
+    const { maps: _maps, lore: _lore, loreIndex: _index, classifications: _classes, tiers: _tiers, currency: _currency, ...old } = doc;
+    expect(validate(old)).toEqual([]);
+    const loaded = load(JSON.stringify(old));
+    expect(loaded.ok && [loaded.world.maps, loaded.world.lore, Object.keys(loaded.world.tiers).sort(), loaded.world.currency.code]).toEqual([{}, {}, ["background", "principal", "supporting"], "USD"]);
+  });
+
   test("migrate fills a missing currency and drops step templates of the retired select purpose; lint finds a broken POV", () => {
     const world = newWorld("w_old", "Old");
     const { currency: _currency, ...rest } = world;

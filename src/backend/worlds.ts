@@ -15,7 +15,7 @@ import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { EditorRequest, LintIssue, WorldCollection, WorldPart } from "../shared/protocol";
 import type { RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
-import { WORLD_FORMAT } from "../shared/world";
+import { EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { blankWorld, currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
@@ -261,7 +261,7 @@ export class WorldStore {
 
   async exportFile(worldId: WorldId, userId: UserId, revision?: RevisionId): Promise<JsonValue> {
     const { world } = await this.get(worldId, userId, revision);
-    return JSON.parse(JSON.stringify({ format: "lre-world-export-v1", world })) as JsonValue;
+    return JSON.parse(JSON.stringify({ format: EXPORT_FORMAT, world })) as JsonValue;
   }
 
   lint(world: WorldDoc): LintIssue[] {
