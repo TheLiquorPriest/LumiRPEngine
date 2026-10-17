@@ -16,6 +16,7 @@ import { startMarkersFrom } from "../../src/backend/start-markers";
 import { resolveOn } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import type { EngineTurnPlan } from "../../src/engine/turn";
+import { namesAny } from "../../src/engine/visibility";
 import { baseWorld, registryOf, startState } from "../packs/support";
 import { Rig } from "../support/rig";
 
@@ -262,5 +263,35 @@ describe("the judge step and people the POV can't see", () => {
     const chain = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
     const adjudged = chain.flatMap((m) => Object.values(m.ledger?.swipes ?? {}).flatMap((r) => r.events)).find((e) => e.type === "engine.adjudged");
     expect(adjudged).toMatchObject({ data: { rating: 1, reason: "" } });
+  });
+
+  /** The reason a judged climb kept, with the hidden Vex and Dan where the POV is. */
+  const keptReason = async (reason: string, lore: Record<string, JsonObject> = {}): Promise<unknown> => {
+    const rig = new Rig();
+    const dan: JsonObject = { id: "dan", kind: "person", name: "Dan", tier: "background", visibility: "secret", fields: { place: "home" }, relations: [] };
+    const chatId = await climbChat(rig, presetAdjudication("balanced"), { rating: 1, reason }, lore, { ...people, dan });
+    await climbTurn(rig, chatId, "I climb carefully, keeping low.");
+    const chain = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
+    const adjudged = chain.flatMap((m) => Object.values(m.ledger?.swipes ?? {}).flatMap((r) => r.events)).find((e) => e.type === "engine.adjudged");
+    return adjudged && "data" in adjudged ? adjudged.data.reason : undefined;
+  };
+
+  test("a reason is read word for word: a hidden person's first name drops it, a hidden Dan doesn't drop 'dangerous'", async () => {
+    expect(await keptReason("Vex is watching from the corner, so it is risky")).toBe("");
+    expect(await keptReason("The ledge looks dangerous, but it holds")).toBe("The ledge looks dangerous, but it holds");
+  });
+
+  test("a reason that names a secret lore entry by its title is dropped", async () => {
+    const lore = { rot: { id: "rot", title: "Rotten mortar", content: "The east wall was never repointed after the flood, and it crumbles under any weight.", keys: ["wall"], links: [], secret: true, gate: "self.cash > 100000", audience: ["judge"] } };
+    expect(await keptReason("Rotten mortar makes this climb risky", lore)).toBe("");
+  });
+
+  test("names are matched by their words of two or more letters, labels and titles only whole", () => {
+    expect(namesAny("Vex's knife glints", ["Vex Morrow"])).toBe(true);
+    expect(namesAny("It looks dangerous", ["Dan"])).toBe(false);
+    expect(namesAny("The vault is dark", ["The Vault of Sorrows"])).toBe(true);
+    expect(namesAny("The old door creaks", ["The Vault of Sorrows"])).toBe(false);
+    expect(namesAny("He means to poison the mayor", [], ["Poison the mayor"])).toBe(true);
+    expect(namesAny("The mayor frowns", [], ["Poison the mayor"])).toBe(false);
   });
 });

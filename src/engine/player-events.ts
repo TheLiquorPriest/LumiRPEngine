@@ -241,16 +241,25 @@ function relabel(line: string, refs: readonly Ref[], world: WorldDoc, state: Rea
   return out;
 }
 
-/** Names only the GM may see: hidden tracks' labels and stage labels, and the names of people and things the POV can't see. */
-export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
+/** Labels only the GM may see: hidden tracks' labels and their stage labels of six characters or more. */
+export function hiddenTrackLabels(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
   const out: string[] = [];
   for (const [id, t] of Object.entries(world.tracks)) {
     if (trackShown(reg, world, state, pov, id)) continue;
     out.push(t.label);
     for (const s of Object.values(t.stages)) if (s.label.length >= 6) out.push(s.label);
   }
-  for (const [id, e] of Object.entries(state.entities)) if (!canSeeEntity(reg, world, state, pov, id)) out.push(e.name);
   return out;
+}
+
+/** The names of the people and things the POV can't see. */
+export function hiddenEntityNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
+  return Object.entries(state.entities).flatMap(([id, e]) => (canSeeEntity(reg, world, state, pov, id) ? [] : [e.name]));
+}
+
+/** Names only the GM may see: hidden tracks' labels and stage labels, and the names of people and things the POV can't see. */
+export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
+  return [...hiddenTrackLabels(reg, world, state, pov), ...hiddenEntityNames(reg, world, state, pov)];
 }
 
 /** An event's line, worded for `pov` when it is a player's (`player`), else for the GM or the author. */

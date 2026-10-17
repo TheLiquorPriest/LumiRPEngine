@@ -36,8 +36,8 @@ import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
-import { hiddenNames, playerKnows } from "../engine/player-events";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
+import { hiddenEntityNames, hiddenTrackLabels, playerKnows } from "../engine/player-events";
+import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, secretLoreTitles, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { Working } from "../engine/working";
 import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
@@ -810,7 +810,11 @@ export class Runtime implements TurnHooks {
     }
     const typed = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typed.includes(s.toLowerCase()));
-    const leaks = findLeaks(judgement.reason, [...secrets, ...hiddenNames(this.registry, render.world, render.state, render.world.pov), ...unseenPlaceNames(this.registry, render.world, render.state, render.world.pov)]).length > 0;
+    // Names are matched word for word: "Vex is watching" names a hidden Vex Morrow, while a hidden
+    // Dan doesn't make "dangerous" a leak. A hidden track's label and a secret entry's title count
+    // only whole.
+    const { world: w, state: s } = render;
+    const leaks = findLeaks(judgement.reason, secrets).length > 0 || namesAny(judgement.reason, [...hiddenEntityNames(this.registry, w, s, w.pov), ...unseenPlaceNames(this.registry, w, s, w.pov)], [...hiddenTrackLabels(this.registry, w, s, w.pov), ...secretLoreTitles(this.registry, w, s)]);
     if (leaks) this.host.log("info", `[LumiRPEngine] judge: the reason for ${action.id} carried an unrevealed secret or a hidden name; it isn't shown`, userId);
     bridge.setIntent(text, { ...intent, judgement: leaks ? { ...judgement, reason: "" } : judgement }, bridge.wasInterpreted(text));
   }

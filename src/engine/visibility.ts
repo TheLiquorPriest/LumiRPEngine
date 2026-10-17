@@ -8,7 +8,7 @@
 // everything as labelled, unrecorded previews.
 
 import type { JsonValue } from "../shared/json";
-import { isRecord } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
 import type { EntityId, PlaceId, StageId, TrackId, Visibility } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { LoreEntryDef, PlaceDef, Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
@@ -281,6 +281,12 @@ export function secretLorePhrases(reg: Registry, world: WorldDoc, state: Readonl
   return out;
 }
 
+/** The titles of the secret lore entries whose gate doesn't hold: what a model may call them. */
+export function secretLoreTitles(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+  const open = loreGateReader(reg, world, state);
+  return Object.values(world.lore).flatMap((l) => (loreIsSecret(l) && typeof l.title === "string" && l.title.trim() !== "" && !open(l) ? [l.title] : []));
+}
+
 /** Every unrevealed secret a player view must never carry: tracks' unrevealed truths and gated secret lore. */
 export function unrevealedSecrets(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
   return [...unrevealedTruths(world, state), ...secretLorePhrases(reg, world, state)];
@@ -307,4 +313,28 @@ export function findLeaks(value: JsonValue | string | undefined, secrets: readon
   };
   visit(value);
   return out;
+}
+
+/** A text's words as name checks compare them: lowercase runs of letters and digits ("Vex's" is "vex" and "s"). */
+function nameWords(text: string): string[] {
+  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+/** Words too common to stand for a name on their own: "The Vault of Sorrows" is named by "vault" or "sorrows". */
+const FUNCTION_WORDS: Record<string, true> = { the: true, of: true, and: true, an: true, in: true, on: true, at: true, to: true, by: true, for: true, or: true, with: true, from: true };
+
+/**
+ * Whether a model's free text (a judge's reason) names any of `names` or says any of `phrases`, word
+ * for word and ignoring case: a name by any of its words of two or more letters ("Vex is watching"
+ * names Vex Morrow, "dangerous" doesn't name Dan), a phrase (a track's label, a lore title) only whole.
+ */
+export function namesAny(text: string, names: readonly string[], phrases: readonly string[] = []): boolean {
+  const words = nameWords(text);
+  const said = new Set(words);
+  for (const name of names) for (const w of nameWords(name)) if (w.length >= 2 && !hasOwn(FUNCTION_WORDS, w) && said.has(w)) return true;
+  for (const phrase of phrases) {
+    const p = nameWords(phrase);
+    if (p.length > 0 && words.some((_, i) => p.every((w, j) => words[i + j] === w))) return true;
+  }
+  return false;
 }
