@@ -121,6 +121,21 @@ describe("kinship and relation integrity", () => {
     w.entities.dev = { ...w.entities.dev!, relations: [...w.entities.dev!.relations, { type: "betrothed_to", to: "mara" }, { type: "betrothed_to", to: POV }] };
     expect(lintWorld(w, reg).some((i) => i.code === "cardinality" && i.severity === "error")).toBe(true);
   });
+
+  test("a spawn's relations obey their types: the other side comes in the spawn's unit, and a breach refuses the spawn", () => {
+    const w = world({ relations: { betrothed_to: { id: "betrothed_to", label: "Betrothed to", from: "person", to: "person", cardinality: "one_one", symmetric: true, fields: {} } } });
+    w.entities.dev = { ...w.entities.dev!, relations: [...w.entities.dev!.relations, { type: "betrothed_to", to: "mara" }] };
+    const work = new Working(reg, w, startState(w, reg));
+    const spawn = (id: string, relations: { type: string; to: string }[]) => applyEffects(reg, work, [{ type: "spawn", args: { id, kind: "person", name: id, relations } }], { bindings: {}, rng: createRng(id) });
+    const born = spawn("npc_kit", [{ type: "child_of", to: "dev" }, { type: "member_of", to: "harlow_home" }]);
+    expect(born.rejected).toEqual([]);
+    expect(work.state.entities.dev?.relations.some((r) => r.type === "parent_of" && r.to === "npc_kit")).toBe(true);
+    expect(new Set(born.applied.map((e) => e.group)).size).toBe(1);
+    expect(spawn("npc_odd", [{ type: "member_of", to: "mara" }]).rejected[0]?.rejection.code).toBe("relation_kind");
+    const taken = spawn("npc_rival", [{ type: "betrothed_to", to: "dev" }]);
+    expect(taken.rejected[0]?.rejection).toMatchObject({ code: "cardinality" });
+    expect(work.state.entities.npc_odd ?? work.state.entities.npc_rival).toBeUndefined();
+  });
 });
 
 describe("group schedules and selectors", () => {

@@ -67,22 +67,31 @@ function reject(code: string, reason: string): Rejection {
   return { code, reason };
 }
 
-/** Why `from → to` may not be linked with this type in this state: the kinds, or the cardinality. */
-function linkProblem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, def: RelationTypeDef, from: EntityId, to: EntityId): Rejection | null {
-  const a = own(state.entities, from);
-  const b = own(state.entities, to);
-  // A missing end is the event's own rejection.
-  if (!a || !b) return null;
+/** One end of a link as the checks see it: an entity in the state, or one a spawn is about to add. */
+interface End {
+  id: EntityId;
+  kind: string;
+  name: string;
+  relations: readonly RelationInstance[];
+}
+
+function endOf(state: Readonly<WorldState>, id: EntityId): End | null {
+  const e = own(state.entities, id);
+  return e ? { id, kind: e.kind, name: e.name, relations: e.relations } : null;
+}
+
+/** Why `a → b` may not be linked with this type in this state: the kinds, or the cardinality. */
+function linkProblem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, def: RelationTypeDef, a: End, b: End): Rejection | null {
   if (def.from !== "*" && !kindIs(reg, world, a.kind, def.from)) return reject("relation_kind", `“${def.label}” runs from ${kindPhrase(reg, world, def.from)}; ${a.name} is ${kindPhrase(reg, world, a.kind)}`);
   if (def.to !== "*" && !kindIs(reg, world, b.kind, def.to)) return reject("relation_kind", `“${def.label}” runs to ${kindPhrase(reg, world, def.to)}; ${b.name} is ${kindPhrase(reg, world, b.kind)}`);
   if (oneTarget(def.cardinality)) {
-    const other = a.relations.find((r) => r.type === def.id && r.to !== to);
+    const other = a.relations.find((r) => r.type === def.id && r.to !== b.id);
     if (other) return reject("cardinality", `${a.name} is already ${inline(def)} ${own(state.entities, other.to)?.name ?? other.to}; “${def.label}” allows one at a time`);
   }
   if (oneSource(def.cardinality)) {
     const holder = Object.keys(state.entities)
       .sort()
-      .find((id) => id !== from && own(state.entities, id)?.relations.some((r) => r.type === def.id && r.to === to));
+      .find((id) => id !== a.id && own(state.entities, id)?.relations.some((r) => r.type === def.id && r.to === b.id));
     if (holder) return reject("cardinality", `${own(state.entities, holder)?.name ?? holder} is already ${inline(def)} ${b.name}; “${def.label}” allows one at a time`);
   }
   return null;
@@ -95,16 +104,47 @@ function linkProblem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
 export function linkEvents(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, link: { rel: RelationTypeId; from: EntityId; to: EntityId; fields?: JsonObject; until?: number }): LedgerEvent[] | Rejection {
   const extra = { ...(link.fields ? { fields: link.fields } : {}), ...(link.until !== undefined ? { until: link.until } : {}) };
   const events: LedgerEvent[] = [{ type: "link", rel: link.rel, from: link.from, to: link.to, ...extra }];
+  const a = endOf(state, link.from);
+  const b = endOf(state, link.to);
+  // A missing end is the event's own rejection.
+  if (!a || !b) return events;
   const def = relationDef(reg, world, link.rel);
-  const problem = def ? linkProblem(reg, world, state, def, link.from, link.to) : null;
+  const problem = def ? linkProblem(reg, world, state, def, a, b) : null;
   if (problem) return problem;
   const back = counterpartOf(reg, world, link.rel);
   if (!back || (back === link.rel && link.from === link.to)) return events;
   const backDef = relationDef(reg, world, back);
-  const backProblem = backDef ? linkProblem(reg, world, state, backDef, link.to, link.from) : null;
+  const backProblem = backDef ? linkProblem(reg, world, state, backDef, b, a) : null;
   if (backProblem) return backProblem;
   events.push({ type: "link", rel: back, from: link.to, to: link.from, ...extra });
   return events;
+}
+
+/**
+ * The other sides of a spawn's relations, as links that follow the spawn in its unit: each relation
+ * and each other side is checked like a `link` (kinds, cardinality). A relation to a place has no
+ * other side, and a type that wants an entity kind at that end refuses it.
+ */
+export function spawnLinks(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, entity: { id: EntityId; kind: string; name: string; relations: readonly RelationInstance[] }): LedgerEvent[] | Rejection {
+  const self: End = { id: entity.id, kind: entity.kind, name: entity.name, relations: entity.relations };
+  const out: LedgerEvent[] = [];
+  for (const r of entity.relations) {
+    const def = relationDef(reg, world, r.type);
+    const target = r.to === entity.id ? self : endOf(state, r.to);
+    if (!target) {
+      if (def && def.to !== "*") return reject("relation_kind", `“${def.label}” runs to ${kindPhrase(reg, world, def.to)}; ${own(world.places, r.to)?.name ?? r.to} isn't one`);
+      continue;
+    }
+    const problem = def ? linkProblem(reg, world, state, def, self, target) : null;
+    if (problem) return problem;
+    const back = counterpartOf(reg, world, r.type);
+    if (!back || (back === r.type && r.to === entity.id)) continue;
+    const backDef = relationDef(reg, world, back);
+    const backProblem = backDef ? linkProblem(reg, world, state, backDef, target, self) : null;
+    if (backProblem) return backProblem;
+    out.push({ type: "link", rel: back, from: r.to, to: entity.id });
+  }
+  return out;
 }
 
 /** The events of an `unlink` effect: the link, and the other side when the target holds it. */

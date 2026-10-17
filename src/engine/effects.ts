@@ -14,7 +14,8 @@
 //                                            or inverse type with it; kinds and cardinality checked
 //   spawn   {id?, kind, name, tier?, fields?, relations?, agent?, place?, class?, tags?}
 //                                            tier: a world tier, else the world's spawn tier;
-//                                            class and tags stay with the entity in state
+//                                            class and tags stay with the entity in state;
+//                                            relations are checked and two-sided as with link
 //   stage   {track, to}
 //   post    {lines: [{account, amount}], memo}
 //   signal  {class, text, entity?, visibility?}   an interrupt-class event (timelapse policy)
@@ -41,7 +42,7 @@ import type { EnvVars, Value } from "./expr";
 import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
-import { linkEvents, unlinkEvents } from "./relations";
+import { linkEvents, spawnLinks, unlinkEvents } from "./relations";
 import { progressionApplies, progressOf } from "./ruleset";
 import { evalArg, evalArgs, evalExpr, fieldDef, objects, poolMax, scopeEnv } from "./scope";
 import { classOf, classProblems } from "./selector";
@@ -200,13 +201,16 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       }
       const tags = [...new Set((Array.isArray(args.tags) ? args.tags : []).filter((t): t is string => typeof t === "string" && t.trim() !== "").map((t) => t.trim()))];
       if (tags.length > 0) entity.tags = tags;
+      // Its relations obey their types like a `link`; the other sides follow the spawn in its unit.
+      const links = spawnLinks(reg, world, state, entity);
+      if (isRejection(links)) return links;
       const out: LedgerEvent[] = [];
       if (agentOf(world, { id, tier, agent: typeof args.agent === "boolean" ? args.agent : undefined })) {
         entity.agent = true;
         // A new agent starts caught up: it never replays slots from before it existed.
         out.push({ type: "engine.caught", data: { agent: id, slot: slotIndexAt(calendarOf(world), state.clock) } });
       }
-      return [{ type: "spawn", entity }, ...out];
+      return [{ type: "spawn", entity }, ...links, ...out];
     }
     case "stage":
       return [{ type: "stage", track: text(args.track), to: text(args.to) }];
