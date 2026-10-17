@@ -390,7 +390,7 @@ function gridInn(): WorldDoc {
       scope: "inn",
       title: "Ground floor",
       cellMeters: 2,
-      layout: ["############", "#ttttt#kkkk#", "#tLttt+kkkk#", "#ttttt#kkkk#", "##+#########", "#hhhhhhhhhh#", "#####+######"],
+      layout: ["############", "#ttttt#kkkk#", "#ttttt+kkkk#", "#tttLt#kkkk#", "##+#########", "#hhhhhhhhhh#", "#####+######"],
       legend: { t: { place: "taproom" }, k: { place: "kitchen" }, h: { place: "hall" }, L: { item: "lantern" } },
       places: [
         { id: "taproom", name: "Taproom" },
