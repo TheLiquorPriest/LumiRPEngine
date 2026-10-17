@@ -1015,7 +1015,7 @@ export class Runtime implements TurnHooks {
     const { world, state } = render;
     const index = await this.worlds.index(run.worldId, input.userId);
     const settings = await this.settings.get(input.userId);
-    const result: InterceptorResult = { disabled: [], enabled: [], forced: [], mutated: [], disableRecursion: false };
+    const result: InterceptorResult = { disabled: [], enabled: [], forced: [], mutated: [] };
     const bookId = index?.loreBookId ?? null;
     const slotIds = bookId ? await this.book.slotEntries(bookId, input.userId) : new Map<string, string>();
     const present = new Set(input.entries.filter((e) => e.bookId === bookId).map((e) => e.id));

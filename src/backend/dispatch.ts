@@ -311,7 +311,7 @@ export class Dispatcher {
     }
   }
 
-  /** The world's engine-managed book follows its head revision: a slot entry per section (DESIGN §4.2). */
+  /** The world's engine-managed book follows its head revision: a slot entry per section, and no leftover lore copies (DESIGN §4.2). */
   private async syncBook(worldId: WorldId, userId: UserId): Promise<void> {
     const index = await this.rt.worlds.index(worldId, userId);
     if (!index) return;

@@ -58,17 +58,27 @@ export class EngineBook {
     private readonly worlds: WorldStore,
   ) {}
 
-  /** Creates the world's book if it has none (or it was deleted), a slot entry per section, and removes leftover lore entries. */
+  /**
+   * Creates the world's book if it has none (or it was deleted) and a slot entry per section, and
+   * deletes the world lore copies an earlier build synced into it: lore is no longer delivered, and
+   * those copies (secret ones included) shouldn't sit in a host-visible book. The world document
+   * keeps the lore.
+   */
   async ensure(world: WorldDoc, index: WorldIndex, userId: UserId): Promise<string> {
     let bookId = index.loreBookId;
     if (!bookId || !(await this.host.books.exists(bookId, userId))) {
       bookId = await this.host.books.create(`LumiRPEngine · ${world.name}`, "Engine-managed slots. Entries here are activated only by LumiRPEngine.", userId);
       await this.worlds.setLoreBook(world.id, bookId, userId);
-      this.slots.delete(bookId);
     }
     // Read the book afresh: a slot entry deleted in the host's UI is recreated.
-    this.slots.delete(bookId);
-    const existing = await this.slotEntries(bookId, userId);
+    const existing = new Map<SlotId, string>();
+    const leftoverLore: string[] = [];
+    for (const e of await this.host.books.entries(bookId, userId)) {
+      const slot = slotOfEntry(e.extensions);
+      if (slot) existing.set(slot, e.id);
+      else if (loreOfEntry(e.extensions) !== null) leftoverLore.push(e.id);
+    }
+    this.slots.set(bookId, existing);
     for (const section of sectionsOf(world)) {
       if (existing.has(section.id)) continue;
       const placement = placementOf(section);
@@ -90,17 +100,8 @@ export class EngineBook {
       );
       existing.set(section.id, id);
     }
-    await this.removeLore(bookId, userId);
+    for (const id of leftoverLore) await this.host.books.deleteEntry(id, userId);
     return bookId;
-  }
-
-  /**
-   * Deletes the world lore entries an earlier build synced into the book: lore is no longer
-   * delivered, and those copies (secret ones included) shouldn't sit in a host-visible book.
-   * The world document keeps the lore.
-   */
-  async removeLore(bookId: string, userId: UserId): Promise<void> {
-    for (const e of await this.host.books.entries(bookId, userId)) if (loreOfEntry(e.extensions) !== null) await this.host.books.deleteEntry(e.id, userId);
   }
 
   async slotEntries(bookId: string, userId: UserId): Promise<Map<SlotId, string>> {

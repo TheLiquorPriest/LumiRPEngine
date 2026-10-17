@@ -448,16 +448,13 @@ export class FakeHost implements HostPort {
 
   private async runInterceptor(chatId: ChatId): Promise<InterceptorResult | null> {
     if (!this.interceptor) return null;
-    const messages = this.chat(chatId).messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "").map((m) => ({ id: m.id, content: m.swipes[m.swipeId] ?? "", isUser: m.isUser }));
     const ids = this.chat(chatId).metadata.chat_world_book_ids;
     const entries: InterceptorInput["entries"] = [];
     for (const bookId of Array.isArray(ids) ? ids : []) {
       if (typeof bookId !== "string") continue;
-      for (const e of this.bookStore.get(bookId)?.entries.values() ?? []) {
-        entries.push({ id: e.id, bookId, comment: e.comment, content: e.content, keys: e.keys, constant: e.constant, disabled: e.disabled, group: null, groupOverride: false, groupWeight: 100, extensions: e.extensions });
-      }
+      for (const e of this.bookStore.get(bookId)?.entries.values() ?? []) entries.push({ id: e.id, bookId, extensions: e.extensions });
     }
-    this.lastInterceptor = await this.interceptor({ chatId, userId: this.userId, messages, entries });
+    this.lastInterceptor = await this.interceptor({ chatId, userId: this.userId, entries });
     return this.lastInterceptor;
   }
 

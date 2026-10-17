@@ -396,9 +396,8 @@ describe("backend runtime", () => {
     await rig.turn(chatId, "Let's go to the diner.", "Sure.");
     const result = rig.host.lastInterceptor;
     if (!result) throw new Error("no interceptor run");
-    // No vote, force, enable or text for any of the user's entries, and no recursion override.
+    // No vote, force, enable or text for any of the user's entries.
     for (const list of [result.disabled, result.enabled, result.forced, result.mutated.map((m) => m.id)]) expect(list.filter((id) => mine.has(id))).toEqual([]);
-    expect(result.disableRecursion).toBe(false);
     // Every section the engine filled is a slot entry, enabled, forced and given its text.
     const run = await rig.rt.runOf(chatId, rig.host.userId);
     const slots = await rig.rt.book.slotEntries((await rig.rt.worlds.index(run?.worldId ?? "", rig.host.userId))?.loreBookId ?? "", rig.host.userId);
@@ -414,7 +413,7 @@ describe("backend runtime", () => {
     if (!isRecord(panel) || !Array.isArray(panel.generations) || !Array.isArray(panel.warnings)) throw new Error("no inspector panel");
     const latest = panel.generations[0];
     if (!isRecord(latest) || !Array.isArray(latest.sections)) throw new Error("no record");
-    expect(Object.keys(latest).sort()).toEqual(["activation", "at", "budget", "id", "sections"]);
+    expect("candidates" in latest).toBe(false);
     const shown = latest.sections.flatMap((s) => (isRecord(s) && s.clipped === false && typeof s.tokens === "number" ? [s.tokens] : []));
     expect(latest.budget).toEqual({ sections: 600, used: shown.reduce((sum, n) => sum + n, 0) });
     expect(latest.sections.some((s) => isRecord(s) && s.slot === "scene" && s.delivery === "verified")).toBe(true);

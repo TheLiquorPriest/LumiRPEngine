@@ -215,17 +215,16 @@ if (which === "interceptor" || which === "payload" || which === "all") {
   for (let t = 0; t <= 1000; t++) {
     if (marks.has(t)) {
       payload[`turns${t}`] = JSON.stringify(await rt.view(chatId, host.userId)).length;
-      const messages = host.chat(chatId).messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "").map((m) => ({ id: m.id, content: m.swipes[m.swipeId] ?? "", isUser: m.isUser }));
       const ids = host.chat(chatId).metadata.chat_world_book_ids;
       const entries = [];
       for (const bookId of Array.isArray(ids) ? ids : []) {
         if (typeof bookId !== "string") continue;
-        for (const e of await host.books.entries(bookId, host.userId)) entries.push({ id: e.id, bookId, comment: e.comment, content: e.content, keys: e.keys, constant: e.constant, disabled: e.disabled, group: null, groupOverride: false, groupWeight: 100, extensions: e.extensions });
+        for (const e of await host.books.entries(bookId, host.userId)) entries.push({ id: e.id, bookId, extensions: e.extensions });
       }
       const xs: number[] = [];
       for (let i = 0; i < 12; i++) {
         const t0 = performance.now();
-        await rt.intercept({ chatId, userId: host.userId, messages, entries });
+        await rt.intercept({ chatId, userId: host.userId, entries });
         xs.push(performance.now() - t0);
       }
       interceptMs[`turns${t}`] = { medianMs: r1(median(xs.slice(2))), p95Ms: r1(p95(xs.slice(2))), entries: entries.length };

@@ -174,7 +174,7 @@ const FACT_OF: Record<Exclude<StepSignal, "always" | "never">, keyof SignalFacts
 const FACTS_BY_SIGNAL = new Map<string, keyof SignalFacts>(Object.entries(FACT_OF));
 
 /** Whether any of `signals` fires; `never` wins over everything. */
-export function fires(signals: readonly string[], f: SignalFacts): boolean {
+function fires(signals: readonly string[], f: SignalFacts): boolean {
   if (signals.includes("never")) return false;
   for (const s of signals) {
     if (s === "always") return true;
@@ -233,7 +233,7 @@ export interface StepRun {
 }
 
 /** The world's step templates for a purpose, in id order (DESIGN §5.2 "templates with engine placeholders"). */
-export function templatesFor(world: WorldDoc, purpose: StepPurpose): StepTemplateDef[] {
+function templatesFor(world: WorldDoc, purpose: StepPurpose): StepTemplateDef[] {
   return Object.values(world.steps)
     .filter((t) => t.purpose === purpose)
     .sort((a, b) => a.id.localeCompare(b.id));

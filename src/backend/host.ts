@@ -137,24 +137,10 @@ export interface ContextHandlerInput {
   frontendSessionId?: string;
 }
 
-export interface InterceptorMessage {
-  id: MessageId;
-  content: string;
-  isUser: boolean;
-}
-
+/** A World Info entry as the interceptor sees it: the engine reads only which book it is in and its extension data. */
 export interface InterceptorEntry {
   id: string;
   bookId: string;
-  comment: string;
-  content: string;
-  keys: string[];
-  constant: boolean;
-  disabled: boolean;
-  group: string | null;
-  /** Native group rule: an override entry wins its group, else the higher weight. */
-  groupOverride: boolean;
-  groupWeight: number;
   /** The entry's extension data (`lumi_rp_engine`: a slot, or the lore id of an entry an earlier build synced). */
   extensions: JsonObject;
 }
@@ -163,7 +149,6 @@ export interface InterceptorEntry {
 export interface InterceptorInput {
   chatId: ChatId;
   userId: UserId;
-  messages: InterceptorMessage[];
   entries: InterceptorEntry[];
 }
 
@@ -179,7 +164,6 @@ export interface InterceptorResult {
   enabled: string[];
   forced: string[];
   mutated: { id: string; content?: string; placement?: PlacementOverride }[];
-  disableRecursion: boolean;
 }
 
 // ---------------------------------------------------------------- model calls

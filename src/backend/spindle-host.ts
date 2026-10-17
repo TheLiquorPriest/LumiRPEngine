@@ -182,19 +182,19 @@ function usageTokens(raw: unknown): number {
   return (num(u, "input_tokens") ?? num(u, "prompt_tokens") ?? 0) + (num(u, "output_tokens") ?? num(u, "completion_tokens") ?? 0);
 }
 
-function entryInput(entry: Partial<HostBookEntryInput>): WorldBookEntryCreateDTO {
-  const out: WorldBookEntryCreateDTO = {};
-  if (entry.comment !== undefined) out.comment = entry.comment;
-  if (entry.content !== undefined) out.content = entry.content;
-  if (entry.keys !== undefined) out.key = entry.keys;
-  if (entry.disabled !== undefined) out.disabled = entry.disabled;
-  if (entry.constant !== undefined) out.constant = entry.constant;
-  if (entry.position !== undefined) out.position = entry.position;
-  if (entry.depth !== undefined) out.depth = entry.depth;
-  if (entry.role !== undefined && entry.role !== null) out.role = entry.role;
-  if (entry.order !== undefined) out.order_value = entry.order;
-  if (entry.extensions !== undefined) out.extensions = entry.extensions;
-  return out;
+function entryInput(entry: HostBookEntryInput): WorldBookEntryCreateDTO {
+  return {
+    comment: entry.comment,
+    content: entry.content,
+    key: entry.keys,
+    disabled: entry.disabled,
+    constant: entry.constant,
+    position: entry.position,
+    depth: entry.depth,
+    ...(entry.role !== null ? { role: entry.role } : {}),
+    order_value: entry.order,
+    extensions: entry.extensions,
+  };
 }
 
 /** Extension storage file mirroring system log lines (Settings → diagnostics; integration checks). */
@@ -332,31 +332,16 @@ export function createSpindleHost(): HostPort {
         const input: InterceptorInput = {
           chatId: ctx.chatId,
           userId,
-          messages: ctx.messages.map((m) => ({ id: m.id, content: m.content, isUser: m.is_user })),
-          entries: ctx.entries.map(
-            (e): InterceptorEntry => ({
-              id: e.id,
-              bookId: e.world_book_id,
-              comment: e.comment,
-              content: e.content,
-              keys: [...e.key],
-              constant: e.constant,
-              disabled: e.disabled,
-              group: e.group_name === "" ? null : e.group_name,
-              groupOverride: e.group_override,
-              groupWeight: e.group_weight,
-              extensions: toJsonObject(e.extensions),
-            }),
-          ),
+          entries: ctx.entries.map((e): InterceptorEntry => ({ id: e.id, bookId: e.world_book_id, extensions: toJsonObject(e.extensions) })),
         };
         const result: InterceptorResult | null = await handler(input);
         if (!result) return undefined;
+        // Only the world's own book is voted on; no activation override, so recursion follows the user's settings.
         return {
           disabled: result.disabled,
           enabled: result.enabled,
           forced: result.forced,
           mutated: result.mutated.map((m) => ({ id: m.id, ...(m.content !== undefined ? { content: m.content } : {}), ...(m.placement ? { placement: m.placement } : {}) })),
-          ...(result.disableRecursion ? { activationOverrides: { disableRecursion: true } } : {}),
         };
       }, priority);
     },
