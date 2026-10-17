@@ -9,6 +9,7 @@ import { hasOwn, isRecord } from "../shared/json";
 import { mapSettingsOf } from "../shared/maps";
 import { agentOf } from "../shared/tiers";
 import type { WorldDoc } from "../shared/world";
+import { own } from "./pack-kit";
 import { completeRelations, type RelationTypes } from "./relations";
 import { placeOfEntity } from "./scope";
 import { seedObservations } from "./seen";
@@ -59,7 +60,7 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
   if (pov && placeOfEntity({ entities }, world.pov) === null && hasOwn(world.places, world.start.place)) pov.fields.place = world.start.place;
   // Things a map lays in its cells start there, unless they start inside something (DESIGN §4.1).
   for (const item of placedItems(world)) {
-    const thing = entities[item.id];
+    const thing = own(entities, item.id);
     if (!thing || thing.relations.some((r) => r.type === "in")) continue;
     Object.assign(thing.fields, { place: item.place, x: item.cell.x, y: item.cell.y });
   }

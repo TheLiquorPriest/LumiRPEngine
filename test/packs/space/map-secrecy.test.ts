@@ -239,3 +239,16 @@ describe("things lying in cells", () => {
     expect(items(buildMapView(w.ctx))).toEqual([]);
   });
 });
+
+describe("a grid's items", () => {
+  test("a prototype name among them, with no such entity, starts the chat without it", () => {
+    const w = blankWorld("w_proto", "Proto");
+    w.places = { town: { id: "town", name: "Town", fields: {}, grid: "g" } };
+    w.grids = { g: { id: "g", width: 2, height: 1, terrain: ["floor", "floor"], blocked: [], zones: {}, items: { constructor: 1, toString: 0 } } };
+    w.start = { ...w.start, place: "town" };
+    w.entities.you!.fields.place = "town";
+    const state = initialState(migrateWorld(w), "seed", reg);
+    expect(Object.keys(state.entities)).not.toContain("constructor");
+    expect(state.entities.you?.fields.place).toBe("town");
+  });
+});
