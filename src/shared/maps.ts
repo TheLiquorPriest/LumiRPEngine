@@ -8,11 +8,12 @@
 // every keystroke, and the Describe a map job checks the helper's answer, all through here.
 
 import schemaJson from "./lre-map-v1.schema.json";
-import type { MapId, PlaceId, TravelMode } from "./ids";
+import { areaOf, cellIndex, costMinutes, gridCosts, nearestMiddle, SIGHT_MAX } from "./grid";
+import type { EntityId, MapId, PlaceId, TravelMode } from "./ids";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { LintIssue } from "./protocol";
 import { checkSchema, pathText, type JsonPath, type Schema } from "./schema-check";
-import type { GridDef, MapCellDef, MapDoc, MapPlaceDef, PlaceDef, RouteDef, RouteLeg, WorldDoc } from "./world";
+import type { GridDef, MapCellDef, MapDoc, MapPlaceDef, MapSettings, PlaceDef, RouteDef, RouteLeg, WorldDoc } from "./world";
 
 export const MAP_FORMAT = "lre-map-v1";
 
@@ -98,27 +99,29 @@ function plan(maps: Readonly<Record<string, unknown>>, authored: Readonly<Record
   return live;
 }
 
-/** The cell of an area nearest its middle: where a room's dot goes when the map gives it no `at`. */
-function middle(cells: readonly number[], width: number): { x: number; y: number } | null {
-  if (cells.length === 0 || width === 0) return null;
-  const cx = cells.reduce((a, i) => a + (i % width), 0) / cells.length;
-  const cy = cells.reduce((a, i) => a + Math.floor(i / width), 0) / cells.length;
-  let best = cells[0] ?? 0;
-  let bestDistance = Infinity;
-  for (const i of cells) {
-    const d = (i % width - cx) ** 2 + (Math.floor(i / width) - cy) ** 2;
-    if (d < bestDistance) {
-      best = i;
-      bestDistance = d;
-    }
-  }
-  return { x: best % width, y: Math.floor(best / width) };
+/** The cells the POV sees around it while the grid system is on, when the world doesn't say. */
+export const DEFAULT_SIGHT_RADIUS = 3;
+
+/**
+ * A world's map settings (DESIGN §12), each part read for itself: one missing or malformed is the
+ * default (the map shows what the POV knows; the grid system off, sight 3 cells).
+ */
+export function mapSettingsOf(world: { readonly mapSettings?: unknown }): MapSettings {
+  const raw = isRecord(world.mapSettings) ? world.mapSettings : {};
+  const grid = isRecord(raw.grid) ? raw.grid : {};
+  const radius = grid.sightRadius;
+  return {
+    display: raw.display === "fog" ? "fog" : "knowledge",
+    grid: { movement: grid.movement === true, sightRadius: typeof radius === "number" && Number.isFinite(radius) ? Math.min(SIGHT_MAX, Math.max(0, Math.round(radius))) : DEFAULT_SIGHT_RADIUS },
+  };
 }
 
 /**
  * A grid map's grid, given to its scope, and its places' cells: `at`, else the middle of the
- * place's area. Each place's area is kept as a zone named by the place. A scope that already has
- * a grid, or a grid id already taken, gets nothing (lint says which).
+ * place's area. Each place's area is kept as a zone named by the place. A thing in the legend lies
+ * on its cell (`items`), which joins the area of the place the legend names, else of the place most
+ * of the cells beside it belong to. A scope that already has a grid, or a grid id already taken,
+ * gets nothing (lint says which).
  */
 function compileGrid(key: MapId, map: MapDoc, mine: readonly MapPlaceDef[], places: Record<PlaceId, PlaceDef>, grids: Record<string, GridDef>): void {
   const scope = places[map.scope];
@@ -128,6 +131,8 @@ function compileGrid(key: MapId, map: MapDoc, mine: readonly MapPlaceDef[], plac
   const terrain: string[] = [];
   const blocked: number[] = [];
   const zones = new Map<string, number[]>();
+  const rooms = new Map<number, PlaceId>();
+  const things: { id: EntityId; index: number; place: PlaceId | null }[] = [];
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = y * width + x;
@@ -140,20 +145,71 @@ function compileGrid(key: MapId, map: MapDoc, mine: readonly MapPlaceDef[], plac
       else if ("terrain" in cell) {
         terrain.push(cell.terrain);
         if (cell.blocked === true) blocked.push(index);
+      } else if ("item" in cell) {
+        terrain.push("floor");
+        things.push({ id: cell.item, index, place: cell.place !== undefined && ids.has(cell.place) ? cell.place : null });
       } else {
         terrain.push("floor");
         const zone = "place" in cell ? (ids.has(cell.place) ? cell.place : null) : cell.zone;
         if (zone !== null) zones.set(zone, [...(zones.get(zone) ?? []), index]);
+        if ("place" in cell && zone !== null) rooms.set(index, zone);
       }
     }
   }
-  grids[key] = { id: key, width, height, terrain, blocked, zones: Object.fromEntries(zones), map: key };
+  const items: Record<EntityId, number> = {};
+  for (const t of things) {
+    // One cell per thing: the first; lint flags the rest.
+    if (hasOwn(items, t.id)) continue;
+    items[t.id] = t.index;
+    const votes = new Map<PlaceId, number>();
+    const x = t.index % width;
+    for (const n of [t.index - width, t.index + width, x > 0 ? t.index - 1 : -1, x < width - 1 ? t.index + 1 : -1]) {
+      const room = rooms.get(n);
+      if (room !== undefined) votes.set(room, (votes.get(room) ?? 0) + 1);
+    }
+    const room = t.place ?? [...votes].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0];
+    if (room !== undefined) zones.set(room, [...(zones.get(room) ?? []), t.index].sort((a, b) => a - b));
+  }
+  grids[key] = { id: key, width, height, ...(map.cellMeters !== undefined ? { cellMeters: map.cellMeters } : {}), terrain, blocked, zones: Object.fromEntries(zones), ...(things.length > 0 ? { items } : {}), map: key };
   places[map.scope] = { ...scope, grid: key };
   for (const p of mine) {
     const def = places[p.id];
     if (!def) continue;
-    const cell = p.at ? (p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null) : middle(zones.get(p.id) ?? [], width);
+    const cell = p.at ? (p.at[0] < width && p.at[1] < height ? { x: p.at[0], y: p.at[1] } : null) : nearestMiddle(zones.get(p.id) ?? [], width);
     if (cell) places[p.id] = { ...def, cell };
+  }
+}
+
+/**
+ * With the grid system on, a grid map without links joins its places as its floor plan does
+ * (DESIGN §4.1): two places get a route when someone can walk from one's cell to the other's
+ * through doors, corridors and open floor without crossing a third place's area, the route's
+ * minutes those of the walk.
+ */
+function compileFloorRoutes(key: MapId, mine: readonly MapPlaceDef[], places: Readonly<Record<PlaceId, PlaceDef>>, grids: Readonly<Record<string, GridDef>>, routes: Record<string, RouteDef>): void {
+  const grid = hasOwn(grids, key) ? grids[key] : undefined;
+  if (!grid || grid.map !== key) return;
+  const ids = mine.map((p) => p.id).filter((id) => places[id]?.map === key).sort();
+  const rooms = new Map<number, PlaceId>();
+  for (const id of ids) for (const cell of areaOf(grid, id)) rooms.set(cell, id);
+  const cells = new Map<PlaceId, number>();
+  for (const id of ids) {
+    const at = places[id]?.cell;
+    const index = at ? cellIndex(grid, at) : null;
+    if (index !== null) cells.set(id, index);
+  }
+  for (const [a, from] of cells) {
+    // Inside another place's area a walk stays there: it reaches that place, never one beyond it.
+    const cost = gridCosts(grid, from, (step, next) => {
+      const room = rooms.get(step);
+      return room === undefined || room === a || rooms.get(next) === room;
+    });
+    for (const [b, to] of cells) {
+      const walk = cost[to] ?? Infinity;
+      const id = linkRouteId(key, a, b);
+      if (b <= a || !Number.isFinite(walk) || hasOwn(routes, id)) continue;
+      routes[id] = { id, from: a, to: b, modes: { walk: { minutes: Math.max(1, costMinutes(grid, walk)) } }, bidirectional: true, map: key };
+    }
   }
 }
 
@@ -195,6 +251,7 @@ export function compileMaps(doc: WorldDoc): WorldDoc {
   const grids: Record<string, GridDef> = Object.fromEntries(Object.entries(doc.grids).filter(([, g]) => !owned(g)));
   const plans = plan(maps, places);
   for (const { key, map, places: mine } of plans) for (const p of mine) places[p.id] = { id: p.id, name: p.name ?? nameOfId(p.id), parent: map.scope, fields: {}, map: key };
+  const movement = mapSettingsOf(doc).grid.movement;
   for (const { key, map, places: mine } of plans) {
     if (map.layout) compileGrid(key, map, mine, places, grids);
     else {
@@ -203,9 +260,11 @@ export function compileMaps(doc: WorldDoc): WorldDoc {
         if (def && p.at) places[p.id] = { ...def, layoutPos: { x: p.at[0], y: p.at[1] } };
       }
     }
-    // Travel between a map's places follows its links (with none, the scope's free walking between
-    // the places inside it): a grid map's walls and doors are drawn, not walked.
+    // Travel between a map's places follows its links. With none, a grid map's floor plan while the
+    // grid system is on; otherwise the scope's free walking between the places inside it, its walls
+    // and doors drawn, not walked.
     compileLinks(key, map, places, routes);
+    if (map.layout && movement && (map.links ?? []).length === 0) compileFloorRoutes(key, mine, places, grids, routes);
   }
   return { ...doc, places, routes, grids };
 }
@@ -246,6 +305,30 @@ function cutOff(doc: WorldDoc, map: MapDoc): PlaceId[] {
     if (a !== null && b !== null && a !== b) root.set(find(a), find(b));
   }
   return kids.filter((id) => find(id) !== find(start));
+}
+
+/**
+ * With the grid system on, the places a grid map without links leaves apart: the floor plan joins
+ * them to its first place (in id order) by no door or open floor.
+ */
+function apartOnFloor(doc: WorldDoc, key: MapId): PlaceId[] {
+  const grid = hasOwn(doc.grids, key) ? doc.grids[key] : undefined;
+  if (!grid || grid.map !== key) return [];
+  const ids = Object.values(doc.places)
+    .filter((p) => p.map === key && p.cell !== undefined && cellIndex(grid, p.cell) !== null)
+    .map((p) => p.id)
+    .sort();
+  const reached = new Set(ids.slice(0, 1));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const r of Object.values(doc.routes)) {
+      if (r.map !== key || reached.has(r.from) === reached.has(r.to)) continue;
+      reached.add(r.from);
+      reached.add(r.to);
+      grew = true;
+    }
+  }
+  return ids.filter((id) => !reached.has(id));
 }
 
 /** Every map's problems, by map id: the schema's, then what the compiled world says about it. */
@@ -289,7 +372,26 @@ export function mapProblems(world: WorldDoc): Map<MapId, MapProblem[]> {
       const unknown = new Map<string, number>();
       rows.forEach((row, y) => row.forEach((ch) => (cellOf(map, ch) || unknown.has(ch) ? undefined : unknown.set(ch, y))));
       for (const [ch, y] of unknown) err(["layout", y], "map_legend", `"${ch}" isn't in the legend: add it, or use # (wall), . (floor), + (door) or a space`);
-      for (const [ch, cell] of Object.entries(map.legend ?? {})) if (typeof cell === "object" && "place" in cell && !ids.includes(cell.place)) err(["legend", ch], "map_legend", `"${cell.place}" isn't one of this map's places`);
+      // A thing in the legend is one the world has, lying free, on one cell of one map.
+      const lying = new Map<string, number>();
+      rows.forEach((row) =>
+        row.forEach((ch) => {
+          const cell = cellOf(map, ch);
+          if (typeof cell === "object" && "item" in cell) lying.set(cell.item, (lying.get(cell.item) ?? 0) + 1);
+        }),
+      );
+      for (const [ch, cell] of Object.entries(map.legend ?? {})) {
+        if (typeof cell !== "object") continue;
+        if ("place" in cell && cell.place !== undefined && !ids.includes(cell.place)) err(["legend", ch], "map_legend", `"${cell.place}" isn't one of this map's places`);
+        if (!("item" in cell)) continue;
+        const thing = hasOwn(world.entities, cell.item) ? world.entities[cell.item] : undefined;
+        const drawn = lying.get(cell.item) ?? 0;
+        const other = Object.values(doc.grids).find((g) => g.map !== key && g.items !== undefined && hasOwn(g.items, cell.item));
+        if (!thing) err(["legend", ch, "item"], "map_item", `there's no "${cell.item}" in the world to lie here`);
+        else if (thing.relations.some((r) => r.type === "in")) problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} starts inside something, so it won't lie on the map` });
+        else if (drawn > 1) err(["legend", ch, "item"], "map_item", `${thing.name} is drawn on ${drawn} cells; a thing lies on one`);
+        else if (drawn > 0 && other) problems.push({ severity: "warning", path: ["legend", ch, "item"], code: "map_item", message: `${thing.name} already lies on the map "${other.map ?? other.id}"` });
+      }
       (map.places ?? []).forEach((p, i) => {
         if (p.at && (p.at[0] >= width || p.at[1] >= height)) err(["places", i, "at"], "map_place", `[${p.at[0]}, ${p.at[1]}] is outside the ${width} × ${height} layout`);
       });
@@ -300,6 +402,9 @@ export function mapProblems(world: WorldDoc): Map<MapId, MapProblem[]> {
           const other = scope.grid !== undefined && hasOwn(doc.grids, scope.grid) ? doc.grids[scope.grid]?.map : undefined;
           err(["scope"], "map_grid", other ? `the map "${other}" already draws ${scope.name}'s grid` : `${scope.name} already has the grid "${scope.grid ?? ""}"; take it off the place for this map to draw its grid`);
         }
+        const apart = mapSettingsOf(world).grid.movement && (map.links ?? []).length === 0 ? apartOnFloor(doc, key).map(placeName) : [];
+        const listed = apart.length <= 1 ? apart.join("") : `${apart.slice(0, -1).join(", ")} and ${apart.at(-1) ?? ""}`;
+        if (apart.length > 0) problems.push({ severity: "warning", path: ["layout"], code: "map_floor_apart", message: `With the grid system on, people walk ${scope.name}'s floor plan, and no door or open floor joins ${listed} to the rest: add a door (+), or give the map links.` });
       }
     } else if (map.size) {
       const [w, h] = map.size;

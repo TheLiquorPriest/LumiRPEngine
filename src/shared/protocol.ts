@@ -11,7 +11,7 @@ import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, 
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, KindDef, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, KindDef, MapDisplay, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -212,6 +212,12 @@ export interface UiRequest extends Request<"lre.ui"> {
   op: "close_drawer";
 }
 
+/** How Play's map shows this chat (DESIGN §12): what the POV knows, or fog of war. Presentation, kept beside the chat rather than in its ledger, so it never changes the world. */
+export interface MapDisplayRequest extends Request<"lre.map"> {
+  chatId: ChatId;
+  display: MapDisplay;
+}
+
 /**
  * Background-lane jobs (DESIGN §13, §15): Import from lore, Build/Refine with AI, Describe a map,
  * Playtest, Check world, and the lore indexing jobs (§4.2). Input: `import_lore` `{bookIds}`;
@@ -362,6 +368,7 @@ export type FrontendToBackend =
   | EditorRequest
   | WorldRequest
   | UiRequest
+  | MapDisplayRequest
   | JobRequest
   | LoreRequest;
 
@@ -418,6 +425,7 @@ export interface ResultBodies {
    */
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null };
   "lre.ui": { done: true };
+  "lre.map": { display: MapDisplay };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /** `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are left out); `save`: the world and the new entry's id. */

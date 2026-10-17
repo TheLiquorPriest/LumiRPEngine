@@ -1,16 +1,19 @@
 // The POV's own observations (DESIGN §7), the `space.seen` slice: every place it has been, with its
-// first and last visit, and where and when it last saw each person it was with. The slice is written
-// inside the apply of events that can move someone (a `place` set, an `in` link or unlink, a spawn),
-// so both folds keep it alike and an old chat rebuilds it on replay; no turn writes an event for it.
+// first and last visit, where and when it last saw each person it was with, and, while the grid
+// system is on, the cells of each grid it has seen. The slice is written inside the apply of events
+// that can move someone (a `place` set, an `in` link or unlink, a spawn, a `space.pos`), so both
+// folds keep it alike and an old chat rebuilds it on replay; no turn writes an event for it.
 // A visit counts for the places around the one visited: being in the kitchen is being in the manor.
 // Only people the POV could see then are recorded, and the times are the clock when they parted or
 // met. A coarsened record (a Timelapse, a catch-up) moves everyone once, to where they end up, so it
 // carries what that would get wrong as one `engine.observed` event at its end (`lostObservations`).
 
+import { addCells, cellIndex, hasCell, sightCells, standingGrid } from "../shared/grid";
 import type { JsonObject } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, PlaceId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
+import { mapSettingsOf } from "../shared/maps";
 import type { WorldDoc } from "../shared/world";
 import type { EventTypeDef, ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
@@ -23,6 +26,9 @@ const PACK = "space";
 const SLICE = "seen";
 /** How far up the place tree a visit is counted. */
 const PARENT_DEPTH = 32;
+/** The parts of the slice, each by id: places, people, and grids' seen cells by the place whose grid it is. */
+const PARTS = ["places", "people", "cells"] as const;
+type Part = (typeof PARTS)[number];
 
 export interface PlaceVisit {
   first: number;
@@ -37,7 +43,7 @@ export interface Sighting {
 /** Whether the POV can see someone, as the visibility rules decide (`canSeeEntity`). */
 export type SeesEntity = (reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: EntityId) => boolean;
 
-function entries(state: Readonly<WorldState>, key: "places" | "people"): JsonObject {
+function entries(state: Readonly<WorldState>, key: Part): JsonObject {
   const seen = state.packs[PACK]?.[SLICE];
   const list = isRecord(seen) ? seen[key] : undefined;
   return isRecord(list) ? (list as JsonObject) : {};
@@ -55,13 +61,41 @@ export function lastSighting(state: Readonly<WorldState>, id: EntityId): Sightin
   return isRecord(v) && typeof v.place === "string" && typeof v.at === "number" ? { place: v.place, at: v.at } : null;
 }
 
-function writable(state: WorldState, key: "places" | "people"): JsonObject {
+/**
+ * The cells of a place's grid the POV has seen (a cell set, `shared/grid` `hasCell`), or null when
+ * it has seen none of it, or saw it when the grid had another width (the map changed under it).
+ */
+export function cellsSeen(state: Readonly<WorldState>, scope: PlaceId, width: number): string | null {
+  const v = own(entries(state, "cells"), scope);
+  return isRecord(v) && v.width === width && typeof v.bits === "string" ? v.bits : null;
+}
+
+function writable(state: WorldState, key: Part): JsonObject {
   const seen = sliceRecord(state, PACK, SLICE);
   const v = seen[key];
   if (isRecord(v)) return v as JsonObject;
   const fresh: JsonObject = {};
   seen[key] = fresh;
   return fresh;
+}
+
+/**
+ * The grid system's sight (DESIGN §7): the POV sees the cells within its sight radius of where it
+ * stands, walls blocking the view, and they stay seen. Nothing while the grid system is off, or
+ * while the POV stands on no cell of a grid.
+ */
+export function observeCells(state: WorldState, world: WorldDoc): void {
+  const settings = mapSettingsOf(world);
+  const pov = own(state.entities, world.pov);
+  if (!settings.grid.movement || !pov) return;
+  const stand = standingGrid(world, placeOfEntity(state, world.pov));
+  const x = pov.fields.x;
+  const y = pov.fields.y;
+  if (!stand || typeof x !== "number" || typeof y !== "number" || cellIndex(stand.grid, { x, y }) === null) return;
+  const before = cellsSeen(state, stand.scope, stand.grid.width);
+  const sight = sightCells(stand.grid, { x, y }, settings.grid.sightRadius);
+  if (before !== null && sight.every((cell) => hasCell(before, cell))) return;
+  writable(state, "cells")[stand.scope] = { width: stand.grid.width, bits: addCells(before ?? "", sight) };
 }
 
 /** A visit at `at` to a place and every place around it. */
@@ -121,10 +155,11 @@ export function observing(def: EventTypeDef, sees: SeesEntity): EventTypeDef {
   };
 }
 
-/** A chat's first observation: the place the POV starts in, and the places around it. */
+/** A chat's first observation: the place the POV starts in and the places around it, and with the grid system on, what it sees from its first cell. */
 export function seedObservations(world: WorldDoc, state: WorldState): void {
   const here = placeOfEntity(state, world.pov);
   if (here !== null) visit(state, world, here, state.clock);
+  observeCells(state, world);
 }
 
 /** The state without the POV's observations: what the world itself is, for comparing two folds of it. */
@@ -140,12 +175,12 @@ export function unobserved(state: Readonly<WorldState>): WorldState {
 
 /**
  * What folding a coarse record gets wrong of the POV's observations, against folding the full one:
- * per place and person, the full fold's entry, or null where the coarse fold has one the full one
- * doesn't. Null when nothing differs.
+ * per place, person and grid, the full fold's entry, or null where the coarse fold has one the full
+ * one doesn't. Null when nothing differs.
  */
 export function lostObservations(full: Readonly<WorldState>, coarse: Readonly<WorldState>): JsonObject | null {
   const out: JsonObject = {};
-  for (const key of ["places", "people"] as const) {
+  for (const key of PARTS) {
     const want = entries(full, key);
     const got = entries(coarse, key);
     const diff: JsonObject = {};
@@ -158,7 +193,7 @@ export function lostObservations(full: Readonly<WorldState>, coarse: Readonly<Wo
 
 /** Applies `lostObservations`: each entry written, each null removed. */
 export function restoreObservations(state: WorldState, data: JsonObject): void {
-  for (const key of ["places", "people"] as const) {
+  for (const key of PARTS) {
     const diff = data[key];
     if (!isRecord(diff)) continue;
     const list = writable(state, key);

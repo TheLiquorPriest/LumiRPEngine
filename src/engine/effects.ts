@@ -9,7 +9,7 @@
 //   recover {entity, field, amount?, full?}  a pool rises by `amount`, else its own `recover`, else to its max
 //   award   {entity, progression, amount}    adds to a progression's XP field (the level-up follows)
 //   check   {check, actor, target?, outcomes} anyone rolls a check; its outcome's effects see `roll.*`
-//   move    {entity, to}                     `place` := to; leaves any container (`in`); the POV, from Space 3, stands on `to`'s cell
+//   move    {entity, to}                     `place` := to; leaves any container (`in`); where it then stands is the space pack's (`space.arrival`)
 //   link    {rel, from, to, until?, fields?} unlink {rel, from, to}: the other side of a symmetric
 //                                            or inverse type with it; kinds and cardinality checked
 //   spawn   {id?, kind, name, tier?, fields?, relations?, agent?, place?, class?, tags?}
@@ -47,7 +47,7 @@ import { progressionApplies, progressOf } from "./ruleset";
 import { evalArg, evalArgs, evalExpr, fieldDef, objects, poolMax, scopeEnv } from "./scope";
 import { classOf, classProblems } from "./selector";
 import type { Working } from "./working";
-import { labelOf, own } from "./pack-kit";
+import { labelOf, optionalService, own } from "./pack-kit";
 
 export interface EffectScope {
   /** Name → entity id (`self`, `actor`, `target`, ref params). */
@@ -180,12 +180,9 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const out: LedgerEvent[] = [];
       for (const r of e.relations) if (r.type === "in") out.push({ type: "unlink", rel: "in", from: entity, to: r.to });
       out.push({ type: "set", entity, field: "place", value: to });
-      // Positions are live from Space 3: the POV arrives where the place is drawn, not where it last stood.
-      const cell = own(world.places, to)?.cell;
-      if (entity === world.pov && cell && w.ctx.levelOf(entity, "space") >= 3) {
-        if (e.fields.x !== cell.x) out.push({ type: "set", entity, field: "x", value: cell.x });
-        if (e.fields.y !== cell.y) out.push({ type: "set", entity, field: "y", value: cell.y });
-      }
+      // Where the mover stands there is the space pack's (DESIGN §7): from Space 3 the POV stands on
+      // the place's cell, and with the grid system on, at a gridded place's entrance.
+      out.push(...(optionalService(w.ctx, "space.arrival")?.(w.ctx, entity, to) ?? []));
       return out;
     }
     case "link": {

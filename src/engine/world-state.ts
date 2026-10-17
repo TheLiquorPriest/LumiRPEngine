@@ -1,9 +1,12 @@
 // The state a chat starts from: the world revision's document, before any marker or event. Its
-// symmetric and inverse relations are two-sided from the start (`completeRelations`).
+// symmetric and inverse relations are two-sided from the start (`completeRelations`); the things a
+// map lays in its cells lie there, and with the grid system on the POV stands on a cell.
 
 import type { Band, DomainId, Level, RevisionId } from "../shared/ids";
 import { BANDS, DOMAINS } from "../shared/ids";
+import { arrivalCell, cellIndex, placedItems, standingGrid } from "../shared/grid";
 import { hasOwn, isRecord } from "../shared/json";
+import { mapSettingsOf } from "../shared/maps";
 import { agentOf } from "../shared/tiers";
 import type { WorldDoc } from "../shared/world";
 import { completeRelations, type RelationTypes } from "./relations";
@@ -54,6 +57,22 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
   // A POV the world doesn't place starts where the world says the story starts.
   const pov = entities[world.pov];
   if (pov && placeOfEntity({ entities }, world.pov) === null && hasOwn(world.places, world.start.place)) pov.fields.place = world.start.place;
+  // Things a map lays in its cells start there, unless they start inside something (DESIGN §4.1).
+  for (const item of placedItems(world)) {
+    const thing = entities[item.id];
+    if (!thing || thing.relations.some((r) => r.type === "in")) continue;
+    Object.assign(thing.fields, { place: item.place, x: item.cell.x, y: item.cell.y });
+  }
+  // With the grid system on, the POV starts on a cell of the grid it stands on (DESIGN §7): its own,
+  // when the world gives it one there, else where its place is entered.
+  const here = placeOfEntity({ entities }, world.pov);
+  if (pov && here !== null && mapSettingsOf(world).grid.movement) {
+    const stand = standingGrid(world, here);
+    const { x, y } = pov.fields;
+    const placed = stand !== null && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null;
+    const entry = placed ? null : arrivalCell(world, here);
+    if (entry) Object.assign(pov.fields, { x: entry.cell.x, y: entry.cell.y });
+  }
   const tierCaps = {} as Record<Band, Partial<Record<DomainId, Level>>>;
   for (const band of BANDS) {
     const caps: unknown = world.realism.tierCaps[band];

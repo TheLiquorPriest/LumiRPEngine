@@ -6,6 +6,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
+import { mapSettingsOf } from "../../shared/maps";
 import type { LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import type { WorldDoc, WorldIndex } from "../../shared/world";
 import type { App, BuildRoute } from "../app";
@@ -608,7 +609,8 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
     case "time":
       return doc.time as unknown as JsonObject;
     case "meta":
-      return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, currency: { ...doc.currency } };
+      // Map settings show as the world plays them: a world without them, with the defaults.
+      return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
   }
 }
 

@@ -8,7 +8,7 @@ import { isRecord } from "../shared/json";
 import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
-import type { ActionDef, RetryRule, WorldDoc } from "../shared/world";
+import type { ActionDef, MapDisplay, RetryRule, WorldDoc } from "../shared/world";
 import { policyOf } from "../engine/adjudication";
 import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
 import { placeSceneType, sceneType } from "../engine/time";
@@ -20,7 +20,7 @@ import { optionalQuery } from "../engine/pack-kit";
 import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
 import { presetOf } from "../engine/realism";
-import type { Registry } from "../engine/registry-impl";
+import { levelFloors, type Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates, type Availability } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
@@ -32,7 +32,7 @@ import type { StoredChip } from "./chips";
 export const TIMELAPSE_ACTION = "timelapse";
 
 export function notWorldView(chatId: ChatId): StateView {
-  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
+  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null, mapDisplay: null };
 }
 
 const GROUPS: Record<string, PaletteEntry["group"]> = { buy: "buy", purchase: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
@@ -264,7 +264,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
 function controls(world: WorldDoc, state: WorldState, sceneType: string): ControlsView {
   return {
     // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
-    realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: { ...world.ruleset?.minLevels } },
+    realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: levelFloors(world) },
     adjudication: policyOf(world, state),
     time: {
       sceneType,
@@ -540,6 +540,8 @@ export interface ViewInput {
   world: (revision: string) => WorldDoc | undefined;
   stored: readonly StoredChip[];
   meter: CallMeterView | null;
+  /** How the player chose to see the chat's map (`ChatPrefs`); null or absent follows the world. */
+  mapDisplay?: MapDisplay | null;
 }
 
 export function buildView(input: ViewInput): StateView {
@@ -595,6 +597,7 @@ export function buildView(input: ViewInput): StateView {
     meter: input.meter,
     packs,
     currency: world.currency,
+    mapDisplay: input.mapDisplay ?? null,
   };
 }
 

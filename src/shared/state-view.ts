@@ -24,7 +24,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
-import type { AdjudicationDef, FieldType, WorldCurrency } from "./world";
+import type { AdjudicationDef, FieldType, MapDisplay, WorldCurrency } from "./world";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
 
@@ -220,7 +220,7 @@ export interface ControlsView {
     tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
     /** The world's tiers each band's caps reach, in order. */
     bandTiers: Record<Band, string[]>;
-    /** The world ruleset's floors (DESIGN §11): effective levels never go below them, so neither do the sliders. */
+    /** The world's floors on effective levels (DESIGN §9.1, §11): its ruleset's, and Space 3 while the grid system is on; the sliders don't go below them either. */
     floors: Partial<Record<DomainId, Level>>;
   };
   time: {
@@ -260,6 +260,8 @@ export interface StateView {
   packs: Record<PackId, number>;
   /** The attached revision's money display; format amounts with `formatMoney` from `shared/world`. */
   currency: WorldCurrency | null;
+  /** How the player chose to see the map in this chat; null follows the world's default (the `space.map` panel's `display`). Presentation, kept beside the chat, never in its ledger. */
+  mapDisplay: MapDisplay | null;
 }
 
 /** A field on the GM view's entity form: as the entity's kind defines it (when it does) and as stored. */

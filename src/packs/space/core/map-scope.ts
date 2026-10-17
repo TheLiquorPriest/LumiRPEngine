@@ -4,7 +4,7 @@
 // outermost scope, holding the top-level places. Pure over the world document, so Play's map
 // (filtered to what the POV may see) and Build's map preview draw a scope the same way.
 
-import type { PlaceId, TravelMode } from "../../../shared/ids";
+import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
 import type { MapDoc, WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
@@ -25,6 +25,17 @@ export interface MapPlaceView {
   kind?: string;
   /** Whether the POV knows the place; one the POV is inside shows even when it doesn't. */
   known: boolean;
+  /** Whether the POV has been there, or somewhere inside it (`space.seen`): one known and not visited is only heard of. */
+  visited: boolean;
+}
+
+/** A thing lying at a cell of a grid, as the POV saw it there. */
+export interface MapItemView {
+  id: EntityId;
+  name: string;
+  /** Its cell. */
+  x: number;
+  y: number;
 }
 
 export interface MapRouteView {
@@ -42,8 +53,12 @@ export interface MapGridView {
   blocked: number[];
   /** The cells of each drawn place's area: the grid's zones named after places in the scope. */
   areas: Record<PlaceId, number[]>;
-  /** The POV's own cell, when it stands in this scope (Space 3 and up). */
+  /** The POV's own cell, when it stands on this grid (Space 3 and up). */
   pov?: { x: number; y: number };
+  /** While the grid system is on, the cells the POV has seen (a cell set, `shared/grid` `hasCell`); absent when cells aren't tracked. */
+  seen?: string;
+  /** Things lying at cells of this grid that the POV has seen there. */
+  items?: MapItemView[];
 }
 
 export interface MapScopeView {
@@ -61,10 +76,11 @@ export interface MapScopeView {
   routes: MapRouteView[];
 }
 
-/** Which places a scope may draw, and which of them the viewer knows. */
+/** Which places a scope may draw, which of them the viewer knows, and which it has been to. */
 export interface ScopeFilter {
   drawn(id: PlaceId): boolean;
   known(id: PlaceId): boolean;
+  visited(id: PlaceId): boolean;
 }
 
 /** Each place's children by id, and the top-level places under `null`, each list in id order. */
@@ -142,7 +158,7 @@ function ring(ids: readonly PlaceId[], frame: { width: number; height: number })
  * floor, a cellar) sit in a row below the grid. Elsewhere a child sits at its node-map position
  * (`layoutPos`, in the node map's `size` when it gives one), and the rest lie on a ring.
  */
-export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; here?: PlaceId | null; pov?: { x: number; y: number } }): MapScopeView {
+export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; pov?: { x: number; y: number }; seen?: string; items?: MapItemView[] }): MapScopeView {
   const kids = ((opts.children ?? placeChildren(world)).get(scope) ?? []).filter(filter.drawn);
   const def = scope === null ? undefined : own(world.places, scope);
   const grid = def?.grid ? own(world.grids, def.grid) : undefined;
@@ -172,7 +188,7 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
   const places: MapPlaceView[] = kids.map((id) => {
     const p = own(world.places, id);
     const pos = at.get(id) ?? { x: 0, y: 0 };
-    return { id, name: p?.name ?? id, x: pos.x, y: pos.y, ...(p?.sceneType ? { kind: p.sceneType } : {}), known: filter.known(id) };
+    return { id, name: p?.name ?? id, x: pos.x, y: pos.y, ...(p?.sceneType ? { kind: p.sceneType } : {}), known: filter.known(id), visited: filter.visited(id) };
   });
   const drawn = new Set(kids);
   const routes = new Map<string, MapRouteView>();
@@ -201,7 +217,7 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
     trail: opts.trail,
     frame,
     ...(grid && opts.level >= 2
-      ? { grid: { width: grid.width, height: grid.height, ...(grid.cellMeters !== undefined ? { cellMeters: grid.cellMeters } : {}), terrain: grid.terrain, blocked: grid.blocked, areas, ...(opts.pov && opts.level >= 3 && scope !== null && scope === opts.here ? { pov: opts.pov } : {}) } }
+      ? { grid: { width: grid.width, height: grid.height, ...(grid.cellMeters !== undefined ? { cellMeters: grid.cellMeters } : {}), terrain: grid.terrain, blocked: grid.blocked, areas, ...(opts.pov && opts.level >= 3 ? { pov: opts.pov } : {}), ...(opts.seen !== undefined ? { seen: opts.seen } : {}), ...(opts.items && opts.items.length > 0 ? { items: opts.items } : {}) } }
       : {}),
     places,
     routes: [...routes.values()],

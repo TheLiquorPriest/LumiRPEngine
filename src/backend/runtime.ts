@@ -39,6 +39,7 @@ import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedTruths } f
 import { openPuzzle } from "../packs/story/core/index";
 import { Working } from "../engine/working";
 import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
+import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./host";
 import { LedgerService, toChain, type TurnContext, type TurnHooks } from "./ledger-io";
@@ -359,6 +360,8 @@ export class Runtime implements TurnHooks {
   readonly outcomeNotes: OutcomeNotes;
   /** The inspector's history and delivery badges per chat. */
   readonly inspector: InspectorLog;
+  /** How the player chose to see each chat (the map's display mode): presentation, beside the chat. */
+  readonly chatPrefs: ChatPrefs;
   readonly steps: Steps;
   readonly ledger: LedgerService;
   readonly push: StatePush;
@@ -401,6 +404,7 @@ export class Runtime implements TurnHooks {
     this.planNotes = new PlanNotes(this.host);
     this.outcomeNotes = new OutcomeNotes(this.host);
     this.inspector = new InspectorLog(this.host);
+    this.chatPrefs = new ChatPrefs(this.host);
     this.book = new EngineBook(this.host, this.worlds);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
@@ -1296,7 +1300,7 @@ export class Runtime implements TurnHooks {
     // The inspector's history and the meter are read from storage the first time the chat is viewed.
     await this.inspector.load(chatId, userId);
     await this.meter.ready(userId);
-    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId) });
+    const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId), mapDisplay: await this.chatPrefs.mapDisplay(chatId, userId) });
     view.panels["core.context"] = this.inspectorView(chatId, userId);
     return view;
   }

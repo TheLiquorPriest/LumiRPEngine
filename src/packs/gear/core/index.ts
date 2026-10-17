@@ -182,6 +182,8 @@ const transfer = (ctx: ReadContext, item: EntityId, to: EntityId): Events => {
   const out = detach(ctx, item);
   if (typeof own(ctx.state.entities, item)?.fields.place === "string") out.push({ type: "set", entity: item, field: "place", value: null });
   out.push({ type: "link", rel: "in", from: item, to });
+  // Picked up, it no longer lies in a cell (the space pack's positions, DESIGN §12).
+  out.push(...(optionalService(ctx, "space.lay")?.(ctx, item, null, null) ?? []));
   return out;
 };
 
@@ -189,7 +191,8 @@ const drop = (ctx: ReadContext, item: EntityId, place: PlaceId): Events => {
   if (!own(ctx.state.entities, item)) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
   if (!own(ctx.world.places, place)) return reject("missing_place", `no place ${labelOf(ctx, place)}`);
   if (gearLevel(ctx, item) === 0) return [];
-  return [...detach(ctx, item), { type: "set", entity: item, field: "place", value: place }];
+  // Put down by someone the grid system has on a cell, it lies on that cell.
+  return [...detach(ctx, item), { type: "set", entity: item, field: "place", value: place }, ...(optionalService(ctx, "space.lay")?.(ctx, item, place, holderOf(ctx.state, item)) ?? [])];
 };
 
 /**
@@ -407,7 +410,9 @@ export const gearPack: PackDef = {
       },
     });
 
-    r.action({ id: "take", label: "Take", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["place(item) == here", "not carries(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
+    // Things in cells (DESIGN §11): with the grid system on, taking or using one lying in a cell
+    // needs you on or next to it (`reach`); off, `reach` is being at the same place.
+    r.action({ id: "take", label: "Take", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
     // Losing something: it leaves its holder and the world (whereabouts unknown); cash inside goes with it.
     r.effect({
       type: "gear.lose",
@@ -436,10 +441,10 @@ export const gearPack: PackDef = {
     // the palette always sends days.
     r.action({ id: "lend", label: "Lend", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
-    r.action({ id: "wear", label: "Wear or equip", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or place(item) == here", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
+    r.action({ id: "wear", label: "Wear or equip", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
     r.action({ id: "remove", label: "Take off", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
-    r.action({ id: "use", label: "Use", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
-    r.action({ id: "take_piece", label: "Take from a kit", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["place(kit) == here or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
+    r.action({ id: "use", label: "Use", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
+    r.action({ id: "take_piece", label: "Take from a kit", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
 
     r.process({
       id: "gear.grants",

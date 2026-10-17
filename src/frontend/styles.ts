@@ -114,6 +114,9 @@ select.lre-input{appearance:auto}
 .lre-map .bar :focus-visible,.lre-map .zoom :focus-visible{outline-color:#fff}
 .lre-map .dock{position:absolute;left:8px;right:8px;bottom:8px;padding:10px;border-radius:14px;background:color-mix(in srgb,var(--lre-surface) 94%,transparent);border:1px solid var(--lre-border);display:flex;flex-direction:column;gap:8px;max-height:55%;overflow:auto}
 .lre-map .zoom{position:absolute;right:8px;bottom:8px;display:flex;flex-direction:column;gap:6px}
+.lre-map .mode{position:absolute;left:8px;bottom:8px;padding:4px;border-radius:12px;background:rgba(0,0,0,.45)}
+.lre-map .mode .lre-seg{flex-wrap:nowrap}
+.lre-map .mode .lre-seg>button:not([aria-pressed=true]){background:var(--lre-surface)}
 .lre-map .crumbs{position:absolute;top:8px;left:8px;right:8px;display:flex;align-items:center;gap:4px;overflow-x:auto;scrollbar-width:none;white-space:nowrap;color:#fff}
 .lre-map .crumbs::-webkit-scrollbar{display:none}
 .lre-overlay-root .lre-map .crumbs{top:56px}

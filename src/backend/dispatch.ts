@@ -268,6 +268,15 @@ export class Dispatcher {
         reply("lre.ui", { done: true });
         return;
       }
+      case "lre.map": {
+        // How the map shows this chat: presentation, kept beside the chat, never in its ledger.
+        if (r.display !== "knowledge" && r.display !== "fog") throw new RequestError("bad_request", "the map shows what you know (knowledge) or fog");
+        await this.requireWorldChat(r.chatId, userId);
+        await this.rt.chatPrefs.setMapDisplay(r.chatId, userId, r.display);
+        this.rt.push.changed(r.chatId, userId);
+        reply("lre.map", { display: r.display });
+        return;
+      }
       case "lre.job": {
         if (r.op === "start") reply("lre.job", { jobId: await this.jobs.start(r.kind, r.worldId, r.input, userId, session) });
         else if (r.op === "list") reply("lre.job", { jobs: await this.jobs.list(r.worldId, userId) });

@@ -1,6 +1,7 @@
 // Builds the frozen engine registry from pack definitions (DESIGN §3 Modules; ARCHITECTURE §5).
 
 import type { DomainId, EntityId, Level, TableId } from "../shared/ids";
+import { DOMAINS } from "../shared/ids";
 import { tierBand } from "../shared/tiers";
 import type { ActionDef, KindDef, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
 import type { Value } from "./expr";
@@ -71,14 +72,26 @@ export function effectiveLevel(world: Pick<WorldDoc, "pov" | "tiers">, state: Re
   return cap === undefined ? domainLevel : (Math.min(cap, domainLevel) as Level);
 }
 
+/** The grid system needs positions: while it moves people, Space plays at this level at least. */
+export const GRID_SPACE_FLOOR: Level = 3;
+
 /**
- * A world ruleset's floor on a domain's effective level (DESIGN §11): its math needs, say, Sheets 3
- * for stat modifiers, whatever the realism settings, tier caps or overrides say. Wraps every
- * effective level the engine reads.
+ * A world's floor on a domain's effective level (DESIGN §9.1, §11): its ruleset's (its math needs,
+ * say, Sheets 3 for stat modifiers), and Space 3 while the grid system moves people on grids
+ * (`mapSettings.grid.movement`), whatever the realism settings, tier caps or overrides say. Wraps
+ * every effective level the engine reads.
  */
-export function rulesetFloor(world: Pick<WorldDoc, "ruleset">, domain: DomainId, level: Level): Level {
-  const floor = world.ruleset?.minLevels?.[domain];
-  return floor === undefined ? level : (Math.max(level, clampLevel(floor)) as Level);
+export function rulesetFloor(world: Pick<WorldDoc, "ruleset" | "mapSettings">, domain: DomainId, level: Level): Level {
+  const authored = world.ruleset?.minLevels?.[domain];
+  const grid = domain === "space" && world.mapSettings?.grid?.movement === true ? GRID_SPACE_FLOOR : 0;
+  return Math.max(level, grid, authored === undefined ? 0 : clampLevel(authored)) as Level;
+}
+
+/** Each domain's floor where the world sets one (`rulesetFloor`), for the sliders that can't go below them. */
+export function levelFloors(world: Pick<WorldDoc, "ruleset" | "mapSettings">): Partial<Record<DomainId, Level>> {
+  const out: Partial<Record<DomainId, Level>> = {};
+  for (const domain of DOMAINS) if (world.ruleset?.minLevels?.[domain] !== undefined || rulesetFloor(world, domain, 0) > 0) out[domain] = rulesetFloor(world, domain, 0);
+  return out;
 }
 
 export function createRegistry(packs: readonly PackDef[]): Registry {

@@ -1,9 +1,14 @@
 // Drawing one map scope on a canvas (DESIGN §12): the grid behind its places (terrain, walls,
-// doors, each place's area tinted), the routes, the places' dots and their names. Play's map and
-// Build's map preview both draw through here, so a map looks the same while it's being written.
+// doors, each place's area tinted), the routes, the places' dots and their names, and the things
+// lying in cells. The display mode decides how what the POV knows only in part is drawn: by
+// knowledge, a place only heard of is a dashed ring; in fog, places never visited and cells never
+// seen lie under fog. Play's map and Build's map preview both draw through here, so a map looks the
+// same while it's being written.
 
 import type { Bounds, Point, Transform } from "../../../frontend/map-math";
 import { toScreen } from "../../../frontend/map-math";
+import { hasCell } from "../../../shared/grid";
+import type { MapDisplay } from "../../../shared/world";
 import type { MapPlaceView, MapScopeView } from "../core/map-scope";
 import { controlBoxes, LABEL_PAD, LINE, placeLabels, type PlacedLabel } from "./labels";
 
@@ -28,6 +33,10 @@ const TERRAIN_DEFAULT = "#1d2029";
 const BLOCKED = "#0a0b0f";
 /** Tints for each place's area on a grid, in the order the places are drawn. */
 const AREA_TINTS = ["rgba(124,108,255,0.20)", "rgba(242,196,107,0.18)", "rgba(127,224,160,0.18)", "rgba(255,138,138,0.18)", "rgba(107,197,242,0.20)", "rgba(220,140,240,0.18)"];
+/** Fog over what the POV hasn't seen: dark enough to hide the terrain, light enough to show there is something there. */
+const FOG = "rgba(11,12,16,0.86)";
+/** Things lying in cells, and a picked cell's outline. */
+const ITEM = "#f2c46b";
 
 export function terrainColor(terrain: string): string {
   const name = terrain.toLowerCase();
@@ -62,9 +71,17 @@ export interface DrawOptions {
   inside: ReadonlySet<string>;
   /** Screen px along the top that the map's own bars cover. */
   top: number;
+  display: MapDisplay;
+  /** A cell picked on the grid, outlined. */
+  cell: { x: number; y: number } | null;
 }
 
-function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transform, width: number, height: number): void {
+/** Whether a place is known of but never visited, and not where the POV is: heard of, or under fog. */
+function unvisited(place: MapPlaceView, opts: DrawOptions): boolean {
+  return place.known && !place.visited && place.id !== opts.here && !opts.inside.has(place.id);
+}
+
+function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transform, width: number, height: number, opts: DrawOptions): void {
   const grid = scope.grid;
   if (!grid) return;
   const unit = unitOf(scope);
@@ -74,6 +91,12 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
   scope.places.forEach((place, i) => {
     for (const cell of grid.areas[place.id] ?? []) tint.set(cell, AREA_TINTS[i % AREA_TINTS.length] ?? AREA_TINTS[0] ?? "");
   });
+  // In fog, what the POV hasn't seen: the cells never in its sight while the grid system tracks
+  // them, else the areas of the rooms it hasn't been in.
+  const fog = opts.display === "fog";
+  const seen = grid.seen;
+  const fogged = new Set<number>();
+  if (fog && seen === undefined) for (const place of scope.places) if (unvisited(place, opts)) for (const cell of grid.areas[place.id] ?? []) fogged.add(cell);
   for (let y = 0; y < grid.height; y += 1) {
     for (let x = 0; x < grid.width; x += 1) {
       const p = toScreen(t, { x: x * unit, y: y * unit });
@@ -84,6 +107,10 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
       const area = tint.get(index);
       if (area && !blocked.has(index)) {
         g.fillStyle = area;
+        g.fillRect(p.x, p.y, Math.ceil(size), Math.ceil(size));
+      }
+      if (fog && (seen !== undefined ? !hasCell(seen, index) : fogged.has(index))) {
+        g.fillStyle = FOG;
         g.fillRect(p.x, p.y, Math.ceil(size), Math.ceil(size));
       }
       if (size >= 14) {
@@ -105,6 +132,28 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
     g.lineTo(b.x, b.y);
     g.stroke();
     g.setLineDash([]);
+  }
+  // Things lying in cells: a small diamond each.
+  for (const item of grid.items ?? []) {
+    const c = toScreen(t, { x: (item.x + 0.5) * unit, y: (item.y + 0.5) * unit });
+    const r = Math.max(4, size * 0.24);
+    g.fillStyle = ITEM;
+    g.strokeStyle = "rgba(0,0,0,0.6)";
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.moveTo(c.x, c.y - r);
+    g.lineTo(c.x + r, c.y);
+    g.lineTo(c.x, c.y + r);
+    g.lineTo(c.x - r, c.y);
+    g.closePath();
+    g.fill();
+    g.stroke();
+  }
+  if (opts.cell) {
+    const p = toScreen(t, { x: opts.cell.x * unit, y: opts.cell.y * unit });
+    g.strokeStyle = ITEM;
+    g.lineWidth = 2;
+    g.strokeRect(p.x + 1, p.y + 1, Math.max(2, size - 2), Math.max(2, size - 2));
   }
   if (grid.pov) {
     const p = toScreen(t, { x: (grid.pov.x + 0.5) * unit, y: (grid.pov.y + 0.5) * unit });
@@ -148,7 +197,7 @@ export function drawScope(canvas: HTMLCanvasElement, scope: MapScopeView, t: Tra
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.fillStyle = "#12141a";
   g.fillRect(0, 0, width, height);
-  if (scope.grid) paintGrid(g, scope, t, width, height);
+  if (scope.grid) paintGrid(g, scope, t, width, height, opts);
   else paintBackdrop(g, t, width, height);
   const screen = new Map(scope.places.map((p) => [p.id, toScreen(t, placePoint(scope, p))]));
   for (const route of scope.routes) {
@@ -170,11 +219,21 @@ export function drawScope(canvas: HTMLCanvasElement, scope: MapScopeView, t: Tra
     const here = place.id === opts.here;
     const inside = !here && opts.inside.has(place.id);
     const isSelected = place.id === opts.selected;
-    g.globalAlpha = place.known ? 1 : 0.45;
-    g.fillStyle = here ? "#7c6cff" : "#d8d8e4";
+    // Known of but never visited: by knowledge a dashed ring, in fog a dot under the fog.
+    const away = unvisited(place, opts);
+    g.globalAlpha = !place.known ? 0.45 : away && opts.display === "fog" ? 0.35 : 1;
     g.beginPath();
     g.arc(p.x, p.y, here || isSelected ? 9 : 7, 0, Math.PI * 2);
-    g.fill();
+    if (away && opts.display === "knowledge") {
+      g.strokeStyle = "#d8d8e4";
+      g.lineWidth = 2;
+      g.setLineDash([3, 3]);
+      g.stroke();
+      g.setLineDash([]);
+    } else {
+      g.fillStyle = here ? "#7c6cff" : "#d8d8e4";
+      g.fill();
+    }
     if (here || inside || isSelected) {
       g.strokeStyle = isSelected ? "#f2c46b" : here ? "rgba(124,108,255,0.5)" : "rgba(124,108,255,0.85)";
       g.lineWidth = 3;
@@ -186,7 +245,7 @@ export function drawScope(canvas: HTMLCanvasElement, scope: MapScopeView, t: Tra
   }
   // Names go where they don't collide (labels.ts): beside the dot, or further out on a leader line,
   // on two lines, or shortened with "…"; the place's card shows the full name on tap.
-  const known = new Map(scope.places.map((place) => [place.id, place.known]));
+  const dim = new Map(scope.places.map((place) => [place.id, !place.known ? 0.45 : opts.display === "fog" && unvisited(place, opts) ? 0.55 : 1]));
   const labels = placeLabels(
     scope.places.map((place) => ({ id: place.id, ...(screen.get(place.id) ?? { x: 0, y: 0 }), r: place.id === opts.here || place.id === opts.selected || opts.inside.has(place.id) ? 16 : 8, text: place.known ? place.name : `${place.name}?` })),
     { width, height, measure: (s) => g.measureText(s).width, avoid: controlBoxes(width, height, opts.top), first: [opts.here, opts.selected].filter((id): id is string => id !== null) },
@@ -201,7 +260,7 @@ export function drawScope(canvas: HTMLCanvasElement, scope: MapScopeView, t: Tra
     g.stroke();
   }
   for (const label of labels) {
-    g.globalAlpha = known.get(label.id) === false ? 0.45 : 1;
+    g.globalAlpha = dim.get(label.id) ?? 1;
     g.fillStyle = "rgba(0,0,0,0.6)";
     g.fillRect(label.box.x, label.box.y, label.box.w, label.box.h);
     g.fillStyle = "#f0f0f6";

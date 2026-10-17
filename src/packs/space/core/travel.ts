@@ -1,8 +1,8 @@
-// Routes and grids (DESIGN §3 Locations, §9.1 Space & travel): shortest routes over the world's route
-// graph per travel mode, terrain multipliers, and A* on grids with a hard expansion cap.
+// Routes (DESIGN §3 Locations, §9.1 Space & travel): shortest routes over the world's route graph
+// per travel mode, with terrain multipliers. Grids and A* are `shared/grid`.
 
 import type { PlaceId, TravelMode } from "../../../shared/ids";
-import type { GridDef, RouteLeg, WorldDoc } from "../../../shared/world";
+import type { RouteLeg, WorldDoc } from "../../../shared/world";
 import { objOf, optionalQuery, sliceOf, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 
@@ -145,78 +145,6 @@ export function findRoute(world: WorldDoc, from: PlaceId, to: PlaceId, mode: Tra
     cur = p.from;
   }
   return { mode, legs, minutes: legs.reduce((a, l) => a + l.minutes, 0), distanceKm: legs.reduce((a, l) => a + l.distanceKm, 0) };
-}
-
-// ---------------------------------------------------------------- grids
-
-export interface Cell {
-  x: number;
-  y: number;
-}
-
-/** Cost to enter a cell by its terrain code; blocked cells are impassable. */
-export const GRID_TERRAIN_COST: Readonly<Record<string, number>> = Object.freeze({ "": 1, ".": 1, floor: 1, road: 1, grass: 1.2, sand: 1.8, mud: 2, water: 4, rough: 1.6, "~": 4, "^": 3 });
-
-/** Expanded-node cap for one A* search: a search past it returns null. */
-export const ASTAR_CAP = 20_000;
-
-export interface GridPath {
-  cells: Cell[];
-  cost: number;
-}
-
-/**
- * A* on a grid, 4-connected, Manhattan heuristic (admissible: every step costs ≥ 1). Returns the
- * cheapest path including both ends, or null when blocked, off-grid or past `cap` expansions.
- */
-export function findPath(grid: GridDef, from: Cell, to: Cell, cap = ASTAR_CAP): GridPath | null {
-  const inside = (c: Cell): boolean => c.x >= 0 && c.y >= 0 && c.x < grid.width && c.y < grid.height;
-  const index = (c: Cell): number => c.y * grid.width + c.x;
-  const blocked = new Set(grid.blocked);
-  if (!inside(from) || !inside(to) || blocked.has(index(from)) || blocked.has(index(to))) return null;
-  const goal = index(to);
-  const h = (i: number): number => Math.abs((i % grid.width) - to.x) + Math.abs(Math.floor(i / grid.width) - to.y);
-  const g = new Map<number, number>([[index(from), 0]]);
-  const came = new Map<number, number>();
-  const open = new Map<number, number>([[index(from), h(index(from))]]);
-  let expanded = 0;
-  while (open.size > 0) {
-    let cur = -1;
-    let best = Infinity;
-    for (const [i, f] of open) if (f < best || (f === best && i < cur)) {
-      best = f;
-      cur = i;
-    }
-    if (cur === goal) {
-      const cells: Cell[] = [];
-      for (let i: number | undefined = cur; i !== undefined; i = came.get(i)) cells.unshift({ x: i % grid.width, y: Math.floor(i / grid.width) });
-      return { cells, cost: g.get(cur) ?? 0 };
-    }
-    open.delete(cur);
-    if (++expanded > cap) return null;
-    const cx = cur % grid.width;
-    const cy = Math.floor(cur / grid.width);
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-      const n = { x: cx + dx, y: cy + dy };
-      if (!inside(n)) continue;
-      const ni = index(n);
-      if (blocked.has(ni)) continue;
-      const step = Math.max(1, own(GRID_TERRAIN_COST, grid.terrain[ni] ?? "") ?? 1);
-      const ng = (g.get(cur) ?? 0) + step;
-      if (ng < (g.get(ni) ?? Infinity)) {
-        g.set(ni, ng);
-        came.set(ni, cur);
-        open.set(ni, ng + h(ni));
-      }
-    }
-  }
-  return null;
-}
-
-/** Walking minutes along a grid path: its cost × the cell size, at 80 m per minute (a cell is 80 m by default). */
-export function gridMinutes(grid: GridDef, path: GridPath): number {
-  const meters = (grid.cellMeters ?? 80) * path.cost;
-  return Math.max(path.cells.length > 1 ? 1 : 0, Math.round(meters / 80));
 }
 
 /** Routes closed now: `packs.space.config.closedRoutes` (secret or seasonal routes) unless opened, plus any closed by `space.route`. */

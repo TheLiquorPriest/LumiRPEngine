@@ -59,6 +59,8 @@ export function validate(doc: unknown): LintIssue[] {
   if (doc.ruleset !== undefined && !isRecord(doc.ruleset)) err("ruleset", "ruleset must be an object");
   // A world written before maps has none (migration adds the collection); each map's shape is lint's.
   if (doc.maps !== undefined && !isRecord(doc.maps)) err("maps", "maps must be an object");
+  // Map settings are optional (DESIGN §12): absent, the defaults; lint checks their parts.
+  if (doc.mapSettings !== undefined && !isRecord(doc.mapSettings)) err("mapSettings", "mapSettings must be an object");
   return issues;
 }
 

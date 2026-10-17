@@ -302,15 +302,18 @@ export interface GridDef {
   /** Blocked cell indexes. */
   blocked: number[];
   zones: Record<string, number[]>;
+  /** Things that start lying at a cell of this grid: thing id → cell index (a map's legend places them). Each starts in the place whose area holds its cell, else in the place the grid draws (DESIGN §4.1). */
+  items?: Record<EntityId, number>;
   /** The map that compiled this grid from its layout; absent on authored grids. */
   map?: MapId;
 }
 
 /**
  * What a character of a grid map's layout stands for (`lre-map-v1`): a wall, floor or door; a
- * terrain, blocked or not; part of one of the map's places (its area); or part of a zone.
+ * terrain, blocked or not; part of one of the map's places (its area); part of a zone; or a thing
+ * the world already has, lying on the floor there (in `place`'s area, else the area around it).
  */
-export type MapCellDef = "wall" | "floor" | "door" | { terrain: string; blocked?: boolean } | { place: PlaceId } | { zone: string };
+export type MapCellDef = "wall" | "floor" | "door" | { terrain: string; blocked?: boolean } | { place: PlaceId } | { zone: string } | { item: EntityId; place?: PlaceId };
 
 /** A place a map draws inside its scope; the map creates it. */
 export interface MapPlaceDef {
@@ -347,6 +350,8 @@ export interface MapDoc {
   size?: [number, number];
   /** A grid map's rows, top first, one character per cell. */
   layout?: string[];
+  /** A grid map's cell size in metres, for walking times on it; a cell is 80 m unless it says. */
+  cellMeters?: number;
   legend?: Record<string, MapCellDef>;
   places?: MapPlaceDef[];
   links?: MapLinkDef[];
@@ -360,11 +365,19 @@ export interface EffectSpec {
   args: Record<string, JsonValue>;
 }
 
+/**
+ * Someone stepping into a grid's zone, or onto one of its cells (the grid system, DESIGN §10): `in`
+ * names the place whose grid it is (any grid with that zone when a zone trigger leaves it out);
+ * `who` picks who counts, the POV when absent. It fires once per entry, not on each step inside.
+ */
+export type GridTrigger = { zone: string; in?: PlaceId; who?: Selector } | { cell: [number, number]; in: PlaceId; who?: Selector };
+
 export type RuleTrigger =
   | { event: EventType }
   | { tick: "turn" | "slot" | "day" }
   | { enter: PlaceId }
-  | { at: Expr };
+  | { at: Expr }
+  | GridTrigger;
 
 export interface RuleDef {
   id: RuleId;
@@ -848,6 +861,20 @@ export interface AdjudicationDef {
   retryAfter: number;
 }
 
+/** How the map shows the world (DESIGN §12): what the POV knows, places only heard of drawn dashed; or fog over what it hasn't seen. */
+export type MapDisplay = "knowledge" | "fog";
+
+/**
+ * A world's map settings (DESIGN §4.1, §12); a world without them plays with `DEFAULT_MAP_SETTINGS`
+ * (`shared/maps` `mapSettingsOf`). The grid system is optional: with `movement` on, walls and doors
+ * steer the POV across grids, things lie in cells, cells and zones trigger rules, and the POV sees
+ * `sightRadius` cells around it.
+ */
+export interface MapSettings {
+  display: MapDisplay;
+  grid: { movement: boolean; sightRadius: number };
+}
+
 export interface WorldDoc {
   format: typeof WORLD_FORMAT;
   id: WorldId;
@@ -881,6 +908,8 @@ export interface WorldDoc {
   lore: Record<string, LoreEntryDef>;
   /** The lore lookup table (DESIGN §4.2); empty in documents written before it existed. */
   loreIndex: LoreIndex;
+  /** How the map shows the world, and the optional grid system (DESIGN §12); absent, the defaults. */
+  mapSettings?: MapSettings;
   /** Classification facets by id (DESIGN §4.1); entities hold values in `class`. */
   classifications: Record<FacetId, FacetDef>;
   /** The world's tabletop ruleset (DESIGN §11); absent in worlds that have none. */

@@ -145,9 +145,12 @@ describe("map scopes", () => {
     expect(scopeOf(at(2), "brindlemere").routes.length).toBeGreaterThan(0);
     expect(scopeOf(at(2), "market_square").grid?.pov).toBeUndefined();
     expect(scopeOf(at(3), "market_square").grid?.pov).toEqual({ x: 7, y: 4 });
-    // The POV's cell is on its own place's grid, never on a scope around it.
-    state.entities[world.pov]!.fields.place = "crooked_kettle";
-    expect(scopeOf(at(3), "market_square").grid?.pov).toBeUndefined();
+    // The POV's cell is on the grid it stands on: in the inn, the square's, where the inn is drawn.
+    Object.assign(state.entities[world.pov]!.fields, { place: "crooked_kettle", ...world.places.crooked_kettle?.cell });
+    expect(scopeOf(at(3), "market_square").grid?.pov).toEqual(world.places.crooked_kettle?.cell);
+    // Off every grid (the town around the square is drawn as linked places), it has no cell on the map.
+    state.entities[world.pov]!.fields.place = "brindlemere";
+    expect(at(3).scopes.some((s) => s.grid?.pov !== undefined)).toBe(false);
   });
 
   test("a map's places draw in its scope: a node map's at their positions, the rest on a ring; the map opens on the place it draws", () => {

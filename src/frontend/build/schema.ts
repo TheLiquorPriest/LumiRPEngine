@@ -224,7 +224,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "links", label: "Links", optional: true },
   ],
   rules: [
-    { kind: "json", key: "on", label: "Trigger", hint: '{"event": "…"} · {"tick": "turn|slot|day"} · {"enter": "place"} · {"at": "formula"}' },
+    { kind: "json", key: "on", label: "Trigger", hint: '{"event": "…"} · {"tick": "turn|slot|day"} · {"enter": "place"} · {"at": "formula"} · with the grid system on, {"zone": "…", "in": "place"} or {"cell": [x, y], "in": "place"}, and "who": a selector (else the POV)' },
     { kind: "expr", key: "when", label: "When", optional: true },
     { kind: "list", key: "do", label: "Do", item: EFFECT, title: "type" },
     { kind: "bool", key: "once", label: "Once" },
@@ -440,6 +440,23 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
         { kind: "text", key: "minorUnit", label: "Minor unit (cent, copper…)" },
         { kind: "number", key: "decimals", label: "Decimals (2 → 100 minor units per major)", min: 0, max: 6, step: 1 },
         { kind: "text", key: "format", label: "Format", hint: "{sign}{symbol}{amount} · {sign}{major} sp {minor} cp" },
+      ],
+    },
+    {
+      kind: "object",
+      key: "mapSettings",
+      label: "Map",
+      fields: [
+        { kind: "enum", key: "display", label: "The map shows (knowledge: what the POV knows, places only heard of dashed; fog: fog over what it hasn't seen)", values: ["knowledge", "fog"] },
+        {
+          kind: "object",
+          key: "grid",
+          label: "Grid system",
+          fields: [
+            { kind: "bool", key: "movement", label: "Grid movement", hint: "Walls and doors steer the POV across grids, things lie in cells, and cells and zones trigger rules; Space plays at 3 or more" },
+            { kind: "number", key: "sightRadius", label: "Sight radius (cells the POV sees around it)", min: 0, max: 32, step: 1 },
+          ],
+        },
       ],
     },
   ],

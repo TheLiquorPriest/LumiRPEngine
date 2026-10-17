@@ -17,7 +17,7 @@ import type { EditorRequest, LintIssue, WorldCollection, WorldPart } from "../sh
 import type { RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { WORLD_FORMAT } from "../shared/world";
 import { blankWorld, currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, stamped } from "../engine/authoring";
-import { compileMaps } from "../shared/maps";
+import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort } from "./host";
 
@@ -286,6 +286,12 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     if (isRecord(value.start) && typeof value.start.place === "string" && typeof value.start.at === "string") doc.start = { place: value.start.place, at: value.start.at };
     const currency = currencyOf(value.currency);
     if (currency) doc.currency = currency;
+    // Map settings as the engine reads them; the defaults are no settings, so a world saved untouched stays as it was.
+    if (value.mapSettings !== undefined) {
+      const settings = mapSettingsOf({ mapSettings: value.mapSettings });
+      if (JSON.stringify(settings) === JSON.stringify(mapSettingsOf({}))) delete doc.mapSettings;
+      else doc.mapSettings = settings;
+    }
     return;
   }
   if (part === "tiers") {

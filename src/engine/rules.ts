@@ -1,7 +1,7 @@
-// Rules (DESIGN §3, §10): `on <event | tick | place entry | time> when <predicate> do <effects>`,
-// with `once`, `cooldown`, a cascade cap of 8 and storylet beats. Data only: the predicate and
-// the effect arguments are formulas. A rule's firing is recorded (`engine.fired`) before its
-// effects, so `once` and cooldowns hold on re-fold and inside its own cascade.
+// Rules (DESIGN §3, §10): `on <event | tick | place entry | zone or cell entry | time> when
+// <predicate> do <effects>`, with `once`, `cooldown`, a cascade cap of 8 and storylet beats. Data
+// only: the predicate and the effect arguments are formulas. A rule's firing is recorded
+// (`engine.fired`) before its effects, so `once` and cooldowns hold on re-fold and inside its own cascade.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -16,7 +16,7 @@ import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { createRng } from "./rng";
 import { evalExpr, placeWithin, scopeEnv, toValue, truthy } from "./scope";
-import { own } from "./pack-kit";
+import { optionalQuery, own } from "./pack-kit";
 import type { Working } from "./working";
 
 export const CASCADE_CAP = 8;
@@ -129,10 +129,12 @@ function fire(reg: Registry, w: Working, p: Pending, opts: RuleOptions): RuleFir
   };
 }
 
-function matchesEvent(world: WorldDoc, rule: RuleDef, e: LedgerEvent): boolean {
+function matchesEvent(w: Working, rule: RuleDef, e: LedgerEvent): boolean {
   const on = rule.on;
   if ("event" in on) return on.event === e.type;
-  if ("enter" in on) return e.type === "set" && e.field === "place" && typeof e.value === "string" && placeWithin(world, e.value, on.enter);
+  if ("enter" in on) return e.type === "set" && e.field === "place" && typeof e.value === "string" && placeWithin(w.world, e.value, on.enter);
+  // Stepping into a zone or onto a cell is the space pack's to judge: it owns positions on grids.
+  if ("zone" in on || "cell" in on) return optionalQuery(w.ctx, "space.entered")?.(w.ctx, on, e) === true;
   return false;
 }
 
@@ -154,11 +156,11 @@ function cascade(reg: Registry, w: Working, roots: Pending[], opts: RuleOptions)
       if (!f) continue;
       firings.push(f);
       if (p.depth + 1 >= cap) {
-        if (f.events.some((e) => rules.some((r) => matchesEvent(w.world, r, e)))) capped = true;
+        if (f.events.some((e) => rules.some((r) => matchesEvent(w, r, e)))) capped = true;
         continue;
       }
       for (const e of f.events) {
-        for (const r of rules) if (matchesEvent(w.world, r, e)) next.push({ rule: r, depth: p.depth + 1, self: eventSubject(e), vars: { event: eventVars(e) } });
+        for (const r of rules) if (matchesEvent(w, r, e)) next.push({ rule: r, depth: p.depth + 1, self: eventSubject(e), vars: { event: eventVars(e) } });
       }
     }
     if (capped) break;
@@ -172,7 +174,7 @@ function cascade(reg: Registry, w: Working, roots: Pending[], opts: RuleOptions)
 export function runRulesOnEvents(reg: Registry, w: Working, events: readonly LedgerEvent[], opts: RuleOptions): RuleFiring[] {
   const rules = allRules(reg, w.world);
   const roots: Pending[] = [];
-  for (const e of events) for (const r of rules) if (matchesEvent(w.world, r, e)) roots.push({ rule: r, depth: 0, self: eventSubject(e), vars: { event: eventVars(e) } });
+  for (const e of events) for (const r of rules) if (matchesEvent(w, r, e)) roots.push({ rule: r, depth: 0, self: eventSubject(e), vars: { event: eventVars(e) } });
   return cascade(reg, w, roots, opts);
 }
 

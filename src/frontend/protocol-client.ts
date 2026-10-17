@@ -65,6 +65,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.editor": true,
   "lre.world": true,
   "lre.ui": true,
+  "lre.map": true,
   "lre.job": true,
   "lre.lore": true,
 };

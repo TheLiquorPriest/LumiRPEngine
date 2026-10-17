@@ -7,20 +7,30 @@
 //   0  off: no movement rules (moves are free and instant)
 //   1  named places: moves need no route and take a nominal 15 minutes
 //   2  places plus routes and travel times: walking needs a route (or shared parent)
-//   3  grids and positions (`x`, `y` on the place's grid; A* with caps)
+//   3  grids and positions (`x`, `y` on the grid the place stands on; A* with caps)
 //   4  terrain multipliers and weather effects on travel; mode-specific routes
+//
+// The grid system (`mapSettings.grid.movement`, DESIGN §12) plays Space at 3 at least: walls and
+// doors steer the POV across grids, things lie in cells, and cells and zones trigger rules
+// (`positions.ts`).
 
 import type { JsonValue } from "../../../shared/json";
-import { mapLint } from "../../../shared/maps";
+import { hasOwn, isRecord } from "../../../shared/json";
+import { cellIndex, findPath, gridMinutes, gridOf, SIGHT_MAX, standingGrid, type GridPath } from "../../../shared/grid";
+import { mapLint, mapSettingsOf } from "../../../shared/maps";
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
-import type { KindDef } from "../../../shared/world";
+import type { LintIssue } from "../../../shared/protocol";
+import type { GridDef, GridTrigger, KindDef, WorldDoc } from "../../../shared/world";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
+import { GRID_SPACE_FLOOR } from "../../../engine/registry-impl";
 import { placeOfEntity, placeWithin } from "../../../engine/scope";
-import { canSeePlace } from "../../../engine/visibility";
+import { observeCells } from "../../../engine/seen";
+import { canSeePlace, knownBySelector } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
-import { closedRoutes, findPath, gridMinutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
+import { arrivalEvents, entered, layEvents, POS_EVENT, reach, spotData, spotOf, stepEvents } from "./positions";
+import { closedRoutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
 import { buildMapView } from "./view";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
@@ -30,12 +40,18 @@ declare module "../../../engine/registry" {
   interface ServiceMap {
     /** Moves an entity to a place by a mode: the plan (minutes, distance, legs) and the move events. */
     "space.travel": TravelService;
+    /** Where someone arriving at a place stands there (`move` effects end with these events). */
+    "space.arrival": (ctx: ReadContext, entity: EntityId, to: PlaceId) => LedgerEvent[];
+    /** Where a thing lies once it leaves someone's hands: put down at `place` by `by`, or (null) picked up. */
+    "space.lay": (ctx: ReadContext, thing: EntityId, place: PlaceId | null, by: EntityId | null) => LedgerEvent[];
   }
   interface QueryMap {
     /** The fastest route for a mode at the current Space level (terrain and weather from level 4). */
     "space.route": RouteQuery;
     /** Whether `to` can be reached from `from` by any one travel mode (always below Space 2). */
     "space.reachable": (ctx: ReadContext, from: PlaceId, to: PlaceId) => boolean;
+    /** Whether an event steps someone into a grid trigger's zone or onto its cell (rules, DESIGN §10). */
+    "space.entered": (ctx: ReadContext, trigger: GridTrigger, e: LedgerEvent) => boolean;
   }
 }
 
@@ -45,6 +61,52 @@ const MODES: readonly TravelMode[] = ["walk", "road", "offroad", "water"];
 export function reachable(ctx: ReadContext, from: PlaceId, to: PlaceId): boolean {
   if (from === to || ctx.levelOf(ctx.world.pov, "space") < 2) return true;
   return MODES.some((m) => routeAt(ctx, from, to, m) !== null);
+}
+
+/** A walk on the grid the POV stands on at `place`, from its cell to (x, y); null when it has no cell there or nothing joins the two. */
+function gridWalk(ctx: ReadContext, place: PlaceId, x: number, y: number): { grid: GridDef; path: GridPath } | null {
+  const stand = standingGrid(ctx.world, place);
+  const fields = own(ctx.state.entities, ctx.world.pov)?.fields;
+  if (!stand || typeof fields?.x !== "number" || typeof fields.y !== "number") return null;
+  const path = findPath(stand.grid, { x: fields.x, y: fields.y }, { x, y });
+  return path ? { grid: stand.grid, path } : null;
+}
+
+/** The map settings as the engine reads them (DESIGN §12), and the grid system's rule triggers (§10). */
+function gridLint(world: WorldDoc): LintIssue[] {
+  const issues: LintIssue[] = [];
+  const err = (path: string, message: string): void => void issues.push({ severity: "error", path, code: "space.grid", message });
+  const raw: unknown = world.mapSettings;
+  const grid = isRecord(raw) ? raw.grid : undefined;
+  if (raw !== undefined && !isRecord(raw)) err("mapSettings", "Map settings are an object: display, and the grid system's movement and sightRadius.");
+  else if (isRecord(raw)) {
+    if (raw.display !== undefined && raw.display !== "knowledge" && raw.display !== "fog") err("mapSettings.display", 'The map shows "knowledge" (what the POV knows) or "fog".');
+    if (grid !== undefined && !isRecord(grid)) err("mapSettings.grid", "The grid system's settings are an object: movement and sightRadius.");
+    if (isRecord(grid) && grid.movement !== undefined && typeof grid.movement !== "boolean") err("mapSettings.grid.movement", "Grid movement is on (true) or off (false).");
+    const radius = isRecord(grid) ? grid.sightRadius : undefined;
+    if (radius !== undefined && (typeof radius !== "number" || !Number.isInteger(radius) || radius < 0 || radius > SIGHT_MAX)) err("mapSettings.grid.sightRadius", `The sight radius is a whole number of cells from 0 to ${SIGHT_MAX}.`);
+  }
+  const movement = mapSettingsOf(world).grid.movement;
+  if (movement && world.realism.levels.space < GRID_SPACE_FLOOR) issues.push({ severity: "info", path: "mapSettings.grid.movement", code: "level_floor", message: `The realism defaults put space at ${world.realism.levels.space}; the grid system plays it at ${GRID_SPACE_FLOOR}, for positions.` });
+  for (const [id, rule] of Object.entries(world.rules)) {
+    const on: unknown = rule.on;
+    if (!isRecord(on) || !("zone" in on || "cell" in on)) continue;
+    const path = `rules.${id}.on`;
+    const scope = on.in;
+    const onGrid = typeof scope === "string" ? gridOf(world, scope) : undefined;
+    if (scope !== undefined && !onGrid) err(path, `"${String(scope)}" isn't a place with a grid.`);
+    if ("cell" in on) {
+      const cell = on.cell;
+      if (scope === undefined) err(path, "A cell trigger names the place whose grid the cell is on, as `in`.");
+      if (!Array.isArray(cell) || cell.length !== 2 || !cell.every((n) => Number.isInteger(n))) err(path, "A cell is [x, y], two whole numbers.");
+      else if (onGrid && cellIndex(onGrid, { x: Number(cell[0]), y: Number(cell[1]) }) === null) err(path, `[${cell.join(", ")}] isn't on ${String(scope)}'s grid.`);
+    } else if (typeof on.zone !== "string" || !(onGrid ? [onGrid] : Object.values(world.grids)).some((g) => hasOwn(g.zones, String(on.zone)))) {
+      err(path, `No grid${onGrid ? ` of ${String(scope)}` : ""} has a zone "${String(on.zone)}".`);
+    }
+    if (on.who !== undefined && knownBySelector(on.who) === null) err(`${path}.who`, "`who` is a selector the engine can read whole, with at least one constraint (kind, tier, class, memberOf, tag or ids).");
+    if (!movement) issues.push({ severity: "warning", path, code: "space.grid", message: "With the grid system off nobody steps across a grid, so this rule never fires." });
+  }
+  return issues;
 }
 
 export const THING: KindDef = {
@@ -116,8 +178,43 @@ export const spacePack: PackDef = {
     r.relation({ id: "in", label: "In", from: "*", to: "*", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" });
 
     r.service("space.travel", travel);
+    r.service("space.arrival", arrivalEvents);
+    r.service("space.lay", layEvents);
     r.query("space.route", routeAt);
     r.query("space.reachable", reachable);
+    r.query("space.entered", entered);
+
+    // A position on a grid while the grid system is on (`positions.ts`): the cell (null: off any
+    // grid) and the one before, written whole, so the POV's sight and zone triggers read whole moves.
+    r.event<PackEvent>({
+      type: POS_EVENT,
+      validate: (e, ctx) => {
+        const entity = strOf(e.data.entity);
+        if (!own(ctx.state.entities, entity)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
+        if (e.data.at === null) return null;
+        const at = spotData(e.data.at);
+        const stand = standingGrid(ctx.world, placeOfEntity(ctx.state, entity));
+        return at && stand && stand.scope === at.scope && cellIndex(stand.grid, at) !== null ? null : { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't on that map` };
+      },
+      apply: (e, state, ctx) => {
+        const entity = strOf(e.data.entity);
+        const thing = own(state.entities, entity);
+        if (!thing) return;
+        const at = spotData(e.data.at);
+        if (at) Object.assign(thing.fields, { x: at.x, y: at.y });
+        else {
+          delete thing.fields.x;
+          delete thing.fields.y;
+        }
+        if (entity === ctx.world.pov) observeCells(state, ctx.world);
+      },
+      // Steps are told by the action and the place they reach, never as coordinates.
+      describe: () => "",
+    });
+    r.effect({
+      type: "space.step",
+      resolve: (a, ctx) => (typeof a.x === "number" && typeof a.y === "number" ? stepEvents(ctx, strOf(a.entity) || ctx.world.pov, { x: Math.round(a.x), y: Math.round(a.y) }) : { code: "bad_args", reason: "a step needs x and y" }),
+    });
 
     // Opening and closing routes (a ferry stops running, a secret passage is found).
     r.event<PackEvent>({
@@ -139,20 +236,18 @@ export const spacePack: PackDef = {
     r.formula("distance_km", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.distanceKm ?? 0);
     r.formula("route_exists", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode)) !== null);
     r.formula("within", (ctx, place, ancestor) => placeWithin(ctx.world, String(place ?? ""), String(ancestor ?? "")));
+    // Walking on the grid the POV stands on at `place`: its own, or the one it is drawn on.
     r.formula("grid_minutes", (ctx, place, x, y) => {
-      const gridId = own(ctx.world.places, String(place ?? ""))?.grid ?? "";
-      const grid = own(ctx.world.grids, gridId);
-      const self = own(ctx.state.entities, ctx.world.pov);
-      if (!grid || !self) return 0;
-      const path = findPath(grid, { x: Number(self.fields.x ?? 0), y: Number(self.fields.y ?? 0) }, { x: Number(x ?? 0), y: Number(y ?? 0) });
-      return path ? gridMinutes(grid, path) : 0;
+      const path = gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0));
+      return path ? gridMinutes(path.grid, path.path) : 0;
     });
-    r.formula("grid_reachable", (ctx, place, x, y) => {
-      const gridId = own(ctx.world.places, String(place ?? ""))?.grid ?? "";
-      const grid = own(ctx.world.grids, gridId);
-      const self = own(ctx.state.entities, ctx.world.pov);
-      if (!grid || !self) return false;
-      return findPath(grid, { x: Number(self.fields.x ?? 0), y: Number(self.fields.y ?? 0) }, { x: Number(x ?? 0), y: Number(y ?? 0) }) !== null;
+    r.formula("grid_reachable", (ctx, place, x, y) => gridWalk(ctx, String(place ?? ""), Number(x ?? 0), Number(y ?? 0)) !== null);
+    // Things in cells (DESIGN §11): `reach(self, item)` holds on or next to the item's cell while the
+    // grid system tracks both, else at the same place; `on_grid(item)` while it lies in a cell itself.
+    r.formula("reach", (ctx, a, b) => reach(ctx, String(a ?? ""), String(b ?? "")));
+    r.formula("on_grid", (ctx, thing) => {
+      const e = own(ctx.state.entities, String(thing ?? ""));
+      return mapSettingsOf(ctx.world).grid.movement && typeof e?.fields.place === "string" && spotOf(ctx.world, ctx.state, String(thing ?? "")) !== null;
     });
 
     r.action({
@@ -173,7 +268,7 @@ export const spacePack: PackDef = {
       pack: "space",
       params: { x: { type: "number" }, y: { type: "number" } },
       requires: ["level.space >= 3", "grid_reachable(here, x, y)"],
-      outcomes: { default: [{ type: "set", args: { entity: "self", field: "x", value: "=x" } }, { type: "set", args: { entity: "self", field: "y", value: "=y" } }] },
+      outcomes: { default: [{ type: "space.step", args: { entity: "self", x: "=x", y: "=y" } }] },
       duration: "grid_minutes(here, x, y)",
       lexicon: ["walk over to", "cross to", "move to"],
       observable: "moves across the area",
@@ -249,6 +344,8 @@ export const spacePack: PackDef = {
     });
     // Maps (`lre-map-v1`): shape, scope, layout and legend, places new to the world, links.
     r.lint({ code: "space.maps", check: mapLint });
+    // Map settings and the grid system's triggers.
+    r.lint({ code: "space.grid", check: gridLint });
   },
 };
 

@@ -3,6 +3,7 @@
 // same stage and drawing as Play's map.
 
 import { useMemo, useState } from "preact/hooks";
+import { cellAt, gridOf } from "../../../shared/grid";
 import { compileMaps, readMap } from "../../../shared/maps";
 import type { MapDoc, WorldDoc } from "../../../shared/world";
 import { Empty } from "../../../frontend/components";
@@ -12,10 +13,12 @@ import { MapStage } from "./map";
 
 const NOBODY_INSIDE: ReadonlySet<string> = new Set();
 
-/** The scope `map` draws once it's compiled into `world` under `key`; Build sees every place, at the highest Space level. */
+/** The scope `map` draws once it's compiled into `world` under `key`; Build sees every place, visited, and every thing the map lays in a cell, at the highest Space level. */
 export function previewScope(world: WorldDoc, key: string, map: MapDoc): MapScopeView {
   const doc = compileMaps({ ...world, maps: { ...world.maps, [key]: map } });
-  return scopeView(doc, map.scope, { drawn: () => true, known: () => true }, { level: 4, trail: [] });
+  const grid = gridOf(doc, map.scope);
+  const items = grid ? Object.entries(grid.items ?? {}).map(([id, index]) => ({ id, name: doc.entities[id]?.name ?? id, ...cellAt(grid, index) })) : [];
+  return scopeView(doc, map.scope, { drawn: () => true, known: () => true, visited: () => true }, { level: 4, trail: [], items });
 }
 
 /** A proposed map (Describe a map) as Play will draw it, compiled into the draft. */
@@ -34,7 +37,7 @@ export function MapPreview(props: { scope: MapScopeView; height?: number }) {
   return (
     <div class="lre-stack" data-lre-map-preview={props.scope.id ?? ""}>
       <div class="lre-map" style={{ height: `${props.height ?? 300}px` }}>
-        <MapStage scope={props.scope} here={null} inside={NOBODY_INSIDE} selected={selected} onTap={(p) => setSelected(p?.id ?? null)} top={8} />
+        <MapStage scope={props.scope} here={null} inside={NOBODY_INSIDE} selected={selected} onTap={(p) => setSelected(p?.id ?? null)} display="knowledge" top={8} />
       </div>
       <span class="lre-small lre-muted">
         {place

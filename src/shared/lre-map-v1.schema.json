@@ -19,6 +19,7 @@
       "maxItems": 64,
       "items": { "type": "string", "minLength": 1, "maxLength": 64 }
     },
+    "cellMeters": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000, "description": "A grid map's cell size in metres, for walking times on it: 80 unless given (1 or 2 suits a room)." },
     "legend": {
       "type": "object",
       "description": "What each layout character stands for. Characters not listed: # wall, . floor, + door, a space nothing (blocked).",
@@ -54,6 +55,14 @@
     "cell": {
       "anyOf": [
         { "title": "\"wall\", \"floor\" or \"door\"", "enum": ["wall", "floor", "door"] },
+        {
+          "title": "{\"item\": …}",
+          "description": "A thing the world already has, lying on the floor here: in `place`'s area, else the area of the place most of the cells beside it belong to.",
+          "type": "object",
+          "required": ["item"],
+          "additionalProperties": false,
+          "properties": { "item": { "type": "string", "minLength": 1, "maxLength": 200 }, "place": { "$ref": "#/$defs/id" } }
+        },
         {
           "title": "{\"terrain\": …}",
           "type": "object",

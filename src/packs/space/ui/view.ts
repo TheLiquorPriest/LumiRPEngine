@@ -5,7 +5,7 @@ import type { JsonObject } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import type { TravelMode } from "../../../shared/ids";
 import { list, num, obj, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
-import type { MapGridView, MapPlaceView, MapRouteView, MapScopeView, MapView } from "../core/view";
+import type { MapGridView, MapItemView, MapPlaceView, MapRouteView, MapScopeView, MapView } from "../core/view";
 
 export const TRAVEL_MODES = ["walk", "road", "offroad", "water"] as const satisfies readonly TravelMode[];
 
@@ -14,7 +14,12 @@ function numbers(value: unknown): number[] {
 }
 
 function decodePlace(p: Record<string, unknown>): MapPlaceView | null {
-  return typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id), x: num(p.x), y: num(p.y), kind: optStr(p.kind), known: p.known !== false } : null;
+  // A view without `visited` (an older backend) reads every place as visited: none is drawn as only heard of.
+  return typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id), x: num(p.x), y: num(p.y), kind: optStr(p.kind), known: p.known !== false, visited: p.visited !== false } : null;
+}
+
+function decodeItem(i: Record<string, unknown>): MapItemView | null {
+  return typeof i.id === "string" && typeof i.x === "number" && typeof i.y === "number" ? { id: i.id, name: str(i.name, i.id), x: i.x, y: i.y } : null;
 }
 
 function decodeRoute(r: Record<string, unknown>): MapRouteView | null {
@@ -42,6 +47,8 @@ function decodeGrid(value: unknown): MapGridView | undefined {
     blocked: numbers(grid.blocked),
     areas: areas ? Object.fromEntries(Object.entries(areas).map(([id, cells]) => [id, numbers(cells)])) : {},
     pov: pov ? { x: num(pov.x), y: num(pov.y) } : undefined,
+    seen: optStr(grid.seen),
+    items: list(grid.items, decodeItem),
   };
 }
 
@@ -66,6 +73,8 @@ export function decodeMapView(value: unknown): MapView | null {
     here: optStr(value.here) ?? null,
     path: strings(value.path),
     scope: optStr(value.scope) ?? null,
+    display: value.display === "fog" ? "fog" : "knowledge",
+    movement: value.movement === true,
     scopes: list(value.scopes, decodeScope),
     travel: list(value.travel, (t) =>
       typeof t.to === "string" && typeof t.action === "string"

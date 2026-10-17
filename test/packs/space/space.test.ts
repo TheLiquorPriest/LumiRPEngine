@@ -8,7 +8,8 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { runTimelapse } from "../../../src/engine/time";
 import { ALL_NOTE } from "../../../src/engine/simulate";
 import { modernUsWorld } from "../riverton";
-import { findPath, findRoute, routeAt } from "../../../src/packs/space/core/travel";
+import { findRoute, routeAt } from "../../../src/packs/space/core/travel";
+import { findPath } from "../../../src/shared/grid";
 import { buildMapView } from "../../../src/packs/space/core/view";
 import { startState } from "../support";
 
