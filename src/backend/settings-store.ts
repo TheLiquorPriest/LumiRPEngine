@@ -74,7 +74,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 400)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 400)),
     },
-    budgets: { pre: { calls: 2, ms: 30_000, lookup: { calls: 1, ms: 15_000 } }, post: { calls: 2, ms: 45_000, lookup: { calls: 1, ms: 20_000 } } },
+    budgets: { pre: { calls: 2, ms: 30_000, lookup: { calls: 2, ms: 15_000 } }, post: { calls: 2, ms: 45_000, lookup: { calls: 1, ms: 20_000 } } },
     tokens: { sections: 600 },
   },
   full: {

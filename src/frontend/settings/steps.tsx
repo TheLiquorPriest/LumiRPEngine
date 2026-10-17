@@ -23,7 +23,7 @@ const PRESETS: { value: ModelUsePresetId; label: string }[] = [
 
 export const PRESET_NOTE: Record<ModelUsePresetId, string> = {
   lean: "Narrator + up to 2 model steps a turn, and no lore lookups: helpers get the lore their inputs find. The floor; doesn't meet “a model decides” on its own. The call meter shows each turn's real count.",
-  standard: "Narrator + up to 4 model steps a turn, plus up to 2 lore lookups. The default. The call meter shows each turn's real count.",
+  standard: "Narrator + up to 4 model steps a turn, plus up to 3 lore lookups. The default. The call meter shows each turn's real count.",
   full: "Narrator + up to 9 model steps a turn, plus up to 5 lore lookups. The call meter shows each turn's real count.",
   custom: "Your own steps, signals, providers, lore and budgets. The count depends on the steps you enable; the call meter shows it live.",
 };
