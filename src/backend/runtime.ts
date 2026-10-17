@@ -986,7 +986,7 @@ export class Runtime implements TurnHooks {
     const userText = user ? (user.swipes[user.swipeId] ?? "") : "";
     // Rolls and odds, and an action that couldn't run (DESIGN §12 chips), from the turn's resolution.
     const res = plan?.resolution;
-    this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId} ${input.kind}: plan ${plan ? "yes" : "no"}, action ${res?.action ?? "-"}, check ${res?.check?.outcome ?? "-"}`, input.userId);
+    this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId} ${input.kind}: plan ${plan ? "yes" : "no"}, action ${res?.action ?? "-"}, check ${res?.check?.outcome ?? (res?.adjudged ? `${res.outcome ?? "-"} (no roll: ${res.adjudged.why ?? "-"})` : "-")}`, input.userId);
     if (res) {
       // The action lives in the revision the chat folds at (after any Upgrade), not the run's first.
       const world = input.core.worldAt(input.core.fold(input.observed).state.revision) ?? input.core.worldAt(rec?.defHash ?? "");

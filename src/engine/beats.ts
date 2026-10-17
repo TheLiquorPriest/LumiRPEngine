@@ -57,7 +57,8 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   if (r) {
     const label = own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     if (!r.ok) lines.push(`${label} doesn't happen: ${r.failed?.reason ?? "not possible"}.`);
-    else if (r.check) lines.push(`${label}: the result is decided — ${r.outcome}.`);
+    // A check the adjudication policy settled without a roll is decided all the same.
+    else if (r.check || r.adjudged) lines.push(`${label}: the result is decided — ${r.outcome}.`);
     else lines.push(`${label} happens.`);
   }
   const tl = input.timelapse;
