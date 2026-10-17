@@ -1464,6 +1464,37 @@
       "autopay": "none"
     }
   ],
+  "bills": [
+    {
+      "id": "bill_housekeeping_allowance",
+      "payer": "lady_honoria",
+      "payee": "gideon_pell",
+      "label": "Housekeeping allowance",
+      "amountCents": 1440,
+      "every": "week",
+      "day": 1
+    },
+    {
+      "id": "bill_household_tradesmen",
+      "payer": "gideon_pell",
+      "payee": "Saltreach tradesmen",
+      "label": "Butcher, baker and grocer",
+      "amountCents": 840,
+      "every": "week",
+      "day": 6,
+      "from": "acct_household_petty"
+    },
+    {
+      "id": "bill_household_coal",
+      "payer": "gideon_pell",
+      "payee": "Saltreach coal merchant",
+      "label": "Coal",
+      "amountCents": 480,
+      "every": "month",
+      "day": 1,
+      "from": "acct_household_petty"
+    }
+  ],
   "prices": [
     {
       "id": "pr_pint_bitter",

@@ -424,11 +424,6 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     for (const bill of recs(t.bills)) {
       const where = `bill ${text(bill.id)}`;
       const amount = num(bill.amountCents) ?? 0;
-      need(`${where}.payer`, bill.payer, "character");
-      const account = recs(t.accounts).find((a) => a.id === bill.from);
-      if (!account || account.owner !== bill.payer) err(`${where}: "from" must be an account the payer owns`);
-      if (!Number.isInteger(amount) || amount <= 0) err(`${where}: amount must be a positive integer of cents`);
-      if ((num(bill.day) ?? 0) < 1 || (num(bill.day) ?? 99) > 28) err(`${where}: day must be 1-28`);
       if (bill.catalogItem !== undefined) {
         const band = rec(rec(data.rows("economy.catalog")?.[text(bill.catalogItem)]).price_cents);
         if (!band.min || amount < (num(band.min) ?? 0) || amount > (num(band.max) ?? 0)) err(`${where}: ${amount}c is outside the catalog band for ${text(bill.catalogItem)}`);
@@ -438,6 +433,24 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
       if (bill.usageKwh !== undefined && Math.abs((num(bill.usageKwh) ?? 0) * (num(bill.rateCentsPerKwh) ?? 0) - amount) > 1) err(`${where}: usage times rate does not equal the amount`);
       if (bill.kind === "rent" && (amount < rent * 0.5 || amount > rent * 1.5)) err(`${where}: rent ${amount}c is outside 0.5-1.5x the regional 1BR median ${rent}c`);
     }
+  }
+
+  // ---------------------------------------------------------------- bills
+  for (const bill of recs(t.bills)) {
+    const where = `bill ${text(bill.id)}`;
+    const amount = num(bill.amountCents) ?? 0;
+    need(`${where}.payer`, bill.payer, "character");
+    // A payer that holds accounts pays from one of them; one without accounts names none and pays out of its means.
+    if (bill.from !== undefined) {
+      const account = recs(t.accounts).find((a) => a.id === bill.from);
+      if (!account || account.owner !== bill.payer) err(`${where}: "from" must be an account the payer owns`);
+    } else if (recs(t.accounts).some((a) => a.owner === bill.payer)) err(`${where}: the payer holds accounts, so "from" must name the one it pays from`);
+    // Paid to a character (it lands in their account) or to an outside counterparty named in words.
+    if (has(bill.payee) && !has(bill.payee, "character")) err(`${where}: payee "${text(bill.payee)}" is a ${kindOf(bill.payee)}; a bill is paid to a character or an outside counterparty`);
+    if (bill.payee === bill.payer) err(`${where}: the payer can't pay itself`);
+    if (!Number.isInteger(amount) || amount <= 0) err(`${where}: amount must be a positive integer of base units`);
+    const day = num(bill.day) ?? -1;
+    if (bill.every === "week" ? day < 0 || day > 6 : bill.every !== "month" || day < 1 || day > 28) err(`${where}: a bill is every "week" (day 0-6, the calendar's weekday) or every "month" (day 1-28)`);
   }
 
   // ---------------------------------------------------------------- gear

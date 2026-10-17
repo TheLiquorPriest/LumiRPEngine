@@ -1396,6 +1396,48 @@
       "coins": {"crown": 0, "mark": 7, "bit": 9}
     }
   ],
+  "bills": [
+    {
+      "id": "bill_kettle_market_dues",
+      "payer": "odo_kettleby",
+      "payee": "hollis_garrow",
+      "label": "Market dues to the reeve",
+      "amountCents": 20,
+      "every": "month",
+      "day": 1,
+      "from": "acct_kettle_till"
+    },
+    {
+      "id": "bill_marta_hearth_tax",
+      "payer": "marta_dunmore",
+      "payee": "hollis_garrow",
+      "label": "Hearth tax",
+      "amountCents": 6,
+      "every": "month",
+      "day": 1,
+      "from": "acct_marta_purse"
+    },
+    {
+      "id": "bill_joss_hearth_tax",
+      "payer": "joss_tamber",
+      "payee": "hollis_garrow",
+      "label": "Hearth tax",
+      "amountCents": 6,
+      "every": "month",
+      "day": 1,
+      "from": "acct_joss_purse"
+    },
+    {
+      "id": "bill_wren_hearth_tax",
+      "payer": "wren_aldous",
+      "payee": "hollis_garrow",
+      "label": "Hearth tax",
+      "amountCents": 4,
+      "every": "month",
+      "day": 1,
+      "from": "acct_wren_purse"
+    }
+  ],
   "prices": [
     {
       "id": "pr_bread_loaf",

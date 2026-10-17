@@ -415,7 +415,7 @@ function characterEntity(c: Ctx, ch: TplCharacter): EntityDef {
     put(fields, "annual_income_cents", job.estimatedAnnualIncomeCents ?? (job.incomeMonthlyCents ? job.incomeMonthlyCents * 12 : undefined));
     put(fields, "shift_pattern", job.shiftPattern);
   }
-  const bills = (c.tpl.bills ?? []).filter((b) => b.payer === ch.id).map((b) => ({ label: b.label, payee: b.payee, amountCents: b.amountCents, every: b.every, day: b.day, from: b.from }));
+  const bills = (c.tpl.bills ?? []).filter((b) => b.payer === ch.id).map((b) => ({ label: b.label, payee: b.payee, amountCents: b.amountCents, every: b.every, day: b.day, ...(b.from ? { from: b.from } : {}) }));
   if (bills.length > 0) fields.bills = bills;
   const relations: RelationInstance[] = (ch.regard ?? []).map((r) => ({ type: "regard", to: r.toward, fields: { ...r.axes, t: 0 } }));
   const out: EntityDef = { id: ch.id, kind: "character", name: ch.name, tier: ch.tier, fields, relations };

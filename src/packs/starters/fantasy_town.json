@@ -223,7 +223,8 @@
         "brawn": 13,
         "wits": 10,
         "grace": 8,
-        "heart": 11
+        "heart": 11,
+        "bills": [{"label": "Hearth tax", "payee": "hollis_garrow", "amountCents": 6, "every": "month", "day": 1, "from": "acct_joss_purse"}]
       },
       "relations": [
         {"type": "regard", "to": "marta_dunmore", "fields": {"warmth": 30, "trust": 30, "respect": 40, "t": 0}},
@@ -251,7 +252,8 @@
         "brawn": 15,
         "wits": 11,
         "grace": 10,
-        "heart": 10
+        "heart": 10,
+        "bills": [{"label": "Hearth tax", "payee": "hollis_garrow", "amountCents": 6, "every": "month", "day": 1, "from": "acct_marta_purse"}]
       },
       "relations": [
         {"type": "regard", "to": "joss_tamber", "fields": {"warmth": 30, "trust": 30, "respect": 25, "t": 0}},
@@ -305,7 +307,8 @@
         "brawn": 6,
         "wits": 13,
         "grace": 11,
-        "heart": 15
+        "heart": 15,
+        "bills": [{"label": "Hearth tax", "payee": "hollis_garrow", "amountCents": 4, "every": "month", "day": 1, "from": "acct_wren_purse"}]
       },
       "relations": [
         {"type": "regard", "to": "odo_kettleby", "fields": {"warmth": 35, "trust": 20, "respect": 15, "t": 0}},
@@ -331,7 +334,8 @@
         "brawn": 10,
         "wits": 10,
         "grace": 8,
-        "heart": 11
+        "heart": 11,
+        "bills": [{"label": "Market dues to the reeve", "payee": "hollis_garrow", "amountCents": 20, "every": "month", "day": 1, "from": "acct_kettle_till"}]
       },
       "relations": [
         {"type": "regard", "to": "wren_aldous", "fields": {"warmth": 55, "trust": 25, "respect": 20, "t": 0}},

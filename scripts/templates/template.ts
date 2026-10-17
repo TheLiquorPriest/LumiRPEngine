@@ -187,12 +187,15 @@ export interface TplAccount {
 export interface TplBill {
   id: string;
   payer: string;
+  /** A character (the money lands in their account) or an outside counterparty named in words. */
   payee: string;
   label: string;
   amountCents: number;
+  /** `month` (day 1-28) or `week` (day 0-6, the calendar's weekday). */
   every: string;
   day: number;
-  from: string;
+  /** The payer's account it is paid from; omitted for a payer without accounts, who pays out of their means. */
+  from?: string;
 }
 
 export interface TplStage {

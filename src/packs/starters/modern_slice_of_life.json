@@ -263,7 +263,18 @@
         "employer": "alder_automotive",
         "pay_frequency": "monthly",
         "deposit_to": "acct_marcus_shop",
-        "annual_income_cents": 8500000
+        "annual_income_cents": 8500000,
+        "bills": [
+          {"label": "Mortgage", "payee": "Lakeshore Credit Union", "amountCents": 162000, "every": "month", "day": 1, "from": "acct_marcus_shop"},
+          {
+            "label": "Shop electricity, 1,400 kWh",
+            "payee": "Alder Light & Power",
+            "amountCents": 27300,
+            "every": "month",
+            "day": 20,
+            "from": "acct_marcus_shop"
+          }
+        ]
       },
       "relations": [
         {"type": "regard", "to": "danny_okafor", "fields": {"warmth": 45, "trust": 55, "respect": 60, "t": 0}},
@@ -302,7 +313,11 @@
         "pay_frequency": "weekly",
         "payday": "Friday",
         "deposit_to": "acct_danny_checking",
-        "shift_pattern": "trades_day_7_330"
+        "shift_pattern": "trades_day_7_330",
+        "bills": [
+          {"label": "Rent, Unit 2A", "payee": "helen_kowalczyk", "amountCents": 97500, "every": "month", "day": 1, "from": "acct_danny_checking"},
+          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 4500, "every": "month", "day": 14, "from": "acct_danny_checking"}
+        ]
       },
       "relations": [
         {"type": "regard", "to": "marcus_delgado", "fields": {"warmth": 45, "trust": 55, "respect": 60, "t": 0}},
@@ -341,7 +356,12 @@
         "pay_frequency": "semimonthly",
         "payday": "15th and the last day of the month",
         "deposit_to": "acct_priya_checking",
-        "shift_pattern": "std_weekday_9_5"
+        "shift_pattern": "std_weekday_9_5",
+        "bills": [
+          {"label": "Rent", "payee": "Lakeview Apartments", "amountCents": 112500, "every": "month", "day": 1, "from": "acct_priya_checking"},
+          {"label": "Home internet", "payee": "Alder Broadband", "amountCents": 6500, "every": "month", "day": 8, "from": "acct_priya_checking"},
+          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 5500, "every": "month", "day": 14, "from": "acct_priya_checking"}
+        ]
       },
       "relations": [
         {"type": "regard", "to": "marcus_delgado", "fields": {"warmth": 25, "trust": 30, "respect": 35, "t": 0}},
@@ -380,7 +400,11 @@
         "pay_frequency": "weekly",
         "payday": "Friday",
         "deposit_to": "acct_jess_checking",
-        "shift_pattern": "bar_night"
+        "shift_pattern": "bar_night",
+        "bills": [
+          {"label": "Household share, 1A", "payee": "helen_kowalczyk", "amountCents": 30000, "every": "month", "day": 1, "from": "acct_jess_checking"},
+          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 3500, "every": "month", "day": 14, "from": "acct_jess_checking"}
+        ]
       },
       "relations": [
         {"type": "regard", "to": "helen_kowalczyk", "fields": {"warmth": 80, "trust": 70, "respect": 70, "t": 0}},
@@ -445,7 +469,33 @@
         "employer": "alder_harbor_marina",
         "pay_frequency": "monthly",
         "deposit_to": "acct_dale_marina",
-        "annual_income_cents": 6200000
+        "annual_income_cents": 6200000,
+        "bills": [
+          {
+            "label": "Township harbor fee",
+            "payee": "Port Alder Township",
+            "amountCents": 30000,
+            "every": "month",
+            "day": 1,
+            "from": "acct_dale_marina"
+          },
+          {
+            "label": "Marina liability insurance",
+            "payee": "Midlake Mutual",
+            "amountCents": 41000,
+            "every": "month",
+            "day": 5,
+            "from": "acct_dale_marina"
+          },
+          {
+            "label": "Marina electricity, 2,000 kWh",
+            "payee": "Alder Light & Power",
+            "amountCents": 39000,
+            "every": "month",
+            "day": 20,
+            "from": "acct_dale_marina"
+          }
+        ]
       },
       "relations": [
         {"type": "regard", "to": "marcus_delgado", "fields": {"warmth": 35, "trust": 40, "respect": 40, "t": 0}},
@@ -478,7 +528,49 @@
         "region": "mi",
         "pay_frequency": "monthly",
         "deposit_to": "acct_helen_checking",
-        "annual_income_cents": 2340000
+        "annual_income_cents": 2340000,
+        "bills": [
+          {
+            "label": "Property tax, 114 Harbor Street",
+            "payee": "Port Alder Township",
+            "amountCents": 38000,
+            "every": "month",
+            "day": 1,
+            "from": "acct_helen_checking"
+          },
+          {
+            "label": "Building insurance, 114 Harbor Street",
+            "payee": "Harbor Mutual",
+            "amountCents": 18500,
+            "every": "month",
+            "day": 5,
+            "from": "acct_helen_checking"
+          },
+          {
+            "label": "Electricity, 1A and the stairs, 520 kWh",
+            "payee": "Alder Light & Power",
+            "amountCents": 10140,
+            "every": "month",
+            "day": 20,
+            "from": "acct_helen_checking"
+          },
+          {
+            "label": "Natural gas, building heat",
+            "payee": "Lakeshore Gas",
+            "amountCents": 11000,
+            "every": "month",
+            "day": 22,
+            "from": "acct_helen_checking"
+          },
+          {
+            "label": "Water and sewer, building",
+            "payee": "Port Alder Township",
+            "amountCents": 9500,
+            "every": "month",
+            "day": 25,
+            "from": "acct_helen_checking"
+          }
+        ]
       },
       "relations": [
         {"type": "regard", "to": "jess_kowalczyk", "fields": {"warmth": 85, "trust": 75, "respect": 70, "t": 0}},
@@ -515,7 +607,19 @@
         "pay_frequency": "biweekly",
         "payday": "every other Friday",
         "deposit_to": "acct_nora_checking",
-        "shift_pattern": "three_12h"
+        "shift_pattern": "three_12h",
+        "bills": [
+          {"label": "Rent", "payee": "Lakeview Apartments", "amountCents": 98000, "every": "month", "day": 1, "from": "acct_nora_checking"},
+          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 4000, "every": "month", "day": 14, "from": "acct_nora_checking"},
+          {
+            "label": "Electricity, 340 kWh",
+            "payee": "Alder Light & Power",
+            "amountCents": 6630,
+            "every": "month",
+            "day": 20,
+            "from": "acct_nora_checking"
+          }
+        ]
       },
       "relations": [
         {"type": "regard", "to": "priya_nair", "fields": {"warmth": 45, "trust": 45, "respect": 40, "t": 0}},
@@ -545,7 +649,11 @@
         "pay_frequency": "biweekly",
         "payday": "every other Friday",
         "deposit_to": "acct_sam_checking",
-        "shift_pattern": "shift_8h_rotating"
+        "shift_pattern": "shift_8h_rotating",
+        "bills": [
+          {"label": "Rent", "payee": "Lakeview Apartments", "amountCents": 104000, "every": "month", "day": 1, "from": "acct_sam_checking"},
+          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 5000, "every": "month", "day": 14, "from": "acct_sam_checking"}
+        ]
       },
       "relations": [
         {"type": "regard", "to": "marcus_delgado", "fields": {"warmth": 20, "trust": 30, "respect": 30, "t": 0}},

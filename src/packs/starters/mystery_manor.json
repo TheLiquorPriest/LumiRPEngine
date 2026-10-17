@@ -205,7 +205,8 @@
         "observation": 13,
         "manner": 15,
         "nerve": 13,
-        "knowledge": 11
+        "knowledge": 11,
+        "bills": [{"label": "Housekeeping allowance", "payee": "gideon_pell", "amountCents": 1440, "every": "week", "day": 1}]
       },
       "relations": [
         {"type": "regard", "to": "sir_alaric", "fields": {"warmth": 55, "trust": 60, "respect": 50, "fear": 0, "t": 0}},
@@ -347,7 +348,18 @@
         "observation": 15,
         "manner": 15,
         "nerve": 11,
-        "knowledge": 11
+        "knowledge": 11,
+        "bills": [
+          {
+            "label": "Butcher, baker and grocer",
+            "payee": "Saltreach tradesmen",
+            "amountCents": 840,
+            "every": "week",
+            "day": 6,
+            "from": "acct_household_petty"
+          },
+          {"label": "Coal", "payee": "Saltreach coal merchant", "amountCents": 480, "every": "month", "day": 1, "from": "acct_household_petty"}
+        ]
       },
       "relations": [
         {"type": "regard", "to": "sir_alaric", "fields": {"warmth": 50, "trust": 70, "respect": 60, "fear": 0, "t": 0}},
