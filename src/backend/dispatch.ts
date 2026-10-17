@@ -218,7 +218,7 @@ export class Dispatcher {
         return;
       }
       case "lre.marker": {
-        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
+        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
         if (!body) throw new RequestError("bad_request", "not a valid marker");
         if (body.kind === "migrate") {
           // An Upgrade target must be a revision of this chat's world.
@@ -393,6 +393,8 @@ export class Dispatcher {
       if (body.to > from && body.to >= 2) lines.push({ text: `People without ${name.toLowerCase()} detail get it from the pinned tables when you open them.`, tone: "materialize" });
     } else if (body.kind === "time") {
       lines.push({ text: `${body.control} changes from the next turn; earlier turns keep the setting they were planned with.`, tone: "info" });
+    } else if (body.kind === "adjudicate") {
+      lines.push({ text: "Checks are decided this way from the next turn; earlier turns keep how theirs were decided.", tone: "info" });
     } else {
       lines.push({ text: `The chat moves to revision ${body.to.slice(0, 8)} of ${world.name} from the next turn.`, tone: "info" });
       return { lines, upgrade: await this.upgradePreview(chatId, userId, state, body.to) };

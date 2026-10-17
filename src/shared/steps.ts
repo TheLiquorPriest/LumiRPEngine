@@ -47,4 +47,6 @@ export const STEP_OUTPUTS: Record<StepPurpose, readonly StepTemplateDef["output"
   outline: ["text"],
   extract: ["text", "effects"],
   choices: ["text", "effects"],
+  // A decision only: the rating, its reason and (under narrative authority) the outcome's odds.
+  judge: ["decision", "text"],
 };

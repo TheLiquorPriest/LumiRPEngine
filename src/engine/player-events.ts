@@ -30,6 +30,8 @@ const BOOKKEEPING = new Set<string>([
   ENGINE_EVENTS.pause,
   ENGINE_EVENTS.beat,
   ENGINE_EVENTS.observed,
+  // The roll chip and the Outcome slot tell how a check was decided.
+  ENGINE_EVENTS.adjudged,
   "castlife.decision",
   "castlife.override",
   "economy.price",

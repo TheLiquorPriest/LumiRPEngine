@@ -16,6 +16,7 @@ import type { ActionDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
+import { needsJudge, outcomeChoices, policyOf } from "../engine/adjudication";
 import type { EngineTurnPlan } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { parseOverrides, parseTarget } from "../engine/time";
@@ -30,6 +31,7 @@ import { createRegistry, type Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
 import { kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
+import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { playerKnows } from "../engine/player-events";
@@ -49,7 +51,7 @@ import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TurnBridge } from "./turn-model";
-import { contradiction, factLines, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, refsExist, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, type PlanStart, type SignalFacts, type StepRun, type Tie } from "./turn-steps";
+import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, refsExist, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, type PlanStart, type SignalFacts, type StepRun, type Tie } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, spanText, TIMELAPSE_ACTION } from "./view";
 import { WorldStore } from "./worlds";
 
@@ -496,8 +498,9 @@ export class Runtime implements TurnHooks {
 
   /**
    * The pre phase (DESIGN §5.2, §5.3), before the plan: the turn's intent (a recorded palette or chip
-   * action, else `interpret` when its signals fire), `npc.choose` for agents with the POV, and
-   * `puzzle.answer` when an answer needs judging. One call budget covers this and `afterPlan`.
+   * action, else `interpret` when its signals fire), `npc.choose` for agents with the POV,
+   * `puzzle.answer` when an answer needs judging, and `judge` when the adjudication policy weighs the
+   * player's words or leaves the check to the story. One call budget covers this and `afterPlan`.
    */
   async beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string | null; dryRun: boolean; connectionId: string | null; signal: AbortSignal }): Promise<void> {
     await this.keepBookAttached(input.chatId, input.userId);
@@ -543,6 +546,7 @@ export class Runtime implements TurnHooks {
     trimMap(this.prePhase);
     if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${budget.spent} pre call(s)`, input.userId);
     await this.judgeAnswer(bridge, text, render, settings, facts, budget, input.userId);
+    await this.judgeApproach(bridge, text, render, settings, facts, budget, input.userId);
   }
 
   /**
@@ -706,6 +710,33 @@ export class Runtime implements TurnHooks {
     if (!run || !stage?.answer || !budget.take()) return;
     const p = await puzzleAnswer(this.steps, run, stage.label, stage.answer.expect, answer, userId, budget.signal);
     if (p !== null) bridge.setIntent(text, { ...intent, params: { ...intent.params, puzzle: track, decision: p } }, bridge.wasInterpreted(text));
+  }
+
+  /**
+   * `judge` (DESIGN §11): when the policy would roll a check the player's words may shift, or leaves
+   * it to the story, the described approach is rated (and the story's odds given) before the plan.
+   * The answer rides on the intent, so a Re-run reads the same judgement and the fold never asks.
+   */
+  private async judgeApproach(bridge: TurnBridge, text: string, render: { world: WorldDoc; state: WorldState }, settings: UserSettings, facts: SignalFacts, budget: StepBudget, userId: UserId): Promise<void> {
+    const intent = bridge.intentOf(text);
+    if (!intent?.action || intent.judgement || intent.action === TIMELAPSE_ACTION) return;
+    const action = findAction(this.registry, render.world, intent.action);
+    if (!action) return;
+    const shown = actionOdds(this.registry, render.world, render.state, { action, params: intent.params });
+    const policy = policyOf(render.world, render.state);
+    if (!shown.available || !shown.verdict || !shown.odds || !needsJudge(policy, shown.verdict)) return;
+    const run = runsOf(settings.modelUse, render.world, "judge", facts)[0];
+    if (!run || !budget.take()) return;
+    const odds = shown.odds;
+    const story = shown.verdict.why === "story" ? Object.fromEntries(outcomeChoices(action, Object.keys(odds)).map((o) => [o, odds[o] ?? 0])) : null;
+    const place = placeOfEntity(render.state, render.world.pov);
+    const scene = { you: render.state.entities[render.world.pov]?.name ?? render.world.pov, place: place ? (render.world.places[place]?.name ?? place) : null, present: presentNames(this.registry, render.world, render.state) };
+    const judgement = await judge(this.steps, run, { action: action.label, text, max: policy.description.max, odds: story, scene }, userId, budget.signal);
+    if (!judgement) {
+      this.host.log("warn", `[LumiRPEngine] judge: no judgement for ${action.id}; ${story ? "the unrolled rule decides" : "the roll stands as shown"}`, userId);
+      return;
+    }
+    bridge.setIntent(text, { ...intent, judgement }, bridge.wasInterpreted(text));
   }
 
   /** What `npc.choose` sees about one tie: who, where, when, and the options (private plans stay in this decision call). */
@@ -960,16 +991,8 @@ export class Runtime implements TurnHooks {
       // The action lives in the revision the chat folds at (after any Upgrade), not the run's first.
       const world = input.core.worldAt(input.core.fold(input.observed).state.revision) ?? input.core.worldAt(rec?.defHash ?? "");
       const label = (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
-      if (res.check) {
-        const odds = Object.entries(res.check.odds)
-          .map(([band, p]) => `${band} ${Math.round(p * 100)}%`)
-          .join(" · ");
-        const mod = res.check.modifier !== 0 ? ` ${res.check.modifier > 0 ? "+" : "−"} ${Math.abs(res.check.modifier)}` : "";
-        // The natural die when a band reads it, and the DC a margin is measured from (DESIGN §11).
-        const natural = res.check.natural !== null && (res.check.check.bands ?? []).some((b) => b.natural) ? ` (natural ${res.check.natural})` : "";
-        const dc = res.check.dc !== null && res.check.dc !== 0 ? ` against ${res.check.dc}` : "";
-        stored.push({ id: `roll:${at}`, kind: "roll", ...base, label: `${label}: ${res.check.outcome}`, detail: `Rolled ${res.check.roll.notation}${mod} = ${res.check.total}${natural}${dc}. Odds: ${odds}.`, actions: [], expires: "never", payload: {} });
-      }
+      const chip = rollChip(label, res);
+      if (chip) stored.push({ id: `roll:${at}`, kind: "roll", ...base, label: chip.label, detail: chip.detail, actions: [], expires: "never", payload: {} });
       if (!res.ok && res.failed) stored.push({ id: `decline:${at}`, kind: "decline", ...base, label: `${label}: couldn't`, detail: playerReason(res.failed), actions: [], expires: "next_send", payload: {} });
       else if (res.rejected.length > 0) stored.push({ id: `decline:${at}`, kind: "decline", ...base, label: `${label}: declined`, detail: res.rejected.map((r) => r.rejection.reason).join("; "), actions: [], expires: "next_send", payload: {} });
       // Typed text `interpret` read as an action (DESIGN §9.4, §11): one tap undoes the resolution.
@@ -1407,8 +1430,8 @@ export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Regis
     const label = (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
     const reasons = res.rejected.slice(0, 3).map((r) => r.rejection.reason);
     if (!res.ok) outcome.push(`${label}: it didn't happen (${res.failed?.reason ?? "not possible"}). Narrate the attempt failing.`);
-    else if (res.check) {
-      outcome.push(`${label}: ${res.check.outcome} (rolled ${res.check.total} on ${res.check.roll.notation}). Narrate this result.`);
+    else if (res.check || res.adjudged) {
+      outcome.push(checkLine(label, res));
       for (const r of reasons) outcome.push(`Not possible: ${r}.`);
     } else if (reasons.length > 0) outcome.push(`${label}: it didn't go through (${reasons.join("; ")}). Narrate it failing; nothing changed hands.`);
     else outcome.push(`${label}: done.`);
@@ -1427,6 +1450,73 @@ export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Regis
     for (const a of m.money.slice(0, 4)) montage.push(`${a.label}: in ${formatMoney(a.in, world.currency)}, out ${formatMoney(a.out, world.currency)}`);
   }
   return { outcome, montage };
+}
+
+/** A share as a whole percentage ("62%"), as chips and the Outcome slot say odds. */
+const percent = (p: number): string => `${Math.round(p * 100)}%`;
+
+/**
+ * The Outcome slot's line for an action's check (DESIGN §6.2, §11), worded for how the adjudication
+ * policy decided it: a roll to narrate as it fell (and, under hybrid, a close call that may come at a
+ * cost or leave partial progress), the story's judged outcome, or the reason nothing was rolled.
+ */
+function checkLine(label: string, res: Resolution): string {
+  const a = res.adjudged;
+  const c = res.check;
+  if (c) {
+    const rolled = `rolled ${c.total} on ${c.roll.notation}${a?.approach && a.approach.rating > 0 ? `, ${a.approach.rating} of ${a.approach.max} for the approach` : ""}`;
+    const close = a?.close;
+    if (!a || !close) return `${label}: ${c.outcome} (${rolled}). Narrate this result.`;
+    const passed = a.pass.includes(c.outcome);
+    const near = a.pass.includes(close.outcome);
+    if (passed && !near) return `${label}: ${c.outcome}, only just (${rolled}). Narrate it succeeding; it may come at a cost.`;
+    if (!passed && near) return `${label}: ${c.outcome}, only just (${rolled}). Narrate it failing; it may leave partial progress.`;
+    return `${label}: ${c.outcome}, close to ${close.outcome} (${rolled}). Narrate this result; it may come at a cost or leave partial progress.`;
+  }
+  const outcome = res.outcome ?? "";
+  switch (a?.why) {
+    case "impossible":
+      return `${label}: ${outcome} (too hard to pull off, so no roll). Narrate the attempt failing.`;
+    case "retry":
+      return `${label}: ${outcome} again (nothing has changed since the last try, so no roll). Narrate it failing the same way.`;
+    case "story":
+      return a.judged ? `${label}: ${outcome}, as the story decides from the player's approach (no roll${a.chance === null ? "" : `; the dice gave success ${percent(a.chance)}`}). Narrate this result.` : `${label}: ${outcome} (no roll; the story decides). Narrate this result.`;
+    default:
+      return `${label}: ${outcome} (no roll needed). Narrate this result.`;
+  }
+}
+
+/**
+ * The roll chip (DESIGN §12): what was rolled with its odds, or, when the adjudication policy rolled
+ * nothing, why; with the judged approach and a hybrid close call. Null without a check.
+ */
+export function rollChip(label: string, res: Resolution): { label: string; detail: string } | null {
+  const a = res.adjudged;
+  const c = res.check;
+  const approach = a?.approach ? ` Your approach: ${a.approach.rating} of ${a.approach.max}${a.approach.reason ? ` (${a.approach.reason})` : ""}.` : "";
+  if (c) {
+    const odds = Object.entries(c.odds)
+      .map(([band, p]) => `${band} ${percent(p)}`)
+      .join(" · ");
+    const mod = c.modifier !== 0 ? ` ${c.modifier > 0 ? "+" : "−"} ${Math.abs(c.modifier)}` : "";
+    // The natural die when a band reads it, and the DC a margin is measured from (DESIGN §11).
+    const natural = c.natural !== null && (c.check.bands ?? []).some((b) => b.natural) ? ` (natural ${c.natural})` : "";
+    const dc = c.dc !== null && c.dc !== 0 ? ` against ${c.dc}` : "";
+    const close = a?.close ? ` Close: ${Math.abs(a.close.points)} ${Math.abs(a.close.points) === 1 ? "point" : "points"} ${a.close.points < 0 ? "lower" : "higher"} would have been ${a.close.outcome}.` : "";
+    return { label: `${label}: ${c.outcome}`, detail: `Rolled ${c.roll.notation}${mod} = ${c.total}${natural}${dc}. Odds: ${odds}.${approach}${close}` };
+  }
+  if (!a) return null;
+  const chance = a.chance === null ? "" : ` (${percent(a.chance)} to succeed)`;
+  const why: Record<NonNullable<typeof a.why>, string> = {
+    trivial: `a sure thing${chance}`,
+    impossible: `too hard to try${chance}`,
+    safe: `only risky checks roll${chance}`,
+    unmarked: "checks roll only for marked actions, places and quests",
+    never: "this chat doesn't roll checks",
+    story: a.judged ? `the story decides, judged from your approach${chance}` : "the story decides; nothing judged it, so it went as an unrolled check does",
+    retry: a.retry === "once" ? "you already failed this here; it takes a new scene" : "you already failed this; it takes a change (time, another way, or better odds)",
+  };
+  return { label: `${label}: ${res.outcome ?? ""}`, detail: `No roll: ${a.why ? why[a.why] : "the policy settled it"}.${approach}` };
 }
 
 /** The thing a proposal is about, for chip labels ("coffee", "Toolbox"). */

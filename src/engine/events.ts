@@ -5,6 +5,7 @@
 // a rebased view drops an event whose validation fails. Reducers mutate a working copy.
 
 import type { JsonValue } from "../shared/json";
+import { readAdjudication } from "../shared/adjudication";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { DomainId, EntityId, Level } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
@@ -405,6 +406,10 @@ export function validMarkerBody(raw: unknown): MarkerBody | null {
       const interrupt = INTERRUPT_CLASSES.find((c) => c === scope.interrupt);
       return interrupt ? { kind: "time", control, scope: { interrupt }, to } : null;
     }
+    case "adjudicate": {
+      const to = readAdjudication(raw.to);
+      return to ? { kind: "adjudicate", to } : null;
+    }
     default:
       return null;
   }
@@ -477,6 +482,9 @@ export function applyMarker(state: WorldState, raw: MarkerBody, env?: MarkerEnv)
       return [];
     case "time":
       setTimeControl(state, body);
+      return [];
+    case "adjudicate":
+      state.adjudication = body.to;
       return [];
   }
 }

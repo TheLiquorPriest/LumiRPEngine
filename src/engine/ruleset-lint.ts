@@ -9,6 +9,7 @@ import { DOMAINS } from "../shared/ids";
 import type { LintIssue } from "../shared/protocol";
 import type { CheckDef, EffectSpec, Expr, ProgressionDef, WorldDoc } from "../shared/world";
 import { EFFECT_ONLY_FUNCTIONS, objectiveWhen } from "../shared/world";
+import { lintAdjudication } from "./adjudication";
 import { diceDistribution, naturalDie, parseDice } from "./dice";
 import { callsIn, compile, type FormulaCall } from "./expr";
 import type { Registry } from "./registry-impl";
@@ -252,9 +253,10 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
     }
   }
 
-  // The ruleset container (DESIGN §11).
+  // The ruleset container (DESIGN §11), its adjudication policy first: the sheet's checks below may end early.
   const rs: unknown = world.ruleset;
   if (rs === undefined) return issues;
+  issues.push(...lintAdjudication(world));
   if (!isRecord(rs)) {
     err("ruleset", "ruleset", "The ruleset must be an object.");
     return issues;

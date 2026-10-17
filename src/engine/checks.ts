@@ -125,13 +125,22 @@ function whole(v: Value): number {
   return Math.round(Number(v)) || 0;
 }
 
+/** What the player's described approach does to a check before it is fixed (DESIGN §11 adjudication). */
+export interface CheckShift {
+  modifier?: number;
+  /** Added to the check's own advantage: advantage and disadvantage cancel a die at a time. */
+  advantage?: number;
+  /** Lowers the DC (an opponent's passive score or roll included); a check without one takes it as modifier. */
+  dc?: number;
+}
+
 /**
  * Fixes a check against the state (DESIGN §11). The modifier, advantage and DC are read with
  * `bindings` (the roller is `self`); an opponent's side with the opponent as `self` and the rest of
- * the bindings unchanged. Rejected when the check is opposed and its binding names no one, or the
- * dice can't be read.
+ * the bindings unchanged; then `shift` applies. Rejected when the check is opposed and its binding
+ * names no one, or the dice can't be read.
  */
-export function readyCheck(reg: Registry, ctx: ReadContext, check: CheckDef, bindings: Record<string, EntityId>, vars?: EnvVars): ReadyCheck | Rejection {
+export function readyCheck(reg: Registry, ctx: ReadContext, check: CheckDef, bindings: Record<string, EntityId>, vars?: EnvVars, shift?: CheckShift): ReadyCheck | Rejection {
   const env = scopeEnv({ reg, ctx, bindings, vars });
   const inputs: CheckInputs = {
     modifier: whole(evalExpr(check.modifier ?? 0, env, 0)),
@@ -153,6 +162,15 @@ export function readyCheck(reg: Registry, ctx: ReadContext, check: CheckDef, bin
         const dice = other ? (withAdvantage(other.dice, Math.sign(whole(evalExpr(other.advantage ?? 0, theirs, 0)))) ?? other.dice) : check.dice;
         inputs.against = { dice, modifier: whole(evalExpr((other ? other.modifier : vs.modifier) ?? 0, theirs, 0)) };
       }
+    }
+    if (shift) {
+      inputs.modifier = (inputs.modifier ?? 0) + (shift.modifier ?? 0);
+      inputs.advantage = (inputs.advantage ?? 0) + (shift.advantage ?? 0);
+      const drop = shift.dc ?? 0;
+      // An opponent who rolls is read against DC 0, so lowering it is a DC below 0.
+      if (drop !== 0 && inputs.dc !== undefined && inputs.dc !== null) inputs.dc -= drop;
+      else if (drop !== 0 && inputs.against) inputs.dc = -drop;
+      else inputs.modifier += drop;
     }
     return fixedCheck(check, inputs);
   } catch (e) {

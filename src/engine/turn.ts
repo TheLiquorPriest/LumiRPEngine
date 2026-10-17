@@ -75,7 +75,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     else timelapse = outcome;
   } else {
     if (intent?.action) {
-      resolution = resolveAction(reg, w, { action: intent.action, params: intent.params }, rng, { runSeed: input.runSeed });
+      resolution = resolveAction(reg, w, { action: intent.action, params: intent.params }, rng, { runSeed: input.runSeed, judgement: intent.judgement ?? null });
       if (resolution.events.length > 0) runRulesOnEvents(reg, w, resolution.events, { seed: input.seed });
     }
     const elapsed = turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);

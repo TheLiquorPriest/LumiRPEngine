@@ -21,7 +21,7 @@ const PRESETS: { value: ModelUsePresetId; label: string }[] = [
 export const PRESET_NOTE: Record<ModelUsePresetId, string> = {
   lean: "Narrator + up to 2 model steps a turn. The floor; doesn't meet “a model decides” on its own. The call meter shows each turn's real count.",
   standard: "Narrator + up to 4 model steps a turn. The default. The call meter shows each turn's real count.",
-  full: "Narrator + up to 8 model steps a turn. The call meter shows each turn's real count.",
+  full: "Narrator + up to 9 model steps a turn. The call meter shows each turn's real count.",
   custom: "Your own steps, signals, providers and budgets. The count depends on the steps you enable; the call meter shows it live.",
 };
 
@@ -34,6 +34,7 @@ export const STEP_LABEL: Record<StepPurpose, string> = {
   outline: "Prose outline",
   extract: "Extract changes",
   choices: "Suggested choices",
+  judge: "Judge your approach",
 };
 
 const PHASES = ["pre", "post"] as const;

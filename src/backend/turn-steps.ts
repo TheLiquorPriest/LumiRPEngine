@@ -4,7 +4,7 @@
 //   - prompted text: `brief` and the prose `outline` (stacked on the engine's beats), `choices`;
 //   - prompted `effects`: proposals, validated and bounded like extraction by the caller;
 //   - decisions: `npc.choose` (present agents before the plan, off-screen ones after the reply),
-//     `contradiction` and `puzzle.answer`.
+//     `contradiction`, `puzzle.answer` and `judge` (the player's described approach, DESIGN §11).
 // Secrecy batching rule: each step is its own call, and prose-producing steps only ever see
 // player-visible facts (lines that would leak an unrevealed truth are dropped), so a question that
 // carries a secret never shares a call with prose.
@@ -17,6 +17,7 @@ import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import type { StepSignal } from "../shared/steps";
 import type { ActionDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock } from "../engine/calendar";
+import type { Judgement } from "../engine/adjudication";
 import type { Answers, Questions } from "../engine/decide";
 import { sample } from "../engine/decide";
 import { optionalQuery } from "../engine/pack-kit";
@@ -85,7 +86,7 @@ export function planFacts(world: WorldDoc, before: PlanStart, after: Readonly<Wo
     dayStart: dateAt(cal, after.clock).dayIndex > dateAt(cal, before.clock).dayIndex,
     beat: (plan?.outline.length ?? 0) > 0,
     invitation: (plan?.events ?? []).some((e) => e.type === "castlife.invitation"),
-    conflict: !!res && (!res.ok || res.rejected.length > 0 || /fail|miss|bad/i.test(res.check?.outcome ?? "")),
+    conflict: !!res && (!res.ok || res.rejected.length > 0 || /fail|miss|bad/i.test(res.check?.outcome ?? (res.adjudged ? (res.outcome ?? "") : ""))),
     timelapse: !!plan?.timelapse,
   };
 }
@@ -404,4 +405,58 @@ export async function puzzleAnswer(steps: Steps, run: StepRun, question: string,
   const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run.config, userId, signal);
   const a = result?.answers.correct;
   return a && a.type === "noul" ? a.noul : null;
+}
+
+/** What `judge` is asked about one check: the action, the player's words, the scale, the scene, and (when the story decides) each outcome's exact odds. */
+export interface JudgeAsk {
+  action: string;
+  text: string;
+  max: number;
+  /** Under narrative authority: the outcomes to pick from, with the dice's exact odds as guidance. */
+  odds: Record<string, number> | null;
+  /** Player-visible only: where the player character is and who is there. */
+  scene: JsonValue;
+}
+
+/**
+ * `judge` (DESIGN §11, §5.2): rates the player's described approach from 0 to `max` with a one-line
+ * reason and, when the story decides, gives each outcome's probability. A decision only, in its own
+ * call: no prose comes back. On the Decision route the rating is a score question and the outcome a
+ * choice, so there is no reason. Null when the call fails or gives no rating.
+ */
+export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: UserId, signal: AbortSignal): Promise<Judgement | null> {
+  const scale = `0 (no particular approach, or one that works against them) to ${ask.max} (a clever, prepared approach that fits the situation)`;
+  const choices = ask.odds ? Object.keys(ask.odds) : [];
+  const guidance = ask.odds ? Object.fromEntries(Object.entries(ask.odds).map(([o, p]) => [o, `${Math.round(p * 100)}%`])) : null;
+  const lead = run.template?.template ?? "Judge how well the player's described approach suits what their character attempts.";
+  const outcomesOf = (raw: unknown): Record<string, number> | undefined => {
+    if (!isRecord(raw)) return undefined;
+    const out: Record<string, number> = {};
+    for (const o of choices) if (typeof raw[o] === "number" && Number.isFinite(raw[o]) && raw[o] >= 0) out[o] = raw[o];
+    return Object.keys(out).length > 0 ? out : undefined;
+  };
+  if (run.config.route?.provider === "decision") {
+    const questions: Questions = { rating: { type: "score", instructions: `${lead} Rate it from ${scale}.`, criteria: Array.from({ length: ask.max + 1 }, (_, i) => String(i)) } };
+    if (guidance) questions.outcome = { type: "choice", instructions: "How does it turn out? The dice's exact odds are guidance: a strong approach moves them toward success, a weak one away.", criteria: guidance };
+    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run.config, userId, signal);
+    const rating = answer?.answers.rating;
+    if (!rating || rating.type !== "score") return null;
+    const outcome = answer?.answers.outcome;
+    const outcomes = outcome?.type === "choice" ? outcomesOf(outcome.probabilities) : undefined;
+    return { rating: Math.min(ask.max, Math.max(0, rating.score)), reason: "", ...(outcomes ? { outcomes } : {}) };
+  }
+  const system = [
+    `${lead} Rate the approach from ${scale}, and give a one-line reason in plain words.`,
+    guidance ? `Then decide how it turns out: give each outcome a probability. The dice's exact odds are guidance: lean on them, and move them toward success for a strong approach and away from it for a weak one.` : "",
+    `Output JSON only: {"rating": number, "reason": string${guidance ? `, "outcomes": {${choices.map((o) => `"${o}": number`).join(", ")}}` : ""}}.`,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+  const user = `Action: ${ask.action}\nThe player wrote: ${ask.text.slice(0, 2000)}\nScene: ${JSON.stringify(ask.scene)}${guidance ? `\nOutcomes with the dice's exact odds: ${JSON.stringify(guidance)}` : ""}`;
+  const raw = await steps.helperJson("judge", system, user, run.config, userId, signal);
+  // A reply without a rating is no answer: a made-up middle rating would read as the model's.
+  if (!isRecord(raw) || typeof raw.rating !== "number" || !Number.isFinite(raw.rating)) return null;
+  const reason = typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";
+  const outcomes = outcomesOf(raw.outcomes);
+  return { rating: Math.min(ask.max, Math.max(0, Math.round(raw.rating))), reason, ...(outcomes ? { outcomes } : {}) };
 }

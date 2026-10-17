@@ -5,7 +5,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { Band, DomainId, EntityId, InterruptClass, InterruptPolicy, KindId, Level, PackId, RevisionId, SceneTypeId, StageId, TierId, TrackId } from "../shared/ids";
-import type { FacetId, FacetValueId, RelationInstance } from "../shared/world";
+import type { AdjudicationDef, FacetId, FacetValueId, RelationInstance } from "../shared/world";
 
 export interface EntityState {
   kind: KindId;
@@ -58,6 +58,8 @@ export interface WorldState {
   tracks: Record<TrackId, TrackState>;
   realism: RealismState;
   time: TimeState;
+  /** The adjudication policy an `adjudicate` marker set (DESIGN §11); absent, the world's ruleset decides. */
+  adjudication?: AdjudicationDef;
   /** First materialization per `<entityId>:<domain>`, with its pins (L24, L25). */
   materialized: Record<string, { generatorVersion: number; tablesRevision: string }>;
   /** Pack-owned state slices, keyed by pack id. */

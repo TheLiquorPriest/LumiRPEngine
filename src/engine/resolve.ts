@@ -1,13 +1,18 @@
 // Action resolution (DESIGN §3 Actions, §11): parameters, requirements, then the check, then the
 // outcome's effects, then the duration and any activity the action starts. The check is the one
 // check mechanism (engine/checks): the palette's odds (`actionOdds`) and the roll read the same
-// ready check, so shown odds are the real odds. Outcome effects see the roll as `roll.*`.
+// ready check, so shown odds are the real odds. Outcome effects see the roll as `roll.*`. The
+// adjudication policy (engine/adjudication) decides whether the check rolls at all, what the
+// player's judged approach adds, and who settles it; the palette shows the same verdict.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { ActionDef, CheckDef, EffectSpec, Expr, WorldDoc } from "../shared/world";
+import { plainRolling } from "../shared/adjudication";
+import { approachShift, closeCall, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyOf, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
 import { checkOdds, checkOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
+import { ENGINE_EVENTS } from "./engine-pack";
 import { applyEffects } from "./effects";
 import type { EnvVars, ExprEnv, Value } from "./expr";
 import { materializeAll } from "./materialize";
@@ -54,6 +59,8 @@ export interface Resolution {
   duration: number;
   activity: { type: string; until: number } | null;
   observable: string | null;
+  /** How the adjudication policy decided the check; null without a check or under a plain-rolling policy. */
+  adjudged: Adjudged | null;
 }
 
 export function findAction(reg: Registry, world: WorldDoc, id: ActionId): ActionDef | undefined {
@@ -125,31 +132,37 @@ export interface Availability {
   /** How the check would roll (its notation, advantage, DC and opponent), when the action has one. */
   check: { notation: string; advantage: -1 | 0 | 1; dc: number | null; opponent: EntityId | null } | null;
   duration: number;
+  /** What the adjudication policy makes of the check before it is taken (no roll, too hard, the story decides). */
+  verdict: Verdict | null;
 }
 
 /** What the palette shows: availability, exact odds and duration, against the current state. */
 export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, req: ActionRequest): Availability {
   const p = prepare(reg, world, state, req);
-  if ("code" in p) return { available: false, failed: p, odds: null, modifier: 0, check: null, duration: 0 };
+  if ("code" in p) return { available: false, failed: p, odds: null, modifier: 0, check: null, duration: 0, verdict: null };
   const ctx = reg.context(world, state);
   const env = scopeEnv({ reg, ctx, bindings: p.bindings, vars: p.vars });
   const unmet = firstUnmet(p.action, env);
   const def = checkOf(world, p.action.check);
   const ready = def ? readyCheck(reg, ctx, def, p.bindings, p.vars) : null;
   const usable = ready && !("code" in ready) ? ready : null;
+  const odds = usable ? checkOdds(usable) : null;
   return {
     available: unmet === null && usable === ready,
     failed: unmet !== null ? { code: "requirement", reason: `requires ${unmet}`, requirement: unmet } : ready && "code" in ready ? ready : null,
-    odds: usable ? checkOdds(usable) : null,
+    odds,
     modifier: usable?.modifier ?? 0,
     check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
+    verdict: usable && odds ? verdictOf(policyOf(world, state), { world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null,
   };
 }
 
 export interface ResolveOptions {
   /** Enables in-turn materialization of the actor and entity parameters (DESIGN §9.2). */
   runSeed?: string;
+  /** The turn's recorded `judge` answer (DESIGN §11): the approach's rating, and the story's odds under narrative authority. */
+  judgement?: Judgement | null;
 }
 
 /**
@@ -172,6 +185,7 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
     duration: 0,
     activity: null,
     observable: null,
+    adjudged: null,
   };
   if ("code" in p) return { ...base, failed: p };
 
@@ -196,13 +210,55 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   let check: CheckResult | null = null;
   let outcome: string;
   let vars = p.vars;
+  let adjudged: Adjudged | null = null;
   if (checkDef) {
     const ready = readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars);
     if ("code" in ready) return { ...base, actor: p.actor, failed: ready, events: w.events.slice(start) };
-    const rolled = rollCheck(ready, rng.fork("check"));
-    check = { ...rolled, check: checkDef, notation: ready.notation, modifier: ready.modifier, advantage: ready.advantage, dc: ready.dc, odds: checkOdds(ready) };
-    outcome = rolled.outcome;
-    vars = { ...p.vars, roll: rollVars(ready, rolled) };
+    const odds = checkOdds(ready);
+    const policy = policyOf(w.world, w.state);
+    const verdict = verdictOf(policy, { world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
+    const judgement = opts.judgement ?? null;
+    const place = placeOfEntity(w.state, p.actor);
+    let close: Adjudged["close"] = null;
+    let judged = false;
+    if (verdict.roll) {
+      // The judged approach shifts the roll only: the verdict above read the check as the palette showed it.
+      const shift = approachShift(policy, judgement);
+      const shifted = shift ? readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars, shift) : ready;
+      const rolling = "code" in shifted ? ready : shifted;
+      const rolled = rollCheck(rolling, rng.fork("check"));
+      check = { ...rolled, check: checkDef, notation: rolling.notation, modifier: rolling.modifier, advantage: rolling.advantage, dc: rolling.dc, odds: rolling === ready ? odds : checkOdds(rolling) };
+      outcome = rolled.outcome;
+      vars = { ...p.vars, roll: rollVars(rolling, rolled) };
+      if (policy.authority === "hybrid") close = closeCall(rolling, rolled, rolled.outcome, policy.closeBy);
+    } else {
+      // The story's pick is sampled from the judge's odds; without them the unrolled rule decides.
+      const story = verdict.why === "story" ? judgedOutcome(judgement, outcomeChoices(p.action, Object.keys(odds)), rng.fork("judge")) : null;
+      judged = story !== null;
+      outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, odds, verdict.pass);
+      vars = { ...p.vars, roll: { natural: null, total: null, modifier: ready.modifier, dc: ready.dc, margin: null, outcome } };
+    }
+    if (!plainRolling(policy)) {
+      const approach = judgement && (policy.authority === "narrative" ? verdict.why === "story" : verdict.roll && policy.description.weight !== "none") ? { rating: ratingOf(policy, judgement), max: policy.description.max, reason: judgement.reason } : null;
+      adjudged = { rolled: verdict.roll, why: verdict.why, chance: verdict.chance, pass: verdict.pass, authority: policy.authority, retry: policy.retry, approach, judged, close };
+      // A refused retry is no new attempt: the wait a retry rule counts runs from the failed roll.
+      const tracked = policy.retry !== "free" && verdict.pass.length > 0 && verdict.why !== "retry";
+      w.apply({
+        type: ENGINE_EVENTS.adjudged,
+        data: {
+          actor: p.actor,
+          action: p.action.id,
+          check: checkDef.id ?? "",
+          outcome,
+          rolled: verdict.roll,
+          ...(verdict.why ? { why: verdict.why } : {}),
+          ...(approach ? { rating: approach.rating, max: approach.max, reason: approach.reason.slice(0, 240) } : {}),
+          ...(judged ? { judged: true } : {}),
+          ...(close ? { close: close.outcome } : {}),
+          ...(tracked ? { key: tryKey(p.actor, p.action.id, p.params), place, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready) } : {}),
+        },
+      });
+    }
   } else {
     outcome = Object.prototype.hasOwnProperty.call(p.action.outcomes, "default") ? "default" : (Object.keys(p.action.outcomes)[0] ?? "default");
   }
@@ -225,6 +281,7 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
     duration,
     activity,
     observable: p.action.observable ?? null,
+    adjudged,
   };
 }
 

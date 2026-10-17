@@ -7,6 +7,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId } from "../shared/ids";
 import type { GenerationKind, LedgerEvent } from "../shared/ledger";
 import type { StepPurpose, WorldDoc } from "../shared/world";
+import type { Judgement } from "./adjudication";
 import type { Answers, Questions } from "./decide";
 import type { Registry } from "./registry-impl";
 import type { WorldState } from "./state";
@@ -67,6 +68,8 @@ export interface InterpretOutput {
   probabilities: Record<string, number>;
   /** Time the input lets pass after the action ("…and sleep until the next morning"): `minutes` or `until`. */
   then?: JsonObject;
+  /** The `judge` step's answer for the action's check (DESIGN §11), recorded with the intent so a Re-run reads the same one. */
+  judgement?: Judgement;
 }
 
 /** `extract`: proposals read from a reply, bounded per channel (DESIGN §9.4). */

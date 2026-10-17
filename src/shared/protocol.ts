@@ -11,7 +11,7 @@ import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, 
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { KindDef, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, KindDef, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -129,12 +129,14 @@ export interface GmRequest extends Request<"lre.gm"> {
 }
 
 /**
- * A Play change to the running chat: a realism, time or Upgrade marker. With `preview`, nothing is
- * written. An Upgrade with `merge` brings the revision's definition changes in as the picks say.
+ * A Play change to the running chat: a realism, time, adjudication or Upgrade marker. With
+ * `preview`, nothing is written. An Upgrade with `merge` brings the revision's definition changes in
+ * as the picks say.
  */
 export type MarkerRequest = Request<"lre.marker"> & { chatId: ChatId; preview?: true } & (
     | { kind: "resolve"; domain: DomainId; scope: ResolveScope; to: Level }
     | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue }
+    | { kind: "adjudicate"; to: AdjudicationDef }
     | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   );
 

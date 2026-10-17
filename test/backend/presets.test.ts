@@ -11,7 +11,7 @@ import type { ModelUseSettings } from "../../src/shared/settings";
 import type { StepPurpose } from "../../src/shared/world";
 import { FakeHost } from "../support/fake-host";
 
-const PRE: StepPurpose[] = ["interpret", "npc.choose", "puzzle.answer", "brief", "outline"];
+const PRE: StepPurpose[] = ["interpret", "npc.choose", "puzzle.answer", "judge", "brief", "outline"];
 const POST: StepPurpose[] = ["extract", "npc.choose", "contradiction", "choices"];
 
 function ceiling(m: Omit<ModelUseSettings, "preset">): number {

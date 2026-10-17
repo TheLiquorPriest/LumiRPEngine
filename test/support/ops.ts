@@ -14,6 +14,7 @@
 // these exercise; L10 and L12 are in scenarios.test.ts and reference.test.ts. Pack-dependent
 // invariants arrive with the packs.
 
+import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
 import type { ChatId } from "../../src/shared/ids";
 import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, Rec, Tombstone, UpgradePicks } from "../../src/shared/ledger";
@@ -647,6 +648,7 @@ export class Runner {
         { kind: "resolve", domain: "gear", scope: { all: true }, to: op.b < 0.5 ? 2 : 3 },
         { kind: "time", control: "scale", scope: { all: true }, to: op.b < 0.5 ? 2 : 1 },
         { kind: "migrate", to: pick(this.h.revisions, op.b) },
+        { kind: "adjudicate", to: presetAdjudication(op.b < 0.5 ? "narrative" : "balanced") },
       ];
       return { kind: "marker", id, target: "head", body: pick(bodies, op.a) };
     }

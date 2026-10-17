@@ -24,7 +24,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
-import type { FieldType, WorldCurrency } from "./world";
+import type { AdjudicationDef, FieldType, WorldCurrency } from "./world";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
 
@@ -211,7 +211,7 @@ export interface PaletteView {
   timelapse: TimelapseView | null;
 }
 
-/** The running chat's folded realism and time controls (Play → Calendar, "This chat" realism). */
+/** The running chat's folded realism, time controls and adjudication policy (Play → Calendar, Settings → This chat). */
 export interface ControlsView {
   realism: {
     preset: RealismPresetId;
@@ -234,6 +234,8 @@ export interface ControlsView {
     unitCap: { agentDays: number; events: number };
     npcCalls: number;
   };
+  /** The policy deciding this chat's checks (DESIGN §11): its own marker's, else the world's, else plain rolling. */
+  adjudication: AdjudicationDef;
 }
 
 export interface StateView {

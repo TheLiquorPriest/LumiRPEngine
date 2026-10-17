@@ -1,6 +1,7 @@
 // User settings (`userStorage/settings.json`), the two preset families (D25; DESIGN §5.3, §9.1) and
 // D4 per-connection extraction learning (`userStorage/extraction-learning.json`; DESIGN §11).
 
+import { defaultAdjudication, readAdjudication } from "../shared/adjudication";
 import type { DomainId, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, UserId } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -45,13 +46,17 @@ function step(enabled: boolean, signals: string[], route: StepConfig["route"]): 
   return { enabled, signals, ...(route ? { route: { ...route } } : {}), maxTokens: HELPER_MAX_TOKENS };
 }
 
-/** Model-use presets (DESIGN §5.3). Routing per D10: `interpret` and `extract` on the helper; `npc.choose` on the Decision connection. */
+/**
+ * Model-use presets (DESIGN §5.3). Routing per D10: `interpret` and `extract` on the helper; `npc.choose` on the Decision connection.
+ * `judge` runs only when a world's adjudication policy needs it (the player's words weigh, or the story decides), never on Lean.
+ */
 export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit<ModelUseSettings, "preset">> = {
   lean: {
     steps: {
       interpret: step(true, ["classifier"], HELPER),
       extract: step(true, ["reply"], HELPER),
       "npc.choose": step(false, [], DECISION),
+      judge: step(false, ["always"], HELPER),
     },
     budgets: { pre: { calls: 1, ms: 20_000 }, post: { calls: 1, ms: 30_000 } },
     tokens: { sections: 300 },
@@ -61,6 +66,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       interpret: step(true, ["classifier"], HELPER),
       extract: step(true, ["reply"], HELPER),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION),
+      judge: step(true, ["always"], HELPER),
     },
     budgets: { pre: { calls: 2, ms: 30_000 }, post: { calls: 2, ms: 45_000 } },
     tokens: { sections: 600 },
@@ -73,6 +79,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       extract: step(true, ["reply"], HELPER),
       contradiction: step(true, ["reply"], HELPER),
       "npc.choose": step(true, ["present", "offscreen"], DECISION),
+      judge: step(true, ["always"], HELPER),
     },
     budgets: { pre: { calls: 8, ms: 60_000 }, post: { calls: 4, ms: 60_000 } },
     tokens: { sections: 1000 },
@@ -96,6 +103,9 @@ export function defaultSettings(): UserSettings {
     },
     // New chats start from the world's own realism and time defaults (DESIGN §9.1).
     overrideWorldDefaults: false,
+    // A world without a policy plays as every check always has; this fills in only for such worlds.
+    adjudication: defaultAdjudication(),
+    overrideWorldAdjudication: false,
     extraction: {},
     swipeDefault: "rerun",
   };
@@ -118,13 +128,19 @@ export function mergePatch(target: JsonValue, patch: JsonValue): JsonValue {
 function normalize(raw: unknown): UserSettings {
   const base = defaultSettings();
   if (!isRecord(raw)) return base;
+  // A file saved before the judge step lists its named preset's steps without it: that preset's own
+  // judge fills in, so a Lean player's stays off rather than taking the default preset's.
+  const mu = isRecord(raw.modelUse) ? raw.modelUse : {};
+  const named = oneOf(mu.preset, ["lean", "standard", "full"] as const);
+  const judge = named ? MODEL_USE_PRESETS[named].steps.judge : undefined;
+  if (judge && !(isRecord(mu.steps) && hasOwn(mu.steps, "judge"))) base.modelUse.steps.judge = structuredClone(judge);
   const merged = mergePatch(JSON.parse(JSON.stringify(base)) as JsonValue, JSON.parse(JSON.stringify(raw)) as JsonValue);
   return isRecord(merged) && merged.v === 1 ? conform(merged, base) : base;
 }
 
 // ---------------------------------------------------------------- the settings schema
 
-const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"];
+const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"];
 /** A phase deadline above this is a typo, not a wish (10 min). */
 const MAX_PHASE_MS = 600_000;
 
@@ -239,6 +255,9 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     realism,
     time,
     overrideWorldDefaults: typeof v.overrideWorldDefaults === "boolean" ? v.overrideWorldDefaults : d.overrideWorldDefaults,
+    // A named preset reads as its own values, so choosing one is a whole policy.
+    adjudication: readAdjudication(v.adjudication) ?? d.adjudication,
+    overrideWorldAdjudication: typeof v.overrideWorldAdjudication === "boolean" ? v.overrideWorldAdjudication : d.overrideWorldAdjudication,
     extraction,
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
   };

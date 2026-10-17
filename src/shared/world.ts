@@ -272,6 +272,8 @@ export interface PlaceDef {
   sources?: string[];
   /** The map that compiled this place (it owns it; Build edits it in the map). Absent on authored places. */
   map?: MapId;
+  /** Marked for the adjudication policy's `marked` timing: checks roll here and in the places inside it (DESIGN §11). */
+  adjudicate?: boolean;
 }
 
 export interface RouteLeg {
@@ -437,6 +439,13 @@ export interface CheckDef {
   vs?: OpposedRoll;
   /** Absent or empty: the DC's two bands when the check has a DC or an opponent, else every roll reads `none`. */
   bands?: CheckBand[];
+  /**
+   * The outcomes that count as a success when the adjudication policy reads the check's chance or
+   * tells a failure (DESIGN §11). Absent: `success` and every band listed after it.
+   */
+  pass?: string[];
+  /** The outcome a check that isn't rolled passes with, when neither the action nor the check has `success`. */
+  auto?: string;
 }
 
 export interface ActivitySpec {
@@ -462,6 +471,8 @@ export interface ActionDef {
   /** The label other characters can observe (no secrets; linted). */
   observable?: string;
   pack?: PackId;
+  /** Marked for the adjudication policy's `marked` timing: its check rolls wherever it is taken (DESIGN §11). */
+  adjudicate?: boolean;
 }
 
 // ---------------------------------------------------------------- calendar, schedules, tracks
@@ -593,6 +604,8 @@ export interface TrackDef {
   visibility: Visibility;
   /** With `known_by`: who knows the track besides its owner and those who know the owner; matching is knowing (DESIGN §7). */
   knownBy?: Selector;
+  /** Marked for the adjudication policy's `marked` timing: checks roll while the track is in progress (DESIGN §11). */
+  adjudicate?: boolean;
 }
 
 // ---------------------------------------------------------------- packs, realism, time, context
@@ -662,7 +675,8 @@ export type StepPurpose =
   | "brief"
   | "outline"
   | "extract"
-  | "choices";
+  | "choices"
+  | "judge";
 
 /** A world-authored prompted or decision step template (DESIGN §5.2). */
 export interface StepTemplateDef {
@@ -791,6 +805,47 @@ export interface RulesetDef {
   sheet?: SheetLayoutDef;
   /** The lowest effective level each domain plays at, whatever the realism settings: stat modifiers need Sheets 3. */
   minLevels?: Partial<Record<DomainId, Level>>;
+  /** How the world's checks are decided: when they roll, what the player's words weigh, who settles them (DESIGN §11). */
+  adjudication?: AdjudicationDef;
+}
+
+/** A named adjudication preset expands to concrete values; `custom` keeps them as edited. */
+export type AdjudicationPresetId = "narrative" | "balanced" | "crunchy" | "custom";
+/** When an action's check rolls: every time, only when it is risky, only where the author marked, or never. */
+export type CheckTiming = "every" | "risky" | "marked" | "never";
+/** How the player's described approach shifts a rolled check: not at all, a bonus, advantage, or a lower DC. */
+export type DescriptionWeight = "none" | "bonus" | "advantage" | "dc";
+/** Who settles a check: the roll; the roll, with close calls told to the narrator; or the story, through the judge. */
+export type CheckAuthority = "mechanics" | "hybrid" | "narrative";
+/** Retrying a failed check: a fresh roll; the same failure until something changed; the same failure until the scene changes. */
+export type RetryRule = "free" | "changed" | "once";
+
+/**
+ * The adjudication policy (DESIGN §11): when checks happen and who settles them. A world without
+ * one plays as every check always has: rolled, and settled by the roll.
+ */
+export interface AdjudicationDef {
+  preset: AdjudicationPresetId;
+  checks: CheckTiming;
+  /** With `risky`: a check rolls only when its success chance is below this (0–1). */
+  riskyAt: number;
+  /** A success chance at or above this passes without a roll; null never does. */
+  trivialAt: number | null;
+  /** A success chance at or below this fails without a roll; null never does. */
+  impossibleAt: number | null;
+  description: {
+    weight: DescriptionWeight;
+    /** The judge rates an approach from 0 to this: the most a bonus adds, or a DC drops by. */
+    max: number;
+    /** With `advantage`: the rating that grants it. */
+    advantageAt: number;
+  };
+  authority: CheckAuthority;
+  /** With `hybrid`: a roll that many points or fewer from another outcome is a close call. */
+  closeBy: number;
+  retry: RetryRule;
+  /** With `changed`: game minutes after which the same check may be rolled again. */
+  retryAfter: number;
 }
 
 export interface WorldDoc {

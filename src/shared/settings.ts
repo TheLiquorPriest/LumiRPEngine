@@ -4,7 +4,7 @@
 // conservative default is one tap to change (D31).
 
 import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "./ids";
-import type { StepPurpose } from "./world";
+import type { AdjudicationDef, StepPurpose } from "./world";
 
 /** Where a model step runs. `decision` uses `decisions.evaluate`; `helper` a helper JSON call. */
 export interface StepRoute {
@@ -125,6 +125,10 @@ export interface UserSettings {
   time: TimeSettings;
   /** New chats start from these realism and time settings instead of the world's own defaults (DESIGN §9.1). */
   overrideWorldDefaults: boolean;
+  /** How checks are decided in new chats (DESIGN §11): it fills in for a world whose ruleset sets none. */
+  adjudication: AdjudicationDef;
+  /** New chats use `adjudication` even where the world's ruleset sets a policy of its own. */
+  overrideWorldAdjudication: boolean;
   extraction: ExtractionBounds;
   swipeDefault: "rerun" | "renarrate";
 }

@@ -6,7 +6,7 @@
 // `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
 import type { JsonObject, JsonValue } from "../shared/json";
-import { isRecord } from "../shared/json";
+import { isRecord, safeKey } from "../shared/json";
 import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids";
 import { DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import { isBand, tierBand, tierLabel, tierOf } from "../shared/tiers";
@@ -40,7 +40,21 @@ export const ENGINE_EVENTS = {
   entity: "engine.entity",
   /** What a coarsened record's fold would get wrong of the POV's observations (`engine/seen`), at its end. */
   observed: "engine.observed",
+  /** How the adjudication policy decided an action's check (DESIGN §11): rolled or not and why, the judge's rating, and the attempt a retry rule reads. */
+  adjudged: "engine.adjudged",
 } as const;
+
+/** An action's latest attempt at a check, as a retry rule reads it (DESIGN §11). */
+export interface TryRecord {
+  /** The clock when it was made. */
+  at: number;
+  /** Where the actor was. */
+  place: string | null;
+  outcome: string;
+  failed: boolean;
+  /** The check as it was rolled (dice, modifier, DC): a different one is a change. */
+  odds: string;
+}
 
 export interface EngineSlice {
   fired: Record<string, { n: number; last: number }>;
@@ -54,6 +68,8 @@ export interface EngineSlice {
   rr: number;
   /** The scene key the clock was paused in, or null (DESIGN §9.2: paused for the current scene). */
   pauseScene: string | null;
+  /** Each action's latest attempt at a check, keyed by actor, action and parameters (`engine.adjudged`). */
+  tries: Record<string, TryRecord>;
 }
 
 export function readEngineSlice(state: Readonly<WorldState>): EngineSlice {
@@ -69,6 +85,10 @@ export function readEngineSlice(state: Readonly<WorldState>): EngineSlice {
   for (const [k, v] of Object.entries(rec(s.revealed))) if (Array.isArray(v)) revealed[k] = v.filter((x): x is string => typeof x === "string");
   const agents: Record<string, number> = {};
   for (const [k, v] of Object.entries(rec(s.agents))) if (typeof v === "number") agents[k] = v;
+  const tries: Record<string, TryRecord> = {};
+  for (const [k, v] of Object.entries(rec(s.tries))) {
+    if (isRecord(v) && typeof v.at === "number" && (typeof v.place === "string" || v.place === null) && typeof v.outcome === "string" && typeof v.failed === "boolean" && typeof v.odds === "string") tries[k] = { at: v.at, place: v.place, outcome: v.outcome, failed: v.failed, odds: v.odds };
+  }
   return {
     fired,
     attempts,
@@ -77,6 +97,7 @@ export function readEngineSlice(state: Readonly<WorldState>): EngineSlice {
     agents,
     rr: typeof s.rr === "number" ? s.rr : 0,
     pauseScene: typeof s.pauseScene === "string" ? s.pauseScene : null,
+    tries,
   };
 }
 
@@ -255,6 +276,18 @@ const events: EventTypeDef<PackEvent>[] = [
     validate: (e) => (Object.values(e.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" }),
     apply: (e, state) => restoreObservations(state, e.data),
     describe: () => "what you saw meanwhile",
+  },
+  {
+    type: ENGINE_EVENTS.adjudged,
+    validate: (e, ctx) => need(e, "actor", "action", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str(e, "actor")}` }),
+    apply: (e, state) => {
+      // Only an attempt a retry rule reads carries a key; its record is the latest for that check.
+      const key = e.data.key;
+      if (typeof key !== "string" || !safeKey(key)) return;
+      const place = e.data.place;
+      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str(e, "outcome"), failed: e.data.failed === true, odds: str(e, "odds") };
+    },
+    describe: (e) => `${str(e, "actor")}: ${str(e, "action").replace(/_/g, " ")}, ${str(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str(e, "why")})`}`,
   },
 ];
 

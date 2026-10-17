@@ -7,6 +7,7 @@
 // The journal is authoritative; message metadata is its re-asserted mirror (DESIGN §4.3).
 
 import type { JsonObject, JsonValue } from "./json";
+import type { AdjudicationDef } from "./world";
 import type {
   ActionId,
   ActivityType,
@@ -225,7 +226,8 @@ export type MarkerBody =
   /** With `merge`, the revision's definition changes come into the chat as the picks say; without, only the revision switches. */
   | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   | { kind: "resolve"; domain: DomainId; scope: ResolveScope; to: Level }
-  | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue };
+  | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue }
+  | { kind: "adjudicate"; to: AdjudicationDef };
 
 /** A message-level intent marker: a pure intent with no values (DESIGN §4.3). */
 export type Marker = MarkerBody & {
