@@ -7,8 +7,9 @@ import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
+import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
 import { Harness } from "../support/harness";
-import { balanceOf, POV } from "../support/test-pack";
+import { balanceOf, openMoney, POV } from "../support/test-pack";
 
 async function cash(h: Harness, chatId: string): Promise<number> {
   const { optimized } = await h.folds(chatId);
@@ -294,6 +295,59 @@ describe("ledger scenarios", () => {
     h.host.navigate(chat, head.id, 0);
     await h.host.settle();
     expect((await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried")).toEqual([]);
+    await expectAgree(h, chat);
+  });
+
+  // A ✎ cash fix on Dev as the GM view records it while his money isn't open: the opening first (+50), then the correction to 30.
+  const devCashFix: LedgerEvent[] = [openMoney("dev"), { type: "post", lines: [{ account: "dev", amount: -20 }, { account: `${EXTERNAL_ACCOUNT_PREFIX}correction`, amount: 20 }], memo: "Correction" }];
+  const OPENS_DEV = "Dev counts out his wages. [opens:dev]";
+
+  async function devMoney(h: Harness, chat: string): Promise<[number, number]> {
+    const { state } = (await h.folds(chat)).optimized;
+    return [balanceOf(state, "dev"), balanceOf(state, `${EXTERNAL_ACCOUNT_PREFIX}opening`)];
+  }
+
+  test("a Re-run whose reply opens the money a fix opened drops the fix with a note: the opening posts once (L46)", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "look around");
+    const head = h.host.head(chat);
+    if (!head) throw new Error("no head");
+    expect((await h.write(chat, { kind: "post", id: "fix", target: "head", entry: { kind: "fix", events: devCashFix } })).applied).toBe(true);
+    expect(await devMoney(h, chat)).toEqual([30, -50]);
+    const g = await h.host.start(chat, { type: "swipe", messageId: head.id });
+    await h.host.finish(g, OPENS_DEV);
+    expect(await devMoney(h, chat)).toEqual([50, -50]);
+    expect((await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried")).toHaveLength(1);
+    await expectAgree(h, chat);
+  });
+
+  test("a Re-read whose new read opens the money a kept fix opened drops the fix with a note (L46)", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "look around");
+    const head = h.host.head(chat);
+    if (!head) throw new Error("no head");
+    await h.write(chat, { kind: "post", id: "fix", target: "head", entry: { kind: "fix", events: devCashFix } });
+    h.host.editMessage(chat, head.id, OPENS_DEV);
+    await h.host.settle();
+    expect((await h.write(chat, { kind: "reread", id: "r1", messageId: head.id, swipeId: head.swipeId })).applied).toBe(true);
+    expect(await devMoney(h, chat)).toEqual([50, -50]);
+    expect((await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried")).toHaveLength(1);
+    await expectAgree(h, chat);
+  });
+
+  test("a fix held while a reply streams is refused when it lands if the reply opened the money it opens (L46)", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "look around");
+    h.host.sendUser(chat, "look around");
+    await h.host.settle();
+    const g = await h.host.start(chat, { type: "normal" });
+    expect((await h.write(chat, { kind: "post", id: "held", target: "head", entry: { kind: "fix", events: devCashFix } })).pending).toBe(true);
+    await h.host.finish(g, OPENS_DEV);
+    expect(await devMoney(h, chat)).toEqual([50, -50]);
+    expect((await h.core(chat)).journal.refused?.map((r) => r.write.id)).toEqual(["held"]);
     await expectAgree(h, chat);
   });
 

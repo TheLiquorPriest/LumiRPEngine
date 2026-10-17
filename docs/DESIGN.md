@@ -18,7 +18,7 @@ Section numbers are stable: code comments and docs cite them as `DESIGN §9.2`. 
 | `D1`–`D35` | Design decisions (§2) |
 | `G1`–`G9` | Gaps in the host that I plan to propose fixes for (§16) |
 | `P1`–`P4` | The four principles behind the per-chat ledger (§4.3) |
-| `L1`–`L45` | The named invariants the ledger property suite checks (§14) |
+| `L1`–`L46` | The named invariants the ledger property suite checks (§14) |
 | `B0`–`B9` | The internal build blocks (§17); `B0` is the throwaway spike whose checks are in §18 |
 
 A few terms, in plain words:
@@ -547,7 +547,7 @@ Level 0 turns a domain off. Story systems (tracks) do not depend on realism. Tim
   - **What counts as "show":** a **player-facing observation or an in-fiction action** (opening a trunk, emptying a wallet, auditing an account). Showing a pack's Play panel is an observation of the POV: switching to the tab sends `lre.view.open` for that panel with no entity, which materializes the POV in the domain of the panel's pack. The inspector, audits, playtests and Dry Run render **labelled previews from the seed** and record nothing; the GM view shows what is recorded and, for what isn't yet, its representation (an unopened account's opening balance), and records nothing either. One more thing needs a person's money: the recurring money processes (Money 3+) open the authored accounts of the people they act for, posting their opening balances (the same event a view records; it draws no randomness) in the first slot holding 09:00, so their bills draw on the money the author gave them.
   - **Until it is materialized, an entity shows its representation.** For money that is each authored account's `opening` amount, exactly what the materialization posts: the POV's Money panel and the HUD cash show it (net worth and band included), as the GM view does for everyone else, so a new chat never shows zero and nothing changes when the accounts open. A ✎ cash fix materializes the holder's money first and measures its correction from there, recording both in the fix.
   - **Where it is recorded:** materialization during a turn goes in that swipe's `events`, ahead of the action's effects. Between turns it goes in the head record's `post`. **Inside a turn's in-flight window it is deferred** (P2, §4.3): the panel keeps showing the representation (or "pending", for detail that has none, such as a container's contents) and the detail materializes on the head once the window closes, so nothing shown is ever re-sampled.
-  - It is capped per write and recorded with `generatorVersion` and `tablesRevision`.
+  - It is capped per write and recorded with `generatorVersion` and `tablesRevision`. Detail materializes once per entity and domain: a materialization of detail already recorded fails its check, so a carried, kept or held entry holding one (a ✎ cash fix whose accounts a Re-run's reply already opened) is dropped or refused with its note, and an opening balance never posts twice.
   - **Pinned versions.** Each world revision pins the generator versions and data-table revisions it uses: tables are copied into the revision (§4.1), and every pinned generator version stays in the bundle. A running chat keeps its revision's pins across extension updates. New tables or generators reach it only through **Upgrade** (a `migrate` marker), never silently. First-shown detail stays recorded in `events`/`post`.
   - Detail whose source materialization entry is missing from the current fold (a branch cut before it, a Discard, a drop or an inert entry in a rebased view, a Re-narrate drop) regenerates from the same seed and pins, but from the current representation, which may differ. The UI therefore labels it "regenerated" whenever that source entry is missing from the current fold.
 - **Time (D29).** Deterministic by default; no time control or timelapse needs a model call.
@@ -874,6 +874,7 @@ I stopped reviewing the ledger on paper once repeated review rounds kept finding
 | **L43 A Re-run carries its fixes** | Every live ✎ fix or GM edit of the swipe a Re-run was made from is on the new record with its `seq`, events and undos, anchored at the record's path, or is a Journal drop; nothing else is copied. |
 | **L44 An Upgrade keeps what play changed** | An Upgrade with picks never takes a revision's value over one play changed, unless the owner picked it. |
 | **L45 Copies fold alike** | A branch or an import folds every message it copied as its chat does: the same folds, paths and state, from the message metadata alone. |
+| **L46 Detail materializes once** | On any path, an entity's detail in a domain is materialized at most once (a Keep conversion aside), however its entries are carried, kept, held or rebased. |
 
 **Loop-sim** (including mixed-level and Story-default scenarios)
 - the clock advances every turn unless paused; timelapses stop only on `stop`-class interrupts;

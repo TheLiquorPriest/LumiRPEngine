@@ -10,13 +10,14 @@
 // L20 starting markers after every operation; L2 switch-and-back (excursion), L3 no pause on a switch
 // or removal, L5 off-path commit, L6 P4 re-render, L8 held writes, L13/L14 Continue, L15 stopped
 // Continue, L19 deletion, L34 dry run, L38 assistant edits, L39 user-edit pause, L43 a Re-run
-// carries its fixes, L45 a branch or import folds as its source, per operation; L31 determinism in
-// properties.test.ts. L4 is the classification these exercise; L10 and L12 are in scenarios.test.ts
-// and reference.test.ts. Pack-dependent invariants arrive with the packs.
+// carries its fixes, L45 a branch or import folds as its source, L46 detail materialized once, per
+// operation; L31 determinism in properties.test.ts. L4 is the classification these exercise; L10 and
+// L12 are in scenarios.test.ts and reference.test.ts. Pack-dependent invariants arrive with the packs.
 
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
 import type { ChatId } from "../../src/shared/ids";
+import { hasOwn } from "../../src/shared/json";
 import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, Rec, Tombstone, UpgradePicks } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE, ROOT_PATH } from "../../src/shared/ledger";
 import { decodeLedger, toChain } from "../../src/backend/ledger-io";
@@ -26,11 +27,11 @@ import { isLive, isTombstoned } from "../../src/engine/ledger/path";
 import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
 import type { Harness } from "./harness";
-import { POV } from "./test-pack";
+import { openMoney, POV } from "./test-pack";
 
 export type Op =
-  | { op: "send"; text: number; reply: number; createAtEnd: boolean; rerender: boolean; money?: number; toll?: number; fight?: number }
-  | { op: "regenerate"; at: number; reply: number; renarrate?: boolean; toll?: number }
+  | { op: "send"; text: number; reply: number; createAtEnd: boolean; rerender: boolean; money?: number; toll?: number; fight?: number; opens?: number }
+  | { op: "regenerate"; at: number; reply: number; renarrate?: boolean; toll?: number; opens?: number }
   | { op: "continue"; at: number; reply: number; stop: boolean; rerenderPrefix: boolean }
   | { op: "editAndSend"; at: number; text: number; reply: number; branch: boolean }
   | { op: "navigate"; at: number; swipe: number }
@@ -42,15 +43,18 @@ export type Op =
   | { op: "deleteMessage"; at: number }
   | { op: "branch"; at: number }
   | { op: "import" }
-  /** `gm`: a GM-style fix instead (a money correction, a relation added or removed, a grouped edit), picked by its value. */
-  | { op: "write"; kind: number; a: number; b: number; gm?: number }
-  /** A GM-style fix on the head, then a Re-run of the head with any reply (L43). */
-  | { op: "fixRerun"; gm: number; a: number; reply: number }
+  /**
+   * `gm`: a GM-style fix instead (a money correction, a relation added or removed, a grouped edit),
+   * picked by its value; `open`: a ✎ cash fix on Dev instead, which opens his money first while it isn't.
+   */
+  | { op: "write"; kind: number; a: number; b: number; gm?: number; open?: number }
+  /** A GM-style fix on the head (with `open`, a ✎ cash fix on Dev), then a Re-run of the head with any reply (L43). */
+  | { op: "fixRerun"; gm: number; a: number; reply: number; open?: number; opens?: number }
   | { op: "dryRun" }
   | { op: "restart" }
   | { op: "clobber"; at: number; echo: boolean }
   | { op: "excursion"; at: number; inner: Op[] }
-  | { op: "inFlight"; type: number; inner: Op[]; stop: boolean; reply: number }
+  | { op: "inFlight"; type: number; inner: Op[]; stop: boolean; reply: number; opens?: number }
   /** An Upgrade with picks (the definition merge) to one of the revisions, `picks` choosing them. */
   | { op: "upgrade"; to: number; picks: number };
 
@@ -64,19 +68,26 @@ const MONEY_TEXTS = ["deposit:60", "deposit:150", "pay:50", "pay:20", "pay:80", 
 const TOLL_REPLIES = ["You pay the toll. [pay:30]", "A fee is taken. [pay:15]", "The meter eats your money. [pay:70]"];
 // A fight against the rat (start, act, end turn, end), kept apart for the same reason; the optional `fight` op field picks from these.
 const FIGHT_TEXTS = ["fight:rat", "strike:rat", "strike:rat", "end_turn", "flee"];
+// Replies naming Dev, whose read opens his money (once), kept apart for the same reason; the optional `opens` op field picks from these.
+const OPENING_REPLIES = ["Dev counts out his wages. [opens:dev]", "Dev pays you back. [opens:dev] [found:5]"];
 
-/** How often a run exercised a funds drop, a grouped drop on a rebased view, a Re-run carrying or dropping a fix, and a fight's start, acts, turns and end (the suite asserts they happen). */
+/**
+ * How often a run exercised a funds drop, a grouped drop on a rebased view, a Re-run carrying or
+ * dropping a fix, a Re-run dropping a fix whose materialization its new swipe had already made, and
+ * a fight's start, acts, turns and end (the suite asserts they happen).
+ */
 export interface Coverage {
   fundsDrops: number;
   groupDrops: number;
   carried: number;
   carryDrops: number;
+  openDrops: number;
   fights: Record<"start" | "act" | "turn" | "end", number>;
 }
 
 /** A fresh count for a runner or a whole suite. */
 export function noCoverage(): Coverage {
-  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
+  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, openDrops: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
 }
 
 const FIGHT_EVENTS: Record<string, keyof Coverage["fights"]> = { "combat.start": "start", "combat.act": "act", "combat.turn": "turn", "combat.end": "end" };
@@ -113,12 +124,14 @@ function gmFix(which: number, x: number): LedgerEvent[] {
 export function generate(rng: Rng, length: number, depth = 0): Op[] {
   const ops: Op[] = [];
   const r = (): number => rng.next();
-  // Fights draw from a stream of their own, so every other op is generated as before.
+  // Fights draw from a stream of their own, so every other op is generated as before; so do Dev's
+  // money openings (replies naming him, ✎ cash fixes on him).
   const fights = rng.fork(`fights:${depth}`);
+  const opens = rng.fork(`opens:${depth}`);
   for (let i = 0; i < length; i++) {
     const roll = r();
-    if (roll < 0.22) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: r() < 0.2, ...(r() < 0.35 ? { money: r() } : {}), ...(r() < 0.2 ? { toll: r() } : {}), ...(fights.next() < 0.3 ? { fight: fights.next() } : {}) });
-    else if (roll < 0.29) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5, ...(r() < 0.3 ? { toll: r() } : {}) });
+    if (roll < 0.22) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: r() < 0.2, ...(r() < 0.35 ? { money: r() } : {}), ...(r() < 0.2 ? { toll: r() } : {}), ...(fights.next() < 0.3 ? { fight: fights.next() } : {}), ...(opens.next() < 0.15 ? { opens: opens.next() } : {}) });
+    else if (roll < 0.29) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5, ...(r() < 0.3 ? { toll: r() } : {}), ...(opens.next() < 0.3 ? { opens: opens.next() } : {}) });
     else if (roll < 0.35) ops.push({ op: "continue", at: r(), reply: r(), stop: r() < 0.3, rerenderPrefix: r() < 0.2 });
     else if (roll < 0.38) ops.push({ op: "editAndSend", at: r(), text: r(), reply: r(), branch: r() < 0.3 });
     else if (roll < 0.45) ops.push({ op: "navigate", at: r(), swipe: r() });
@@ -130,14 +143,14 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     else if (roll < 0.65) ops.push({ op: "deleteMessage", at: r() });
     else if (roll < 0.66) ops.push({ op: "branch", at: r() });
     else if (roll < 0.67) ops.push({ op: "import" });
-    else if (roll < 0.755) ops.push({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}) });
+    else if (roll < 0.755) ops.push({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}), ...(opens.next() < 0.15 ? { open: opens.next() } : {}) });
     else if (roll < 0.77) ops.push({ op: "upgrade", to: r(), picks: r() });
-    else if (roll < 0.8) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r() });
+    else if (roll < 0.8) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r(), ...(opens.next() < 0.5 ? { open: opens.next() } : {}), ...(opens.next() < 0.5 ? { opens: opens.next() } : {}) });
     else if (roll < 0.82) ops.push({ op: "dryRun" });
     else if (roll < 0.84) ops.push({ op: "restart" });
     else if (roll < 0.87) ops.push({ op: "clobber", at: r(), echo: r() < 0.5 });
     else if (roll < 0.93 && depth === 0) ops.push({ op: "excursion", at: r(), inner: generateExcursion(rng, 1 + Math.floor(r() * 4)) });
-    else if (depth === 0) ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3)), stop: r() < 0.25, reply: r() });
+    else if (depth === 0) ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3), opens), stop: r() < 0.25, reply: r(), ...(opens.next() < 0.3 ? { opens: opens.next() } : {}) });
     else ops.push({ op: "write", kind: r(), a: r(), b: r() });
   }
   return ops;
@@ -155,12 +168,12 @@ function generateExcursion(rng: Rng, length: number): Op[] {
   return ops;
 }
 
-/** Operations interleaved while a reply streams (P2). */
-function generateInner(rng: Rng, length: number): Op[] {
+/** Operations interleaved while a reply streams (P2); `opens` is the generator's own stream for Dev's money. */
+function generateInner(rng: Rng, length: number, opens: Rng): Op[] {
   const ops: Op[] = [];
   for (let i = 0; i < length; i++) {
     const roll = rng.next();
-    if (roll < 0.4) ops.push({ op: "write", kind: rng.next(), a: rng.next(), b: rng.next(), ...(rng.next() < 0.3 ? { gm: rng.next() } : {}) });
+    if (roll < 0.4) ops.push({ op: "write", kind: rng.next(), a: rng.next(), b: rng.next(), ...(rng.next() < 0.3 ? { gm: rng.next() } : {}), ...(opens.next() < 0.2 ? { open: opens.next() } : {}) });
     else if (roll < 0.55) ops.push({ op: "navigate", at: rng.next() * 0.8, swipe: rng.next() });
     else if (roll < 0.7) ops.push({ op: "editAssistant", at: rng.next() * 0.8, text: rng.next() });
     else if (roll < 0.8) ops.push({ op: "editUser", at: rng.next(), text: rng.next() });
@@ -241,7 +254,8 @@ export class Runner {
         await host.settle();
         const g = await host.start(chat, { type: "normal", createAtEnd: op.createAtEnd });
         const pausesBefore = (await this.h.core(chat)).journal.pauses.length;
-        await host.finish(g, op.toll !== undefined ? pick(TOLL_REPLIES, op.toll) : pick(REPLIES, op.reply), op.rerender ? { rerender: { [u]: `${text} ` } } : {});
+        const reply = op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : op.toll !== undefined ? pick(TOLL_REPLIES, op.toll) : pick(REPLIES, op.reply);
+        await host.finish(g, reply, op.rerender ? { rerender: { [u]: `${text} ` } } : {});
         // L6: the host's re-render of the turn's own user message never pauses.
         if (op.rerender && (await this.h.core(chat)).journal.pauses.length > pausesBefore) throw new InvariantError("L6", "a P4 re-render paused the chat");
         return;
@@ -253,7 +267,7 @@ export class Runner {
         const tombstones = structuredClone((await this.h.core(chat)).journal.tombstones);
         this.h.renarrateNext = op.renarrate === true;
         const g = await host.start(chat, { type: "swipe", messageId: target.id });
-        await host.finish(g, op.toll !== undefined ? pick(TOLL_REPLIES, op.toll) : pick(REPLIES, op.reply));
+        await host.finish(g, op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : op.toll !== undefined ? pick(TOLL_REPLIES, op.toll) : pick(REPLIES, op.reply));
         this.h.renarrateNext = false;
         if (op.renarrate) await this.checkRenarrate(chat, target.id, g.swipeId, before, tombstones);
         else await this.checkRerun(chat, target.id, g.swipeId, before, tombstones);
@@ -412,12 +426,12 @@ export class Runner {
       case "fixRerun": {
         const head = this.assistants().at(-1);
         if (!head || this.assistants().length < 2) return;
-        await this.h.write(chat, { kind: "post", id: `w${++this.ids}`, target: "head", entry: { kind: "fix", events: gmFix(op.gm, op.a) } });
+        await this.h.write(chat, { kind: "post", id: `w${++this.ids}`, target: "head", entry: { kind: "fix", events: op.open !== undefined ? await this.devCashFix(op.open) : gmFix(op.gm, op.a) } });
         const core = await this.h.core(chat);
         const before = structuredClone(core.journal.messages[head.id]?.ledger);
         const tombstones = structuredClone(core.journal.tombstones);
         const g = await host.start(chat, { type: "swipe", messageId: head.id });
-        await host.finish(g, pick([...REPLIES, ...TOLL_REPLIES], op.reply));
+        await host.finish(g, op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : pick([...REPLIES, ...TOLL_REPLIES], op.reply));
         await this.checkRerun(chat, head.id, g.swipeId, before, tombstones);
         return;
       }
@@ -505,8 +519,9 @@ export class Runner {
         }
         this.streaming = null;
         const changed = type !== "continue" && (await parentOfTarget()) !== planned;
-        if (op.stop) await host.stop(g, pick(REPLIES, op.reply).slice(0, 6));
-        else await host.finish(g, pick(REPLIES, op.reply));
+        const reply = op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : pick(REPLIES, op.reply);
+        if (op.stop) await host.stop(g, reply.slice(0, 6));
+        else await host.finish(g, reply);
         if (before && g.messageId && g.swipeId !== undefined) await this.checkRerun(chat, g.messageId, g.swipeId, before.ledger, before.tombstones);
         if (changed) {
           // An unplanned turn (under a pause) holds nothing made on the old chain; it commits where it lands.
@@ -651,6 +666,7 @@ export class Runner {
       if (!copy && !dropped) throw new InvariantError("L43", `${chat}/${messageId}: the Re-run neither carried nor dropped fix ${fix.seq}`);
       if (copy && dropped) throw new InvariantError("L43", `${chat}/${messageId}: fix ${fix.seq} was both carried and dropped`);
       if (dropped) this.coverage.carryDrops++;
+      if (dropped && fix.events.some((e) => e.type === "materialize")) this.coverage.openDrops++;
       if (!copy) continue;
       this.coverage.carried++;
       if (copy.kind !== "fix" || hashJson(copy.events) !== hashJson(fix.events)) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} differs from its source`);
@@ -660,8 +676,19 @@ export class Runner {
     if (copies.some((p) => !live.some((f) => f.seq === p.seq))) throw new InvariantError("L43", `${chat}/${messageId}: the Re-run copied an entry that isn't a live fix of its source`);
   }
 
+  /**
+   * A ✎ cash fix on Dev as the GM view records one (`setField`): while his money isn't open on the
+   * head, it opens first and the fix holds that materialization; then a correction out of his account.
+   */
+  private async devCashFix(x: number): Promise<LedgerEvent[]> {
+    const amount = pick([10, 20, 40], x);
+    const open = hasOwn((await this.h.folds(this.current)).optimized.state.materialized, "dev:money");
+    return [...(open ? [] : [openMoney("dev")]), { type: "post", lines: [{ account: "dev", amount: -amount }, { account: `${EXTERNAL_ACCOUNT_PREFIX}correction`, amount }], memo: "Correction" }];
+  }
+
   private async writeFor(op: Extract<Op, { op: "write" }>): Promise<HeldWrite | null> {
     const id = `w${++this.ids}`;
+    if (op.open !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: await this.devCashFix(op.open) } };
     if (op.gm !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: gmFix(op.gm, op.a) } };
     const all = this.messages();
     const k = op.kind;
@@ -715,7 +742,7 @@ export class Runner {
     if (this.h.service.errors.length > 0) throw new InvariantError("errors", this.h.service.errors.join("\n"));
     for (const chatId of this.chats) {
       const core = await this.h.core(chatId);
-      const { reference, optimized, cold } = await this.h.folds(chatId);
+      const { reference, optimized, cold, materializedTwice } = await this.h.folds(chatId);
       // L42: a cold fold that starts from the chat's stored snapshots equals the full fold.
       if (hashJson(cold.state) !== hashJson(reference.state) || hashJson(cold.messages) !== hashJson(reference.messages) || hashJson(cold.notes) !== hashJson(reference.notes) || hashJson(cold.keepReport) !== hashJson(reference.keepReport) || hashJson(cold.violations) !== hashJson(reference.violations)) throw new InvariantError("L42", `${chatId}: a snapshot-started fold differs from the full fold`);
       // L1: the optimized fold equals the reference fold.
@@ -731,6 +758,9 @@ export class Runner {
       for (const [account, balance] of Object.entries(reference.state.accounts)) {
         if (!converted && !account.startsWith(EXTERNAL_ACCOUNT_PREFIX) && balance < 0) throw new InvariantError("L40", `${chatId}: ${account} folded to ${balance}`);
       }
+      // L46: an entity's detail in a domain is materialized at most once on any path (a Keep
+      // conversion is again the player's override).
+      if (!converted && materializedTwice.length > 0) throw new InvariantError("L46", `${chatId}: ${materializedTwice.join(", ")} materialized twice`);
       const droppedNotes = new Set(reference.notes.filter((n) => n.kind === "dropped").map((n) => `${n.messageId}:${JSON.stringify(n.ref)}`));
       const droppedKeep = new Set(reference.keepReport.filter((k) => k.status === "dropped").map((k) => `${k.messageId}:${JSON.stringify(k.ref)}`));
       if ([...droppedNotes].some((k) => !droppedKeep.has(k)) || [...droppedKeep].some((k) => !droppedNotes.has(k))) throw new InvariantError("L40", `${chatId}: dropped notes and Keep lines differ`);
@@ -843,6 +873,7 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       coverage.groupDrops += runner.coverage.groupDrops;
       coverage.carried += runner.coverage.carried;
       coverage.carryDrops += runner.coverage.carryDrops;
+      coverage.openDrops += runner.coverage.openDrops;
       for (const k of ["start", "act", "turn", "end"] as const) coverage.fights[k] += runner.coverage.fights[k];
     }
     return null;

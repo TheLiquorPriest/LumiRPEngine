@@ -4,7 +4,8 @@
 // User text drives planning: `buy:<item>:<price>`, `use:<item>`, `earn:<n>`, `roll`,
 // `deposit:<n>` and `pay:<n>` (postings on Sam's account), `shop:<item>:<price>` (a posting and
 // the item as one event group), anything else is a plain turn. Reply text drives reading:
-// `[found:<n>]`, `[lose:<item>]`, `[pay:<n>]`.
+// `[found:<n>]`, `[lose:<item>]`, `[pay:<n>]`, and `[opens:<id>]` (naming someone opens their money,
+// once, ahead of the rest, as a read naming them does).
 //
 // The pack guards the core `post` the way economy does: an own account never goes
 // below zero, so a payment rebased onto a poorer branch is dropped, not folded negative.
@@ -97,6 +98,11 @@ export function balanceOf(state: Readonly<WorldState>, account: string = POV): n
 /** A posting between Sam's account and the outside: positive amounts pay in. */
 function posting(amount: number, memo: string): LedgerEvent {
   return { type: "post", lines: [{ account: POV, amount }, { account: `${EXTERNAL_ACCOUNT_PREFIX}${amount >= 0 ? "job" : "shop"}`, amount: -amount }], memo };
+}
+
+/** A person's money opening with 50, as a materialization records it (a view, a read naming them, or a ✎ cash fix first). */
+export function openMoney(entity: string): LedgerEvent {
+  return { type: "materialize", entity, domain: "money", generatorVersion: 1, tablesRevision: "t", events: [{ type: "post", lines: [{ account: entity, amount: 50 }, { account: `${EXTERNAL_ACCOUNT_PREFIX}opening`, amount: -50 }], memo: "Opening balance" }] };
 }
 
 export const testPack: PackDef = {
@@ -280,8 +286,9 @@ export const testModel: TurnModel = {
     else if (verb === "shop" && a) events.push({ ...posting(-(Number(b ?? "0") || 0), `bought ${a}`), group: `shop:${a}` }, { type: "test.buy", data: { item: a, price: 0 }, group: `shop:${a}` });
     return events;
   },
-  read({ text }) {
+  read({ state, text }) {
     const events: LedgerEvent[] = [];
+    for (const id of new Set([...text.matchAll(/\[opens:(\w+)\]/g)].map((m) => m[1] ?? ""))) if (Object.hasOwn(state.entities, id) && !Object.hasOwn(state.materialized, `${id}:money`)) events.push(openMoney(id));
     for (const m of text.matchAll(/\[found:(\d+)\]/g)) events.push({ type: "add", entity: POV, field: "cash", delta: Number(m[1]) });
     for (const m of text.matchAll(/\[lose:(\w+)\]/g)) events.push({ type: "test.lose", data: { item: m[1] ?? "" } });
     for (const m of text.matchAll(/\[pay:(\d+)\]/g)) events.push(posting(-Number(m[1]), "fee"));

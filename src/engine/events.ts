@@ -198,6 +198,9 @@ export function coreEventTypes(lookup: () => EventTypes): EventTypeDef[] {
     type: "materialize",
     validate: (e, ctx) => {
       if (!hasEntity(ctx.state, e.entity)) return reject("missing_entity", `no entity ${e.entity}`);
+      // Detail is sampled once per entity and domain (DESIGN §9.2): a second one, such as a carried
+      // ✎ cash fix's when the new swipe already opened the accounts, would post their opening again.
+      if (hasOwn(ctx.state.materialized, `${e.entity}:${e.domain}`)) return reject("materialized", `${e.domain} detail for ${nameOf(ctx, e.entity)} is already recorded`);
       // Nested events validate in sequence against the state they will see.
       const scratch = structuredClone(ctx.state) as WorldState;
       for (const inner of e.events) {

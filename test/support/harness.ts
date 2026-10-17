@@ -4,14 +4,15 @@ import { ChatSnapshots, LedgerService, toChain } from "../../src/backend/ledger-
 import { defaultSettings } from "../../src/backend/settings-store";
 import { startMarkersFrom } from "../../src/backend/start-markers";
 import type { ChatId } from "../../src/shared/ids";
-import { isRecord } from "../../src/shared/json";
+import { hasOwn, isRecord } from "../../src/shared/json";
 import type { ChatRun, HeldWrite } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import type { LedgerCore } from "../../src/engine/ledger/journal";
-import { referenceFold } from "../../src/engine/ledger/reference";
+import { referenceFold, type FoldTypes } from "../../src/engine/ledger/reference";
+import type { EventTypeDef } from "../../src/engine/registry";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import combatPack from "../../src/packs/combat/core/index";
 import { FakeHost } from "./fake-host";
@@ -22,6 +23,8 @@ export interface Folds {
   optimized: FoldOutput;
   /** A cold fold (empty cache) that starts from the chat's stored snapshots (L42). */
   cold: FoldOutput;
+  /** `entity:domain` of each materialization the reference fold applied over detail already recorded (L46). */
+  materializedTwice: string[];
 }
 
 /** Snapshots every few messages, so short generated sequences exercise them (production: 200). */
@@ -124,7 +127,19 @@ export class Harness {
     const optimized = core.fold(observed);
     const snapshots = this.service.snapshotsOf(chatId);
     const cold = new LedgerFold(this.registry, { snapshotEvery: HARNESS_SNAPSHOT_EVERY }).fold({ ...input, ...(snapshots ? { snapshots: new ChatSnapshots(snapshots.toJSON()) } : {}) });
-    return { reference: referenceFold(input, this.registry), optimized, cold };
+    // The reference fold re-folds from scratch, so it sees every materialization a path applies: the
+    // watch notes one that lands on detail already recorded, and changes nothing.
+    const materializedTwice: string[] = [];
+    const materialize = this.registry.get("materialize");
+    const watched: EventTypeDef | undefined = materialize && {
+      ...materialize,
+      apply: (e, state, ctx) => {
+        if (e.type === "materialize" && hasOwn(state.materialized, `${e.entity}:${e.domain}`)) materializedTwice.push(`${e.entity}:${e.domain}`);
+        materialize.apply(e, state, ctx);
+      },
+    };
+    const types: FoldTypes = { relations: this.registry.relations, context: this.registry.context, get: (type) => (type === "materialize" ? watched : this.registry.get(type)) };
+    return { reference: referenceFold(input, types), optimized, cold, materializedTwice };
   }
 
   /** The chain as the folds see it (journal overlaid on metadata). */
