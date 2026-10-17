@@ -257,9 +257,11 @@ describe("realism examples: gear", () => {
 
 describe("realism examples: NPC lives", () => {
   test("a job schedule: Maya is at the café, working, in the Cast panel", () => {
+    // Cast shows what someone is doing only to a POV that is with them.
     const w = setup();
     lapse(w, until(w, "2026-10-21T10:00"));
-    expect(buildCastView(w.ctx).people.find((p) => p.id === "maya")).toMatchObject({ place: "Daybreak Café", activity: "work shift" });
+    w.apply({ type: "set", entity: "you", field: "place", value: "cafe" });
+    expect(buildCastView(w.ctx).people.find((p) => p.id === "maya")).toMatchObject({ here: true, place: "Daybreak Café", activity: "work shift" });
   });
 
   test("a school term and a vacation change the day plans", () => {
@@ -268,10 +270,13 @@ describe("realism examples: NPC lives", () => {
       wd.schedules.rosa_school = { id: "rosa_school", owner: "rosa", target: "activity", recurrence: { every: "week", weekdays: [1, 2, 3, 4, 5], from: "2026-10-19", until: "2026-10-23" }, slots: [{ start: "09:00", end: "15:00", value: "school" }] };
     });
     lapse(w, until(w, "2026-10-21T08:00"));
+    // Rosa's day shows in Cast while the POV is with her: at her place, then at the lake.
+    w.apply({ type: "set", entity: "you", field: "place", value: "apartment_hall" });
     expect(buildCastView(w.ctx).people.find((p) => p.id === "rosa")?.timeline?.some((b) => b.label === "school")).toBe(true);
     const cal = calendarOf(w.world);
     w.state.entities.rosa!.fields.trips = [{ from: clockOfLocal(cal, "2026-10-28T08:00"), until: clockOfLocal(cal, "2026-10-30T20:00"), place: "lake", label: "Fishing trip" }];
     lapse(w, until(w, "2026-10-28T13:00"));
+    w.apply({ type: "set", entity: "you", field: "place", value: "lake" });
     const rosa = buildCastView(w.ctx).people.find((p) => p.id === "rosa");
     expect(rosa?.timeline?.some((b) => b.label === "school")).toBe(false);
     expect(rosa?.timeline?.some((b) => b.label === "Fishing trip")).toBe(true);
@@ -280,6 +285,8 @@ describe("realism examples: NPC lives", () => {
 
   test("agenda progress shows in the Cast panel", () => {
     const w = setup((wd) => {
+      // A public agenda shows for someone the POV knows, here or away.
+      wd.entities.you!.relations.push({ type: "knows", to: "jordan" });
       wd.tracks.jordan_plan = {
         id: "jordan_plan",
         kind: "agenda",

@@ -79,13 +79,16 @@ describe("castlife: commitments and the day planner", () => {
 
   test("off-screen agents live their plans: Maya is at the café during her shift", () => {
     const w = setup(3);
+    w.apply({ type: "link", rel: "knows", from: "you", to: "maya" });
     const cal = calendarOf(w.world);
     const day = dayWith(w, [3]);
     lapse(w, clockAt(cal, day, 10 * 60) - w.state.clock);
     expect(w.state.entities.maya?.fields.place).toBe("cafe");
     expect(dayPlan(w.ctx, "maya").blocks.some((b) => b.fixed && b.activity === "work_shift")).toBe(true);
-    const view = buildCastView(w.ctx);
-    expect(view.people.find((p) => p.id === "maya")?.timeline?.some((b) => b.kind === "work")).toBe(true);
+    // The POV knows her but is elsewhere: Cast lists her without her whereabouts or her day.
+    const maya = buildCastView(w.ctx).people.find((p) => p.id === "maya");
+    expect(maya).toMatchObject({ here: false });
+    expect([maya?.place, maya?.activity, maya?.timeline, maya?.next]).toEqual([undefined, undefined, undefined, undefined]);
     expect(fold(reg, w.world, startState(w.world), w.events)).toEqual(w.state);
   });
 

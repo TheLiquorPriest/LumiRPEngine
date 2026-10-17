@@ -3,6 +3,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
+import { calendarOf, formatClock } from "../../src/engine/calendar";
+import { buildCastView } from "../../src/packs/castlife/core/index";
 import type { WorldDoc } from "../../src/shared/world";
 import { applyEffects } from "../../src/engine/effects";
 import { ENGINE_EVENTS } from "../../src/engine/engine-pack";
@@ -144,5 +146,30 @@ describe("space.seen: where the POV has been and whom it saw", () => {
     expect([w.state.entities.you?.fields.x, w.state.entities.you?.fields.y]).toEqual([3, 4]);
     move(w, "rosa", "cafe");
     expect(w.state.entities.rosa?.fields.x).toBeUndefined();
+  });
+});
+
+describe("Cast shows only what the POV knows", () => {
+  test("someone here shows what they do; someone known and away only where and when last seen; strangers and the hidden aren't listed", () => {
+    const w = riverton((world) => {
+      world.kinds.mechanic = { id: "mechanic", label: "Mechanic", extends: "person", fields: { role: { type: "text", visibility: "secret" } } };
+      Object.assign(world.entities.rosa!, { kind: "mechanic", fields: { ...world.entities.rosa!.fields, place: "apartment", role: "getaway driver" } });
+    });
+    w.apply({ type: "set", entity: "maya", field: "activity", value: "making_coffee" });
+    const cast = () => Object.fromEntries(buildCastView(w.ctx).people.map((p) => [p.id, p]));
+    const before = cast();
+    // Jordan was never met and is away; the Lurker is secret and the Stranger unknown, though both are here.
+    expect(Object.keys(before).sort()).toEqual(["maya", "rosa"]);
+    expect(before.maya).toMatchObject({ here: true, place: "Your apartment", activity: "making coffee" });
+    // Rosa's role is secret: Cast falls back to her public occupation.
+    expect(before.rosa?.role).toBe("auto mechanic");
+    w.apply({ type: "link", rel: "knows", from: "you", to: "maya" });
+    w.apply({ type: "clock", minutes: 30, cause: "advance" });
+    applyEffects(reg, w, [{ type: "move", args: { entity: "you", to: "cafe" } }], { bindings: {}, rng: createRng("go") });
+    const after = cast();
+    expect(Object.keys(after).sort()).toEqual(["maya"]);
+    expect(after.maya?.here).toBe(false);
+    expect(after.maya?.lastSeen).toEqual({ place: "Your apartment", at: formatClock(calendarOf(w.world), w.state.clock) });
+    expect([after.maya?.place, after.maya?.activity, after.maya?.timeline, after.maya?.next]).toEqual([undefined, undefined, undefined, undefined]);
   });
 });

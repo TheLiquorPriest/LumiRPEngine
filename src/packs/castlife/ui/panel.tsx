@@ -1,6 +1,7 @@
-// Play → Cast (DESIGN §12): the people the panel lists, with today's timeline, agendas the POV knows
-// about, regard (one band per pair at Relationships 1, axes above) and their next commitment.
-// People present in the scene come first. The list can be grouped by a classification facet players
+// Play → Cast (DESIGN §12): everyone the POV knows and anyone here. Someone here shows what they
+// are doing, today's timeline and their next commitment; someone away shows where and when the POV
+// last saw them. Also agendas the POV knows about and regard (one band per pair at Relationships 1,
+// axes above). People present in the scene come first. The list can be grouped by a classification facet players
 // can see, by group membership or by tier, and filtered by those facets' values (nested values
 // included) and by groups: within one kind of chip any will do, across kinds all must hold, as in a
 // selector. The POV's own groups, with its role in each, head the panel. Hidden facets and tags
@@ -23,6 +24,7 @@ export interface CastPerson {
   here: boolean;
   activity?: string;
   place?: string;
+  lastSeen?: { place?: string; at: string };
   regard: { axis: string; band: string; value?: number }[];
   timeline: { start: string; end: string; label: string; kind: SlotKind; reasons: string[] }[];
   agenda: { label: string; stage: string }[];
@@ -74,6 +76,7 @@ export function decodeCastView(value: unknown): CastView | null {
             here: p.here === true,
             activity: optStr(p.activity),
             place: optStr(p.place),
+            lastSeen: isRecord(p.lastSeen) ? { place: optStr(p.lastSeen.place), at: str(p.lastSeen.at) } : undefined,
             regard: list(p.regard, (r) => ({ axis: str(r.axis), band: str(r.band), value: optNum(r.value) })),
             timeline: list(p.timeline, (s) => ({ start: str(s.start), end: str(s.end), label: str(s.label), kind: oneOf(s.kind, SLOT_KINDS, "other"), reasons: strings(s.reasons) })),
             agenda: list(p.agenda, (a) => ({ label: str(a.label), stage: str(a.stage) })),
@@ -235,6 +238,7 @@ export function CastPanel(props: PanelProps) {
           <Row key={a.label} k={a.label} v={a.stage} sub="agenda" />
         ))}
         {p.next ? <Row k="Next" v={p.next.at} sub={p.next.label} /> : null}
+        {p.lastSeen ? <Row k="Last seen" v={p.lastSeen.at} sub={p.lastSeen.place} /> : null}
       </Card>
     );
   };

@@ -34,7 +34,9 @@ import { isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { classValues, isGroup, isMemberOf, MEMBER_OF } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
-import { canSeeEntity } from "../../../engine/visibility";
+import { lastSighting } from "../../../engine/seen";
+import { playerKnows } from "../../../engine/player-events";
+import { canSeeEntity, canSeeField, canSeePlace } from "../../../engine/visibility";
 
 // ---------------------------------------------------------------- needs
 
@@ -415,6 +417,8 @@ export interface CastPerson {
   here: boolean;
   activity?: string;
   place?: string;
+  /** Someone away: where (when the POV may name the place) and when the POV last saw them. */
+  lastSeen?: { place?: string; at: string };
   regard?: { axis: string; band: string; value?: number }[];
   timeline?: { start: string; end: string; label: string; kind: "work" | "sleep" | "free" | "travel" | "other"; reasons: string[] }[];
   agenda?: { label: string; stage: string }[];
@@ -461,16 +465,20 @@ function kindOfBlock(activity: string): "work" | "sleep" | "free" | "travel" | "
   return "other";
 }
 
+/**
+ * Play → Cast (DESIGN §7, §12): the people the POV knows (`playerKnows`) and anyone it can see here.
+ * Someone here shows what they are doing and, with LOD1, their day; someone away shows only where
+ * and when the POV last saw them, never where they are now or what they plan. Fields follow field
+ * visibility, and agendas show only when public.
+ */
 export function buildCastView(ctx: ReadContext): CastView {
   const pov = ctx.world.pov;
   const level = ctx.levelOf(pov, "castlife");
   const cal = calendarOf(ctx.world);
   const here = placeOfEntity(ctx.state, pov);
   const view = optionalQuery(ctx, "relationships.view");
-  const shown = (id: EntityId): boolean => {
-    const vis = own(ctx.world.entities, id)?.visibility ?? "public";
-    return vis !== "secret" && (vis !== "known_by" || !!own(ctx.state.entities, pov)?.relations.some((r) => r.type === "knows" && r.to === id));
-  };
+  // Who the POV can see: the groups shown, and the people present (the shared rules, `isGone` included).
+  const shown = (id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
   const groupIds = Object.keys(ctx.state.entities)
     .sort()
     .filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && shown(id));
@@ -485,27 +493,36 @@ export function buildCastView(ctx: ReadContext): CastView {
   const people: CastPerson[] = [];
   for (const id of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, id);
-    if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id) || !shown(id)) continue;
+    if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
     const place = placeOfEntity(ctx.state, id);
+    const present = place !== null && place === here;
+    if (!(present ? shown(id) : playerKnows(ctx.registry, ctx.world, ctx.state, pov, id))) continue;
     const classes: Record<FacetId, FacetValueId[]> = {};
     for (const [facet] of facets) {
       const values = classValues(ctx.world, ctx.state, id, facet);
       if (values.length > 0) classes[facet] = [...values];
     }
+    const sees = (field: string): boolean => canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, field);
+    const role = sees("role") ? strOf(e.fields.role) : "";
     const p: CastPerson = {
       id,
       name: e.name,
-      role: strOf(e.fields.role, strOf(e.fields.occupation).replace(/_/g, " ")),
-      here: place !== null && place === here,
+      role: role !== "" ? role : sees("occupation") ? strOf(e.fields.occupation).replace(/_/g, " ") : "",
+      here: present,
       tier: e.tier,
       classes,
       groups: membershipsOf(id).map((m) => ({ id: m.id, ...(m.role !== undefined ? { role: m.role } : {}) })),
     };
-    if (typeof e.fields.activity === "string") p.activity = e.fields.activity.replace(/_/g, " ");
-    if (place && (p.here || level >= 2)) p.place = own(ctx.world.places, place)?.name ?? place;
+    if (present) {
+      if (typeof e.fields.activity === "string" && sees("activity")) p.activity = e.fields.activity.replace(/_/g, " ");
+      if (sees("place")) p.place = own(ctx.world.places, place)?.name ?? place;
+    } else if (level >= 2) {
+      const last = lastSighting(ctx.state, id);
+      if (last) p.lastSeen = { ...(canSeePlace(ctx.registry, ctx.world, ctx.state, pov, last.place) ? { place: own(ctx.world.places, last.place)?.name ?? last.place } : {}), at: formatClock(cal, last.at) };
+    }
     const regard = view ? view(ctx, id, pov) : [];
     if (regard.length > 0) p.regard = regard;
-    const plan = e.agent ? dayPlan(ctx, id) : null;
+    const plan = present && e.agent ? dayPlan(ctx, id) : null;
     if (plan && level >= 3) p.timeline = plan.blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
     const agenda = agendaFor(ctx.world, ctx.state, id);
     if (agenda.length > 0 && own(ctx.world.tracks, agenda[0]?.track ?? "")?.visibility === "public") p.agenda = agenda.map((a) => ({ label: a.label, stage: a.stageLabel }));
