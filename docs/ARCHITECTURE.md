@@ -232,7 +232,7 @@ declare module "../../../engine/registry" {
 }
 ```
 
-`UiPackDef {id, register(r: UiRegistry)}`, with `panel(PanelDef)`, `editor(EditorDef)` and `chip(kind, component)`. Components receive their view model and `send`, which wraps the protocol.
+`UiPackDef {id, register(r: UiRegistry)}`, with `panel(PanelDef)`, `editor(EditorDef)`, `config(component)` and `chip(kind, component)`. Components receive their view model and `send`, which wraps the protocol. `config` gives the registering pack dedicated fields for its `config` in Build (the economy pack's narrated-price cap): they render on the pack's entry under Packs, above the config as JSON, and edit the same object (`PackConfigProps`). Play sends `lre.view.open` with no entity whenever a pack's panel is shown, so the POV's detail in that pack's domain materializes; the panel shows the representation until it lands.
 
 ## 6. Data tables (`shared/tables.ts`)
 
