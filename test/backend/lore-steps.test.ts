@@ -7,11 +7,14 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
+import { Working } from "../../src/engine/working";
 import type { DecideRequest, QuietRequest, QuietToolCall } from "../../src/backend/host";
-import { TOOL_SUPPORT_PATH } from "../../src/backend/lore-steps";
+import { LookupBudget, StepLore, TOOL_SUPPORT_PATH } from "../../src/backend/lore-steps";
 import { sectionTokens } from "../../src/backend/book";
 import { runDir } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
+import type { StepPurpose, WorldDoc } from "../../src/shared/world";
+import { baseWorld, registryOf, startState } from "../packs/support";
 import { Rig } from "../support/rig";
 
 const SECRET = "The ferryman scuttled the old boat for the insurance money";
@@ -393,5 +396,27 @@ describe("the inspector's lore traces", () => {
     expect(context).toContain('"title":"Dev\'s past"');
     expect(context).not.toContain("work, rest");
     expect(context).not.toContain("wreck");
+  });
+});
+
+describe("lookup instructions and answers", () => {
+  const reg = registryOf();
+  /** A step's lore on `world`'s start, with a round of lookups to offer. */
+  const stepLore = (world: WorldDoc, purpose: StepPurpose, tokens = 400): StepLore => {
+    const w = new Working(reg, world, startState(world));
+    const lookups = { budget: new LookupBudget(2, 60_000, 60_000, new AbortController().signal), transport: "tools" as const, refused: () => undefined };
+    return new StepLore(purpose, { policy: "prefetch+lookup", tokens }, { reg, world: w.world, state: w.state, tokens: (t: string) => Math.ceil(t.length / 3.2) }, "post", { text: [], names: [] }, { lookups });
+  };
+
+  test("the instructions name only the topics the step can read an entry under", () => {
+    const world = baseWorld();
+    world.lore.cafe = { id: "cafe", title: "The cafe", content: "Opens at six every morning.", keys: ["cafe"], links: [], topics: ["Harbor life"] };
+    world.lore.wreck = { id: "wreck", title: "The wreck", content: "The ferryman scuttled the old boat for the insurance money.", keys: [], links: [], topics: ["The ferryman's fraud"], secret: true, gate: "false", audience: ["interpret"] };
+    world.loreIndex.topics = { harbor_life: { label: "Harbor life", entries: ["cafe"] }, the_ferryman_s_fraud: { label: "The ferryman's fraud", entries: ["wreck"] } };
+    const extract = stepLore(world, "extract").instructions("tools");
+    expect(extract).toContain("Topics: Harbor life.");
+    expect(extract).not.toContain("ferryman");
+    // interpret is in the secret's audience, so it can read an entry under that topic.
+    expect(stepLore(world, "interpret").instructions("need")).toContain("Topics: Harbor life, The ferryman's fraud.");
   });
 });

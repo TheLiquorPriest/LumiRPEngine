@@ -246,13 +246,16 @@ export class StepLore {
     this.lookups?.refused(reason);
   }
 
-  /** How the model may ask for lore, for its instructions. */
+  /**
+   * How the model may ask for lore, for its instructions. A topic is named only when the step can
+   * read an entry under it: a topic only secrets are filed under would say what they are about.
+   */
   instructions(transport: LookupTransport): string {
-    const { world } = this.reader;
-    const topics = Object.values(world.loreIndex.topics)
-      .map((t) => (isRecord(t) && typeof t.label === "string" ? t.label : ""))
-      .filter((l) => l !== "")
-      .slice(0, TOPICS_NAMED);
+    const topics: string[] = [];
+    for (const t of Object.values(this.reader.world.loreIndex.topics)) {
+      if (topics.length >= TOPICS_NAMED) break;
+      if (isRecord(t) && typeof t.label === "string" && t.label.trim() !== "" && loreList(this.reader, t.label, this.purpose, this.effects).length > 0) topics.push(t.label);
+    }
     const named = topics.length > 0 ? ` Topics: ${topics.join(", ")}.` : "";
     if (transport === "tools") return `When the notes given aren't enough, you may look up the world's lore with the lore tools before you answer.${named}`;
     return `When you need world lore that isn't given here, reply with only {"need": ["a short query", …]} (at most ${ROUND_ASKS}) and nothing else; you'll get what the lore says, then answer.${named}`;
