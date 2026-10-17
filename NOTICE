@@ -1,0 +1,82 @@
+LumiRPEngine
+============
+
+Portions of this software are adapted from Warp by japolino (https://github.com/japolino/warp), used with the author's permission for this non-commercial project.
+
+Adapted (code carried over and changed) from https://github.com/japolino/warp @ 7a516930d3f12e9dc5fd8aae20756f250d63b820:
+
+  - Warp src/engine/expr.ts  ->  LumiRPEngine src/engine/expr.ts
+    Warp's safe formula language: the tokenizer, the precedence parser and the interpreter, with
+    the same syntax and evaluation rules. Changed: hard limits (source length 4096, nesting depth
+    64, AST nodes 2048, evaluation steps 100,000) that throw a typed ExprLimitError, with a
+    shareable step budget; every result is a finite number (overflow and NaN become 0); built-in
+    functions are looked up as own entries so they cannot resolve to Object.prototype members;
+    the module-level compile cache is gone (compile is pure and returns an immutable Program);
+    a createEnv helper builds an environment from plain data; the tokenizer scans in linear time.
+
+  - Warp src/engine/dice.ts  ->  LumiRPEngine src/engine/dice.ts
+    Warp's dice notation (NdS, kh/kl, exploding, flat terms) and roller. Changed: rolling takes an
+    injected Rng object (engine/rng) instead of a bare function; the built-in generator and
+    randomSeed are removed; exploding dice keep their chain together so keep/drop chooses between
+    whole dice; whitespace inside a term is an error; notation length, term count and flat bonus
+    are bounded. Added: diceDistribution() computes the exact probability of every total
+    (including keep/drop and exploding dice) and probEqual/probAtLeast/probAtMost read it; this
+    generalizes and replaces Warp's d20-only d20Odds, d20Tier and rollD20.
+
+  - Warp src/engine/decide.ts  ->  LumiRPEngine src/engine/decide.ts
+    Warp's decision primitives: the choice/score/noul question and answer shapes, normalize,
+    sample, noulConfidence and scoreIndex. Changed: invalid probabilities (NaN, Infinity,
+    negative, non-numeric) and all-zero maps throw DecideError instead of being coerced or spread
+    uniformly; options are visited in a canonical order (an explicit key list, else sorted keys)
+    so a pick never depends on object key order; a zero-probability option can never be drawn;
+    normalization cannot overflow. Added: mostLikely (ties go to the earlier option) and
+    sampleNoul. The Decider/DecideOptions interfaces are not carried over.
+
+Design taken from Warp, with no Warp code retained (each is new code in LumiRPEngine):
+
+  - Warp src/backend/ledger.ts (@ 7a51693)
+      ->  LumiRPEngine src/engine/ledger/{journal,path,fold,reference}.ts and src/backend/ledger-io.ts
+    The pattern of a per-swipe turn record kept in message metadata, the record of the displayed
+    swipe as the live one (activeRecord), a path hash chained over the messages before it so a
+    record knows whether it is on the current path, serialized per-chat metadata writes that
+    keep other extensions' keys, and shifting records when a swipe is deleted. Everything else is
+    new: the journal and its overlay, markers with sequence numbers, rebased views, Keep and
+    Discard with tombstones, in-flight windows, chunked storage for large records, and a separate
+    reference fold used as the test oracle.
+
+  - Warp src/shared/revision.ts (@ 7a51693)  ->  LumiRPEngine src/shared/hash.ts
+    The idea of a small deterministic fingerprint for cache and provenance checks, replaced by a
+    new implementation. hash.ts is MurmurHash3 x86 128-bit over a length-prefixed, type-tagged
+    encoding of the parts (hashParts, hash32, hashWords) plus hashJson, a key-order-independent
+    fingerprint of JSON values.
+
+  - Warp src/backend/state-push.ts (@ 7a51693)  ->  LumiRPEngine src/backend/push.ts
+    The idea of a revision counter per user and chat so stale pushes are dropped, with coalesced
+    pushes. LumiRPEngine sends snapshots plus JSON deltas.
+
+  - Warp src/backend/test-host.ts (@ 7a51693)  ->  LumiRPEngine test/support/fake-host.ts
+    The idea of a fake host that drives the real backend in tests. LumiRPEngine's fake host
+    replays the host event orders recorded from a Lumiverse host (DESIGN §14).
+
+  - Warp src/engine/loop-sim.ts (@ 7a51693)  ->  LumiRPEngine test/loop-sim/
+    The name and idea of a whole-loop simulator used as a quality gate. The scenarios, checks and
+    harness are new and were written from LumiRPEngine's own design (docs/DESIGN.md).
+
+  - Warp src/frontend/map-view.ts (@ cc90c1af248f8b4aebed642b2aa7c1508e369f43, the "legacy" branch)
+      ->  LumiRPEngine src/frontend/map-math.ts
+    Only the idea of keeping map pan and zoom as pure functions. The focal-point zoom formula in
+    zoomAt is the standard one and is the same as Warp's; the model differs (a screen transform
+    with pinch handling, not an SVG view box).
+
+Written for the adaptation (no Warp code):
+
+  - src/engine/rng.ts is the seeded generator that replaces xmur3 + mulberry32 in Warp's
+    src/engine/dice.ts: sfc32 seeded from the hash of a seed string, with int, pick, weighted
+    and fork.
+
+Third-party algorithms (public domain): MurmurHash3 by Austin Appleby; sfc32 by Chris Doty-Humphrey.
+
+Warp files that were looked at for reference and not used: src/frontend/overlay-layout.ts (@ 7a51693),
+and, from the "legacy" branch (@ cc90c1af), src/engine/world.ts, src/engine/quests.ts,
+src/engine/resolve.ts (companionLife) and src/engine/companions.test.ts. A comparison of
+LumiRPEngine's src/ and test/ against these files found no shared code or structure.
