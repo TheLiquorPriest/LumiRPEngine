@@ -140,8 +140,8 @@ describe("GM edits", () => {
         scene: view.scene?.present.map((p) => p.id) ?? [],
         palette: paramCandidates(rig.rt.registry, world, state, talk, "to"),
         agents: lod1Agents(state),
-        seen: canSeeEntity(world, state, POV, "dev"),
-        coinSeen: canSeeEntity(world, state, POV, "coin"),
+        seen: canSeeEntity(rig.rt.registry, world, state, POV, "dev"),
+        coinSeen: canSeeEntity(rig.rt.registry, world, state, POV, "coin"),
       };
     };
     expect(await shown()).toEqual({ scene: ["dev"], palette: ["dev"], agents: ["dev"], seen: true, coinSeen: true });

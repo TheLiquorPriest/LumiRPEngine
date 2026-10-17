@@ -15,7 +15,7 @@ import type { Registry } from "./registry-impl";
 import { bandOf, fieldDef, GONE_FIELD } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
-import { canSeeEntity, canSeeField, canSeePlace, eventVisible, findLeaks, knows, unrevealedTruths } from "./visibility";
+import { canSeeEntity, canSeeField, canSeePlace, eventVisible, findLeaks, knows, trackKnown, unrevealedTruths, visibilityOf } from "./visibility";
 
 /** Event types that are engine or pack bookkeeping: never player-facing lines. */
 const BOOKKEEPING = new Set<string>([
@@ -102,18 +102,19 @@ function povRegions(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId)
 }
 
 /** Whether the POV may see and has met an entity; the region it stands in (its weather) counts. */
-export function playerKnows(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: EntityId): boolean {
-  if (!canSeeEntity(world, state, pov, id)) return false;
+export function playerKnows(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: EntityId): boolean {
+  if (!canSeeEntity(reg, world, state, pov, id)) return false;
   return metBy(state, pov, id) || povRegions(world, state, pov).includes(id);
 }
 
-/** Whether a track may be named to the POV: public, revealed, or `known_by` someone the POV knows. */
-function trackShown(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
+/** Whether a track may be named to the POV: public, revealed, or `known_by` and known (`trackKnown`). */
+function trackShown(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
   const t = own(world.tracks, id);
   if (!t) return false;
-  if (t.visibility === "public") return true;
+  const visibility = visibilityOf(t.visibility);
+  if (visibility === "public") return true;
   if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0) return true;
-  return t.visibility === "known_by" && (t.owner === pov || (t.owner !== undefined && knows(state, pov, t.owner)));
+  return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
 }
 
 type Ref = { kind: "entity" | "place" | "track"; id: string };
@@ -170,11 +171,11 @@ export function playerEventVisible(reg: Registry, world: WorldDoc, state: Readon
     if (e.data.npc === true) return false;
     if (POV_ONLY.has(e.type) && (e.data.agent ?? e.data.entity ?? e.data.who) !== pov) return false;
   }
-  if (e.type === "stage" && !trackShown(world, state, pov, e.track)) return false;
+  if (e.type === "stage" && !trackShown(reg, world, state, pov, e.track)) return false;
   for (const r of refsOf(world, state, e)) {
-    if (r.kind === "entity" && !playerKnows(world, state, pov, r.id)) return false;
-    if (r.kind === "place" && !canSeePlace(world, state, pov, r.id)) return false;
-    if (r.kind === "track" && !trackShown(world, state, pov, r.id)) return false;
+    if (r.kind === "entity" && !playerKnows(reg, world, state, pov, r.id)) return false;
+    if (r.kind === "place" && !canSeePlace(reg, world, state, pov, r.id)) return false;
+    if (r.kind === "track" && !trackShown(reg, world, state, pov, r.id)) return false;
   }
   return true;
 }
@@ -234,14 +235,14 @@ function relabel(line: string, refs: readonly Ref[], world: WorldDoc, state: Rea
 }
 
 /** Text that must never reach a player line: unrevealed truths, and hidden tracks' labels. */
-function secretsOf(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
+function secretsOf(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
   const out = unrevealedTruths(world, state);
   for (const [id, t] of Object.entries(world.tracks)) {
-    if (trackShown(world, state, pov, id)) continue;
+    if (trackShown(reg, world, state, pov, id)) continue;
     out.push(t.label);
     for (const s of Object.values(t.stages)) if (s.label.length >= 6) out.push(s.label);
   }
-  for (const [id, e] of Object.entries(state.entities)) if (!canSeeEntity(world, state, pov, id)) out.push(e.name);
+  for (const [id, e] of Object.entries(state.entities)) if (!canSeeEntity(reg, world, state, pov, id)) out.push(e.name);
   return out;
 }
 
@@ -340,7 +341,7 @@ function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     const text = rawLine(reg, world, state, pov, e);
     if (!text || lines.some((l) => l.text === text)) continue;
     if (player) {
-      secrets ??= secretsOf(world, state, pov);
+      secrets ??= secretsOf(reg, world, state, pov);
       if (findLeaks(text, secrets).length > 0) continue;
     }
     lines.push({ at: i, rank: lineRank(reg, world, state, pov, e), text });

@@ -251,7 +251,7 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
     for (const p of Object.values(world.places)) if (here && p.parent === here) near.add(p.id);
     const name = (id: string): string => own(world.places, id)?.name ?? id;
     return Object.keys(world.places)
-      .filter((id) => id !== here && canSeePlace(world, state, actor, id))
+      .filter((id) => id !== here && canSeePlace(reg, world, state, actor, id))
       .sort((a, b) => Number(near.has(b)) - Number(near.has(a)) || name(a).localeCompare(name(b)));
   }
   const filters = candidateFilters(action, param);
@@ -264,7 +264,7 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
     if (def.ref && !kindIs(reg, world, e.kind, def.ref)) continue;
     if (def.of && !selectorMatches(reg, world, state, def.of, id)) continue;
     if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && e.fields.owner !== actor) continue;
-    if (!canSeeEntity(world, state, actor, id)) continue;
+    if (!canSeeEntity(reg, world, state, actor, id)) continue;
     if (ctx && !filters.every((f) => truthy(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false)))) continue;
     out.push(id);
   }

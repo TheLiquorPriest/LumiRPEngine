@@ -335,7 +335,7 @@ export const relationshipsPack: PackDef = {
         const lines: string[] = [];
         for (const id of Object.keys(ctx.state.entities).sort()) {
           if (id === ctx.world.pov || placeOfEntity(ctx.state, id) !== here) continue;
-          if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") || !canSeeEntity(ctx.world, ctx.state, ctx.world.pov, id)) continue;
+          if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) continue;
           const line = voiceLine(ctx, id);
           if (line) lines.push(line);
         }

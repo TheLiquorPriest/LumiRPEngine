@@ -413,7 +413,7 @@ export function buildMontage(reg: Registry, world: WorldDoc, before: Readonly<Wo
     for (const [field, v] of Object.entries(e.fields)) {
       if (typeof v !== "number") continue;
       const def = fieldDef(reg, world, e.kind, field);
-      if (!def?.bands || !canSeeField(reg, world, after, pov, id, field) || !playerKnows(world, after, pov, id)) continue;
+      if (!def?.bands || !canSeeField(reg, world, after, pov, id, field) || !playerKnows(reg, world, after, pov, id)) continue;
       const old = own(prev.fields, field);
       const from = bandOf(def.bands, typeof old === "number" ? old : 0)?.label ?? "";
       const to = bandOf(def.bands, v)?.label ?? "";

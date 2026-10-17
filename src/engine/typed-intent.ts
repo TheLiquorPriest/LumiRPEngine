@@ -215,9 +215,9 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
         if (def.type === "ref") {
           const pool =
             def.ref === "place"
-              ? Object.values(world.places).filter((p) => canSeePlace(world, state, pov, p.id))
+              ? Object.values(world.places).filter((p) => canSeePlace(reg, world, state, pov, p.id))
               : Object.entries(state.entities)
-                  .filter(([id, e]) => id !== pov && canSeeEntity(world, state, pov, id) && (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state, def.of, id)))
+                  .filter(([id, e]) => id !== pov && canSeeEntity(reg, world, state, pov, id) && (!def.ref || kindIs(reg, world, e.kind, def.ref)) && (!def.of || selectorMatches(reg, world, state, def.of, id)))
                   .map(([id, e]) => ({ id, name: e.name }));
           const id = byName(named, pool);
           if (id) params[name] = id;

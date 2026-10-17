@@ -615,7 +615,7 @@ export const castlifePack: PackDef = {
           const e = own(ctx.state.entities, id);
           if (!e || id === pov || !here || placeOfEntity(ctx.state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
           // The narrator is told only who the POV can see: a secret or unknown person stays out of the prose.
-          if (!canSeeEntity(ctx.world, ctx.state, pov, id)) continue;
+          if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) continue;
           const act = e.fields.activity;
           lines.push(`${e.name}${typeof act === "string" && act !== "idle" ? ` (${act.replace(/_/g, " ")})` : ""} is here.`);
         }

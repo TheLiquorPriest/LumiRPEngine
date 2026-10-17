@@ -35,7 +35,7 @@ export function buildGearView(ctx: ReadContext): GearView {
   const lent = new Map(grants(ctx.state).map((g) => [g.thing, g]));
   const shown = (id: EntityId): boolean => {
     const e = own(ctx.state.entities, id);
-    return !!e && e.kind !== "account" && canSeeEntity(ctx.world, ctx.state, pov, id) && (level >= 2 || e.fields.notable === true);
+    return !!e && e.kind !== "account" && canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id) && (level >= 2 || e.fields.notable === true);
   };
   const item = (id: EntityId, depth: number): GearItem => {
     const e = own(ctx.state.entities, id);

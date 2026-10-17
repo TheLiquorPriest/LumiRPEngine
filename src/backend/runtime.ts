@@ -87,10 +87,10 @@ function readRun(meta: JsonObject): ChatRun | null {
  * it can see where it stands (an extraction chip must never name a stranger). A world
  * that doesn't place the POV can't tell who is present: every entity it can see counts.
  */
-function povMayKnow(world: WorldDoc, state: Readonly<WorldState>, id: string): boolean {
+function povMayKnow(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, id: string): boolean {
   const pov = world.pov;
-  if (id === pov || playerKnows(world, state, pov, id)) return true;
-  if (!canSeeEntity(world, state, pov, id)) return false;
+  if (id === pov || playerKnows(reg, world, state, pov, id)) return true;
+  if (!canSeeEntity(reg, world, state, pov, id)) return false;
   const e = state.entities[id];
   if (e?.fields.owner === pov) return true;
   const here = placeOfEntity(state, pov);
@@ -98,24 +98,24 @@ function povMayKnow(world: WorldDoc, state: Readonly<WorldState>, id: string): b
 }
 
 /** The world as the POV may know it, for model prompts that list entities and places (`interpret`, `extract`). */
-function povWorld(world: WorldDoc, state: Readonly<WorldState>): WorldDoc {
+function povWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): WorldDoc {
   return {
     ...world,
-    entities: Object.fromEntries(Object.entries(world.entities).filter(([id]) => povMayKnow(world, state, id))),
-    places: Object.fromEntries(Object.entries(world.places).filter(([id]) => canSeePlace(world, state, world.pov, id))),
+    entities: Object.fromEntries(Object.entries(world.entities).filter(([id]) => povMayKnow(reg, world, state, id))),
+    places: Object.fromEntries(Object.entries(world.places).filter(([id]) => canSeePlace(reg, world, state, world.pov, id))),
   };
 }
 
 /** The prefix an extraction reads against: only entities and places the POV may know. */
-function prefixSummary(world: WorldDoc, state: WorldState): JsonValue {
+function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState): JsonValue {
   const pov = state.entities[world.pov];
   const people: JsonObject = {};
   for (const [id, e] of Object.entries(state.entities)) {
     if (Object.keys(people).length >= 30) break;
-    if (!povMayKnow(world, state, id)) continue;
+    if (!povMayKnow(reg, world, state, id)) continue;
     people[id] = { name: e.name, kind: e.kind, place: typeof e.fields.place === "string" ? e.fields.place : null };
   }
-  const places = Object.keys(world.places).filter((p) => canSeePlace(world, state, world.pov, p)).slice(0, 40);
+  const places = Object.keys(world.places).filter((p) => canSeePlace(reg, world, state, world.pov, p)).slice(0, 40);
   return { clock: state.clock, pov: world.pov, povName: pov?.name ?? world.pov, cents: state.accounts[world.pov] ?? null, entities: people, places };
 }
 
@@ -124,7 +124,7 @@ function prefixSummary(world: WorldDoc, state: WorldState): JsonValue {
  * or changes. A value is matched as the channels read it, trimmed (and lowercased when only that
  * names something), so `" vera "` is Vera.
  */
-export function proposalKnown(p: JsonObject, world: WorldDoc, state: Readonly<WorldState>): boolean {
+export function proposalKnown(p: JsonObject, reg: Registry, world: WorldDoc, state: Readonly<WorldState>): boolean {
   const named = (s: string): string => {
     const t = s.trim();
     return hasOwn(state.entities, t) || hasOwn(world.places, t) ? t : t.toLowerCase();
@@ -132,7 +132,7 @@ export function proposalKnown(p: JsonObject, world: WorldDoc, state: Readonly<Wo
   const ok = (v: JsonValue | undefined, depth: number): boolean => {
     if (typeof v === "string") {
       const id = named(v);
-      return hasOwn(state.entities, id) ? povMayKnow(world, state, id) : hasOwn(world.places, id) ? canSeePlace(world, state, world.pov, id) : true;
+      return hasOwn(state.entities, id) ? povMayKnow(reg, world, state, id) : hasOwn(world.places, id) ? canSeePlace(reg, world, state, world.pov, id) : true;
     }
     if (depth > 3) return true;
     if (Array.isArray(v)) return v.every((x) => ok(x, depth + 1));
@@ -641,9 +641,9 @@ export class Runtime implements TurnHooks {
       const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null } } : all.find((x) => x.id === a.choice)) : undefined;
       if (!chosen) result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
       else if (Object.keys(chosen.params).length === 0 || !budget.take()) result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
-      else result = await interpret(this.steps, text, povWorld(render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal);
+      else result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal);
     } else {
-      result = await interpret(this.steps, text, povWorld(render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined);
+      result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined);
     }
     // The call failed (a transient failure already had its second try): the turn runs as plain
     // roleplay, and a chip says the action went unread, with a Retry that runs the turn again.
@@ -765,7 +765,7 @@ export class Runtime implements TurnHooks {
     // Each step takes its call from the budget when it starts, in priority order.
     const extractRun = runsOf(modelUse, context.world, "extract", facts).find((r) => r.template === null || r.template.output !== "effects");
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(context.world, context.state), prefixSummary(context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" || this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" || this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined)
       : Promise.resolve([]);
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, "effects")).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts)[0];
@@ -793,7 +793,7 @@ export class Runtime implements TurnHooks {
       if (along === "unsure") unsure.add(p);
       return along !== "retold";
     });
-    const known = deduped.filter((p) => proposalKnown(p, context.world, context.state));
+    const known = deduped.filter((p) => proposalKnown(p, this.registry, context.world, context.state));
     if (known.length < deduped.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${deduped.length - known.length} proposal(s) naming what the player hasn't seen`, userId);
     // So is one carrying a secret's unrevealed truth: its chip would show it.
     const proposals = known.filter((p) => findLeaks(p, secrets).length === 0);

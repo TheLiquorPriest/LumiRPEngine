@@ -32,7 +32,7 @@ export function buildMapView(ctx: ReadContext): MapView {
   const here = placeOfEntity(state, world.pov);
   const path = placePath(world, here);
   const inside = new Set(path);
-  const filter: ScopeFilter = { known: (id) => canSeePlace(world, state, world.pov, id), drawn: (id) => inside.has(id) || canSeePlace(world, state, world.pov, id) };
+  const filter: ScopeFilter = { known: (id) => canSeePlace(ctx.registry, world, state, world.pov, id), drawn: (id) => inside.has(id) || canSeePlace(ctx.registry, world, state, world.pov, id) };
   const children = placeChildren(world);
   const opens = (id: PlaceId): boolean => hasGrid(world, id) || (children.get(id) ?? []).some(filter.drawn);
   const roots = (children.get(null) ?? []).filter(filter.drawn);

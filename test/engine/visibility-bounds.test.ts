@@ -17,11 +17,11 @@ describe("visibility", () => {
     world.entities.ghost = { id: "ghost", kind: "person", name: "Ghost", tier: "background", fields: {}, relations: [], visibility: "secret" };
     const reg = registryOf();
     const s = startState(world);
-    expect(canSeeEntity(world, s, POV, "dev")).toBe(true);
-    expect(canSeeEntity(world, s, POV, "spy")).toBe(false);
-    expect(canSeeEntity(world, s, POV, "ghost")).toBe(false);
+    expect(canSeeEntity(reg, world, s, POV, "dev")).toBe(true);
+    expect(canSeeEntity(reg, world, s, POV, "spy")).toBe(false);
+    expect(canSeeEntity(reg, world, s, POV, "ghost")).toBe(false);
     s.entities[POV]!.relations.push({ type: "knows", to: "spy" });
-    expect(canSeeEntity(world, s, POV, "spy")).toBe(true);
+    expect(canSeeEntity(reg, world, s, POV, "spy")).toBe(true);
     expect(canSeeField(reg, world, s, POV, "spy", "secret_note")).toBe(false);
     expect(eventVisible(reg, world, s, POV, { type: "set", entity: "spy", field: "secret_note", value: "x" })).toBe(false);
     expect(eventVisible(reg, world, s, POV, { type: "add", entity: "dev", field: "cash", delta: 1 })).toBe(true);

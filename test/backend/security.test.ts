@@ -279,9 +279,9 @@ describe("secrets in chips and the Journal", () => {
     // A padded or recased id names her too (" vera " must not pass the check).
     const world = state ? core?.worldAt(state.revision) : undefined;
     if (!state || !world) throw new Error("no fold");
-    expect(proposalKnown({ type: "condition", entity: " vera " }, world, state)).toBe(false);
-    expect(proposalKnown({ type: "condition", entity: "Vera" }, world, state)).toBe(false);
-    expect(proposalKnown({ type: "condition", entity: " sam " }, world, state)).toBe(true);
+    expect(proposalKnown({ type: "condition", entity: " vera " }, rig.rt.registry, world, state)).toBe(false);
+    expect(proposalKnown({ type: "condition", entity: "Vera" }, rig.rt.registry, world, state)).toBe(false);
+    expect(proposalKnown({ type: "condition", entity: " sam " }, rig.rt.registry, world, state)).toBe(true);
   });
 });
 

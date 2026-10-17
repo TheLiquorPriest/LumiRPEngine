@@ -63,7 +63,7 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   const tl = input.timelapse;
   if (tl) {
     const stop = tl.result.stops[0];
-    if (stop && signalVisible(world, state, pov, stop)) lines.push(`Time passes until it's interrupted: ${stop.text}. Narrate the interval from the Montage; don't add events.`);
+    if (stop && signalVisible(reg, world, state, pov, stop)) lines.push(`Time passes until it's interrupted: ${stop.text}. Narrate the interval from the Montage; don't add events.`);
     else lines.push("Time passes. Narrate the interval from the Montage; don't add events.");
   }
   for (const e of input.events) {
@@ -73,14 +73,14 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
       continue;
     }
     const s = "data" in e ? signalOf(e) : null;
-    if (s && s.text && !tl && signalVisible(world, state, pov, s)) lines.push(s.text);
+    if (s && s.text && !tl && signalVisible(reg, world, state, pov, s)) lines.push(s.text);
   }
   for (const b of weightedOrder(storylets(input.events), rng.fork("storylets")).slice(0, 2)) lines.push(b.hint);
   const here = placeOfEntity(state, pov);
   if (here) {
     for (const id of Object.keys(state.entities).sort()) {
       const e = own(state.entities, id);
-      if (!e || id === pov || !e.agent || placeOfEntity(state, id) !== here || !canSeeEntity(world, state, pov, id)) continue;
+      if (!e || id === pov || !e.agent || placeOfEntity(state, id) !== here || !canSeeEntity(reg, world, state, pov, id)) continue;
       const act = e.fields.activity;
       if (typeof act === "string" && act !== "" && act !== "idle") lines.push(`${e.name} is ${act.replace(/_/g, " ")}.`);
     }

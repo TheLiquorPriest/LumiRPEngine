@@ -109,7 +109,7 @@ function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry
     if (id === world.pov || placeOfEntity(state, id) !== placeId || placeId === null || isGone(state, id)) continue;
     // Authored kinds extend `person` (the starters' `character`). Someone the POV can't see (secret,
     // or `known_by` and not known) isn't listed, even standing right there.
-    if (!kindIs(registry, world, e.kind, "person") || !canSeeEntity(world, state, world.pov, id)) continue;
+    if (!kindIs(registry, world, e.kind, "person") || !canSeeEntity(registry, world, state, world.pov, id)) continue;
     present.push({ id, name: e.name, label: world.kinds[e.kind]?.label ?? e.kind });
   }
   return { placeId, sceneType: sceneType(world, state), present, elapsed: headElapsed };

@@ -104,7 +104,7 @@ describe("typed intent (Playtest, no model)", () => {
     priya.relations = priya.relations.filter((r) => r.to !== world.pov);
     const ids = [...Object.keys(world.places), ...Object.keys(world.entities)].filter((id) => id.includes("_"));
     const start = playtestStart(reg, world, "r");
-    const unmet = Object.entries(start.entities).filter(([id, e]) => id !== world.pov && kindIs(reg, world, e.kind, "person") && !playerKnows(world, start, world.pov, id)).map(([, e]) => e.name);
+    const unmet = Object.entries(start.entities).filter(([id, e]) => id !== world.pov && kindIs(reg, world, e.kind, "person") && !playerKnows(reg, world, start, world.pov, id)).map(([, e]) => e.name);
     expect(unmet).toContain("Priya Nair");
     const turns = checkWorld(world, 2).turns;
     for (const turn of turns) {

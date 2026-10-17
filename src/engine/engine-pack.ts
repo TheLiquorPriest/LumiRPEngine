@@ -119,7 +119,8 @@ export function signalOf(e: { type: string; data?: JsonObject }): Signal | null 
     class: cls as InterruptClass,
     text: typeof e.data.text === "string" ? e.data.text : "",
     ...(typeof e.data.entity === "string" ? { entity: e.data.entity } : {}),
-    visibility: vis === "secret" || vis === "known_by" ? vis : "public",
+    // A value this reader doesn't know hides the signal (fail closed); unset is public.
+    visibility: vis === undefined || vis === null || vis === "public" ? "public" : vis === "known_by" ? "known_by" : "secret",
   };
 }
 

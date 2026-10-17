@@ -20,6 +20,7 @@ import { scheduleOverlaps } from "./schedules";
 import { kindDef, kindFields } from "./scope";
 import { classOf, classProblems, selectorProblems } from "./selector";
 import { own } from "./pack-kit";
+import { knownBySelector } from "./visibility";
 
 function typeProblem(f: FieldDef, v: JsonValue, world: WorldDoc): string | null {
   if (v === null) return null;
@@ -185,6 +186,28 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
         }
       }
     }
+  }
+
+  // Visibility (DESIGN §7): a value every reader understands (`discoverable` is for places), and a
+  // `knownBy` only beside `known_by` or `discoverable`, as a selector this engine reads. Anything
+  // else fails closed: the thing stays hidden, the grant grants nobody.
+  const subjects: { path: string; what: string; visibility: unknown; knownBy: unknown; place: boolean }[] = [
+    ...Object.entries(world.entities).map(([id, e]) => ({ path: `entities.${id}`, what: e.name, visibility: e.visibility, knownBy: e.knownBy, place: false })),
+    ...Object.entries(world.places).map(([id, p]) => ({ path: `places.${id}`, what: p.name, visibility: p.visibility, knownBy: p.knownBy, place: true })),
+    ...Object.entries(world.tracks).map(([id, t]) => ({ path: `tracks.${id}`, what: t.label, visibility: t.visibility, knownBy: t.knownBy, place: false })),
+    ...Object.entries(world.kinds).flatMap(([kid, k]) => Object.entries(k.fields).map(([fid, f]) => ({ path: `kinds.${kid}.fields.${fid}`, what: `${k.label}'s ${f.label ?? fid}`, visibility: f.visibility, knownBy: f.knownBy, place: false }))),
+  ];
+  for (const s of subjects) {
+    const understood = s.visibility === undefined || s.visibility === "public" || s.visibility === "known_by" || s.visibility === "secret" || (s.place && s.visibility === "discoverable");
+    if (!understood) err(`${s.path}.visibility`, "visibility", `${s.what} has visibility "${String(s.visibility)}", which isn't ${s.place ? "public, known_by, discoverable or secret" : "public, known_by or secret (discoverable is for places)"}; it stays hidden from the player.`);
+    if (s.knownBy === undefined) continue;
+    if (s.visibility !== "known_by" && !(s.place && s.visibility === "discoverable")) warn(`${s.path}.knownBy`, "visibility", `${s.what} has a Known by, which only counts with ${s.place ? "known_by or discoverable" : "known_by"} visibility.`);
+    const selector = knownBySelector(s.knownBy);
+    if (!selector) {
+      err(`${s.path}.knownBy`, "visibility", `${s.what}'s Known by names no constraint, or one this engine doesn't read, so it grants nobody.`);
+      continue;
+    }
+    for (const id of [...(selector.ids ?? []), ...(selector.memberOf ?? [])]) if (!own(world.entities, id)) err(`${s.path}.knownBy`, "refs", `${s.what}'s Known by names "${id}", which isn't in the world.`);
   }
 
   // Authored postings must balance.

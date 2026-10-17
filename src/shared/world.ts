@@ -126,6 +126,8 @@ export interface FieldDef {
   /** A `text` field naming a row of this table (an occupation, a region, a catalog item). */
   table?: TableId;
   visibility?: Visibility;
+  /** With `known_by`: who knows the field besides those with a `knows` relation to its entity; matching is knowing (DESIGN §7). */
+  knownBy?: Selector;
   /** Level contract: the domain and the lowest effective level at which the field is live. */
   domain?: DomainId;
   level?: Level;
@@ -191,6 +193,8 @@ export interface EntityDef {
   /** Lumiverse character id, for group chats. */
   characterId?: string;
   visibility?: Visibility;
+  /** With `known_by`: who knows the entity besides those with a `knows` relation to it; matching is knowing (DESIGN §7). */
+  knownBy?: Selector;
   /** Free-form labels selectors match (`tag`). Read live from the world. */
   tags?: string[];
   /** Classification values by facet (`WorldDoc.classifications`); a single-valued facet holds at most one. Read live from the world. */
@@ -258,6 +262,8 @@ export interface PlaceDef {
   layoutPos?: { x: number; y: number };
   fields: JsonObject;
   visibility?: Visibility;
+  /** With `known_by`: who knows the place besides those with a `knows` relation to it; matching is knowing (DESIGN §7). */
+  knownBy?: Selector;
   /** Import from lore (DESIGN §9.7): the `bookId/entryId` entries this came from; never edited. */
   sources?: string[];
   /** The map that compiled this place (it owns it; Build edits it in the map). Absent on authored places. */
@@ -581,6 +587,8 @@ export interface TrackDef {
   start: StageId;
   stages: Record<StageId, StageDef>;
   visibility: Visibility;
+  /** With `known_by`: who knows the track besides its owner and those who know the owner; matching is knowing (DESIGN §7). */
+  knownBy?: Selector;
 }
 
 // ---------------------------------------------------------------- packs, realism, time, context
