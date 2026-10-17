@@ -84,7 +84,7 @@ export interface MapScopeView {
   /** The scope's grid, drawn behind its places (Space 2 and up). */
   grid?: MapGridView;
   places: MapPlaceView[];
-  /** Routes between the drawn places; a route to somewhere inside one of them is drawn to that place. */
+  /** Routes between the drawn places whose real ends the viewer knows; a route to somewhere inside one of them is drawn to that place. */
   routes: MapRouteView[];
 }
 
@@ -227,7 +227,9 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
   if (opts.level >= 2) {
     for (const rid of Object.keys(world.routes).sort()) {
       const r = own(world.routes, rid);
-      if (!r) continue;
+      // A route is drawn to the place inside the scope that holds its end, so an end the viewer
+      // can't see would be drawn as a way to the place around it, with the hidden way's minutes.
+      if (!r || !filter.known(r.from) || !filter.known(r.to)) continue;
       const a = childOf(world, scope, r.from);
       const b = childOf(world, scope, r.to);
       if (a === null || b === null || a === b || !drawn.has(a) || !drawn.has(b)) continue;

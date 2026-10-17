@@ -203,3 +203,16 @@ describe("the map's display, applied before the view leaves the engine", () => {
     expect(grid.terrain[VAULT_CELL]).toBe("void");
   });
 });
+
+describe("routes on the map", () => {
+  test("a route whose real end the POV can't see isn't drawn, not even to the visible place around that end", () => {
+    const { world, state } = riverton((w) => {
+      w.places.park_cache = { id: "park_cache", name: "Smugglers' cache", parent: "park", fields: {}, visibility: "secret" };
+      w.routes.apt_cache = { id: "apt_cache", from: "apartment_bldg", to: "park_cache", modes: { walk: { minutes: 1 } }, bidirectional: true };
+    });
+    const town = buildMapView(reg.context(world, state)).scopes.find((s) => s.id === "riverton");
+    const line = town?.routes.find((r) => [r.from, r.to].sort().join() === "apartment_bldg,park");
+    // The visible route says 10 minutes; the hidden one's minute never reaches the drawn line.
+    expect(line?.modes.walk?.minutes).toBe(10);
+  });
+});
