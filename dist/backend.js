@@ -34951,9 +34951,9 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
   condition: "auto",
-  regard: "auto",
-  transfer: "auto",
-  spawn: "auto",
+  regard: "confirm",
+  transfer: "confirm",
+  spawn: "confirm",
   knows: "confirm",
   give: "confirm",
   purchase: "confirm"
@@ -37483,19 +37483,6 @@ function loreOfEntry(extensions) {
   const ns = extensions[LEDGER_NAMESPACE];
   return isRecord(ns) && typeof ns.lore === "string" ? ns.lore : null;
 }
-function loreExtension(lore) {
-  const ext = { lore: lore.id, keys: [...lore.keys], links: [...lore.links] };
-  if (lore.group)
-    ext.group = lore.group;
-  if (lore.priority !== undefined)
-    ext.priority = lore.priority;
-  if (lore.secret)
-    ext.secret = true;
-  if (lore.gate)
-    ext.gate = lore.gate;
-  ext.hash = hashJson({ ...ext, title: lore.title, content: lore.content });
-  return ext;
-}
 
 class EngineBook {
   host;
@@ -37508,7 +37495,7 @@ class EngineBook {
   async ensure(world, index, userId) {
     let bookId = index.loreBookId;
     if (!bookId || !await this.host.books.exists(bookId, userId)) {
-      bookId = await this.host.books.create(`LumiRPEngine \xB7 ${world.name}`, "Engine-managed slots and world lore. Entries here are activated only by LumiRPEngine.", userId);
+      bookId = await this.host.books.create(`LumiRPEngine \xB7 ${world.name}`, "Engine-managed slots. Entries here are activated only by LumiRPEngine.", userId);
       await this.worlds.setLoreBook(world.id, bookId, userId);
       this.slots.delete(bookId);
     }
@@ -37532,34 +37519,13 @@ class EngineBook {
       }, userId);
       existing.set(section.id, id);
     }
-    await this.syncLore(world, bookId, userId);
+    await this.removeLore(bookId, userId);
     return bookId;
   }
-  async syncLore(world, bookId, userId) {
-    const have = new Map;
-    for (const e of await this.host.books.entries(bookId, userId)) {
-      const id = loreOfEntry(e.extensions);
-      if (id)
-        have.set(id, e);
-    }
-    for (const lore of Object.values(world.lore)) {
-      const ext = loreExtension(lore);
-      const prior = have.get(lore.id);
-      have.delete(lore.id);
-      const fields = { comment: lore.title, content: lore.content, keys: [], disabled: true, constant: false, position: 0, depth: 4, role: null, order: 200 - Math.max(-100, Math.min(100, lore.priority ?? 0)), extensions: { [LEDGER_NAMESPACE]: ext } };
-      if (!prior) {
-        const id = await this.host.books.createEntry(bookId, fields, userId);
-        await this.host.books.setExtension(id, LEDGER_NAMESPACE, ext, userId);
-        continue;
-      }
-      const ns = prior.extensions[LEDGER_NAMESPACE];
-      if (isRecord(ns) && ns.hash === ext.hash && prior.disabled && prior.keys.length === 0)
-        continue;
-      await this.host.books.updateEntry(prior.id, fields, userId);
-      await this.host.books.setExtension(prior.id, LEDGER_NAMESPACE, ext, userId);
-    }
-    for (const stale of have.values())
-      await this.host.books.deleteEntry(stale.id, userId);
+  async removeLore(bookId, userId) {
+    for (const e of await this.host.books.entries(bookId, userId))
+      if (loreOfEntry(e.extensions) !== null)
+        await this.host.books.deleteEntry(e.id, userId);
   }
   async slotEntries(bookId, userId) {
     const known = this.slots.get(bookId);
@@ -37786,213 +37752,6 @@ class StatePush {
   }
 }
 
-// src/engine/decide.ts
-class DecideError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "DecideError";
-  }
-}
-var hasOwn5 = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-function orderedKeys(p, keys) {
-  const ks = keys ? [...keys] : Object.keys(p).sort();
-  if (ks.length === 0)
-    throw new DecideError("No options to choose from");
-  if (new Set(ks).size !== ks.length)
-    throw new DecideError("Duplicate option keys");
-  return ks;
-}
-function weightsOf(p, ks) {
-  return ks.map((k) => {
-    const v = hasOwn5(p, k) ? p[k] : undefined;
-    if (v === undefined)
-      return 0;
-    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
-      throw new DecideError(`Probability for "${k}" must be a finite number \u2265 0, got ${String(v)}`);
-    }
-    return v;
-  });
-}
-function normalized(p, keys) {
-  const ks = orderedKeys(p, keys);
-  const w = weightsOf(p, ks);
-  const top = Math.max(...w);
-  if (top === 0)
-    throw new DecideError("Probabilities have no mass (all zero)");
-  const scaled = w.map((x) => x / top);
-  const sum = scaled.reduce((a, b) => a + b, 0);
-  return { ks, probs: scaled.map((x) => x / sum) };
-}
-function sample2(p, rng, keys) {
-  const { ks, probs } = normalized(p, keys);
-  const u = rng.next();
-  let cum = 0;
-  let last = 0;
-  for (let i = 0;i < ks.length; i++) {
-    if (probs[i] === 0)
-      continue;
-    last = i;
-    cum += probs[i];
-    if (u < cum)
-      return ks[i];
-  }
-  return ks[last];
-}
-function checkNoul(p) {
-  if (typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 1) {
-    throw new DecideError(`A yes/no probability must be a number from 0 to 1, got ${String(p)}`);
-  }
-}
-function sampleNoul(p, rng) {
-  checkNoul(p);
-  return rng.next() < p;
-}
-
-// src/backend/selection.ts
-var CANDIDATE_CAP = 64;
-function ext(entry) {
-  const ns = entry.extensions[LEDGER_NAMESPACE];
-  return isRecord(ns) ? ns : {};
-}
-function strings(v) {
-  return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
-}
-function gatherCandidates(input) {
-  const suppressed = [];
-  const passThrough = [];
-  const out = [];
-  const recent = input.recent.map((m) => m.toLowerCase());
-  for (const raw of input.entries) {
-    const engine = raw.bookId === input.engineBookId;
-    if (engine && input.slotIds.has(raw.id))
-      continue;
-    if (!engine && input.passThroughBooks.has(raw.bookId)) {
-      passThrough.push(raw);
-      continue;
-    }
-    if (!engine && input.suppressed(raw)) {
-      suppressed.push(raw.id);
-      continue;
-    }
-    const ns = ext(raw);
-    if (!engine && raw.disabled)
-      continue;
-    if (engine && ns.secret === true && !(typeof ns.gate === "string" && input.revealed(ns.gate)))
-      continue;
-    const entry = engine ? { ...raw, keys: strings(ns.keys), group: typeof ns.group === "string" ? ns.group : raw.group } : raw;
-    let score = 0;
-    let hit = false;
-    let keyHit = false;
-    for (const id of strings(ns.links)) {
-      if (input.sceneIds.has(id)) {
-        score += 3;
-        hit = true;
-      }
-    }
-    for (const key of entry.keys) {
-      const k = key.trim().toLowerCase();
-      if (k.length < 2)
-        continue;
-      const at = recent.findIndex((m) => m.includes(k));
-      if (at < 0)
-        continue;
-      hit = true;
-      keyHit = true;
-      score += 2 + (at < 2 ? 1 : 0);
-    }
-    const links = strings(ns.links);
-    if (engine && input.knows && !keyHit && links.length > 0 && links.every((id) => !input.knows?.(id)))
-      continue;
-    const priority = typeof ns.priority === "number" ? ns.priority : 0;
-    out.push({ entry, pinned: !engine && entry.constant && !entry.disabled, engine, score, priority, hit, tokens: tokensOf(entry.content) });
-  }
-  out.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.score - a.score || b.priority - a.priority || a.entry.id.localeCompare(b.entry.id));
-  const kept = Math.max(CANDIDATE_CAP, out.filter((c) => c.pinned).length);
-  return { candidates: out.slice(0, kept), suppressed, passThrough, overflow: out.slice(kept).filter((c) => !c.engine).map((c) => c.entry.id) };
-}
-async function selectLore(input) {
-  const status = new Map;
-  const wanted = new Map;
-  let viaModel = false;
-  const nonPins = input.candidates.filter((c) => !c.pinned);
-  if (input.mode !== "engine" && input.decide) {
-    const asks = nonPins.filter((c) => (input.mode === "full" || c.hit) && (input.mode === "full" || !input.cache.has(input.cacheKey(c))));
-    for (const c of nonPins)
-      if (input.mode === "standard" && input.cache.has(input.cacheKey(c)))
-        wanted.set(c.entry.id, input.cache.get(input.cacheKey(c)) === true);
-    const answers = asks.length > 0 ? await input.decide(asks) : new Map;
-    if (answers) {
-      viaModel = true;
-      for (const c of asks) {
-        const p = answers.get(c.entry.id);
-        if (p === undefined)
-          continue;
-        const yes = sampleNoul(Math.min(1, Math.max(0, p)), createRng(hashParts("lre.select", input.seed, c.entry.id)));
-        wanted.set(c.entry.id, yes);
-        if (input.mode === "standard")
-          input.cache.set(input.cacheKey(c), yes);
-      }
-    }
-  }
-  for (const c of nonPins)
-    if (!wanted.has(c.entry.id))
-      wanted.set(c.entry.id, c.hit);
-  const selected = [];
-  const groups = new Map;
-  let used = 0;
-  const pins = input.candidates.filter((c) => c.pinned);
-  for (const c of pins) {
-    const g = c.entry.group;
-    const rival = g ? groups.get(g) : undefined;
-    if (g && rival) {
-      const keepRival = rival.entry.groupOverride !== c.entry.groupOverride ? rival.entry.groupOverride : rival.entry.groupWeight !== c.entry.groupWeight ? rival.entry.groupWeight > c.entry.groupWeight : createRng(hashParts("lre.group", input.seed, g)).next() < 0.5;
-      const loser = keepRival ? c : rival;
-      status.set(loser.entry.id, { status: "dropped", reason: "group" });
-      if (!keepRival) {
-        selected.splice(selected.indexOf(rival), 1, c);
-        used += c.tokens - rival.tokens;
-        groups.set(g, c);
-        status.set(c.entry.id, { status: "pinned", reason: "constant" });
-      }
-      continue;
-    }
-    selected.push(c);
-    used += c.tokens;
-    if (g)
-      groups.set(g, c);
-    status.set(c.entry.id, { status: "pinned", reason: "constant" });
-  }
-  const pinsOverBudget = used > input.loreBudget;
-  for (const c of nonPins) {
-    if (!wanted.get(c.entry.id)) {
-      status.set(c.entry.id, { status: "dropped", reason: c.hit ? viaModel ? "not selected" : "low rank" : "no hit" });
-      continue;
-    }
-    if (pinsOverBudget) {
-      status.set(c.entry.id, { status: "dropped", reason: "pins fill the lore budget" });
-      continue;
-    }
-    const g = c.entry.group;
-    if (g && groups.has(g)) {
-      status.set(c.entry.id, { status: "dropped", reason: "group" });
-      continue;
-    }
-    if (used + c.tokens > input.loreBudget) {
-      status.set(c.entry.id, { status: "dropped", reason: "lore budget" });
-      continue;
-    }
-    selected.push(c);
-    used += c.tokens;
-    if (g)
-      groups.set(g, c);
-    status.set(c.entry.id, { status: "included", reason: viaModel ? "selected" : "rank" });
-  }
-  return { selected, status, used, pinsOverBudget, viaModel };
-}
-function cacheKeyOf(c, relevance, stepConfig) {
-  return hashJson([hashParts("lre.content", c.entry.content), relevance, c.hit, stepConfig]);
-}
-
 // src/backend/settings-store.ts
 var SETTINGS_PATH = "settings.json";
 var LEARNING_PATH = "extraction-learning.json";
@@ -38024,21 +37783,19 @@ var MODEL_USE_PRESETS = {
     steps: {
       interpret: step(true, ["classifier"], HELPER),
       extract: step(true, ["reply"], HELPER),
-      select: step(false, [], DECISION),
       "npc.choose": step(false, [], DECISION)
     },
-    budgets: { pre: { calls: 1, ms: 20000 }, select: { calls: 0, ms: 0 }, post: { calls: 1, ms: 30000 } },
-    tokens: { sections: 300, lore: 600 }
+    budgets: { pre: { calls: 1, ms: 20000 }, post: { calls: 1, ms: 30000 } },
+    tokens: { sections: 300 }
   },
   standard: {
     steps: {
       interpret: step(true, ["classifier"], HELPER),
       extract: step(true, ["reply"], HELPER),
-      select: step(true, ["uncached"], DECISION),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION)
     },
-    budgets: { pre: { calls: 2, ms: 30000 }, select: { calls: 1, ms: 6000 }, post: { calls: 2, ms: 45000 } },
-    tokens: { sections: 600, lore: 1200 }
+    budgets: { pre: { calls: 2, ms: 30000 }, post: { calls: 2, ms: 45000 } },
+    tokens: { sections: 600 }
   },
   full: {
     steps: {
@@ -38047,11 +37804,10 @@ var MODEL_USE_PRESETS = {
       outline: step(true, ["always"], HELPER),
       extract: step(true, ["reply"], HELPER),
       contradiction: step(true, ["reply"], HELPER),
-      select: step(true, ["always"], DECISION),
       "npc.choose": step(true, ["present", "offscreen"], DECISION)
     },
-    budgets: { pre: { calls: 8, ms: 60000 }, select: { calls: 1, ms: 6000 }, post: { calls: 4, ms: 60000 } },
-    tokens: { sections: 1000, lore: 2000 }
+    budgets: { pre: { calls: 8, ms: 60000 }, post: { calls: 4, ms: 60000 } },
+    tokens: { sections: 1000 }
   }
 };
 function defaultSettings() {
@@ -38069,8 +37825,7 @@ function defaultSettings() {
       npcCallsPerTimelapse: 0
     },
     extraction: {},
-    swipeDefault: "rerun",
-    passThroughBooks: []
+    swipeDefault: "rerun"
   };
 }
 function mergePatch(target, patch) {
@@ -38094,7 +37849,7 @@ function normalize(raw) {
   const merged = mergePatch(JSON.parse(JSON.stringify(base)), JSON.parse(JSON.stringify(raw)));
   return isRecord(merged) && merged.v === 1 ? conform(merged, base) : base;
 }
-var STEP_PURPOSES = ["interpret", "select", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"];
+var STEP_PURPOSES = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"];
 var MAX_PHASE_MS = 600000;
 var int = (v, lo, hi) => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined;
 var real = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined;
@@ -38158,8 +37913,8 @@ function conform(v, d) {
   const modelUse = {
     preset: oneOf(mu.preset, ["lean", "standard", "full", "custom"]) ?? d.modelUse.preset,
     steps,
-    budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre), select: phase(budgets.select, d.modelUse.budgets.select), post: phase(budgets.post, d.modelUse.budgets.post) },
-    tokens: { sections: int(tokens.sections, 0, 1e5) ?? d.modelUse.tokens.sections, lore: int(tokens.lore, 0, 1e5) ?? d.modelUse.tokens.lore }
+    budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre), post: phase(budgets.post, d.modelUse.budgets.post) },
+    tokens: { sections: int(tokens.sections, 0, 1e5) ?? d.modelUse.tokens.sections }
   };
   const re = isRecord(v.realism) ? v.realism : {};
   const rawLevels = isRecord(re.levels) ? re.levels : {};
@@ -38213,8 +37968,7 @@ function conform(v, d) {
     realism,
     time,
     extraction,
-    swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"]) ?? d.swipeDefault,
-    passThroughBooks: Array.isArray(v.passThroughBooks) ? v.passThroughBooks.filter((b) => typeof b === "string" && b.length <= 200).slice(0, 500) : d.passThroughBooks
+    swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"]) ?? d.swipeDefault
   };
 }
 function expandPresets(settings, patch) {
@@ -38892,6 +38646,59 @@ function trim(map, cap = 64) {
   }
 }
 
+// src/engine/decide.ts
+class DecideError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "DecideError";
+  }
+}
+var hasOwn5 = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+function orderedKeys(p, keys) {
+  const ks = keys ? [...keys] : Object.keys(p).sort();
+  if (ks.length === 0)
+    throw new DecideError("No options to choose from");
+  if (new Set(ks).size !== ks.length)
+    throw new DecideError("Duplicate option keys");
+  return ks;
+}
+function weightsOf(p, ks) {
+  return ks.map((k) => {
+    const v = hasOwn5(p, k) ? p[k] : undefined;
+    if (v === undefined)
+      return 0;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+      throw new DecideError(`Probability for "${k}" must be a finite number \u2265 0, got ${String(v)}`);
+    }
+    return v;
+  });
+}
+function normalized(p, keys) {
+  const ks = orderedKeys(p, keys);
+  const w = weightsOf(p, ks);
+  const top = Math.max(...w);
+  if (top === 0)
+    throw new DecideError("Probabilities have no mass (all zero)");
+  const scaled = w.map((x) => x / top);
+  const sum = scaled.reduce((a, b) => a + b, 0);
+  return { ks, probs: scaled.map((x) => x / sum) };
+}
+function sample2(p, rng, keys) {
+  const { ks, probs } = normalized(p, keys);
+  const u = rng.next();
+  let cum = 0;
+  let last = 0;
+  for (let i = 0;i < ks.length; i++) {
+    if (probs[i] === 0)
+      continue;
+    last = i;
+    cum += probs[i];
+    if (u < cum)
+      return ks[i];
+  }
+  return ks[last];
+}
+
 // src/backend/turn-steps.ts
 function factLines(registry, world, state, secrets) {
   const ctx = registry.context(world, state);
@@ -38966,15 +38773,12 @@ function refsExist(registry, action, params, world, state) {
   return true;
 }
 function noFacts(turn = 0) {
-  return { typed: false, classifier: false, reply: false, uncached: false, candidatesChanged: false, hitSetChanged: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
+  return { typed: false, classifier: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
 }
 var FACT_OF = {
   typed_input: "typed",
   classifier: "classifier",
   reply: "reply",
-  uncached: "uncached",
-  candidates_changed: "candidatesChanged",
-  hit_set_changed: "hitSetChanged",
   scene_change: "sceneChange",
   slot_crossed: "slotCrossed",
   day_start: "dayStart",
@@ -39083,7 +38887,7 @@ ${v}`);
 
 `) || "(no facts)";
 }
-function strings2(v, max, chars = 300) {
+function strings(v, max, chars = 300) {
   if (typeof v === "string")
     return v.trim() === "" ? [] : [v.trim().slice(0, chars)];
   if (!Array.isArray(v))
@@ -39096,7 +38900,7 @@ async function promptedText(steps, run, kind, vars, secrets, userId, signal) {
 ${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal);
   if (!isRecord(raw))
     return null;
-  const lines = kind === "brief" ? strings2(raw.text, 1, 600) : kind === "outline" ? strings2(raw.beats, 4) : strings2(raw.choices, 4, 120);
+  const lines = kind === "brief" ? strings(raw.text, 1, 600) : kind === "outline" ? strings(raw.beats, 4) : strings(raw.choices, 4, 120);
   return lines.filter((l) => findLeaks(l, secrets).length === 0);
 }
 async function promptedEffects(steps, run, vars, currency, userId, signal) {
@@ -39642,9 +39446,6 @@ var STEP_SIGNALS = [
   "typed_input",
   "classifier",
   "reply",
-  "uncached",
-  "candidates_changed",
-  "hit_set_changed",
   "scene_change",
   "slot_crossed",
   "day_start",
@@ -39665,7 +39466,6 @@ function knownSignal(s) {
 var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent"];
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
-  select: ["decision", "text"],
   "npc.choose": ["decision", "text"],
   contradiction: ["decision", "text", "effects"],
   "puzzle.answer": ["decision", "text"],
@@ -39974,9 +39774,17 @@ function currencyOf(v) {
 function migrateWorld(doc) {
   const currency = doc.currency;
   const lore = doc.lore;
-  if (isCurrency(currency) && isRecord(lore))
+  const steps = doc.steps;
+  const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => isRecord(t) && t.purpose === "select" ? [id] : []) : [];
+  if (isCurrency(currency) && isRecord(lore) && retired.length === 0)
     return doc;
-  return { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {} };
+  const out = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {} };
+  if (retired.length > 0) {
+    out.steps = { ...doc.steps };
+    for (const id of retired)
+      delete out.steps[id];
+  }
+  return out;
 }
 function lintWorld(world, registry) {
   const issues = [];
@@ -40033,7 +39841,7 @@ function lintWorld(world, registry) {
     if (truths.some((t) => l.content.toLowerCase().includes(t)))
       err(`lore.${id}.content`, "secret_truth", `"${l.title}" carries a secret's truth; lore holds cue text only`);
     if (l.secret && !l.gate)
-      warn(`lore.${id}.gate`, "no_gate", `secret lore "${l.title}" has no gate, so it is never selected`);
+      warn(`lore.${id}.gate`, "no_gate", `secret lore "${l.title}" has no gate, so it can never be revealed`);
   }
   for (const [id, s] of Object.entries(world.sections)) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0)
@@ -40542,7 +40350,6 @@ class Runtime {
   tokenCounts = new Map;
   lastWorldChat = new Map;
   presetWarnings = new Map;
-  selectCache = new Map;
   pins = new Map;
   outcomeNotes = new Map;
   preBudgets = new Map;
@@ -40559,7 +40366,7 @@ class Runtime {
     this.planNotes = new PlanNotes(this.host);
     this.book = new EngineBook(this.host, this.worlds);
     this.steps = new Steps(this.host, this.meter);
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792238521" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792257185" }));
     this.push = new StatePush(this.host, (chatId, userId) => this.view(chatId, userId));
   }
   start() {
@@ -40844,15 +40651,6 @@ class Runtime {
       return;
     this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the world's book was detached; re-attaching it`, userId);
     await this.book.attach(chatId, bookId, userId);
-  }
-  bookNames = new Map;
-  async bookName(bookId, userId) {
-    const known = this.bookNames.get(bookId);
-    if (known)
-      return known;
-    const name = await this.host.books.name(bookId, userId).catch(() => null) ?? bookId;
-    lruSet(this.bookNames, bookId, name, 1024);
-    return name;
   }
   async beforeCommit(input) {
     let context;
@@ -41167,15 +40965,17 @@ class Runtime {
     for (const n of this.outcomeNotes.get(input.chatId) ?? [])
       if (n.messageId !== plan?.messageId && (n.toldTo === undefined || n.toldTo === plan?.messageId))
         planned.outcome.unshift(n.text);
-    const record = { id: plan?.generationId ?? `dry:${Date.now().toString(36)}`, at: Date.now(), activation: "unconfirmed", candidates: [], sections: [], budget: { sections: settings.modelUse.tokens.sections, lore: settings.modelUse.tokens.lore, used: 0 }, forced: [] };
+    const record = { id: plan?.generationId ?? `dry:${Date.now().toString(36)}`, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [] };
     if (bookId && present.size === 0)
       record.warnings = ["The world's book wasn't attached to this chat, so no engine sections reached the narrator. It is re-attached for the next turn."];
-    else if (bookId && index && sectionsOf(world).some((s) => !present.has(slotIds.get(s.id) ?? ""))) {
-      record.warnings = ["Some engine slot entries were missing from the world's book; they are recreated for the next turn."];
-      this.book.ensure(world, index, input.userId).catch((error) => this.host.log("warn", `[LumiRPEngine] slot repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
+    else if (bookId && index) {
+      const missing = sectionsOf(world).some((s) => !present.has(slotIds.get(s.id) ?? ""));
+      if (missing)
+        record.warnings = ["Some engine slot entries were missing from the world's book; they are recreated for the next turn."];
+      if (missing || input.entries.some((e) => e.bookId === bookId && loreOfEntry(e.extensions) !== null))
+        this.book.ensure(world, index, input.userId).catch((error) => this.host.log("warn", `[LumiRPEngine] book repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
     }
     let budget = settings.modelUse.tokens.sections;
-    const sceneText = [];
     const delivery = this.delivery.get(input.chatId) ?? {};
     const uncounted = new Map;
     for (const section of sectionsOf(world)) {
@@ -41216,7 +41016,6 @@ class Runtime {
       if (clipped)
         continue;
       budget -= cost;
-      sceneText.push(content);
       const placement = placementOf(section);
       result.enabled.push(entryId);
       result.forced.push(entryId);
@@ -41232,100 +41031,11 @@ class Runtime {
         return;
       });
     }
-    const povPlace = placeOfEntity(state, world.pov);
-    const sceneIds = new Set;
-    for (let p = povPlace ?? undefined, guard = 0;p && guard < 16; p = world.places[p]?.parent, guard++)
-      sceneIds.add(p);
-    for (const [id] of Object.entries(state.entities))
-      if (povPlace && placeOfEntity(state, id) === povPlace)
-        sceneIds.add(id);
-    const recent = [...input.messages].reverse().slice(0, 8).map((m) => m.content);
-    const found = gatherCandidates({
-      entries: input.entries,
-      engineBookId: bookId,
-      slotIds: new Set(slotIds.values()),
-      passThroughBooks: new Set(settings.passThroughBooks),
-      suppressed: (e) => world.suppressed.some((s) => s.bookId === e.bookId && ("entryId" in s ? s.entryId === e.id : s.comment === e.comment)),
-      sceneIds,
-      recent,
-      knows: (id) => !hasOwn(state.entities, id) || playerKnows(world, state, world.pov, id),
-      revealed: (gate) => {
-        try {
-          return truthy2(evalExpr(gate, scopeEnv({ reg: this.registry, ctx }), false));
-        } catch {
-          return false;
-        }
-      }
-    });
-    const selectConfig = settings.modelUse.steps.select ?? null;
-    const selectFacts = { ...(plan ? this.prePhase.get(plan.generationId)?.facts : undefined) ?? noFacts(), uncached: true, hitSetChanged: true, candidatesChanged: true };
-    const cacheSignals = ["uncached", "hit_set_changed", "candidates_changed"];
-    const mode = !selectConfig?.enabled || settings.modelUse.budgets.select.calls < 1 ? "engine" : selectConfig.signals.includes("always") ? "full" : selectConfig.signals.some((s) => cacheSignals.includes(s)) ? "standard" : fires(selectConfig.signals, selectFacts) ? "full" : "engine";
-    const selectTemplate = templatesFor(world, "select")[0]?.template;
-    const relevance = hashJson({ place: [...sceneIds].sort(), tracks: state.tracks, knows: state.entities[world.pov]?.relations.filter((r) => r.type === "knows").map((r) => r.to) ?? [], levels: state.realism.levels });
-    const stepKey = hashJson({ route: selectConfig?.route ?? null, template: selectConfig?.template ?? null, v: 1 });
-    const cache = this.selectCache.get(input.chatId) ?? new Map;
-    lruSet(this.selectCache, input.chatId, cache, 256);
-    trimMap(cache, 2048);
-    const seed = plan?.seed ?? hashParts("lre.wi", input.chatId, String(observed.length));
-    const selection = await selectLore({
-      candidates: found.candidates,
-      loreBudget: settings.modelUse.tokens.lore,
-      mode,
-      cache,
-      cacheKey: (c) => cacheKeyOf(c, relevance, stepKey),
-      seed,
-      decide: async (asks) => {
-        if (!plan)
-          return null;
-        const questions = {};
-        const keys = new Map;
-        asks.slice(0, 16).forEach((c, i) => {
-          keys.set(`c${i}`, c.entry.id);
-          questions[`c${i}`] = { type: "noul", instructions: `${selectTemplate ?? "Does this lore matter for the narrator's next reply?"} Title: ${c.entry.comment || c.entry.keys.join(", ")}. Text: ${c.entry.content.slice(0, 500)}` };
-        });
-        const brief = this.bridges.get(input.chatId)?.proseFor(plan.seed)?.brief ?? null;
-        const answer = await this.steps.decide("select", { scene: sceneText.join(`
-`).slice(0, 2500), recent: recent.slice(0, 6), ...brief ? { brief } : {} }, questions, selectConfig, input.userId, AbortSignal.timeout(Math.max(500, Math.min(6000, settings.modelUse.budgets.select.ms))));
-        if (!answer)
-          return null;
-        const out = new Map;
-        for (const [key, a] of Object.entries(answer.answers)) {
-          const id = keys.get(key);
-          if (id && a.type === "noul")
-            out.set(id, a.noul);
-        }
-        return out;
-      }
-    });
-    record.budget.used = selection.used;
-    const selectedIds = new Set(selection.selected.map((c) => c.entry.id));
-    const bookNames = new Map;
-    for (const id of new Set(found.candidates.map((c) => c.entry.bookId)))
-      bookNames.set(id, id === bookId ? "World lore" : await this.bookName(id, input.userId));
-    for (const c of found.candidates) {
-      if (selectedIds.has(c.entry.id)) {
-        result.forced.push(c.entry.id);
-        if (c.engine)
-          result.enabled.push(c.entry.id);
-      } else if (!c.engine)
-        result.disabled.push(c.entry.id);
-      const s = selection.status.get(c.entry.id) ?? { status: "dropped", reason: "unranked" };
-      record.candidates.push({ title: c.entry.comment || c.entry.keys.join(", ") || c.entry.id, book: c.entry.bookId, bookName: bookNames.get(c.entry.bookId) ?? c.entry.bookId, status: s.status, reason: s.reason });
-    }
-    result.disabled.push(...found.suppressed, ...found.overflow);
-    const groups = new Set(selection.selected.map((c) => c.entry.group).filter((g) => g !== null));
-    for (const e of found.passThrough)
-      if (e.group && groups.has(e.group))
-        result.disabled.push(e.id);
+    record.budget.used = settings.modelUse.tokens.sections - budget;
     const picked = new Set([...result.enabled, ...result.forced]);
-    const voted = new Set(result.disabled);
     for (const e of input.entries)
-      if (e.bookId === bookId && !picked.has(e.id) && !voted.has(e.id))
+      if (e.bookId === bookId && !picked.has(e.id))
         result.disabled.push(e.id);
-    result.disableRecursion = found.passThrough.length === 0;
-    if (selection.pinsOverBudget)
-      record.warnings = [...record.warnings ?? [], "Pinned (constant) entries alone exceed the lore budget."];
     record.forced = [...result.forced];
     if (plan) {
       const list = this.inspector.get(input.chatId) ?? [];
@@ -41387,10 +41097,8 @@ class Runtime {
   inspectorRecords(chatId) {
     return this.inspector.get(chatId);
   }
-  async inspectorView(chatId, userId) {
+  inspectorView(chatId, userId) {
     const warnings = [];
-    if (await this.host.councilWorldInfo(userId) === true)
-      warnings.push("Council World Info is on: Council uses native activation over your lore books in this world chat.");
     const records = this.inspector.get(chatId) ?? [];
     for (const r of records)
       for (const w of r.warnings ?? [])
@@ -41415,7 +41123,7 @@ class Runtime {
     const observed = toChain(await this.host.chats.messages(chatId, userId));
     const stored = await this.chips.list(chatId, userId);
     const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId) });
-    view.panels["core.context"] = await this.inspectorView(chatId, userId);
+    view.panels["core.context"] = this.inspectorView(chatId, userId);
     return view;
   }
   takeChip(chatId, userId, id) {
@@ -42596,9 +42304,6 @@ function createSpindleHost() {
       async exists(bookId, userId) {
         return await spindle.world_books.get(bookId, userId) !== null;
       },
-      async name(bookId, userId) {
-        return (await spindle.world_books.get(bookId, userId))?.name ?? null;
-      },
       async entries(bookId, userId) {
         const out = [];
         for (let offset = 0;offset < 1e5; offset += 200) {
@@ -42628,15 +42333,8 @@ function createSpindleHost() {
         const created = await spindle.world_books.entries.create(bookId, entryInput(entry), userId);
         return created.id;
       },
-      async updateEntry(entryId, patch, userId) {
-        await spindle.world_books.entries.update(entryId, entryInput(patch), userId);
-      },
       async deleteEntry(entryId, userId) {
         await spindle.world_books.entries.delete(entryId, userId);
-      },
-      async setExtension(entryId, namespace, value, userId) {
-        const api = spindle.world_books.entries;
-        await api.setExtension(entryId, namespace, value, userId);
       }
     },
     async dryRun(chatId, userId) {
@@ -42696,14 +42394,6 @@ function createSpindleHost() {
       else
         spindle.log.info(message);
       diagnostics.add(level, message, userId);
-    },
-    async councilWorldInfo(userId) {
-      try {
-        const s = await spindle.council.getSettings({ userId });
-        return s.councilMode && s.toolsSettings.includeWorldInfo;
-      } catch {
-        return null;
-      }
     }
   };
 }

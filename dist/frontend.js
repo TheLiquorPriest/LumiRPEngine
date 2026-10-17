@@ -2264,7 +2264,7 @@ var COLLECTION_SPECS = {
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' }
   ],
   steps: [
-    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "select", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"] },
+    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"] },
     { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "enum", key: "output", label: "Output", values: ["text", "effects", "decision"] },
     { kind: "tags", key: "signals", label: "Signals" }
@@ -2278,9 +2278,9 @@ var COLLECTION_SPECS = {
     { kind: "text", key: "content", label: "Content", multiline: true },
     { kind: "tags", key: "keys", label: "Keys" },
     { kind: "refs", key: "links", label: "Links (entities and places)", collections: ["entities", "places"] },
-    { kind: "text", key: "group", label: "Group", optional: true, hint: "At most one entry of a group is selected per turn" },
-    { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among equal hits" },
-    { kind: "bool", key: "secret", label: "Secret", hint: "A candidate only while the gate holds" },
+    { kind: "text", key: "group", label: "Group", optional: true, hint: "Entries sharing a group are alternatives to each other" },
+    { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
+    { kind: "bool", key: "secret", label: "Secret", hint: "Hidden until the gate holds" },
     { kind: "expr", key: "gate", label: "Gate", optional: true }
   ]
 };
@@ -3858,7 +3858,7 @@ var COLLECTIONS2 = [
   { id: "rules", label: "Rules", hint: "When this, do that" },
   { id: "schedules", label: "Schedules", hint: "Routines, shifts, weather" },
   { id: "tracks", label: "Tracks", hint: "Quests, secrets, puzzles, agendas" },
-  { id: "lore", label: "Lore", hint: "What the world knows; synced to the engine's book" },
+  { id: "lore", label: "Lore", hint: "Authored lore. Not delivered to the AI yet." },
   { id: "tables", label: "Data tables", hint: "Prices, jobs, regions…" },
   { id: "sections", label: "Sections", hint: "What the narrator reads" },
   { id: "steps", label: "Step templates", hint: "Prompted model steps" },
@@ -4905,9 +4905,9 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
   condition: "auto",
-  regard: "auto",
-  transfer: "auto",
-  spawn: "auto",
+  regard: "confirm",
+  transfer: "confirm",
+  spawn: "confirm",
   knows: "confirm",
   give: "confirm",
   purchase: "confirm"
@@ -5387,14 +5387,13 @@ var PRESETS2 = [
   { value: "custom", label: "Custom" }
 ];
 var PRESET_NOTE = {
-  lean: "Narrator + up to 2 model steps a turn (2 calls on a typical turn). The floor; doesn't meet “a model decides” on its own.",
-  standard: "Narrator + up to 5 model steps a turn (3 calls on a typical turn). The default.",
-  full: "Narrator + up to 9 model steps a turn (6 calls on a typical turn).",
+  lean: "Narrator + up to 2 model steps a turn. The floor; doesn't meet “a model decides” on its own. The call meter shows each turn's real count.",
+  standard: "Narrator + up to 4 model steps a turn. The default. The call meter shows each turn's real count.",
+  full: "Narrator + up to 8 model steps a turn. The call meter shows each turn's real count.",
   custom: "Your own steps, signals, providers and budgets. The count depends on the steps you enable; the call meter shows it live."
 };
 var STEP_LABEL = {
   interpret: "Interpret typed input",
-  select: "Select lore",
   "npc.choose": "NPC choices",
   contradiction: "Contradiction check",
   "puzzle.answer": "Puzzle answers",
@@ -5403,8 +5402,8 @@ var STEP_LABEL = {
   extract: "Extract changes",
   choices: "Suggested choices"
 };
-var PHASES = ["pre", "select", "post"];
-var PHASE_LABEL = { pre: "Before the reply", select: "Lore selection", post: "After the reply" };
+var PHASES = ["pre", "post"];
+var PHASE_LABEL = { pre: "Before the reply", post: "After the reply" };
 function ModelUseSection(props) {
   const { modelUse } = props;
   return /* @__PURE__ */ u3("div", {
@@ -5466,16 +5465,6 @@ function ModelUseSection(props) {
         integer: true,
         disabled: props.busy,
         onChange: (sections) => props.patch({ modelUse: { preset: "custom", tokens: { sections } } })
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(NumberStepper, {
-        label: "Lore",
-        value: modelUse.tokens.lore,
-        min: 0,
-        max: 16000,
-        step: 100,
-        integer: true,
-        disabled: props.busy,
-        onChange: (lore) => props.patch({ modelUse: { preset: "custom", tokens: { lore } } })
       }, undefined, false, undefined, this),
       props.meter ? /* @__PURE__ */ u3(Meter, {
         meter: props.meter
@@ -5581,7 +5570,7 @@ function StepsSection(props) {
     class: "lre-list",
     children: Object.keys(STEP_LABEL).map((purpose) => {
       const config = props.modelUse.steps[purpose] ?? { enabled: false, signals: [] };
-      const route = config.route ?? { provider: purpose === "select" || purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
+      const route = config.route ?? { provider: purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
       const lowTokens = config.maxTokens !== undefined && config.maxTokens < 1500;
       return /* @__PURE__ */ u3("div", {
         class: "lre-card",
@@ -5763,7 +5752,7 @@ var EXTRACTION_LABEL = {
   transfer: "Money transfers",
   regard: "Feelings toward others",
   quantity: "Quantities",
-  spawn: "New people and things"
+  spawn: "New people"
 };
 var MODE_OPTIONS = [
   { value: "auto", label: "Auto" },
@@ -5830,52 +5819,6 @@ function ExtractionSection(props) {
           ]
         }, type, true, undefined, this);
       })
-    ]
-  }, undefined, true, undefined, this);
-}
-function BooksSection(props) {
-  const app = useApp();
-  const [books, setBooks] = d2(null);
-  A(() => {
-    app.host.worldBooks().then(setBooks, () => setBooks([]));
-  }, []);
-  const toggle = (id) => {
-    const next = props.selected.includes(id) ? props.selected.filter((entry) => entry !== id) : [...props.selected, id];
-    props.patch({ passThroughBooks: next });
-  };
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    children: [
-      /* @__PURE__ */ u3("p", {
-        class: "lre-small lre-muted",
-        style: { margin: 0 },
-        children: "In world chats the engine decides what lore enters the context. Books checked here still activate natively."
-      }, undefined, false, undefined, this),
-      books === null ? /* @__PURE__ */ u3(Empty, {
-        children: "Loading lore books…"
-      }, undefined, false, undefined, this) : books.length === 0 ? /* @__PURE__ */ u3(Empty, {
-        children: "No lore books."
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
-        class: "lre-list",
-        children: books.map((book) => /* @__PURE__ */ u3("label", {
-          class: "lre-item",
-          children: [
-            /* @__PURE__ */ u3("span", {
-              class: "lre-check",
-              children: /* @__PURE__ */ u3("input", {
-                type: "checkbox",
-                checked: props.selected.includes(book.id),
-                disabled: props.busy,
-                onChange: () => toggle(book.id)
-              }, undefined, false, undefined, this)
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              class: "grow",
-              children: book.name
-            }, undefined, false, undefined, this)
-          ]
-        }, book.id, true, undefined, this))
-      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -5953,8 +5896,7 @@ function PinsSection() {
   }, undefined, true, undefined, this);
 }
 var STATIC_CAVEATS = [
-  "Other extensions' World Info interceptors still run; entries they force count as pins.",
-  "If Council's own World Info is on, Council activates lore natively over your books in world chats.",
+  "LumiRPEngine does not manage lore; Lumiverse's World Info works as usual in world chats.",
   "Settings seed new chats only. Change a running chat from Play (Calendar, realism for this chat).",
   "Undo covers the latest reply; earlier changes go through Keep or Discard."
 ];
@@ -6071,17 +6013,6 @@ function Settings() {
         ...fold,
         children: /* @__PURE__ */ u3(StepsSection, {
           modelUse: settings.modelUse,
-          patch,
-          busy
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Fold, {
-        id: "books",
-        title: "Pass-through lore books",
-        summary: `${settings.passThroughBooks.length} selected`,
-        ...fold,
-        children: /* @__PURE__ */ u3(BooksSection, {
-          selected: settings.passThroughBooks,
           patch,
           busy
         }, undefined, false, undefined, this)
@@ -10553,7 +10484,6 @@ var DELIVERY_BADGE = {
   unverified: { text: "not delivered", tone: "neg" },
   unchecked: { text: "unchecked", tone: "" }
 };
-var STATUSES2 = ["included", "pinned", "dropped", "unverified"];
 function decodeContextView(value) {
   if (!isRecord(value) || !Array.isArray(value.generations))
     return null;
@@ -10565,9 +10495,8 @@ function decodeContextView(value) {
         id: str(g.id),
         at: num(g.at),
         activation: oneOf(g.activation, ["confirmed", "unconfirmed", "stalled"], "unconfirmed"),
-        candidates: list(g.candidates, (c) => ({ title: str(c.title, "Untitled"), book: str(c.book), bookName: str(c.bookName, str(c.book)), status: oneOf(c.status, STATUSES2, "unverified"), reason: str(c.reason) })),
         sections: list(g.sections, (s) => ({ slot: str(s.slot), label: str(s.label, str(s.slot)), tokens: num(s.tokens), clipped: s.clipped === true, delivery: oneOf(s.delivery, DELIVERY, "unchecked") })),
-        budget: { sections: num(budget.sections), lore: num(budget.lore), used: num(budget.used) }
+        budget: { sections: num(budget.sections), used: num(budget.used) }
       };
     })
   };
@@ -10575,13 +10504,11 @@ function decodeContextView(value) {
 var ACTIVATION = {
   confirmed: { text: "Activation confirmed", tone: "pos" },
   unconfirmed: { text: "Not confirmed", tone: "warn" },
-  stalled: { text: "Worker stalled: world lore absent", tone: "neg" }
+  stalled: { text: "Worker stalled: engine sections absent", tone: "neg" }
 };
-var STATUS_TONE2 = { included: "pos", pinned: "accent", dropped: "", unverified: "warn" };
 function ContextPanel(props) {
   const view = decodeContextView(props.view);
   const [index, setIndex] = d2(0);
-  const [status, setStatus] = d2("all");
   const app = useApp();
   A(() => {
     app.request({ type: "lre.view.open", chatId: props.chatId, panel: "core.context", entity: null });
@@ -10596,7 +10523,7 @@ function ContextPanel(props) {
     }, undefined, false, undefined, this);
   const generations = [...view.generations].sort((a, b) => b.at - a.at);
   const generation = generations[Math.min(index, generations.length - 1)];
-  const total = generation ? generation.budget.sections + generation.budget.lore : 0;
+  const total = generation ? generation.budget.sections : 0;
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
     "data-lre-panel": "core.context",
@@ -10677,45 +10604,7 @@ function ContextPanel(props) {
               sub: s.clipped ? "left out: over the section budget" : undefined,
               tone: s.clipped ? "warn" : undefined
             }, s.slot, false, undefined, this))
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3(Card, {
-            title: "Candidates",
-            aside: /* @__PURE__ */ u3("span", {
-              class: "lre-badge",
-              children: generation.candidates.length
-            }, undefined, false, undefined, this),
-            children: [
-              /* @__PURE__ */ u3(Seg, {
-                label: "Candidate status",
-                value: status,
-                options: [{ value: "all", label: "All" }, ...STATUSES2.map((s) => ({ value: s, label: `${s[0]?.toUpperCase()}${s.slice(1)} (${generation.candidates.filter((c) => c.status === s).length})` }))],
-                onChange: (next) => setStatus(next)
-              }, undefined, false, undefined, this),
-              generation.candidates.filter((c) => status === "all" || c.status === status).map((c, i) => /* @__PURE__ */ u3("div", {
-                class: "lre-row",
-                style: { alignItems: "flex-start" },
-                children: [
-                  /* @__PURE__ */ u3("span", {
-                    class: "k",
-                    children: [
-                      c.title,
-                      /* @__PURE__ */ u3("span", {
-                        class: "sub",
-                        children: [
-                          c.bookName,
-                          c.reason ? ` — ${c.reason}` : ""
-                        ]
-                      }, undefined, true, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ u3("span", {
-                    class: `lre-badge ${STATUS_TONE2[c.status]}`,
-                    children: c.status
-                  }, undefined, false, undefined, this)
-                ]
-              }, `${c.book}:${c.title}:${i}`, true, undefined, this))
-            ]
-          }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
         ]
       }, undefined, true, undefined, this)
     ]

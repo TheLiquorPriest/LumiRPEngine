@@ -32,9 +32,6 @@ var STEP_SIGNALS = [
   "typed_input",
   "classifier",
   "reply",
-  "uncached",
-  "candidates_changed",
-  "hit_set_changed",
   "scene_change",
   "slot_crossed",
   "day_start",
@@ -55,7 +52,6 @@ function knownSignal(s) {
 var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent"];
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
-  select: ["decision", "text"],
   "npc.choose": ["decision", "text"],
   contradiction: ["decision", "text", "effects"],
   "puzzle.answer": ["decision", "text"],
@@ -3436,7 +3432,7 @@ function lintWorld(world, registry) {
     if (truths.some((t) => l.content.toLowerCase().includes(t)))
       err(`lore.${id}.content`, "secret_truth", `"${l.title}" carries a secret's truth; lore holds cue text only`);
     if (l.secret && !l.gate)
-      warn(`lore.${id}.gate`, "no_gate", `secret lore "${l.title}" has no gate, so it is never selected`);
+      warn(`lore.${id}.gate`, "no_gate", `secret lore "${l.title}" has no gate, so it can never be revealed`);
   }
   for (const [id, s] of Object.entries(world.sections)) {
     if (macroHazards(s.template, ["{{lines}}"]).length > 0)
