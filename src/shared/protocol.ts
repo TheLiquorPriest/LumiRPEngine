@@ -111,7 +111,7 @@ export interface SettingsGetRequest extends Request<"lre.settings.get"> {}
 /**
  * An RFC 7386 merge patch over UserSettings: `null` deletes (unpin a type with
  * `{extraction: {purchase: null}}`) and arrays replace. A `realism.preset` or `modelUse.preset`
- * other than `custom` is expanded by the backend into levels and tier caps, or steps and budgets;
+ * other than `custom` is expanded by the backend into levels and band caps, or steps and budgets;
  * any manual change sends `preset: "custom"`.
  */
 export interface SettingsSetRequest extends Request<"lre.settings.set"> {
@@ -180,8 +180,8 @@ export type WorldCollection =
   | "packs"
   | "lore";
 
-/** Singleton parts of a world document. */
-export type WorldPart = "calendar" | "realism" | "time" | "meta";
+/** Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1). */
+export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers";
 
 /**
  * Build-draft operations. `get` returns the stored draft (or a fresh copy of the head when there is

@@ -4,13 +4,14 @@
 // computed by query functions at read time.
 
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { DomainId, EntityId, InterruptClass, InterruptPolicy, KindId, Level, PackId, RevisionId, SceneTypeId, StageId, Tier, TrackId } from "../shared/ids";
+import type { Band, DomainId, EntityId, InterruptClass, InterruptPolicy, KindId, Level, PackId, RevisionId, SceneTypeId, StageId, TierId, TrackId } from "../shared/ids";
 import type { RelationInstance } from "../shared/world";
 
 export interface EntityState {
   kind: KindId;
   name: string;
-  tier: Tier;
+  /** The entity's tier; the world maps it to a band when levels are read (DESIGN §9.1). */
+  tier: TierId;
   fields: JsonObject;
   relations: RelationInstance[];
   levels: Partial<Record<DomainId, Level>>;
@@ -22,10 +23,10 @@ export interface TrackState {
   since: number;
 }
 
-/** Realism as folded from the world defaults and `resolve` markers. */
+/** Realism as folded from the world defaults and `resolve` markers: levels, and caps per detail band. */
 export interface RealismState {
   levels: Record<DomainId, Level>;
-  tierCaps: Record<Exclude<Tier, "pov">, Partial<Record<DomainId, Level>>>;
+  tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
 }
 
 /** Time controls as folded from the world defaults, starting markers and `time` markers. */

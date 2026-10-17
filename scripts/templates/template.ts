@@ -2,7 +2,7 @@
 // converter reads it. The files are checked by data-src/templates/validate.ts before they get here.
 
 import type { JsonObject, JsonValue } from "../../src/shared/json";
-import type { Tier, Visibility } from "../../src/shared/ids";
+import type { Band, Visibility } from "../../src/shared/ids";
 import type { DateRule } from "../../src/shared/world";
 
 export interface TplEffect {
@@ -45,7 +45,8 @@ export interface TplJob {
 export interface TplCharacter {
   id: string;
   name: string;
-  tier: Tier;
+  /** `pov` marks the point-of-view character; everyone else names a band (the converted world's default tiers). */
+  tier: "pov" | Band;
   agent?: boolean;
   age?: number;
   role: string;

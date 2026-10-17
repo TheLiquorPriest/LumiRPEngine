@@ -212,7 +212,7 @@ Every turn has an **elapsed time**. It is one of: the length of a Timelapse, the
 
 Where to change them:
 
-- **Settings → Time** sets your defaults for **new chats**.
+- **Settings → Time** fills in, for **new chats**, what a world's own time defaults leave out (always the time scale and the NPC calls); with **Use my settings instead of a world's defaults for new chats** on, it replaces them.
 - **Play → Calendar** changes **this chat**.
 
 Both places have the same sections: **Default tick per scene type**, **Time scale**, **Timelapse interrupts**, **Speed through** and **Montage and limits**.
@@ -276,7 +276,7 @@ The time controls and Timelapse need Calendar at level 1 or higher. At level 1, 
 
 ### Presets
 
-| Preset | Money | Gear | Vehicles | Cast life | Relationships | Space | Calendar | Weather | Sheets | Tier caps (principal / supporting / background) |
+| Preset | Money | Gear | Vehicles | Cast life | Relationships | Space | Calendar | Weather | Sheets | Band caps (Leads / Supporting / Background) |
 |---|---|---|---|---|---|---|---|---|---|---|
 | **Story** (the default) | 1 | 1 | 1 | 1 | 1 | 2 | 2 | 1 | 1 | none; every domain level applies to everyone |
 | **Grounded** | 2 | 2 | 2 | 2 | 2 | 2 | 3 | 2 | 2 | no cap / no cap / 1 |
@@ -285,15 +285,17 @@ The time controls and Timelapse need Calendar at level 1 or higher. At level 1, 
 
 Moving any dial yourself makes the preset *Custom*.
 
-### Tiers
+### Tiers and bands
 
-Not everyone needs to be simulated in depth. Every character is one of four **tiers**: **pov** (you), **principal**, **supporting** and **background**, and each tier has a cap per domain. A character's **effective level** is the lower of the domain level and the tier's cap, unless you set a per-character override (**Level overrides** in the character's editor), which can never go above the domain level. In Simulation, principal characters run at level 4 while a background shopkeeper runs at 2.
+Not everyone needs to be simulated in depth. Every character has a **tier**, one of the world's own (a new world has **Leads**, **Supporting** and **Background**; an author can rename them, add more and reorder them in **Build → Tiers**). Each tier belongs to one of three **bands**, Leads, Supporting or Background, and each band has a cap per domain. A character's **effective level** is the lower of the domain level and its band's cap, unless you set a per-character override (**Level overrides** in the character's editor), which can never go above the domain level. Your own character is never capped. In Simulation, Leads run at level 4 while a Background shopkeeper runs at 2.
+
+A tier can make its people **LOD1 agents by default**, and a world names the tier **new people join** (by default its first Background tier): people the story introduces, and anything spawned without a tier.
 
 People you mark as a **LOD1 agent** in their entity editor get goals and agendas that feed their choices, even on Story. They are consulted by the AI only on close calls or invitations. Everyone else follows schedules and seeded incidents.
 
 ### Promote and demote
 
-You can change a domain's level at any time in **Settings → Realism**. Its **New chats** tab sets the defaults for chats you start later; its **This chat** tab changes the running chat, for **Everyone** or for just the **Principal**, **Supporting** or **Background** tier. A single character's level is set on the character in the Build editors (**Level overrides**).
+You can change a domain's level at any time in **Settings → Realism**. A new chat starts from its world's own realism and time defaults, and the **New chats** tab fills in only what a world leaves out; turn on **Use my settings instead of a world's defaults for new chats** (also in **Settings → Time**) if you always want your own levels, say Story everywhere. Its **This chat** tab changes the running chat, for **Everyone** or for just the **Leads**, **Supporting** or **Background** band (it names the world's tiers in that band); before the chat's first turn it shows the levels that turn will use. A single character's level is set on the character in the Build editors (**Level overrides**).
 
 - **Promoting** switches processes on. Anything the character lacks is generated on demand, inside what is already known.
 - **Demoting** switches processes off and trims what is shown. The data stays; nothing goes dormant, so promoting again never brings back stale detail. Money is conserved either way.
@@ -425,7 +427,7 @@ Anything the engine inserts into the prompt, a name, a price, a number, a model'
 
 ## Authoring
 
-You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults and time defaults), its **Content** lists (Entities, Places, Routes, Grids, Kinds, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its tools. Edit an item and **Save to draft**, or **Revert**. **Check world**, **Import from lore**, **Build with AI**, **Refine with AI**, **Playtest** and **Attach to this chat** are tools inside a world.
+You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults, tiers and time defaults), its **Content** lists (Entities, Places, Routes, Grids, Kinds, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its tools. Edit an item and **Save to draft**, or **Revert**. **Check world**, **Import from lore**, **Build with AI**, **Refine with AI**, **Playtest** and **Attach to this chat** are tools inside a world.
 
 ### Editors and lint
 
@@ -441,7 +443,8 @@ What you can define:
 - **Tracks**: quests, secrets (revealed by conditions only), puzzles with attempts and a hint ladder, and NPC agendas.
 - **Schedules**: calendar recurrence plus tables of fixed values or weighted choices, for shifts, timetables, routines, weather, bills, paydays and price paths.
 - **Lore**: what the world knows, as entries with a title, keywords and links (see [Lore books](#lore-books)). It is kept in the world but isn't delivered to the AI yet. Lore holds cue text only; the truth of a secret lives in its track, and lint refuses lore that repeats it.
-- The **calendar** (Gregorian or your own) and **realism** defaults.
+- The **calendar** (Gregorian or your own) and **realism** defaults, with the band caps under the band labels.
+- **Tiers**: the world's own ranks of importance. Each has a label, a band (Leads, Supporting or Background), a place in the order (↑ and ↓), an optional description, and whether its people are LOD1 agents by default; **+ Add tier** makes a new one, and a tier still in use can't be removed. **New people join** picks the tier for people the story introduces (by default the first Background tier). An entity's editor picks its tier from these, and its **LOD1 agent** choice can follow the tier ("As its tier"); lint flags an entity whose tier the world doesn't have.
 - **Section templates**: how a section's lines are wrapped when they go into the prompt. A template may use only the engine's `{{lines}}` marker; any other macro, control character or `<user>`-style shorthand in one is a lint error (`section_macro`), because it would run beside the engine's own values.
 - **Step templates**: your own wording for a model step, per purpose (interpret, NPC choices, contradiction, puzzle answers, brief, outline, extract, suggested choices), with an output (text, decision, or `effects` for the steps that read changes, which run after the reply only), the signals it runs on (a template's own signals replace the step's), and engine placeholders such as `{{world}}`, `{{pov}}`, `{{place}}`, `{{clock}}`, `{{scene}}`, `{{present}}`, `{{facts}}`, `{{outcome}}`, `{{beats}}`, `{{brief}}`, `{{user}}`, `{{reply}}` and `{{recent}}`. They are all player-visible: a line that would reveal an unrevealed truth is dropped before the call. A template whose output can't be used by its purpose, an unknown signal and an unknown placeholder are lint warnings. Changes a step template proposes with `effects` are checked and bounded exactly like extraction, and money in them is stated as a plain amount in the world's currency (8 for $8), which the engine converts. Which steps run at all is still your choice, in **Settings → Steps and connections**. A world made with an earlier version keeps its step templates, except those for lore selection, which no longer exists.
 

@@ -181,10 +181,12 @@ describe("palette: Take from a kit", () => {
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     rig.body(await rig.send({ type: "lre.fix", chatId, entity: "pov", field: "place", value: "alder_automotive" }));
     const kitOption = async () => (await rig.rt.view(chatId, rig.host.userId)).palette?.entries.find((e) => e.action === "take_piece")?.options.find((o) => o.params.kit === "pov_toolbox");
-    // Before the first turn the palette judges at the levels that turn will use: the user's realism
-    // (Story: gear 1, too coarse for kit pieces), not the world's own (gear 4).
+    // Before the first turn the palette judges at the levels that turn will use. With "Use my
+    // settings" on, that's the user's realism (Story: gear 1, too coarse for kit pieces) ...
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { overrideWorldDefaults: true } }));
     expect((await kitOption())?.next?.options.every((p) => p.disabled === "Not possible here and now")).toBe(true);
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { realism: { levels: { gear: 4 } } } }));
+    // ... and by default it's the world's own (Port Alder's Simulation: gear 4).
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { overrideWorldDefaults: false } }));
     const entry = (await rig.rt.view(chatId, rig.host.userId)).palette?.entries.find((e) => e.action === "take_piece");
     const kit = entry?.options.find((o) => o.params.kit === "pov_toolbox");
     const piece = kit?.next?.options.find((p) => p.disabled === undefined);

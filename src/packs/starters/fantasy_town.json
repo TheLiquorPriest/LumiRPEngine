@@ -133,7 +133,7 @@
       "id": "pov",
       "kind": "character",
       "name": "The Traveler",
-      "tier": "pov",
+      "tier": "principal",
       "fields": {
         "description": "You came up the high road at dawn with a tired horse, a light purse and an open mind. Brindlemere is the first town in three days with a bed and a warm meal.",
         "role": "Travelling hand-for-hire with a horse and no plan",
@@ -7369,5 +7369,10 @@
     "format": "{sign}{amount} bits"
   },
   "pov": "pov",
+  "tiers": {
+    "principal": {"label": "Leads", "band": "principal", "order": 0},
+    "supporting": {"label": "Supporting", "band": "supporting", "order": 1},
+    "background": {"label": "Background", "band": "background", "order": 2}
+  },
   "start": {"place": "market_square", "at": "0412-08-25T07:30"}
 }

@@ -3,6 +3,7 @@
 
 import { hashJson } from "../../src/shared/hash";
 import type { LedgerEvent } from "../../src/shared/ledger";
+import { defaultTiers } from "../../src/shared/tiers";
 import type { WorldDoc } from "../../src/shared/world";
 import { DEFAULT_CURRENCY, WORLD_FORMAT } from "../../src/shared/world";
 import { enginePack } from "../../src/engine/engine-pack";
@@ -14,7 +15,7 @@ import { initialState } from "../../src/engine/world-state";
 
 export const POV = "sam";
 
-/** A small world: one POV, one LOD1 agent, two places, Story realism, US Eastern calendar. */
+/** A small world: one POV, one LOD1 agent, two places, the default tiers, Story realism, US Eastern calendar. */
 export function baseWorld(patch: Partial<WorldDoc> = {}): WorldDoc {
   const world: WorldDoc = {
     format: WORLD_FORMAT,
@@ -43,7 +44,7 @@ export function baseWorld(patch: Partial<WorldDoc> = {}): WorldDoc {
     },
     relations: {},
     entities: {
-      [POV]: { id: POV, kind: "person", name: "Sam", tier: "pov", fields: { place: "home", home: "home", cash: 5000, skill: 2 }, relations: [] },
+      [POV]: { id: POV, kind: "person", name: "Sam", tier: "principal", fields: { place: "home", home: "home", cash: 5000, skill: 2 }, relations: [] },
       dev: { id: "dev", kind: "person", name: "Dev", tier: "principal", fields: { place: "cafe", home: "cafe", cash: 900 }, relations: [], agent: true },
     },
     places: {
@@ -89,6 +90,7 @@ export function baseWorld(patch: Partial<WorldDoc> = {}): WorldDoc {
     seedMode: "fresh",
     lenientPricing: false,
     pov: POV,
+    tiers: defaultTiers(),
     start: { place: "home", at: "2026-10-16T08:00" },
   };
   return { ...world, ...patch };

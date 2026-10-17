@@ -5,6 +5,7 @@
 import type { ChatId, EntityId, PackId, PanelId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
+import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
 import type { ActionDef, WorldDoc } from "../shared/world";
@@ -17,6 +18,7 @@ import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
 import { optionalQuery } from "../engine/pack-kit";
 import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
+import { presetOf } from "../engine/realism";
 import { effectiveLevel, type Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates } from "../engine/resolve";
 import { kindIs, placeOfEntity } from "../engine/scope";
@@ -63,7 +65,7 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   const placeId = placeOfEntity(state, pov);
   const place = placeId ? world.places[placeId] : undefined;
   const offset = placeOffset(world, state.clock, placeId);
-  const money = effectiveLevel(state, pov, "money");
+  const money = effectiveLevel(world, state, pov, "money");
   const economy = panels["economy.money"];
   const band = isRecord(economy) && typeof economy.band === "string" ? economy.band : null;
   // The economy pack's panel knows the POV's cash accounts; without it, the POV's account or cash field.
@@ -218,7 +220,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
     });
   }
   entries.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-  const calendar = effectiveLevel(state, world.pov, "calendar");
+  const calendar = effectiveLevel(world, state, world.pov, "calendar");
   const timelapse: TimelapseView = {
     action: TIMELAPSE_ACTION,
     blocked: calendar < 1 ? "Calendar is off" : state.time.paused ? "Resume the clock first" : null,
@@ -236,9 +238,9 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
 }
 
 function controls(world: WorldDoc, state: WorldState, sceneType: string): ControlsView {
-  const realismPreset = world.realism.preset;
   return {
-    realism: { preset: realismPreset, levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps) },
+    // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
+    realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world) },
     time: {
       sceneType,
       sceneTicks: { ...state.time.sceneTicks },
@@ -512,6 +514,7 @@ export function buildView(input: ViewInput): StateView {
   };
   const drops = playerDrops(registry, world, state, recordOf, fold.notes, fold.keepReport);
   const chips: Chip[] = [...shown.map(({ payload: _payload, ...chip }) => chip), ...derivedChips(chain, fold, drops.keep, core, registry, world)];
+  const next = core.renderState(observed)?.state ?? state;
   return {
     v: 1,
     chatId: input.chatId,
@@ -526,9 +529,9 @@ export function buildView(input: ViewInput): StateView {
     pending,
     panels,
     // Judged against what the next turn acts on: before the first record, that includes the starting
-    // markers (the user's realism), which the head fold doesn't hold yet.
-    palette: palette(world, core.renderState(observed)?.state ?? state, registry),
-    controls: controls(world, state, sceneView.sceneType),
+    // markers (the world's defaults, the user's settings filling in), which the head fold doesn't hold yet.
+    palette: palette(world, next, registry),
+    controls: controls(world, next, sceneView.sceneType),
     meter: input.meter,
     packs,
     currency: world.currency,

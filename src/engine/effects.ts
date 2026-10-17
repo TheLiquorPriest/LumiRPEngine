@@ -8,7 +8,7 @@
 //   add    {entity, field, delta}           the result clamps to min/max (the delta shrinks)
 //   move   {entity, to}                     `place` := to; leaves any container (`in`)
 //   link   {rel, from, to, until?, fields?} unlink {rel, from, to}
-//   spawn  {id?, kind, name, tier?, fields?, relations?, agent?, place?}
+//   spawn  {id?, kind, name, tier?, fields?, relations?, agent?, place?}   tier: a world tier, else the world's spawn tier
 //   stage  {track, to}
 //   post   {lines: [{account, amount}], memo}
 //   signal {class, text, entity?, visibility?}   an interrupt-class event (timelapse policy)
@@ -18,9 +18,10 @@
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, InterruptClass } from "../shared/ids";
-import { INTERRUPT_CLASSES, TIERS } from "../shared/ids";
+import { INTERRUPT_CLASSES } from "../shared/ids";
 import { hashParts } from "../shared/hash";
 import type { LedgerEvent, PostingLine } from "../shared/ledger";
+import { agentOf, spawnTierOf, tierOf } from "../shared/tiers";
 import type { EffectSpec, EntityDef, RelationInstance } from "../shared/world";
 import { calendarOf, slotIndexAt } from "./calendar";
 import type { EnvVars, Value } from "./expr";
@@ -124,13 +125,13 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       const kind = text(args.kind);
       if (kind === "" || !(own(world.kinds, kind) ?? reg.kinds.get(kind))) return reject("missing_kind", `no kind ${kind}`);
       const id = text(args.id) || `${kind}:${hashParts(rng.seed, "spawn", kind, text(args.name)).slice(0, 10)}`;
-      const tier = (TIERS as readonly string[]).includes(text(args.tier)) ? (text(args.tier) as EntityDef["tier"]) : "background";
+      const tier = tierOf(world, text(args.tier)) ? text(args.tier) : spawnTierOf(world);
       const fields: JsonObject = isRecord(args.fields) ? { ...(args.fields as JsonObject) } : {};
       if (typeof args.place === "string") fields.place = args.place;
       const relations: RelationInstance[] = objects(args.relations).map((r) => ({ type: text(r.type), to: text(r.to) }));
       const entity: EntityDef = { id, kind, name: text(args.name) || id, tier, fields, relations };
       const out: LedgerEvent[] = [];
-      if (args.agent === true) {
+      if (agentOf(world, { id, tier, agent: typeof args.agent === "boolean" ? args.agent : undefined })) {
         entity.agent = true;
         // A new agent starts caught up: it never replays slots from before it existed.
         out.push({ type: "engine.caught", data: { agent: id, slot: slotIndexAt(calendarOf(world), state.clock) } });

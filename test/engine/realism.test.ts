@@ -32,17 +32,22 @@ describe("realism", () => {
     expect(presetOf(s.realism)).toBe("custom");
   });
 
-  test("effective level = override (never above the domain), else min(domain, tier cap)", () => {
-    const s = startState(baseWorld());
+  test("effective level = override (never above the domain), else min(domain, band cap); the POV is never capped", () => {
+    const world = baseWorld();
+    const s = startState(world);
     for (const m of realismMarkers(REALISM_PRESETS.simulation)) applyMarker(s, m);
-    expect(effectiveLevel(s, POV, "money")).toBe(4);
-    expect(effectiveLevel(s, "dev", "money")).toBe(4); // principal cap 4
+    expect(effectiveLevel(world, s, POV, "money")).toBe(4);
+    expect(effectiveLevel(world, s, "dev", "money")).toBe(4); // Leads cap 4
     s.entities.dev!.tier = "background";
-    expect(effectiveLevel(s, "dev", "money")).toBe(2);
+    expect(effectiveLevel(world, s, "dev", "money")).toBe(2);
     s.entities.dev!.levels.money = 3;
-    expect(effectiveLevel(s, "dev", "money")).toBe(3);
+    expect(effectiveLevel(world, s, "dev", "money")).toBe(3);
     applyMarker(s, { kind: "resolve", domain: "money", scope: { all: true }, to: 1 });
-    expect(effectiveLevel(s, "dev", "money")).toBe(1);
+    expect(effectiveLevel(world, s, "dev", "money")).toBe(1);
+    // The POV runs at the domain level whatever its tier.
+    s.entities[POV]!.tier = "background";
+    applyMarker(s, { kind: "resolve", domain: "money", scope: { all: true }, to: 4 });
+    expect(effectiveLevel(world, s, POV, "money")).toBe(4);
   });
 
   test("a demotion preview lists predicates whose inputs freeze, and processes that switch off", () => {

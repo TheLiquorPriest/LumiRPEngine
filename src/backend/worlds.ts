@@ -270,6 +270,14 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     if (currency) doc.currency = currency;
     return;
   }
+  if (part === "tiers") {
+    // `{tiers, spawnTier?}`: the tiers whole, as the editor sends them (lint checks each band); no spawn tier is the default.
+    if (!isRecord(value.tiers)) throw new WorldError("bad_request", "tiers must be an object");
+    doc.tiers = Object.fromEntries(Object.entries(value.tiers).filter(([id]) => safeKey(id))) as unknown as WorldDoc["tiers"];
+    if (typeof value.spawnTier === "string") doc.spawnTier = value.spawnTier;
+    else delete doc.spawnTier;
+    return;
+  }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.
   Object.assign(doc, { [part]: value });
 }

@@ -9,8 +9,8 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { neutralizeMacros } from "../shared/macros";
 import type { JobProposal, WorldCollection } from "../shared/protocol";
 import type { DataTable } from "../shared/tables";
+import { spawnTierOf, tierOf, tiersInOrder } from "../shared/tiers";
 import type { FieldDef, KindDef, WorldDoc } from "../shared/world";
-import { TIERS } from "../shared/ids";
 import type { Registry } from "../engine/registry-impl";
 
 /** Bounds: lore entries per call, calls per import, characters per entry, proposals per call and per job. */
@@ -29,7 +29,6 @@ export type ProposalMode = "import" | "refine";
 
 const COLLECTIONS: Record<string, "entities" | "places" | "routes"> = { entities: "entities", places: "places", routes: "routes" };
 const TRAVEL_MODES = ["walk", "road", "offroad", "water"] as const;
-const PROPOSABLE_TIERS: readonly string[] = TIERS.filter((t) => t !== "pov");
 
 /** Strict rules shared by both jobs (the extraction lesson, DESIGN §9.4: precision needs them). */
 export const PROPOSAL_STRICT_RULES = [
@@ -92,8 +91,13 @@ function worldSummary(world: WorldDoc): string {
   return `World "${world.name}". POV: ${world.pov}. Entities: ${ents || "none"}. Places: ${places || "none"}.`;
 }
 
-const SHAPES =
-  'Shapes: entities {id, kind, name, tier ("principal"|"supporting"|"background"), fields: {...}, relations?: [{type, to}], agent?: boolean}; places {id, name, parent?, sceneType?, fields: {}}; routes {id, from, to, modes: {walk?|road?|offroad?|water?: {minutes, distanceKm?}}, bidirectional}.';
+/** The proposal shapes; an entity's tier is one of the world's own (DESIGN §9.1). */
+function shapes(world: WorldDoc): string {
+  const tiers = tiersInOrder(world)
+    .map(([id, t]) => `"${id}" (${t.label})`)
+    .join("|");
+  return `Shapes: entities {id, kind, name, tier (${tiers}), fields: {...}, relations?: [{type, to}], agent?: boolean}; places {id, name, parent?, sceneType?, fields: {}}; routes {id, from, to, modes: {walk?|road?|offroad?|water?: {minutes, distanceKm?}}, bidirectional}.`;
+}
 
 /** The reply's shape, in the prompt and in the retry's reminder. */
 const OUTPUT = '{"proposals":[{"collection":"entities"|"places"|"routes","key":string,"value":{...},"confidence":number,"note"?:string,"source":string}]}';
@@ -103,7 +107,7 @@ export function proposalSystem(mode: ProposalMode, world: WorldDoc, registry: Re
     mode === "import"
       ? "You turn roleplay lore entries into structured world data for a simulation engine."
       : "You help an author build a world for a simulation roleplay engine. Propose concrete additions or changes that do what the author asks; keep existing ids for changes.";
-  return `${task}\n${worldSummary(world)}\nKinds by pack:\n${kindCatalog(world, registry)}\n${SHAPES}\nRules:\n- ${PROPOSAL_STRICT_RULES}\nOutput JSON only: ${OUTPUT}${mode === "import" ? '; "source" is the id after "source:" in the heading of the entry the proposal comes from' : ""}.`;
+  return `${task}\n${worldSummary(world)}\nKinds by pack:\n${kindCatalog(world, registry)}\n${shapes(world)}\nRules:\n- ${PROPOSAL_STRICT_RULES}\nOutput JSON only: ${OUTPUT}${mode === "import" ? '; "source" is the id after "source:" in the heading of the entry the proposal comes from' : ""}.`;
 }
 
 /** Added to the request for the one retry, when a reply had nothing usable (`replyProblem`). */
@@ -358,7 +362,8 @@ export function checkProposals(world: WorldDoc, registry: Registry, raw: readonl
         assumed.push(f);
         notes.push(`assumed ${f}: ${row}`);
       }
-      const tier = typeof v.tier === "string" && PROPOSABLE_TIERS.includes(v.tier) ? v.tier : (base?.tier ?? "background");
+      // A tier the world doesn't have is the world's spawn tier for something new; a change keeps its own.
+      const tier = typeof v.tier === "string" && tierOf(world, v.tier) ? v.tier : (base?.tier ?? spawnTierOf(world));
       const link = sources?.linkOf(p.source) ?? null;
       const linked = [...new Set([...(base?.sources ?? []), ...(link ? [link] : [])])];
       // An assumed kind stays marked until a change gives the entity another kind.

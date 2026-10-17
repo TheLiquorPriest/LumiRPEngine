@@ -64,7 +64,7 @@ export function stateFixture(chatId: string): StateView {
     panels: {
       "sheets.you": {
         name: "Sam Rivera",
-        tier: "pov",
+        tier: "Leads",
         place: "Rosie's Diner",
         activity: "on shift",
         conditions: ["tired", "caffeinated"],
@@ -321,7 +321,7 @@ export function stateFixture(chatId: string): StateView {
       },
     },
     controls: {
-      realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } } },
+      realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } }, bandTiers: { principal: ["Leads"], supporting: ["Regulars", "Supporting"], background: ["Background"] } },
       time: {
         sceneType: "conversation",
         sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 },
@@ -417,9 +417,9 @@ export function worldFixture(): WorldDoc {
     },
     relations: { roommate: { id: "roommate", label: "Roommate", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: {} } },
     entities: {
-      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "pov", fields: { cash: 4600, energy: 62, job: "Server" }, relations: [{ type: "roommate", to: "npc_dev" }] },
+      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "principal", fields: { cash: 4600, energy: 62, job: "Server" }, relations: [{ type: "roommate", to: "npc_dev" }] },
       npc_rosie: { id: "npc_rosie", kind: "npc", name: "Rosie Alvarez", tier: "principal", fields: { cash: 120000, mood: "calm" }, relations: [], agent: true },
-      npc_dev: { id: "npc_dev", kind: "npc", name: "Dev Patel", tier: "principal", fields: { mood: "happy" }, relations: [{ type: "owns", to: "boat1" }], agent: true },
+      npc_dev: { id: "npc_dev", kind: "npc", name: "Dev Patel", tier: "regulars", fields: { mood: "happy" }, relations: [{ type: "owns", to: "boat1" }], agent: true },
       car1: { id: "car1", kind: "vehicle", name: "2011 Civic", tier: "supporting", fields: { fuel: 38, owner: "pov" }, relations: [] },
     },
     places: {
@@ -482,6 +482,12 @@ export function worldFixture(): WorldDoc {
     lenientPricing: false,
     currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
     pov: "pov",
+    tiers: {
+      principal: { label: "Leads", band: "principal", order: 0 },
+      regulars: { label: "Regulars", band: "supporting", order: 1, agentDefault: true, description: "The diner's daily faces: they keep their own routines." },
+      supporting: { label: "Supporting", band: "supporting", order: 2 },
+      background: { label: "Background", band: "background", order: 3 },
+    },
     start: { place: "apartment", at: "2026-10-19T07:00" },
   };
 }
@@ -501,6 +507,7 @@ export function settingsFixture(): UserSettings {
     },
     realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} } },
     time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, scale: 1, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 }, npcCallsPerTimelapse: 0 },
+    overrideWorldDefaults: false,
     extraction: { regard: { mode: "never" } },
     swipeDefault: "rerun",
   };

@@ -1,17 +1,19 @@
-// Settings → Realism (DESIGN §9.1): presets, per-domain levels on the host range slider and tier
-// caps for new chats; and "This chat": promote or demote a domain on the running chat through a
+// Settings → Realism (DESIGN §9.1): presets, per-domain levels on the host range slider and band
+// caps for new chats, which fill in what a world's own realism leaves out (or replace it, with "Use
+// my settings" on); and "This chat": promote or demote a domain on the running chat through a
 // `resolve` marker, after a migration preview of what freezes, promotes or materializes (§9.2).
 
 import { useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
-import { DOMAINS } from "../../shared/ids";
-import type { DomainId, Level, RealismPresetId, Tier } from "../../shared/ids";
+import { BANDS, DOMAINS } from "../../shared/ids";
+import type { Band, DomainId, Level, RealismPresetId } from "../../shared/ids";
 import type { ResolveScope } from "../../shared/ledger";
 import type { MarkerPreview } from "../../shared/protocol";
 import type { RealismSettings } from "../../shared/settings";
 import type { ControlsView } from "../../shared/state-view";
+import { BAND_LABEL } from "../../shared/tiers";
 import { useApp } from "../app";
-import { Empty, HostSlider, Seg, useBusy } from "../components";
+import { Empty, HostSlider, HostSwitch, Seg, useBusy } from "../components";
 import { resolveMarker } from "../requests";
 
 export const DOMAIN_LABEL: Record<DomainId, string> = {
@@ -35,14 +37,16 @@ const PRESETS: { value: RealismPresetId; label: string }[] = [
   { value: "custom", label: "Custom" },
 ];
 
-const CAPPED_TIERS = ["principal", "supporting", "background"] as const satisfies readonly Exclude<Tier, "pov">[];
-
 function asLevel(value: number): Level {
   const rounded = Math.max(0, Math.min(4, Math.round(value)));
   return rounded === 0 ? 0 : rounded === 1 ? 1 : rounded === 2 ? 2 : rounded === 3 ? 3 : 4;
 }
 
-/** A domain level on the host slider, with the level's name tracking the drag. */
+/**
+ * A domain level on the host slider. The label tracks a drag while it lasts; once the gesture
+ * commits (or is cancelled) it shows `value` again, the level actually in force, so a change the
+ * parent previews, cancels or refuses never leaves the dragged level on screen.
+ */
 function LevelSlider(props: { domain: DomainId; value: Level; disabled?: boolean; onCommit(level: Level): void }) {
   const [drag, setDrag] = useState<number | null>(null);
   const shown = asLevel(drag ?? props.value);
@@ -50,56 +54,83 @@ function LevelSlider(props: { domain: DomainId; value: Level; disabled?: boolean
     <div class="lre-field" style={{ marginBottom: "4px" }} data-lre-domain={props.domain} role="group" aria-label={`${DOMAIN_LABEL[props.domain]} level`}>
       <div class="lre-spread">
         <span>{DOMAIN_LABEL[props.domain]}</span>
-        <span class={shown === 0 ? "lre-dim" : "lre-muted"}>
+        <span class={shown === 0 ? "lre-dim" : "lre-muted"} data-lre-level-label>
           {shown} · {LEVEL_LABEL[shown]}
         </span>
       </div>
-      <HostSlider min={0} max={4} step={1} integer value={props.value} disabled={props.disabled} onDrag={setDrag} onCommit={(value) => props.onCommit(asLevel(value))} />
+      <HostSlider
+        min={0}
+        max={4}
+        step={1}
+        integer
+        value={props.value}
+        disabled={props.disabled}
+        onDrag={setDrag}
+        onCommit={(value) => {
+          setDrag(null);
+          props.onCommit(asLevel(value));
+        }}
+      />
     </div>
   );
 }
 
-export function RealismSeed(props: { realism: RealismSettings; patch(patch: JsonObject): void; busy: boolean }) {
+/** The one switch for whether a new chat starts from these settings instead of its world's defaults (realism and time). */
+export function OverrideWorldSwitch(props: { checked: boolean; busy: boolean; patch(patch: JsonObject): void }) {
+  return (
+    <div class="lre-field" data-lre-override-world>
+      <HostSwitch label="Use my settings instead of a world's defaults for new chats" checked={props.checked} disabled={props.busy} onChange={(checked) => props.patch({ overrideWorldDefaults: checked })} />
+      <span class="lre-small lre-muted">
+        {props.checked ? "New chats start from these realism and time settings, whatever their world sets." : "New chats start from their world's own realism and time defaults; these settings fill in only what a world leaves out."}
+      </span>
+    </div>
+  );
+}
+
+export function RealismSeed(props: { realism: RealismSettings; overrideWorld: boolean; patch(patch: JsonObject): void; busy: boolean }) {
   const { realism } = props;
   return (
     <div class="lre-stack">
+      <OverrideWorldSwitch checked={props.overrideWorld} busy={props.busy} patch={props.patch} />
       <Seg<RealismPresetId> label="Realism preset" value={realism.preset} options={PRESETS} disabled={props.busy} onChange={(preset) => props.patch({ realism: { preset } })} />
       <p class="lre-small lre-muted" style={{ margin: 0 }}>
-        Seeds new chats. Story is the default; any change makes it Custom.
+        Story is the default; any change makes it Custom.
       </p>
       {DOMAINS.map((domain) => (
         <LevelSlider key={domain} domain={domain} value={realism.levels[domain]} disabled={props.busy} onCommit={(level) => props.patch({ realism: { preset: "custom", levels: { [domain]: level } } })} />
       ))}
-      <div class="lre-h">Tier caps</div>
+      <div class="lre-h">Band caps</div>
+      <p class="lre-small lre-muted" style={{ margin: 0 }}>
+        A world's tiers each belong to a band; a band's cap limits how deeply its people are simulated. Your own character is never capped.
+      </p>
       <div class="lre-tier-wrap">
-        <div class="lre-tier-grid" role="table" aria-label="Tier caps" lang="en">
+        <div class="lre-tier-grid" role="table" aria-label="Band caps" lang="en">
           {/* Rows use display:contents so the cells stay on the CSS grid while the table roles stay valid. */}
           <div role="row" style={{ display: "contents" }}>
             <span role="columnheader">
               <span class="lre-sr">Domain</span>
             </span>
-            {CAPPED_TIERS.map((tier) => (
-              <span key={tier} class="lre-muted" role="columnheader">
-                {tier[0]?.toUpperCase()}
-                {tier.slice(1)}
+            {BANDS.map((band) => (
+              <span key={band} class="lre-muted" role="columnheader">
+                {BAND_LABEL[band]}
               </span>
             ))}
           </div>
           {DOMAINS.map((domain) => (
             <div key={domain} role="row" style={{ display: "contents" }}>
               <span role="rowheader">{DOMAIN_LABEL[domain]}</span>
-              {CAPPED_TIERS.map((tier) => {
-                const cap = realism.tierCaps[tier]?.[domain];
+              {BANDS.map((band) => {
+                const cap = realism.tierCaps[band]?.[domain];
                 return (
-                  <span key={tier} role="cell" style={{ display: "contents" }}>
+                  <span key={band} role="cell" style={{ display: "contents" }}>
                     <select
                       class="lre-input"
-                      aria-label={`${DOMAIN_LABEL[domain]} cap for ${tier}`}
+                      aria-label={`${DOMAIN_LABEL[domain]} cap for ${BAND_LABEL[band]}`}
                       value={cap === undefined ? "" : String(cap)}
                       disabled={props.busy}
                       onChange={(event) => {
                         const raw = event.currentTarget.value;
-                        props.patch({ realism: { preset: "custom", tierCaps: { [tier]: { [domain]: raw === "" ? null : Number(raw) } } } });
+                        props.patch({ realism: { preset: "custom", tierCaps: { [band]: { [domain]: raw === "" ? null : Number(raw) } } } });
                       }}
                     >
                       <option value="">—</option>
@@ -120,7 +151,7 @@ export function RealismSeed(props: { realism: RealismSettings; patch(patch: Json
   );
 }
 
-type ScopeChoice = "all" | Exclude<Tier, "pov">;
+type ScopeChoice = "all" | Band;
 
 interface PendingChange {
   domain: DomainId;
@@ -155,19 +186,22 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
         setPending(null);
       }
     });
+  // Which of the world's tiers the chosen band's caps reach, unless that is just the band itself.
+  const reached = scope === "all" ? [] : realism.bandTiers[scope];
+  const tiersNote = scope === "all" ? "" : reached.length === 0 ? `No tier in this world belongs to ${BAND_LABEL[scope]}. ` : reached.length === 1 && reached[0] === BAND_LABEL[scope] ? "" : `Tiers in this band: ${reached.join(", ")}. `;
   return (
     <div class="lre-stack" data-lre-realism="chat">
       <Seg<ScopeChoice>
         label="Applies to"
         value={scope}
-        options={[
-          { value: "all", label: "Everyone" },
-          { value: "principal", label: "Principal" },
-          { value: "supporting", label: "Supporting" },
-          { value: "background", label: "Background" },
-        ]}
+        options={[{ value: "all", label: "Everyone" }, ...BANDS.map((band) => ({ value: band, label: BAND_LABEL[band] }))]}
         onChange={(next) => setScope(next)}
       />
+      {scope !== "all" ? (
+        <p class="lre-small lre-muted" style={{ margin: 0 }} data-lre-band-tiers>
+          {tiersNote}Your own character is never capped.
+        </p>
+      ) : null}
       {pending ? (
         <div class="lre-banner info" data-lre-migration-preview>
           <strong>

@@ -1,10 +1,10 @@
-// Realism (DESIGN §9.1, §9.2): levels per domain, caps per tier, presets, effective levels and
+// Realism (DESIGN §9.1, §9.2): levels per domain, caps per detail band, presets, effective levels and
 // promote/demote previews. Levels gate processes, rendering and extraction, never the data shape
 // (D18): a demotion leaves every field live, so a promotion never restores stale detail; the
 // preview lists what switches on or off and which predicates read fields that will freeze.
 
-import type { DomainId, EntityId, Level, RealismPresetId, Tier } from "../shared/ids";
-import { DOMAINS } from "../shared/ids";
+import type { Band, DomainId, EntityId, Level, RealismPresetId } from "../shared/ids";
+import { BANDS, DOMAINS } from "../shared/ids";
 import type { MarkerBody } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import { objectiveWhen } from "../shared/world";
@@ -24,7 +24,7 @@ function all(level: Level): Record<DomainId, Level> {
   return Object.fromEntries(DOMAINS.map((d) => [d, level])) as Record<DomainId, Level>;
 }
 
-/** The three named presets (DESIGN §9.1). An absent tier cap means "the domain level". */
+/** The three named presets (DESIGN §9.1). An absent band cap means "the domain level". */
 export const REALISM_PRESETS: Record<Preset, RealismState> = {
   story: {
     levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 },
@@ -40,26 +40,24 @@ export const REALISM_PRESETS: Record<Preset, RealismState> = {
   },
 };
 
-const CAPPED_TIERS: readonly Exclude<Tier, "pov">[] = ["principal", "supporting", "background"];
-
-function capOf(caps: Caps, tier: Exclude<Tier, "pov">, domain: DomainId): Level {
-  return caps[tier][domain] ?? 4;
+function capOf(caps: Caps, band: Band, domain: DomainId): Level {
+  return caps[band][domain] ?? 4;
 }
 
 /** The preset a realism state matches, or `custom`. */
 export function presetOf(realism: RealismState): RealismPresetId {
   for (const [id, p] of Object.entries(REALISM_PRESETS) as [Preset, RealismState][]) {
-    const same = DOMAINS.every((d) => p.levels[d] === realism.levels[d] && CAPPED_TIERS.every((t) => capOf(p.tierCaps, t, d) === capOf(realism.tierCaps, t, d)));
+    const same = DOMAINS.every((d) => p.levels[d] === realism.levels[d] && BANDS.every((b) => capOf(p.tierCaps, b, d) === capOf(realism.tierCaps, b, d)));
     if (same) return id;
   }
   return "custom";
 }
 
-/** The `resolve` markers that move a chat to a realism state (domain levels, then tier caps). */
+/** The `resolve` markers that move a chat to a realism state (domain levels, then band caps). */
 export function realismMarkers(target: RealismState): MarkerBody[] {
   const out: MarkerBody[] = [];
   for (const d of DOMAINS) out.push({ kind: "resolve", domain: d, scope: { all: true }, to: target.levels[d] });
-  for (const t of CAPPED_TIERS) for (const d of DOMAINS) out.push({ kind: "resolve", domain: d, scope: { tier: t }, to: capOf(target.tierCaps, t, d) });
+  for (const b of BANDS) for (const d of DOMAINS) out.push({ kind: "resolve", domain: d, scope: { tier: b }, to: capOf(target.tierCaps, b, d) });
   return out;
 }
 
@@ -140,8 +138,8 @@ export function previewLevelChange(reg: Registry, world: WorldDoc, state: Readon
   const demoted: LevelChange[] = [];
   const materialize: LevelPreview["materialize"] = [];
   for (const id of Object.keys(state.entities).sort()) {
-    const from = effectiveLevel(state, id, body.domain);
-    const to = effectiveLevel(after, id, body.domain);
+    const from = effectiveLevel(world, state, id, body.domain);
+    const to = effectiveLevel(world, after, id, body.domain);
     if (to > from) {
       promoted.push({ entity: id, domain: body.domain, from, to });
       if (reg.materializers.has(body.domain) && !isMaterialized(state, id, body.domain)) materialize.push({ entity: id, domain: body.domain });
@@ -174,6 +172,6 @@ export function fieldLive(reg: Registry, world: WorldDoc, state: Readonly<WorldS
   if (!e) return false;
   const def = own(kindFields(reg, world, e.kind), field);
   if (!def?.domain) return true;
-  const lvl = effectiveLevel(state, entity, def.domain);
+  const lvl = effectiveLevel(world, state, entity, def.domain);
   return lvl > 0 && lvl >= (def.level ?? 1);
 }

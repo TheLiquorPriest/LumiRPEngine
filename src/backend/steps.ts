@@ -190,8 +190,8 @@ export function classifyTyped(text: string, world: WorldDoc, lexicon: readonly s
   if (ACTION_VERBS.test(text) || STRUCTURE.test(text)) return true;
   const lower = text.toLowerCase();
   for (const phrase of lexicon) if (phrase.trim().length > 2 && lower.includes(phrase.trim().toLowerCase())) return true;
-  for (const e of Object.values(world.entities)) {
-    if (e.tier === "pov" || e.kind === "person") continue;
+  for (const [id, e] of Object.entries(world.entities)) {
+    if (id === world.pov || e.kind === "person") continue;
     if (e.name.length > 2 && lower.includes(e.name.toLowerCase())) return true;
   }
   for (const p of Object.values(world.places)) if (p.name.length > 2 && lower.includes(`to ${p.name.toLowerCase()}`)) return true;

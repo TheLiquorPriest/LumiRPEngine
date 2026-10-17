@@ -52,9 +52,16 @@ export type DomainId = (typeof DOMAINS)[number];
 /** Realism level per domain: 0 off … 4 simulation. */
 export type Level = 0 | 1 | 2 | 3 | 4;
 
-/** Entity tiers, each with a cap per domain (DESIGN §9.1). */
-export const TIERS = ["pov", "principal", "supporting", "background"] as const;
-export type Tier = (typeof TIERS)[number];
+/**
+ * The three fixed detail bands (DESIGN §9.1), each with a cap per domain. A world's own tiers
+ * (`WorldDoc.tiers`) map onto them; the ids are the original tier ids, so settings, `resolve`
+ * markers and stored ledgers read unchanged.
+ */
+export const BANDS = ["principal", "supporting", "background"] as const;
+export type Band = (typeof BANDS)[number];
+
+/** A tier the world defines (`WorldDoc.tiers`); an entity names one. */
+export type TierId = string;
 
 export type RealismPresetId = "story" | "grounded" | "simulation" | "custom";
 export type ModelUsePresetId = "lean" | "standard" | "full" | "custom";

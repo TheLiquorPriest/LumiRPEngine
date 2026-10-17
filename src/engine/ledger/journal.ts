@@ -46,7 +46,7 @@ export interface LedgerEnv {
   worlds(revision: RevisionId): WorldDoc | undefined;
   run: ChatRun;
   model: TurnModel;
-  /** Starting markers from the user's settings (written once per chat, L20). */
+  /** Starting markers: the world's realism and time defaults, the user's settings filling in (written once per chat, L20). */
   startMarkers(): MarkerBody[];
   /** A fresh seed for a Re-run (random in production, deterministic in tests). */
   newSeed(): string;
@@ -569,9 +569,9 @@ export class LedgerCore {
   /**
    * The state the narrator sees now (DESIGN §6): the latest planned in-flight turn's fold prefix plus
    * its planned events, else the head fold. Before the chat's first record it includes the starting
-   * markers the first turn applies (the user's realism and time settings, DESIGN §9.1), so the
-   * palette judges actions at the levels the turn will use. Pure: nothing is written (L35 has no
-   * slot to go stale).
+   * markers the first turn applies (the world's realism and time defaults, with the user's settings
+   * filling in, DESIGN §9.1), so the palette judges actions at the levels the turn will use. Pure:
+   * nothing is written (L35 has no slot to go stale).
    */
   renderState(observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc } | null {
     const planned = Object.values(this.journal.pending).filter((p) => p.planned).at(-1);

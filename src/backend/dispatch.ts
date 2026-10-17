@@ -2,7 +2,7 @@
 // `lre.error` with its `reqId`. Ledger writes go through the queue and are held inside open
 // windows (P2: `pending: true`).
 
-import type { ChatId, DomainId, UserId, WorldId } from "../shared/ids";
+import type { Band, ChatId, DomainId, UserId, WorldId } from "../shared/ids";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
@@ -41,6 +41,9 @@ export class RequestError extends Error {
 }
 
 const PACK_DOMAIN: Record<string, DomainId> = { economy: "money" };
+
+/** Whose level a band-scoped preview line names (the band labels, said as people). */
+const BAND_WHO: Record<Band, string> = { principal: "leads", supporting: "supporting characters", background: "background characters" };
 
 function isRequest(raw: unknown): raw is FrontendToBackend {
   return isRecord(raw) && raw.lre === PROTOCOL_VERSION && typeof raw.type === "string" && typeof raw.reqId === "string";
@@ -324,11 +327,11 @@ export class Dispatcher {
     const { state, world } = await this.head(chatId, userId);
     const lines: MarkerPreview["lines"] = [];
     if (body.kind === "resolve") {
-      // The level the marker changes, at its own scope (a tier cap or an entity's override, else the domain's).
+      // The level the marker changes, at its own scope (a band's cap or an entity's override, else the domain's).
       const domainLevel = state.realism.levels[body.domain];
       const scope = body.scope;
-      const from = "all" in scope ? domainLevel : "tier" in scope ? (scope.tier === "pov" ? undefined : state.realism.tierCaps[scope.tier]?.[body.domain]) ?? domainLevel : (state.entities[scope.entity]?.levels[body.domain] ?? domainLevel);
-      const who = "all" in scope ? "" : "tier" in scope ? ` for ${scope.tier} characters` : ` for ${state.entities[scope.entity]?.name ?? scope.entity}`;
+      const from = "all" in scope ? domainLevel : "tier" in scope ? (state.realism.tierCaps[scope.tier]?.[body.domain] ?? domainLevel) : (state.entities[scope.entity]?.levels[body.domain] ?? domainLevel);
+      const who = "all" in scope ? "" : "tier" in scope ? ` for ${BAND_WHO[scope.tier]}` : ` for ${state.entities[scope.entity]?.name ?? scope.entity}`;
       const name = this.rt.registry.packs.find((p) => p.domain === body.domain)?.label ?? body.domain;
       if (body.to < from) lines.push({ text: `${name}${who} drops from level ${from} to ${body.to}: processes above level ${body.to} stop and their inputs freeze; detail stays stored.`, tone: "freeze" });
       else if (body.to > from) lines.push({ text: `${name}${who} rises from level ${from} to ${body.to}: detail is materialized when first shown.`, tone: "promote" });

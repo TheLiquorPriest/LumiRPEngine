@@ -1,8 +1,9 @@
 // User-owned settings, `userStorage/settings.json` (DESIGN §4.1, §5.3, §9.1, §9.2).
-// Settings seed new chats only; a running chat changes through markers. Every conservative
-// default is one tap to change (D31).
+// Realism and time settings seed new chats only, filling in what a world's own defaults leave out
+// (or replacing them, when the user asks); a running chat changes through markers. Every
+// conservative default is one tap to change (D31).
 
-import type { BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId, Tier } from "./ids";
+import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "./ids";
 import type { StepPurpose } from "./world";
 
 /** Where a model step runs. `decision` uses `decisions.evaluate`; `helper` a helper JSON call. */
@@ -37,7 +38,8 @@ export interface ModelUseSettings {
 export interface RealismSettings {
   preset: RealismPresetId;
   levels: Record<DomainId, Level>;
-  tierCaps: Record<Exclude<Tier, "pov">, Partial<Record<DomainId, Level>>>;
+  /** Caps per detail band, keyed by band id. */
+  tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
 }
 
 export interface TimeSettings {
@@ -121,6 +123,8 @@ export interface UserSettings {
   modelUse: ModelUseSettings;
   realism: RealismSettings;
   time: TimeSettings;
+  /** New chats start from these realism and time settings instead of the world's own defaults (DESIGN §9.1). */
+  overrideWorldDefaults: boolean;
   extraction: ExtractionBounds;
   swipeDefault: "rerun" | "renarrate";
 }

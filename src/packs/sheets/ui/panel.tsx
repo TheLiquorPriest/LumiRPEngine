@@ -49,7 +49,7 @@ export function decodeYouView(value: unknown): YouView | null {
   if (!isRecord(value) || typeof value.name !== "string") return null;
   return {
     name: value.name,
-    tier: str(value.tier, "pov"),
+    tier: str(value.tier),
     place: optStr(value.place),
     activity: optStr(value.activity),
     conditions: strings(value.conditions),
@@ -67,7 +67,7 @@ export function YouPanel(props: PanelProps) {
   if (!view) return <JsonView value={props.view} />;
   return (
     <div class="lre-stack" data-lre-panel="sheets.you">
-      <Card title={view.name} aside={<span class="lre-badge accent">{view.tier}</span>}>
+      <Card title={view.name} aside={view.tier ? <span class="lre-badge accent">{view.tier}</span> : null}>
         {view.place || view.activity ? <div class="lre-muted">{[view.activity, view.place].filter((part) => part).join(" · ")}</div> : null}
         {view.conditions.length > 0 ? (
           <div class="lre-inline" style={{ marginTop: "6px" }}>

@@ -1,6 +1,7 @@
 // Riverton: a hand-built Modern US test fixture (not starter content: starter worlds come from
 // data-src/templates through ops' converter). It exercises every pack at Simulation realism.
 
+import { defaultTiers } from "../../src/shared/tiers";
 import type { EntityDef, WorldDoc } from "../../src/shared/world";
 import { DEFAULT_CURRENCY, WORLD_FORMAT } from "../../src/shared/world";
 import { REALISM_PRESETS } from "../../src/engine/realism";
@@ -21,7 +22,7 @@ export function modernUsWorld(id: string, name: string): WorldDoc {
   const add = (e: EntityDef): void => {
     entities[e.id] = e;
   };
-  add(person("you", "Alex Rivera", "pov", { place: "apartment", home: "apartment", wealth: "modest", occupation: "office_clerk", region: "oh", employer: "brightline", charm: 12, wits: 13, grit: 11 }));
+  add(person("you", "Alex Rivera", "principal", { place: "apartment", home: "apartment", wealth: "modest", occupation: "office_clerk", region: "oh", employer: "brightline", charm: 12, wits: 13, grit: 11 }));
   add(person("maya", "Maya Chen", "principal", { place: "cafe", home: "maya_flat", wealth: "poor", occupation: "barista", region: "oh", charm: 14 }, { agent: true }));
   add(person("jordan", "Jordan Price", "principal", { place: "office", home: "jordan_house", wealth: "comfortable", occupation: "operations_manager", region: "oh" }, { agent: true }));
   add(person("rosa", "Rosa Delgado", "supporting", { place: "apartment_hall", home: "apartment_hall", wealth: "modest", occupation: "auto_mechanic", region: "oh" }, { agent: true }));
@@ -137,6 +138,7 @@ export function modernUsWorld(id: string, name: string): WorldDoc {
     seedMode: "fresh",
     lenientPricing: true,
     pov: "you",
+    tiers: defaultTiers(),
     start: { place: "apartment", at: "2026-10-16T07:30" },
   };
 }

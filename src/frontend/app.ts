@@ -6,7 +6,7 @@ import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type { SpindleComponentsHelper } from "lumiverse-spindle-types";
 import type { ChatId, PanelId, RevisionId, WorldId } from "../shared/ids";
-import type { JobKind, LintIssue, ResultBodies, WorldCollection } from "../shared/protocol";
+import type { JobKind, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import type { KindDef, WorldDoc } from "../shared/world";
 import type { Viewport } from "./layout";
@@ -23,7 +23,7 @@ export type BuildRoute =
   | { view: "world"; worldId: WorldId }
   | { view: "collection"; worldId: WorldId; collection: WorldCollection }
   | { view: "item"; worldId: WorldId; collection: WorldCollection; id: string | null }
-  | { view: "part"; worldId: WorldId; part: "calendar" | "realism" | "time" | "meta" }
+  | { view: "part"; worldId: WorldId; part: WorldPart }
   | { view: "check"; worldId: WorldId }
   | { view: "job"; worldId: WorldId; kind: JobKind };
 

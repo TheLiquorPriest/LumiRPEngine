@@ -179,7 +179,7 @@
       "id": "pov",
       "kind": "character",
       "name": "Jordan Ellis",
-      "tier": "pov",
+      "tier": "principal",
       "fields": {
         "description": "Eight months into the job and a year into living in Port Alder, you are good with engines, careful with money and still learning the town's unwritten rules. You rent 2B above the hardware store, make payments on a pickup older than it looks, and keep an old fishing boat on a trailer at the marina for days off.",
         "role": "Auto mechanic at Alder Automotive",
@@ -9301,5 +9301,10 @@
     "format": "{sign}{symbol}{amount}"
   },
   "pov": "pov",
+  "tiers": {
+    "principal": {"label": "Leads", "band": "principal", "order": 0},
+    "supporting": {"label": "Supporting", "band": "supporting", "order": 1},
+    "background": {"label": "Background", "band": "background", "order": 2}
+  },
   "start": {"place": "harbor_street_114", "at": "2026-09-14T06:15"}
 }

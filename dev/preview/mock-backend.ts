@@ -259,6 +259,11 @@ export class MockBackend {
         else if (message.op === "put") (doc[message.collection] ??= {})[message.id] = message.value;
         else if (message.op === "remove") delete doc[message.collection]?.[message.id];
         else if (message.op === "set" && message.part === "meta" && isRecord(message.value)) Object.assign(this.draft, message.value);
+        else if (message.op === "set" && message.part === "tiers" && isRecord(message.value) && isRecord(message.value.tiers)) {
+          this.draft.tiers = structuredClone(message.value.tiers) as unknown as WorldDoc["tiers"];
+          if (typeof message.value.spawnTier === "string") this.draft.spawnTier = message.value.spawnTier;
+          else delete this.draft.spawnTier;
+        }
         else if (message.op === "set") (this.draft as unknown as Record<string, JsonValue>)[message.part] = message.value;
         const stored = JSON.stringify(this.draft) !== JSON.stringify(this.world);
         return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: WORLDS[0]?.head ?? null, stored, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }] });

@@ -15,6 +15,7 @@
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { FixTarget } from "../../../shared/state-view";
+import { tierLabel } from "../../../shared/tiers";
 import type { BandDef, CheckDef } from "../../../shared/world";
 import { createEnv, evalNumber } from "../../../engine/expr";
 import { labelOf, numOf, objOf, strOf, own } from "../../../engine/pack-kit";
@@ -186,6 +187,7 @@ function checkMod(ctx: ReadContext, who: EntityId, stat: string): number {
 export interface SheetView {
   level: number;
   name: string;
+  /** The POV's tier as players see it (the world's label). */
   tier: string;
   place?: string;
   activity?: string;
@@ -212,7 +214,7 @@ export function buildSheetView(ctx: ReadContext): SheetView {
   return {
     level,
     name: e?.name ?? pov,
-    tier: e?.tier ?? "pov",
+    tier: e ? tierLabel(ctx.world, e.tier) : "",
     ...(place ? { place: own(ctx.world.places, place)?.name ?? place } : {}),
     ...(activity !== "" ? { activity } : {}),
     conditions: activeConditions(ctx, pov).map((c) => c.label),

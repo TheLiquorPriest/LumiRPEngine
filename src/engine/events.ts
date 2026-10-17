@@ -7,7 +7,7 @@
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { DomainId, EntityId, Level } from "../shared/ids";
-import { DOMAINS, INTERRUPT_CLASSES, TIERS } from "../shared/ids";
+import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type {
   AddEvent,
   ClockEvent,
@@ -251,7 +251,6 @@ export function applyValidUnits(types: EventTypes, events: readonly LedgerEvent[
 // ---------------------------------------------------------------- markers
 
 const TIME_CONTROLS = ["tick", "scale", "pause", "interrupt", "speed_through", "montage", "unit_cap", "npc_calls"] as const;
-const CAP_TIERS = TIERS.filter((t) => t !== "pov");
 
 /** Bounds for time controls (DESIGN §9.2): minutes per tick, the time scale, the unit cap and NPC calls. */
 export const TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: [1, 10_080], agentDays: [1, 600], events: [1, 5000], npcCalls: [0, 50] } as const);
@@ -286,7 +285,7 @@ function timeValue(control: (typeof TIME_CONTROLS)[number], to: unknown): JsonVa
 
 /**
  * A marker body from outside (a request, a stored or imported ledger), checked and clamped; null
- * when it isn't one. Domains, tiers and interrupt classes come from their fixed lists; entity,
+ * when it isn't one. Domains, bands and interrupt classes come from their fixed lists; entity,
  * scene type and activity keys must be safe map keys; levels are whole numbers 0–4.
  */
 export function validMarkerBody(raw: unknown): MarkerBody | null {
@@ -301,8 +300,8 @@ export function validMarkerBody(raw: unknown): MarkerBody | null {
       if (!domain || !scope || typeof to !== "number" || !Number.isInteger(to) || to < 0 || to > 4) return null;
       const level = to as Level;
       if (scope.all === true) return { kind: "resolve", domain, scope: { all: true }, to: level };
-      const tier = CAP_TIERS.find((t) => t === scope.tier);
-      if (tier) return { kind: "resolve", domain, scope: { tier }, to: level };
+      const band = BANDS.find((b) => b === scope.tier);
+      if (band) return { kind: "resolve", domain, scope: { tier: band }, to: level };
       return safeKey(scope.entity) ? { kind: "resolve", domain, scope: { entity: scope.entity }, to: level } : null;
     }
     case "time": {
@@ -358,7 +357,7 @@ function setTimeControl(state: WorldState, body: Extract<MarkerBody, { kind: "ti
 function setLevel(state: WorldState, domain: DomainId, scope: Extract<MarkerBody, { kind: "resolve" }>["scope"], to: Level): void {
   if ("all" in scope) state.realism.levels[domain] = to;
   else if ("tier" in scope) {
-    if (scope.tier !== "pov" && hasOwn(state.realism.tierCaps, scope.tier)) state.realism.tierCaps[scope.tier][domain] = to;
+    if (hasOwn(state.realism.tierCaps, scope.tier)) state.realism.tierCaps[scope.tier][domain] = to;
   } else {
     const entity = hasEntity(state, scope.entity) ? state.entities[scope.entity] : undefined;
     if (entity) entity.levels[domain] = to;

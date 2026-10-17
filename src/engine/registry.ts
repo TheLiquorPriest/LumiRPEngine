@@ -45,7 +45,7 @@ export interface ReadContext {
   world: WorldDoc;
   state: Readonly<WorldState>;
   tables: TableReader;
-  /** Effective level: the per-entity override, else min(domain level, tier cap) (DESIGN §9.1). */
+  /** Effective level: the per-entity override, else min(domain level, the cap of the band its tier maps to); the POV is never capped (DESIGN §9.1). */
   levelOf(entity: EntityId, domain: DomainId): Level;
   service<K extends keyof ServiceMap>(name: K): ServiceMap[K];
   query<K extends keyof QueryMap>(name: K): QueryMap[K];

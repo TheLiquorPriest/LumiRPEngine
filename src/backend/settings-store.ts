@@ -2,7 +2,7 @@
 // D4 per-connection extraction learning (`userStorage/extraction-learning.json`; DESIGN §11).
 
 import type { DomainId, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, UserId } from "../shared/ids";
-import { DOMAINS, INTERRUPT_CLASSES, TIERS } from "../shared/ids";
+import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
@@ -94,6 +94,8 @@ export function defaultSettings(): UserSettings {
       // DESIGN §9.2: tie-zone choices during a timelapse are utility-only; Custom may allow N.
       npcCallsPerTimelapse: 0,
     },
+    // New chats start from the world's own realism and time defaults (DESIGN §9.1).
+    overrideWorldDefaults: false,
     extraction: {},
     swipeDefault: "rerun",
   };
@@ -198,15 +200,15 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   for (const dom of DOMAINS) if (hasOwn(rawLevels, dom)) levels[dom] = level(rawLevels[dom]) ?? d.realism.levels[dom];
   const rawCaps = isRecord(re.tierCaps) ? re.tierCaps : {};
   const tierCaps = structuredClone(d.realism.tierCaps);
-  for (const tier of TIERS) {
-    if (tier === "pov" || !hasOwn(rawCaps, tier)) continue;
+  for (const band of BANDS) {
+    if (!hasOwn(rawCaps, band)) continue;
     const caps: Partial<Record<DomainId, Level>> = {};
-    const raw = rawCaps[tier];
+    const raw = rawCaps[band];
     for (const dom of DOMAINS) {
       const l = isRecord(raw) && hasOwn(raw, dom) ? level(raw[dom]) : undefined;
       if (l !== undefined) caps[dom] = l;
     }
-    tierCaps[tier] = caps;
+    tierCaps[band] = caps;
   }
   const realism: RealismSettings = { preset: oneOf(re.preset, ["story", "grounded", "simulation", "custom"] as const) ?? d.realism.preset, levels, tierCaps };
   const t = isRecord(v.time) ? v.time : {};
@@ -236,6 +238,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     modelUse,
     realism,
     time,
+    overrideWorldDefaults: typeof v.overrideWorldDefaults === "boolean" ? v.overrideWorldDefaults : d.overrideWorldDefaults,
     extraction,
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
   };

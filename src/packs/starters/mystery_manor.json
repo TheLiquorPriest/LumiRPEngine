@@ -142,7 +142,7 @@
       "id": "pov",
       "kind": "character",
       "name": "The Guest",
-      "tier": "pov",
+      "tier": "principal",
       "fields": {
         "description": "You were asked to value a handful of pieces before the autumn sale, and you accepted because Sir Alaric's collection is one of the best private ones in the Fens. You notice things for a living.",
         "role": "Antiquarian valuer invited to appraise part of the Thorne collection",
@@ -7586,5 +7586,10 @@
     "format": "{sign}{amount}d"
   },
   "pov": "pov",
+  "tiers": {
+    "principal": {"label": "Leads", "band": "principal", "order": 0},
+    "supporting": {"label": "Supporting", "band": "supporting", "order": 1},
+    "background": {"label": "Background", "band": "background", "order": 2}
+  },
   "start": {"place": "entrance_hall", "at": "1934-10-26T16:40"}
 }

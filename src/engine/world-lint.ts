@@ -1,11 +1,12 @@
 // Structural world lint (DESIGN §13): references, field types, cycles, unreachable track stages,
-// expressions that don't parse, unbalanced authored postings and predicates frozen at the world's
-// current realism. Pure; the authoring lint runs it with the registry (pack kinds and fields).
+// tiers, expressions that don't parse, unbalanced authored postings and predicates frozen at the
+// world's current realism. Pure; the authoring lint runs it with the registry (pack kinds and fields).
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
 import { DOMAINS } from "../shared/ids";
+import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, WorldDoc } from "../shared/world";
 import { objectiveWhen } from "../shared/world";
 import { compile } from "./expr";
@@ -100,6 +101,23 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
       }
       cur = own(world.entities, cur)?.relations.find((r) => r.type === "in")?.to;
     }
+  }
+
+  // Tiers (DESIGN §9.1): each maps to a band, and everything that names one names a tier the world has.
+  for (const [id, t] of Object.entries(isRecord(world.tiers) ? world.tiers : {})) {
+    const def: unknown = t;
+    if (!isRecord(def) || !isBand(def.band)) err(`tiers.${id}.band`, "tier_band", `Tier ${id} needs a band: principal (Leads), supporting or background.`);
+    else if (typeof def.label !== "string" || def.label.trim() === "") warn(`tiers.${id}.label`, "tier_label", `Tier ${id} has no label, so players see its id.`);
+  }
+  for (const [id, e] of Object.entries(world.entities)) {
+    if (!tierOf(world, e.tier)) err(`entities.${id}.tier`, "unknown_tier", `${e.name}'s tier "${e.tier}" isn't one of the world's tiers.`);
+  }
+  if (world.spawnTier !== undefined && !tierOf(world, world.spawnTier)) err("spawnTier", "unknown_tier", `New people would join tier "${world.spawnTier}", which isn't one of the world's tiers.`);
+  for (const { path, effects } of effectLists(world)) {
+    effects.forEach((spec, i) => {
+      const tier = spec.args.tier;
+      if (spec.type === "spawn" && typeof tier === "string" && !tierOf(world, tier)) warn(`${path}.${i}`, "unknown_tier", `A spawn in ${path} names tier "${tier}", which isn't one of the world's tiers; it gets the spawn tier instead.`);
+    });
   }
 
   // Tracks: owners, stage targets, unreachable stages, predicates that don't parse.

@@ -12,6 +12,7 @@ import { DEFAULT_SYMBOL } from "../../src/packs/economy/core/model";
 import { hashJson } from "../../src/shared/hash";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { DataTable, TableRow } from "../../src/shared/tables";
+import { defaultTiers, leadTierOf } from "../../src/shared/tiers";
 import type { ActionDef, EffectSpec, EntityDef, FieldDef, GridDef, KindDef, LoreEntryDef, Objective, PackConfig, PlaceDef, Recurrence, RelationInstance, RuleDef, RuleTrigger, ScheduleDef, StageDef, TrackDef, WorldDoc } from "../../src/shared/world";
 import { ENGINE_VERSION, WORLD_FORMAT } from "../../src/shared/world";
 import type { TplAccount, TplBlock, TplCharacter, TplEffect, TplItem, TplKit, TplRule, TplStage, TplVehicle, Template } from "./template";
@@ -418,7 +419,9 @@ function characterEntity(c: Ctx, ch: TplCharacter): EntityDef {
   const bills = (c.tpl.bills ?? []).filter((b) => b.payer === ch.id).map((b) => ({ label: b.label, payee: b.payee, amountCents: b.amountCents, every: b.every, day: b.day, ...(b.from ? { from: b.from } : {}) }));
   if (bills.length > 0) fields.bills = bills;
   const relations: RelationInstance[] = (ch.regard ?? []).map((r) => ({ type: "regard", to: r.toward, fields: { ...r.axes, t: 0 } }));
-  const out: EntityDef = { id: ch.id, kind: "character", name: ch.name, tier: ch.tier, fields, relations };
+  // A template marks its point of view with the `pov` tier; the world's POV is `pov` itself and is
+  // never capped, so it takes the lead tier.
+  const out: EntityDef = { id: ch.id, kind: "character", name: ch.name, tier: ch.tier === "pov" ? leadTierOf({ tiers: defaultTiers() }) : ch.tier, fields, relations };
   if (ch.agent) out.agent = true;
   return out;
 }
@@ -734,6 +737,7 @@ export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
     lenientPricing: false,
     currency: { ...tpl.currency },
     pov: "pov",
+    tiers: defaultTiers(),
     start: { place: tpl.start.place, at: tpl.start.at },
   };
 }

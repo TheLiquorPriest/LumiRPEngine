@@ -1,12 +1,13 @@
 // The engine's own narration channels (DESIGN §7, §9.4; D4): `knows`, the player character learning
-// of a public person or thing a reply shows them, and `spawn`, a new background character a reply
-// introduces. Both are bounded. `knows` takes public entities only: never a secret or `known_by`
-// entity, a secret place, a gated or secret lore entry, or a track. `spawn` validates its kind and
-// place, deduplicates by name and is capped per world.
+// of a public person or thing a reply shows them, and `spawn`, a new character a reply introduces, at
+// the world's spawn tier. Both are bounded. `knows` takes public entities only: never a secret or
+// `known_by` entity, a secret place, a gated or secret lore entry, or a track. `spawn` validates its
+// kind and place, deduplicates by name and is capped per world.
 
 import { hashParts } from "../shared/hash";
 import type { JsonObject } from "../shared/json";
 import type { EntityId } from "../shared/ids";
+import { spawnTierOf } from "../shared/tiers";
 import type { EffectSpec } from "../shared/world";
 import type { ProposalChannelDef, ReadContext, Rejection } from "./registry";
 import { kindIs, placeOfEntity } from "./scope";
@@ -118,7 +119,8 @@ export const spawnChannel: ProposalChannelDef = {
     const role = text(p.role).slice(0, ROLE_MAX);
     const fields: JsonObject = { spawned: SPAWNED_BY_NARRATION, ...(role !== "" ? { role } : {}) };
     return [
-      { type: "spawn", args: { id, kind: text(p.kind), name, tier: "background", place: placeFor(p, ctx), fields } },
+      // A newcomer joins at the world's spawn tier; the reply never picks one.
+      { type: "spawn", args: { id, kind: text(p.kind), name, tier: spawnTierOf(ctx.world), place: placeFor(p, ctx), fields } },
       // The player character has just met them.
       { type: "link", args: { rel: "knows", from: ctx.world.pov, to: id } },
     ];

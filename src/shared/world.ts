@@ -9,6 +9,7 @@ import type { JsonObject, JsonValue } from "./json";
 import type {
   ActionId,
   ActivityType,
+  Band,
   BoundMode,
   CheckId,
   DomainId,
@@ -33,7 +34,7 @@ import type {
   StageId,
   StepTemplateId,
   TableId,
-  Tier,
+  TierId,
   TrackId,
   TravelMode,
   Visibility,
@@ -140,12 +141,13 @@ export interface EntityDef {
   id: EntityId;
   kind: KindId;
   name: string;
-  tier: Tier;
+  /** One of the world's tiers (`WorldDoc.tiers`); its band caps the entity's levels (DESIGN §9.1). */
+  tier: TierId;
   fields: JsonObject;
   relations: RelationInstance[];
   /** Per-entity level overrides; never above the domain level (DESIGN §9.1). */
   levels?: Partial<Record<DomainId, Level>>;
-  /** LOD1 agents run agendas and the planner (DESIGN §8). */
+  /** LOD1 agents run agendas and the planner (DESIGN §8). Unset: the tier's `agentDefault`. */
   agent?: boolean;
   /** Lumiverse character id, for group chats. */
   characterId?: string;
@@ -412,8 +414,22 @@ export interface WorldPins {
 export interface RealismDefaults {
   preset: RealismPresetId;
   levels: Record<DomainId, Level>;
-  /** Caps per tier; the `pov` tier is never capped. */
-  tierCaps: Record<Exclude<Tier, "pov">, Partial<Record<DomainId, Level>>>;
+  /** Caps per detail band, keyed by band id; the POV is never capped. */
+  tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
+}
+
+/**
+ * A world tier (DESIGN §9.1): a named rank of importance that maps to one of the three detail bands,
+ * so its people are capped by that band's caps. Worlds name, add and order their own.
+ */
+export interface TierDef {
+  label: string;
+  band: Band;
+  /** Position in lists, lowest first. */
+  order: number;
+  /** Its people are LOD1 agents unless their entity says otherwise (never the POV). */
+  agentDefault?: boolean;
+  description?: string;
 }
 
 export interface TimeDefaults {
@@ -520,8 +536,12 @@ export interface WorldDoc {
   lenientPricing: boolean;
   /** How money displays. State keeps integer minor units; the UI formats them with this. */
   currency: WorldCurrency;
-  /** The POV entity. */
+  /** The POV entity; never capped, whatever its tier. */
   pov: EntityId;
+  /** The world's tiers by id (DESIGN §9.1). */
+  tiers: Record<TierId, TierDef>;
+  /** The tier a spawned entity gets when it names none; unset, the lowest-order tier in the Background band. */
+  spawnTier?: TierId;
   /** Where the POV starts. */
   start: { place: PlaceId; at: string };
 }

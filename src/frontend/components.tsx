@@ -228,6 +228,9 @@ export function HostSlider(props: { min: number; max: number; step?: number; int
   const callbacks = useRef(props);
   callbacks.current = props;
   const handle = useRef<{ update(patch: Record<string, unknown>): void; destroy(): void } | null>(null);
+  // The host keeps the position a gesture committed; `held` mirrors it, and `dragging` marks a gesture in progress.
+  const held = useRef(props.value);
+  const dragging = useRef(false);
   useEffect(() => {
     const el = slot.current;
     if (!el) return;
@@ -241,8 +244,15 @@ export function HostSlider(props: { min: number; max: number; step?: number; int
       hint: props.hint,
       format: props.suffix ? { suffix: props.suffix } : undefined,
       disabled: props.disabled,
-      onCommit: (value) => callbacks.current.onCommit(value),
-      onDragValue: (value) => callbacks.current.onDrag?.(value),
+      onCommit: (value) => {
+        dragging.current = false;
+        held.current = value;
+        callbacks.current.onCommit(value);
+      },
+      onDragValue: (value) => {
+        dragging.current = value !== null;
+        callbacks.current.onDrag?.(value);
+      },
     });
     return () => {
       handle.current?.destroy();
@@ -250,8 +260,15 @@ export function HostSlider(props: { min: number; max: number; step?: number; int
     };
   }, []);
   useEffect(() => {
-    handle.current?.update({ value: props.value, disabled: props.disabled, min: props.min, max: props.max, label: props.label, hint: props.hint });
-  }, [props.value, props.disabled, props.min, props.max, props.label, props.hint]);
+    handle.current?.update({ disabled: props.disabled, min: props.min, max: props.max, label: props.label, hint: props.hint });
+  }, [props.disabled, props.min, props.max, props.label, props.hint]);
+  // Outside a gesture the knob shows `value`: the parent may not take a committed position (a
+  // cancelled preview, a refused change), so any render puts it back.
+  useEffect(() => {
+    if (dragging.current || held.current === props.value) return;
+    held.current = props.value;
+    handle.current?.update({ value: props.value });
+  });
   return <div ref={slot} class="lre-host-slot" />;
 }
 

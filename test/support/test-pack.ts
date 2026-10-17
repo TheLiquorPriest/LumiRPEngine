@@ -13,6 +13,7 @@ import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
 import type { LedgerEvent, MarkerBody, PackEvent } from "../../src/shared/ledger";
+import { defaultTiers } from "../../src/shared/tiers";
 import type { WorldDoc } from "../../src/shared/world";
 import { DEFAULT_CURRENCY, WORLD_FORMAT } from "../../src/shared/world";
 import type { EventTypeDef, PackDef } from "../../src/engine/registry";
@@ -177,7 +178,7 @@ export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh")
     kinds: { person: { id: "person", label: "Person", fields: { cash: { type: "money" }, mood: { type: "text" }, detail: { type: "text" } } } },
     relations: {},
     entities: {
-      [POV]: { id: POV, kind: "person", name: "Sam", tier: "pov", fields: { cash: 100 + variant * 10, mood: "fine" }, relations: [] },
+      [POV]: { id: POV, kind: "person", name: "Sam", tier: "principal", fields: { cash: 100 + variant * 10, mood: "fine" }, relations: [] },
       dev: { id: "dev", kind: "person", name: "Dev", tier: "principal", fields: { cash: 50 }, relations: [], agent: true },
     },
     places: { home: { id: "home", name: "Home", fields: {} } },
@@ -210,6 +211,7 @@ export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh")
     lenientPricing: variant === 1,
     currency: { ...DEFAULT_CURRENCY },
     pov: POV,
+    tiers: defaultTiers(),
     start: { place: "home", at: "2026-10-16T07:00" },
   };
 }

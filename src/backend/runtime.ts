@@ -6,7 +6,7 @@ import { hashParts } from "../shared/hash";
 import type { ChatId, ChipId, InterruptClass, MessageId, RevisionId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { ChatRun, EventRef, GenerationKind, LedgerEvent, MarkerBody, TimelapseTarget } from "../shared/ledger";
+import type { ChatRun, EventRef, GenerationKind, LedgerEvent, TimelapseTarget } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, UserSettings } from "../shared/settings";
@@ -18,7 +18,6 @@ import { transferCents } from "../packs/economy/core/index";
 import type { EngineTurnPlan } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { parseOverrides, parseTarget } from "../engine/time";
-import { DOMAINS } from "../shared/ids";
 import { boundProposal } from "../engine/bounds";
 import { calendarOf, dateAt, formatClock, formatHHMM, nextTimeOfDay, weekdayName, type Calendar } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
@@ -42,6 +41,7 @@ import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./ho
 import { LedgerService, toChain, type TurnContext, type TurnHooks } from "./ledger-io";
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
+import { startMarkersFrom } from "./start-markers";
 import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, saidPayMethod, Steps } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
@@ -84,27 +84,6 @@ function readRun(meta: JsonObject): ChatRun | null {
   const raw = meta[LEDGER_NAMESPACE];
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.worldId !== "string" || typeof raw.revision !== "string" || typeof raw.runSeed !== "string") return null;
   return { v: 1, worldId: raw.worldId, revision: raw.revision, runSeed: raw.runSeed, startedAt: typeof raw.startedAt === "number" ? raw.startedAt : 0 };
-}
-
-/** Starting markers from the user's settings (DESIGN §4.3, §9.1): the revision, every level and tier cap, every time control. */
-export function startMarkersFrom(settings: UserSettings, revision: string): MarkerBody[] {
-  const out: MarkerBody[] = [{ kind: "migrate", to: revision }];
-  for (const domain of DOMAINS) out.push({ kind: "resolve", domain, scope: { all: true }, to: settings.realism.levels[domain] });
-  for (const tier of ["principal", "supporting", "background"] as const) {
-    for (const [domain, level] of Object.entries(settings.realism.tierCaps[tier])) {
-      const d = DOMAINS.find((x) => x === domain);
-      if (d && level !== undefined) out.push({ kind: "resolve", domain: d, scope: { tier }, to: level });
-    }
-  }
-  const t = settings.time;
-  for (const [sceneType, minutes] of Object.entries(t.sceneTicks)) out.push({ kind: "time", control: "tick", scope: { sceneType }, to: minutes });
-  out.push({ kind: "time", control: "scale", scope: { all: true }, to: t.scale });
-  for (const [cls, policy] of Object.entries(t.interrupts)) out.push({ kind: "time", control: "interrupt", scope: { interrupt: cls as keyof typeof t.interrupts }, to: policy });
-  for (const [activity, policy] of Object.entries(t.speedThrough)) out.push({ kind: "time", control: "speed_through", scope: { activity }, to: { mode: policy.mode, thresholdMinutes: policy.thresholdMinutes } });
-  out.push({ kind: "time", control: "montage", scope: { all: true }, to: t.montage });
-  out.push({ kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: t.unitCap.agentDays, events: t.unitCap.events } });
-  out.push({ kind: "time", control: "npc_calls", scope: { all: true }, to: t.npcCallsPerTimelapse });
-  return out;
 }
 
 /**
@@ -414,12 +393,14 @@ export class Runtime implements TurnHooks {
     const pinned = new Map<RevisionId, WorldDoc>();
     const missing = new Set<RevisionId>();
     lruSet(this.pins, `${userId}\u0000${chatId}`, pinned, 256);
+    let world: WorldDoc;
     try {
-      pinned.set(run.revision, (await this.worlds.get(run.worldId, userId, run.revision)).world);
+      world = (await this.worlds.get(run.worldId, userId, run.revision)).world;
     } catch (error) {
       this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its world ${run.worldId} is unavailable (${error instanceof Error ? error.message : String(error)})`, userId);
       return null;
     }
+    pinned.set(run.revision, world);
     const settings = await this.settings.get(userId);
     lruSet(this.settingsCache, userId, settings, 256);
     // One bridge per chat run: a second env resolution (concurrent opens) must not orphan the
@@ -448,9 +429,10 @@ export class Runtime implements TurnHooks {
       },
       run,
       model: bridge,
-      // Settings seed new chats only (DESIGN §9.1): the latest settings, so the view before the first
-      // record (its palette) and the first turn's plan use the same levels.
-      startMarkers: () => startMarkersFrom(this.settings.known(userId) ?? this.settingsCache.get(userId) ?? settings, run.revision),
+      // The world's realism and time defaults seed a new chat, with the latest settings filling in
+      // (DESIGN §9.1), so the view before the first record (its palette) and the first turn's plan
+      // use the same levels.
+      startMarkers: () => startMarkersFrom(this.settings.known(userId) ?? this.settingsCache.get(userId) ?? settings, world, run.revision),
       newSeed: () => crypto.randomUUID(),
     };
   }

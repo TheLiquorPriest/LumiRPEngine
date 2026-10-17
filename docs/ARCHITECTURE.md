@@ -7,7 +7,8 @@ This is the contract between the modules. Behavior is specified in [DESIGN.md](D
 | File | Contents |
 |---|---|
 | `src/shared/json.ts` | `JsonValue`, `JsonObject`, the one `isRecord` guard |
-| `src/shared/ids.ts` | Id aliases; domains, levels, tiers, interrupt classes, bound modes |
+| `src/shared/ids.ts` | Id aliases; domains, levels, the three detail bands, interrupt classes, bound modes |
+| `src/shared/tiers.ts` | World tiers over the detail bands: band labels, default tiers, a tier's band, the spawn and lead tiers, tier agent defaults |
 | `src/shared/world.ts` | The world document `lre-world-v1` |
 | `src/shared/tables.ts` | Pinned data tables and the build-time mapping |
 | `src/shared/ledger.ts` | Events, `Rec`, `post` entries, markers, `MessageLedger`, `ChatRun`, the journal, fold outputs |
@@ -79,7 +80,7 @@ One JSON document per revision; the revision id is its `hashJson`. Collections a
 
 - **Formulas** are expression-language strings (`Expr`); **dice** are notation strings.
 - **Kinds** have single inheritance and typed fields (`FieldDef`: type, default, min/max, enum values, ref kind, list element, bands, derived formula, locked, bound, visibility, and the level contract's domain and live level).
-- **Entities** carry field values, relation instances (with `until` for use grants), a tier, optional per-domain level overrides, the LOD1 `agent` flag and an optional Lumiverse character id.
+- **Entities** carry field values, relation instances (with `until` for use grants), a tier (one of the world's `tiers`, each mapped to a detail band whose caps apply), optional per-domain level overrides, the LOD1 `agent` flag (unset: the tier's default) and an optional Lumiverse character id.
 - **Pins** fix generator versions and table revisions (DESIGN §9.2). The document holds copies of its tables, so a running chat sees new data only through a `migrate` marker.
 - Levels gate processes, rendering and extraction, never the shape (D18).
 

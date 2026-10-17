@@ -1,6 +1,7 @@
 // Builds the frozen engine registry from pack definitions (DESIGN §3 Modules; ARCHITECTURE §5).
 
 import type { DomainId, EntityId, Level, TableId } from "../shared/ids";
+import { tierBand } from "../shared/tiers";
 import type { ActionDef, KindDef, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
 import type { Value } from "./expr";
 import { coreEventTypes, type EventTypes } from "./events";
@@ -50,14 +51,19 @@ export class RegistryError extends Error {
   }
 }
 
-/** Effective level (DESIGN §9.1): the override, capped by the domain level; else min(domain level, tier cap). */
-export function effectiveLevel(state: Readonly<WorldState>, entity: EntityId, domain: DomainId): Level {
+/**
+ * Effective level (DESIGN §9.1): the override, capped by the domain level; else min(domain level,
+ * the cap of the band the entity's tier maps to). The tier is read through the world each time, so
+ * a world's tier changes reach a chat with its revision. The POV (`world.pov`) is never capped.
+ */
+export function effectiveLevel(world: Pick<WorldDoc, "pov" | "tiers">, state: Readonly<WorldState>, entity: EntityId, domain: DomainId): Level {
   const domainLevel = state.realism.levels[domain];
   const e = state.entities[entity];
   if (!e) return domainLevel;
   const override = e.levels[domain];
   if (override !== undefined) return Math.min(override, domainLevel) as Level;
-  const cap = e.tier === "pov" ? undefined : state.realism.tierCaps[e.tier][domain];
+  const band = entity === world.pov ? null : tierBand(world, e.tier);
+  const cap = band ? state.realism.tierCaps[band][domain] : undefined;
   return cap === undefined ? domainLevel : (Math.min(cap, domainLevel) as Level);
 }
 
@@ -109,7 +115,7 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
         world,
         state,
         tables: { get: (id) => world.tables[id] },
-        levelOf: (entity, domain) => effectiveLevel(state, entity, domain),
+        levelOf: (entity, domain) => effectiveLevel(world, state, entity, domain),
         service<K extends keyof ServiceMap>(name: K): ServiceMap[K] {
           if (!services.has(String(name))) throw new RegistryError(`no service ${String(name)}`);
           return services.get(String(name)) as ServiceMap[K];

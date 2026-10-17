@@ -1,7 +1,9 @@
 // The state a chat starts from: the world revision's document, before any marker or event.
 
-import type { DomainId, Level, RevisionId } from "../shared/ids";
-import { DOMAINS } from "../shared/ids";
+import type { Band, DomainId, Level, RevisionId } from "../shared/ids";
+import { BANDS, DOMAINS } from "../shared/ids";
+import { isRecord } from "../shared/json";
+import { agentOf } from "../shared/tiers";
 import type { WorldDoc } from "../shared/world";
 import type { EntityState, TrackState, WorldState } from "./state";
 import { clampLevel, clampThreshold, clampTick, clampUnitCap } from "./time-limits";
@@ -41,8 +43,13 @@ export function initialState(world: WorldDoc, revision: RevisionId): WorldState 
       fields: structuredClone(e.fields),
       relations: structuredClone(e.relations),
       levels: clampLevels(e.levels ?? {}),
-      agent: e.agent === true,
+      agent: agentOf(world, { id, tier: e.tier, agent: e.agent }),
     };
+  }
+  const tierCaps = {} as Record<Band, Partial<Record<DomainId, Level>>>;
+  for (const band of BANDS) {
+    const caps: unknown = world.realism.tierCaps[band];
+    tierCaps[band] = isRecord(caps) ? clampLevels(caps) : {};
   }
   const tracks: Record<string, TrackState> = {};
   for (const [id, t] of Object.entries(world.tracks)) tracks[id] = { stage: t.start, since: 0 };
@@ -52,7 +59,7 @@ export function initialState(world: WorldDoc, revision: RevisionId): WorldState 
     entities,
     accounts: {},
     tracks,
-    realism: { levels: domainLevels(world.realism.levels), tierCaps: { principal: clampLevels(world.realism.tierCaps.principal), supporting: clampLevels(world.realism.tierCaps.supporting), background: clampLevels(world.realism.tierCaps.background) } },
+    realism: { levels: domainLevels(world.realism.levels), tierCaps },
     time: {
       sceneTicks: Object.fromEntries(Object.entries(world.time.sceneTicks).map(([k, v]) => [k, clampTick(v)])),
       scale: 1,

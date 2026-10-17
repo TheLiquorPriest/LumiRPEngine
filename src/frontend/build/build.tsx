@@ -19,6 +19,7 @@ import { JobView } from "./jobs";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { TableEditor } from "./table-editor";
+import { TiersEditor } from "./tiers-editor";
 
 const COLLECTIONS: { id: WorldCollection; label: string; hint: string }[] = [
   { id: "entities", label: "Entities", hint: "People, things, vehicles" },
@@ -43,6 +44,7 @@ const PARTS: { id: WorldPart; label: string }[] = [
   { id: "meta", label: "World" },
   { id: "calendar", label: "Calendar" },
   { id: "realism", label: "Realism defaults" },
+  { id: "tiers", label: "Tiers" },
   { id: "time", label: "Time defaults" },
 ];
 
@@ -482,7 +484,7 @@ export function SchemaEditor(props: EditorProps) {
   const isNew = props.id?.startsWith("new:") ?? false;
   const id = isNew ? (props.id ?? "").slice(4) : props.id ?? "";
   const stored = (props.world[props.collection] as Record<string, unknown>)[id];
-  const initial: JsonObject = isRecord(stored) ? (stored as JsonObject) : newItem(props.collection, id);
+  const initial: JsonObject = isRecord(stored) ? (stored as JsonObject) : newItem(props.collection, id, props.world);
   const [value, setValue] = useState<JsonObject>(initial);
   const [busy, run] = useBusy();
   useEffect(() => setValue(initial), [JSON.stringify(stored)]);
@@ -544,7 +546,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
-function partValue(doc: WorldDoc, part: WorldPart): JsonObject {
+function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers">): JsonObject {
   switch (part) {
     case "calendar":
       return doc.calendar as unknown as JsonObject;
@@ -558,6 +560,15 @@ function partValue(doc: WorldDoc, part: WorldPart): JsonObject {
 }
 
 function PartView(props: { part: WorldPart }) {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d) => d);
+  const send = useMemo(() => draftSend(app), [app]);
+  if (!draft) return null;
+  if (props.part === "tiers") return <TiersEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "tiers", value })} />;
+  return <SchemaPartView part={props.part} />;
+}
+
+function SchemaPartView(props: { part: Exclude<WorldPart, "tiers"> }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const send = useMemo(() => draftSend(app), [app]);

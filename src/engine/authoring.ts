@@ -3,11 +3,12 @@
 // deterministic: no packages, no host, no clock.
 
 import type { WorldId } from "../shared/ids";
-import { isRecord } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { macroHazards } from "../shared/macros";
 import type { LintIssue } from "../shared/protocol";
 import { knownSignal, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
+import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { WorldCurrency, WorldDoc } from "../shared/world";
 import { DEFAULT_CURRENCY, ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { applyEvent, validateEvent } from "./events";
@@ -22,7 +23,7 @@ import { typedIntent } from "./typed-intent";
 
 // ---------------------------------------------------------------- documents
 
-/** A minimal valid world: one POV person in one place, Story realism, the Modern US calendar. */
+/** A minimal valid world: one POV person in one place, the default tiers, Story realism, the Modern US calendar. */
 export function blankWorld(id: WorldId, name: string): WorldDoc {
   return {
     format: WORLD_FORMAT,
@@ -33,7 +34,7 @@ export function blankWorld(id: WorldId, name: string): WorldDoc {
     pins: { generators: {}, tables: {} },
     kinds: { person: { id: "person", label: "Person", fields: {} } },
     relations: {},
-    entities: { you: { id: "you", kind: "person", name: "You", tier: "pov", fields: {}, relations: [] } },
+    entities: { you: { id: "you", kind: "person", name: "You", tier: "principal", fields: {}, relations: [] } },
     places: { home: { id: "home", name: "Home", fields: {} } },
     routes: {},
     grids: {},
@@ -75,6 +76,7 @@ export function blankWorld(id: WorldId, name: string): WorldDoc {
     lenientPricing: false,
     currency: { ...DEFAULT_CURRENCY },
     pov: "you",
+    tiers: defaultTiers(),
     start: { place: "home", at: "2026-01-01T08:00" },
   };
 }
@@ -93,22 +95,29 @@ export function currencyOf(v: unknown): WorldCurrency | null {
 }
 
 /**
- * Brings an older `lre-world-v1` document up to this engine: documents written before `currency`
- * or `lore` existed (and templates without them) get Modern US money and no lore, and step
- * templates for the retired `select` purpose (lore selection) are dropped. Returns the same object
- * when nothing changes.
+ * Brings an older `lre-world-v1` document up to this engine: documents written before `currency`,
+ * `lore` or `tiers` existed (and templates without them) get Modern US money, no lore and the three
+ * default tiers, whose ids are the band ids their entities already name; a POV still on the legacy
+ * `pov` tier moves to the lead tier (the POV is `pov`, never capped whatever its tier); and step
+ * templates for the retired `select` purpose are dropped. Revisions are immutable, so this runs
+ * whenever one is read. Returns the same object when nothing changes.
  */
 export function migrateWorld(doc: WorldDoc): WorldDoc {
   const currency: unknown = doc.currency;
   const lore: unknown = doc.lore;
   const steps: unknown = doc.steps;
+  const hasTiers = isRecord(doc.tiers);
+  const tiers = hasTiers ? doc.tiers : defaultTiers();
   const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && t.purpose === "select" ? [id] : [])) : [];
-  if (isCurrency(currency) && isRecord(lore) && retired.length === 0) return doc;
-  const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {} };
+  const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
+  const legacyPov = pov?.tier === "pov" && !tierOf({ tiers }, "pov");
+  if (isCurrency(currency) && isRecord(lore) && hasTiers && retired.length === 0 && !legacyPov) return doc;
+  const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, tiers };
   if (retired.length > 0) {
     out.steps = { ...doc.steps };
     for (const id of retired) delete out.steps[id];
   }
+  if (pov && legacyPov) out.entities = { ...doc.entities, [doc.pov]: { ...pov, tier: leadTierOf(out) } };
   return out;
 }
 
@@ -120,7 +129,6 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   };
   if (world.format !== WORLD_FORMAT) err("format", "format", `format must be ${WORLD_FORMAT}`);
   if (!world.entities[world.pov]) err("pov", "missing_pov", `the POV entity "${world.pov}" does not exist`);
-  else if (world.entities[world.pov]?.tier !== "pov") err(`entities.${world.pov}.tier`, "pov_tier", "the POV entity must have tier pov");
   if (!world.places[world.start.place]) err("start.place", "missing_place", `the start place "${world.start.place}" does not exist`);
   const c = world.currency;
   if (!Number.isInteger(c.decimals) || c.decimals < 0 || c.decimals > 6) err("currency.decimals", "currency", "decimals must be a whole number from 0 to 6");

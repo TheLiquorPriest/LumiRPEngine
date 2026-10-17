@@ -5,6 +5,7 @@
 import type { JsonObject, JsonValue } from "./json";
 import type {
   ActionId,
+  Band,
   ChatId,
   ChipId,
   DomainId,
@@ -20,7 +21,6 @@ import type {
   RealismPresetId,
   RevisionId,
   SceneTypeId,
-  Tier,
   WorldId,
 } from "./ids";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
@@ -182,7 +182,8 @@ export interface PaletteView {
 
 /** The running chat's folded realism and time controls (Play → Calendar, "This chat" realism). */
 export interface ControlsView {
-  realism: { preset: RealismPresetId; levels: Record<DomainId, Level>; tierCaps: Record<Exclude<Tier, "pov">, Partial<Record<DomainId, Level>>> };
+  /** Levels and caps per detail band; `bandTiers` lists the world's tiers each band's caps reach, in order. */
+  realism: { preset: RealismPresetId; levels: Record<DomainId, Level>; tierCaps: Record<Band, Partial<Record<DomainId, Level>>>; bandTiers: Record<Band, string[]> };
   time: {
     sceneType: SceneTypeId;
     sceneTicks: Record<SceneTypeId, number>;

@@ -5,7 +5,9 @@
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
-import { DOMAINS } from "../../shared/ids";
+import type { Band } from "../../shared/ids";
+import { BANDS, DOMAINS } from "../../shared/ids";
+import { BAND_LABEL, tierOf, tiersInOrder } from "../../shared/tiers";
 import type { LintIssue } from "../../shared/protocol";
 import { BUILTIN_RELATIONS } from "../../shared/world";
 import type { FieldDef, WorldDoc } from "../../shared/world";
@@ -399,6 +401,66 @@ function LevelsInput(props: { label: string; value: JsonValue | undefined; onCha
   );
 }
 
+/** A cap per domain for each detail band, under the band labels; "—" is no cap (the domain level). */
+function BandCapsInput(props: { label: string; value: JsonValue | undefined; onChange(value: JsonValue | undefined): void }) {
+  const caps: JsonObject = isRecord(props.value) ? (props.value as JsonObject) : {};
+  const capsOf = (band: Band): JsonObject => {
+    const c = caps[band];
+    return isRecord(c) ? (c as JsonObject) : {};
+  };
+  return (
+    <div class="lre-field">
+      <span class="label">{props.label}</span>
+      <div class="lre-tier-wrap">
+        <div class="lre-tier-grid" role="table" aria-label={props.label} lang="en">
+          <div role="row" style={{ display: "contents" }}>
+            <span role="columnheader">
+              <span class="lre-sr">Domain</span>
+            </span>
+            {BANDS.map((band) => (
+              <span key={band} class="lre-muted" role="columnheader">
+                {BAND_LABEL[band]}
+              </span>
+            ))}
+          </div>
+          {DOMAINS.map((domain) => (
+            <div key={domain} role="row" style={{ display: "contents" }}>
+              <span role="rowheader">{domain}</span>
+              {BANDS.map((band) => {
+                const cap = capsOf(band)[domain];
+                return (
+                  <span key={band} role="cell" style={{ display: "contents" }}>
+                    <select
+                      class="lre-input"
+                      aria-label={`${domain} cap for ${BAND_LABEL[band]}`}
+                      value={typeof cap === "number" ? String(cap) : ""}
+                      onChange={(event) => {
+                        // Every band keeps its record, so the document always has all three.
+                        const out: JsonObject = Object.fromEntries(BANDS.map((b) => [b, { ...capsOf(b) }]));
+                        const edited = out[band] as JsonObject;
+                        if (event.currentTarget.value === "") delete edited[domain];
+                        else edited[domain] = Number(event.currentTarget.value);
+                        props.onChange(out);
+                      }}
+                    >
+                      <option value="">—</option>
+                      {[0, 1, 2, 3, 4].map((level) => (
+                        <option key={level} value={String(level)}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefined; ctx: FormCtx; path: string; parent: JsonObject; onChange(value: JsonValue | undefined): void }) {
   const { spec, ctx } = props;
   const path = spec.key ? `${props.path}.${spec.key}` : props.path;
@@ -483,6 +545,41 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
       return <KindFieldsInput value={props.value} kind={typeof props.parent.kind === "string" ? props.parent.kind : ""} ctx={ctx} path={path} onChange={props.onChange} />;
     case "levels":
       return <LevelsInput label={spec.label} value={props.value} onChange={props.onChange} />;
+    case "bandCaps":
+      return <BandCapsInput label={spec.label} value={props.value} onChange={props.onChange} />;
+    case "tier":
+      return (
+        <SelectInput
+          label={spec.label}
+          value={props.value}
+          options={tiersInOrder(ctx.doc).map(([id, t]) => ({ value: id, label: t.label === BAND_LABEL[t.band] ? t.label : `${t.label} (${BAND_LABEL[t.band]})` }))}
+          issues={issues}
+          onChange={props.onChange}
+        />
+      );
+    case "agent": {
+      // Unset follows the tier's default, which the POV never takes.
+      const tier = typeof props.parent.tier === "string" ? tierOf(ctx.doc, props.parent.tier) : undefined;
+      const inherited = props.parent.id !== ctx.doc.pov && tier?.agentDefault === true;
+      return (
+        <label class="lre-field">
+          <span class="label">{spec.label}</span>
+          <select
+            class="lre-input"
+            value={props.value === true ? "yes" : props.value === false ? "no" : ""}
+            onChange={(event) => {
+              const choice = event.currentTarget.value;
+              props.onChange(choice === "yes" ? true : choice === "no" ? false : undefined);
+            }}
+          >
+            <option value="">As its tier ({inherited ? "yes" : "no"})</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+          <Issues issues={issues} />
+        </label>
+      );
+    }
     case "object": {
       if (spec.optional && !isRecord(props.value)) {
         return (

@@ -1,6 +1,7 @@
 // Settings (DESIGN §12): model use and budgets, realism (new chats and this chat), time, per-type
 // extraction modes with D4 learning, steps and connections, pins and Upgrade, the swipe default
-// and caveats. Settings seed new chats; running-chat changes are markers.
+// and caveats. Realism and time settings seed new chats behind a world's own defaults (or instead of
+// them, with "Use my settings" on); running-chat changes are markers.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -14,7 +15,7 @@ import { useApp, useView } from "../app";
 import { Empty, Row, Seg, useBusy } from "../components";
 import { humanize } from "../format";
 import { settingsTimePatch, TimeControlsEditor } from "../time-controls";
-import { RealismSeed, RealismThisChat } from "./realism";
+import { OverrideWorldSwitch, RealismSeed, RealismThisChat } from "./realism";
 import { ModelUseSection, StepsSection } from "./steps";
 
 type SectionId = "model" | "realism" | "time" | "extraction" | "steps" | "pins" | "swipes" | "caveats";
@@ -145,7 +146,7 @@ function PinsSection() {
 
 const STATIC_CAVEATS = [
   "LumiRPEngine does not manage lore; Lumiverse's World Info works as usual in world chats.",
-  "Settings seed new chats only. Change a running chat from Play (Calendar, realism for this chat).",
+  "Realism and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat from Play (Calendar, realism for this chat).",
   "Undo covers the latest reply; earlier changes go through Keep or Discard.",
 ];
 
@@ -176,7 +177,7 @@ export function Settings() {
       <Fold id="model" title="Model use" summary={`${humanize(settings.modelUse.preset)} preset`} {...fold}>
         <ModelUseSection modelUse={settings.modelUse} meter={view?.meter ?? null} patch={patch} busy={busy} />
       </Fold>
-      <Fold id="realism" title="Realism" summary={`${humanize(settings.realism.preset)} for new chats`} {...fold}>
+      <Fold id="realism" title="Realism" summary={settings.overrideWorldDefaults ? `${humanize(settings.realism.preset)} for new chats` : `World defaults, then ${humanize(settings.realism.preset)}`} {...fold}>
         <div class="lre-stack">
           <Seg<"seed" | "chat">
             label="Realism scope"
@@ -187,13 +188,16 @@ export function Settings() {
             ]}
             onChange={(next) => setRealismScope(next)}
           />
-          {realismScope === "seed" ? <RealismSeed realism={settings.realism} patch={patch} busy={busy} /> : <RealismThisChat chatId={view?.chatId ?? ""} controls={view?.status === "not_world" ? null : view?.controls ?? null} />}
+          {realismScope === "seed" ? <RealismSeed realism={settings.realism} overrideWorld={settings.overrideWorldDefaults} patch={patch} busy={busy} /> : <RealismThisChat chatId={view?.chatId ?? ""} controls={view?.status === "not_world" ? null : view?.controls ?? null} />}
         </div>
       </Fold>
       <Fold id="time" title="Time" summary={`${settings.time.scale}× · montage ${settings.time.montage}`} {...fold}>
-        <p class="lre-small lre-muted" style={{ margin: "0 0 8px" }}>
-          Seeds new chats. Pause the clock from the HUD or Play → Calendar (this chat only).
-        </p>
+        <div class="lre-stack" style={{ marginBottom: "8px" }}>
+          <OverrideWorldSwitch checked={settings.overrideWorldDefaults} busy={busy} patch={patch} />
+          <p class="lre-small lre-muted" style={{ margin: 0 }}>
+            The time scale and NPC calls always come from here. Pause the clock from the HUD or Play → Calendar (this chat only).
+          </p>
+        </div>
         <TimeControlsEditor
           values={{ sceneTicks: settings.time.sceneTicks, scale: settings.time.scale, interrupts: settings.time.interrupts, speedThrough: settings.time.speedThrough, montage: settings.time.montage, unitCap: settings.time.unitCap, npcCalls: settings.time.npcCallsPerTimelapse }}
           disabled={busy}

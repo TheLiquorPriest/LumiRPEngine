@@ -12,6 +12,7 @@
 
 import type { JsonValue } from "../../../shared/json";
 import type { DataTable } from "../../../shared/tables";
+import { agentOf } from "../../../shared/tiers";
 import type { DateRule, HolidayDef } from "../../../shared/world";
 import { calendarOf, clockOfLocal, dateAt, dayIndexOf, dayPartAt, formatClock, holidaysOn, MINUTES_PER_DAY, nextTimeOfDay, parseHHMM, placeOffset, shortestSlot, weekdayName } from "../../../engine/calendar";
 import type { PackDef } from "../../../engine/registry";
@@ -169,7 +170,7 @@ export const calendarPack: PackDef = {
     r.lint({
       code: "calendar.unit_cap",
       check(world) {
-        const agents = Object.values(world.entities).filter((e) => e.agent && e.id !== world.pov).length;
+        const agents = Object.values(world.entities).filter((e) => e.id !== world.pov && agentOf(world, e)).length;
         const min = ((agents + 1) * shortestSlot(calendarOf(world))) / MINUTES_PER_DAY;
         return world.time.unitCap.agentDays < min
           ? [{ severity: "error", code: "calendar.unit_cap", message: `The timelapse unit cap (${world.time.unitCap.agentDays} agent-days) is smaller than one slot for ${agents} LOD1 agents plus the POV (${min.toFixed(2)}).`, path: "time.unitCap" }]

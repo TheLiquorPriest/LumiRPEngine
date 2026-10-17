@@ -200,8 +200,9 @@ export function createMockHost(initialDrawerOpen: boolean): MockHost {
       wrap.appendChild(input);
       target.replaceChildren(wrap);
       return handle<SpindleRangeSliderOptions>(target, () => Number(input.value), (patch) => {
+        // Like the host, an update changes only what it names.
         if (typeof patch.value === "number") input.value = String(patch.value);
-        input.disabled = patch.disabled === true;
+        if ("disabled" in patch) input.disabled = patch.disabled === true;
         head();
       });
     },

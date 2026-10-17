@@ -10,6 +10,7 @@ import type { JsonObject, JsonValue } from "./json";
 import type {
   ActionId,
   ActivityType,
+  Band,
   ChatId,
   DomainId,
   EntityId,
@@ -22,7 +23,6 @@ import type {
   RevisionId,
   SceneTypeId,
   StageId,
-  Tier,
   TrackId,
   WorldId,
 } from "./ids";
@@ -185,7 +185,8 @@ export interface PostEntry {
   events: LedgerEvent[];
 }
 
-export type ResolveScope = { all: true } | { tier: Tier } | { entity: EntityId };
+/** A level change for everyone, for one detail band (stored under `tier`, the key the band ids had as tiers) or for one entity. */
+export type ResolveScope = { all: true } | { tier: Band } | { entity: EntityId };
 
 export type TimeControl = "tick" | "scale" | "pause" | "interrupt" | "speed_through" | "montage" | "unit_cap" | "npc_calls";
 

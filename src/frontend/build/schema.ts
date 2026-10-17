@@ -3,8 +3,10 @@
 // `UiRegistry.editor`, and the descriptors stay the default.
 
 import type { JsonObject } from "../../shared/json";
-import { DOMAINS, TIERS } from "../../shared/ids";
+import { DOMAINS } from "../../shared/ids";
 import type { WorldCollection, WorldPart } from "../../shared/protocol";
+import { spawnTierOf } from "../../shared/tiers";
+import type { WorldDoc } from "../../shared/world";
 
 export type RefCollection = "kinds" | "relations" | "entities" | "places" | "grids" | "checks" | "tracks" | "tables";
 
@@ -24,7 +26,13 @@ export type FieldSpec =
   | { kind: "object"; key: string; label: string; fields: FieldSpec[]; optional?: boolean }
   | { kind: "json"; key: string; label: string; optional?: boolean; hint?: string }
   | { kind: "kindFields"; key: string; label: string }
-  | { kind: "levels"; key: string; label: string };
+  | { kind: "levels"; key: string; label: string }
+  /** One of the world's tiers (`WorldDoc.tiers`), in their order. */
+  | { kind: "tier"; key: string; label: string }
+  /** The LOD1 agent flag: yes, no, or (unset) the entity's tier's default. */
+  | { kind: "agent"; key: string; label: string }
+  /** A cap per domain for each detail band, keyed by band id. */
+  | { kind: "bandCaps"; key: string; label: string };
 
 export const FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] as const;
 const BOUND_MODES = ["auto", "confirm", "never"] as const;
@@ -102,7 +110,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   entities: [
     { kind: "text", key: "name", label: "Name" },
     { kind: "ref", key: "kind", label: "Kind", collection: "kinds" },
-    { kind: "enum", key: "tier", label: "Tier", values: TIERS },
+    { kind: "tier", key: "tier", label: "Tier" },
     { kind: "kindFields", key: "fields", label: "Fields" },
     {
       kind: "list",
@@ -122,7 +130,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
       },
     },
     { kind: "levels", key: "levels", label: "Level overrides" },
-    { kind: "bool", key: "agent", label: "LOD1 agent (runs agendas and the planner)" },
+    { kind: "agent", key: "agent", label: "LOD1 agent (runs agendas and the planner)" },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
     { kind: "tags", key: "tags", label: "Tags" },
@@ -293,7 +301,8 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   ],
 };
 
-export const PART_SPECS: Record<WorldPart, FieldSpec[]> = {
+/** The schema-driven singletons; Tiers has its own editor (`tiers-editor.tsx`). */
+export const PART_SPECS: Record<Exclude<WorldPart, "tiers">, FieldSpec[]> = {
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
     { kind: "text", key: "epoch", label: "Epoch (local ISO, e.g. 2026-10-16T06:00)" },
@@ -336,7 +345,7 @@ export const PART_SPECS: Record<WorldPart, FieldSpec[]> = {
   realism: [
     { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
     { kind: "levels", key: "levels", label: "Domain levels" },
-    { kind: "json", key: "tierCaps", label: "Tier caps" },
+    { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
   ],
   time: [
     { kind: "record", key: "sceneTicks", label: "Default tick per scene type (min)", keyLabel: "Scene type", item: { kind: "number", key: "", label: "Minutes", min: 0, step: 0.5 } },
@@ -382,15 +391,15 @@ export const PART_SPECS: Record<WorldPart, FieldSpec[]> = {
   ],
 };
 
-/** A minimal valid value for a new item (the backend lints the rest). */
-export function newItem(collection: WorldCollection, id: string): JsonObject {
+/** A minimal valid value for a new item (the backend lints the rest); a new entity starts in the world's spawn tier. */
+export function newItem(collection: WorldCollection, id: string, world: Pick<WorldDoc, "tiers" | "spawnTier">): JsonObject {
   switch (collection) {
     case "kinds":
       return { id, label: id, fields: {} };
     case "relations":
       return { id, label: id, from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: {} };
     case "entities":
-      return { id, kind: "", name: id, tier: "background", fields: {}, relations: [] };
+      return { id, kind: "", name: id, tier: spawnTierOf(world), fields: {}, relations: [] };
     case "places":
       return { id, name: id, fields: {} };
     case "routes":
