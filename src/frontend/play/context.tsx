@@ -1,11 +1,11 @@
-// Play → Context (DESIGN §6.5): per generation, every World Info candidate with its status and
-// reason, the activation confirmation, the engine sections with their token cost and clipping,
-// and the budget. Built by the backend as `core.context`.
+// Play → Context (DESIGN §6.5): per generation, the activation confirmation, the engine sections
+// with their token cost, clipping and delivery, and the section budget. Built by the backend as
+// `core.context`.
 
 import { useEffect, useState } from "preact/hooks";
 import { isRecord } from "../../shared/json";
 import { useApp } from "../app";
-import { Card, Empty, JsonView, Row, Seg } from "../components";
+import { Card, Empty, JsonView, Row } from "../components";
 import { list, num, oneOf, str, strings } from "../decode";
 import type { PanelProps } from "../registry";
 import type { ContextView } from "../../shared/state-view";
@@ -18,9 +18,6 @@ const DELIVERY_BADGE: Record<Delivery, { text: string; tone: string }> = {
   unchecked: { text: "unchecked", tone: "" },
 };
 
-const STATUSES = ["included", "pinned", "dropped", "unverified"] as const;
-type CandidateStatus = (typeof STATUSES)[number];
-
 export function decodeContextView(value: unknown): ContextView | null {
   if (!isRecord(value) || !Array.isArray(value.generations)) return null;
   return {
@@ -31,9 +28,8 @@ export function decodeContextView(value: unknown): ContextView | null {
         id: str(g.id),
         at: num(g.at),
         activation: oneOf(g.activation, ["confirmed", "unconfirmed", "stalled"] as const, "unconfirmed"),
-        candidates: list(g.candidates, (c) => ({ title: str(c.title, "Untitled"), book: str(c.book), bookName: str(c.bookName, str(c.book)), status: oneOf(c.status, STATUSES, "unverified"), reason: str(c.reason) })),
         sections: list(g.sections, (s) => ({ slot: str(s.slot), label: str(s.label, str(s.slot)), tokens: num(s.tokens), clipped: s.clipped === true, delivery: oneOf(s.delivery, DELIVERY, "unchecked") })),
-        budget: { sections: num(budget.sections), lore: num(budget.lore), used: num(budget.used) },
+        budget: { sections: num(budget.sections), used: num(budget.used) },
       };
     }),
   };
@@ -42,15 +38,12 @@ export function decodeContextView(value: unknown): ContextView | null {
 const ACTIVATION: Record<ContextView["generations"][number]["activation"], { text: string; tone: string }> = {
   confirmed: { text: "Activation confirmed", tone: "pos" },
   unconfirmed: { text: "Not confirmed", tone: "warn" },
-  stalled: { text: "Worker stalled: world lore absent", tone: "neg" },
+  stalled: { text: "Worker stalled: engine sections absent", tone: "neg" },
 };
-
-const STATUS_TONE: Record<CandidateStatus, string> = { included: "pos", pinned: "accent", dropped: "", unverified: "warn" };
 
 export function ContextPanel(props: PanelProps) {
   const view = decodeContextView(props.view);
   const [index, setIndex] = useState(0);
-  const [status, setStatus] = useState<CandidateStatus | "all">("all");
   const app = useApp();
   // Opening the inspector runs the backend's deliverability check (a dry-run assembly).
   useEffect(() => {
@@ -60,7 +53,7 @@ export function ContextPanel(props: PanelProps) {
   if (!view) return <JsonView value={props.view} />;
   const generations = [...view.generations].sort((a, b) => b.at - a.at);
   const generation = generations[Math.min(index, generations.length - 1)];
-  const total = generation ? generation.budget.sections + generation.budget.lore : 0;
+  const total = generation ? generation.budget.sections : 0;
   return (
     <div class="lre-stack" data-lre-panel="core.context">
       {view.warnings.map((warning) => (
@@ -106,28 +99,6 @@ export function ContextPanel(props: PanelProps) {
                 />
               ))
             )}
-          </Card>
-          <Card title="Candidates" aside={<span class="lre-badge">{generation.candidates.length}</span>}>
-            <Seg<CandidateStatus | "all">
-              label="Candidate status"
-              value={status}
-              options={[{ value: "all", label: "All" }, ...STATUSES.map((s) => ({ value: s, label: `${s[0]?.toUpperCase()}${s.slice(1)} (${generation.candidates.filter((c) => c.status === s).length})` }))]}
-              onChange={(next) => setStatus(next)}
-            />
-            {generation.candidates
-              .filter((c) => status === "all" || c.status === status)
-              .map((c, i) => (
-                <div key={`${c.book}:${c.title}:${i}`} class="lre-row" style={{ alignItems: "flex-start" }}>
-                  <span class="k">
-                    {c.title}
-                    <span class="sub">
-                      {c.bookName}
-                      {c.reason ? ` — ${c.reason}` : ""}
-                    </span>
-                  </span>
-                  <span class={`lre-badge ${STATUS_TONE[c.status]}`}>{c.status}</span>
-                </div>
-              ))}
           </Card>
         </>
       )}

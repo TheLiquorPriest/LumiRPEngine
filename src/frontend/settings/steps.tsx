@@ -19,15 +19,14 @@ const PRESETS: { value: ModelUsePresetId; label: string }[] = [
 ];
 
 export const PRESET_NOTE: Record<ModelUsePresetId, string> = {
-  lean: "Narrator + up to 2 model steps a turn (2 calls on a typical turn). The floor; doesn't meet “a model decides” on its own.",
-  standard: "Narrator + up to 5 model steps a turn (3 calls on a typical turn). The default.",
-  full: "Narrator + up to 9 model steps a turn (6 calls on a typical turn).",
+  lean: "Narrator + up to 2 model steps a turn. The floor; doesn't meet “a model decides” on its own. The call meter shows each turn's real count.",
+  standard: "Narrator + up to 4 model steps a turn. The default. The call meter shows each turn's real count.",
+  full: "Narrator + up to 8 model steps a turn. The call meter shows each turn's real count.",
   custom: "Your own steps, signals, providers and budgets. The count depends on the steps you enable; the call meter shows it live.",
 };
 
 export const STEP_LABEL: Record<StepPurpose, string> = {
   interpret: "Interpret typed input",
-  select: "Select lore",
   "npc.choose": "NPC choices",
   contradiction: "Contradiction check",
   "puzzle.answer": "Puzzle answers",
@@ -37,8 +36,8 @@ export const STEP_LABEL: Record<StepPurpose, string> = {
   choices: "Suggested choices",
 };
 
-const PHASES = ["pre", "select", "post"] as const;
-const PHASE_LABEL: Record<(typeof PHASES)[number], string> = { pre: "Before the reply", select: "Lore selection", post: "After the reply" };
+const PHASES = ["pre", "post"] as const;
+const PHASE_LABEL: Record<(typeof PHASES)[number], string> = { pre: "Before the reply", post: "After the reply" };
 
 export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: CallMeterView | null; patch(patch: JsonObject): void; busy: boolean }) {
   const { modelUse } = props;
@@ -58,7 +57,6 @@ export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: Call
       ))}
       <div class="lre-h">Engine budget (tokens)</div>
       <NumberStepper label="Sections" value={modelUse.tokens.sections} min={100} max={8000} step={50} integer disabled={props.busy} onChange={(sections) => props.patch({ modelUse: { preset: "custom", tokens: { sections } } })} />
-      <NumberStepper label="Lore" value={modelUse.tokens.lore} min={0} max={16000} step={100} integer disabled={props.busy} onChange={(lore) => props.patch({ modelUse: { preset: "custom", tokens: { lore } } })} />
       {props.meter ? <Meter meter={props.meter} /> : null}
     </div>
   );
@@ -122,7 +120,7 @@ export function StepsSection(props: { modelUse: ModelUseSettings; patch(patch: J
     <div class="lre-list">
       {(Object.keys(STEP_LABEL) as StepPurpose[]).map((purpose) => {
         const config: StepConfig = props.modelUse.steps[purpose] ?? { enabled: false, signals: [] };
-        const route = config.route ?? { provider: purpose === "select" || purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
+        const route = config.route ?? { provider: purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
         const lowTokens = config.maxTokens !== undefined && config.maxTokens < 1500;
         return (
           <div key={purpose} class="lre-card" data-lre-step={purpose}>

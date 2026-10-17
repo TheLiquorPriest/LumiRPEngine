@@ -485,7 +485,7 @@ describe("helper fallback answers", () => {
     const host = new FakeHost();
     host.quietReply = () => JSON.stringify({ c0: {}, c1: { p: 0.9 } });
     const steps = new Steps(host, new CallMeter());
-    const answer = await steps.decide("select", {}, { c0: { type: "noul", instructions: "x" }, c1: { type: "noul", instructions: "y" } }, null, host.userId, new AbortController().signal);
+    const answer = await steps.decide("npc.choose", {}, { c0: { type: "noul", instructions: "x" }, c1: { type: "noul", instructions: "y" } }, null, host.userId, new AbortController().signal);
     expect(answer?.answers.c0).toBeUndefined();
     expect(answer?.answers.c1).toEqual({ type: "noul", noul: 0.9 });
   });

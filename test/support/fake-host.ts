@@ -14,6 +14,7 @@ import type {
   DecideRequest,
   DryRun,
   HostBookEntry,
+  HostBookEntryInput,
   HostEventMap,
   HostEventName,
   HostGenerationType,
@@ -220,13 +221,6 @@ export class FakeHost implements HostPort {
   log(level: "info" | "warn" | "error", message: string, userId?: UserId): void {
     this.logs.push(`${level}: ${message}`);
     if (userId) this.userLogs.set(userId, [...(this.userLogs.get(userId) ?? []), `${level}: ${message}`]);
-  }
-
-  /** Council World Info, as tests set it. */
-  council: boolean | null = false;
-
-  async councilWorldInfo(): Promise<boolean | null> {
-    return this.council;
   }
 
   // ------------------------------------------------------------------ delivery
@@ -474,6 +468,14 @@ export class FakeHost implements HostPort {
 
   readonly bookStore = new Map<string, { name: string; entries: Map<string, HostBookEntry> }>();
 
+  /** Edits an entry as the host's World Info UI would (the engine never updates entries). */
+  editEntry(entryId: string, patch: Partial<HostBookEntryInput>): void {
+    for (const book of this.bookStore.values()) {
+      const e = book.entries.get(entryId);
+      if (e) book.entries.set(entryId, { ...e, ...structuredClone(patch) });
+    }
+  }
+
   books: HostPort["books"] = {
     create: async (name) => {
       const id = this.newId("book");
@@ -481,7 +483,6 @@ export class FakeHost implements HostPort {
       return id;
     },
     exists: async (bookId) => this.bookStore.has(bookId),
-    name: async (bookId) => this.bookStore.get(bookId)?.name ?? null,
     entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map((e) => structuredClone(e)),
     createEntry: async (bookId, entry) => {
       const book = this.bookStore.get(bookId);
@@ -490,24 +491,8 @@ export class FakeHost implements HostPort {
       book.entries.set(id, { ...structuredClone(entry), id, bookId });
       return id;
     },
-    updateEntry: async (entryId, patch) => {
-      for (const book of this.bookStore.values()) {
-        const e = book.entries.get(entryId);
-        if (e) book.entries.set(entryId, { ...e, ...structuredClone(patch) });
-      }
-    },
     deleteEntry: async (entryId) => {
       for (const book of this.bookStore.values()) book.entries.delete(entryId);
-    },
-    setExtension: async (entryId, namespace, value) => {
-      for (const book of this.bookStore.values()) {
-        const e = book.entries.get(entryId);
-        if (!e) continue;
-        const extensions: JsonObject = { ...e.extensions };
-        if (value === null) delete extensions[namespace];
-        else extensions[namespace] = value;
-        book.entries.set(entryId, { ...e, extensions });
-      }
     },
   };
 

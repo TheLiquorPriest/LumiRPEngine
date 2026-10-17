@@ -1,4 +1,4 @@
-// The model steps around a turn beyond interpret, extract and select (DESIGN §5.2, §5.3): which
+// The model steps around a turn beyond interpret and extract (DESIGN §5.2, §5.3): which
 // steps fire (signals), how many may run (phase budgets), what they ask (built-in prompts, or the
 // world's own step templates), and what comes back:
 //   - prompted text: `brief` and the prose `outline` (stacked on the engine's beats), `choices`;
@@ -126,10 +126,6 @@ export interface SignalFacts {
   classifier: boolean;
   /** A reply exists (the post phase). */
   reply: boolean;
-  /** Lore candidates without a cached decision (the select phase). */
-  uncached: boolean;
-  candidatesChanged: boolean;
-  hitSetChanged: boolean;
   /** The POV's place changed since the last turn (or by this turn's plan). */
   sceneChange: boolean;
   /** The plan crossed a day part. */
@@ -156,16 +152,13 @@ export interface SignalFacts {
 }
 
 export function noFacts(turn = 0): SignalFacts {
-  return { typed: false, classifier: false, reply: false, uncached: false, candidatesChanged: false, hitSetChanged: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
+  return { typed: false, classifier: false, reply: false, sceneChange: false, slotCrossed: false, dayStart: false, beat: false, agentsPresent: false, present: false, offscreen: false, tieZone: false, invitation: false, timelapse: false, conflict: false, turn };
 }
 
 const FACT_OF: Record<Exclude<StepSignal, "always" | "never">, keyof SignalFacts> = {
   typed_input: "typed",
   classifier: "classifier",
   reply: "reply",
-  uncached: "uncached",
-  candidates_changed: "candidatesChanged",
-  hit_set_changed: "hitSetChanged",
   scene_change: "sceneChange",
   slot_crossed: "slotCrossed",
   day_start: "dayStart",

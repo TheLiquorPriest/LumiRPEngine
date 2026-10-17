@@ -9,9 +9,6 @@ export const STEP_SIGNALS = [
   "typed_input",
   "classifier",
   "reply",
-  "uncached",
-  "candidates_changed",
-  "hit_set_changed",
   "scene_change",
   "slot_crossed",
   "day_start",
@@ -43,7 +40,6 @@ export const STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "pr
  */
 export const STEP_OUTPUTS: Record<StepPurpose, readonly StepTemplateDef["output"][]> = {
   interpret: ["decision", "text"],
-  select: ["decision", "text"],
   "npc.choose": ["decision", "text"],
   contradiction: ["decision", "text", "effects"],
   "puzzle.answer": ["decision", "text"],

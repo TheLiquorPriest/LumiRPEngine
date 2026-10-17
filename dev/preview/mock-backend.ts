@@ -196,7 +196,7 @@ export class MockBackend {
         this.result(reqId, "lre.view.open", { materialized: true, pending: false });
         return;
       case "lre.settings.get":
-        this.result(reqId, "lre.settings.get", { settings: structuredClone(this.settings), extraction: extractionView(this.settings), caveats: [{ code: "council_wi", message: "Council's World Info is on: Council activates lore natively over your books in world chats." }] });
+        this.result(reqId, "lre.settings.get", { settings: structuredClone(this.settings), extraction: extractionView(this.settings), caveats: [{ code: "preset_json_ledger", message: "Your active preset “Default” has an enabled block “Caravan Ledger” that asks the narrator for JSON; replies will carry it. Turn it off in the preset if you don't want it." }] });
         return;
       case "lre.settings.set": {
         const next = mergePatch(this.settings, message.patch) as UserSettings;

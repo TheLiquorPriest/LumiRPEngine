@@ -1,15 +1,15 @@
 // The engine-managed lore book per world (DESIGN §4.2, D11): "LumiRPEngine · <World>", one slot
 // entry per section, stored `disabled:true, key:[]` so nothing activates natively; only the
 // interceptor enables them, with content rendered from the fold (DESIGN §6.3) and chat-depth
-// placement (§6.4). The book is attached to world chats through `chat_world_book_ids`.
+// placement (§6.4). The book is attached to world chats through `chat_world_book_ids`. It holds
+// slots only: world lore stays in the world document, and copies an earlier build synced into
+// the book are removed.
 
-import { hashJson } from "../shared/hash";
 import type { ChatId, SlotId, UserId } from "../shared/ids";
-import type { JsonObject } from "../shared/json";
 import { isRecord } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
-import type { LoreEntryDef, SectionTemplate, WorldDoc, WorldIndex } from "../shared/world";
+import type { SectionTemplate, WorldDoc, WorldIndex } from "../shared/world";
 import type { HostBookEntry, HostPort, PlacementOverride } from "./host";
 import type { WorldStore } from "./worlds";
 
@@ -43,21 +43,10 @@ export function slotOfEntry(extensions: Readonly<Record<string, unknown>>): Slot
   return isRecord(ns) && typeof ns.slot === "string" ? ns.slot : null;
 }
 
-/** The world lore id an engine-book entry carries, if it is a lore entry. */
+/** The world lore id an engine-book entry carries, if it is a lore entry an earlier build synced into the book. */
 export function loreOfEntry(extensions: Readonly<Record<string, unknown>>): string | null {
   const ns = extensions[LEDGER_NAMESPACE];
   return isRecord(ns) && typeof ns.lore === "string" ? ns.lore : null;
-}
-
-/** A lore entry's extension data: what selection reads (keys, links, group, priority, gate) and a hash. */
-export function loreExtension(lore: LoreEntryDef): JsonObject {
-  const ext: JsonObject = { lore: lore.id, keys: [...lore.keys], links: [...lore.links] };
-  if (lore.group) ext.group = lore.group;
-  if (lore.priority !== undefined) ext.priority = lore.priority;
-  if (lore.secret) ext.secret = true;
-  if (lore.gate) ext.gate = lore.gate;
-  ext.hash = hashJson({ ...ext, title: lore.title, content: lore.content });
-  return ext;
 }
 
 export class EngineBook {
@@ -69,11 +58,11 @@ export class EngineBook {
     private readonly worlds: WorldStore,
   ) {}
 
-  /** Creates the world's book if it has none (or it was deleted), and a slot entry per section. */
+  /** Creates the world's book if it has none (or it was deleted), a slot entry per section, and removes leftover lore entries. */
   async ensure(world: WorldDoc, index: WorldIndex, userId: UserId): Promise<string> {
     let bookId = index.loreBookId;
     if (!bookId || !(await this.host.books.exists(bookId, userId))) {
-      bookId = await this.host.books.create(`LumiRPEngine · ${world.name}`, "Engine-managed slots and world lore. Entries here are activated only by LumiRPEngine.", userId);
+      bookId = await this.host.books.create(`LumiRPEngine · ${world.name}`, "Engine-managed slots. Entries here are activated only by LumiRPEngine.", userId);
       await this.worlds.setLoreBook(world.id, bookId, userId);
       this.slots.delete(bookId);
     }
@@ -101,38 +90,17 @@ export class EngineBook {
       );
       existing.set(section.id, id);
     }
-    await this.syncLore(world, bookId, userId);
+    await this.removeLore(bookId, userId);
     return bookId;
   }
 
   /**
-   * World lore → book entries (DESIGN §4.2): one per `world.lore` entry, stored `disabled:true,
-   * key:[]` (only the engine's selection activates it), its keys, links, group, priority and gate
-   * in the entry's extension data; changed entries are updated, removed ones deleted.
+   * Deletes the world lore entries an earlier build synced into the book: lore is no longer
+   * delivered, and those copies (secret ones included) shouldn't sit in a host-visible book.
+   * The world document keeps the lore.
    */
-  async syncLore(world: WorldDoc, bookId: string, userId: UserId): Promise<void> {
-    const have = new Map<string, HostBookEntry>();
-    for (const e of await this.host.books.entries(bookId, userId)) {
-      const id = loreOfEntry(e.extensions);
-      if (id) have.set(id, e);
-    }
-    for (const lore of Object.values(world.lore)) {
-      const ext = loreExtension(lore);
-      const prior = have.get(lore.id);
-      have.delete(lore.id);
-      // Authored lore keeps its macros, as native World Info does (an import lists them for review).
-      const fields = { comment: lore.title, content: lore.content, keys: [], disabled: true, constant: false, position: 0, depth: 4, role: null, order: 200 - Math.max(-100, Math.min(100, lore.priority ?? 0)), extensions: { [LEDGER_NAMESPACE]: ext } };
-      if (!prior) {
-        const id = await this.host.books.createEntry(bookId, fields, userId);
-        await this.host.books.setExtension(id, LEDGER_NAMESPACE, ext, userId);
-        continue;
-      }
-      const ns = prior.extensions[LEDGER_NAMESPACE];
-      if (isRecord(ns) && ns.hash === ext.hash && prior.disabled && prior.keys.length === 0) continue;
-      await this.host.books.updateEntry(prior.id, fields, userId);
-      await this.host.books.setExtension(prior.id, LEDGER_NAMESPACE, ext, userId);
-    }
-    for (const stale of have.values()) await this.host.books.deleteEntry(stale.id, userId);
+  async removeLore(bookId: string, userId: UserId): Promise<void> {
+    for (const e of await this.host.books.entries(bookId, userId)) if (loreOfEntry(e.extensions) !== null) await this.host.books.deleteEntry(e.id, userId);
   }
 
   async slotEntries(bookId: string, userId: UserId): Promise<Map<SlotId, string>> {

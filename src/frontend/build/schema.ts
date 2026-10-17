@@ -272,7 +272,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
   ],
   steps: [
-    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "select", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"] },
+    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"] },
     { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "enum", key: "output", label: "Output", values: ["text", "effects", "decision"] },
     { kind: "tags", key: "signals", label: "Signals" },
@@ -286,9 +286,9 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "text", key: "content", label: "Content", multiline: true },
     { kind: "tags", key: "keys", label: "Keys" },
     { kind: "refs", key: "links", label: "Links (entities and places)", collections: ["entities", "places"] },
-    { kind: "text", key: "group", label: "Group", optional: true, hint: "At most one entry of a group is selected per turn" },
-    { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among equal hits" },
-    { kind: "bool", key: "secret", label: "Secret", hint: "A candidate only while the gate holds" },
+    { kind: "text", key: "group", label: "Group", optional: true, hint: "Entries sharing a group are alternatives to each other" },
+    { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
+    { kind: "bool", key: "secret", label: "Secret", hint: "Hidden until the gate holds" },
     { kind: "expr", key: "gate", label: "Gate", optional: true },
   ],
 };

@@ -32,7 +32,7 @@ const COLLECTIONS: { id: WorldCollection; label: string; hint: string }[] = [
   { id: "rules", label: "Rules", hint: "When this, do that" },
   { id: "schedules", label: "Schedules", hint: "Routines, shifts, weather" },
   { id: "tracks", label: "Tracks", hint: "Quests, secrets, puzzles, agendas" },
-  { id: "lore", label: "Lore", hint: "What the world knows; synced to the engine's book" },
+  { id: "lore", label: "Lore", hint: "Authored lore. Not delivered to the AI yet." },
   { id: "tables", label: "Data tables", hint: "Prices, jobs, regions…" },
   { id: "sections", label: "Sections", hint: "What the narrator reads" },
   { id: "steps", label: "Step templates", hint: "Prompted model steps" },

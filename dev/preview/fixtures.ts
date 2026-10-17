@@ -207,21 +207,13 @@ export function stateFixture(chatId: string): StateView {
             id: "g41",
             at: "Tue 07:42 · reply to “I ask Rosie about the raise”",
             activation: "confirmed",
-            candidates: [
-              { title: "Rosie Alvarez", book: "book-engine", bookName: "World lore", status: "included", reason: "present in the scene" },
-              { title: "Rosie's Diner", book: "book-engine", bookName: "World lore", status: "included", reason: "current place" },
-              { title: "Raise quest cue", book: "book-engine", bookName: "World lore", status: "pinned", reason: "active quest stage" },
-              { title: "Kim's Garage", book: "book-engine", bookName: "World lore", status: "dropped", reason: "not relevant this turn (select)" },
-              { title: "Sam's backstory", book: "book-mine", bookName: "My lore", status: "included", reason: "pass-through book" },
-              { title: "Old flame", book: "book-mine", bookName: "My lore", status: "unverified", reason: "activation not confirmed" },
-            ],
             sections: [
               { slot: "outcome", label: "Outcome", tokens: 64, clipped: false },
               { slot: "scene", label: "Scene", tokens: 142, clipped: false },
               { slot: "cast", label: "Cast", tokens: 210, clipped: false },
               { slot: "montage", label: "Montage", tokens: 0, clipped: false },
             ],
-            budget: { sections: 600, lore: 1200, used: 1033 },
+            budget: { sections: 600, used: 416 },
           },
         ],
       },
@@ -465,18 +457,16 @@ export function settingsFixture(): UserSettings {
       preset: "standard",
       steps: {
         interpret: { enabled: true, signals: ["typed_input"], route: { provider: "helper", connectionId: null, model: null }, maxTokens: 1500 },
-        select: { enabled: true, signals: ["hit_set_changed"], route: { provider: "decision", connectionId: "conn-ds", model: "deepseek-v4-flash" } },
         extract: { enabled: true, signals: ["reply"], maxTokens: 800 },
         "npc.choose": { enabled: true, signals: ["tie_zone", "invitation"] },
       },
-      budgets: { pre: { calls: 2, ms: 20000 }, select: { calls: 1, ms: 6000 }, post: { calls: 2, ms: 30000 } },
-      tokens: { sections: 600, lore: 1200 },
+      budgets: { pre: { calls: 2, ms: 20000 }, post: { calls: 2, ms: 30000 } },
+      tokens: { sections: 600 },
     },
     realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} } },
     time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, scale: 1, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 }, npcCallsPerTimelapse: 0 },
     extraction: { regard: { mode: "never" } },
     swipeDefault: "rerun",
-    passThroughBooks: ["book-sam"],
   };
 }
 

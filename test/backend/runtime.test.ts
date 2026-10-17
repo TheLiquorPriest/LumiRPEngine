@@ -3,12 +3,15 @@
 // confirm chips, D4 learning), the engine slots in the interceptor, settings and the state push.
 
 import { describe, expect, test } from "bun:test";
+import { loreOfEntry, slotOfEntry } from "../../src/backend/book";
+import type { HostBookEntryInput } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
 import { describeProposal, playerReason } from "../../src/backend/runtime";
 import { compactSpan, keepSummary, playerDrops, spanText, TIMELAPSE_ACTION } from "../../src/backend/view";
 import { UNSEEN_DROP } from "../../src/engine/player-events";
 import type { Rec } from "../../src/shared/ledger";
 import { initialState } from "../../src/engine/world-state";
+import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { DEFAULT_CURRENCY, formatMoney } from "../../src/shared/world";
@@ -103,35 +106,60 @@ describe("backend runtime", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("world lore syncs into the engine book disabled with no host keys, and is selected by its own keys", async () => {
+  test("world lore stays in the world document: the engine book holds slots only, and lore an earlier build synced there is removed at the next ensure", async () => {
     const rig = new Rig();
     const worldId = await rig.newWorld("Harbor");
     rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "ferry", value: { id: "ferry", title: "The ferry", content: "The ferry crosses every hour.", keys: ["ferry"], links: [] } }));
     rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "vault", value: { id: "vault", title: "The vault", content: "Rumors say the bank has an old vault.", keys: ["ferry"], links: [], secret: true, gate: "false" } }));
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    const index = await rig.rt.worlds.index(worldId, rig.host.userId);
-    const entries = index?.loreBookId ? await rig.host.books.entries(index.loreBookId, rig.host.userId) : [];
-    const ferry = entries.find((e) => e.comment === "The ferry");
-    expect(ferry?.disabled).toBe(true);
-    expect(ferry?.keys).toEqual([]);
-    expect(ferry?.extensions[LEDGER_NAMESPACE]).toMatchObject({ lore: "ferry", keys: ["ferry"] });
+    const got = rig.body(await rig.send({ type: "lre.world", op: "get", worldId }));
+    expect(isRecord(got.world) && isRecord(got.world.lore) ? Object.keys(got.world.lore).sort() : []).toEqual(["ferry", "vault"]);
+    const bookId = (await rig.rt.worlds.index(worldId, rig.host.userId))?.loreBookId;
+    if (!bookId) throw new Error("no engine book");
+    const slots = await rig.host.books.entries(bookId, rig.host.userId);
+    expect(slots.length).toBeGreaterThan(0);
+    expect(slots.every((e) => slotOfEntry(e.extensions) !== null && e.disabled && e.keys.length === 0 && e.content === "")).toBe(true);
+    // A gated secret's lore as an earlier build synced it: its full text, its gate in extension data.
+    await rig.host.books.createEntry(bookId, { comment: "The vault", content: "Rumors say the bank has an old vault.", keys: [], disabled: true, constant: false, position: 0, depth: 4, role: null, order: 200, extensions: { [LEDGER_NAMESPACE]: { lore: "vault", keys: ["ferry"], links: [], secret: true, gate: "false", hash: "old" } } }, rig.host.userId);
+    // Attaching the world to a chat ensures its book: the copy goes, the slots stay.
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const after = await rig.host.books.entries(bookId, rig.host.userId);
+    expect(after.some((e) => loreOfEntry(e.extensions) !== null)).toBe(false);
+    expect(after.map((e) => e.id)).toEqual(slots.map((e) => e.id));
+  });
+
+  test("an engine-book entry the engine didn't fill is voted off even when switched on in the host's UI; a lore copy an earlier build left is removed after the turn", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const run = await rig.rt.runOf(chatId, rig.host.userId);
+    const bookId = (await rig.rt.worlds.index(run?.worldId ?? "", rig.host.userId))?.loreBookId ?? "";
+    // Switched on with a key the turn's text matches: the unused Vehicles slot and an old lore copy.
+    const vehicles = (await rig.rt.book.slotEntries(bookId, rig.host.userId)).get("vehicles") ?? "";
+    rig.host.editEntry(vehicles, { disabled: false, keys: ["ferry"] });
+    const leftover = await rig.host.books.createEntry(bookId, { comment: "The vault", content: "Rumors say the bank has an old vault.", keys: ["ferry"], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 200, extensions: { [LEDGER_NAMESPACE]: { lore: "vault", secret: true, gate: "false" } } }, rig.host.userId);
     await rig.turn(chatId, "I wait for the ferry.", "The horn sounds.");
-    expect(rig.host.lastInterceptor?.enabled).toContain(ferry?.id);
-    const vault = entries.find((e) => e.comment === "The vault");
-    expect(rig.host.lastInterceptor?.enabled).not.toContain(vault?.id);
-    // Re-enabled in the host's UI, the gated secret is still voted off, so it can't activate natively.
-    if (!index?.loreBookId || !vault) throw new Error("no vault entry");
-    await rig.host.books.updateEntry(vault.id, { disabled: false, keys: ["ferry"] }, rig.host.userId);
-    await rig.turn(chatId, "I wait for the ferry again.", "The horn sounds again.");
-    expect(rig.host.lastInterceptor?.disabled).toContain(vault.id);
-    expect(rig.host.lastInterceptor?.enabled).not.toContain(vault.id);
-    // Removing it from the world removes it from the book at the next commit.
-    rig.body(await rig.send({ type: "lre.editor", op: "remove", worldId, base: null, collection: "lore", id: "ferry" }));
-    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-    const after = index?.loreBookId ? await rig.host.books.entries(index.loreBookId, rig.host.userId) : [];
-    expect(after.some((e) => e.comment === "The ferry")).toBe(false);
+    const result = rig.host.lastInterceptor;
+    for (const id of [vehicles, leftover]) {
+      expect(result?.disabled).toContain(id);
+      expect(result?.enabled).not.toContain(id);
+      expect(result?.forced).not.toContain(id);
+    }
+    await rig.host.settle();
+    const entries = await rig.host.books.entries(bookId, rig.host.userId);
+    expect(entries.some((e) => e.id === leftover)).toBe(false);
+    expect(entries.some((e) => e.id === vehicles)).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a world file with a step template for the retired select purpose imports without it; its other templates stay", async () => {
+    const rig = new Rig();
+    const file = rig.body(await rig.send({ type: "lre.world", op: "export", worldId: await rig.newWorld("Source") })).file as { world: JsonObject };
+    const steps = { pick: { id: "pick", purpose: "select", template: "Does this lore matter?", output: "decision", signals: ["uncached"] }, brief: { id: "brief", purpose: "brief", template: "Summarize the scene.", output: "text", signals: [] } };
+    const imported = rig.body(await rig.send({ type: "lre.world", op: "import", file: { format: "lre-world-export-v1", world: { ...file.world, steps } } })) as { world: { id: string; steps: Record<string, unknown> } };
+    expect(Object.keys(imported.world.steps)).toEqual(["brief"]);
+    const stored = rig.body(await rig.send({ type: "lre.world", op: "get", worldId: imported.world.id })) as { world: { steps: Record<string, unknown> } };
+    expect(Object.keys(stored.world.steps)).toEqual(["brief"]);
   });
 
   test("a narrated purchase the engine declines gets a decline chip, the next Outcome slot says so, and Pay another way applies it", async () => {
@@ -354,29 +382,43 @@ describe("backend runtime", () => {
     expect(rig.host.lastInterceptor?.forced.length).toBeGreaterThan(0);
   });
 
-  test("the inspector records each turn's interceptor run (dry runs don't enter it); opening it verifies slot delivery; Council World Info warns", async () => {
+  test("in a world chat your own books are left to native World Info, while the engine's sections still go in; the inspector shows them (dry runs don't enter it)", async () => {
     const rig = new Rig();
     const chatId = await rig.worldChat();
-    // A user book with one keyword entry and one disabled entry, attached to the chat.
+    // A user book with a keyword entry, a disabled one and a constant one, attached to the chat.
     const userBook = await rig.host.books.create("My lore", "", rig.host.userId);
-    await rig.host.books.createEntry(userBook, { comment: "The diner", content: "Rosie runs the diner.", keys: ["diner"], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} }, rig.host.userId);
-    await rig.host.books.createEntry(userBook, { comment: "Old note", content: "Never shown.", keys: ["diner"], disabled: true, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {} }, rig.host.userId);
+    const specs: [string, Partial<HostBookEntryInput>][] = [["The diner", {}], ["Old note", { disabled: true }], ["Always on", { constant: true, keys: [] }]];
+    const mine = new Set<string>();
+    for (const [comment, over] of specs) mine.add(await rig.host.books.createEntry(userBook, { comment, content: `${comment}.`, keys: ["diner"], disabled: false, constant: false, position: 0, depth: 4, role: null, order: 100, extensions: {}, ...over }, rig.host.userId));
     const meta = await rig.host.chats.chatMetadata(chatId, rig.host.userId);
     const ids = Array.isArray(meta.chat_world_book_ids) ? meta.chat_world_book_ids : [];
     await rig.host.chats.mergeChatMetadata(chatId, { chat_world_book_ids: [...ids, userBook] }, rig.host.userId);
     await rig.turn(chatId, "Let's go to the diner.", "Sure.");
+    const result = rig.host.lastInterceptor;
+    if (!result) throw new Error("no interceptor run");
+    // No vote, force, enable or text for any of the user's entries, and no recursion override.
+    for (const list of [result.disabled, result.enabled, result.forced, result.mutated.map((m) => m.id)]) expect(list.filter((id) => mine.has(id))).toEqual([]);
+    expect(result.disableRecursion).toBe(false);
+    // Every section the engine filled is a slot entry, enabled, forced and given its text.
+    const run = await rig.rt.runOf(chatId, rig.host.userId);
+    const slots = await rig.rt.book.slotEntries((await rig.rt.worlds.index(run?.worldId ?? "", rig.host.userId))?.loreBookId ?? "", rig.host.userId);
+    const scene = slots.get("scene") ?? "";
+    expect(result.enabled).toContain(scene);
+    expect(result.forced).toContain(scene);
+    expect(result.mutated.find((m) => m.id === scene)?.content).toMatch(/^\[Scene\]\n/);
+    expect(result.mutated.every((m) => [...slots.values()].includes(m.id) && result.enabled.includes(m.id) && result.forced.includes(m.id))).toBe(true);
+    // Opening the inspector verifies slot delivery; a generation shows sections and the section budget only.
     const count = (rig.rt.inspectorRecords(chatId) ?? []).length;
-    rig.host.council = true;
     rig.body(await rig.send({ type: "lre.view.open", chatId, panel: "core.context", entity: null }));
-    const view = await rig.rt.view(chatId, rig.host.userId);
-    const panel = view.panels["core.context"];
+    const panel = (await rig.rt.view(chatId, rig.host.userId)).panels["core.context"];
     if (!isRecord(panel) || !Array.isArray(panel.generations) || !Array.isArray(panel.warnings)) throw new Error("no inspector panel");
     const latest = panel.generations[0];
-    if (!isRecord(latest) || !Array.isArray(latest.candidates) || !Array.isArray(latest.sections)) throw new Error("no record");
-    expect(latest.candidates.some((c) => isRecord(c) && c.title === "The diner" && c.status === "included")).toBe(true);
-    expect(latest.candidates.some((c) => isRecord(c) && c.title === "Old note")).toBe(false);
+    if (!isRecord(latest) || !Array.isArray(latest.sections)) throw new Error("no record");
+    expect(Object.keys(latest).sort()).toEqual(["activation", "at", "budget", "id", "sections"]);
+    const shown = latest.sections.flatMap((s) => (isRecord(s) && s.clipped === false && typeof s.tokens === "number" ? [s.tokens] : []));
+    expect(latest.budget).toEqual({ sections: 600, used: shown.reduce((sum, n) => sum + n, 0) });
     expect(latest.sections.some((s) => isRecord(s) && s.slot === "scene" && s.delivery === "verified")).toBe(true);
-    expect(panel.warnings.some((w) => typeof w === "string" && w.includes("Council"))).toBe(true);
+    expect(panel.warnings.some((w) => typeof w === "string" && /council|lore/i.test(w))).toBe(false);
     // Opening ran a dry-run assembly; it added nothing to the history.
     expect((rig.rt.inspectorRecords(chatId) ?? []).length).toBe(count);
   });

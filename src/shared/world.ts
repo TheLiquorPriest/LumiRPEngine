@@ -442,7 +442,6 @@ export interface SectionTemplate {
 
 export type StepPurpose =
   | "interpret"
-  | "select"
   | "npc.choose"
   | "contradiction"
   | "puzzle.answer"
@@ -461,24 +460,23 @@ export interface StepTemplateDef {
 }
 
 /**
- * World lore (DESIGN §4.2, D11): entries the engine-managed lore book carries — stored disabled with
- * no host keys, so only the engine's selection activates them. `keys` and `links` feed the
- * pre-rank; a `secret` entry is a candidate only once its `gate` holds. Lore holds cue text only:
- * a secret's truth lives in its track, never here (linted).
+ * World lore (DESIGN §4.2): what the world knows, authored in Build or imported with a world. It is
+ * kept in the world document and not delivered to the narrator yet; the engine-managed book holds
+ * slots only. Lore holds cue text only: a secret's truth lives in its track, never here (linted).
  */
 export interface LoreEntryDef {
   id: string;
   title: string;
   content: string;
-  /** Keywords for the pre-rank (never host activation). */
+  /** Keywords the entry answers to (never host World Info keys). */
   keys: string[];
   /** Entity and place ids the entry is about (back-links). */
   links: string[];
-  /** At most one entry of a group is selected per turn. */
+  /** Entries sharing a group are alternatives to each other. */
   group?: string;
-  /** Pre-rank boost; higher comes first among equal hits. */
+  /** Higher comes first among otherwise equal entries. */
   priority?: number;
-  /** Secret lore is gated: a candidate only while `gate` holds. */
+  /** Secret lore is gated: it may be shown only while `gate` holds. */
   secret?: boolean;
   gate?: Expr;
 }
@@ -512,8 +510,9 @@ export interface WorldDoc {
   time: TimeDefaults;
   sections: Record<SlotId, SectionTemplate>;
   steps: Record<StepTemplateId, StepTemplateDef>;
+  /** Sources of adopted user entries (a retired design, DESIGN §4.2): kept for the format; nothing reads them. */
   suppressed: SuppressedSource[];
-  /** World lore by id (DESIGN §4.2); synced into the engine-managed book. */
+  /** World lore by id (DESIGN §4.2): authored data, not delivered yet. */
   lore: Record<string, LoreEntryDef>;
   /** Action seeds: a fresh seed per Re-run, or `hash(runSeed, parent path, action)` (DESIGN §4.3). */
   seedMode: "fresh" | "same_roll";

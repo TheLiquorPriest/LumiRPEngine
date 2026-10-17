@@ -152,10 +152,10 @@ export interface InterceptorEntry {
   constant: boolean;
   disabled: boolean;
   group: string | null;
-  /** Native group rule: an override entry wins its group, else the higher weight (DESIGN §6.2). */
+  /** Native group rule: an override entry wins its group, else the higher weight. */
   groupOverride: boolean;
   groupWeight: number;
-  /** The entry's extension data (`lumi_rp_engine` links and slots). */
+  /** The entry's extension data (`lumi_rp_engine`: a slot, or the lore id of an entry an earlier build synced). */
   extensions: JsonObject;
 }
 
@@ -299,14 +299,9 @@ export interface HostPort {
   books: {
     create(name: string, description: string, userId: UserId): Promise<string>;
     exists(bookId: string, userId: UserId): Promise<boolean>;
-    /** The book's display name, or null when it doesn't exist. */
-    name(bookId: string, userId: UserId): Promise<string | null>;
     entries(bookId: string, userId: UserId): Promise<HostBookEntry[]>;
     createEntry(bookId: string, entry: HostBookEntryInput, userId: UserId): Promise<string>;
-    updateEntry(entryId: string, patch: Partial<HostBookEntryInput>, userId: UserId): Promise<void>;
     deleteEntry(entryId: string, userId: UserId): Promise<void>;
-    /** `world_books.entries.setExtension` (host-only API; spindle-augment.ts). */
-    setExtension(entryId: string, namespace: string, value: JsonValue | null, userId: UserId): Promise<void>;
   };
   /** A dry-run assembly of the chat's next prompt (deliverability check, DESIGN §4.2; the D32 preset lint). */
   dryRun(chatId: ChatId, userId: UserId): Promise<DryRun>;
@@ -328,6 +323,4 @@ export interface HostPort {
    * their own storage, never in the extension-wide file.
    */
   log(level: "info" | "warn" | "error", message: string, userId?: UserId): void;
-  /** Council settings (DESIGN §6.5): whether Council World Info is on. Null when unknown. */
-  councilWorldInfo(userId: UserId): Promise<boolean | null>;
 }

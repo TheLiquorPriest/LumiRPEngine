@@ -245,7 +245,7 @@ export interface ExtractionModeView {
   rejected: number;
 }
 
-/** Settings plus derived views: effective extraction modes and caveats (Council world-info on, foreign interceptors). */
+/** Settings plus derived views: effective extraction modes and the D32 preset caveats. */
 export interface SettingsResult {
   settings: UserSettings;
   extraction: Record<ExtractionType, ExtractionModeView>;

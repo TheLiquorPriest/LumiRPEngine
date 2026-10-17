@@ -1,6 +1,6 @@
 // Model steps (DESIGN §5.2, D10, D31; ARCHITECTURE §3.4). The engine asks; the backend answers
 // through a StepPort it implements over the host. Routing (D10): `interpret` on the helper;
-// `select` and `npc.choose` on the Decision connection; on a decision error the helper, then
+// `npc.choose` on the Decision connection; on a decision error the helper, then
 // engine-only. Prompts and schemas stay model-agnostic (D31). Producers land after the ledger gate.
 
 import type { JsonObject, JsonValue } from "../shared/json";

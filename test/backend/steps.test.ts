@@ -1,6 +1,6 @@
 // Model calls per turn by preset (DESIGN §5.3) on one typed turn that fires every signal: the
-// classifier, open ties for an agent with the POV and one elsewhere, an uncached lore hit, a
-// reply. Also: routes reach the host, and prose steps never see a secret (secrecy batching rule).
+// classifier, open ties for an agent with the POV and one elsewhere, a reply. Also: routes reach
+// the host, and prose steps never see a secret (secrecy batching rule).
 
 import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
@@ -32,7 +32,7 @@ function decide(req: DecideRequest): Answers {
   return out;
 }
 
-const ALL_ON: JsonObject = Object.fromEntries(["interpret", "select", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
+const ALL_ON: JsonObject = Object.fromEntries(["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
 
 async function turnCalls(preset: "lean" | "standard" | "full" | "custom", steps?: JsonObject): Promise<{ rig: Rig; chatId: string; counts: Record<string, number>; total: number }> {
   const rig = new Rig();
@@ -50,7 +50,6 @@ async function turnCalls(preset: "lean" | "standard" | "full" | "custom", steps?
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: "sam", value: { ...sam, fields: { ...sam.fields, place: "home" } } }));
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "actions", id: "wait", value: { id: "wait", label: "Wait", params: {}, requires: [], outcomes: { default: [] }, duration: "10", lexicon: ["wait"] } }));
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: "kim", value: { id: "kim", kind: "person", name: "Kim", tier: "background", fields: { tie: true }, relations: [], agent: true } }));
-  rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "ferry", value: { id: "ferry", title: "The ferry", content: "The ferry crosses hourly.", keys: ["ferry"], links: [] } }));
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "tracks", id: "wreck", value: { id: "wreck", kind: "secret", label: "The wreck", start: "hidden", visibility: "secret", stages: { hidden: { label: "Hidden", next: [], truth: TRUTH } } } }));
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning, Sam.");
@@ -73,16 +72,16 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     expect(total).toBe(2);
   });
 
-  test("Standard: interpret, npc.choose with the POV and off-screen, select for the uncached hit, extract", async () => {
+  test("Standard: interpret, npc.choose with the POV and off-screen, extract", async () => {
     const { counts, total } = await turnCalls("standard");
-    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, select: 1, extract: 1 });
-    expect(total).toBe(5);
+    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, extract: 1 });
+    expect(total).toBe(4);
   });
 
-  test("Full: adds brief, the prose outline and contradiction (narrator + 8)", async () => {
+  test("Full: adds brief, the prose outline and contradiction (narrator + 7)", async () => {
     const { rig, counts, total } = await turnCalls("full");
-    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, select: 1, extract: 1, contradiction: 1 });
-    expect(total).toBe(8);
+    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, contradiction: 1 });
+    expect(total).toBe(7);
     // The brief and prose outline reach the narrator through the Outline slot.
     const outline = rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outline]"))?.content ?? "";
     expect(outline).toContain("Brief: Sam waits at home for the ferry.");
@@ -91,8 +90,8 @@ describe("model calls per preset (DESIGN §5.3)", () => {
 
   test("Custom with every step on: every step Settings lists that can fire runs (choices too)", async () => {
     const { rig, chatId, counts, total } = await turnCalls("custom");
-    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, select: 1, extract: 1, contradiction: 1, choices: 1 });
-    expect(total).toBe(9);
+    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, contradiction: 1, choices: 1 });
+    expect(total).toBe(8);
     const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
     expect(chips.filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I board the ferry", "I go home"]);
   });

@@ -19,11 +19,16 @@ describe("studio seam", () => {
     expect(validate(world)).toEqual([]);
   });
 
-  test("migrate fills a missing currency; lint finds a broken POV", () => {
+  test("migrate fills a missing currency and drops step templates of the retired select purpose; lint finds a broken POV", () => {
     const world = newWorld("w_old", "Old");
     const { currency: _currency, ...rest } = world;
     const old = JSON.parse(JSON.stringify(rest)) as typeof world;
     expect(migrate(old).currency).toEqual(DEFAULT_CURRENCY);
+    expect(migrate(world)).toBe(world);
+    const steps = { pick: { id: "pick", purpose: "select", template: "Does this lore matter?", output: "decision", signals: ["uncached"] }, brief: { id: "brief", purpose: "brief", template: "Summarize the scene.", output: "text", signals: [] } };
+    const loaded = load(JSON.stringify({ ...world, steps }));
+    expect(loaded.ok && Object.keys(loaded.world.steps)).toEqual(["brief"]);
+    expect(loaded.issues.filter((i) => i.path.startsWith("steps."))).toEqual([]);
     expect(lint(world).filter((i) => i.severity === "error")).toEqual([]);
     expect(lint({ ...world, pov: "ghost" }).some((i) => i.code === "missing_pov")).toBe(true);
   });

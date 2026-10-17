@@ -1,5 +1,5 @@
 // Model steps over the host (DESIGN §5.2, §9.4, D10, D31). Routing: `interpret` and `extract` on
-// the helper (a quiet JSON call on the user's connection); `select` and `npc.choose` on the
+// the helper (a quiet JSON call on the user's connection); `npc.choose` on the
 // Decision connection, falling back to the helper, then to engine-only. No blind retry; one JSON
 // repair call when a helper reply doesn't parse (DESIGN §18.4). Prompts are model-agnostic.
 
@@ -163,7 +163,7 @@ export class Steps {
       const a = raw[key];
       if (!isRecord(a)) continue;
       if (q.type === "noul") {
-        // A reply without `p` is no answer: a made-up 0.5 would be sampled and cached as the model's.
+        // A reply without `p` is no answer: a made-up 0.5 would be sampled as the model's.
         if (typeof a.p !== "number" || !Number.isFinite(a.p)) continue;
         answers[key] = { type: "noul", noul: Math.min(1, Math.max(0, a.p)) };
         continue;

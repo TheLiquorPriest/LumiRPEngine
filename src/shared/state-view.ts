@@ -234,14 +234,12 @@ export interface ContextGeneration {
   at: number;
   /** `confirmed` once `WORLD_INFO_ACTIVATED` showed every forced entry. */
   activation: "confirmed" | "unconfirmed" | "stalled";
-  /** `book` is the book id; `bookName` its display name ("World lore" for the world's own book). */
-  candidates: { title: string; book: string; bookName: string; status: "included" | "pinned" | "dropped" | "unverified"; reason: string }[];
   /** `delivery`: found in a dry-run assembly when the inspector opened (`verified`), not found (`unverified`), or not yet checked. */
   sections: { slot: string; label: string; tokens: number; clipped: boolean; delivery: "verified" | "unverified" | "unchecked" }[];
-  budget: { sections: number; lore: number; used: number };
+  budget: { sections: number; used: number };
 }
 
-/** The `core.context` panel: the last ten interceptor runs, newest first, and standing warnings (Council World Info, pins over budget). */
+/** The `core.context` panel: the last ten interceptor runs, newest first, and standing warnings (book attachment and slot repair, preset caveats, journal notices). */
 export interface ContextView {
   generations: ContextGeneration[];
   warnings: string[];

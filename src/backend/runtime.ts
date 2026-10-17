@@ -2,7 +2,7 @@
 // ledger to the host, and implements the turn hooks (interpret before planning, extract before
 // the commit, chips after it), the World Info interceptor (engine slots) and the state push.
 
-import { hashJson, hashParts } from "../shared/hash";
+import { hashParts } from "../shared/hash";
 import type { ChatId, ChipId, InterruptClass, MessageId, RevisionId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
@@ -21,7 +21,6 @@ import { parseOverrides, parseTarget } from "../engine/time";
 import { DOMAINS } from "../shared/ids";
 import { boundProposal } from "../engine/bounds";
 import { calendarOf, dateAt, formatClock, formatHHMM, nextTimeOfDay, weekdayName, type Calendar } from "../engine/calendar";
-import type { Questions } from "../engine/decide";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -29,7 +28,7 @@ import { optionalQuery } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
-import { evalExpr, placeOfEntity, scopeEnv, truthy } from "../engine/scope";
+import { placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
@@ -37,18 +36,17 @@ import { playerKnows } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedTruths } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { Working } from "../engine/working";
-import { EngineBook, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
+import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./host";
 import { LedgerService, toChain, type TurnContext, type TurnHooks } from "./ledger-io";
 import { StatePush } from "./push";
-import { cacheKeyOf, gatherCandidates, selectLore } from "./selection";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, saidPayMethod, Steps } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TurnBridge } from "./turn-model";
-import { contradiction, factLines, fires, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, refsExist, renderTemplate, runsOf, safeVars, StepBudget, templatesFor, tiesOf, type PlanStart, type SignalFacts, type StepRun, type Tie } from "./turn-steps";
+import { contradiction, factLines, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, refsExist, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, type PlanStart, type SignalFacts, type StepRun, type Tie } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, spanText, TIMELAPSE_ACTION } from "./view";
 import { WorldStore } from "./worlds";
 
@@ -349,7 +347,6 @@ export class Runtime implements TurnHooks {
   private readonly lastWorldChat = new Map<UserId, ChatId>();
   /** The D32 preset caveats each chat's last dry run found (shown in the inspector). */
   private readonly presetWarnings = new Map<ChatId, string[]>();
-  private readonly selectCache = new Map<ChatId, Map<string, boolean>>();
   /** Each open chat's pinned world revisions, by `user \0 chat`. */
   private readonly pins = new Map<string, Map<RevisionId, WorldDoc>>();
   /**
@@ -694,17 +691,6 @@ export class Runtime implements TurnHooks {
     await this.book.attach(chatId, bookId, userId);
   }
 
-  private readonly bookNames = new Map<string, string>();
-
-  /** A user book's display name (cached; book ids are stable), for the Context inspector. */
-  private async bookName(bookId: string, userId: UserId): Promise<string> {
-    const known = this.bookNames.get(bookId);
-    if (known) return known;
-    const name = (await this.host.books.name(bookId, userId).catch(() => null)) ?? bookId;
-    lruSet(this.bookNames, bookId, name, 1024);
-    return name;
-  }
-
   async beforeCommit(input: TurnContext): Promise<void> {
     let context: ReadInput | null;
     if (input.kind === "continue") {
@@ -1044,16 +1030,17 @@ export class Runtime implements TurnHooks {
     const planned = turnPlan ? planLines(turnPlan, world, this.registry) : kept ? { outcome: kept.outcome, montage: kept.montage } : { outcome: [], montage: [] };
     // Declines from the last reply (DESIGN §9.5), for the next turn and its swipes only.
     for (const n of this.outcomeNotes.get(input.chatId) ?? []) if (n.messageId !== plan?.messageId && (n.toldTo === undefined || n.toldTo === plan?.messageId)) planned.outcome.unshift(n.text);
-    const record: InspectorRecord = { id: plan?.generationId ?? `dry:${Date.now().toString(36)}`, at: Date.now(), activation: "unconfirmed", candidates: [], sections: [], budget: { sections: settings.modelUse.tokens.sections, lore: settings.modelUse.tokens.lore, used: 0 }, forced: [] };
+    const record: InspectorRecord = { id: plan?.generationId ?? `dry:${Date.now().toString(36)}`, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [] };
     if (bookId && present.size === 0) record.warnings = ["The world's book wasn't attached to this chat, so no engine sections reached the narrator. It is re-attached for the next turn."];
-    else if (bookId && index && sectionsOf(world).some((s) => !present.has(slotIds.get(s.id) ?? ""))) {
-      // A slot entry was deleted in the host's UI (or the cache is stale): recreate it for the next turn.
-      record.warnings = ["Some engine slot entries were missing from the world's book; they are recreated for the next turn."];
-      void this.book.ensure(world, index, input.userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] slot repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
+    else if (bookId && index) {
+      // A slot entry deleted in the host's UI (or a stale cache) is recreated for the next turn, and
+      // world lore an earlier build synced into the book is removed; the hook itself reads nothing.
+      const missing = sectionsOf(world).some((s) => !present.has(slotIds.get(s.id) ?? ""));
+      if (missing) record.warnings = ["Some engine slot entries were missing from the world's book; they are recreated for the next turn."];
+      if (missing || input.entries.some((e) => e.bookId === bookId && loreOfEntry(e.extensions) !== null)) void this.book.ensure(world, index, input.userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] book repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
     }
-    // 1. Slots: the section budget is reserved first; Outcome (rank 0) is never evicted (DESIGN §6.2).
+    // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2).
     let budget = settings.modelUse.tokens.sections;
-    const sceneText: string[] = [];
     const delivery = this.delivery.get(input.chatId) ?? {};
     const uncounted = new Map<string, string>();
     for (const section of sectionsOf(world)) {
@@ -1089,7 +1076,6 @@ export class Runtime implements TurnHooks {
       record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
       if (clipped) continue;
       budget -= cost;
-      sceneText.push(content);
       const placement = placementOf(section);
       result.enabled.push(entryId);
       result.forced.push(entryId);
@@ -1107,92 +1093,12 @@ export class Runtime implements TurnHooks {
         )
         .catch(() => undefined);
     }
-    // 2. Lore: candidates, selection, the lore budget and the vote (DESIGN §6.1–6.4).
-    const povPlace = placeOfEntity(state, world.pov);
-    const sceneIds = new Set<string>();
-    for (let p: string | undefined = povPlace ?? undefined, guard = 0; p && guard < 16; p = world.places[p]?.parent, guard++) sceneIds.add(p);
-    for (const [id] of Object.entries(state.entities)) if (povPlace && placeOfEntity(state, id) === povPlace) sceneIds.add(id);
-    const recent = [...input.messages].reverse().slice(0, 8).map((m) => m.content);
-    const found = gatherCandidates({
-      entries: input.entries,
-      engineBookId: bookId,
-      slotIds: new Set(slotIds.values()),
-      passThroughBooks: new Set(settings.passThroughBooks),
-      suppressed: (e) => world.suppressed.some((s) => s.bookId === e.bookId && ("entryId" in s ? s.entryId === e.id : s.comment === e.comment)),
-      sceneIds,
-      recent,
-      // Places are public; an entity counts once the POV has met it (sim's playerKnows).
-      knows: (id) => !hasOwn(state.entities, id) || playerKnows(world, state, world.pov, id),
-      revealed: (gate) => {
-        try {
-          return truthy(evalExpr(gate, scopeEnv({ reg: this.registry, ctx }), false));
-        } catch {
-          return false;
-        }
-      },
-    });
-    const selectConfig = settings.modelUse.steps.select ?? null;
-    // Select runs per its signals and budget (DESIGN §5.3): `always` asks every candidate, the cache
-    // signals ask only candidates without a cached decision, other signals ask all when they fire.
-    const selectFacts: SignalFacts = { ...((plan ? this.prePhase.get(plan.generationId)?.facts : undefined) ?? noFacts()), uncached: true, hitSetChanged: true, candidatesChanged: true };
-    const cacheSignals = ["uncached", "hit_set_changed", "candidates_changed"];
-    const mode = !selectConfig?.enabled || settings.modelUse.budgets.select.calls < 1 ? "engine" : selectConfig.signals.includes("always") ? "full" : selectConfig.signals.some((s) => cacheSignals.includes(s)) ? "standard" : fires(selectConfig.signals, selectFacts) ? "full" : "engine";
-    const selectTemplate = templatesFor(world, "select")[0]?.template;
-    const relevance = hashJson({ place: [...sceneIds].sort(), tracks: state.tracks, knows: state.entities[world.pov]?.relations.filter((r) => r.type === "knows").map((r) => r.to) ?? [], levels: state.realism.levels });
-    const stepKey = hashJson({ route: selectConfig?.route ?? null, template: selectConfig?.template ?? null, v: 1 });
-    const cache = this.selectCache.get(input.chatId) ?? new Map<string, boolean>();
-    lruSet(this.selectCache, input.chatId, cache, 256);
-    trimMap(cache, 2048);
-    const seed = plan?.seed ?? hashParts("lre.wi", input.chatId, String(observed.length));
-    const selection = await selectLore({
-      candidates: found.candidates,
-      loreBudget: settings.modelUse.tokens.lore,
-      mode,
-      cache,
-      cacheKey: (c) => cacheKeyOf(c, relevance, stepKey),
-      seed,
-      decide: async (asks) => {
-        // An inspector dry run (no planned turn) uses cached decisions only: no paid call.
-        if (!plan) return null;
-        const questions: Questions = {};
-        const keys = new Map<string, string>();
-        asks.slice(0, 16).forEach((c, i) => {
-          keys.set(`c${i}`, c.entry.id);
-          questions[`c${i}`] = { type: "noul", instructions: `${selectTemplate ?? "Does this lore matter for the narrator's next reply?"} Title: ${c.entry.comment || c.entry.keys.join(", ")}. Text: ${c.entry.content.slice(0, 500)}` };
-        });
-        const brief = this.bridges.get(input.chatId)?.proseFor(plan.seed)?.brief ?? null;
-        const answer = await this.steps.decide("select", { scene: sceneText.join("\n").slice(0, 2500), recent: recent.slice(0, 6), ...(brief ? { brief } : {}) }, questions, selectConfig, input.userId, AbortSignal.timeout(Math.max(500, Math.min(6000, settings.modelUse.budgets.select.ms))));
-        if (!answer) return null;
-        const out = new Map<string, number>();
-        for (const [key, a] of Object.entries(answer.answers)) {
-          const id = keys.get(key);
-          if (id && a.type === "noul") out.set(id, a.noul);
-        }
-        return out;
-      },
-    });
-    record.budget.used = selection.used;
-    const selectedIds = new Set(selection.selected.map((c) => c.entry.id));
-    const bookNames = new Map<string, string>();
-    for (const id of new Set(found.candidates.map((c) => c.entry.bookId))) bookNames.set(id, id === bookId ? "World lore" : await this.bookName(id, input.userId));
-    for (const c of found.candidates) {
-      if (selectedIds.has(c.entry.id)) {
-        result.forced.push(c.entry.id);
-        if (c.engine) result.enabled.push(c.entry.id);
-      } else if (!c.engine) result.disabled.push(c.entry.id);
-      const s = selection.status.get(c.entry.id) ?? { status: "dropped" as const, reason: "unranked" };
-      record.candidates.push({ title: c.entry.comment || c.entry.keys.join(", ") || c.entry.id, book: c.entry.bookId, bookName: bookNames.get(c.entry.bookId) ?? c.entry.bookId, status: s.status, reason: s.reason });
-    }
-    result.disabled.push(...found.suppressed, ...found.overflow);
-    const groups = new Set(selection.selected.map((c) => c.entry.group).filter((g): g is string => g !== null));
-    for (const e of found.passThrough) if (e.group && groups.has(e.group)) result.disabled.push(e.id);
-    // Every engine-book entry the engine didn't pick this turn is voted off, so one re-enabled in the
-    // host's UI (a gated secret's lore, an unused slot) can't activate natively.
+    record.budget.used = settings.modelUse.tokens.sections - budget;
+    // Every engine-book entry the engine didn't fill this turn is voted off, so one re-enabled in the
+    // host's UI (an unused slot, a lore entry an earlier build left) can't activate natively. Other
+    // books' entries are left to native World Info: no vote, no force, no recursion override.
     const picked = new Set([...result.enabled, ...result.forced]);
-    const voted = new Set(result.disabled);
-    for (const e of input.entries) if (e.bookId === bookId && !picked.has(e.id) && !voted.has(e.id)) result.disabled.push(e.id);
-    result.disableRecursion = found.passThrough.length === 0;
-    if (selection.pinsOverBudget) record.warnings = [...(record.warnings ?? []), "Pinned (constant) entries alone exceed the lore budget."];
+    for (const e of input.entries) if (e.bookId === bookId && !picked.has(e.id)) result.disabled.push(e.id);
     record.forced = [...result.forced];
     // Only real turns enter the history; a dry run (inspector check, preview) records nothing.
     if (plan) {
@@ -1268,9 +1174,8 @@ export class Runtime implements TurnHooks {
   }
 
   /** The inspector panel (`core.context`, `ContextView`). */
-  async inspectorView(chatId: ChatId, userId: UserId): Promise<JsonValue> {
+  inspectorView(chatId: ChatId, userId: UserId): JsonValue {
     const warnings: string[] = [];
-    if ((await this.host.councilWorldInfo(userId)) === true) warnings.push("Council World Info is on: Council uses native activation over your lore books in this world chat.");
     const records = this.inspector.get(chatId) ?? [];
     for (const r of records) for (const w of r.warnings ?? []) if (!warnings.includes(w)) warnings.push(w);
     for (const w of this.presetWarnings.get(chatId) ?? []) if (!warnings.includes(w)) warnings.push(w);
@@ -1289,7 +1194,7 @@ export class Runtime implements TurnHooks {
     const observed = toChain(await this.host.chats.messages(chatId, userId));
     const stored = await this.chips.list(chatId, userId);
     const view = buildView({ chatId, run, core, observed, registry: this.registry, world: (r) => core.worldAt(r), stored, meter: this.meter.view(userId) });
-    view.panels["core.context"] = await this.inspectorView(chatId, userId);
+    view.panels["core.context"] = this.inspectorView(chatId, userId);
     return view;
   }
 

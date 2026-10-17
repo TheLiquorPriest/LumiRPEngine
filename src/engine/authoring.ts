@@ -94,14 +94,22 @@ export function currencyOf(v: unknown): WorldCurrency | null {
 
 /**
  * Brings an older `lre-world-v1` document up to this engine: documents written before `currency`
- * or `lore` existed (and templates without them) get Modern US money and no lore. Returns the same
- * object when nothing changes.
+ * or `lore` existed (and templates without them) get Modern US money and no lore, and step
+ * templates for the retired `select` purpose (lore selection) are dropped. Returns the same object
+ * when nothing changes.
  */
 export function migrateWorld(doc: WorldDoc): WorldDoc {
   const currency: unknown = doc.currency;
   const lore: unknown = doc.lore;
-  if (isCurrency(currency) && isRecord(lore)) return doc;
-  return { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {} };
+  const steps: unknown = doc.steps;
+  const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && t.purpose === "select" ? [id] : [])) : [];
+  if (isCurrency(currency) && isRecord(lore) && retired.length === 0) return doc;
+  const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {} };
+  if (retired.length > 0) {
+    out.steps = { ...doc.steps };
+    for (const id of retired) delete out.steps[id];
+  }
+  return out;
 }
 
 /** Structural checks every world must pass, plus the registry's lint rules. */
@@ -141,7 +149,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
     if (l.id !== id) err(`lore.${id}.id`, "id_mismatch", "the id must match its key");
     for (const link of l.links) if (!world.entities[link] && !world.places[link]) warn(`lore.${id}.links`, "missing_ref", `"${link}" is not an entity or place`);
     if (truths.some((t) => l.content.toLowerCase().includes(t))) err(`lore.${id}.content`, "secret_truth", `"${l.title}" carries a secret's truth; lore holds cue text only`);
-    if (l.secret && !l.gate) warn(`lore.${id}.gate`, "no_gate", `secret lore "${l.title}" has no gate, so it is never selected`);
+    if (l.secret && !l.gate) warn(`lore.${id}.gate`, "no_gate", `secret lore "${l.title}" has no gate, so it can never be revealed`);
   }
   // Section templates wrap engine values: the only macro they may hold is the engine's `{{lines}}`;
   // no escape sentinel or `<user>`-style shorthand either.

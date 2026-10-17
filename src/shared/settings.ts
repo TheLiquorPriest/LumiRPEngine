@@ -29,9 +29,9 @@ export interface PhaseBudget {
 export interface ModelUseSettings {
   preset: ModelUsePresetId;
   steps: Partial<Record<StepPurpose, StepConfig>>;
-  budgets: { pre: PhaseBudget; select: PhaseBudget; post: PhaseBudget };
-  /** Engine budget in tokens: sections plus lore (DESIGN §5.3). */
-  tokens: { sections: number; lore: number };
+  budgets: { pre: PhaseBudget; post: PhaseBudget };
+  /** Engine budget in tokens for the sections (DESIGN §5.3). */
+  tokens: { sections: number };
 }
 
 export interface RealismSettings {
@@ -123,5 +123,4 @@ export interface UserSettings {
   time: TimeSettings;
   extraction: ExtractionBounds;
   swipeDefault: "rerun" | "renarrate";
-  passThroughBooks: string[];
 }

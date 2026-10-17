@@ -1,6 +1,6 @@
 // Settings (DESIGN §12): model use and budgets, realism (new chats and this chat), time, per-type
-// extraction modes with D4 learning, steps and connections, pass-through books, pins and Upgrade,
-// the swipe default and caveats. Settings seed new chats; running-chat changes are markers.
+// extraction modes with D4 learning, steps and connections, pins and Upgrade, the swipe default
+// and caveats. Settings seed new chats; running-chat changes are markers.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -17,7 +17,7 @@ import { settingsTimePatch, TimeControlsEditor } from "../time-controls";
 import { RealismSeed, RealismThisChat } from "./realism";
 import { ModelUseSection, StepsSection } from "./steps";
 
-type SectionId = "model" | "realism" | "time" | "extraction" | "steps" | "books" | "pins" | "swipes" | "caveats";
+type SectionId = "model" | "realism" | "time" | "extraction" | "steps" | "pins" | "swipes" | "caveats";
 
 function Fold(props: { id: SectionId; title: string; summary?: string; open: SectionId | null; setOpen(id: SectionId | null): void; children: ComponentChildren }) {
   const expanded = props.open === props.id;
@@ -98,41 +98,6 @@ function ExtractionSection(props: { data: SettingsResult; patch(patch: JsonObjec
   );
 }
 
-function BooksSection(props: { selected: string[]; patch(patch: JsonObject): void; busy: boolean }) {
-  const app = useApp();
-  const [books, setBooks] = useState<{ id: string; name: string }[] | null>(null);
-  useEffect(() => {
-    void app.host.worldBooks().then(setBooks, () => setBooks([]));
-  }, []);
-  const toggle = (id: string) => {
-    const next = props.selected.includes(id) ? props.selected.filter((entry) => entry !== id) : [...props.selected, id];
-    props.patch({ passThroughBooks: next });
-  };
-  return (
-    <div class="lre-stack">
-      <p class="lre-small lre-muted" style={{ margin: 0 }}>
-        In world chats the engine decides what lore enters the context. Books checked here still activate natively.
-      </p>
-      {books === null ? (
-        <Empty>Loading lore books…</Empty>
-      ) : books.length === 0 ? (
-        <Empty>No lore books.</Empty>
-      ) : (
-        <div class="lre-list">
-          {books.map((book) => (
-            <label key={book.id} class="lre-item">
-              <span class="lre-check">
-                <input type="checkbox" checked={props.selected.includes(book.id)} disabled={props.busy} onChange={() => toggle(book.id)} />
-              </span>
-              <span class="grow">{book.name}</span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function PinsSection() {
   const app = useApp();
   const view = useView();
@@ -179,8 +144,7 @@ function PinsSection() {
 }
 
 const STATIC_CAVEATS = [
-  "Other extensions' World Info interceptors still run; entries they force count as pins.",
-  "If Council's own World Info is on, Council activates lore natively over your books in world chats.",
+  "LumiRPEngine does not manage lore; Lumiverse's World Info works as usual in world chats.",
   "Settings seed new chats only. Change a running chat from Play (Calendar, realism for this chat).",
   "Undo covers the latest reply; earlier changes go through Keep or Discard.",
 ];
@@ -244,9 +208,6 @@ export function Settings() {
       </Fold>
       <Fold id="steps" title="Steps and connections" summary="Which model runs each step" {...fold}>
         <StepsSection modelUse={settings.modelUse} patch={patch} busy={busy} />
-      </Fold>
-      <Fold id="books" title="Pass-through lore books" summary={`${settings.passThroughBooks.length} selected`} {...fold}>
-        <BooksSection selected={settings.passThroughBooks} patch={patch} busy={busy} />
       </Fold>
       <Fold id="pins" title="Pins and upgrade" summary="World revision, tables and generators" {...fold}>
         <PinsSection />

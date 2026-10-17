@@ -4,7 +4,7 @@
 // `import type`.
 //
 // Host sources: frontend/src/lib/spindle/dom-decorator-service.ts:62-83,
-// frontend/src/lib/spindle/frontend-context.ts:25-78, src/spindle/worker-runtime.ts:730.
+// frontend/src/lib/spindle/frontend-context.ts:25-78.
 
 import type { SpindleFloatWidgetHandle, SpindleFloatWidgetOptions, SpindleFrontendContext } from "lumiverse-spindle-types";
 
@@ -80,8 +80,3 @@ export type HostUi = Omit<SpindleFrontendContext["ui"], "createFloatWidget"> & {
   geometry: HostGeometry;
   createFloatWidget(options?: FloatWidgetOptions): SpindleFloatWidgetHandle;
 };
-
-/** `spindle.world_books.entries.setExtension` (permission `world_books`). */
-export interface EntryExtensionApi {
-  setExtension(entryId: string, namespace: string, value: unknown | null, userId?: string): Promise<void>;
-}

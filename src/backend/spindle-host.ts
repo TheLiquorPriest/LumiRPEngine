@@ -4,7 +4,6 @@
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
 import type { SpindleAPI, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
-import type { EntryExtensionApi } from "../spindle-augment";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { ChatId, UserId } from "../shared/ids";
@@ -428,9 +427,6 @@ export function createSpindleHost(): HostPort {
       async exists(bookId, userId) {
         return (await spindle.world_books.get(bookId, userId)) !== null;
       },
-      async name(bookId, userId) {
-        return (await spindle.world_books.get(bookId, userId))?.name ?? null;
-      },
       async entries(bookId, userId) {
         const out: HostBookEntry[] = [];
         for (let offset = 0; offset < 100_000; offset += 200) {
@@ -459,15 +455,8 @@ export function createSpindleHost(): HostPort {
         const created = await spindle.world_books.entries.create(bookId, entryInput(entry), userId);
         return created.id;
       },
-      async updateEntry(entryId, patch, userId) {
-        await spindle.world_books.entries.update(entryId, entryInput(patch), userId);
-      },
       async deleteEntry(entryId, userId) {
         await spindle.world_books.entries.delete(entryId, userId);
-      },
-      async setExtension(entryId, namespace, value, userId) {
-        const api: EntryExtensionApi = spindle.world_books.entries as unknown as EntryExtensionApi;
-        await api.setExtension(entryId, namespace, value, userId);
       },
     },
     async dryRun(chatId, userId) {
@@ -523,14 +512,6 @@ export function createSpindleHost(): HostPort {
       else if (level === "warn") spindle.log.warn(message);
       else spindle.log.info(message);
       diagnostics.add(level, message, userId);
-    },
-    async councilWorldInfo(userId) {
-      try {
-        const s = await spindle.council.getSettings({ userId });
-        return s.councilMode && s.toolsSettings.includeWorldInfo;
-      } catch {
-        return null;
-      }
     },
   };
 }

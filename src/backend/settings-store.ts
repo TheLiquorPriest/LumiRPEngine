@@ -45,27 +45,25 @@ function step(enabled: boolean, signals: string[], route: StepConfig["route"]): 
   return { enabled, signals, ...(route ? { route: { ...route } } : {}), maxTokens: HELPER_MAX_TOKENS };
 }
 
-/** Model-use presets (DESIGN §5.3). Routing per D10: `interpret` and `extract` on the helper; `select` and `npc.choose` on the Decision connection. */
+/** Model-use presets (DESIGN §5.3). Routing per D10: `interpret` and `extract` on the helper; `npc.choose` on the Decision connection. */
 export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit<ModelUseSettings, "preset">> = {
   lean: {
     steps: {
       interpret: step(true, ["classifier"], HELPER),
       extract: step(true, ["reply"], HELPER),
-      select: step(false, [], DECISION),
       "npc.choose": step(false, [], DECISION),
     },
-    budgets: { pre: { calls: 1, ms: 20_000 }, select: { calls: 0, ms: 0 }, post: { calls: 1, ms: 30_000 } },
-    tokens: { sections: 300, lore: 600 },
+    budgets: { pre: { calls: 1, ms: 20_000 }, post: { calls: 1, ms: 30_000 } },
+    tokens: { sections: 300 },
   },
   standard: {
     steps: {
       interpret: step(true, ["classifier"], HELPER),
       extract: step(true, ["reply"], HELPER),
-      select: step(true, ["uncached"], DECISION),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION),
     },
-    budgets: { pre: { calls: 2, ms: 30_000 }, select: { calls: 1, ms: 6_000 }, post: { calls: 2, ms: 45_000 } },
-    tokens: { sections: 600, lore: 1200 },
+    budgets: { pre: { calls: 2, ms: 30_000 }, post: { calls: 2, ms: 45_000 } },
+    tokens: { sections: 600 },
   },
   full: {
     steps: {
@@ -74,11 +72,10 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       outline: step(true, ["always"], HELPER),
       extract: step(true, ["reply"], HELPER),
       contradiction: step(true, ["reply"], HELPER),
-      select: step(true, ["always"], DECISION),
       "npc.choose": step(true, ["present", "offscreen"], DECISION),
     },
-    budgets: { pre: { calls: 8, ms: 60_000 }, select: { calls: 1, ms: 6_000 }, post: { calls: 4, ms: 60_000 } },
-    tokens: { sections: 1000, lore: 2000 },
+    budgets: { pre: { calls: 8, ms: 60_000 }, post: { calls: 4, ms: 60_000 } },
+    tokens: { sections: 1000 },
   },
 };
 
@@ -99,7 +96,6 @@ export function defaultSettings(): UserSettings {
     },
     extraction: {},
     swipeDefault: "rerun",
-    passThroughBooks: [],
   };
 }
 
@@ -126,7 +122,7 @@ function normalize(raw: unknown): UserSettings {
 
 // ---------------------------------------------------------------- the settings schema
 
-const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "select", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"];
+const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"];
 /** A phase deadline above this is a typo, not a wish (10 min). */
 const MAX_PHASE_MS = 600_000;
 
@@ -193,8 +189,8 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   const modelUse: ModelUseSettings = {
     preset: oneOf(mu.preset, ["lean", "standard", "full", "custom"] as const) ?? d.modelUse.preset,
     steps,
-    budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre), select: phase(budgets.select, d.modelUse.budgets.select), post: phase(budgets.post, d.modelUse.budgets.post) },
-    tokens: { sections: int(tokens.sections, 0, 100_000) ?? d.modelUse.tokens.sections, lore: int(tokens.lore, 0, 100_000) ?? d.modelUse.tokens.lore },
+    budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre), post: phase(budgets.post, d.modelUse.budgets.post) },
+    tokens: { sections: int(tokens.sections, 0, 100_000) ?? d.modelUse.tokens.sections },
   };
   const re = isRecord(v.realism) ? v.realism : {};
   const rawLevels = isRecord(re.levels) ? re.levels : {};
@@ -242,7 +238,6 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     time,
     extraction,
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
-    passThroughBooks: Array.isArray(v.passThroughBooks) ? v.passThroughBooks.filter((b): b is string => typeof b === "string" && b.length <= 200).slice(0, 500) : d.passThroughBooks,
   };
 }
 
