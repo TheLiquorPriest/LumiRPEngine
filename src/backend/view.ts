@@ -23,7 +23,7 @@ import type { Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates, type Availability } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { findLeaks, unrevealedTruths } from "../engine/visibility";
+import { canSeeEntity, findLeaks, unrevealedTruths } from "../engine/visibility";
 import type { StoredChip } from "./chips";
 
 /** The palette's timelapse action; its params are `{target, overrides}`. */
@@ -107,8 +107,9 @@ function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry
   const present: SceneView["present"] = [];
   for (const [id, e] of Object.entries(state.entities)) {
     if (id === world.pov || placeOfEntity(state, id) !== placeId || placeId === null || isGone(state, id)) continue;
-    // Authored kinds extend `person` (the starters' `character`).
-    if (!kindIs(registry, world, e.kind, "person")) continue;
+    // Authored kinds extend `person` (the starters' `character`). Someone the POV can't see (secret,
+    // or `known_by` and not known) isn't listed, even standing right there.
+    if (!kindIs(registry, world, e.kind, "person") || !canSeeEntity(world, state, world.pov, id)) continue;
     present.push({ id, name: e.name, label: world.kinds[e.kind]?.label ?? e.kind });
   }
   return { placeId, sceneType: sceneType(world, state), present, elapsed: headElapsed };

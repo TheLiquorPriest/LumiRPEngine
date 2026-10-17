@@ -244,3 +244,25 @@ describe("HUD ✎ fixes for weather and scene type", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
+
+describe("Scene → Present and the palette list only people the player may see", () => {
+  test("a secret person standing in the room is neither present nor a palette target", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const here = STARTER_WORLDS.modern_slice_of_life?.("a", "Alder").entities.pov?.fields.place;
+    const person = (id: string, name: string, extra: Record<string, unknown>) => ({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id, value: { id, kind: "person", name, tier: "background", fields: { place: here }, relations: [], ...extra } });
+    rig.body(await rig.send(person("lurker", "The Lurker", { visibility: "secret" })));
+    rig.body(await rig.send(person("visitor", "Pat Visitor", {})));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const view = await rig.rt.view(chatId, rig.host.userId);
+    expect(view.scene?.present.map((p) => p.name)).toContain("Pat Visitor");
+    expect(view.scene?.present.map((p) => p.name)).not.toContain("The Lurker");
+    const targets = view.palette?.entries.flatMap((e) => e.options.map((o) => o.label)) ?? [];
+    expect(targets).toContain("Pat Visitor");
+    expect(targets).not.toContain("The Lurker");
+    expect(JSON.stringify(view.panels["castlife.cast"])).not.toContain("The Lurker");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});

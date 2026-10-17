@@ -28,6 +28,7 @@ import type { EventTypeDef, PackDef, ReadContext, Rejection } from "../../../eng
 import { bandOf, kindIs, placeOfEntity } from "../../../engine/scope";
 import { GROUP_KIND, MEMBER_OF, membersOf } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
+import { canSeeEntity } from "../../../engine/visibility";
 
 export interface Axis {
   id: string;
@@ -334,7 +335,7 @@ export const relationshipsPack: PackDef = {
         const lines: string[] = [];
         for (const id of Object.keys(ctx.state.entities).sort()) {
           if (id === ctx.world.pov || placeOfEntity(ctx.state, id) !== here) continue;
-          if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person")) continue;
+          if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") || !canSeeEntity(ctx.world, ctx.state, ctx.world.pov, id)) continue;
           const line = voiceLine(ctx, id);
           if (line) lines.push(line);
         }

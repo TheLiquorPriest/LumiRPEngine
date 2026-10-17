@@ -34,6 +34,7 @@ import { isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { classValues, isGroup, isMemberOf, MEMBER_OF } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
+import { canSeeEntity } from "../../../engine/visibility";
 
 // ---------------------------------------------------------------- needs
 
@@ -613,6 +614,8 @@ export const castlifePack: PackDef = {
         for (const id of Object.keys(ctx.state.entities).sort()) {
           const e = own(ctx.state.entities, id);
           if (!e || id === pov || !here || placeOfEntity(ctx.state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
+          // The narrator is told only who the POV can see: a secret or unknown person stays out of the prose.
+          if (!canSeeEntity(ctx.world, ctx.state, pov, id)) continue;
           const act = e.fields.activity;
           lines.push(`${e.name}${typeof act === "string" && act !== "idle" ? ` (${act.replace(/_/g, " ")})` : ""} is here.`);
         }

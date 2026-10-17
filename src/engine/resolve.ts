@@ -18,7 +18,7 @@ import { evalExpr, isGone, kindIs, placeOfEntity, scopeEnv, toValue, truthy } fr
 import { selectorMatches } from "./selector";
 import type { WorldState } from "./state";
 import { Working } from "./working";
-import { canSeePlace } from "./visibility";
+import { canSeeEntity, canSeePlace } from "./visibility";
 import { labelOf, own } from "./pack-kit";
 
 export interface ActionRequest {
@@ -238,7 +238,7 @@ export function resolveOn(reg: Registry, world: WorldDoc, state: Readonly<WorldS
 /**
  * What can fill a ref parameter. A `place` ref offers the places the actor may see, nearest first
  * (joined to here by a route, or the place's parent or a child); any other ref offers entities of
- * the right kind that the param's selector (`of`) matches, at the actor's place or held by the actor.
+ * the right kind that the param's selector (`of`) matches and the actor may see, at the actor's place or held by the actor.
  */
 export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, param: string, actor: EntityId = world.pov): EntityId[] {
   const def = own(action.params, param);
@@ -264,6 +264,7 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
     if (def.ref && !kindIs(reg, world, e.kind, def.ref)) continue;
     if (def.of && !selectorMatches(reg, world, state, def.of, id)) continue;
     if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && e.fields.owner !== actor) continue;
+    if (!canSeeEntity(world, state, actor, id)) continue;
     if (ctx && !filters.every((f) => truthy(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false)))) continue;
     out.push(id);
   }
