@@ -646,7 +646,16 @@ You edit a world as a draft: the world bar in **Build** shows **unsaved draft** 
 
 #### Upgrade
 
-Upgrade moves a chat to the newer revision from the next turn forward; you confirm with **Upgrade world**. It is recorded like any other change, so it works with swipes, branches and Re-narrate. Detail that has already been shown stays as it was; the new tables and generators apply to anything not yet shown. Nothing ever changes silently.
+Upgrade moves a chat to the newer revision from the next turn forward. It is recorded like any other change, so it works with swipes, branches and Re-narrate. Detail that has already been shown stays as it was; the new tables and generators apply to anything not yet shown. Nothing ever changes silently.
+
+**Upgrade to the latest revision** first shows what the revision brings into the chat, entity by entity: people and things that are new, ones the revision no longer has, and each change to the rest. That covers fields such as appointments, home or employer, plus name, tier, classes, relations and an account's opening balance. Each change shows the chat's value, the revision's, and why it is set the way it is:
+
+- **Unchanged in play:** nothing in the chat has touched it, so it's set to **Take**.
+- **Changed in play:** a turn, a fix or a GM edit changed it, so it's set to **Keep**. That holds even if it later changed back.
+
+Flip any change with its **Take**/**Keep** toggle. **Take all unchanged** resets the untouched ones to Take; **Review changed in play** lists only the touched ones. Someone the revision no longer has stays in the chat unless you pick **Remove**. **Upgrade with these picks** applies it.
+
+A quest sitting at a stage the revision removed goes back to its first stage, with a Journal note. If an earlier Upgrade moved the chat without bringing these changes in, Pins and upgrade says so and offers the Upgrade even at the latest revision.
 
 ## Troubleshooting
 
