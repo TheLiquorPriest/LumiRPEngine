@@ -162,7 +162,8 @@ export function stateFixture(chatId: string): StateView {
             classes: { story_role: ["best_friend"] },
             groups: [{ id: "apt_4b", role: "Tenant" }],
           },
-          { id: "npc_mara", name: "Mara Kim", role: "Neighbor · coworker", here: false, activity: "Asleep", place: "Apartment 3A", regard: [{ axis: "Affection", band: "Friendly" }], next: { at: "13:30", label: "Shift at Rosie's" }, tier: "supporting", classes: { story_role: ["rival"] }, groups: [{ id: "diner_crew", role: "Cook" }] },
+          // Away: only where and when the player last saw her (the Drifter, whom the player doesn't know, isn't listed).
+          { id: "npc_mara", name: "Mara Kim", role: "Neighbor · coworker", here: false, lastSeen: { place: "Rosie's Diner", at: "Mon 21:40" }, regard: [{ axis: "Affection", band: "Friendly" }], tier: "supporting", classes: { story_role: ["rival"] }, groups: [{ id: "diner_crew", role: "Cook" }] },
           { id: "npc_okafor", name: "Mr. Okafor", role: "Regular · retired teacher", here: true, activity: "Reading the paper", tier: "regulars", classes: {}, groups: [] },
         ],
         facets: [
@@ -481,6 +482,7 @@ export function worldFixture(): WorldDoc {
       npc_rosie: { id: "npc_rosie", kind: "npc", name: "Rosie Alvarez", tier: "principal", fields: { cash: 120000, mood: "calm" }, relations: [{ type: "member_of", to: "diner_crew", fields: { role: "Owner", rank: 1 } }], agent: true, class: { story_role: ["mentor"], secret: ["in_debt"] }, tags: ["early_riser"] },
       npc_dev: { id: "npc_dev", kind: "npc", name: "Dev Patel", tier: "regulars", fields: { mood: "happy" }, relations: [{ type: "owns", to: "boat1" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant" } }], agent: true, class: { story_role: ["best_friend"] }, tags: ["mechanic", "night_owl"] },
       npc_mara: { id: "npc_mara", kind: "npc", name: "Mara Kim", tier: "supporting", fields: { mood: "calm" }, relations: [{ type: "member_of", to: "diner_crew", fields: { role: "Cook", rank: 2 } }], class: { story_role: ["rival"], secret: ["informant"] }, tags: ["night_owl"] },
+      npc_drifter: { id: "npc_drifter", kind: "npc", name: "The Drifter", tier: "background", fields: {}, relations: [], visibility: "known_by", knownBy: { memberOf: ["diner_crew"] } },
       apt_4b: { id: "apt_4b", kind: "household", name: "Apartment 4B", tier: "background", fields: {}, relations: [] },
       diner_crew: { id: "diner_crew", kind: "company", name: "Rosie's Diner crew", tier: "background", fields: {}, relations: [] },
       car1: { id: "car1", kind: "vehicle", name: "2011 Civic", tier: "supporting", fields: { fuel: 38, owner: "pov" }, relations: [] },
