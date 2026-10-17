@@ -1,0 +1,421 @@
+// Form descriptors for the world document (`shared/world.ts`), driving the schema-driven Build
+// editors (DESIGN §13). One descriptor per collection; packs override a collection's editor through
+// `UiRegistry.editor`, and the descriptors stay the default.
+
+import type { JsonObject } from "../../shared/json";
+import { DOMAINS, TIERS } from "../../shared/ids";
+import type { WorldCollection, WorldPart } from "../../shared/protocol";
+
+export type RefCollection = "kinds" | "relations" | "entities" | "places" | "grids" | "checks" | "tracks" | "tables";
+
+export type FieldSpec =
+  | { kind: "text"; key: string; label: string; multiline?: boolean; optional?: boolean; readonly?: boolean; hint?: string }
+  | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number; optional?: boolean; hint?: string }
+  | { kind: "bool"; key: string; label: string; hint?: string }
+  | { kind: "enum"; key: string; label: string; values: readonly string[]; optional?: boolean }
+  /** `inline`: the value may also be an inline definition, which is then edited as JSON. */
+  | { kind: "ref"; key: string; label: string; collection: RefCollection; optional?: boolean; any?: boolean; inline?: boolean }
+  | { kind: "refs"; key: string; label: string; collections: readonly RefCollection[] }
+  | { kind: "expr"; key: string; label: string; optional?: boolean }
+  | { kind: "dice"; key: string; label: string; optional?: boolean }
+  | { kind: "tags"; key: string; label: string }
+  | { kind: "list"; key: string; label: string; item: FieldSpec; title?: string }
+  | { kind: "record"; key: string; label: string; item: FieldSpec; keyLabel: string; keys?: readonly string[] }
+  | { kind: "object"; key: string; label: string; fields: FieldSpec[]; optional?: boolean }
+  | { kind: "json"; key: string; label: string; optional?: boolean; hint?: string }
+  | { kind: "kindFields"; key: string; label: string }
+  | { kind: "levels"; key: string; label: string };
+
+export const FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] as const;
+const BOUND_MODES = ["auto", "confirm", "never"] as const;
+const VISIBILITY = ["public", "known_by", "secret"] as const;
+const TRAVEL_MODES = ["walk", "road", "offroad", "water"] as const;
+
+const BAND: FieldSpec = {
+  kind: "object",
+  key: "",
+  label: "Band",
+  fields: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "number", key: "min", label: "From (inclusive)", optional: true },
+    { kind: "number", key: "max", label: "To (exclusive)", optional: true },
+  ],
+};
+
+export const FIELD_DEF: FieldSpec = {
+  kind: "object",
+  key: "",
+  label: "Field",
+  fields: [
+    { kind: "enum", key: "type", label: "Type", values: FIELD_TYPES },
+    { kind: "text", key: "label", label: "Label", optional: true },
+    { kind: "json", key: "default", label: "Default", optional: true },
+    { kind: "number", key: "min", label: "Min", optional: true },
+    { kind: "number", key: "max", label: "Max", optional: true },
+    { kind: "tags", key: "values", label: "Enum values" },
+    { kind: "ref", key: "ref", label: "Ref kind", collection: "kinds", optional: true },
+    { kind: "enum", key: "of", label: "List of", values: FIELD_TYPES.filter((t) => t !== "list"), optional: true },
+    { kind: "list", key: "bands", label: "Bands (shown as words)", item: BAND, title: "label" },
+    { kind: "expr", key: "derived", label: "Derived formula", optional: true },
+    { kind: "bool", key: "locked", label: "Locked (never offered to a model)" },
+    {
+      kind: "object",
+      key: "bound",
+      label: "Bound on model changes",
+      optional: true,
+      fields: [
+        { kind: "enum", key: "mode", label: "Mode", values: BOUND_MODES },
+        { kind: "number", key: "maxDelta", label: "Largest change per turn", optional: true },
+      ],
+    },
+    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
+    { kind: "enum", key: "domain", label: "Realism domain", values: DOMAINS, optional: true },
+    { kind: "number", key: "level", label: "Live from level", min: 0, max: 4, step: 1, optional: true },
+  ],
+};
+
+const EFFECT: FieldSpec = {
+  kind: "object",
+  key: "",
+  label: "Effect",
+  fields: [
+    { kind: "text", key: "type", label: "Effect type", hint: "e.g. set, add, economy.charge" },
+    { kind: "json", key: "args", label: "Arguments (values or formulas)" },
+  ],
+};
+
+export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
+  kinds: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "ref", key: "extends", label: "Extends", collection: "kinds", optional: true },
+    { kind: "record", key: "fields", label: "Fields", item: FIELD_DEF, keyLabel: "Field id" },
+    { kind: "text", key: "pack", label: "Pack", optional: true, readonly: true },
+  ],
+  relations: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "ref", key: "from", label: "From kind", collection: "kinds", any: true },
+    { kind: "ref", key: "to", label: "To kind", collection: "kinds", any: true },
+    { kind: "enum", key: "cardinality", label: "Cardinality", values: ["one_one", "one_many", "many_one", "many_many"] },
+    { kind: "bool", key: "symmetric", label: "Symmetric" },
+    { kind: "record", key: "fields", label: "Fields", item: FIELD_DEF, keyLabel: "Field id" },
+  ],
+  entities: [
+    { kind: "text", key: "name", label: "Name" },
+    { kind: "ref", key: "kind", label: "Kind", collection: "kinds" },
+    { kind: "enum", key: "tier", label: "Tier", values: TIERS },
+    { kind: "kindFields", key: "fields", label: "Fields" },
+    {
+      kind: "list",
+      key: "relations",
+      label: "Relations",
+      title: "type",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Relation",
+        fields: [
+          { kind: "ref", key: "type", label: "Type", collection: "relations" },
+          { kind: "ref", key: "to", label: "To", collection: "entities" },
+          { kind: "json", key: "fields", label: "Fields", optional: true },
+          { kind: "number", key: "until", label: "Until (game minutes)", optional: true },
+        ],
+      },
+    },
+    { kind: "levels", key: "levels", label: "Level overrides" },
+    { kind: "bool", key: "agent", label: "LOD1 agent (runs agendas and the planner)" },
+    { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
+    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
+    { kind: "tags", key: "tags", label: "Tags" },
+  ],
+  places: [
+    { kind: "text", key: "name", label: "Name" },
+    { kind: "ref", key: "parent", label: "Inside", collection: "places", optional: true },
+    { kind: "text", key: "timeZone", label: "Time zone (IANA)", optional: true, hint: "Inherited from the parent when empty" },
+    { kind: "text", key: "sceneType", label: "Default scene type", optional: true },
+    { kind: "ref", key: "grid", label: "Grid", collection: "grids", optional: true },
+    {
+      kind: "object",
+      key: "cell",
+      label: "Cell on the parent's grid",
+      optional: true,
+      fields: [
+        { kind: "number", key: "x", label: "x", min: 0, step: 1 },
+        { kind: "number", key: "y", label: "y", min: 0, step: 1 },
+      ],
+    },
+    { kind: "json", key: "fields", label: "Fields" },
+    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
+  ],
+  routes: [
+    { kind: "ref", key: "from", label: "From", collection: "places" },
+    { kind: "ref", key: "to", label: "To", collection: "places" },
+    {
+      kind: "record",
+      key: "modes",
+      label: "Modes",
+      keyLabel: "Mode",
+      keys: TRAVEL_MODES,
+      item: {
+        kind: "object",
+        key: "",
+        label: "Leg",
+        fields: [
+          { kind: "number", key: "minutes", label: "Minutes", min: 0 },
+          { kind: "number", key: "distanceKm", label: "Distance (km)", min: 0, optional: true },
+          { kind: "text", key: "terrain", label: "Terrain", optional: true },
+        ],
+      },
+    },
+    { kind: "bool", key: "bidirectional", label: "Both directions" },
+  ],
+  grids: [
+    { kind: "number", key: "width", label: "Width", min: 1, step: 1 },
+    { kind: "number", key: "height", label: "Height", min: 1, step: 1 },
+    { kind: "number", key: "cellMeters", label: "Cell size (m)", optional: true },
+    { kind: "json", key: "terrain", label: "Terrain (row-major)" },
+    { kind: "json", key: "blocked", label: "Blocked cells" },
+    { kind: "json", key: "zones", label: "Zones" },
+  ],
+  rules: [
+    { kind: "json", key: "on", label: "Trigger", hint: '{"event": "…"} · {"tick": "turn|slot|day"} · {"enter": "place"} · {"at": "formula"}' },
+    { kind: "expr", key: "when", label: "When", optional: true },
+    { kind: "list", key: "do", label: "Do", item: EFFECT, title: "type" },
+    { kind: "bool", key: "once", label: "Once" },
+    { kind: "number", key: "cooldownMinutes", label: "Cooldown (min)", optional: true },
+    { kind: "bool", key: "interrupt", label: "Interrupts a timelapse" },
+    {
+      kind: "object",
+      key: "beat",
+      label: "Storylet beat",
+      optional: true,
+      fields: [
+        { kind: "text", key: "hint", label: "Outline hint" },
+        { kind: "number", key: "weight", label: "Weight", optional: true },
+      ],
+    },
+  ],
+  actions: [
+    { kind: "text", key: "label", label: "Label" },
+    {
+      kind: "record",
+      key: "params",
+      label: "Parameters",
+      keyLabel: "Parameter",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Parameter",
+        fields: [
+          { kind: "enum", key: "type", label: "Type", values: FIELD_TYPES },
+          { kind: "text", key: "label", label: "Label", optional: true },
+          { kind: "ref", key: "ref", label: "Ref kind", collection: "kinds", optional: true },
+          { kind: "bool", key: "optional", label: "Optional" },
+        ],
+      },
+    },
+    { kind: "list", key: "requires", label: "Requires", item: { kind: "expr", key: "", label: "Requirement" } },
+    { kind: "ref", key: "check", label: "Check", collection: "checks", optional: true, inline: true },
+    { kind: "json", key: "outcomes", label: "Effects per outcome" },
+    { kind: "expr", key: "duration", label: "Duration (minutes)" },
+    {
+      kind: "object",
+      key: "activity",
+      label: "Starts an activity",
+      optional: true,
+      fields: [
+        { kind: "text", key: "type", label: "Activity", hint: "sleep, work_shift, travel, waiting, …" },
+        { kind: "expr", key: "until", label: "Until" },
+      ],
+    },
+    { kind: "tags", key: "lexicon", label: "Verbs and phrases" },
+    { kind: "text", key: "observable", label: "Observable label", optional: true },
+  ],
+  checks: [
+    { kind: "dice", key: "dice", label: "Dice" },
+    { kind: "expr", key: "modifier", label: "Modifier", optional: true },
+    {
+      kind: "list",
+      key: "bands",
+      label: "Outcome bands",
+      title: "outcome",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Band",
+        fields: [
+          { kind: "text", key: "outcome", label: "Outcome" },
+          { kind: "number", key: "min", label: "Min total", optional: true },
+          { kind: "number", key: "max", label: "Max total", optional: true },
+        ],
+      },
+    },
+  ],
+  schedules: [
+    { kind: "text", key: "owner", label: "Owner (entity or kind)", optional: true },
+    { kind: "text", key: "target", label: "Sets" },
+    { kind: "json", key: "recurrence", label: "Recurrence" },
+    { kind: "json", key: "slots", label: "Slots" },
+  ],
+  tracks: [
+    { kind: "enum", key: "kind", label: "Kind", values: ["quest", "secret", "puzzle", "agenda"] },
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "ref", key: "owner", label: "Owner", collection: "entities", optional: true },
+    { kind: "text", key: "start", label: "Start stage" },
+    { kind: "json", key: "stages", label: "Stages" },
+    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY },
+  ],
+  tables: [{ kind: "json", key: "rows", label: "Rows" }],
+  sections: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "number", key: "rank", label: "Rank (lower is reserved first)", step: 1 },
+    { kind: "text", key: "template", label: "Template", multiline: true },
+    { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
+  ],
+  steps: [
+    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "select", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"] },
+    { kind: "text", key: "template", label: "Template", multiline: true },
+    { kind: "enum", key: "output", label: "Output", values: ["text", "effects", "decision"] },
+    { kind: "tags", key: "signals", label: "Signals" },
+  ],
+  packs: [
+    { kind: "number", key: "version", label: "Format version", step: 1 },
+    { kind: "json", key: "config", label: "Config" },
+  ],
+  lore: [
+    { kind: "text", key: "title", label: "Title" },
+    { kind: "text", key: "content", label: "Content", multiline: true },
+    { kind: "tags", key: "keys", label: "Keys" },
+    { kind: "refs", key: "links", label: "Links (entities and places)", collections: ["entities", "places"] },
+    { kind: "text", key: "group", label: "Group", optional: true, hint: "At most one entry of a group is selected per turn" },
+    { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among equal hits" },
+    { kind: "bool", key: "secret", label: "Secret", hint: "A candidate only while the gate holds" },
+    { kind: "expr", key: "gate", label: "Gate", optional: true },
+  ],
+};
+
+export const PART_SPECS: Record<WorldPart, FieldSpec[]> = {
+  calendar: [
+    { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
+    { kind: "text", key: "epoch", label: "Epoch (local ISO, e.g. 2026-10-16T06:00)" },
+    { kind: "text", key: "timeZone", label: "Time zone (IANA)" },
+    {
+      kind: "list",
+      key: "dayParts",
+      label: "Day parts",
+      title: "label",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Day part",
+        fields: [
+          { kind: "text", key: "id", label: "Id" },
+          { kind: "text", key: "label", label: "Label" },
+          { kind: "text", key: "start", label: "Starts (HH:MM)" },
+        ],
+      },
+    },
+    {
+      kind: "list",
+      key: "holidays",
+      label: "Holidays",
+      title: "label",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Holiday",
+        fields: [
+          { kind: "text", key: "id", label: "Id" },
+          { kind: "text", key: "label", label: "Label" },
+          { kind: "json", key: "rule", label: "Date rule" },
+          { kind: "bool", key: "dayOff", label: "Day off" },
+        ],
+      },
+    },
+    { kind: "json", key: "custom", label: "Custom calendar (month lengths and names)", optional: true },
+  ],
+  realism: [
+    { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
+    { kind: "levels", key: "levels", label: "Domain levels" },
+    { kind: "json", key: "tierCaps", label: "Tier caps" },
+  ],
+  time: [
+    { kind: "record", key: "sceneTicks", label: "Default tick per scene type (min)", keyLabel: "Scene type", item: { kind: "number", key: "", label: "Minutes", min: 0, step: 0.5 } },
+    { kind: "json", key: "interrupts", label: "Interrupt policy" },
+    { kind: "json", key: "speedThrough", label: "Speed through" },
+    { kind: "enum", key: "montage", label: "Montage", values: ["key", "day", "week"] },
+    {
+      kind: "object",
+      key: "unitCap",
+      label: "Unit cap",
+      fields: [
+        { kind: "number", key: "agentDays", label: "Agent-days", min: 1, step: 1 },
+        { kind: "number", key: "events", label: "Events", min: 1, step: 1 },
+      ],
+    },
+  ],
+  meta: [
+    { kind: "text", key: "name", label: "World name" },
+    { kind: "ref", key: "pov", label: "Point of view", collection: "entities" },
+    {
+      kind: "object",
+      key: "start",
+      label: "Start",
+      fields: [
+        { kind: "ref", key: "place", label: "Place", collection: "places" },
+        { kind: "text", key: "at", label: "At (local ISO)" },
+      ],
+    },
+    { kind: "enum", key: "seedMode", label: "Re-run rolls", values: ["fresh", "same_roll"] },
+    { kind: "bool", key: "lenientPricing", label: "Lenient pricing (accept narrated prices inside the band)" },
+    {
+      kind: "object",
+      key: "currency",
+      label: "Currency",
+      fields: [
+        { kind: "text", key: "code", label: "Code (ISO 4217 or your own, e.g. GP)" },
+        { kind: "text", key: "symbol", label: "Symbol" },
+        { kind: "text", key: "minorUnit", label: "Minor unit (cent, copper…)" },
+        { kind: "number", key: "decimals", label: "Decimals (2 → 100 minor units per major)", min: 0, max: 6, step: 1 },
+        { kind: "text", key: "format", label: "Format", hint: "{sign}{symbol}{amount} · {sign}{major} sp {minor} cp" },
+      ],
+    },
+  ],
+};
+
+/** A minimal valid value for a new item (the backend lints the rest). */
+export function newItem(collection: WorldCollection, id: string): JsonObject {
+  switch (collection) {
+    case "kinds":
+      return { id, label: id, fields: {} };
+    case "relations":
+      return { id, label: id, from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: {} };
+    case "entities":
+      return { id, kind: "", name: id, tier: "background", fields: {}, relations: [] };
+    case "places":
+      return { id, name: id, fields: {} };
+    case "routes":
+      return { id, from: "", to: "", modes: { walk: { minutes: 10 } }, bidirectional: true };
+    case "grids":
+      return { id, width: 16, height: 16, terrain: Array.from({ length: 256 }, () => "grass"), blocked: [], zones: {} };
+    case "rules":
+      return { id, on: { tick: "turn" }, do: [] };
+    case "actions":
+      return { id, label: id, params: {}, requires: [], outcomes: { default: [] }, duration: "1" };
+    case "checks":
+      return { id, dice: "2d6", bands: [{ outcome: "fail", max: 6 }, { outcome: "success", min: 7 }] };
+    case "schedules":
+      return { id, target: "place", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "17:00", value: null }] };
+    case "tracks":
+      return { id, kind: "quest", label: id, start: "start", stages: { start: { label: "Start", next: [] } }, visibility: "public" };
+    case "tables":
+      return { id, pack: "", schema: `lre-table/${id}/v1`, revision: "", label: id, columns: {}, rows: {} };
+    case "sections":
+      return { id, label: id, rank: 50, template: "", position: { type: "native" } };
+    case "steps":
+      return { id, purpose: "brief", template: "", output: "text", signals: [] };
+    case "packs":
+      return { version: 1, config: {} };
+    case "lore":
+      return { id, title: id, content: "", keys: [], links: [] };
+  }
+}

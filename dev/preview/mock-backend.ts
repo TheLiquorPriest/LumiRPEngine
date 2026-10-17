@@ -1,0 +1,290 @@
+// A mock backend for the preview harness: answers every protocol request from fixtures, keeps
+// a push counter, and pushes real snapshots and deltas (computed by diffing the view), so the
+// frontend's delta/resync path runs exactly as against the real backend.
+
+import type { JsonValue } from "../../src/shared/json";
+import { isRecord } from "../../src/shared/json";
+import type { DeltaOp, FrontendToBackend, JobUpdate, ResultBodies } from "../../src/shared/protocol";
+import type { UserSettings } from "../../src/shared/settings";
+import type { StateView } from "../../src/shared/state-view";
+import type { WorldDoc } from "../../src/shared/world";
+import { extractionView, pausedFixture, portAlderRingMap, settingsFixture, stateFixture, WORLDS, worldFixture } from "./fixtures";
+
+type Emit = (payload: unknown) => void;
+
+export interface MockOptions {
+  scenario: "play" | "paused" | "not_world";
+  /** `ring`: the map is the Port Alder starter's (places on a ring). */
+  map?: "ring";
+  closeDrawer(): void;
+}
+
+function diffOps(before: unknown, after: unknown, path: (string | number)[], out: DeltaOp[]): void {
+  if (isRecord(before) && isRecord(after)) {
+    for (const key of Object.keys(after)) {
+      if (!(key in before)) out.push({ op: "set", path: [...path, key], value: after[key] as JsonValue });
+      else diffOps(before[key], after[key], [...path, key], out);
+    }
+    for (const key of Object.keys(before)) if (!(key in after)) out.push({ op: "del", path: [...path, key] });
+    return;
+  }
+  if (JSON.stringify(before) !== JSON.stringify(after)) out.push({ op: "set", path, value: after as JsonValue });
+}
+
+function mergePatch(target: unknown, patch: unknown): unknown {
+  if (!isRecord(patch)) return patch;
+  const out: Record<string, unknown> = isRecord(target) ? { ...target } : {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) delete out[key];
+    else out[key] = mergePatch(out[key], value);
+  }
+  return out;
+}
+
+const REALISM_PRESETS: Record<string, Record<string, number>> = {
+  story: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 },
+  grounded: { money: 2, gear: 2, vehicles: 2, castlife: 2, relationships: 2, space: 2, calendar: 3, weather: 2, sheets: 2 },
+  simulation: { money: 4, gear: 4, vehicles: 4, castlife: 4, relationships: 4, space: 4, calendar: 4, weather: 3, sheets: 3 },
+};
+
+export class MockBackend {
+  private view: StateView | null = null;
+  private rev = 0;
+  private settings: UserSettings = settingsFixture();
+  private world: WorldDoc = worldFixture();
+  private draft: WorldDoc = worldFixture();
+  private jobs = 0;
+  readonly log: FrontendToBackend[] = [];
+
+  constructor(private readonly emit: Emit, private readonly options: MockOptions) {}
+
+  /** Replaces the view and pushes the change as a delta. */
+  mutate(change: (view: StateView) => void, delayMs = 0): void {
+    const apply = () => {
+      if (!this.view) return;
+      const before = structuredClone(this.view);
+      change(this.view);
+      const ops: DeltaOp[] = [];
+      diffOps(before, this.view, [], ops);
+      if (ops.length === 0) return;
+      const base = this.rev;
+      this.rev += 1;
+      this.emit({ lre: 1, type: "lre.state.delta", chatId: this.view.chatId, base, rev: this.rev, ops });
+    };
+    if (delayMs > 0) setTimeout(apply, delayMs);
+    else apply();
+  }
+
+  /** Pushes a delta with a wrong base, to show the resync path in the harness log. */
+  pushStaleDelta(): void {
+    if (!this.view) return;
+    this.emit({ lre: 1, type: "lre.state.delta", chatId: this.view.chatId, base: this.rev + 5, rev: this.rev + 6, ops: [] });
+  }
+
+  private snapshot(): void {
+    if (!this.view) return;
+    this.rev += 1;
+    this.emit({ lre: 1, type: "lre.state.snapshot", chatId: this.view.chatId, rev: this.rev, view: structuredClone(this.view) });
+  }
+
+  private result<K extends keyof ResultBodies>(reqId: string, request: K, body: ResultBodies[K]): void {
+    setTimeout(() => this.emit({ lre: 1, type: "lre.result", reqId, request, body }), 30);
+  }
+
+  private error(reqId: string, code: string, message: string): void {
+    setTimeout(() => this.emit({ lre: 1, type: "lre.error", reqId, code, message }), 30);
+  }
+
+  receive(message: FrontendToBackend): void {
+    this.log.push(message);
+    const reqId = message.reqId;
+    switch (message.type) {
+      case "lre.hello":
+        if (message.chatId === null) {
+          this.result(reqId, "lre.hello", { accepted: true });
+          return;
+        }
+        this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : stateFixture(message.chatId);
+        if (this.options.scenario === "not_world") this.view = { ...stateFixture(message.chatId), status: "not_world", hud: null, scene: null, chips: [], panels: {}, palette: null, controls: null };
+        else if (this.options.map === "ring") this.view.panels["space.map"] = portAlderRingMap();
+        this.result(reqId, "lre.hello", { accepted: true });
+        setTimeout(() => this.snapshot(), 50);
+        return;
+      case "lre.state.resync":
+        this.result(reqId, "lre.state.resync", { accepted: true });
+        setTimeout(() => this.snapshot(), 50);
+        return;
+      case "lre.chip": {
+        const chip = this.view?.chips.find((c) => c.id === message.chip);
+        if (!chip) return this.error(reqId, "not_found", "That chip has expired.");
+        this.result(reqId, "lre.chip", { applied: true, pending: false });
+        this.mutate((view) => {
+          view.chips = view.chips.filter((c) => c.id !== message.chip);
+          if (chip.kind === "confirm" && message.choice === "confirm") view.journal.push({ kind: "note", messageId: chip.messageId, ref: null, text: `Confirmed: ${chip.label}` });
+          if (chip.kind === "keep_report" && (message.choice === "keep" || message.choice === "discard")) {
+            view.status = "idle";
+            view.keepReport = [];
+            view.journal.push({ kind: message.choice === "discard" ? "tombstoned" : "note", messageId: chip.messageId, ref: null, text: message.choice === "discard" ? "Discarded the turns after your edit." : "Kept the turns after your edit." });
+          }
+        }, 60);
+        return;
+      }
+      case "lre.keep":
+        this.result(reqId, "lre.keep", { pending: false });
+        this.mutate((view) => {
+          if (message.choice === "convert") {
+            view.keepReport = view.keepReport.map((line) => ("marker" in line.ref || JSON.stringify(line.ref) !== JSON.stringify(message.refs[0]) ? line : { ...line, status: "converted" }));
+            return;
+          }
+          view.status = "idle";
+          view.chips = view.chips.filter((c) => c.kind !== "keep_report");
+          view.keepReport = [];
+          view.journal.push({ kind: message.choice === "discard" ? "tombstoned" : "note", messageId: message.messageId, ref: null, text: message.choice === "discard" ? "Discarded the turns after your edit." : "Kept the turns after your edit." });
+        }, 60);
+        return;
+      case "lre.action":
+        this.result(reqId, "lre.action", { messageId: `m-${Date.now()}` });
+        this.mutate((view) => {
+          view.status = "in_flight";
+        }, 40);
+        this.mutate((view) => {
+          view.status = "idle";
+          if (view.hud) {
+            view.hud.clock.minutes += 5;
+            view.hud.clock.label = "Tue 07:47";
+          }
+          view.journal.push({ kind: "note", messageId: "m5", ref: null, text: `Action: ${message.action} ${JSON.stringify(message.params)}` });
+        }, 900);
+        return;
+      case "lre.fix":
+        this.result(reqId, "lre.fix", { pending: false });
+        this.mutate((view) => {
+          if (!view.hud) return;
+          if (message.field === "cash" && typeof message.value === "number") view.hud.cash = { cents: message.value };
+          const fix = Object.values(view.hud.fixes).find((f) => f?.entity === message.entity && f.field === message.field);
+          if (fix) fix.value = message.value;
+          if (message.field === "in") {
+            const option = view.hud.fixes.place?.options?.find((o) => o.value === message.value);
+            if (option) view.hud.place = { id: String(message.value), name: option.label };
+          }
+        }, 40);
+        return;
+      case "lre.marker":
+        if (message.kind === "resolve" && message.preview) {
+          const current = this.view?.controls?.realism.levels[message.domain] ?? 0;
+          const lines: { text: string; tone: "freeze" | "promote" | "materialize" | "info" }[] =
+            message.to < current
+              ? [{ text: `“can_afford(pov, …)” in rule payday freezes at its current value`, tone: "freeze" }, { text: "Background characters keep their bands; balances stop updating", tone: "info" }]
+              : [{ text: "Accounts and cards appear for principal characters", tone: "promote" }, { text: "Rosie and Dev get balances inside their current wealth bands when first shown", tone: "materialize" }];
+          this.result(reqId, "lre.marker", { pending: false, preview: { lines } });
+          return;
+        }
+        this.result(reqId, "lre.marker", { pending: false });
+        this.mutate((view) => {
+          if (message.kind === "time" && message.control === "pause" && view.hud && view.controls) {
+            view.hud.clock.paused = message.to === true;
+            view.controls.time.paused = message.to === true;
+          }
+          if (message.kind === "time" && message.control === "scale" && view.controls && view.hud && typeof message.to === "number") {
+            view.controls.time.scale = message.to;
+            view.hud.clock.scale = message.to;
+          }
+          if (message.kind === "resolve" && view.controls && "all" in message.scope) view.controls.realism.levels[message.domain] = message.to;
+        }, 40);
+        return;
+      case "lre.view.open":
+        this.result(reqId, "lre.view.open", { materialized: true, pending: false });
+        return;
+      case "lre.settings.get":
+        this.result(reqId, "lre.settings.get", { settings: structuredClone(this.settings), extraction: extractionView(this.settings), caveats: [{ code: "council_wi", message: "Council's World Info is on: Council activates lore natively over your books in world chats." }] });
+        return;
+      case "lre.settings.set": {
+        const next = mergePatch(this.settings, message.patch) as UserSettings;
+        const preset = next.realism.preset;
+        const levels = REALISM_PRESETS[preset];
+        if (isRecord(message.patch.realism) && message.patch.realism.preset && levels) next.realism.levels = { ...next.realism.levels, ...(levels as UserSettings["realism"]["levels"]) };
+        this.settings = next;
+        this.result(reqId, "lre.settings.set", { settings: structuredClone(this.settings), extraction: extractionView(this.settings), caveats: [] });
+        return;
+      }
+      case "lre.world":
+        switch (message.op) {
+          case "list":
+            return this.result(reqId, "lre.world", { worlds: structuredClone(WORLDS) });
+          case "get":
+            return this.result(reqId, "lre.world", {
+              world: structuredClone(this.world),
+              lint: [],
+              packKinds: {
+                person: { id: "person", label: "Person", pack: "space", fields: {} },
+                container: { id: "container", label: "Container", pack: "gear", fields: { capacity_l: { type: "number" }, stock: { type: "text" } } },
+                vehicle: { id: "vehicle", label: "Vehicle", pack: "vehicles", fields: { fuel: { type: "number" } } },
+              },
+            });
+          case "lint":
+            return this.result(reqId, "lre.world", {
+              lint: [
+                { severity: "error", path: "tables.economy.catalog", code: "band_order", message: "Paper towels: the price band's typical is below its minimum." },
+                { severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." },
+                { severity: "warning", path: "entities.npc_rosie.fields.cash", code: "frozen_predicate", message: "A rule reads Rosie's cash, which freezes at Money 1 for principal characters." },
+                { severity: "info", path: "sections.scene", code: "section_size", message: "Scene section averages 142 tokens (budget 600)." },
+              ],
+            });
+          case "create":
+            return this.result(reqId, "lre.world", { world: { ...structuredClone(this.world), id: "w-new", name: message.name } });
+          case "commit":
+            this.world = structuredClone(this.draft);
+            return this.result(reqId, "lre.world", { revision: `r${Date.now().toString(16)}`, lint: [] });
+          case "export":
+            return this.result(reqId, "lre.world", { file: this.world as unknown as JsonValue });
+          case "import":
+          case "delete":
+          case "attach":
+          case "upgrade":
+            return this.result(reqId, "lre.world", {});
+        }
+        return;
+      case "lre.editor": {
+        const doc = this.draft as unknown as Record<string, Record<string, JsonValue>>;
+        if (message.op === "discard") this.draft = structuredClone(this.world);
+        else if (message.op === "put") (doc[message.collection] ??= {})[message.id] = message.value;
+        else if (message.op === "remove") delete doc[message.collection]?.[message.id];
+        else if (message.op === "set" && message.part === "meta" && isRecord(message.value)) Object.assign(this.draft, message.value);
+        else if (message.op === "set") (this.draft as unknown as Record<string, JsonValue>)[message.part] = message.value;
+        const stored = JSON.stringify(this.draft) !== JSON.stringify(this.world);
+        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: WORLDS[0]?.head ?? null, stored, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }] });
+      }
+      case "lre.ui":
+        this.options.closeDrawer();
+        return this.result(reqId, "lre.ui", { done: true });
+      case "lre.job": {
+        if (message.op === "cancel") return this.result(reqId, "lre.job", { jobId: message.jobId });
+        this.jobs += 1;
+        const jobId = `job-${this.jobs}`;
+        const kind = message.kind;
+        this.result(reqId, "lre.job", { jobId });
+        const update = (status: JobUpdate["status"], progress: number, extra: Partial<JobUpdate> = {}) => this.emit({ lre: 1, type: "lre.job.update", jobId, kind, status, progress, ...extra });
+        setTimeout(() => update("running", 0.35, { message: kind === "playtest" ? "Turn 2 of 5" : "Reading 14 entries…" }), 200);
+        setTimeout(
+          () =>
+            update("done", 1, {
+              message: "Finished",
+              result:
+                kind === "playtest"
+                  ? { turns: [{ user: "I ask Rosie for a raise.", reply: "Rosie sets down the coffee pot. “After the rush,” she says.", notes: ["Check persuade: 9 vs 8 (success)", "+5 min"] }, { user: "I cover Mara's shift.", reply: "The afternoon blurs into orders and refills.", notes: ["Timelapse 6 h", "Payroll accrues"] }], lint: [{ severity: "warning", path: "rules.payday", code: "no_effect", message: "Rule payday never fired in 2 turns." }] }
+                  : {
+                      proposals: [
+                        { id: "p1", collection: "entities", key: "npc_okafor", value: { id: "npc_okafor", kind: "npc", name: "Mr. Okafor", tier: "supporting", fields: {}, relations: [] }, source: "Lore: “Regulars of Rosie's”", confidence: 0.92 },
+                        { id: "p2", collection: "places", key: "library", value: { id: "library", name: "Maple Falls Library", parent: "maple", fields: {} }, source: "Lore: “Town map”", confidence: 0.81 },
+                        { id: "p3", collection: "schedules", key: "okafor_breakfast", value: { id: "okafor_breakfast", owner: "npc_okafor", target: "place", recurrence: { every: "day" }, slots: [{ start: "07:00", end: "08:00", value: "diner" }] }, source: "Lore: “Regulars of Rosie's”", confidence: 0.64, note: "Inferred from “every morning”" },
+                        { id: "p4", collection: "tracks", key: "secret_debt", value: { id: "secret_debt", kind: "secret", label: "Rosie's debt", start: "hidden", stages: { hidden: { label: "Hidden", next: [] } }, visibility: "secret" }, source: "Lore: “Rosie”", confidence: 0.41, note: "Low confidence: mentioned once" },
+                      ],
+                    },
+            }),
+          1200,
+        );
+        return;
+      }
+    }
+  }
+}

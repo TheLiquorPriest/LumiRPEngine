@@ -1,0 +1,129 @@
+import { describe, expect, test } from "bun:test";
+import { chipIntent, convertRequest, fixRequest, paletteRequest, resolveMarker, timelapseRequest, timeMarker, travelRequest } from "../../src/frontend/requests";
+import type { Chip, PaletteEntry, TimelapseView } from "../../src/shared/state-view";
+import { INTERRUPT_CLASSES } from "../../src/shared/ids";
+import type { InterruptClass, InterruptPolicy } from "../../src/shared/ids";
+
+const chip = (kind: Chip["kind"], actions: string[]): Chip => ({
+  id: `chip-${kind}`,
+  kind,
+  messageId: "m7",
+  label: kind,
+  actions: actions.map((id) => ({ id, label: id })),
+  expires: "next_send",
+});
+
+describe("chip actions", () => {
+  test("every chip choice but regenerate sends lre.chip with the chip id and the action id", () => {
+    for (const [kind, choice] of [
+      ["confirm", "confirm"],
+      ["confirm", "reject"],
+      ["undo", "undo"],
+      ["retry_read", "retry_read"],
+      ["reread", "reread"],
+      ["not_action", "not_action"],
+      ["timelapse_offer", "timelapse"],
+      ["continue_timelapse", "timelapse"],
+      ["mode_change", "undo"],
+      ["overdue", "retrieve"],
+      ["keep_report", "open"],
+      ["keep_report", "keep"],
+      ["keep_report", "discard"],
+    ] as const) {
+      expect(chipIntent(chip(kind, [choice]), choice, "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: `chip-${kind}`, choice }, regenerate: false });
+    }
+  });
+
+  test("a payload travels only when given", () => {
+    expect(chipIntent(chip("confirm", ["confirm"]), "confirm", "c1", { cents: 899 })).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-confirm", choice: "confirm", payload: { cents: 899 } }, regenerate: false });
+  });
+
+  test("the pause chip's Keep and Discard are chip choices; the backend writes the decision", () => {
+    const report = chip("keep_report", ["keep", "discard"]);
+    expect(chipIntent(report, "discard", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-keep_report", choice: "discard" }, regenerate: false });
+    expect(chipIntent(report, "keep", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-keep_report", choice: "keep" }, regenerate: false });
+  });
+
+  test("Retry (regenerate) runs the host's Regenerate and sends nothing to the backend", () => {
+    expect(chipIntent(chip("retry", ["regenerate"]), "regenerate", "c1")).toEqual({ request: null, regenerate: true });
+    expect(chipIntent(chip("degraded", ["regenerate"]), "regenerate", "c1")).toEqual({ request: null, regenerate: true });
+  });
+
+  test("a swipe option records the one-shot choice, then runs the host's Regenerate", () => {
+    expect(chipIntent(chip("swipe_option", ["renarrate", "rerun"]), "renarrate", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-swipe_option", choice: "renarrate" }, regenerate: true });
+    expect(chipIntent(chip("swipe_option", ["renarrate", "rerun"]), "rerun", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-swipe_option", choice: "rerun" }, regenerate: true });
+  });
+
+  test("a contradiction's Re-narrate records the choice and swipes; It's fine only records", () => {
+    expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "renarrate", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "renarrate" }, regenerate: true });
+    expect(chipIntent(chip("contradiction", ["renarrate", "dismiss"]), "dismiss", "c1")).toEqual({ request: { type: "lre.chip", chatId: "c1", chip: "chip-contradiction", choice: "dismiss" }, regenerate: false });
+  });
+
+  test("converting an entry sends its event ref and parent path; markers cannot convert", () => {
+    expect(convertRequest({ messageId: "m3", parentPath: "p".repeat(32), ref: { in: "post", seq: 4, index: 1 }, status: "dropped", text: "Paid $12" }, "c1")).toEqual({
+      type: "lre.keep",
+      chatId: "c1",
+      choice: "convert",
+      messageId: "m3",
+      parentPath: "p".repeat(32),
+      refs: [{ in: "post", seq: 4, index: 1 }],
+    });
+    expect(convertRequest({ messageId: "m3", parentPath: "p", ref: { marker: 2 }, status: "inert", text: "Realism" }, "c1")).toBeNull();
+  });
+});
+
+describe("palette and map actions", () => {
+  const pay: PaletteEntry = { action: "economy.pay", label: "Pay", group: "pay", options: [{ label: "Dev", params: { to: "npc_dev" } }], amount: { param: "cents", min: 1, max: 5000 } };
+
+  test("an option's params go verbatim; the free amount merges as integer cents", () => {
+    const option = pay.options[0];
+    if (!option) throw new Error("fixture");
+    expect(paletteRequest(pay, [option], "c1", 1234.4)).toEqual({ type: "lre.action", chatId: "c1", action: "economy.pay", params: { to: "npc_dev", cents: 1234 }, source: "palette" });
+    expect(option.params).toEqual({ to: "npc_dev" });
+    expect(paletteRequest(pay, [option], "c1")).toEqual({ type: "lre.action", chatId: "c1", action: "economy.pay", params: { to: "npc_dev" }, source: "palette" });
+  });
+
+  test("a second-step pick merges its param into the first option's", () => {
+    const drive: PaletteEntry = { action: "vehicles.drive", label: "Drive", group: "drive", options: [{ label: "Your pickup", params: { vehicle: "pov_truck" } }] };
+    const truck = drive.options[0];
+    if (!truck) throw new Error("fixture");
+    expect(paletteRequest(drive, [truck, { label: "Alder Automotive", params: { destination: "alder_automotive" } }], "c1")).toEqual({ type: "lre.action", chatId: "c1", action: "vehicles.drive", params: { vehicle: "pov_truck", destination: "alder_automotive" }, source: "palette" });
+    expect(truck.params).toEqual({ vehicle: "pov_truck" });
+  });
+
+  test("Lend's required number merges under its param", () => {
+    const lend: PaletteEntry = { action: "gear.lend", label: "Lend", group: "lend", options: [{ label: "Pocketknife", params: { item: "pov_knife" } }], number: { param: "days", label: "days", min: 1, max: null, default: 1 } };
+    const knife = lend.options[0];
+    if (!knife) throw new Error("fixture");
+    expect(paletteRequest(lend, [knife, { label: "Danny Okafor", params: { to: "danny" } }], "c1", undefined, 3).params).toEqual({ item: "pov_knife", to: "danny", days: 3 });
+  });
+
+  test("a map tap sends the travel option's action from the map", () => {
+    expect(travelRequest("space.drive", { to: "diner", vehicle: "car1" }, "c1")).toEqual({ type: "lre.action", chatId: "c1", action: "space.drive", params: { to: "diner", vehicle: "car1" }, source: "map" });
+  });
+
+  test("a timelapse sends its target and only the overrides that change the policy", () => {
+    const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, "ignore"])) as Record<InterruptClass, InterruptPolicy>;
+    interrupts.invitation = "stop";
+    const view: TimelapseView = { action: "calendar.timelapse", blocked: null, durations: [60], until: [], interrupts, dayParts: false };
+    expect(timelapseRequest(view, { type: "duration", minutes: 480 }, { invitation: "stop", bill: "note", weather: "stop" }, "c1")).toEqual({
+      type: "lre.action",
+      chatId: "c1",
+      action: "calendar.timelapse",
+      params: { target: { type: "duration", minutes: 480 }, overrides: { bill: "note", weather: "stop" } },
+      source: "palette",
+    });
+  });
+});
+
+describe("fixes and markers", () => {
+  test("a ✎ fix writes the target's entity and field", () => {
+    expect(fixRequest({ entity: "pov", field: "cash", type: "money", value: 4600 }, 3900, "c1")).toEqual({ type: "lre.fix", chatId: "c1", entity: "pov", field: "cash", value: 3900 });
+  });
+
+  test("time and resolve markers carry preview only when asked", () => {
+    expect(timeMarker("c1", "pause", { all: true }, true)).toEqual({ type: "lre.marker", chatId: "c1", kind: "time", control: "pause", scope: { all: true }, to: true });
+    expect(resolveMarker("c1", "money", { all: true }, 3, true)).toEqual({ type: "lre.marker", chatId: "c1", kind: "resolve", domain: "money", scope: { all: true }, to: 3, preview: true });
+    expect(resolveMarker("c1", "money", { tier: "background" }, 1)).toEqual({ type: "lre.marker", chatId: "c1", kind: "resolve", domain: "money", scope: { tier: "background" }, to: 1 });
+  });
+});

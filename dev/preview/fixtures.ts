@@ -1,0 +1,496 @@
+// Preview fixtures: a modern slice-of-life world in play. Shapes follow the contracts
+// (`StateView`, `WorldDoc`, `UserSettings`) and the panel view models of the UI packs.
+
+import { INTERRUPT_CLASSES } from "../../src/shared/ids";
+import type { InterruptClass, InterruptPolicy } from "../../src/shared/ids";
+import type { ExtractionModeView } from "../../src/shared/protocol";
+import type { ExtractionType, UserSettings } from "../../src/shared/settings";
+import type { StateView } from "../../src/shared/state-view";
+import type { WorldDoc, WorldIndex } from "../../src/shared/world";
+
+const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, ["invitation", "decline", "incident", "quest", "arrival"].includes(cls) ? "stop" : cls === "bill" ? "note" : "ignore"])) as Record<InterruptClass, InterruptPolicy>;
+
+export function stateFixture(chatId: string): StateView {
+  return {
+    v: 1,
+    chatId,
+    worldId: "w-maple",
+    revision: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    status: "idle",
+    hud: {
+      clock: { minutes: 1902, label: "Tue 07:42", dayPart: "Morning", paused: false, scale: 1 },
+      place: { id: "diner", name: "Rosie's Diner" },
+      weather: "🌧 Light rain 12°C",
+      cash: { cents: 4600 },
+      fixes: {
+        place: { entity: "pov", field: "in", type: "ref", value: "diner", options: [{ value: "diner", label: "Rosie's Diner" }, { value: "apartment", label: "Apartment 4B" }, { value: "garage", label: "Kim's Garage" }] },
+        cash: { entity: "pov", field: "cash", type: "money", value: 4600, min: 0 },
+        weather: { entity: "world", field: "weather", type: "enum", value: "light_rain", options: [{ value: "clear", label: "Clear" }, { value: "light_rain", label: "Light rain" }, { value: "storm", label: "Storm" }] },
+        scene: { entity: "scene", field: "sceneType", type: "enum", value: "conversation", options: [{ value: "conversation", label: "Conversation" }, { value: "action", label: "Action" }, { value: "exploration", label: "Exploration" }, { value: "downtime", label: "Downtime" }] },
+      },
+    },
+    scene: {
+      placeId: "diner",
+      sceneType: "conversation",
+      present: [
+        { id: "npc_rosie", name: "Rosie Alvarez", label: "your boss · wiping the counter" },
+        { id: "npc_dev", name: "Dev Patel", label: "roommate · eating pancakes" },
+      ],
+      elapsed: 12,
+    },
+    chips: [
+      { id: "c-retry", kind: "retry", messageId: "m1", label: "The reply came back empty", actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send" },
+      { id: "c-elapsed", kind: "elapsed", messageId: "m2", label: "+12 min", detail: "07:30 → 07:42", actions: [], expires: "never" },
+      { id: "c-roll", kind: "roll", messageId: "m2", label: "Persuade Rosie: 2d6+1 = 9", detail: "needed 8 · 58.3% · success", actions: [], expires: "never" },
+      { id: "c-price", kind: "price", messageId: "m2", label: "Coffee $3.25", detail: "Visa ··4421", actions: [], expires: "never" },
+      { id: "c-confirm", kind: "confirm", messageId: "m2", label: "Dev gives you his car keys?", actions: [{ id: "confirm", label: "Yes", style: "primary" }, { id: "reject", label: "No" }], expires: "next_send" },
+      { id: "c-mode", kind: "mode_change", messageId: "m2", label: "Purchases now apply automatically", detail: "28 of 30 kept on DeepSeek", actions: [{ id: "undo", label: "Undo" }], expires: "never" },
+      { id: "c-swipe", kind: "swipe_option", messageId: "m2", label: "Swipe:", actions: [{ id: "renarrate", label: "Re-narrate" }, { id: "rerun", label: "Re-run" }], expires: "next_send" },
+      { id: "c-decline", kind: "decline", messageId: "m4", label: "Card declined: Visa over limit", detail: "$1,200 limit", actions: [], expires: "never" },
+      { id: "c-undo", kind: "undo", messageId: "m4", label: "Paid Dev $20", actions: [{ id: "undo", label: "Undo" }], expires: "next_send" },
+      { id: "c-tl", kind: "timelapse_offer", messageId: "m4", label: "Sleep until 07:00?", detail: "8 h 20 min", actions: [{ id: "start", label: "Timelapse", style: "primary" }], expires: "next_send" },
+      { id: "c-notaction", kind: "not_action", messageId: "m3", label: "Read as: Ask Rosie for a raise", actions: [{ id: "not_action", label: "Not an action?" }], expires: "next_send" },
+      { id: "c-overdue", kind: "overdue", messageId: "m4", label: "Dev still has your drill", detail: "due yesterday 18:00", actions: [{ id: "retrieve", label: "Ask for it" }], expires: "never" },
+    ],
+    journal: [
+      { kind: "note", messageId: "m2", ref: null, text: "Montage (Mon 22:00 → Tue 07:00): slept 8 h; payroll $612.40 to Checking; rent autopay $850.00." },
+      { kind: "dropped", messageId: "m3", ref: { in: "post", seq: 14, index: 0 }, text: "Paid Mara $15 — dropped: you no longer had the cash on this branch." },
+      { kind: "inert", messageId: "m3", ref: { marker: 9 }, text: "Realism change made on another branch (Money → Detailed)." },
+      { kind: "expired", messageId: "m1", ref: null, text: "Confirm expired at send: Dev learns about the surprise party." },
+      { kind: "regenerated", messageId: "m2", ref: null, text: "Glovebox contents regenerated from the same seed (source entry missing)." },
+    ],
+    keepReport: [],
+    pending: [{ panel: "castlife.cast", entity: "npc_mara" }],
+    panels: {
+      "sheets.you": {
+        name: "Sam Rivera",
+        tier: "pov",
+        place: "Rosie's Diner",
+        activity: "on shift",
+        conditions: ["tired", "caffeinated"],
+        sections: [
+          { title: "Stats", rows: [{ label: "Strength", value: "Average" }, { label: "Charm", value: "Good", detail: "+1 to persuade" }, { label: "Wits", value: "Sharp" }] },
+          { title: "Status", rows: [{ label: "Energy", value: "62%", fix: { entity: "pov", field: "energy", type: "number", value: 62, min: 0, max: 100 } }, { label: "Hunger", value: "Peckish" }, { label: "Job", value: "Server at Rosie's" }] },
+        ],
+      },
+      "economy.money": {
+        level: 3,
+        band: null,
+        netWorthCents: 447363,
+        accounts: [
+          { id: "cash", name: "Wallet cash", kind: "cash", cents: 4600 },
+          { id: "chk", name: "Checking", kind: "checking", cents: 124018 },
+          { id: "sav", name: "Savings", kind: "savings", cents: 350000 },
+          { id: "visa", name: "Visa ··4421", kind: "card", cents: -41255, limitCents: 120000, due: { label: "min due Oct 28", cents: 3500 } },
+        ],
+        recent: [
+          { at: "Tue 07:40", memo: "Rosie's · coffee", cents: -325, account: "Visa" },
+          { at: "Mon 18:12", memo: "Shell Route 9 · 9.2 gal", cents: -3211, account: "Visa" },
+          { at: "Mon 09:00", memo: "Payroll · Rosie's (net)", cents: 61240, account: "Checking" },
+          { at: "Mon 09:00", memo: "Rent autopay", cents: -85000, account: "Checking" },
+        ],
+        upcoming: [
+          { at: "Fri", label: "Payday", cents: 61240 },
+          { at: "Oct 28", label: "Visa minimum", cents: -3500 },
+          { at: "Nov 1", label: "Phone", cents: -4500 },
+        ],
+      },
+      "vehicles.garage": {
+        level: 3,
+        vehicles: [
+          { id: "car1", name: "2011 Civic", kind: "Sedan · gasoline", status: "Runs fine", place: "Diner lot", fuelPct: 38, rangeLabel: "~140 mi", odometerLabel: "142,318 mi", condition: 62, home: "Apartment lot", service: [{ label: "Oil change", due: "in 300 mi", overdue: false }] },
+          { id: "boat1", name: "Dev's jon boat", kind: "Boat · outboard", status: "Needs work", place: "Garage", fuelPct: 10, odometerLabel: "212 h", assignedTo: { name: "You", until: "Sun 18:00", overdue: false }, service: [{ label: "Registration", due: "expired Sep 30", overdue: true }] },
+        ],
+      },
+      "gear.gear": {
+        level: 3,
+        owned: [{ id: "drill", name: "Cordless drill", condition: 80, lent: { to: "Dev", until: "Mon 18:00", overdue: true }, children: [] }],
+        worn: [
+          { id: "apron", name: "Server apron", slot: "Waist", children: [{ id: "pad", name: "Order pad", children: [] }, { id: "pen", name: "Pen", qty: 3, children: [] }] },
+          { id: "jacket", name: "Rain jacket", slot: "Outer", condition: 45, children: [] },
+        ],
+        carried: [
+          { id: "backpack", name: "Backpack", load: { used: 4.2, capacity: 10, unit: "kg" }, children: [{ id: "wallet", name: "Wallet", children: [{ id: "cashstack", name: "Cash", qty: 46, children: [] }] }, { id: "phone", name: "Phone", condition: 30, children: [] }, { id: "kit", name: "Mechanic toolbox", kit: { complete: false, present: 43, total: 45, missing: ["10 mm socket", "torque wrench"] }, children: [] }] },
+          { id: "keys", name: "Car keys", children: [] },
+        ],
+        stored: [{ id: "tent", name: "2-person tent", condition: 90, children: [] }],
+      },
+      "castlife.cast": {
+        level: 3,
+        people: [
+          {
+            id: "npc_rosie",
+            name: "Rosie Alvarez",
+            role: "Boss · owns the diner",
+            here: true,
+            activity: "Working",
+            place: "Rosie's Diner",
+            regard: [{ axis: "Respect", band: "Warm", value: 2 }],
+            timeline: [
+              { start: "00:00", end: "05:30", label: "Sleep", kind: "sleep" },
+              { start: "05:30", end: "14:00", label: "Diner", kind: "work" },
+              { start: "14:00", end: "22:00", label: "Home", kind: "free" },
+              { start: "22:00", end: "24:00", label: "Sleep", kind: "sleep" },
+            ],
+            next: { at: "14:00", label: "Hands the shift to Mara" },
+          },
+          {
+            id: "npc_dev",
+            name: "Dev Patel",
+            role: "Roommate",
+            here: true,
+            activity: "Eating",
+            regard: [{ axis: "Trust", band: "Close", value: 3 }, { axis: "Affection", band: "Fond", value: 2 }],
+            timeline: [
+              { start: "00:00", end: "08:00", label: "Sleep", kind: "sleep", reasons: ["night"] },
+              { start: "08:30", end: "09:00", label: "Commute", kind: "travel", reasons: ["trip"] },
+              { start: "09:00", end: "17:00", label: "Garage", kind: "work", reasons: ["work"] },
+              { start: "17:00", end: "18:30", label: "See friends", kind: "free", reasons: ["company", "a close friend", "utility 3.1"] },
+              { start: "18:30", end: "19:30", label: "Dinner", kind: "free", reasons: ["evening meal", "hungry (hunger 62)", "utility 7.6", "close call"] },
+              { start: "19:30", end: "24:00", label: "Free", kind: "free", reasons: [] },
+            ],
+            agenda: [{ label: "Fix up the jon boat", stage: "Needs a part" }],
+          },
+          { id: "npc_mara", name: "Mara Kim", role: "Neighbor · coworker", here: false, activity: "Asleep", place: "Apartment 3A", regard: [{ axis: "Affection", band: "Friendly" }], next: { at: "13:30", label: "Shift at Rosie's" } },
+        ],
+      },
+      "calendar.calendar": {
+        date: "October 20, 2026",
+        weekday: "Tuesday",
+        dayPart: "Morning",
+        holidays: [],
+        upcoming: [
+          { at: "Today 14:00", label: "Shift ends", kind: "work" },
+          { at: "Fri 09:00", label: "Payday", kind: "money" },
+          { at: "Sat 19:00", label: "Mara's birthday dinner", kind: "invitation" },
+          { at: "Oct 31", label: "Halloween", kind: "observance" },
+        ],
+      },
+      "story.quests": {
+        active: [
+          { id: "q_raise", label: "Ask for a raise", kind: "quest", stage: "Build the case", cue: "Rosie respects people who show up early and cover shifts.", truths: ["Rosie gave the last raise to whoever covered the holiday shifts."], objectives: [{ label: "Cover two extra shifts", done: true }, { label: "Get a regular to vouch for you", done: false }, { label: "Ask Rosie after the rush", done: false }], hints: ["Mr. Okafor tips well and talks to Rosie every morning.", "Ask after 10:00, when the rush is over."], status: "active" },
+          { id: "q_boat", label: "Dev's boat", kind: "agenda", stage: "Find a carburetor", cue: null, truths: [], objectives: [{ label: "Check Kim's Garage", done: false }], hints: [], status: "active" },
+        ],
+        done: [{ id: "q_lease", label: "Renew the lease", kind: "quest", stage: "Signed", cue: null, truths: [], objectives: [{ label: "Sign by Oct 1", done: true }], hints: [], status: "done" }],
+        failed: [],
+      },
+      "space.map": {
+        level: 3,
+        scope: { id: "maple", name: "Maple Falls", width: 1000, height: 700 },
+        here: "diner",
+        places: [
+          { id: "apartment", name: "Apartment 4B", x: 120, y: 140, known: true },
+          { id: "diner", name: "Rosie's Diner", x: 470, y: 260, known: true },
+          { id: "garage", name: "Kim's Garage", x: 760, y: 140, known: true },
+          { id: "shell", name: "Shell Route 9", x: 820, y: 520, known: true },
+          { id: "lake", name: "Maple Lake", x: 260, y: 560, known: false },
+        ],
+        routes: [
+          { from: "apartment", to: "diner", modes: { walk: { minutes: 18 }, road: { minutes: 5 } } },
+          { from: "diner", to: "garage", modes: { walk: { minutes: 22 }, road: { minutes: 6 } } },
+          { from: "garage", to: "shell", modes: { road: { minutes: 8 } } },
+          { from: "diner", to: "lake", modes: { road: { minutes: 14 }, offroad: { minutes: 20 } } },
+        ],
+        travel: [
+          { to: "apartment", label: "Walk home", mode: "walk", minutes: 18, action: "space.walk", params: { to: "apartment" } },
+          { to: "apartment", label: "Drive home", mode: "road", minutes: 5, vehicle: "2011 Civic", cents: 41, action: "space.drive", params: { to: "apartment", vehicle: "car1" } },
+          { to: "garage", label: "Walk to Kim's Garage", mode: "walk", minutes: 22, action: "space.walk", params: { to: "garage" } },
+          { to: "garage", label: "Drive to Kim's Garage", mode: "road", minutes: 6, vehicle: "2011 Civic", cents: 52, action: "space.drive", params: { to: "garage", vehicle: "car1" } },
+          { to: "shell", label: "Drive to Shell Route 9", mode: "road", minutes: 14, vehicle: "2011 Civic", cents: 118, action: "space.drive", params: { to: "shell", vehicle: "car1" } },
+          { to: "lake", label: "Drive to Maple Lake", mode: "road", minutes: 14, vehicle: "2011 Civic", action: "space.drive", params: { to: "lake", vehicle: "car1" }, disabled: "Not enough fuel for the round trip" },
+        ],
+      },
+      "core.context": {
+        warnings: [],
+        generations: [
+          {
+            id: "g41",
+            at: "Tue 07:42 · reply to “I ask Rosie about the raise”",
+            activation: "confirmed",
+            candidates: [
+              { title: "Rosie Alvarez", book: "book-engine", bookName: "World lore", status: "included", reason: "present in the scene" },
+              { title: "Rosie's Diner", book: "book-engine", bookName: "World lore", status: "included", reason: "current place" },
+              { title: "Raise quest cue", book: "book-engine", bookName: "World lore", status: "pinned", reason: "active quest stage" },
+              { title: "Kim's Garage", book: "book-engine", bookName: "World lore", status: "dropped", reason: "not relevant this turn (select)" },
+              { title: "Sam's backstory", book: "book-mine", bookName: "My lore", status: "included", reason: "pass-through book" },
+              { title: "Old flame", book: "book-mine", bookName: "My lore", status: "unverified", reason: "activation not confirmed" },
+            ],
+            sections: [
+              { slot: "outcome", label: "Outcome", tokens: 64, clipped: false },
+              { slot: "scene", label: "Scene", tokens: 142, clipped: false },
+              { slot: "cast", label: "Cast", tokens: 210, clipped: false },
+              { slot: "montage", label: "Montage", tokens: 0, clipped: false },
+            ],
+            budget: { sections: 600, lore: 1200, used: 1033 },
+          },
+        ],
+      },
+      "core.gm": {
+        previews: [{ title: "Glovebox (Civic)", lines: ["Registration and insurance card", "Half a pack of gum", "$7 in quarters"] }],
+        truths: [{ track: "The surprise party", stage: "Planning", truth: "Mara and Dev are planning a surprise party for Sam on Saturday." }],
+        agendas: [{ entity: "Dev Patel", label: "Fix up the jon boat", stage: "Needs a part" }],
+      },
+    },
+    palette: {
+      entries: [
+        {
+          action: "sheets.persuade",
+          label: "Persuade",
+          group: "action",
+          options: [
+            { label: "Rosie Alvarez", params: { target: "npc_rosie" }, detail: "2d6+1 vs 8", minutes: 5, odds: [{ outcome: "success", p: 0.583 }, { outcome: "partial", p: 0.278 }, { outcome: "fail", p: 0.139 }] },
+            { label: "Dev Patel", params: { target: "npc_dev" }, detail: "2d6+2 vs 8", minutes: 5, odds: [{ outcome: "success", p: 0.722 }, { outcome: "partial", p: 0.194 }, { outcome: "fail", p: 0.084 }] },
+          ],
+        },
+        { action: "castlife.ask_raise", label: "Ask for a raise", group: "action", options: [{ label: "Rosie Alvarez", params: { target: "npc_rosie" }, minutes: 10, odds: [{ outcome: "yes", p: 0.41 }, { outcome: "later", p: 0.39 }, { outcome: "no", p: 0.2 }] }] },
+        { action: "castlife.work", label: "Work the counter", group: "action", options: [{ label: "Until the rush ends", params: { until: "10:00" }, minutes: 138, detail: "tips likely" }] },
+        {
+          action: "economy.buy",
+          label: "Buy at Rosie's",
+          group: "buy",
+          options: [
+            { label: "Coffee", params: { item: "coffee" }, cents: 325 },
+            { label: "Pancake stack", params: { item: "pancakes" }, cents: 899 },
+            { label: "Club sandwich", params: { item: "club" }, cents: 1249, disabled: "Kitchen opens at 11:00" },
+          ],
+        },
+        { action: "economy.pay", label: "Pay someone", group: "pay", options: [{ label: "Dev Patel", params: { to: "npc_dev" } }, { label: "Rosie Alvarez", params: { to: "npc_rosie" } }], amount: { param: "cents", min: 1, max: 4600 } },
+        { action: "economy.transfer", label: "Transfer", group: "transfer", options: [{ label: "Checking → Savings", params: { from: "chk", to: "sav" } }, { label: "Checking → Visa", params: { from: "chk", to: "visa" } }], amount: { param: "cents", min: 1, max: 124018 } },
+        {
+          action: "vehicles.drive",
+          label: "Drive",
+          group: "drive",
+          options: [
+            {
+              label: "Your car",
+              params: { vehicle: "car1" },
+              next: {
+                param: "destination",
+                label: "Destination",
+                options: [
+                  { label: "Kim's Garage", params: { destination: "garage" }, minutes: 6, cents: 52 },
+                  { label: "Apartment 4B", params: { destination: "apartment" }, minutes: 5, cents: 41 },
+                  { label: "Lakeshore Park", params: { destination: "park" }, disabled: "Not possible here and now" },
+                ],
+              },
+            },
+          ],
+        },
+        { action: "gear.lend", label: "Lend", group: "lend", options: [{ label: "Car keys", params: { item: "keys" }, next: { param: "to", label: "To", options: [{ label: "Dev Patel", params: { to: "npc_dev" } }, { label: "Mara Kim", params: { to: "npc_mara" } }] } }], number: { param: "days", label: "days", min: 1, max: null, default: 1 } },
+      ],
+      timelapse: {
+        action: "calendar.timelapse",
+        blocked: null,
+        durations: [30, 60, 240, 480, 1440, 10080],
+        until: [
+          { label: "Until your shift ends", detail: "14:00 · in 6 h 18 min", target: { type: "shift" } },
+          { label: "Until tomorrow morning", detail: "Wed 07:00", target: { type: "day_part", dayPart: "morning" } },
+          { label: "Until Mara's birthday dinner", detail: "Sat 19:00", target: { type: "commitment" } },
+          { label: "Until something happens", target: { type: "interrupt" } },
+        ],
+        interrupts,
+        dayParts: false,
+      },
+    },
+    controls: {
+      realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } } },
+      time: {
+        sceneType: "conversation",
+        sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 },
+        scale: 1,
+        paused: false,
+        interrupts,
+        speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 }, work_shift: { mode: "auto", thresholdMinutes: 60 } },
+        montage: "key",
+        unitCap: { agentDays: 600, events: 5000 },
+        npcCalls: 0,
+      },
+    },
+    meter: { turn: { calls: 3, tokens: 2140, ms: 6200 }, average: { calls: 2.4, tokens: 1890, ms: 5100 }, p95: { calls: 5, tokens: 3900, ms: 11800 } },
+    currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
+    packs: { calendar: 1, space: 1, economy: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, sheets: 1, story: 1, weather: 1 },
+  };
+}
+
+/**
+ * The Port Alder starter's map as its space view builds it: sixteen places with no grid cells, on a
+ * ring in id order (`?map=ring`), for checking label placement.
+ */
+export function portAlderRingMap(): StateView["panels"][string] {
+  const ring: [string, string, number, number][] = [
+    ["alder_automotive", "Alder Automotive", 83, 50],
+    ["alder_harbor_marina", "Alder Harbor Marina", 81, 63],
+    ["alder_market", "Alder Market", 74, 74],
+    ["bluebird_coffee", "Bluebird Coffee", 63, 81],
+    ["chicago_il", "Chicago, Illinois", 50, 83],
+    ["community_clinic", "Alder Community Clinic", 37, 81],
+    ["dune_trails", "Shoreline Dunes Trail System", 26, 74],
+    ["gull_island", "Gull Island State Park", 19, 63],
+    ["harbor_street_114", "114 Harbor Street", 17, 50],
+    ["lakefront_park", "Lakefront Park", 19, 37],
+    ["lakeshore_county", "Lakeshore County", 26, 26],
+    ["lakeshore_school", "Lakeshore Consolidated School", 37, 19],
+    ["port_alder", "Port Alder", 50, 17],
+    ["rusty_anchor", "The Rusty Anchor", 63, 19],
+    ["shoreline_fuel", "Shoreline Fuel", 74, 26],
+    ["township_hall", "Alder Township Hall", 81, 37],
+  ];
+  return {
+    level: 3,
+    scope: { id: "port_alder", name: "Port Alder", width: 100, height: 100 },
+    here: "harbor_street_114",
+    places: ring.map(([id, name, x, y]) => ({ id, name, x, y, known: true })),
+    routes: [
+      { from: "harbor_street_114", to: "alder_automotive", modes: { walk: { minutes: 23 }, road: { minutes: 6 } } },
+      { from: "harbor_street_114", to: "bluebird_coffee", modes: { walk: { minutes: 9 } } },
+      { from: "alder_harbor_marina", to: "gull_island", modes: { water: { minutes: 25 } } },
+    ],
+    travel: [
+      { to: "alder_automotive", label: "Walk to Alder Automotive", mode: "walk", minutes: 23, action: "go", params: { to: "alder_automotive" } },
+      { to: "bluebird_coffee", label: "Walk to Bluebird Coffee", mode: "walk", minutes: 9, action: "go", params: { to: "bluebird_coffee" } },
+    ],
+  };
+}
+
+/** The same chat after a user-message edit: paused on Keep / Discard. */
+export function pausedFixture(chatId: string): StateView {
+  const view = stateFixture(chatId);
+  view.status = "paused";
+  view.chips = [...view.chips.filter((chip) => chip.messageId !== "m3"), { id: "c-keep", kind: "keep_report", messageId: "m3", label: "You edited this message", detail: "Later turns don't change the world until you choose.", actions: [{ id: "keep", label: "Keep later turns", style: "primary" }, { id: "discard", label: "Discard them", style: "danger" }], expires: "never" }];
+  view.keepReport = [
+    { messageId: "m4", parentPath: "f".repeat(32), ref: { in: "events", index: 2 }, status: "dropped", text: "Paid Dev $20 — no longer valid here" },
+    { messageId: "m4", parentPath: "f".repeat(32), ref: { in: "post", seq: 21, index: 0 }, status: "inert", text: "Lent Dev the drill" },
+    { messageId: "m4", parentPath: "f".repeat(32), ref: { marker: 22 }, status: "inert", text: "Paused the clock" },
+  ];
+  return view;
+}
+
+export const WORLDS: WorldIndex[] = [
+  { id: "w-maple", name: "Maple Falls", head: "a1b2c3d4e5f60718293a4b5c6d7e8f90", loreBookId: "book-engine", revisions: ["0f0f", "a1b2c3d4e5f60718293a4b5c6d7e8f90"] },
+  { id: "w-manor", name: "Blackwood Manor", head: "77aa", loreBookId: null, revisions: ["77aa"] },
+  // Wrapping and escaping checks: a very long name, an unbroken token and markup that must render as text.
+  { id: "w-long", name: "The Exceptionally Long-Named Port Alder Lakeshore Simulation World With Ferries, Fishing Boats And A Lighthouse <b>bold?</b> & Co. Supercalifragilisticexpialidociousharborfront", head: "88bb", loreBookId: null, revisions: ["88bb"] },
+];
+
+export function worldFixture(): WorldDoc {
+  const terrain: string[] = [];
+  for (let y = 0; y < 12; y += 1) for (let x = 0; x < 16; x += 1) terrain.push(y === 6 || x === 7 ? "road" : x > 11 && y < 4 ? "water" : (x + y) % 7 === 0 ? "forest" : x < 4 && y > 8 ? "building" : "grass");
+  return {
+    format: "lre-world-v1",
+    id: "w-maple",
+    name: "Maple Falls",
+    engineVersion: "0.0.1",
+    packs: { calendar: { version: 1, config: {} }, space: { version: 1, config: {} }, economy: { version: 1, config: { region: "us-oh" } }, story: { version: 1, config: {} } },
+    pins: { generators: { "economy.wallet": 1, "gear.glovebox": 2 }, tables: { "economy.catalog": "9c1d0e7a55aa12bb", "economy.regions": "41aa88d0c3e2f1a9" } },
+    kinds: {
+      person: { id: "person", label: "Person", fields: { cash: { type: "money", label: "Cash", min: 0, domain: "money", level: 2 }, energy: { type: "number", min: 0, max: 100, label: "Energy" }, mood: { type: "enum", values: ["calm", "happy", "tense"] }, job: { type: "text" } } },
+      npc: { id: "npc", label: "NPC", extends: "person", fields: { schedule: { type: "ref", label: "Schedule" }, wariness: { type: "number", derived: "100 - energy" } } },
+      vehicle: { id: "vehicle", label: "Vehicle", pack: "vehicles", fields: { fuel: { type: "number", min: 0, max: 100, domain: "vehicles", level: 2 }, owner: { type: "ref", ref: "person" } } },
+    },
+    relations: { roommate: { id: "roommate", label: "Roommate", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: {} } },
+    entities: {
+      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "pov", fields: { cash: 4600, energy: 62, job: "Server" }, relations: [{ type: "roommate", to: "npc_dev" }] },
+      npc_rosie: { id: "npc_rosie", kind: "npc", name: "Rosie Alvarez", tier: "principal", fields: { cash: 120000, mood: "calm" }, relations: [], agent: true },
+      npc_dev: { id: "npc_dev", kind: "npc", name: "Dev Patel", tier: "principal", fields: { mood: "happy" }, relations: [{ type: "owns", to: "boat1" }], agent: true },
+      car1: { id: "car1", kind: "vehicle", name: "2011 Civic", tier: "supporting", fields: { fuel: 38, owner: "pov" }, relations: [] },
+    },
+    places: {
+      maple: { id: "maple", name: "Maple Falls", timeZone: "America/New_York", grid: "town", fields: {} },
+      diner: { id: "diner", name: "Rosie's Diner", parent: "maple", sceneType: "conversation", cell: { x: 7, y: 5 }, fields: {} },
+      apartment: { id: "apartment", name: "Apartment 4B", parent: "maple", sceneType: "downtime", cell: { x: 2, y: 9 }, fields: {} },
+    },
+    routes: { r1: { id: "r1", from: "apartment", to: "diner", modes: { walk: { minutes: 18 }, road: { minutes: 5, distanceKm: 2.4 } }, bidirectional: true } },
+    grids: { town: { id: "town", width: 16, height: 12, cellMeters: 100, terrain, blocked: [20, 21, 36, 37], zones: { downtown: [87, 88, 89, 103, 104, 105] } } },
+    rules: { payday: { id: "payday", on: { tick: "day" }, when: "weekday(now) == 5", do: [{ type: "economy.pay", args: { to: "pov", cents: "61240" } }], interrupt: false } },
+    actions: { "sheets.persuade": { id: "sheets.persuade", label: "Persuade", params: { target: { type: "ref", ref: "person" } }, requires: ["present(target)"], check: "persuade", outcomes: { success: [], partial: [], fail: [] }, duration: "5", lexicon: ["persuade", "convince", "talk into"], observable: "talks earnestly" } },
+    checks: { persuade: { id: "persuade", dice: "2d6", modifier: "charm(pov)", bands: [{ outcome: "fail", max: 5 }, { outcome: "partial", min: 6, max: 7 }, { outcome: "success", min: 8 }] } },
+    calendar: { system: "gregorian", epoch: "2026-10-19T00:00", timeZone: "America/New_York", dayParts: [{ id: "morning", label: "Morning", start: "06:00" }, { id: "afternoon", label: "Afternoon", start: "12:00" }, { id: "evening", label: "Evening", start: "18:00" }, { id: "night", label: "Night", start: "22:00" }], holidays: [{ id: "halloween", label: "Halloween", rule: { type: "fixed", month: 10, day: 31 }, dayOff: false }, { id: "thanksgiving", label: "Thanksgiving", rule: { type: "nth_weekday", month: 11, weekday: 4, n: 4 }, dayOff: true }] },
+    schedules: {
+      rosie_shift: { id: "rosie_shift", owner: "npc_rosie", target: "place", recurrence: { every: "week", weekdays: [1, 2, 3, 4, 5, 6], except: ["thanksgiving"] }, slots: [{ start: "05:30", end: "14:00", value: "diner" }, { start: "14:00", end: "22:00", value: "home" }, { start: "22:00", end: "05:30", value: "home" }] },
+      weather: { id: "weather", target: "weather", recurrence: { every: "day" }, slots: [{ start: "00:00", end: "12:00", weighted: [{ value: "clear", weight: 3 }, { value: "light_rain", weight: 2 }] }, { start: "12:00", end: "24:00", given: { clear: [{ value: "clear", weight: 4 }] }, weighted: [{ value: "clear", weight: 1 }] }] },
+    },
+    tracks: {
+      q_raise: {
+        id: "q_raise",
+        kind: "quest",
+        label: "Ask for a raise",
+        owner: "pov",
+        start: "start",
+        visibility: "public",
+        stages: {
+          start: { label: "Thinking about it", next: [{ to: "case", when: "regard(npc_rosie, pov) >= 1" }] },
+          case: { label: "Build the case", cue: "Rosie respects people who show up early.", objectives: ["shifts_covered >= 2"], next: [{ to: "ask", when: "vouched" }], fail: { when: "fired", to: "lost" }, hints: ["Mr. Okafor talks to Rosie every morning."] },
+          ask: { label: "Ask Rosie", next: [{ to: "done", when: "outcome == 'yes'" }, { to: "case", when: "outcome == 'later'" }] },
+          done: { label: "Raise granted", next: [], rewards: [{ type: "set", args: { entity: "pov", field: "wage", value: "wage + 150" } }] },
+          lost: { label: "Lost the job", next: [] },
+          orphan: { label: "Old idea", next: [] },
+        },
+      },
+    },
+    tables: {
+      "economy.catalog": {
+        id: "economy.catalog",
+        pack: "economy",
+        schema: "lre-table/economy.catalog/v1",
+        revision: "9c1d0e7a55aa12bb3344556677889900",
+        label: "Catalog",
+        source: { dataPack: "modern-us", file: "us/prices.json", sourceSchema: "lre-data-src/us/prices/v1", reflectsPeriod: "2025", approximate: true, basis: "Typical US retail prices" },
+        columns: { label: { type: "text" }, category: { type: "enum", values: ["food", "fuel", "household"] }, unit: { type: "text", optional: true }, price_cents: { type: "band", unit: "cents" } },
+        rows: {
+          coffee: { label: "Coffee", category: "food", unit: "cup", price_cents: { min: 200, typical: 325, max: 550 } },
+          pancakes: { label: "Pancake stack", category: "food", price_cents: { min: 600, typical: 899, max: 1400 } },
+          gas_regular: { label: "Gasoline (regular)", category: "fuel", unit: "gal", price_cents: { min: 280, typical: 349, max: 520 } },
+          bad_row: { label: "Paper towels", category: "household", price_cents: { min: 900, typical: 400, max: 1200 } },
+        },
+      },
+    },
+    realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} } },
+    time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 } },
+    sections: { scene: { id: "scene", label: "Scene", rank: 10, template: "Place: {place}. Present: {present}.", position: { type: "native" } } },
+    lore: { harbor_history: { id: "harbor_history", title: "Harbor history", content: "Maple Street grew around the old cannery.", keys: ["cannery", "harbor"], links: [] } },
+    steps: { brief: { id: "brief", purpose: "brief", template: "Summarize the scene for the narrator.", output: "text", signals: ["scene_change"] } },
+    suppressed: [],
+    seedMode: "fresh",
+    lenientPricing: false,
+    currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
+    pov: "pov",
+    start: { place: "apartment", at: "2026-10-19T07:00" },
+  };
+}
+
+export function settingsFixture(): UserSettings {
+  return {
+    v: 1,
+    modelUse: {
+      preset: "standard",
+      steps: {
+        interpret: { enabled: true, signals: ["typed_input"], route: { provider: "helper", connectionId: null, model: null }, maxTokens: 1500 },
+        select: { enabled: true, signals: ["hit_set_changed"], route: { provider: "decision", connectionId: "conn-ds", model: "deepseek-v4-flash" } },
+        extract: { enabled: true, signals: ["reply"], maxTokens: 800 },
+        "npc.choose": { enabled: true, signals: ["tie_zone", "invitation"] },
+      },
+      budgets: { pre: { calls: 2, ms: 20000 }, select: { calls: 1, ms: 6000 }, post: { calls: 2, ms: 30000 } },
+      tokens: { sections: 600, lore: 1200 },
+    },
+    realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} } },
+    time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, scale: 1, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 }, npcCallsPerTimelapse: 0 },
+    extraction: { regard: { mode: "never" } },
+    swipeDefault: "rerun",
+    passThroughBooks: ["book-sam"],
+  };
+}
+
+const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm" };
+
+/** What the backend would derive: pins first, then learning on the connection, then D4 defaults. */
+export function extractionView(settings: UserSettings): Record<ExtractionType, ExtractionModeView> {
+  const out = {} as Record<ExtractionType, ExtractionModeView>;
+  for (const type of Object.keys(DEFAULTS) as ExtractionType[]) {
+    const pinned = settings.extraction[type];
+    if (pinned) out[type] = { mode: pinned.mode, source: "pinned", connection: null, accepted: 4, rejected: 1 };
+    else if (type === "purchase") out[type] = { mode: "auto", source: "learned", connection: { id: "conn-ds", name: "DeepSeek" }, accepted: 28, rejected: 2 };
+    else if (type === "quantity" || type === "spawn") out[type] = { mode: "confirm", source: "bound", connection: null, accepted: 0, rejected: 0 };
+    else out[type] = { mode: DEFAULTS[type], source: "default", connection: { id: "conn-ds", name: "DeepSeek" }, accepted: type === "give" ? 11 : 0, rejected: type === "give" ? 2 : 0 };
+  }
+  return out;
+}
