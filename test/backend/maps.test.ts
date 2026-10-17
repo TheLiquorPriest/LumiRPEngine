@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import type { MapDoc } from "../../src/shared/world";
+import type { MapDoc, WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 
 const SHOP: MapDoc = {
@@ -15,9 +15,10 @@ const SHOP: MapDoc = {
   links: [{ from: "front", to: "back", minutes: 1 }],
 };
 
-function draftOf(body: Record<string, unknown>): Record<string, Record<string, unknown>> {
+/** The draft an editor reply carries (the backend's own document). */
+function draftOf(body: Record<string, unknown>): WorldDoc {
   if (!isRecord(body.draft)) throw new Error("no draft");
-  return body.draft as Record<string, Record<string, unknown>>;
+  return body.draft as unknown as WorldDoc;
 }
 
 describe("maps in the draft", () => {
