@@ -17,6 +17,7 @@ import type { EditorRequest, LintIssue, WorldCollection, WorldPart } from "../sh
 import type { RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { WORLD_FORMAT } from "../shared/world";
 import { blankWorld, currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, stamped } from "../engine/authoring";
+import { compileMaps } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort } from "./host";
 
@@ -55,6 +56,7 @@ export const WORLD_COLLECTIONS: Record<WorldCollection, true> = {
   places: true,
   routes: true,
   grids: true,
+  maps: true,
   rules: true,
   actions: true,
   checks: true,
@@ -211,21 +213,30 @@ export class WorldStore {
     return (await this.draft(worldId, userId)).doc;
   }
 
-  /** One editor operation on the draft; `base` must match the draft's base (else `conflict`). `get` and `discard` ignore it. */
+  /**
+   * One editor operation on the draft; `base` must match the draft's base (else `conflict`). `get` and `discard` ignore it.
+   * A place, grid or route a map made (`map`) is edited in its map, so a write to one is refused; after any
+   * write the maps compile again, so the draft always carries what its maps make.
+   */
   async edit(request: EditorRequest, userId: UserId): Promise<{ draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean }> {
     if (request.op === "discard") await this.host.storage.remove(`${worldDir(request.worldId)}draft.json`, userId).catch(() => undefined);
     const draft = await this.draft(request.worldId, userId);
     if (request.op === "get" || request.op === "discard") return { draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: draft.stored };
     if (request.base !== null && request.base !== draft.base) throw new WorldError("conflict", "the world changed; reload and retry");
-    const doc = draft.doc;
+    let doc = draft.doc;
     if (request.op === "set") {
       setPart(doc, request.part, request.value);
     } else {
       if (!hasOwn(WORLD_COLLECTIONS, request.collection)) throw new WorldError("bad_request", `unknown collection ${request.collection}`);
       if (!safeKey(request.id)) throw new WorldError("bad_request", "not a valid id");
       const collection = collectionOf(doc, request.collection);
+      const current = hasOwn(collection, request.id) ? collection[request.id] : undefined;
+      const owner = isRecord(current) && typeof current.map === "string" ? current.map : null;
+      if (owner !== null) throw new WorldError("bad_request", `${request.collection} ${request.id} is drawn by the map ${owner}; edit it there`);
+      if (request.op === "put" && request.collection !== "maps" && isRecord(request.value) && request.value.map !== undefined) throw new WorldError("bad_request", "only a map marks what it draws (map)");
       if (request.op === "put") collection[request.id] = request.value;
       else delete collection[request.id];
+      doc = compileMaps(doc);
     }
     await this.writeJson(`${worldDir(request.worldId)}draft.json`, { base: draft.base, doc }, userId);
     return { draft: doc, lint: lintWorld(doc, this.registry), base: draft.base, stored: true };

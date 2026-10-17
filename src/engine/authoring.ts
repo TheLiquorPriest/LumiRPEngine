@@ -11,6 +11,7 @@ import type { SheetSectionView } from "../shared/state-view";
 import { knownSignal, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
 import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { WorldCurrency, WorldDoc } from "../shared/world";
+import { compileMaps } from "../shared/maps";
 import { DEFAULT_CURRENCY, ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { applyEvent, validateEvent } from "./events";
 import type { Registry } from "./registry-impl";
@@ -40,6 +41,7 @@ export function blankWorld(id: WorldId, name: string): WorldDoc {
     places: { home: { id: "home", name: "Home", fields: {} } },
     routes: {},
     grids: {},
+    maps: {},
     rules: {},
     actions: {},
     checks: {},
@@ -99,19 +101,21 @@ export function currencyOf(v: unknown): WorldCurrency | null {
 
 /**
  * Brings an older `lre-world-v1` document up to this engine: documents written before `currency`,
- * `lore`, `classifications` or `tiers` existed (and templates without them) get Modern US money, no
- * lore, no classifications and the three default tiers, whose ids are the band ids their entities
- * already name; a POV still on the legacy `pov` tier moves to the lead tier (the POV is `pov`, never
- * capped whatever its tier); step templates for the retired `select` purpose are dropped; and the
- * economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor units; a set
- * `unpricedCap` wins). A world without a `ruleset` keeps none: every part of one is optional, and
- * nothing reads a missing one. Revisions are immutable, so this runs whenever one is read. Returns
- * the same object when nothing changes.
+ * `lore`, `classifications`, `maps` or `tiers` existed (and templates without them) get Modern US
+ * money, no lore, no classifications, no maps and the three default tiers, whose ids are the band
+ * ids their entities already name; a POV still on the legacy `pov` tier moves to the lead tier (the
+ * POV is `pov`, never capped whatever its tier); step templates for the retired `select` purpose
+ * are dropped; and the economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor
+ * units; a set `unpricedCap` wins). A world without a `ruleset` keeps none: every part of one is
+ * optional, and nothing reads a missing one. Last, the maps compile into the places, grids and
+ * routes they own (`compileMaps`). Revisions are immutable, so this runs whenever one is read.
+ * Returns the same object when nothing changes.
  */
 export function migrateWorld(doc: WorldDoc): WorldDoc {
   const currency: unknown = doc.currency;
   const lore: unknown = doc.lore;
   const classifications: unknown = doc.classifications;
+  const maps: unknown = doc.maps;
   const steps: unknown = doc.steps;
   const hasTiers = isRecord(doc.tiers);
   const tiers = hasTiers ? doc.tiers : defaultTiers();
@@ -121,8 +125,8 @@ export function migrateWorld(doc: WorldDoc): WorldDoc {
   const economy: unknown = isRecord(doc.packs) ? doc.packs.economy : undefined;
   const config = isRecord(economy) && isRecord(economy.config) ? economy.config : null;
   const oldCap = config !== null && "unpricedCapCents" in config;
-  if (isCurrency(currency) && isRecord(lore) && isRecord(classifications) && hasTiers && retired.length === 0 && !legacyPov && !oldCap) return doc;
-  const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, tiers };
+  if (isCurrency(currency) && isRecord(lore) && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && !legacyPov && !oldCap) return compileMaps(doc);
+  const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
   if (retired.length > 0) {
     out.steps = { ...doc.steps };
     for (const id of retired) delete out.steps[id];
@@ -133,7 +137,7 @@ export function migrateWorld(doc: WorldDoc): WorldDoc {
     const { unpricedCapCents: cents, ...rest } = config;
     out.packs = { ...out.packs, economy: { ...pack, config: { ...rest, ...(typeof cents === "number" && rest.unpricedCap === undefined ? { unpricedCap: cents } : {}) } } };
   }
-  return out;
+  return compileMaps(out);
 }
 
 /** Structural checks every world must pass, plus the registry's lint rules. */

@@ -720,6 +720,7 @@ export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
     places: Object.fromEntries(tpl.places.map((p) => [p.id, placeDef(c, p)])),
     routes,
     grids,
+    maps: {},
     rules,
     actions,
     checks: {},

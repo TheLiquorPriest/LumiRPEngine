@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../../../shared/json";
 import type { GridDef } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
-import { SchemaEditor } from "../../../frontend/build/build";
+import { MapOwned, SchemaEditor } from "../../../frontend/build/build";
 import { Seg, useBusy } from "../../../frontend/components";
 import { fit, GestureTracker, IDENTITY, toScreen, toWorld } from "../../../frontend/map-math";
 import type { Point, Transform } from "../../../frontend/map-math";
@@ -225,6 +225,7 @@ export function GridEditor(props: EditorProps) {
   const [busy, run] = useBusy();
   useEffect(() => setGrid(stored ? structuredClone(stored) : blank), [JSON.stringify(stored)]);
   if (!id) return <SchemaEditor {...props} />;
+  if (stored?.map) return <MapOwned worldId={props.world.id} collection="grids" id={id} value={stored} map={stored.map} />;
   const changed = JSON.stringify(grid) !== JSON.stringify(stored ?? null);
   const palette = [...new Set([...TERRAINS, ...grid.terrain])];
   return (
@@ -324,7 +325,7 @@ export function GridEditor(props: EditorProps) {
   );
 }
 
-/** Places: the schema form, plus tap-to-place on the parent place's grid. */
+/** Places: the schema form, plus tap-to-place on the parent place's grid; a place a map draws is edited in the map. */
 export function PlaceEditor(props: EditorProps) {
   const app = useApp();
   const id = props.id?.startsWith("new:") ? null : props.id;
@@ -335,7 +336,7 @@ export function PlaceEditor(props: EditorProps) {
   return (
     <div class="lre-stack">
       <SchemaEditor {...props} />
-      {place && grid ? (
+      {place && grid && !place.map ? (
         <section class="lre-card">
           <div class="lre-h">Position on {parent?.name ?? "parent"}'s grid</div>
           <GridCanvas

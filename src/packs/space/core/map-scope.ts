@@ -5,7 +5,8 @@
 // (filtered to what the POV may see) and Build's map preview draw a scope the same way.
 
 import type { PlaceId, TravelMode } from "../../../shared/ids";
-import type { WorldDoc } from "../../../shared/world";
+import { isRecord } from "../../../shared/json";
+import type { MapDoc, WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
 
 /** What the breadcrumbs call the outermost scope, the world's top-level places. */
@@ -94,19 +95,24 @@ export function hasGrid(world: Pick<WorldDoc, "places" | "grids">, place: PlaceI
   return grid !== undefined && own(world.grids, grid) !== undefined;
 }
 
+/** The node map (`WorldDoc.maps`, no layout) that draws a place, if one does; a map the document holds may be malformed. */
+function nodeMapOf(world: Pick<WorldDoc, "maps">, place: PlaceId): MapDoc | undefined {
+  return Object.values(isRecord(world.maps) ? world.maps : {}).find((m) => isRecord(m) && m.scope === place && m.layout === undefined);
+}
+
 /**
- * The scope a map opens on for a viewer at `here`: the nearest place around it that has a grid
- * (the viewer's own place counts when there are places inside it to draw), else the place it is
- * in, else the world.
+ * The scope a map opens on for a viewer at `here`: the nearest place around it that has a grid or
+ * a map of its own (the viewer's own place counts when there are places inside it to draw), else
+ * the place it is in, else the world.
  */
-export function defaultScope(world: Pick<WorldDoc, "places" | "grids">, here: PlaceId | null, children: ReadonlyMap<PlaceId | null, readonly PlaceId[]>, filter: ScopeFilter): PlaceId | null {
+export function defaultScope(world: Pick<WorldDoc, "places" | "grids" | "maps">, here: PlaceId | null, children: ReadonlyMap<PlaceId | null, readonly PlaceId[]>, filter: ScopeFilter): PlaceId | null {
   const path = placePath(world, here);
   const inner = path.at(-1);
   for (let i = path.length - 1; i >= 0; i--) {
     const id = path[i];
     if (id === undefined) continue;
     if (id === inner && !(children.get(id) ?? []).some(filter.drawn)) continue;
-    if (hasGrid(world, id)) return id;
+    if (hasGrid(world, id) || nodeMapOf(world, id)) return id;
   }
   return path.length >= 2 ? (path[path.length - 2] ?? null) : null;
 }
@@ -130,9 +136,10 @@ function ring(ids: readonly PlaceId[], cx: number, cy: number, r: number): Map<P
 /**
  * One scope as the map draws it: its drawn children at their positions, the routes between them,
  * and its grid. On a grid a child sits at its cell's centre, and children without a cell (another
- * floor, a cellar) sit in a row below the grid; elsewhere children lie on a ring.
+ * floor, a cellar) sit in a row below the grid. Elsewhere a child sits at its node-map position
+ * (`layoutPos`, in the node map's `size` when it gives one), and the rest lie on a ring.
  */
-export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; here?: PlaceId | null; pov?: { x: number; y: number } }): MapScopeView {
+export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; here?: PlaceId | null; pov?: { x: number; y: number } }): MapScopeView {
   const kids = ((opts.children ?? placeChildren(world)).get(scope) ?? []).filter(filter.drawn);
   const def = scope === null ? undefined : own(world.places, scope);
   const grid = def?.grid ? own(world.grids, def.grid) : undefined;
@@ -148,7 +155,16 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids">, 
     off.forEach((id, i) => at.set(id, { x: Math.round(((i + 1) * grid.width * 10) / (off.length + 1)) / 10, y: grid.height + 1.5 }));
     frame = { width: grid.width, height: grid.height + (off.length > 0 ? 3 : 0) };
   } else {
-    for (const [id, p] of ring(kids, NODE_FRAME / 2, NODE_FRAME / 2, NODE_FRAME / 3)) at.set(id, p);
+    const placed = kids.flatMap((id) => {
+      const pos = own(world.places, id)?.layoutPos;
+      return pos ? [[id, { x: pos.x, y: pos.y }] as const] : [];
+    });
+    const size = scope === null ? undefined : nodeMapOf(world, scope)?.size;
+    if (Array.isArray(size) && typeof size[0] === "number" && typeof size[1] === "number") frame = { width: Math.max(1, size[0]), height: Math.max(1, size[1]) };
+    else if (placed.length > 0) frame = { width: Math.max(1, ...placed.map(([, p]) => p.x)), height: Math.max(1, ...placed.map(([, p]) => p.y)) };
+    for (const [id, p] of placed) at.set(id, p);
+    const rest = kids.filter((id) => !at.has(id));
+    for (const [id, p] of ring(rest, frame.width / 2, frame.height / 2, Math.min(frame.width, frame.height) / 3)) at.set(id, p);
   }
   const places: MapPlaceView[] = kids.map((id) => {
     const p = own(world.places, id);

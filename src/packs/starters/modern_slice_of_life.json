@@ -1815,6 +1815,7 @@
       "cellMeters": 5
     }
   },
+  "maps": {},
   "rules": {
     "r_small_craft_advisory": {
       "id": "r_small_craft_advisory",

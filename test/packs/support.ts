@@ -55,6 +55,7 @@ export function baseWorld(patch: Partial<WorldDoc> = {}): WorldDoc {
     },
     routes: {},
     grids: {},
+    maps: {},
     rules: {},
     actions: {},
     checks: {},

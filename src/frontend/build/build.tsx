@@ -10,7 +10,7 @@ import type { LintIssue, WorldCollection, WorldPart } from "../../shared/protoco
 import type { WorldDoc, WorldIndex } from "../../shared/world";
 import type { App, BuildRoute } from "../app";
 import { useApp, useUi, useView } from "../app";
-import { Card, Empty, useBusy } from "../components";
+import { Card, Empty, JsonView, useBusy } from "../components";
 import type { EditorProps } from "../registry";
 import { useSelect } from "../store";
 import { CheckView, issueTarget } from "./check";
@@ -24,6 +24,7 @@ import { TiersEditor } from "./tiers-editor";
 const COLLECTIONS: { id: WorldCollection; label: string; hint: string }[] = [
   { id: "entities", label: "Entities", hint: "People, things, vehicles" },
   { id: "places", label: "Places", hint: "Where things happen" },
+  { id: "maps", label: "Maps", hint: "Floor plans and town maps, as lre-map-v1" },
   { id: "routes", label: "Routes", hint: "Travel between places" },
   { id: "grids", label: "Grids", hint: "Maps inside places" },
   { id: "kinds", label: "Kinds", hint: "Types and their fields" },
@@ -455,6 +456,7 @@ function CollectionView(props: { collection: WorldCollection }) {
                   <code>{id}</code>
                   {isRecord(value) && typeof value.kind === "string" ? ` · ${value.kind}` : ""}
                   {isRecord(value) && typeof value.pack === "string" && value.pack ? ` · ${value.pack}` : ""}
+                  {isRecord(value) && typeof value.map === "string" ? ` · drawn by the map ${value.map}` : ""}
                 </span>
               </span>
               {issues > 0 ? <span class="lre-badge warn">{issues}</span> : null}
@@ -479,7 +481,30 @@ function CollectionView(props: { collection: WorldCollection }) {
   );
 }
 
-/** The default editor for any collection: the schema-driven form over `COLLECTION_SPECS`. */
+const OWNED_NOUN: Partial<Record<WorldCollection, string>> = { places: "place", routes: "route", grids: "grid" };
+
+/** An item a map draws (DESIGN §4.1): read-only here, edited in its map. */
+export function MapOwned(props: { worldId: string; collection: WorldCollection; id: string; value: unknown; map: string }) {
+  const app = useApp();
+  return (
+    <div class="lre-stack" data-lre-editor={props.collection} data-lre-owned={props.map}>
+      <span class="lre-h2">
+        <code>{props.id}</code>
+      </span>
+      <div class="lre-banner info">
+        <span>
+          The map <code>{props.map}</code> draws this {OWNED_NOUN[props.collection] ?? "item"}, so it's read-only here.
+        </span>
+        <button type="button" class="lre-btn small primary" onClick={() => go(app, { view: "item", worldId: props.worldId, collection: "maps", id: props.map })}>
+          Edit in map
+        </button>
+      </div>
+      <JsonView value={props.value} />
+    </div>
+  );
+}
+
+/** The default editor for any collection: the schema-driven form over `COLLECTION_SPECS`; an item a map draws shows read-only. */
 export function SchemaEditor(props: EditorProps) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
@@ -497,6 +522,7 @@ export function SchemaEditor(props: EditorProps) {
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
   // A pack's entry shows the pack's own config fields, when its ui registers them, above the JSON.
   const PackConfig = props.collection === "packs" ? app.catalog.configs.get(id) : undefined;
+  if (isRecord(stored) && typeof stored.map === "string") return <MapOwned worldId={props.world.id} collection={props.collection} id={id} value={stored} map={stored.map} />;
   const save = () =>
     run(async () => {
       const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "put", collection: props.collection, id, value });

@@ -1279,6 +1279,7 @@
       "cellMeters": 4
     }
   },
+  "maps": {},
   "rules": {
     "r_storm_arrives": {
       "id": "r_storm_arrives",

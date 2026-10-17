@@ -11,6 +11,7 @@
 //   4  terrain multipliers and weather effects on travel; mode-specific routes
 
 import type { JsonValue } from "../../../shared/json";
+import { mapLint } from "../../../shared/maps";
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { KindDef } from "../../../shared/world";
@@ -244,6 +245,8 @@ export const spacePack: PackDef = {
         return issues;
       },
     });
+    // Maps (`lre-map-v1`): shape, scope, layout and legend, places new to the world, links.
+    r.lint({ code: "space.maps", check: mapLint });
   },
 };
 

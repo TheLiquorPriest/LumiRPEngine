@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TheLiquorPriest/LumiRPEngine/blob/main/src/shared/lre-map-v1.schema.json",
+  "title": "lre-map-v1",
+  "description": "A map of one place in a LumiRPEngine world (WorldDoc.maps). A grid map (layout plus legend) draws an interior cell by cell; a node map (places plus links) draws a town or a region. When the world is read, the map compiles into the places inside its scope, a grid and routes, which it owns.",
+  "type": "object",
+  "required": ["id", "scope"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "$ref": "#/$defs/id", "description": "The map's id: its key in the world's maps." },
+    "scope": { "type": "string", "minLength": 1, "maxLength": 200, "description": "The id of the place the map draws; the map's places go inside it." },
+    "title": { "type": "string", "maxLength": 80 },
+    "size": { "$ref": "#/$defs/pair", "description": "[width, height]: the layout's size on a grid map; the frame `at` positions use on a node map." },
+    "layout": {
+      "type": "array",
+      "description": "A grid map's rows, top first, one character per cell; every row the same length.",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+    },
+    "legend": {
+      "type": "object",
+      "description": "What each layout character stands for. Characters not listed: # wall, . floor, + door, a space nothing (blocked).",
+      "propertyNames": { "minLength": 1, "maxLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/cell" }
+    },
+    "places": {
+      "type": "array",
+      "description": "The places the map creates inside its scope.",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/place" }
+    },
+    "links": {
+      "type": "array",
+      "description": "Ways between places, as routes. Link every place in the scope or none: with links, places without one can't be walked to from the others.",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/link" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "letters, digits, _ and -, starting with a letter or digit"
+    },
+    "pair": {
+      "type": "array",
+      "description": "two whole numbers, [x, y] or [width, height]",
+      "items": { "type": "integer", "minimum": 0, "maximum": 10000 },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "cell": {
+      "anyOf": [
+        { "title": "\"wall\", \"floor\" or \"door\"", "enum": ["wall", "floor", "door"] },
+        {
+          "title": "{\"terrain\": …}",
+          "type": "object",
+          "required": ["terrain"],
+          "additionalProperties": false,
+          "properties": { "terrain": { "type": "string", "minLength": 1, "maxLength": 40 }, "blocked": { "type": "boolean" } }
+        },
+        {
+          "title": "{\"place\": …}",
+          "type": "object",
+          "required": ["place"],
+          "additionalProperties": false,
+          "properties": { "place": { "$ref": "#/$defs/id" } }
+        },
+        {
+          "title": "{\"zone\": …}",
+          "type": "object",
+          "required": ["zone"],
+          "additionalProperties": false,
+          "properties": { "zone": { "$ref": "#/$defs/id" } }
+        }
+      ]
+    },
+    "place": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "at": { "$ref": "#/$defs/pair", "description": "[x, y]: the place's cell on a grid map (else the middle of its area in the legend), its position on a node map (else laid out for it)." },
+        "opens": { "$ref": "#/$defs/id", "description": "The map that draws this place's inside; its scope is this place." }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": ["from", "to", "minutes"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string", "minLength": 1, "maxLength": 200, "description": "A place of this map, or any other place in the world." },
+        "to": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "mode": { "enum": ["walk", "road", "offroad", "water"], "description": "walk unless given" },
+        "minutes": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+        "bidirectional": { "type": "boolean", "description": "true unless given" }
+      }
+    }
+  }
+}

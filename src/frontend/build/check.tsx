@@ -6,7 +6,7 @@ import type { LintIssue, WorldCollection, WorldPart } from "../../shared/protoco
 import { useApp } from "../app";
 import { Card, Empty, Seg, useBusy } from "../components";
 
-const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
+const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
 /** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part. */
 const PARTS: readonly WorldPart[] = ["calendar", "realism", "time", "ruleset"];
 

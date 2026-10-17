@@ -1491,6 +1491,7 @@
       "cellMeters": 2
     }
   },
+  "maps": {},
   "rules": {
     "r_storm_breaks": {
       "id": "r_storm_breaks",

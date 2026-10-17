@@ -161,6 +161,16 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
         { kind: "number", key: "y", label: "y", min: 0, step: 1 },
       ],
     },
+    {
+      kind: "object",
+      key: "layoutPos",
+      label: "Position on the parent's node map",
+      optional: true,
+      fields: [
+        { kind: "number", key: "x", label: "x", step: 1 },
+        { kind: "number", key: "y", label: "y", step: 1 },
+      ],
+    },
     { kind: "json", key: "fields", label: "Fields" },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
   ],
@@ -193,6 +203,15 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "terrain", label: "Terrain (row-major)" },
     { kind: "json", key: "blocked", label: "Blocked cells" },
     { kind: "json", key: "zones", label: "Zones" },
+  ],
+  maps: [
+    { kind: "text", key: "title", label: "Title", optional: true },
+    { kind: "ref", key: "scope", label: "Draws the inside of", collection: "places" },
+    { kind: "json", key: "size", label: "Size [width, height]", optional: true },
+    { kind: "json", key: "layout", label: "Layout rows", optional: true },
+    { kind: "json", key: "legend", label: "Legend", optional: true },
+    { kind: "json", key: "places", label: "Places", optional: true },
+    { kind: "json", key: "links", label: "Links", optional: true },
   ],
   rules: [
     { kind: "json", key: "on", label: "Trigger", hint: '{"event": "…"} · {"tick": "turn|slot|day"} · {"enter": "place"} · {"at": "formula"}' },
@@ -415,8 +434,8 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers">, FieldSpec[]> = {
   ],
 };
 
-/** A minimal valid value for a new item (the backend lints the rest); a new entity starts in the world's spawn tier. */
-export function newItem(collection: WorldCollection, id: string, world: Pick<WorldDoc, "tiers" | "spawnTier">): JsonObject {
+/** A minimal valid value for a new item (the backend lints the rest); a new entity starts in the world's spawn tier, a new map draws the start place. */
+export function newItem(collection: WorldCollection, id: string, world: Pick<WorldDoc, "tiers" | "spawnTier" | "start">): JsonObject {
   switch (collection) {
     case "kinds":
       return { id, label: id, fields: {} };
@@ -430,6 +449,8 @@ export function newItem(collection: WorldCollection, id: string, world: Pick<Wor
       return { id, from: "", to: "", modes: { walk: { minutes: 10 } }, bidirectional: true };
     case "grids":
       return { id, width: 16, height: 16, terrain: Array.from({ length: 256 }, () => "grass"), blocked: [], zones: {} };
+    case "maps":
+      return { id, scope: world.start.place, places: [] };
     case "rules":
       return { id, on: { tick: "turn" }, do: [] };
     case "actions":

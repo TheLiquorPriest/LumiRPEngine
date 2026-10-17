@@ -74,6 +74,7 @@ export function modernUsWorld(id: string, name: string): WorldDoc {
       lake_crossing: { id: "lake_crossing", from: "lake", to: "trailhead", modes: { water: { minutes: 50, distanceKm: 18, terrain: "open_water" } }, bidirectional: true },
     },
     grids: {},
+    maps: {},
     rules: {},
     actions: {
       persuade: {

@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../../src/shared/world";
+import { blankWorld, migrateWorld } from "../../../src/engine/authoring";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
@@ -145,5 +146,22 @@ describe("map scopes", () => {
     // The POV's cell is on its own place's grid, never on a scope around it.
     state.entities[world.pov]!.fields.place = "crooked_kettle";
     expect(scopeOf(at(3), "market_square").grid?.pov).toBeUndefined();
+  });
+
+  test("a map's places draw in its scope: a node map's at their positions, the rest on a ring; the map opens on the place it draws", () => {
+    const w = blankWorld("w_view", "View");
+    w.places = { town: { id: "town", name: "Town", fields: {} }, home: { id: "home", name: "Home", parent: "town", fields: {} } };
+    w.maps = { town_map: { id: "town_map", scope: "town", size: [200, 100], places: [{ id: "square", at: [100, 50] }, { id: "inn", at: [40, 20] }], links: [{ from: "square", to: "inn", minutes: 3 }, { from: "home", to: "square", minutes: 4 }] } };
+    const world = migrateWorld(w);
+    world.entities.you!.fields.place = "home";
+    const view = buildMapView(reg.context(world, startState(world)));
+    expect(view.scope).toBe("town");
+    const town = scopeOf(view, "town");
+    expect(town.frame).toEqual({ width: 200, height: 100 });
+    expect(town.places.filter((p) => p.id !== "home").map((p) => [p.id, p.x, p.y])).toEqual([
+      ["inn", 40, 20],
+      ["square", 100, 50],
+    ]);
+    expect(town.routes.map((r) => `${r.from}-${r.to}`).sort()).toEqual(["home-square", "inn-square"]);
   });
 });

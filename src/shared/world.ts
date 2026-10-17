@@ -22,6 +22,7 @@ import type {
   InterruptPolicy,
   KindId,
   Level,
+  MapId,
   PackId,
   PlaceId,
   ProgressionId,
@@ -253,10 +254,14 @@ export interface PlaceDef {
   grid?: GridId;
   /** Position on the parent's grid. */
   cell?: { x: number; y: number };
+  /** Position on the parent's node map (a parent without a grid); `cell` is for grids. */
+  layoutPos?: { x: number; y: number };
   fields: JsonObject;
   visibility?: Visibility;
   /** Import from lore (DESIGN §9.7): the `bookId/entryId` entries this came from; never edited. */
   sources?: string[];
+  /** The map that compiled this place (it owns it; Build edits it in the map). Absent on authored places. */
+  map?: MapId;
 }
 
 export interface RouteLeg {
@@ -271,6 +276,8 @@ export interface RouteDef {
   to: PlaceId;
   modes: Partial<Record<TravelMode, RouteLeg>>;
   bidirectional: boolean;
+  /** The map that compiled this route from its links; absent on authored routes. */
+  map?: MapId;
 }
 
 export interface GridDef {
@@ -283,6 +290,54 @@ export interface GridDef {
   /** Blocked cell indexes. */
   blocked: number[];
   zones: Record<string, number[]>;
+  /** The map that compiled this grid from its layout; absent on authored grids. */
+  map?: MapId;
+}
+
+/**
+ * What a character of a grid map's layout stands for (`lre-map-v1`): a wall, floor or door; a
+ * terrain, blocked or not; part of one of the map's places (its area); or part of a zone.
+ */
+export type MapCellDef = "wall" | "floor" | "door" | { terrain: string; blocked?: boolean } | { place: PlaceId } | { zone: string };
+
+/** A place a map draws inside its scope; the map creates it. */
+export interface MapPlaceDef {
+  id: PlaceId;
+  /** Shown name; the id in words when absent. */
+  name?: string;
+  /** [x, y]: its cell on a grid map, its position on a node map. */
+  at?: [number, number];
+  /** The map that draws the inside of this place (its scope is this place). */
+  opens?: MapId;
+}
+
+/** A way between two places, both directions unless `bidirectional` is false. */
+export interface MapLinkDef {
+  from: PlaceId;
+  to: PlaceId;
+  mode?: TravelMode;
+  minutes: number;
+  bidirectional?: boolean;
+}
+
+/**
+ * A map (`lre-map-v1`, DESIGN §4.1): the source of truth for one place's interior. A grid map
+ * (`layout` plus `legend`) draws an interior cell by cell; a node map (places plus links) draws a
+ * town or a region. When the world is read, each map compiles into the places inside its scope, a
+ * grid and routes, which it owns.
+ */
+export interface MapDoc {
+  id: MapId;
+  /** The place the map draws; its places go inside it. */
+  scope: PlaceId;
+  title?: string;
+  /** [width, height]: the layout's size on a grid map, the frame `at` positions use on a node map. */
+  size?: [number, number];
+  /** A grid map's rows, top first, one character per cell. */
+  layout?: string[];
+  legend?: Record<string, MapCellDef>;
+  places?: MapPlaceDef[];
+  links?: MapLinkDef[];
 }
 
 // ---------------------------------------------------------------- rules, actions, checks
@@ -697,6 +752,8 @@ export interface WorldDoc {
   places: Record<PlaceId, PlaceDef>;
   routes: Record<RouteId, RouteDef>;
   grids: Record<GridId, GridDef>;
+  /** Maps by id (`lre-map-v1`): the source of truth for the places, grids and routes they compile into. */
+  maps: Record<MapId, MapDoc>;
   rules: Record<RuleId, RuleDef>;
   actions: Record<ActionId, ActionDef>;
   checks: Record<CheckId, CheckDef>;

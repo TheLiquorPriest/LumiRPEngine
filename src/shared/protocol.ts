@@ -231,6 +231,7 @@ export type WorldCollection =
   | "places"
   | "routes"
   | "grids"
+  | "maps"
   | "rules"
   | "actions"
   | "checks"

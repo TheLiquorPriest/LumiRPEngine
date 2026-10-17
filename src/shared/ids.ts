@@ -11,6 +11,8 @@ export type EntityId = string;
 export type PlaceId = string;
 export type RouteId = string;
 export type GridId = string;
+/** A map in `WorldDoc.maps` (`lre-map-v1`). */
+export type MapId = string;
 export type RuleId = string;
 export type ActionId = string;
 export type CheckId = string;

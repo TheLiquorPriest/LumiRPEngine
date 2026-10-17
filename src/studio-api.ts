@@ -57,6 +57,8 @@ export function validate(doc: unknown): LintIssue[] {
   if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", "lenientPricing must be true or false");
   // The ruleset is optional (DESIGN §11); lint checks its parts.
   if (doc.ruleset !== undefined && !isRecord(doc.ruleset)) err("ruleset", "ruleset must be an object");
+  // A world written before maps has none (migration adds the collection); each map's shape is lint's.
+  if (doc.maps !== undefined && !isRecord(doc.maps)) err("maps", "maps must be an object");
   return issues;
 }
 

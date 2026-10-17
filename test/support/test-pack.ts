@@ -184,6 +184,7 @@ export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh")
     places: { home: { id: "home", name: "Home", fields: {} } },
     routes: {},
     grids: {},
+    maps: {},
     rules: {},
     actions: {},
     checks: {},
