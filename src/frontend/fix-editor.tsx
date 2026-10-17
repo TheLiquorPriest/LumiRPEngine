@@ -1,25 +1,30 @@
 // The ✎ fix editor (DESIGN §12): edits one FixTarget and sends `lre.fix`, a `post` entry of kind
-// `fix` on the head. The input follows the target's field type; options win when present.
+// `fix` on the head. The input follows the target's field type; options win when present. Money is
+// typed in the world's currency (the shared money input).
 
 import { useState } from "preact/hooks";
 import type { JsonValue } from "../shared/json";
+import { formatMoneyInput, parseMoneyInput } from "../shared/money";
 import type { FixTarget } from "../shared/state-view";
+import { DEFAULT_CURRENCY, type WorldCurrency } from "../shared/world";
 import { useApp, useView } from "./app";
 import { useBusy } from "./components";
+import { MoneyInput } from "./money-input";
 import { fixRequest } from "./requests";
 
-function initialText(target: FixTarget): string {
-  if (target.type === "money" && typeof target.value === "number") return (target.value / 100).toFixed(2);
+function initialText(target: FixTarget, currency: WorldCurrency): string {
+  if (target.type === "money" && typeof target.value === "number") return formatMoneyInput(target.value, currency);
   if (target.value === null || target.value === undefined) return "";
   return typeof target.value === "string" ? target.value : JSON.stringify(target.value);
 }
 
-/** Parses the typed text for the target's field type; null when it doesn't parse or is out of range. */
-export function parseFixValue(target: FixTarget, text: string): JsonValue | null {
+/** Parses the typed text for the target's field type (money in `currency`); null when it doesn't parse or is out of range. */
+export function parseFixValue(target: FixTarget, text: string, currency: WorldCurrency): JsonValue | null {
   const trimmed = text.trim();
   if (target.type === "money") {
-    if (!/^-?\d+(\.\d{0,2})?$/.test(trimmed)) return null;
-    return Math.round(Number(trimmed) * 100);
+    const cents = parseMoneyInput(trimmed, currency);
+    if (cents === null || (target.min !== undefined && cents < target.min) || (target.max !== undefined && cents > target.max)) return null;
+    return cents;
   }
   if (target.type === "number" || target.type === "duration") {
     if (trimmed === "" || !Number.isFinite(Number(trimmed))) return null;
@@ -43,7 +48,8 @@ export function FixEditor(props: { label: string; target: FixTarget; onDone(): v
   const app = useApp();
   const view = useView();
   const { target } = props;
-  const [text, setText] = useState(() => initialText(target));
+  const currency = view?.currency ?? DEFAULT_CURRENCY;
+  const [text, setText] = useState(() => initialText(target, currency));
   const [busy, run] = useBusy();
   const chatId = view?.chatId;
   if (!chatId) return null;
@@ -74,7 +80,7 @@ export function FixEditor(props: { label: string; target: FixTarget; onDone(): v
       </div>
     );
   }
-  const parsed = parseFixValue(target, text);
+  const parsed = parseFixValue(target, text, currency);
   return (
     <form
       class="lre-stack"
@@ -93,10 +99,12 @@ export function FixEditor(props: { label: string; target: FixTarget; onDone(): v
             <option value="true">Yes</option>
             <option value="false">No</option>
           </select>
+        ) : target.type === "money" ? (
+          <MoneyInput currency={currency} value={text} onInput={setText} label={`Fix ${props.label.toLowerCase()}`} invalid={parsed === null} />
         ) : (
           <input
             class={parsed === null ? "lre-input invalid" : "lre-input"}
-            inputMode={target.type === "money" || target.type === "number" || target.type === "duration" ? "decimal" : "text"}
+            inputMode={target.type === "number" || target.type === "duration" ? "decimal" : "text"}
             value={text}
             onInput={(event) => setText(event.currentTarget.value)}
           />

@@ -174,12 +174,16 @@ describe("Play panels", () => {
 });
 
 describe("small parsers", () => {
-  test("fix values parse by field type and respect min and max", () => {
-    expect(parseFixValue({ entity: "e", field: "cash", type: "money", value: 0 }, "12.5")).toBe(1250);
-    expect(parseFixValue({ entity: "e", field: "cash", type: "money", value: 0 }, "12.555")).toBeNull();
-    expect(parseFixValue({ entity: "e", field: "energy", type: "number", value: 0, min: 0, max: 100 }, "101")).toBeNull();
-    expect(parseFixValue({ entity: "e", field: "ok", type: "bool", value: false }, "true")).toBe(true);
-    expect(parseFixValue({ entity: "e", field: "tags", type: "list", value: [] }, "[1,2]")).toEqual([1, 2]);
+  test("fix values parse by field type and respect min and max; money is typed in the world's currency", () => {
+    const usd = { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" };
+    const bits = { code: "BIT", symbol: "bits", minorUnit: "bit", decimals: 0, format: "{sign}{amount} bits" };
+    expect(parseFixValue({ entity: "e", field: "cash", type: "money", value: 0 }, "12.5", usd)).toBe(1250);
+    expect(parseFixValue({ entity: "e", field: "cash", type: "money", value: 0 }, "12.555", usd)).toBeNull();
+    expect(parseFixValue({ entity: "e", field: "cash", type: "money", value: 0 }, "5", bits)).toBe(5);
+    expect(parseFixValue({ entity: "e", field: "cash", type: "money", value: 0 }, "5.5", bits)).toBeNull();
+    expect(parseFixValue({ entity: "e", field: "energy", type: "number", value: 0, min: 0, max: 100 }, "101", usd)).toBeNull();
+    expect(parseFixValue({ entity: "e", field: "ok", type: "bool", value: false }, "true", usd)).toBe(true);
+    expect(parseFixValue({ entity: "e", field: "tags", type: "list", value: [] }, "[1,2]", usd)).toEqual([1, 2]);
   });
 
   test("expression balance catches brackets and strings; issues open the item they point at", () => {

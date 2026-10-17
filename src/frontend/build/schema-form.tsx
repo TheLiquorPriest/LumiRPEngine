@@ -7,10 +7,12 @@ import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
 import type { Band } from "../../shared/ids";
 import { BANDS, DOMAINS } from "../../shared/ids";
+import { formatMoneyInput, minorUnitPlural, parseMoneyInput } from "../../shared/money";
 import { BAND_LABEL, tierOf, tiersInOrder } from "../../shared/tiers";
 import type { LintIssue } from "../../shared/protocol";
-import { BUILTIN_RELATIONS } from "../../shared/world";
-import type { FieldDef, WorldDoc } from "../../shared/world";
+import { BUILTIN_RELATIONS, formatMoney } from "../../shared/world";
+import type { FieldDef, WorldCurrency, WorldDoc } from "../../shared/world";
+import { MoneyInput } from "../money-input";
 import { ExprEditor } from "./expr-editor";
 import type { FieldSpec, RefCollection } from "./schema";
 
@@ -131,6 +133,42 @@ function NumberInput(props: { label: string; value: JsonValue | undefined; min?:
         }}
       />
       {props.hint ? <span class="lre-small lre-dim">{props.hint}</span> : null}
+      <Issues issues={props.issues} />
+    </label>
+  );
+}
+
+/**
+ * A money field as Build stores it: whole minor units of the world's currency, which the label
+ * names ("Opening balance (cents)", "(bits)", "(pennies)"), with the amount they make beside it.
+ */
+export function MinorMoneyInput(props: { label: string; value: JsonValue | undefined; currency: WorldCurrency; min?: number; max?: number; optional?: boolean; hint?: string; placeholder?: string; issues: readonly LintIssue[]; onChange(value: JsonValue | undefined): void }) {
+  const asText = (v: JsonValue | undefined): string => (typeof v === "number" ? formatMoneyInput(v, props.currency, "minor") : "");
+  const [text, setText] = useState(() => asText(props.value));
+  useEffect(() => setText(asText(props.value)), [props.value]);
+  const parsed = text.trim() === "" ? null : parseMoneyInput(text, props.currency, "minor");
+  const invalid = text.trim() === "" ? !props.optional : parsed === null || (props.min !== undefined && parsed < props.min) || (props.max !== undefined && parsed > props.max);
+  const label = `${props.label} (${minorUnitPlural(props.currency)})`;
+  const notes = [...(parsed !== null ? [formatMoney(parsed, props.currency)] : []), ...(props.hint ? [props.hint] : [])];
+  return (
+    <label class="lre-field">
+      <span class="label">
+        {label}
+        {props.optional ? " (optional)" : ""}
+      </span>
+      <MoneyInput
+        currency={props.currency}
+        unit="minor"
+        value={text}
+        onInput={setText}
+        label={label}
+        invalid={invalid}
+        placeholder={props.placeholder}
+        onBlur={() => {
+          if (!invalid) props.onChange(parsed === null ? undefined : parsed);
+        }}
+      />
+      {notes.length > 0 ? <span class="lre-small lre-dim">{notes.join(" · ")}</span> : null}
       <Issues issues={props.issues} />
     </label>
   );
@@ -330,7 +368,7 @@ function KindFieldsInput(props: { value: JsonValue | undefined; kind: string; ct
           case "duration":
             return <NumberInput key={key} label={def.type === "duration" ? `${label} (min)` : label} value={values[key]} min={def.min} max={def.max} optional issues={issues} onChange={(next) => set(key, next)} />;
           case "money":
-            return <NumberInput key={key} label={`${label} (cents)`} value={values[key]} min={def.min} max={def.max} step={1} optional issues={issues} onChange={(next) => set(key, typeof next === "number" ? Math.round(next) : next)} />;
+            return <MinorMoneyInput key={key} label={label} value={values[key]} currency={props.ctx.doc.currency} min={def.min} max={def.max} optional issues={issues} onChange={(next) => set(key, next)} />;
           case "bool":
             return (
               <label key={key} class="lre-row">

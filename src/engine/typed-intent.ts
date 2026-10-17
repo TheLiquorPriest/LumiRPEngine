@@ -224,8 +224,9 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
           params[name] = rest;
           textFilled = true;
         } else if (def.type === "money" || def.type === "number" || def.type === "duration") {
+          // A typed amount is in the world's currency: "5" is 5 bits, or $5.00 (500 cents).
           const m = /(\d+(?:\.\d+)?)/.exec(text);
-          if (m) params[name] = def.type === "money" ? Math.round(Number(m[1]) * 100) : Number(m[1]);
+          if (m) params[name] = def.type === "money" ? Math.round(Number(m[1]) * 10 ** world.currency.decimals) : Number(m[1]);
         }
       }
       const filled = Object.entries(action.params).every(([name, def]) => def.optional === true || params[name] !== undefined);

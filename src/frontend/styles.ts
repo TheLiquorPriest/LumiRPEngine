@@ -62,6 +62,9 @@ export const CSS = `
 textarea.lre-input{min-height:80px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
 select.lre-input{appearance:auto}
 .lre-input.invalid{border-color:var(--lre-neg)}
+.lre-money{display:flex;align-items:center;gap:6px;flex:1 1 8em;min-width:0}
+.lre-money>.lre-input{flex:1 1 auto;min-width:0;font-variant-numeric:tabular-nums}
+.lre-money-affix{flex:0 0 auto;color:var(--lre-muted)}
 .lre-list{display:flex;flex-direction:column;gap:6px}
 .lre-item{display:flex;align-items:center;gap:10px;min-height:44px;width:100%;padding:8px 10px;border-radius:var(--lre-radius);border:1px solid var(--lre-border);background:var(--lre-subtle);text-align:left}
 .lre-item>.grow{flex:1;min-width:0}
@@ -77,7 +80,10 @@ select.lre-input{appearance:auto}
 .lre-chip button{flex:0 0 auto;max-width:100%;min-height:40px;min-width:40px;padding:4px 12px;border-radius:20px;border:1px solid var(--lre-border);background:var(--lre-fill);white-space:normal;overflow-wrap:anywhere;text-align:center}
 .lre-chip button.primary{background:var(--lre-accent-fill);color:var(--lre-accent-fg);border-color:transparent}
 .lre-chip button.danger{color:var(--lre-neg)}
-.lre-chip[data-kind=decline],.lre-chip[data-kind=degraded]{border-color:color-mix(in srgb,var(--lre-danger) 45%,transparent);background:color-mix(in srgb,var(--lre-danger) 10%,transparent)}
+.lre-chip[data-kind=decline],.lre-chip[data-kind=degraded],.lre-chip[data-kind=read_failed]{border-color:color-mix(in srgb,var(--lre-danger) 45%,transparent);background:color-mix(in srgb,var(--lre-danger) 10%,transparent)}
+.lre-chip-form{display:flex;flex-wrap:wrap;align-items:center;gap:6px;flex:1 1 100%;min-width:0;padding:0 10px 6px 0}
+.lre-chip-form .lre-input{box-sizing:border-box;min-height:40px}
+.lre-chip-form select.lre-input{flex:1 1 12em;width:auto}
 .lre-chip[data-kind=confirm],.lre-chip[data-kind=overdue],.lre-chip[data-kind=keep_report],.lre-chip[data-kind=pending]{border-color:color-mix(in srgb,var(--lre-warning) 50%,transparent);background:color-mix(in srgb,var(--lre-warning) 10%,transparent)}
 .lre-chip[data-kind=change],.lre-chip[data-kind=elapsed],.lre-chip[data-kind=price],.lre-chip[data-kind=roll]{border-color:var(--lre-border);background:var(--lre-subtle)}
 .lre-chip.busy{opacity:.6}

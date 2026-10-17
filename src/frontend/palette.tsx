@@ -6,12 +6,15 @@ import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../shared/ids";
 import type { TimelapseTarget } from "../shared/ledger";
+import { parseMoneyInput } from "../shared/money";
 import type { PaletteEntry, PaletteOption, PaletteView, StateView, TimelapseView } from "../shared/state-view";
+import { DEFAULT_CURRENCY, formatMoney } from "../shared/world";
 import type { PaletteTab } from "./app";
 import { useApp, useView } from "./app";
 import { Empty, OddsBar, Seg, Tabs, tabPanel, useBusy } from "./components";
 import type { TabPanelProps } from "./components";
 import { formatCents, formatMinutes, humanize } from "./format";
+import { MoneyInput } from "./money-input";
 import { paletteRequest, timelapseRequest, timeMarker } from "./requests";
 
 const GROUP_LABEL: Record<PaletteEntry["group"], string> = { action: "Actions", buy: "Buy", pay: "Pay", transfer: "Transfer", drive: "Drive", lend: "Lend" };
@@ -158,7 +161,9 @@ function ActionList(props: { view: StateView; entries: PaletteEntry[]; panel: Ta
   // The entry's required number (Lend's days); null shows and sends its default.
   const [count, setCount] = useState<string | null>(null);
   const [busy, run] = useBusy();
-  const amountCents = /^\d+(\.\d{0,2})?$/.test(amount.trim()) ? Math.round(Number(amount) * 100) : null;
+  // Amounts are typed in the world's currency, with its own decimals (5 is 5 bits, or $5.00).
+  const currency = props.view.currency ?? DEFAULT_CURRENCY;
+  const amountCents = parseMoneyInput(amount, currency);
   const range = selected?.entry.amount;
   const amountOk = !range || (amountCents !== null && amountCents >= range.min && (range.max === null || amountCents <= range.max));
   const number = selected?.entry.number;
@@ -205,14 +210,13 @@ function ActionList(props: { view: StateView; entries: PaletteEntry[]; panel: Ta
       </div>
       <footer>
         {range ? (
-          <input
-            class={amountOk ? "lre-input" : "lre-input invalid"}
-            style={{ flex: 1 }}
-            inputMode="decimal"
-            placeholder={`Amount ($${(range.min / 100).toFixed(2)}${range.max !== null ? `–$${(range.max / 100).toFixed(2)}` : "+"})`}
-            aria-label="Amount in dollars"
+          <MoneyInput
+            currency={currency}
             value={amount}
-            onInput={(event) => setAmount(event.currentTarget.value)}
+            onInput={setAmount}
+            label="Amount"
+            invalid={!amountOk}
+            placeholder={`Amount (${formatMoney(range.min, currency)}${range.max !== null ? `–${formatMoney(range.max, currency)}` : "+"})`}
           />
         ) : null}
         {number ? (

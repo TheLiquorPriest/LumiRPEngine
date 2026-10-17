@@ -5,7 +5,9 @@
 import { useEffect, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
-import type { ColumnDef, DataTable, TableRow } from "../../shared/tables";
+import { minorUnitPlural } from "../../shared/money";
+import type { ColumnDef, DataTable, TableRow, TableUnit } from "../../shared/tables";
+import type { WorldCurrency } from "../../shared/world";
 import { useApp } from "../app";
 import { Card, Empty, Row, useBusy } from "../components";
 import type { EditorProps } from "../registry";
@@ -38,9 +40,14 @@ export function cellProblem(column: ColumnDef, value: JsonValue | undefined): st
   }
 }
 
-function CellInput(props: { name: string; column: ColumnDef; value: JsonValue | undefined; refRows: string[]; onChange(value: JsonValue | undefined): void }) {
+/** A column's unit as the label shows it: money units name the world's minor unit ("bits per gal"), since every amount is stored in it. */
+function unitLabel(unit: TableUnit, currency: WorldCurrency): string {
+  return unit.startsWith("cents") ? `${minorUnitPlural(currency)}${unit.slice("cents".length).replaceAll("_", " ")}` : unit;
+}
+
+function CellInput(props: { name: string; column: ColumnDef; value: JsonValue | undefined; refRows: string[]; currency: WorldCurrency; onChange(value: JsonValue | undefined): void }) {
   const { column } = props;
-  const label = `${props.name}${column.unit ? ` (${column.unit})` : ""}${column.optional ? " (optional)" : ""}`;
+  const label = `${props.name}${column.unit ? ` (${unitLabel(column.unit, props.currency)})` : ""}${column.optional ? " (optional)" : ""}`;
   const problem = cellProblem(column, props.value);
   const numberText = (v: JsonValue | undefined) => (typeof v === "number" ? String(v) : "");
   const toNumber = (text: string): JsonValue | undefined => (text.trim() === "" ? undefined : Number.isFinite(Number(text)) ? (column.type === "int" ? Math.round(Number(text)) : Number(text)) : undefined);
@@ -204,6 +211,7 @@ export function TableEditor(props: EditorProps) {
                 column={column}
                 value={editing[name]}
                 refRows={column.ref ? Object.keys(props.world.tables[column.ref]?.rows ?? {}) : []}
+                currency={props.world.currency}
                 onChange={(value) => {
                   const next = { ...editing };
                   if (value === undefined) delete next[name];
