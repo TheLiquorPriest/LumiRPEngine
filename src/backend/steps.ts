@@ -13,7 +13,7 @@ import type { Answers, Questions } from "../engine/decide";
 import type { InterpretOutput } from "../engine/steps";
 import { cashGift } from "../packs/gear/core/index";
 import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "./host";
-import type { StepLore } from "./lore-steps";
+import type { LookupTransport, StepLore } from "./lore-steps";
 import { HELPER_MAX_TOKENS } from "./settings-store";
 import { readStoredJson } from "./stored-json";
 
@@ -185,6 +185,15 @@ export function transientFailure(error: unknown): boolean {
   return /\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|ESOCKETTIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|UND_ERR_[A-Z_]+)\b|socket hang up|socket connection was closed|connection (?:was )?(?:reset|closed)|fetch failed|network error|timed? ?out|\(5\d\d\)|\b(?:status|HTTP)\s*:?\s*5\d\d\b/i.test(text);
 }
 
+/** A decision's questions as a helper reads them, one line each. */
+function questionLines(questions: Questions): string[] {
+  return Object.entries(questions).map(([key, q]) => {
+    if (q.type === "choice") return `"${key}": choose one of ${JSON.stringify(Object.keys(q.criteria))}. ${q.instructions} Criteria: ${JSON.stringify(q.criteria)}`;
+    if (q.type === "score") return `"${key}": score 0..${q.criteria.length - 1}. ${q.instructions} Levels: ${JSON.stringify(q.criteria)}`;
+    return `"${key}": probability 0..1 that it is true. ${q.instructions}`;
+  });
+}
+
 export class Steps {
   constructor(
     private readonly host: StepsHost,
@@ -275,16 +284,49 @@ export class Steps {
   }
 
   /**
+   * The lookup pre-pass of a step on the Decision connection (DESIGN §5.4). The Decisions API takes
+   * no tools, so one bounded helper call on the default connection asks what lore the decision
+   * needs (the lore tools, or the need form), on a round of the phase's lookup budget, and never
+   * answers the decision itself. Its hits join the step's lore, which the decision then reads.
+   */
+  private async lookupFirst(purpose: StepPurpose, state: JsonValue, questions: Questions, lore: StepLore, userId: UserId, signal: AbortSignal): Promise<void> {
+    let offer = lore.offer();
+    if (!offer) return;
+    lore.spend();
+    const ask = (transport: LookupTransport) => {
+      const contract = transport === "need" ? 'Output JSON only: {"need": ["a short query", …]}, or {"need": []} when the notes given are enough.' : 'Call the lore tools for what you need; when the notes given are enough, reply "none".';
+      const system = ["You get a decision ready. Read the state and the questions and say what world lore would help answer them; don't answer them.", lore.block(), lore.instructions(transport), contract].filter((s) => s !== "").join("\n\n");
+      const messages: QuietMessage[] = [
+        { role: "system", content: system },
+        { role: "user", content: `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}` },
+      ];
+      return this.quiet(purpose, { messages, maxTokens: HELPER_MAX_TOKENS, json: transport === "need", connectionId: null, model: null, ...(transport === "tools" ? { tools: [...lore.tools] } : {}) }, userId, signal, { retry: false, lookup: true });
+    };
+    let reply = await ask(offer);
+    if (reply instanceof Error && offer === "tools" && !signal.aborted && !transientFailure(reply)) {
+      const refusal = reply.message;
+      offer = lore.refuseTools();
+      reply = await ask(offer);
+      if (!(reply instanceof Error)) lore.keepRefusal(refusal);
+    }
+    if (reply instanceof Error) return;
+    const asks = lore.asked(reply, offer);
+    if (asks) lore.answer(asks);
+  }
+
+  /**
    * A decision call (D10): the Decision connection, then the helper, then null (engine-only). A
    * `helper` route asks the helper on that route directly. The step's lore rides in the state the
-   * Decision connection reads, or in the helper's prompt.
+   * Decision connection reads, after its lookup pre-pass, or in the helper's prompt, which may look
+   * lore up itself.
    */
   async decide(purpose: StepPurpose, state: JsonValue, questions: Questions, config: StepConfig | null, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<{ answers: Answers; via: "decision" | "helper" } | null> {
-    const t0 = performance.now();
     const viaHelper = config?.route?.provider === "helper";
     if (!viaHelper) {
+      if (lore) await this.lookupFirst(purpose, state, questions, lore, userId, signal);
       const notes = lore?.lines() ?? [];
       const asked: JsonValue = notes.length === 0 ? state : isRecord(state) ? { ...state, lore: notes } : { state, lore: notes };
+      const t0 = performance.now();
       try {
         const r = await this.host.models.decide({ state: asked, questions, connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null }, userId, signal);
         this.meter.record({ purpose, via: "decision", ok: true, ms: performance.now() - t0, tokens: r.tokens }, userId);
@@ -295,13 +337,8 @@ export class Steps {
       }
     }
     if (signal.aborted) return null;
-    const lines = Object.entries(questions).map(([key, q]) => {
-      if (q.type === "choice") return `"${key}": choose one of ${JSON.stringify(Object.keys(q.criteria))}. ${q.instructions} Criteria: ${JSON.stringify(q.criteria)}`;
-      if (q.type === "score") return `"${key}": score 0..${q.criteria.length - 1}. ${q.instructions} Levels: ${JSON.stringify(q.criteria)}`;
-      return `"${key}": probability 0..1 that it is true. ${q.instructions}`;
-    });
     const system = `Answer each question about the state with probabilities. Output JSON only: {"<key>": {"probabilities": {"<option>": number}}} for choice and score questions, and {"<key>": {"p": number}} for yes/no questions.`;
-    const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${lines.join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], maxTokens: config?.maxTokens ?? HELPER_MAX_TOKENS }, userId, signal, { lore });
+    const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], maxTokens: config?.maxTokens ?? HELPER_MAX_TOKENS }, userId, signal, { lore });
     if (!isRecord(raw)) return null;
     const answers: Answers = {};
     for (const [key, q] of Object.entries(questions)) {

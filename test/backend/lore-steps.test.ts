@@ -88,8 +88,8 @@ describe("the prefetch", () => {
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     expect(rig.rt.ledger.errors).toEqual([]);
     const counts: Record<string, number> = {};
-    for (const c of rig.rt.meter.log.slice(start)) counts[c.purpose] = (counts[c.purpose] ?? 0) + 1;
-    // The calls Full makes on this turn without lore (DESIGN §5.3).
+    for (const c of rig.rt.meter.log.slice(start)) if (c.lookup !== true) counts[c.purpose] = (counts[c.purpose] ?? 0) + 1;
+    // The calls Full makes on this turn without lore (DESIGN §5.3); lookups are counted apart.
     expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, contradiction: 1 });
     expect(systemOf(rig, "interpret")).toContain("The ferry: The ferry crosses to Gull Island");
     expect(systemOf(rig, "extract")).toContain("The ferry: The ferry crosses to Gull Island");
@@ -219,5 +219,49 @@ describe("lookups", () => {
       expect(r.messages[0]?.content).not.toContain('{"need"');
     }
     expect(systemOf(rig, "interpret")).toContain("World lore");
+  });
+});
+
+describe("the decision pre-pass", () => {
+  const prepassOf = (req: QuietRequest): boolean => req.messages[0]?.content.startsWith("You get a decision ready") === true;
+
+  test("npc.choose on the Decision connection asks the helper what lore it needs, on the lookup budget, and reads the hits with its prefetch", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { modelUse: { preset: "custom", budgets: { pre: { lookup: { calls: 2, ms: 30_000 } } } } }], { ...LORE, timetable: TIMETABLE });
+    const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
+    rig.host.quietReply = (req) => (prepassOf(req) ? { content: "", toolCalls: [search] } : quiet(req));
+    const start = rig.rt.meter.log.length;
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    const prepass = rig.host.quietCalls.filter(prepassOf);
+    // Dev's choice before the plan; Kim's after the reply finds the post phase's one lookup held by extract.
+    expect(prepass.length).toBe(1);
+    expect(prepass[0]?.tools?.map((t) => t.name)).toEqual(["lore_search", "lore_get", "lore_list"]);
+    expect(prepass[0]?.connectionId).toBeNull();
+    const dev = rig.host.decideCalls.find((r) => JSON.stringify(r.state).includes('"agent":"Dev"'));
+    expect(JSON.stringify(dev?.state)).toContain("Timetable: Boats leave at 7, 12 and 18.");
+    expect(JSON.stringify(dev?.state)).toContain("Dev's past: Dev ran the harbor café before the storm.");
+    const npc = rig.rt.meter.log.slice(start).filter((c) => c.purpose === "npc.choose");
+    expect(npc.map((c) => [c.via, c.lookup === true])).toEqual([
+      ["helper", true],
+      ["decision", false],
+      ["decision", false],
+    ]);
+  });
+
+  test("in the need form, and with no lookup left the decision reads its prefetch only", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { modelUse: { preset: "custom", steps: { "npc.choose": { enabled: true, signals: ["tie_zone"], route: { provider: "decision", connectionId: null, model: null }, lore: { policy: "prefetch+lookup", tokens: 400, transport: "need" } } }, budgets: { pre: { lookup: { calls: 2, ms: 30_000 } } } } }], { ...LORE, timetable: TIMETABLE });
+    rig.host.quietReply = (req) => (prepassOf(req) ? JSON.stringify({ need: ["timetable"] }) : quiet(req));
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    const [prepass] = rig.host.quietCalls.filter(prepassOf);
+    expect(prepass?.tools).toBeUndefined();
+    expect(prepass?.messages[0]?.content).toContain('{"need"');
+    expect(JSON.stringify(rig.host.decideCalls.find((r) => JSON.stringify(r.state).includes('"agent":"Dev"'))?.state)).toContain("Timetable: Boats leave at 7, 12 and 18.");
+    // Standard's one lookup before the reply: interpret holds it first, by priority.
+    const lean = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    lean.rig.host.quietReply = (req) => (prepassOf(req) ? JSON.stringify({ need: ["timetable"] }) : quiet(req));
+    await lean.rig.turn(lean.chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(lean.rig.host.quietCalls.filter(prepassOf)).toEqual([]);
+    const state = JSON.stringify(lean.rig.host.decideCalls.find((r) => JSON.stringify(r.state).includes('"agent":"Dev"'))?.state);
+    expect(state).toContain("Dev's past");
+    expect(state).not.toContain("Timetable");
   });
 });
