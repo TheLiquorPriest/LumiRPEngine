@@ -161,6 +161,8 @@ export interface UpgradeChange {
   why: "changed in play" | "unchanged" | "new" | "removed";
   /** Where a pick is written: both sides of a symmetric or inverse pair, which change together. */
   targets: UpgradeTarget[];
+  /** It names someone or somewhere the POV can't see: shown as "A hidden change" until the owner opens the spoiler gate. */
+  secret?: true;
 }
 
 export interface UpgradeEntityRow {
@@ -170,6 +172,8 @@ export interface UpgradeEntityRow {
   kind: string;
   status: "new" | "removed" | "changed";
   changes: UpgradeChange[];
+  /** Someone or something the POV can't see: the whole row waits behind the spoiler gate. */
+  secret?: true;
 }
 
 /** What an Upgrade brings into the chat, entity by entity (DESIGN §4.3 `migrate`). */
@@ -178,8 +182,8 @@ export interface UpgradePreview {
   from: RevisionId;
   to: RevisionId;
   entities: UpgradeEntityRow[];
-  /** Tracks that go back to their start, in words. */
-  tracks: string[];
+  /** Tracks that go back to their start, in words; a track the POV can't see is `secret`. */
+  tracks: { text: string; secret?: true }[];
 }
 
 /** What a marker would do (DESIGN §9.2: the demotion preview lists predicates whose inputs will freeze; an Upgrade's lists its definition changes). */

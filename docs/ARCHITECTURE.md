@@ -95,7 +95,7 @@ Backend layout:
 - `backend/stored-json.ts`: reading the extension's own JSON files; a damaged one is set aside as `<path>.corrupt-<epoch ms>` with a warning, and the caller starts fresh.
 - `backend/main.ts`: starts the backend on the real host: every pack, the pipeline, the spindle adapter, the runtime, the dispatcher and the background lane's route.
 - `backend/start-markers.ts`: a new chat's starting markers (the revision, every domain level and band cap, every time control and the adjudication policy), written with the first record that holds events.
-- `backend/upgrade-preview.ts`: the Upgrade preview (`lre.marker` with `preview`): the plan the fold would apply, entity by entity, each change with its default pick and why.
+- `backend/upgrade-preview.ts`: the Upgrade preview (`lre.marker` with `preview`): the plan the fold would apply, entity by entity, each change with its default pick and why, and `secret` on the rows, changes and track lines that would give a secret away, for Settings' spoiler gate.
 - `backend/chat-prefs.ts`: the player's choices for how a chat looks (`prefs.json`: the map display), kept beside the chat and out of its ledger.
 
 Shared helpers (pure, beside the contract files):

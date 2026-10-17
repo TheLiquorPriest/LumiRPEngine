@@ -750,6 +750,8 @@ Upgrade moves a chat to the newer revision from the next turn forward. It is rec
 
 Flip any change with its **Take**/**Keep** toggle. **Take all unchanged** resets the untouched ones to Take; **Review changed in play** lists only the touched ones. Someone the revision no longer has stays in the chat unless you pick **Remove**. **Upgrade with these picks** applies it.
 
+A change that would give a secret away (someone or somewhere your character doesn't know, a quest kept from you) reads **A hidden change** until you tap **Show spoilers**, as the GM view waits behind its own gate. Its toggle works either way, and its pick applies like any other.
+
 A quest sitting at a stage the revision removed goes back to its first stage, with a Journal note. If an earlier Upgrade moved the chat without bringing these changes in, Pins and upgrade says so and offers the Upgrade even at the latest revision.
 
 ## Troubleshooting

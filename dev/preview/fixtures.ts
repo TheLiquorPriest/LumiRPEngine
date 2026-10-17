@@ -682,7 +682,7 @@ export const UPGRADE_PREVIEW: UpgradePreview = {
     { entity: "acct_pov_checking", name: "Checking", kind: "Account", status: "changed", changes: [{ id: "acct_pov_checking:field:opening", label: "Opening balance", from: "$1,842.17", to: "$2,400.00", pick: "keep", options: ["take", "keep"], why: "changed in play", targets: [{ entity: "acct_pov_checking", part: "field", field: "opening" }] }] },
     { entity: "old_boat", name: "The old skiff", kind: "Vehicle", status: "removed", changes: [{ id: "old_boat:entity", label: "Stay in the chat", from: "in the chat", to: "out of the world", pick: "keep", options: ["keep", "remove"], why: "removed", targets: [{ entity: "old_boat", part: "entity" }] }] },
   ],
-  tracks: ["Raise the barn: back to Rumours; this revision has no stage “Old idea”"],
+  tracks: [{ text: "Raise the barn: back to Rumours; this revision has no stage “Old idea”" }],
 };
 
 export function worldFixture(): WorldDoc {
