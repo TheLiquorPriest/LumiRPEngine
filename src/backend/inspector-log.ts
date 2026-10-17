@@ -1,12 +1,14 @@
 // The inspector's history (DESIGN §6.5): the last interceptor runs per chat with their sections,
-// clipping and delivery badges, and the last delivery check by slot. Kept in
-// `userStorage/runs/<chatId>/inspector.json` and read when the chat is first viewed or generates,
-// so the inspector shows the same history after a restart.
+// clipping and delivery badges, the lore each model step read (§5.4), and the last delivery check
+// by slot. Kept in `userStorage/runs/<chatId>/inspector.json` and read when the chat is first
+// viewed or generates, so the inspector shows the same history after a restart.
 
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
-import type { ContextGeneration } from "../shared/state-view";
+import { LORE_AUDIENCE } from "../shared/lore";
+import { LORE_POLICIES } from "../shared/settings";
+import type { ContextGeneration, LoreStepTrace } from "../shared/state-view";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -40,6 +42,29 @@ function isInspectorRecord(raw: unknown): raw is InspectorRecord {
   if (!isRecord(raw.budget) || typeof raw.budget.sections !== "number" || typeof raw.budget.used !== "number" || !strings(raw.forced)) return false;
   if (raw.warnings !== undefined && !strings(raw.warnings)) return false;
   return Array.isArray(raw.sections) && raw.sections.every((s) => isRecord(s) && typeof s.slot === "string" && typeof s.label === "string" && typeof s.tokens === "number" && typeof s.clipped === "boolean" && typeof s.delivery === "string" && hasOwn(DELIVERIES, s.delivery));
+}
+
+const TRANSPORTS: readonly LoreStepTrace["transport"][] = ["none", "tools", "need"];
+const QUERY_KINDS: readonly LoreStepTrace["queries"][number]["kind"][] = ["prefetch", "search", "get", "list"];
+
+/** A record's lore traces as stored: the well-formed ones, so a damaged trace costs only itself. */
+function loreTracesOf(raw: unknown): LoreStepTrace[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: LoreStepTrace[] = [];
+  for (const t of raw) {
+    if (!isRecord(t) || !Array.isArray(t.queries) || !Array.isArray(t.entries) || typeof t.lookups !== "number" || !strings(t.notes)) continue;
+    const step = LORE_AUDIENCE.find((p) => p === t.step);
+    const policy = LORE_POLICIES.find((p) => p === t.policy);
+    const transport = TRANSPORTS.find((x) => x === t.transport);
+    if (!step || !policy || !transport || (t.phase !== "pre" && t.phase !== "post")) continue;
+    const queries = t.queries.flatMap((q) => {
+      const kind = isRecord(q) ? QUERY_KINDS.find((k) => k === q.kind) : undefined;
+      return kind && isRecord(q) && typeof q.text === "string" && typeof q.matched === "number" ? [{ kind, text: q.text, matched: q.matched }] : [];
+    });
+    const entries = t.entries.flatMap((e) => (isRecord(e) && typeof e.title === "string" && typeof e.tokens === "number" && typeof e.cut === "boolean" && typeof e.secret === "boolean" ? [{ title: e.title, tokens: e.tokens, cut: e.cut, secret: e.secret }] : []));
+    out.push({ step, phase: t.phase, policy, transport, queries, entries, lookups: t.lookups, notes: [...t.notes] });
+  }
+  return out;
 }
 
 function deliveryOf(raw: unknown): Delivery {
@@ -77,7 +102,15 @@ export class InspectorLog {
     // Two first looks at once (a view and a generation) share the log the first one read.
     const raced = this.logs.get(chatId);
     if (raced?.userId === userId) return raced;
-    const log: ChatLog = { userId, records: isRecord(raw) && Array.isArray(raw.records) ? raw.records.filter(isInspectorRecord).slice(-INSPECTOR_RUNS) : [], delivery: isRecord(raw) ? deliveryOf(raw.delivery) : {} };
+    const records = isRecord(raw) && Array.isArray(raw.records) ? raw.records.filter(isInspectorRecord).slice(-INSPECTOR_RUNS) : [];
+    const log: ChatLog = {
+      userId,
+      records: records.map(({ lore, ...r }) => {
+        const traces = loreTracesOf(lore);
+        return traces ? { ...r, lore: traces } : r;
+      }),
+      delivery: isRecord(raw) ? deliveryOf(raw.delivery) : {},
+    };
     this.logs.delete(chatId);
     this.logs.set(chatId, log);
     if (this.logs.size > 256) this.logs.delete(this.logs.keys().next().value ?? "");

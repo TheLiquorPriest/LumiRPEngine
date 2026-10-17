@@ -291,3 +291,24 @@ describe("secret lore stays off what the player sees", () => {
     expect(JSON.stringify(chips).toLowerCase()).not.toContain(SECRET.toLowerCase());
   });
 });
+
+describe("the inspector's lore traces", () => {
+  test("each step's searches, entries with their token cost, lookups and transport reach Context, survive a restart, and never name a secret", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
+    rig.host.quietReply = (req) => (isStep(req, "interpret") && req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    await rig.rt.inspector.settle();
+    const shown = async (r: Rig): Promise<string> => JSON.stringify((await r.rt.view(chatId, r.host.userId)).panels["core.context"]);
+    const context = await shown(rig);
+    expect(context).toContain('"step":"interpret","phase":"pre","policy":"prefetch+lookup","transport":"tools"');
+    expect(context).toContain('{"kind":"search","text":"timetable","matched":1}');
+    expect(context).toMatch(/"title":"Timetable","tokens":\d+,"cut":false,"secret":false/);
+    expect(context).toContain('"step":"extract","phase":"post"');
+    // interpret read the secret (its audience): the trace says only that it was a secret.
+    expect(context).toContain('"title":"A secret entry"');
+    expect(context).not.toContain("The wreck");
+    expect(context.toLowerCase()).not.toContain(SECRET.toLowerCase());
+    expect(await shown(new Rig({ host: rig.host }))).toBe(context);
+  });
+});

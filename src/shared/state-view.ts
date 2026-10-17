@@ -397,6 +397,8 @@ export interface ContextGeneration {
   /** `delivery`: found in a dry-run assembly when the inspector opened (`verified`), not found (`unverified`), or not yet checked. */
   sections: { slot: string; label: string; tokens: number; clipped: boolean; delivery: "verified" | "unverified" | "unchecked" }[];
   budget: { sections: number; used: number };
+  /** What the turn's model steps read of the world's lore, step by step (absent: none read any). */
+  lore?: LoreStepTrace[];
 }
 
 /** The `core.context` panel: the last ten interceptor runs, newest first, and standing warnings (book attachment and slot repair, preset caveats, journal notices). */

@@ -819,7 +819,9 @@ export class Runtime implements TurnHooks {
       void this.toolSupport.refuse(userId, connection, reason).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] the lore tool record wasn't saved (${error instanceof Error ? error.message : String(error)})`, userId));
     };
     const reader = { reg: this.registry, world, state, tokens: (text: string) => this.tokenCounts.get(hashParts("lre.tokens", userId, text)) ?? sectionTokens(text) };
-    const lore = new StepLore(run.purpose, setting, reader, at.phase, unrevealedSecrets(this.registry, world, state), { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused } });
+    // The trace is shown to the player: it names no secret, and no one the player hasn't met.
+    const hidden = [...unrevealedSecrets(this.registry, world, state), ...Object.entries(state.entities).flatMap(([id, e]) => (povMayKnow(this.registry, world, state, id) || e.name.trim().length < 3 ? [] : [e.name]))];
+    const lore = new StepLore(run.purpose, setting, reader, at.phase, hidden, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused } });
     lore.prefetch(inputs);
     lruSet(this.loreTraces, at.key, [...(this.loreTraces.get(at.key) ?? []), lore.trace], 64);
     return lore;
@@ -944,6 +946,13 @@ export class Runtime implements TurnHooks {
     const choiceRuns = runsOf(modelUse, context.world, "choices", facts, "text");
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
     const [extracted, effects, decisions, contradicted, choices] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks)]);
+    // The reply's lore traces join its generation's inspector record (the pre phase's are there already).
+    const traces = this.loreTraces.get(key);
+    const inspected = traces ? this.inspector.records(chatId)?.find((r) => r.id === key) : undefined;
+    if (traces && inspected) {
+      inspected.lore = structuredClone(traces);
+      this.inspector.save(chatId);
+    }
     // Proposals naming what the POV can't know (a hidden or unmet entity, a secret place) are dropped,
     // and so is the turn's own action told again: a give of what it lent, a purchase it made (with
     // the price the player typed for this turn's Buy, in minor units, when there is one). A purchase
@@ -1262,6 +1271,8 @@ export class Runtime implements TurnHooks {
     // Declines from the last reply (DESIGN §9.5), for the next turn and its swipes only.
     for (const n of await this.outcomeNotes.list(input.chatId, input.userId)) if (n.messageId !== plan?.messageId && (n.toldTo === undefined || n.toldTo === plan?.messageId)) planned.outcome.unshift(n.text);
     const record: InspectorRecord = { id: plan?.generationId ?? `dry:${Date.now().toString(36)}`, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [] };
+    const traces = plan ? this.loreTraces.get(plan.generationId) : undefined;
+    if (traces) record.lore = structuredClone(traces);
     if (bookId && present.size === 0) record.warnings = ["The world's book wasn't attached to this chat, so no engine sections reached the narrator. It is re-attached for the next turn."];
     else if (bookId && index) {
       // A slot entry deleted in the host's UI (or a stale cache) is recreated for the next turn, and

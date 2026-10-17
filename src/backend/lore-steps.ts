@@ -130,7 +130,7 @@ export class StepLore {
     readonly setting: Readonly<StepLoreSetting>,
     private readonly reader: LoreReader,
     phase: "pre" | "post",
-    /** The unrevealed secrets: a query in the trace that carries one is withheld. */
+    /** What the trace must not show (unrevealed secrets, people the player hasn't met): a query or title carrying it is withheld. */
     private readonly secrets: readonly string[],
     options: { effects?: boolean; counted?: (texts: readonly string[]) => void; lookups?: StepLookups | null } = {},
   ) {
@@ -164,7 +164,7 @@ export class StepLore {
     const fresh = result.hits.filter((h) => !this.given.has(h.id));
     for (const h of fresh) {
       this.given.set(h.id, h);
-      this.trace.entries.push({ title: h.secret ? "A secret entry" : h.title, tokens: h.tokens, cut: h.cut, secret: h.secret });
+      this.trace.entries.push({ title: h.secret ? "A secret entry" : findLeaks(h.title, this.secrets).length > 0 ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut, secret: h.secret });
     }
     if (fresh.length > 0) this.counted(fresh.map((h) => h.snippet));
     return fresh;
