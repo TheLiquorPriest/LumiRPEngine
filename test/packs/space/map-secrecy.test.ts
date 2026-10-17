@@ -11,6 +11,7 @@ import { createRegistry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runRulesOnEvents } from "../../../src/engine/rules";
+import type { WorldState } from "../../../src/engine/state";
 import { canSeePlace } from "../../../src/engine/visibility";
 import { Working } from "../../../src/engine/working";
 import { initialState } from "../../../src/engine/world-state";
@@ -275,5 +276,20 @@ describe("a grid's items", () => {
     const state = initialState(migrateWorld(w), "seed", reg);
     expect(Object.keys(state.entities)).not.toContain("constructor");
     expect(state.entities.you?.fields.place).toBe("town");
+  });
+});
+
+describe("the narrator's place line", () => {
+  const place = (world: WorldDoc, state: WorldState) => reg.renderers.filter((r) => r.slot === "scene").flatMap((r) => r.render(reg.context(world, state))).filter((l) => l.startsWith("Place:"));
+
+  test("never names a place the POV can't see: around it, it is left out; the POV's own, it is somewhere", () => {
+    const { world, state } = riverton((w) => {
+      w.places.safehouse = { id: "safehouse", name: "Resistance safehouse", parent: "riverton", fields: {}, visibility: "secret" };
+      w.places.cellar_room = { id: "cellar_room", name: "Cellar room", parent: "safehouse", fields: {} };
+      w.entities.you!.fields.place = "cellar_room";
+    });
+    expect(place(world, state)).toEqual(["Place: Cellar room."]);
+    state.entities.you!.fields.place = "safehouse";
+    expect(place(world, state)).toEqual([`Place: ${HIDDEN_PLACE_NAME} (in Riverton).`]);
   });
 });

@@ -31,6 +31,7 @@ import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
 import { closedRoutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
+import { HIDDEN_PLACE_NAME } from "./map-scope";
 import { buildMapView } from "./view";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
@@ -290,8 +291,11 @@ export const spacePack: PackDef = {
         const here = placeOfEntity(ctx.state, ctx.world.pov);
         const place = here ? own(ctx.world.places, here) : undefined;
         if (!place) return [];
-        const parent = place.parent ? own(ctx.world.places, place.parent)?.name : undefined;
-        const lines = [`Place: ${place.name}${parent ? ` (in ${parent})` : ""}.`];
+        // The narrator hears where the POV is only as the POV may know it, as the map draws it: a
+        // place it can't see is somewhere unnamed, and a place around it that it can't see is left out.
+        const sees = (id: PlaceId): boolean => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
+        const parent = place.parent && sees(place.parent) ? own(ctx.world.places, place.parent)?.name : undefined;
+        const lines = [`Place: ${here && sees(here) ? place.name : HIDDEN_PLACE_NAME}${parent ? ` (in ${parent})` : ""}.`];
         if (level >= 2) {
           const exits: string[] = [];
           for (const id of Object.keys(ctx.world.places).sort()) {
