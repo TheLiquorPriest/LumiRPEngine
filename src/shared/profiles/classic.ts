@@ -1,7 +1,7 @@
-// The Classic profile (DESIGN §11): d20 fantasy of the 3.x style. Six abilities; base attack and
-// saves on good, average and poor progressions read from a level table; skills with ranks; Armor
-// Class; HP from a hit die; levels from XP on the triangular scale. An original implementation of
-// common tabletop mechanics: no rules text.
+// The Classic profile (DESIGN §11): classic fantasy on a d20. Six abilities; an attack bonus on a
+// good, average or poor progression and saves on good or poor ones, read from a level table;
+// skills with ranks; an armor score; HP from a die per level; levels from XP on the triangular
+// scale. An original implementation of common tabletop mechanics: no rules text.
 
 import { presetAdjudication } from "../adjudication";
 import type { FieldDef } from "../world";
@@ -12,15 +12,15 @@ const SKILLS: readonly Skill[] = [
   { id: "athletics", label: "Athletics", ability: "str_mod" },
   { id: "acrobatics", label: "Acrobatics", ability: "dex_mod" },
   { id: "stealth", label: "Stealth", ability: "dex_mod" },
-  { id: "sleight_of_hand", label: "Sleight of Hand", ability: "dex_mod" },
+  { id: "sleight_of_hand", label: "Deft Hands", ability: "dex_mod" },
   { id: "search", label: "Search", ability: "int_mod" },
   { id: "lore", label: "Lore", ability: "int_mod" },
-  { id: "heal", label: "Heal", ability: "wis_mod" },
+  { id: "heal", label: "First Aid", ability: "wis_mod" },
   { id: "perception", label: "Perception", ability: "wis_mod" },
-  { id: "sense_motive", label: "Sense Motive", ability: "wis_mod" },
+  { id: "sense_motive", label: "Read People", ability: "wis_mod" },
   { id: "survival", label: "Survival", ability: "wis_mod" },
-  { id: "diplomacy", label: "Diplomacy", ability: "cha_mod" },
-  { id: "bluff", label: "Bluff", ability: "cha_mod" },
+  { id: "diplomacy", label: "Persuade", ability: "cha_mod" },
+  { id: "bluff", label: "Deceive", ability: "cha_mod" },
   { id: "intimidate", label: "Intimidate", ability: "cha_mod" },
 ];
 
@@ -42,7 +42,7 @@ for (const s of SAVES) {
 export const CLASSIC: ProfileDef = {
   id: "classic",
   label: "Classic",
-  summary: "d20 fantasy of the 3.x style: base attack and saves on good and poor progressions, skills with ranks, Armor Class, HP from a hit die, and levels from XP.",
+  summary: "Classic fantasy on a d20: an attack bonus on a good, average or poor track and saves on good or poor ones, skills with ranks, an armor score, HP that grows by a die each level, and levels from XP.",
   fields: {
     ...abilityFields(),
     ...levelFields(20),

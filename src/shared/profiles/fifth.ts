@@ -1,8 +1,7 @@
-// The Fifth profile (DESIGN §11): d20 adventure of the fifth-edition style. Six abilities; a
-// proficiency bonus by level; proficiency (or expertise) in skills and in two saves; advantage from
-// a well-told approach and disadvantage against someone dodging; Armor Class; hit dice spent on a
-// short rest and regained on a long one. An original implementation of common tabletop mechanics:
-// no rules text.
+// The Fifth profile (DESIGN §11): heroic fantasy on a d20. Six abilities; a training bonus by
+// level; training (or expertise) in skills and in two saves; advantage from a well-told approach
+// and disadvantage against someone dodging; an armor score; healing dice spent on a short rest and
+// regained on a long one. An original implementation of common tabletop mechanics: no rules text.
 
 import { presetAdjudication } from "../adjudication";
 import type { FieldDef } from "../world";
@@ -12,11 +11,11 @@ import { ABILITIES, abilityFields, abilityRows, attackAction, ATTACK_BANDS, atte
 const SKILLS: readonly Skill[] = [
   { id: "athletics", label: "Athletics", ability: "str_mod" },
   { id: "acrobatics", label: "Acrobatics", ability: "dex_mod" },
-  { id: "sleight_of_hand", label: "Sleight of Hand", ability: "dex_mod" },
+  { id: "sleight_of_hand", label: "Deft Hands", ability: "dex_mod" },
   { id: "stealth", label: "Stealth", ability: "dex_mod" },
   { id: "investigation", label: "Investigation", ability: "int_mod" },
   { id: "lore", label: "Lore", ability: "int_mod" },
-  { id: "insight", label: "Insight", ability: "wis_mod" },
+  { id: "insight", label: "Read People", ability: "wis_mod" },
   { id: "medicine", label: "Medicine", ability: "wis_mod" },
   { id: "perception", label: "Perception", ability: "wis_mod" },
   { id: "survival", label: "Survival", ability: "wis_mod" },
@@ -41,7 +40,7 @@ const abilityIds = ABILITIES.map((a) => a.id);
 export const FIFTH: ProfileDef = {
   id: "fifth",
   label: "Fifth",
-  summary: "d20 adventure of the fifth-edition style: a proficiency bonus by level, proficient skills and saves, advantage, Armor Class, and short and long rests that spend and regain hit dice.",
+  summary: "Heroic fantasy on a d20: one training bonus that grows with level for your trained skills and saves, advantage, an armor score, and short and long rests that spend and regain healing dice.",
   fields: {
     ...abilityFields(),
     ...levelFields(20),

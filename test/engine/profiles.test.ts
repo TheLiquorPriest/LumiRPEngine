@@ -223,7 +223,7 @@ describe("applying a profile", () => {
   test("a skill names a row of the skills table, by id or label; anything else is refused", () => {
     const world = applyProfile(STARTER_WORLDS.fantasy_town!("w", "w"), PROFILES.modern, packKinds);
     const w = new Working(reg, world, startOf(world));
-    const res = resolveAction(reg, w, { action: "skill_check", params: { skill: "Sense Motive" } }, createRng("label"), { runSeed: "test" });
+    const res = resolveAction(reg, w, { action: "skill_check", params: { skill: "Read People" } }, createRng("label"), { runSeed: "test" });
     expect(res.ok).toBe(true);
     const odds = actionOdds(reg, world, startOf(world), { action: "skill_check", params: { skill: "climbing" } });
     expect(odds.failed).toMatchObject({ code: "bad_param" });

@@ -52,7 +52,7 @@ describe("Start from a profile", () => {
     // The snapshot is the backend's own view model, restated as its parts' types.
     const palette = (isRecord(view) ? view.palette : null) as unknown as PaletteView | null;
     const skills = palette?.entries.find((e) => e.action === "skill_check");
-    expect(skills?.options.map((o) => o.label)).toEqual(["Athletics", "Drive", "Stealth", "Computers", "Investigate", "Repair", "Notice", "Sense Motive", "Treat Injury", "Persuade", "Bluff", "Intimidate"]);
+    expect(skills?.options.map((o) => o.label)).toEqual(["Athletics", "Drive", "Stealth", "Computers", "Investigate", "Repair", "Notice", "Read People", "First Aid", "Persuade", "Deceive", "Intimidate"]);
     expect(skills?.options[0]?.params).toEqual({ skill: "athletics" });
     expect(skills?.options.every((o) => o.odds !== undefined)).toBe(true);
     const panels = isRecord(view) && isRecord(view.panels) ? view.panels : {};

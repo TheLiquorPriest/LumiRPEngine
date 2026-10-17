@@ -1,7 +1,7 @@
-// The Modern profile (DESIGN §11): contemporary heroes on a d20. Six abilities with their
+// The Modern profile (DESIGN §11): present-day adventure on a d20. Six abilities with their
 // modifiers; Defense from Dexterity, a level bonus and equipment; a modern skill list with ranks;
-// Fortitude, Reflex and Will; Action Points to push a skill; HP; and levels from XP on the
-// triangular scale. An original implementation of common tabletop mechanics: no rules text.
+// three saves; Action Points to push a skill; HP; and levels from XP on the triangular scale. An
+// original implementation of common tabletop mechanics: no rules text.
 
 import { presetAdjudication } from "../adjudication";
 import type { FieldDef } from "../world";
@@ -16,10 +16,10 @@ const SKILLS: readonly Skill[] = [
   { id: "investigate", label: "Investigate", ability: "int_mod" },
   { id: "repair", label: "Repair", ability: "int_mod" },
   { id: "notice", label: "Notice", ability: "wis_mod" },
-  { id: "sense_motive", label: "Sense Motive", ability: "wis_mod" },
-  { id: "treat_injury", label: "Treat Injury", ability: "wis_mod" },
+  { id: "sense_motive", label: "Read People", ability: "wis_mod" },
+  { id: "treat_injury", label: "First Aid", ability: "wis_mod" },
   { id: "persuade", label: "Persuade", ability: "cha_mod" },
-  { id: "bluff", label: "Bluff", ability: "cha_mod" },
+  { id: "bluff", label: "Deceive", ability: "cha_mod" },
   { id: "intimidate", label: "Intimidate", ability: "cha_mod" },
 ];
 
@@ -38,7 +38,7 @@ for (const s of SAVES) saves[s.id] = { type: "number", label: s.label, derived: 
 export const MODERN: ProfileDef = {
   id: "modern",
   label: "Modern",
-  summary: "Contemporary heroes on a d20: six abilities, Defense, a modern skill list with ranks, Action Points to push a skill, HP, and levels from XP.",
+  summary: "Present-day adventure on a d20: six abilities, a Defense score, a modern skill list with ranks, points to spend pushing a skill, HP, and levels from XP.",
   fields: {
     ...abilityFields(),
     ...levelFields(20),
