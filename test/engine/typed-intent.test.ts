@@ -40,6 +40,47 @@ describe("typed intent (Playtest, no model)", () => {
     expect(typedIntent(reg, world, state, "I sit down to think")).toBeNull();
   });
 
+  test("a phrase only counts when the player does it: no negation, other subject, hypothetical or idiom", () => {
+    const world = portAlder();
+    const state = initialState(world, "r");
+    for (const line of [
+      "I don't want to walk to the market",
+      "Danny says he'll walk over to the marina",
+      "I pay attention",
+      "I wonder whether to buy a boat",
+      "I never walk to the marina",
+      "Danny will walk to the marina",
+      "I ask Danny to walk to the marina",
+      "I tell her to buy a coffee",
+      "I might buy a boat",
+      "I'm thinking about whether I should buy a boat",
+      "If I had the money, I'd buy a boat",
+      "I take a deep breath",
+    ])
+      expect({ line, intent: typedIntent(reg, world, state, line) }).toEqual({ line, intent: null });
+  });
+
+  test("first person and bare commands still act, around negations and other people in other clauses", () => {
+    const world = portAlder();
+    const state = initialState(world, "r");
+    const go = { action: "go", params: { to: "alder_harbor_marina" } };
+    for (const line of ["Walk to the marina", "Then I walk to the marina", "Let's walk to the marina", "I want to walk to the marina", "Danny and I walk to the marina", "I meet Danny and walk to the marina", "I'm not hungry, so I walk to the marina", "Danny stays. I walk to the marina"])
+      expect({ line, intent: typedIntent(reg, world, state, line) }).toMatchObject({ line, intent: go });
+    expect(typedIntent(reg, world, state, "I'd like to buy a coffee")).toMatchObject({ action: "buy", params: { item: "coffee" } });
+    expect(typedIntent(reg, world, state, "I pay Danny 20")).toMatchObject({ action: "pay", params: { to: "danny_okafor" } });
+    // A phrase that names its own subject or negation still reads.
+    expect(typedIntent(reg, world, state, "I can't find my wallet")?.action).toBe("lose");
+  });
+
+  test("Playtest leaves the player where they are for a negated move", () => {
+    const world = portAlder();
+    const start = playtestStart(world, "r");
+    const before = placeOfEntity(start, world.pov);
+    const turn = playtestTurn(reg, { plan: planTurn, post: postTurn }, world, start, "I don't want to walk to the market.", "run", 0);
+    expect(placeOfEntity(turn.state, world.pov)).toBe(before);
+    expect(turn.turn.notes).not.toContain("read as Go to");
+  });
+
   test("typed moves in Playtest move the player: 'walk down to Bluebird Coffee', then 'walk over to Alder Market'", () => {
     const world = portAlder();
     const start = playtestStart(world, "r");
