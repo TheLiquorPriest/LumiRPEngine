@@ -208,6 +208,8 @@ export const spacePack: PackDef = {
         }
         if (entity === ctx.world.pov) observeCells(state, ctx.world);
       },
+      // A cell set in play is play's: an Upgrade keeps it over the revision's (the touched record).
+      touches: (e) => [{ entity: strOf(e.data.entity), field: "x" }, { entity: strOf(e.data.entity), field: "y" }],
       // Steps are told by the action and the place they reach, never as coordinates.
       describe: () => "",
     });

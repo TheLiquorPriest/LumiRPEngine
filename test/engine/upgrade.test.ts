@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import type { UpgradePicks } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
+import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { calendarOf, slotIndexAt } from "../../src/engine/calendar";
 import { readEngineSlice } from "../../src/engine/engine-pack";
 import { applyMarker, EXTERNAL_ACCOUNT_PREFIX, validMarkerBody } from "../../src/engine/events";
@@ -44,13 +45,8 @@ interface Chat {
   state: WorldState;
 }
 
-/** A chat started on `worldA` (adjusted by `base`) and its later revision (`edit`). */
-function chat(edit: (w: WorldDoc) => void, base: (w: WorldDoc) => void = () => undefined): Chat {
-  const a = worldA();
-  base(a);
-  const b = structuredClone(a);
-  edit(b);
-  b.name = `${a.name}, revised`;
+/** A chat started on revision `a`, which an Upgrade can take to revision `b`. */
+function between(a: WorldDoc, b: WorldDoc): Chat {
   const ra = hashJson(a);
   const rb = hashJson(b);
   const docs = new Map([
@@ -58,6 +54,43 @@ function chat(edit: (w: WorldDoc) => void, base: (w: WorldDoc) => void = () => u
     [rb, b],
   ]);
   return { a, b, ra, rb, env: { worlds: (r) => docs.get(r), types: reg }, state: initialState(a, ra, reg) };
+}
+
+/** A chat started on `worldA` (adjusted by `base`) and its later revision (`edit`). */
+function chat(edit: (w: WorldDoc) => void, base: (w: WorldDoc) => void = () => undefined): Chat {
+  const a = worldA();
+  base(a);
+  const b = structuredClone(a);
+  edit(b);
+  b.name = `${a.name}, revised`;
+  return between(a, b);
+}
+
+/** The inn's ground floor as a grid map: a taproom, a kitchen behind a door and a back hall below. */
+const INN_LAYOUT = ["############", "#ttttt#kkkk#", "#ttttt+kkkk#", "#ttttL#kkkk#", "##+#########", "#hhhhhhhhhh#", "#####+######"];
+
+/** A revision of the inn, the POV in its taproom, with the grid system on unless `movement` is false; `edit` runs before its map compiles. */
+function inn(edit: (w: WorldDoc) => void = () => undefined, movement = true): WorldDoc {
+  const w = blankWorld("w_inn", "Inn");
+  w.mapSettings = { display: "knowledge", grid: { movement, sightRadius: 3 } };
+  w.places = { town: { id: "town", name: "Saltmarsh", fields: {} }, inn: { id: "inn", name: "The Gull", parent: "town", fields: {} } };
+  w.maps = {
+    inn_ground: {
+      id: "inn_ground",
+      scope: "inn",
+      layout: INN_LAYOUT,
+      legend: { t: { place: "taproom" }, k: { place: "kitchen" }, h: { place: "hall" }, L: "floor" },
+      places: [
+        { id: "taproom", name: "Taproom" },
+        { id: "kitchen", name: "Kitchen" },
+        { id: "hall", name: "Back hall" },
+      ],
+    },
+  };
+  w.start = { ...w.start, place: "taproom" };
+  Object.assign(w.entities.you?.fields ?? {}, { place: "taproom" });
+  edit(w);
+  return migrateWorld(w);
 }
 
 function play(c: Chat, events: Parameters<typeof fold>[3]): void {
@@ -334,6 +367,22 @@ describe("the merge", () => {
     expect(notes).toHaveLength(1);
     expect(notes[0]).toContain("The hunt");
     expect(notes.join(" ")).not.toContain("plot");
+  });
+});
+
+describe("the merge on a grid", () => {
+  const standing = (x: number, y: number) => (w: WorldDoc) => void Object.assign(w.entities.you?.fields ?? {}, { x, y });
+
+  test("a cell the POV stepped to in play is kept; one play never moved follows the revision", () => {
+    const moved = between(inn(standing(1, 1)), inn(standing(2, 2)));
+    // A step in play, as the `space.step` effect writes it.
+    play(moved, [{ type: "space.pos", data: { entity: "you", at: { scope: "inn", x: 4, y: 3 }, from: { scope: "inn", x: 1, y: 1 } } }]);
+    expect(planUpgrade(moved.state, moved.env, moved.rb).entities.find((d) => d.id === "you")?.fields.x?.touched).toBe(true);
+    upgrade(moved);
+    expect(moved.state.entities.you?.fields).toMatchObject({ x: 4, y: 3 });
+    const still = between(inn(standing(1, 1)), inn(standing(2, 2)));
+    upgrade(still);
+    expect(still.state.entities.you?.fields).toMatchObject({ x: 2, y: 2 });
   });
 });
 

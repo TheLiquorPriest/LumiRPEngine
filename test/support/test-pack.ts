@@ -69,6 +69,8 @@ const buy: EventTypeDef<PackEvent> = {
     if (pov) pov.fields.cash = cash(state) - num(e, "price");
     setOwned(state, str(e, "item"), true);
   },
+  // It writes Sam's cash, so an Upgrade keeps it (the touched record).
+  touches: () => [{ entity: POV, field: "cash" }],
   describe: (e) => `bought ${str(e, "item")}`,
 };
 
