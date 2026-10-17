@@ -13,7 +13,7 @@ import type { ExtractionType, StepConfig, UserSettings } from "../shared/setting
 import { EXTRACTION_TYPES, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, StepPurpose, WorldDoc } from "../shared/world";
-import { formatMoney } from "../shared/world";
+import { formatMoney, offersAction } from "../shared/world";
 import { transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyOf } from "../engine/adjudication";
@@ -545,7 +545,8 @@ export class Runtime implements TurnHooks {
     const ctx = this.registry.context(render.world, render.state);
     const ties = tiesOf(ctx, render.world, render.state);
     const recorded = lastUser ? (await this.host.chats.messages(input.chatId, input.userId)).find((m) => m.id === lastUser.id)?.metadata[LEDGER_NAMESPACE] : undefined;
-    const all = [...this.registry.actions.values(), ...Object.values(render.world.actions)];
+    // A combat action only where the ruleset has combat (DESIGN §11), so a world without it reads typed text as before.
+    const all = [...this.registry.actions.values(), ...Object.values(render.world.actions)].filter((a) => offersAction(render.world, a));
     const typed = text.trim() !== "" && !(isRecord(recorded) && typeof recorded.action === "string");
     const facts: SignalFacts = {
       ...noFacts(before.filter((m) => !m.isUser).length + 1),
@@ -1562,8 +1563,9 @@ function planOutline(plan: EngineTurnPlan, prose: PlanProse | undefined): string
 }
 
 /**
- * What the narrator must know about the turn's plan (DESIGN §6.2 Outcome, §9.2 Montage): the action's
- * result with its roll, or why it couldn't run; and a timelapse's Montage groups and money.
+ * What the narrator must know about the turn's plan (DESIGN §6.2 Outcome, §9.2 Montage, §11): the
+ * action's result with its roll, or why it couldn't run; a fight's round; and a timelapse's Montage
+ * groups and money.
  */
 export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Registry): { outcome: string[]; montage: string[] } {
   const outcome: string[] = [];
@@ -1578,6 +1580,8 @@ export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Regis
     } else if (reasons.length > 0) outcome.push(`${label}: it didn't go through (${reasons.join("; ")}). Narrate it failing; nothing changed hands.`);
     else outcome.push(`${label}: done.`);
   }
+  // A fight's part of the turn (DESIGN §11): the round in order, then whose turn it is.
+  outcome.push(...plan.combat);
   // A timelapse covers what actually ran, not what was asked for (an interrupt may stop it early).
   const summary = plan.timelapse?.summary;
   if (summary) {

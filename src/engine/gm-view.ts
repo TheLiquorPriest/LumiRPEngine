@@ -107,5 +107,7 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
     })),
     relationTypes: [...relationTypes.values()].sort((a, b) => a.label.localeCompare(b.label)),
     money: optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [],
+    // The fight under way, as only the GM sees it (the combat pack); its view model is plain JSON.
+    encounter: (optionalQuery(ctx, "combat.gm")?.(ctx) ?? null) as unknown as JsonValue | null,
   };
 }

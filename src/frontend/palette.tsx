@@ -7,7 +7,7 @@ import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../shared/ids";
 import type { TimelapseTarget } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
-import type { PaletteEntry, PaletteOption, PaletteView, StateView, TimelapseView } from "../shared/state-view";
+import type { PaletteEncounter, PaletteEntry, PaletteOption, PaletteView, StateView, TimelapseView } from "../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney } from "../shared/world";
 import type { PaletteTab } from "./app";
 import { useApp, useView } from "./app";
@@ -17,8 +17,9 @@ import { formatCents, formatMinutes, humanize } from "./format";
 import { MoneyInput } from "./money-input";
 import { paletteRequest, timelapseRequest, timeMarker } from "./requests";
 
-const GROUP_LABEL: Record<PaletteEntry["group"], string> = { action: "Actions", buy: "Buy", pay: "Pay", transfer: "Transfer", drive: "Drive", lend: "Lend" };
-const GROUP_TAB: Record<PaletteEntry["group"], PaletteTab> = { action: "actions", buy: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
+// Combat leads while it's there: in a fight its actions are what the player wants first.
+const GROUP_LABEL: Record<PaletteEntry["group"], string> = { combat: "Combat", action: "Actions", buy: "Buy", pay: "Pay", transfer: "Transfer", drive: "Drive", lend: "Lend" };
+const GROUP_TAB: Record<PaletteEntry["group"], PaletteTab> = { combat: "combat", action: "actions", buy: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
 
 /** The tabs a palette view offers, in a fixed order; Timelapse last. */
 export function paletteTabs(palette: PaletteView): { id: PaletteTab; label: string }[] {
@@ -32,7 +33,8 @@ export function paletteTabs(palette: PaletteView): { id: PaletteTab; label: stri
 
 export function PaletteSheet(props: { tab: PaletteTab; desk: boolean; onClose(): void }) {
   const view = useView();
-  const [tab, setTab] = useState<PaletteTab>(props.tab);
+  // Asked for the actions in a fight on the POV's turn, the palette opens on Combat.
+  const [tab, setTab] = useState<PaletteTab>(props.tab === "actions" && view?.palette?.encounter?.yours ? "combat" : props.tab);
   const panelId = useId();
   const palette = view?.palette ?? null;
   const tabs = palette ? paletteTabs(palette) : [];
@@ -73,7 +75,10 @@ export function PaletteSheet(props: { tab: PaletteTab; desk: boolean; onClose():
           {active === "timelapse" && palette.timelapse ? (
             <TimelapsePanel view={view} timelapse={palette.timelapse} panel={tabPanel(panelId, active)} onSent={props.onClose} />
           ) : (
-            <ActionList key={active} view={view} entries={palette.entries.filter((entry) => GROUP_TAB[entry.group] === active)} panel={tabPanel(panelId, active)} onSent={props.onClose} />
+            <>
+              {active === "combat" && palette.encounter ? <EncounterHead encounter={palette.encounter} /> : null}
+              <ActionList key={active} view={view} entries={palette.entries.filter((entry) => GROUP_TAB[entry.group] === active)} panel={tabPanel(panelId, active)} onSent={props.onClose} />
+            </>
           )}
         </>
       )}
@@ -100,6 +105,28 @@ function ClockToggle(props: { view: StateView | null }) {
     >
       <span aria-hidden="true">{hud.clock.paused ? "▶" : "⏸"}</span> {hud.clock.paused ? "Resume clock" : "Pause clock"}
     </button>
+  );
+}
+
+/** The Combat tab's head in a fight: the round, whose turn it is, and what the POV has left of each budget. */
+export function EncounterHead(props: { encounter: PaletteEncounter }) {
+  const { encounter } = props;
+  return (
+    <div class="lre-stack" style={{ padding: "8px 12px 0", gap: "4px" }} data-lre-encounter-head>
+      <div class="lre-spread">
+        <strong>Round {encounter.round}</strong>
+        <span class={encounter.yours ? "lre-badge accent" : "lre-badge"}>{encounter.yours ? "Your turn" : `${encounter.turn.charAt(0).toUpperCase()}${encounter.turn.slice(1)}'s turn`}</span>
+      </div>
+      {encounter.economy.length > 0 ? (
+        <div class="lre-inline" style={{ flexWrap: "wrap", gap: "6px" }} aria-label="What you have left this turn">
+          {encounter.economy.map((b) => (
+            <span key={b.id} class={b.left > 0 ? "lre-badge pos" : "lre-badge"} title={`${b.left} of ${b.of} ${b.label} left`}>
+              {b.label} {b.left}/{b.of}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -186,7 +186,8 @@ export interface PaletteOption {
 export interface PaletteEntry {
   action: ActionId;
   label: string;
-  group: "action" | "buy" | "pay" | "transfer" | "drive" | "lend";
+  /** `combat`: a world's combat actions (DESIGN §11), in its Combat tab. */
+  group: "action" | "buy" | "pay" | "transfer" | "drive" | "lend" | "combat";
   /** One per target; one when the action has no target. */
   options: PaletteOption[];
   /** A free amount in cents, merged into params under `param`. */
@@ -207,9 +208,20 @@ export interface TimelapseView {
   dayParts: boolean;
 }
 
+/** A fight under way, as the palette heads its Combat tab (DESIGN §11): the round, whose turn it is and what the POV has left. */
+export interface PaletteEncounter {
+  round: number;
+  /** Whose turn it is, as the POV names them ("you", a name, or "someone"). */
+  turn: string;
+  yours: boolean;
+  economy: { id: string; label: string; left: number; of: number }[];
+}
+
 export interface PaletteView {
   entries: PaletteEntry[];
   timelapse: TimelapseView | null;
+  /** The fight under way, when there is one. */
+  encounter?: PaletteEncounter;
 }
 
 /** The running chat's folded realism, time controls and adjudication policy (Play → Calendar, Settings → This chat). */
@@ -337,6 +349,8 @@ export interface GmView {
   relationTypes: { id: string; label: string; from: string; to: string; fields: { id: string; label: string; type: FieldType; min?: number; max?: number; values?: string[] }[] }[];
   /** Everyone else's money (the economy pack's `economy.people_money`); empty without it. */
   money: GmMoney[];
+  /** The fight under way as the GM sees it, everyone named and HP exact (the combat pack's `combat.gm`); null without one. Its shape is the Encounter card's. */
+  encounter: JsonValue | null;
   /** The ✎ fixes and GM edits in force on this chat's path, newest first, worded in full. */
   edits: { messageId: string; seq: number; lines: string[] }[];
   /** Writes held during a reply that didn't apply when it finished, with the validator's reason. */

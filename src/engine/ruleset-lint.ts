@@ -12,7 +12,7 @@ import { EFFECT_ONLY_FUNCTIONS, objectiveWhen } from "../shared/world";
 import { lintAdjudication } from "./adjudication";
 import { diceDistribution, naturalDie, parseDice } from "./dice";
 import { callsIn, compile, type FormulaCall } from "./expr";
-import type { Registry } from "./registry-impl";
+import { rulesetFloor, type Registry } from "./registry-impl";
 import { thresholdsOf } from "./ruleset";
 import { fieldDef, kindFields, objects } from "./scope";
 import { own } from "./pack-kit";
@@ -129,6 +129,15 @@ export function exprSites(world: WorldDoc): ExprSite[] {
     sections.forEach((s, i) => {
       if (isRecord(s) && Array.isArray(s.rows)) s.rows.forEach((row, j) => isRecord(row) && push(`ruleset.sheet.sections.${i}.rows.${j}.formula`, "formula" in row ? row.formula : undefined));
     });
+  }
+  const combat: unknown = world.ruleset?.combat;
+  if (isRecord(combat)) {
+    for (const [key, sub] of [["tieBreak", null], ["end", null], ["down", "when"], ["sides", "hostile"], ["sides", "ally"], ["tactics", "threat"], ["tactics", "lowHp"]] as const) {
+      const v = sub === null ? combat[key] : isRecord(combat[key]) ? (combat[key] as JsonObject)[sub] : undefined;
+      push(`ruleset.combat.${key}${sub === null ? "" : `.${sub}`}`, typeof v === "string" ? v : undefined);
+    }
+    if (isRecord(combat.economy)) for (const [id, b] of Object.entries(combat.economy)) if (isRecord(b) && typeof b.count === "string") push(`ruleset.combat.economy.${id}.count`, b.count);
+    if (isRecord(combat.initiative)) out.push(...checkSites("ruleset.combat.initiative", combat.initiative as unknown as CheckDef));
   }
   for (const { path, effects } of effectLists(world)) effects.forEach((spec, i) => out.push(...argSites(`${path}.${i}`, spec)));
   return out;
@@ -252,6 +261,69 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
       }
     }
   }
+
+  // Combat (DESIGN §11): what combat actions spend, the rules' parts, and the Sheets floor a fight
+  // that reads stat modifiers needs (they are 0 below Sheets 3).
+  const combat: unknown = isRecord(world.ruleset) ? world.ruleset.combat : undefined;
+  const budgets = isRecord(combat) && isRecord(combat.economy) ? (combat.economy as JsonObject) : null;
+  const fightPaths = ["ruleset.combat."];
+  for (const [id, a] of Object.entries(world.actions)) {
+    const c: unknown = a.combat;
+    if (c === undefined) continue;
+    const at = `actions.${id}.combat`;
+    fightPaths.push(`actions.${id}.`);
+    if (typeof a.check === "string") fightPaths.push(`checks.${a.check}.`);
+    if (!isRecord(c) || !isRecord(c.cost)) {
+      err(at, "combat", `"${a.label}" is a combat action, so it needs a cost: budget → how many, {} when it's free.`);
+      continue;
+    }
+    if (combat === undefined) warn(at, "combat", `"${a.label}" is a combat action, but this world's ruleset has no combat, so it's never offered.`);
+    for (const [budget, n] of Object.entries(c.cost)) {
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 0) err(`${at}.cost.${budget}`, "combat", "A cost is a whole number of a budget, 0 or more.");
+      else if (budgets && !own(budgets, budget)) err(`${at}.cost.${budget}`, "refs", `"${a.label}" spends "${budget}", which the action economy doesn't have.`);
+    }
+    if (c.role !== undefined && c.role !== "attack" && c.role !== "defend") err(`${at}.role`, "combat", "A combat action's role is attack or defend.");
+    if (c.start !== undefined && typeof c.start !== "boolean") err(`${at}.start`, "combat", "Whether it starts a fight is yes or no.");
+  }
+  if (isRecord(combat)) {
+    const init = combat.initiative;
+    if (typeof init === "string") {
+      fightPaths.push(`checks.${init}.`);
+      if (!own(world.checks, init)) err("ruleset.combat.initiative", "refs", `The initiative check "${init}" doesn't exist.`);
+    } else if (isRecord(init) && typeof init.dice === "string") lintCheck("ruleset.combat.initiative", init as unknown as CheckDef, []);
+    else err("ruleset.combat.initiative", "combat", "A fight needs an initiative check: a check's id, or a check of its own.");
+    if (!budgets || Object.keys(budgets).length === 0) err("ruleset.combat.economy", "combat", "A fight needs an action economy: at least one budget, such as action.");
+    for (const [id, b] of Object.entries(budgets ?? {})) {
+      const at = `ruleset.combat.economy.${id}`;
+      if (!isRecord(b)) {
+        err(at, "combat", "A budget has a label, a count and when it refills.");
+        continue;
+      }
+      if (typeof b.label !== "string" || b.label.trim() === "") warn(`${at}.label`, "combat", "A budget needs a label: the palette and the Encounter card show it.");
+      if (b.per !== undefined && b.per !== "turn" && b.per !== "round") err(`${at}.per`, "combat", "A budget refills each turn or each round.");
+      if (b.count !== undefined && typeof b.count !== "string" && !(typeof b.count === "number" && b.count >= 0)) err(`${at}.count`, "combat", "A budget's count is a number of 0 or more, or a formula.");
+    }
+    const pov = own(world.entities, world.pov);
+    const hp = typeof combat.hp === "string" && combat.hp !== "" ? combat.hp : null;
+    const hpDef = hp && pov ? fieldDef(reg, world, pov.kind, hp) : undefined;
+    if (!hp) err("ruleset.combat.hp", "combat", "A fight needs the HP field: a pool on the kind of those who fight.");
+    else if (pov && !hpDef) err("ruleset.combat.hp", "combat", `The point of view's kind has no field ${hp}.`);
+    else if (hpDef && !hpDef.pool) warn("ruleset.combat.hp", "combat", `${hp} isn't a pool, so damage has no floor and HP shows no max.`);
+    if (combat.endTurn !== undefined && combat.endTurn !== "spent" && combat.endTurn !== "manual") err("ruleset.combat.endTurn", "combat", "The POV's turn ends once it's spent, or only on End turn (manual).");
+    if (combat.showHp !== undefined && combat.showHp !== "wounds" && combat.showHp !== "exact") err("ruleset.combat.showHp", "combat", "Others' HP shows as wounds or as exact numbers.");
+    if (combat.wounds !== undefined && (!Array.isArray(combat.wounds) || combat.wounds.some((b) => !isRecord(b) || typeof b.label !== "string"))) err("ruleset.combat.wounds", "combat", "Wounds are bands with labels over the HP left, in percent.");
+    const sites = exprSites(world);
+    for (const site of sites) {
+      if (!site.path.startsWith("ruleset.combat.") || site.path.startsWith("ruleset.combat.initiative")) continue;
+      try {
+        compile(site.expr);
+      } catch (e) {
+        err(site.path, "types", `This formula doesn't parse: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    const statMods = sites.some((s) => fightPaths.some((p) => s.path.startsWith(p)) && /\b(stat_mod|condition_mod)\s*\(/.test(s.expr));
+    if (statMods && rulesetFloor(world, "sheets", world.realism.levels.sheets) < 3) info("ruleset.minLevels.sheets", "level_floor", "This world's fights read stat modifiers, which are 0 below Sheets 3: a Sheets 3 floor makes them count under any realism.");
+  } else if (combat !== undefined) err("ruleset.combat", "combat", "Combat must be an object.");
 
   // The ruleset container (DESIGN §11), its adjudication policy first: the sheet's checks below may end early.
   const rs: unknown = world.ruleset;

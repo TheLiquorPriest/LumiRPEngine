@@ -26,6 +26,7 @@ import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, findLeaks, unrevealedTruths } from "../engine/visibility";
+import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import type { StoredChip } from "./chips";
 
 /** The palette's timelapse action; its params are `{target, overrides}`. */
@@ -158,7 +159,8 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
   const ctx = registry.context(world, state);
   const retry = policyOf(world, state).retry;
   for (const action of actions.values()) {
-    if (action.id === TIMELAPSE_ACTION) continue;
+    // Combat actions are the combat pack's Combat tab (below), and only where the world's ruleset has combat.
+    if (action.id === TIMELAPSE_ACTION || action.combat) continue;
     const refParam = Object.entries(action.params).find(([, p]) => p.type === "ref" && !p.optional)?.[0];
     const amountParam = Object.entries(action.params).find(([, p]) => p.type === "money")?.[0];
     const options: PaletteEntry["options"] = [];
@@ -243,6 +245,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
       ...(numberParam ? { number: { param: numberParam, label: paramLabel(action, numberParam, world, registry), min: 1, max: null, default: 1 } } : {}),
     });
   }
+  entries.push(...combatEntries(ctx));
   entries.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
   const calendar = ctx.levelOf(world.pov, "calendar");
   const timelapse: TimelapseView = {
@@ -258,7 +261,8 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
     interrupts: { ...state.time.interrupts },
     dayParts: calendar === 1,
   };
-  return { entries, timelapse };
+  const encounter = paletteEncounter(ctx);
+  return { entries, timelapse, ...(encounter ? { encounter } : {}) };
 }
 
 function controls(world: WorldDoc, state: WorldState, sceneType: string): ControlsView {

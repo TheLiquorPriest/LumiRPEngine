@@ -16,7 +16,7 @@ import { ENGINE_EVENTS } from "./engine-pack";
 import { applyEffects } from "./effects";
 import type { EnvVars, ExprEnv, Value } from "./expr";
 import { materializeAll } from "./materialize";
-import type { Rejection } from "./registry";
+import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { evalExpr, isGone, kindIs, placeOfEntity, scopeEnv, toValue, truthy } from "./scope";
@@ -24,7 +24,7 @@ import { selectorMatches } from "./selector";
 import type { WorldState } from "./state";
 import { Working } from "./working";
 import { canSeeEntity, canSeePlace } from "./visibility";
-import { labelOf, own } from "./pack-kit";
+import { labelOf, optionalService, own } from "./pack-kit";
 
 export interface ActionRequest {
   action: ActionId | ActionDef;
@@ -136,6 +136,14 @@ export interface Availability {
   verdict: Verdict | null;
 }
 
+/**
+ * What a combat action costs its actor now, as events, or why it can't be taken (the combat pack,
+ * DESIGN §11): its fight's state, the actor's turn and economy. Nothing for any other action.
+ */
+function combatSpend(ctx: ReadContext, actor: EntityId, action: ActionDef): LedgerEvent[] | Rejection {
+  return action.combat ? (optionalService(ctx, "combat.spend")?.(ctx, actor, action) ?? { code: "no_combat", reason: "this world has no combat" }) : [];
+}
+
 /** What the palette shows: availability, exact odds and duration, against the current state. */
 export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, req: ActionRequest): Availability {
   const p = prepare(reg, world, state, req);
@@ -147,9 +155,11 @@ export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<World
   const ready = def ? readyCheck(reg, ctx, def, p.bindings, p.vars) : null;
   const usable = ready && !("code" in ready) ? ready : null;
   const odds = usable ? checkOdds(usable) : null;
+  const spend = combatSpend(ctx, p.actor, p.action);
+  const refused = Array.isArray(spend) ? null : spend;
   return {
-    available: unmet === null && usable === ready,
-    failed: unmet !== null ? { code: "requirement", reason: `requires ${unmet}`, requirement: unmet } : ready && "code" in ready ? ready : null,
+    available: unmet === null && refused === null && usable === ready,
+    failed: unmet !== null ? { code: "requirement", reason: `requires ${unmet}`, requirement: unmet } : (refused ?? (ready && "code" in ready ? ready : null)),
     odds,
     modifier: usable?.modifier ?? 0,
     check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
@@ -207,13 +217,17 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   }
 
   const checkDef = checkOf(w.world, p.action.check);
+  const ready = checkDef ? readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars) : null;
+  if (ready && "code" in ready) return { ...base, actor: p.actor, failed: ready, events: w.events.slice(start) };
+  // A combat action spends its cost before it rolls, so a miss uses it up too.
+  const spend = combatSpend(w.ctx, p.actor, p.action);
+  const refused = Array.isArray(spend) ? (spend.map((ev) => w.apply(ev)).find((r) => r !== null) ?? null) : spend;
+  if (refused) return { ...base, actor: p.actor, failed: refused, events: w.events.slice(start) };
   let check: CheckResult | null = null;
   let outcome: string;
   let vars = p.vars;
   let adjudged: Adjudged | null = null;
-  if (checkDef) {
-    const ready = readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars);
-    if ("code" in ready) return { ...base, actor: p.actor, failed: ready, events: w.events.slice(start) };
+  if (checkDef && ready) {
     const odds = checkOdds(ready);
     const policy = policyOf(w.world, w.state);
     const verdict = verdictOf(policy, { world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });

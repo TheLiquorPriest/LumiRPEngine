@@ -74,6 +74,8 @@ declare module "../../../engine/registry" {
     "sheets.stat": (ctx: ReadContext, who: EntityId, stat: string) => number;
     /** The stats a check can name (the palette's Attempt options), in sheet order. */
     "sheets.stats": (ctx: ReadContext) => { id: string; label: string }[];
+    /** Someone's active conditions by label (Sheets 4 and up), as the Encounter card lists them. */
+    "sheets.conditions": (ctx: ReadContext, who: EntityId) => string[];
   }
 }
 
@@ -242,6 +244,7 @@ export const sheetsPack: PackDef = {
     // The stat fields live on `person` (space); worlds with other stats still store them as fields.
     r.query("sheets.stat", statValue);
     r.query("sheets.stats", (ctx) => statsOf(ctx).map((s) => ({ id: s.id, label: s.label })));
+    r.query("sheets.conditions", (ctx, who) => activeConditions(ctx, who).map((c) => c.label));
     r.formula("stat", (ctx, who, stat) => statValue(ctx, String(who ?? ""), String(stat ?? "")));
     r.formula("stat_mod", (ctx, who, stat) => checkMod(ctx, String(who ?? ""), String(stat ?? "")));
     r.formula("difficulty_of", (_ctx, v) => difficultyOf(v));

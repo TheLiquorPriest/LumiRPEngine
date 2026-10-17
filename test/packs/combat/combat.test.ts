@@ -1,0 +1,401 @@
+// Combat (DESIGN §11): a fight defined by the world's ruleset data: initiative and its ties, the
+// action economy, attacks against an HP pool, falling down and the fight ending, everyone else's
+// turns, replays and swipes, and what the POV may see of foes it can't see.
+
+import { describe, expect, test } from "bun:test";
+import { hashJson } from "../../../src/shared/hash";
+import type { LedgerEvent } from "../../../src/shared/ledger";
+import type { WorldDoc } from "../../../src/shared/world";
+import { offersAction } from "../../../src/shared/world";
+import { applyEffects } from "../../../src/engine/effects";
+import { actionOdds, resolveAction } from "../../../src/engine/resolve";
+import { createRng } from "../../../src/engine/rng";
+import type { WorldState } from "../../../src/engine/state";
+import { planTurn } from "../../../src/engine/turn";
+import { lintStructure } from "../../../src/engine/world-lint";
+import { Working } from "../../../src/engine/working";
+import combatPack, { combatEntries, paletteEncounter } from "../../../src/packs/combat/core/index";
+import { fightChoices } from "../../../src/packs/combat/core/flow";
+import { buildEncounterView } from "../../../src/packs/combat/core/view";
+import { encounterOf, PACK } from "../../../src/packs/combat/core/model";
+import calendarPack from "../../../src/packs/calendar/core/index";
+import sheetsPack from "../../../src/packs/sheets/core/index";
+import spacePack from "../../../src/packs/space/core/index";
+import { withoutAmbient } from "../../engine/support";
+import { baseWorld, fold, POV, registryOf, startState } from "../support";
+
+const reg = registryOf([combatPack]);
+
+/** Sam against a goblin and a bandit at home: a d20 strike against armor, 1d6+1 damage, an action and a move each turn. */
+function fightWorld(patch: (w: WorldDoc) => void = () => undefined): WorldDoc {
+  const world = baseWorld();
+  const person = world.kinds.person;
+  if (!person) throw new Error("no person kind");
+  Object.assign(person.fields, {
+    max_hp: { type: "number", default: 12 },
+    hp: { type: "number", label: "HP", pool: { max: "max_hp" } },
+    ac: { type: "number", default: 12 },
+    atk: { type: "number", default: 3 },
+    dex: { type: "number", default: 0 },
+    guarding: { type: "bool", default: false },
+  });
+  world.entities[POV]!.fields.dex = 2;
+  world.entities.goblin = { id: "goblin", kind: "person", name: "Goblin", tier: "background", fields: { place: "home", max_hp: 7, dex: 3 }, relations: [] };
+  world.entities.bandit = { id: "bandit", kind: "person", name: "Bandit", tier: "background", fields: { place: "home", max_hp: 9, dex: 1 }, relations: [] };
+  world.checks.initiative = { id: "initiative", dice: "d20", modifier: "self.dex" };
+  world.actions.strike = {
+    id: "strike",
+    label: "Strike",
+    params: { target: { type: "ref", ref: "person" } },
+    requires: ["is_foe(self, target)", "not is_down(target)"],
+    check: { id: "strike", dice: "d20", modifier: "self.atk", dc: "target.ac", bands: [{ outcome: "miss", margin: { max: -1 } }, { outcome: "hit", margin: { min: 0 } }] },
+    outcomes: { hit: [{ type: "add", args: { entity: "target", field: "hp", delta: "=-roll('1d6+1')" } }], miss: [] },
+    duration: "0",
+    combat: { cost: { action: 1 }, role: "attack" },
+  };
+  world.actions.guard = { id: "guard", label: "Guard", params: {}, requires: [], outcomes: { default: [{ type: "set", args: { entity: "self", field: "guarding", value: true } }] }, duration: "0", combat: { cost: { action: 1 }, role: "defend" } };
+  world.actions.step = { id: "step", label: "Step", params: {}, requires: [], outcomes: { default: [] }, duration: "0", combat: { cost: { move: 1 } } };
+  world.ruleset = { combat: { initiative: "initiative", economy: { action: { label: "Action" }, move: { label: "Move" } }, hp: "hp" } };
+  patch(world);
+  return world;
+}
+
+/** The fight started with `foes` (ids or a selector) on a working copy of the world's start. */
+function started(world: WorldDoc, foes: unknown = ["goblin", "bandit"], seed = "start", registry = reg): Working {
+  const w = new Working(registry, world, startState(world, registry));
+  const out = applyEffects(registry, w, [{ type: "combat.start", args: { foes: foes as never } }], { bindings: { self: POV }, rng: createRng(seed) });
+  if (out.rejected.length > 0) throw new Error(out.rejected[0]?.rejection.reason);
+  return w;
+}
+
+function orderOf(state: Readonly<WorldState>): string[] {
+  return encounterOf(state)?.order.map((f) => f.id) ?? [];
+}
+
+/** An initiative of 1d2 plus the modifier: a modifier ten apart settles the order, an equal one ties half the time. */
+function initiative(w: WorldDoc, modifier: string): void {
+  w.checks.initiative = { id: "initiative", dice: "1d2", modifier };
+}
+
+/** The first start (by seed) whose initiative totals tie among `who`, with the order it made. */
+function tiedStart(world: WorldDoc, who: readonly string[]): string[] {
+  for (let i = 0; i < 64; i++) {
+    const enc = encounterOf(started(world, ["goblin", "bandit"], `tie${i}`).state);
+    const totals = new Set(enc?.order.filter((f) => who.includes(f.id)).map((f) => f.init));
+    if (totals.size === 1) return enc?.order.map((f) => f.id) ?? [];
+  }
+  throw new Error("no seed tied them");
+}
+
+/** It's the POV's turn first, then the goblin's, then the bandit's. */
+function povFirst(w: WorldDoc): void {
+  initiative(w, "self.dex * 10");
+  w.entities[POV]!.fields.dex = 9;
+}
+
+function plan(world: WorldDoc, state: Readonly<WorldState>, action: string | null, params: Record<string, string> = {}, seed = "turn", registry = reg) {
+  return withoutAmbient(() => planTurn({ registry, world, state, runSeed: "run", seed, kind: "normal", userTexts: ["go"], intent: action ? { action, params, probabilities: { [action]: 1 } } : null }));
+}
+
+describe("initiative", () => {
+  test("everyone rolls the ruleset's check, highest first, with the initiative recorded", () => {
+    const world = fightWorld((w) => initiative(w, "self.dex * 10"));
+    const enc = encounterOf(started(world).state);
+    expect(enc?.order.map((f) => f.id)).toEqual(["goblin", POV, "bandit"]);
+    expect(enc?.order.map((f) => Math.floor(f.init / 10))).toEqual([3, 2, 1]);
+    expect(enc?.order.map((f) => f.side)).toEqual(["foes", "party", "foes"]);
+  });
+
+  test("ties break by the initiative modifier (or the tie-break formula), then the POV, its side and id order", () => {
+    expect(tiedStart(fightWorld((w) => initiative(w, "5")), [POV, "goblin", "bandit"])).toEqual([POV, "bandit", "goblin"]);
+    expect(tiedStart(fightWorld((w) => {
+      initiative(w, "5");
+      w.ruleset!.combat!.tieBreak = "self.dex";
+    }), [POV, "goblin", "bandit"])).toEqual(["goblin", POV, "bandit"]);
+    // 1d2 + dex: the goblin (3) rolling 1 ties Sam (2) rolling 2, and its higher modifier goes first.
+    const order = tiedStart(fightWorld((w) => initiative(w, "self.dex")), [POV, "goblin"]);
+    expect(order.indexOf("goblin")).toBeLessThan(order.indexOf(POV));
+  });
+
+  test("the same seed rolls the same order; foes named by a selector or found hostile", () => {
+    const world = fightWorld();
+    expect(orderOf(started(world, ["goblin", "bandit"], "s1").state)).toEqual(orderOf(started(world, ["goblin", "bandit"], "s1").state));
+    expect(orderOf(started(world, { ids: ["goblin"] }).state).sort()).toEqual(["goblin", POV]);
+    const hostile = fightWorld((w) => w.entities.bandit!.relations.push({ type: "hostile", to: POV }));
+    expect(orderOf(started(hostile, null).state).sort()).toEqual(["bandit", POV]);
+    const w = new Working(reg, world, startState(world));
+    expect(applyEffects(reg, w, [{ type: "combat.start", args: {} }], { bindings: { self: POV }, rng: createRng("x") }).rejected[0]?.rejection.code).toBe("no_foes");
+  });
+
+  test("an ally joins the POV's side, and the ally of a foe joins the foes", () => {
+    const world = fightWorld((w) => {
+      w.entities.dev!.fields = { ...w.entities.dev!.fields, place: "home" };
+      w.ruleset!.combat!.sides = { ally: "has_rel(self, 'friend', other)" };
+      w.entities.dev!.relations.push({ type: "friend", to: POV });
+    });
+    const enc = encounterOf(started(world, ["goblin"]).state);
+    expect(enc?.order.find((f) => f.id === "dev")?.side).toBe("party");
+    expect(enc?.order.some((f) => f.id === "bandit")).toBe(false);
+  });
+});
+
+describe("the action economy", () => {
+  test("a combat action spends its cost, and is refused once it's spent", () => {
+    const world = fightWorld(povFirst);
+    const w = started(world);
+    expect(actionOdds(reg, world, w.state, { action: "strike", params: { target: "goblin" } }).available).toBe(true);
+    const res = resolveAction(reg, w, { action: "strike", params: { target: "goblin" } }, createRng("a"));
+    expect(res.ok).toBe(true);
+    expect(res.events[0]).toEqual({ type: "combat.spend", data: { encounter: encounterOf(w.state)?.id ?? "", who: POV, cost: { action: 1 } } });
+    expect(encounterOf(w.state)?.order.find((f) => f.id === POV)?.left).toEqual({ action: 0, move: 1 });
+    const again = actionOdds(reg, world, w.state, { action: "strike", params: { target: "bandit" } });
+    expect(again.available).toBe(false);
+    expect(again.failed).toEqual({ code: "spent", reason: "no Action left" });
+    const refused = resolveAction(reg, w, { action: "strike", params: { target: "bandit" } }, createRng("b"));
+    expect(refused.ok).toBe(false);
+    expect(refused.failed?.code).toBe("spent");
+    // The move is still there.
+    expect(actionOdds(reg, world, w.state, { action: "step" }).available).toBe(true);
+  });
+
+  test("outside a fight a combat action is refused, Fight isn't, and a world without combat offers neither", () => {
+    const world = fightWorld();
+    const state = startState(world);
+    expect(actionOdds(reg, world, state, { action: "strike", params: { target: "goblin" } }).failed?.code).toBe("requirement");
+    expect(actionOdds(reg, world, state, { action: "step" }).failed).toEqual({ code: "no_fight", reason: "no fight is under way" });
+    expect(actionOdds(reg, world, state, { action: "fight", params: { target: "goblin" } }).available).toBe(true);
+    expect(combatEntries(reg.context(world, state)).map((e) => e.action)).toEqual(["fight"]);
+    const plain = baseWorld();
+    expect(offersAction(plain, reg.actions.get("fight") ?? { combat: undefined })).toBe(false);
+    expect(combatEntries(reg.context(plain, startState(plain)))).toEqual([]);
+    expect(actionOdds(reg, plain, startState(plain), { action: "end_turn" }).failed?.code).toBe("no_combat");
+  });
+
+  test("it isn't anyone's to take out of turn, and a turn refills its budgets", () => {
+    const world = fightWorld((w) => initiative(w, "self.dex * 10"));
+    const w = started(world);
+    expect(actionOdds(reg, world, w.state, { action: "strike", params: { target: "goblin" } }).failed?.reason).toBe("it isn't your turn");
+    const p = plan(world, w.state, null);
+    const enc = encounterOf(fold(reg, world, w.state, p.events));
+    expect(enc?.order[enc.turn]?.id).toBe(POV);
+    expect(enc?.order.find((f) => f.id === POV)?.left).toEqual({ action: 1, move: 1 });
+  });
+});
+
+describe("attacks, HP and the end of a fight", () => {
+  test("a hit takes 1d6+1 off the pool and a miss nothing; the pool stops at 0", () => {
+    const world = fightWorld(povFirst);
+    const seen = new Set<string>();
+    for (let i = 0; i < 40; i++) {
+      const w = started(world);
+      const res = resolveAction(reg, w, { action: "strike", params: { target: "bandit" } }, createRng(`hit${i}`));
+      const hp = Number(w.state.entities.bandit?.fields.hp ?? 9);
+      seen.add(res.outcome ?? "");
+      if (res.outcome === "hit") {
+        expect(9 - hp).toBeGreaterThanOrEqual(2);
+        expect(9 - hp).toBeLessThanOrEqual(7);
+      } else expect(hp).toBe(9);
+    }
+    expect([...seen].sort()).toEqual(["hit", "miss"]);
+    const low = fightWorld((w) => {
+      povFirst(w);
+      w.entities.goblin!.fields.hp = 1;
+      w.entities.goblin!.fields.ac = 0;
+    });
+    const w = started(low);
+    resolveAction(reg, w, { action: "strike", params: { target: "goblin" } }, createRng("x"));
+    expect(w.state.entities.goblin?.fields.hp).toBe(0);
+    applyEffects(reg, w, [{ type: "add", args: { entity: "goblin", field: "hp", delta: 50 } }], { bindings: { self: POV }, rng: createRng("heal") });
+    expect(w.state.entities.goblin?.fields.hp).toBe(7);
+  });
+
+  test("a foe at 0 HP is down, and when no foe stands the fight is over, won", () => {
+    const world = fightWorld((w) => {
+      povFirst(w);
+      w.entities.goblin!.fields.hp = 1;
+      w.entities.goblin!.fields.ac = 0;
+    });
+    const w = started(world, ["goblin"]);
+    const p = plan(world, w.state, "strike", { target: "goblin" });
+    const types = p.events.map((e) => e.type);
+    expect(types).toContain("combat.down");
+    expect(types.at(-1) === "combat.end" || types.includes("combat.end")).toBe(true);
+    const after = fold(reg, world, w.state, p.events);
+    expect(encounterOf(after)).toBeNull();
+    expect(after.packs[PACK]).toBeUndefined();
+    expect(p.events.find((e) => e.type === "combat.end")).toMatchObject({ data: { winner: "party", reason: "over" } });
+    expect(p.combat).toEqual(expect.arrayContaining(["Goblin is down.", "The fight is over: your side won."]));
+  });
+
+  test("the down condition goes on through the Sheets pack, and a fall that never happened is dropped", () => {
+    const registry = registryOf([calendarPack, spacePack, sheetsPack, combatPack]);
+    const world = fightWorld((w) => {
+      povFirst(w);
+      w.entities.goblin!.fields.hp = 1;
+      w.entities.goblin!.fields.ac = 0;
+      w.entities.bandit!.fields.place = "cafe";
+      w.ruleset!.combat!.down = { condition: "Unconscious" };
+    });
+    const w = started(world, ["goblin"], "start", registry);
+    const p = plan(world, w.state, "strike", { target: "goblin" }, "turn", registry);
+    const conditions = fold(registry, world, w.state, p.events).entities.goblin?.fields.conditions;
+    expect(conditions).toEqual([{ id: "unconscious", label: "Unconscious", mod: 0 }]);
+    // On a branch where the goblin still has its HP, the recorded fall doesn't validate.
+    const down = p.events.find((e) => e.type === "combat.down");
+    const healthy = structuredClone(w.state) as WorldState;
+    expect(registry.get("combat.down")?.validate(down as never, registry.context(world, healthy))?.code).toBe("not_down");
+  });
+});
+
+describe("everyone else's turns", () => {
+  test("End turn runs the others in initiative order until the POV's turn, the same for the same seed", () => {
+    const world = fightWorld(povFirst);
+    const w = started(world);
+    const a = plan(world, w.state, "end_turn", {}, "seed-1");
+    const b = plan(world, w.state, "end_turn", {}, "seed-1");
+    expect(a.events).toEqual(b.events);
+    expect(a.combat).toEqual(b.combat);
+    const acts = a.events.filter((e): e is Extract<LedgerEvent, { data: unknown }> => e.type === "combat.act").map((e) => e.data.actor);
+    expect(acts).toEqual(["goblin", "bandit"]);
+    const after = fold(reg, world, w.state, a.events);
+    const enc = encounterOf(after);
+    expect(enc?.order[enc.turn]?.id).toBe(POV);
+    expect(enc?.round).toBe(2);
+    expect(a.combat.at(-2)).toBe("Round 2, your turn: 1 Action, 1 Move left.");
+    // Another seed may roll otherwise, but folds just as well.
+    const c = plan(world, w.state, "end_turn", {}, "seed-2");
+    expect(() => fold(reg, world, w.state, c.events)).not.toThrow();
+  });
+
+  test("the POV's turn ends on its own once nothing it could do fits", () => {
+    const world = fightWorld((w) => {
+      povFirst(w);
+      delete w.actions.step;
+    });
+    const p = plan(world, started(world).state, "strike", { target: "goblin" });
+    const acts = p.events.filter((e) => e.type === "combat.act").map((e) => ("data" in e ? e.data.actor : ""));
+    expect(acts).toEqual([POV, "goblin", "bandit"]);
+    const manual = fightWorld((w) => {
+      povFirst(w);
+      delete w.actions.step;
+      w.ruleset!.combat!.endTurn = "manual";
+    });
+    expect(plan(manual, started(manual).state, "strike", { target: "goblin" }).events.filter((e) => e.type === "combat.act")).toHaveLength(1);
+  });
+
+  test("tactics: attack the most threatening foe; a hurt fighter guards instead", () => {
+    const world = fightWorld((w) => {
+      initiative(w, "self.dex * 10");
+      w.entities.dev!.fields = { ...w.entities.dev!.fields, place: "home" };
+      w.ruleset!.combat!.sides = { ally: "has_rel(self, 'friend', other)" };
+      w.entities.dev!.relations.push({ type: "friend", to: POV });
+      w.entities.dev!.fields.max_hp = 30;
+    });
+    const w = started(world, ["goblin"]);
+    // The goblin goes first and picks Dev, who has the most HP.
+    const p = plan(world, w.state, null);
+    const first = p.events.find((e) => e.type === "combat.act");
+    expect(first).toMatchObject({ data: { actor: "goblin", action: "strike", target: "dev" } });
+    const hurt = fightWorld((w2) => {
+      initiative(w2, "self.dex * 10");
+      w2.entities.goblin!.fields.hp = 1;
+    });
+    const q = plan(hurt, started(hurt, ["goblin"]).state, null);
+    expect(q.events.find((e) => e.type === "combat.act")).toMatchObject({ data: { actor: "goblin", action: "guard" } });
+  });
+
+  test("a recorded npc.choose pick wins while it's legal", () => {
+    const world = fightWorld(povFirst);
+    const w = started(world, ["goblin"]);
+    const choices = fightChoices(reg.context(world, w.state));
+    expect(choices.map((c) => c.agent)).toEqual(["goblin"]);
+    expect(choices[0]?.options).toEqual(["end_turn@", "guard@", "step@", `strike@${POV}`]);
+    expect(choices[0]?.labels[`strike@${POV}`]).toBe("Strike Sam");
+    w.apply({ type: "combat.decision", data: { key: choices[0]?.key ?? "", choice: "guard@" } });
+    const p = plan(world, w.state, "end_turn");
+    expect(p.events.find((e) => e.type === "combat.act")).toMatchObject({ data: { actor: "goblin", action: "guard" } });
+    expect(fightChoices(reg.context(world, w.state))).toEqual([]);
+  });
+});
+
+describe("records and swipes", () => {
+  test("an encounter turn's events fold to the plan's state, and a Re-run's fold just as well", () => {
+    const world = fightWorld(povFirst);
+    const parent = started(world).state;
+    const first = plan(world, parent, "strike", { target: "goblin" }, "swipe-a");
+    const replay = new Working(reg, world, parent);
+    replay.applyAll(first.events);
+    expect(replay.dropped).toEqual([]);
+    expect(hashJson(fold(reg, world, parent, first.events))).toBe(hashJson(replay.state));
+    // A Re-narrate copies the events: the same fold. A Re-run rolls again from the same parent.
+    expect(hashJson(fold(reg, world, parent, structuredClone(first.events)))).toBe(hashJson(replay.state));
+    const rerun = plan(world, parent, "strike", { target: "goblin" }, "swipe-b");
+    expect(() => fold(reg, world, parent, rerun.events)).not.toThrow();
+    // A turn of another fight doesn't fold here.
+    const elsewhere = plan(world, started(world, ["goblin", "bandit"], "other").state, "strike", { target: "goblin" }, "swipe-a");
+    const w = new Working(reg, world, parent);
+    w.applyAll(elsewhere.events);
+    expect(w.dropped.map((d) => d.rejection.code)).toContain("other_fight");
+  });
+
+  test("a world without combat rules plans exactly as before", () => {
+    const world = baseWorld();
+    const state = startState(world);
+    const without = withoutAmbient(() => planTurn({ registry: registryOf(), world, state, runSeed: "run", seed: "s", kind: "normal", userTexts: ["hi"], intent: null }));
+    const withPack = withoutAmbient(() => planTurn({ registry: reg, world, state, runSeed: "run", seed: "s", kind: "normal", userTexts: ["hi"], intent: null }));
+    expect(withPack.events).toEqual(without.events);
+    expect(withPack.combat).toEqual([]);
+  });
+});
+
+describe("what the POV may see", () => {
+  test("a foe it can't see isn't named, shown, targeted or narrated", () => {
+    const world = fightWorld((w) => {
+      povFirst(w);
+      w.entities.bandit!.visibility = "secret";
+    });
+    const w = started(world);
+    const ctx = reg.context(world, w.state);
+    const view = buildEncounterView(ctx);
+    const hidden = view?.order.find((r) => r.id === null);
+    expect(hidden).toMatchObject({ name: "someone", hp: null, wound: null, init: null });
+    expect(JSON.stringify(view)).not.toContain("Bandit");
+    expect(combatEntries(ctx).find((e) => e.action === "strike")?.options.map((o) => o.label)).toEqual(["Goblin"]);
+    const p = plan(world, w.state, "end_turn");
+    expect(p.combat.join("\n")).not.toContain("Bandit");
+    expect(p.combat.join("\n")).toContain("Someone: Strike");
+    const gm = buildEncounterView(ctx, { gm: true });
+    expect(gm?.order.map((r) => r.name)).toContain("Bandit");
+  });
+
+  test("others' HP reads as a wound band unless the rules show numbers", () => {
+    const world = fightWorld((w) => {
+      povFirst(w);
+      w.entities.goblin!.fields.hp = 2;
+    });
+    const row = (wld: WorldDoc) => buildEncounterView(reg.context(wld, started(wld).state))?.order.find((r) => r.id === "goblin");
+    expect(row(world)).toMatchObject({ hp: null, wound: "badly hurt" });
+    world.ruleset!.combat!.showHp = "exact";
+    expect(row(world)).toMatchObject({ hp: { current: 2, max: 7 }, wound: null });
+    expect(buildEncounterView(reg.context(world, started(world).state))?.order.find((r) => r.you)?.hp).toEqual({ current: 12, max: 12 });
+    expect(paletteEncounter(reg.context(world, started(world).state))).toEqual({ round: 1, turn: "you", yours: true, economy: [{ id: "action", label: "Action", left: 1, of: 1 }, { id: "move", label: "Move", left: 1, of: 1 }] });
+  });
+});
+
+describe("lint", () => {
+  test("combat rules and combat actions are checked at their paths", () => {
+    const world = fightWorld((w) => {
+      w.ruleset!.combat!.initiative = "nope";
+      w.ruleset!.combat!.end = "standing('foes') ==";
+      w.actions.strike!.combat = { cost: { focus: 1 } };
+      w.actions.strike!.check = { id: "strike", dice: "d20", modifier: "stat_mod(self, 'might')", dc: "10" };
+    });
+    const issues = lintStructure(world, reg);
+    const at = (path: string): string[] => issues.filter((i) => i.path === path).map((i) => i.code);
+    expect(at("ruleset.combat.initiative")).toContain("refs");
+    expect(at("ruleset.combat.end")).toContain("types");
+    expect(at("actions.strike.combat.cost.focus")).toContain("refs");
+    expect(at("ruleset.minLevels.sheets")).toContain("level_floor");
+    expect(lintStructure(fightWorld(), reg).filter((i) => i.severity === "error" && i.path.includes("combat"))).toEqual([]);
+  });
+});

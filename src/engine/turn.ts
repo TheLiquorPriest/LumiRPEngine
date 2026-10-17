@@ -2,8 +2,9 @@
 //
 // plan (pre-reply, fold order):
 //   pause bookkeeping → the action (materialization, requirements, check, effects, event rules)
-//   → the elapsed time through `advance` (world processes, schedules, slot rules, tracks) → a
-//   timelapse (explicit, or Speed through `auto`) → off-screen catch-up when time moved.
+//   with a fight's turns around it (`combat.round`) → the elapsed time through `advance` (world
+//   processes, schedules, slot rules, tracks) → a timelapse (explicit, or Speed through `auto`)
+//   → off-screen catch-up when time moved.
 // post (after extraction): catch-up when time didn't move in plan, turn rules and tracks.
 //
 // Intents: `interpret`'s answer, or a palette/command intent of the same shape. The built-in
@@ -25,7 +26,7 @@ import type { PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./ste
 import { buildMontage, pauseBookkeeping, parseOverrides, parseTarget, runTimelapse, speedThrough, turnElapsed, type Montage, type TimelapseOutcome } from "./time";
 import { stepTracks } from "./tracks";
 import { Working } from "./working";
-import { own } from "./pack-kit";
+import { optionalService, own } from "./pack-kit";
 
 export const TIMELAPSE_ACTION = "timelapse";
 /** Off-screen agents caught up per turn (K) and their agent-day budget. */
@@ -44,6 +45,8 @@ export interface EngineTurnPlan extends TurnPlan {
   montage: Montage | null;
   chips: TurnChip[];
   outline: string[];
+  /** A fight's part of the turn as the Outcome slot tells it (the combat pack, DESIGN §11); empty without one. */
+  combat: string[];
 }
 
 function onScreen(w: Working): EntityId[] {
@@ -64,6 +67,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const intent = input.intent;
   let resolution: Resolution | null = null;
   let timelapse: TimelapseOutcome | null = null;
+  let combat: string[] = [];
 
   if (intent?.action === TIMELAPSE_ACTION) {
     const target = parseTarget(intent.params.target);
@@ -74,10 +78,13 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     if ("code" in outcome) w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
     else timelapse = outcome;
   } else {
+    // A fight under way runs everyone else's turns around the POV's action (the combat pack).
+    const fight = optionalService(w.ctx, "combat.round")?.(w, rng.fork("combat"));
     if (intent?.action) {
       resolution = resolveAction(reg, w, { action: intent.action, params: intent.params }, rng, { runSeed: input.runSeed, judgement: intent.judgement ?? null });
       if (resolution.events.length > 0) runRulesOnEvents(reg, w, resolution.events, { seed: input.seed });
     }
+    combat = fight?.after(resolution ? { resolution, params: intent?.params ?? {} } : null) ?? [];
     const elapsed = turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
     if (elapsed.minutes > 0) advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
     const act = resolution?.activity;
@@ -108,6 +115,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     montage,
     chips,
     outline: outline(reg, w.world, w.state, { resolution, timelapse, events: w.events }, rng.fork("beats")),
+    combat,
   };
 }
 

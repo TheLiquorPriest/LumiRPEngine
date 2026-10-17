@@ -86,7 +86,8 @@
         "derived": {"health": {"label": "Health", "formula": "8 + brawn"}, "composure": {"label": "Composure", "formula": "6 + floor((wits + heart) / 3)"}}
       }
     },
-    "story": {"version": 1, "config": {"flags": {"ferry_running": true, "market_open": true}}}
+    "story": {"version": 1, "config": {"flags": {"ferry_running": true, "market_open": true}}},
+    "combat": {"version": 1, "config": {}}
   },
   "pins": {
     "generators": {"money": 1, "gear": 1, "vehicles": 1},

@@ -37,7 +37,7 @@ export interface UiState {
   overlay: "map" | "palette" | null;
 }
 
-export type PaletteTab = "actions" | "buy" | "pay" | "transfer" | "drive" | "lend" | "timelapse";
+export type PaletteTab = "actions" | "combat" | "buy" | "pay" | "transfer" | "drive" | "lend" | "timelapse";
 
 export interface Toast {
   id: number;

@@ -130,7 +130,8 @@
         "derived": {"health": {"label": "Health", "formula": "8 + fitness"}, "composure": {"label": "Composure", "formula": "6 + floor((charm + fitness) / 3)"}}
       }
     },
-    "story": {"version": 1, "config": {"flags": {"shop_open": true, "ferry_running": true}}}
+    "story": {"version": 1, "config": {"flags": {"shop_open": true, "ferry_running": true}}},
+    "combat": {"version": 1, "config": {}}
   },
   "pins": {
     "generators": {"money": 1, "gear": 1, "vehicles": 1},

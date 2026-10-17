@@ -467,6 +467,19 @@ export interface ActivitySpec {
   until: Expr;
 }
 
+/**
+ * What makes an action a combat action (DESIGN §11): only worlds whose ruleset defines combat offer
+ * it, and in a fight it is taken on its actor's turn, spending its cost from the actor's economy.
+ */
+export interface CombatActionDef {
+  /** Budget id → how many it spends ("action": 1); empty: it's free. */
+  cost: Record<string, number>;
+  /** It starts a fight (Fight, an ambush): taken only while none is under way. Every other combat action needs one. */
+  start?: boolean;
+  /** How the engine's tactics use it for everyone but the POV: `attack` a foe, `defend` when hurt. Absent: only an `npc.choose` decision picks it. */
+  role?: "attack" | "defend";
+}
+
 export interface ActionDef {
   id: ActionId;
   label: string;
@@ -483,9 +496,15 @@ export interface ActionDef {
   lexicon?: string[];
   /** The label other characters can observe (no secrets; linted). */
   observable?: string;
+  combat?: CombatActionDef;
   pack?: PackId;
   /** Marked for the adjudication policy's `marked` timing: its check rolls wherever it is taken (DESIGN §11). */
   adjudicate?: boolean;
+}
+
+/** Whether a world offers an action: a combat action only where the ruleset defines combat (DESIGN §11). */
+export function offersAction(world: Pick<WorldDoc, "ruleset">, action: Pick<ActionDef, "combat">): boolean {
+  return action.combat === undefined || world.ruleset?.combat !== undefined;
 }
 
 // ---------------------------------------------------------------- calendar, schedules, tracks
@@ -816,13 +835,56 @@ export interface SheetLayoutDef {
   sections: SheetSectionDef[];
 }
 
+/** One budget of a fight's action economy (DESIGN §11): how many a participant has, and when it refills. */
+export interface CombatBudgetDef {
+  label: string;
+  /** How many: a number, or a formula with the participant as `self`; default 1. */
+  count?: number | Expr;
+  /** Refilled at the start of the participant's own turn (the default) or of every round. */
+  per?: "turn" | "round";
+  /** Spent outside one's own turn (a reaction): an unspent one never keeps a turn open. */
+  offTurn?: boolean;
+}
+
 /**
- * A world's tabletop ruleset (DESIGN §11): progression, the sheet layout and the realism floors its
- * math needs. Every key is optional; later parts of the ruleset add their own keys to this interface.
+ * A world's combat rules (DESIGN §11), all data. Combat actions are actions with `combat`; an attack
+ * is one whose check reads the defense (a DC or an opposed roll) and whose hit outcomes take
+ * `roll()` damage off the HP pool.
+ */
+export interface CombatDef {
+  /** Rolled by every participant when a fight starts, highest first: a check id or an inline check, with the participant as `self`. */
+  initiative: CheckId | CheckDef;
+  /** Breaks equal initiative totals, higher first: a formula with the participant as `self` (default: its initiative modifier). Then the POV's side goes first, then id order. */
+  tieBreak?: Expr;
+  /** The action economy by budget id ("action", "bonus", "move", "reaction"). */
+  economy: Record<string, CombatBudgetDef>;
+  /** The pool field that holds hit points. */
+  hp: FieldId;
+  /** When a participant is down (default: no HP left), and the condition it then has (default `down`). */
+  down?: { when?: Expr; condition?: string };
+  /** Who is hostile to whom (default: a `hostile` relation either way), and who fights beside whom (default: no one), with `self` and `other`. */
+  sides?: { hostile?: Expr; ally?: Expr };
+  /** When the fight is over (default: one side has no one standing). */
+  end?: Expr;
+  /** The POV's turn ends once none of its combat actions fits what is left (`spent`, the default), or only on End turn (`manual`). */
+  endTurn?: "spent" | "manual";
+  /** How everyone else fights: the foe it attacks (the highest `threat`, with `self` and `target`; default the foe's HP) and when it defends (`lowHp`; default a quarter of its HP or less). */
+  tactics?: { threat?: Expr; lowHp?: Expr };
+  /** Others' HP as the player sees it: wound bands (the default) or exact numbers, where the HP field is visible. */
+  showHp?: "wounds" | "exact";
+  /** Wound bands over the HP left, in percent of the max. */
+  wounds?: BandDef[];
+}
+
+/**
+ * A world's tabletop ruleset (DESIGN §11): progression, the sheet layout, combat and the realism
+ * floors its math needs. Every key is optional; later parts of the ruleset add their own keys to this interface.
  */
 export interface RulesetDef {
   progression?: Record<ProgressionId, ProgressionDef>;
   sheet?: SheetLayoutDef;
+  /** Fights: initiative, the action economy, HP, who is down and when it's over. Absent: the world has no combat. */
+  combat?: CombatDef;
   /** The lowest effective level each domain plays at, whatever the realism settings: stat modifiers need Sheets 3. */
   minLevels?: Partial<Record<DomainId, Level>>;
   /** How the world's checks are decided: when they roll, what the player's words weigh, who settles them (DESIGN §11). */

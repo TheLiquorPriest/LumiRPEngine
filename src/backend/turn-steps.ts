@@ -61,13 +61,18 @@ export function presentNames(registry: Registry, world: WorldDoc, state: Readonl
     .map(([, e]) => e.name);
 }
 
-/** Open ties in agents' day plans (sim's `castlife.tie_zones`), split by whether the agent is with the POV. */
+/**
+ * Open ties for `npc.choose`, split by whether the agent is with the POV: agents' day plans (sim's
+ * `castlife.tie_zones`), and a fight's turns before the POV's next one (`combat.choices`), which
+ * are always with the POV.
+ */
 export function tiesOf(ctx: ReadContext, world: WorldDoc, state: Readonly<WorldState>): { present: Tie[]; offscreen: Tie[] } {
   const all = optionalQuery(ctx, "castlife.tie_zones")?.(ctx) ?? [];
   const here = placeOfEntity(state, world.pov);
   const present: Tie[] = [];
   const offscreen: Tie[] = [];
   for (const t of all) (here !== null && placeOfEntity(state, t.agent) === here ? present : offscreen).push({ key: t.key, agent: t.agent, options: [...t.options] });
+  for (const t of optionalQuery(ctx, "combat.choices")?.(ctx) ?? []) present.push({ key: t.key, agent: t.agent, options: [...t.options], labels: t.labels, decision: "combat.decision" });
   return { present, offscreen };
 }
 
@@ -338,19 +343,23 @@ export async function promptedEffects(steps: Steps, run: StepRun, vars: Readonly
 
 // ---------------------------------------------------------------- decisions
 
-/** An open tie in an agent's day plan (sim's `castlife.tie_zones`). */
+/** An open tie for `npc.choose`: an agent's day plan (sim's `castlife.tie_zones`), or its turn in a fight (`combat.choices`). */
 export interface Tie {
   key: string;
   agent: EntityId;
   options: string[];
+  /** How each option reads in the question; its id in words otherwise. */
+  labels?: Record<string, string>;
+  /** The event that records the pick; `castlife.decision` otherwise. */
+  decision?: `${string}.${string}`;
 }
 
 const humanize = (id: string): string => id.replace(/[_:.-]+/g, " ").trim();
 
 /**
  * `npc.choose` (DESIGN §5.2): one choice question per open tie, answered as probabilities and
- * sampled with the turn's seeded rng; returns `castlife.decision` events. The questions may carry
- * agents' private plans, so this call never includes prose.
+ * sampled with the turn's seeded rng; returns the decision events (`castlife.decision`, or the
+ * tie's own). The questions may carry agents' private plans, so this call never includes prose.
  */
 export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[], describe: (tie: Tie) => JsonValue, rng: Rng, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<LedgerEvent[]> {
   const asked = ties.filter((t) => t.options.length > 1).slice(0, 12);
@@ -359,7 +368,7 @@ export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[]
   const state: Record<string, JsonValue> = {};
   asked.forEach((t, i) => {
     const criteria: Record<string, string> = {};
-    for (const o of t.options) criteria[o] = humanize(o);
+    for (const o of t.options) criteria[o] = t.labels?.[o] ?? humanize(o);
     questions[`t${i}`] = { type: "choice", instructions: run.template?.template ?? "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.", criteria };
     state[`t${i}`] = describe(t);
   });
@@ -377,7 +386,7 @@ export function decisionEvents(asked: readonly Tie[], answers: Answers, rng: Rng
     for (const o of t.options) probabilities[o] = Math.max(0, a.probabilities[o] ?? 0);
     if (Object.values(probabilities).every((p) => p === 0)) return;
     const choice = sample(probabilities, rng.fork(t.key), t.options);
-    out.push({ type: "castlife.decision", data: { key: t.key, choice } });
+    out.push({ type: t.decision ?? "castlife.decision", data: { key: t.key, choice } });
   });
   return out;
 }

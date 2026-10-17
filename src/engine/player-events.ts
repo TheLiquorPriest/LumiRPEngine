@@ -38,6 +38,10 @@ const BOOKKEEPING = new Set<string>([
   // The POV's transaction history mirrors its `post` events, which carry the line.
   "economy.txn",
   "story.flag",
+  // A fight's turn order, economy and recorded picks; what anyone did is `combat.act`.
+  "combat.turn",
+  "combat.spend",
+  "combat.decision",
 ]);
 
 /** A posting as the POV sees it: the memo with what moved between its own accounts. */

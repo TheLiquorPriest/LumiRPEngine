@@ -583,6 +583,7 @@ export function gmFixture(): GmView {
       },
       { entity: "npc_mara", name: "Mara Lopez", level: 2, band: "modest", netWorthCents: 1235000, opened: false, accounts: [{ id: "mara_checking", name: "Mara's checking", kind: "checking", cents: 1235000 }], bills: [], recent: [], notes: [] },
     ],
+    encounter: null,
     edits: [
       { messageId: "m4", seq: 12, lines: ["Rosie Alvarez's mood: tense"] },
       { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"] },
