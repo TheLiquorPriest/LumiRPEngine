@@ -227,6 +227,8 @@ src/packs/<pack>/core/index.ts   default export PackDef   (pure)
 src/packs/<pack>/ui/index.ts     default export UiPackDef (Preact)
 ```
 
+The engine calls a pack by name only through `optionalService`/`optionalQuery`, so it runs without it: the combat pack's `combat.spend` (what a combat action costs, from `engine/resolve`) and `combat.round` (a fight's turns around the POV's action, from `engine/turn`), and `combat.choices` (its `npc.choose` questions, from `backend/turn-steps`).
+
 `PackDef {id, label, version, domain, requires, register(r: CoreRegistry)}`. Registrations:
 
 | Method | Contributes |
