@@ -1,8 +1,8 @@
 // Build → World → Ruleset (DESIGN §11, §13): how checks are decided (the adjudication policy), the
-// level floors, the progressions and the Sheet Designer, saved together as the `ruleset` part. The
-// designer previews the sheet live through `lre.world sheet`, on the POV as a chat would start, with
-// the ruleset as edited (saved or not). Keys this editor doesn't know are kept as they are, so other
-// ruleset parts survive a save.
+// level floors, the progressions, the Sheet Designer and the Combat card, saved together as the
+// `ruleset` part. The designer previews the sheet live through `lre.world sheet`, on the POV as a
+// chat would start, with the ruleset as edited (saved or not). Keys this editor doesn't know are
+// kept as they are, so other ruleset parts survive a save.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { presetAdjudication, readAdjudication } from "../../shared/adjudication";
@@ -20,7 +20,7 @@ import { sheetPreviewRequest } from "../requests";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
 import { ExprEditor } from "./expr-editor";
-import { EFFECT } from "./schema";
+import { EFFECT, type FieldSpec } from "./schema";
 import type { FormCtx } from "./schema-form";
 import { FieldInput, kindFields, lintAt, refOptions, worldIdentifiers } from "./schema-form";
 
@@ -526,6 +526,43 @@ function ProgressionEditor(props: { value: Record<string, ProgressionDef>; doc: 
   );
 }
 
+/** The combat part (DESIGN §11), schema-driven: initiative, the action economy, HP, who is down, the sides and when a fight is over. */
+const COMBAT: FieldSpec = {
+  kind: "object",
+  key: "combat",
+  label: "Fights (leave it out and this world has no combat)",
+  optional: true,
+  fields: [
+    { kind: "ref", key: "initiative", label: "Initiative check (everyone rolls it when a fight starts; highest first)", collection: "checks", inline: true },
+    { kind: "expr", key: "tieBreak", label: "Tie-break, higher first (default: the initiative modifier)", optional: true },
+    {
+      kind: "record",
+      key: "economy",
+      label: "Action economy",
+      keyLabel: "Budget id (action, bonus, move, reaction)",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Budget",
+        fields: [
+          { kind: "text", key: "label", label: "Label" },
+          { kind: "json", key: "count", label: "How many (a number, or a formula with the fighter as self; default 1)", optional: true },
+          { kind: "enum", key: "per", label: "Refills each", values: ["turn", "round"], optional: true },
+          { kind: "bool", key: "offTurn", label: "Spent off one's own turn (a reaction): never keeps a turn open" },
+        ],
+      },
+    },
+    { kind: "text", key: "hp", label: "HP field", hint: "A pool field on the kind of those who fight" },
+    { kind: "object", key: "down", label: "Down", optional: true, fields: [{ kind: "expr", key: "when", label: "When (default: no HP left)", optional: true }, { kind: "text", key: "condition", label: "Condition it applies (default down)", optional: true }] },
+    { kind: "object", key: "sides", label: "Sides", optional: true, fields: [{ kind: "expr", key: "hostile", label: "Hostile, with self and other (default: a hostile relation)", optional: true }, { kind: "expr", key: "ally", label: "Fights beside, with self and other", optional: true }] },
+    { kind: "expr", key: "end", label: "Over when (default: one side has no one standing)", optional: true },
+    { kind: "enum", key: "endTurn", label: "The player's turn ends", values: ["spent", "manual"], optional: true },
+    { kind: "object", key: "tactics", label: "Everyone else's tactics", optional: true, fields: [{ kind: "expr", key: "threat", label: "A target's threat, with self and target (default its HP)", optional: true }, { kind: "expr", key: "lowHp", label: "Defends when (default a quarter of its HP or less)", optional: true }] },
+    { kind: "enum", key: "showHp", label: "Others' HP shows as", values: ["wounds", "exact"], optional: true },
+    { kind: "json", key: "wounds", label: "Wound bands over the HP left in percent", optional: true, hint: '[{"label": "hurt", "min": 50, "max": 100}, …]' },
+  ],
+};
+
 export function RulesetEditor() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
@@ -573,6 +610,9 @@ export function RulesetEditor() {
       </Card>
       <Card title="Sheet Designer">
         <SheetDesigner sheet={value.sheet} choices={choices} identifiers={identifiers} functions={draft.functions} lint={draft.lint} onChange={(sheet) => setValue({ ...value, sheet })} />
+      </Card>
+      <Card title="Combat">
+        <FieldInput spec={COMBAT} value={json.combat} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("combat", next)} />
       </Card>
       <Card title="Sheet preview">
         <SheetPreview draft={draft} ruleset={tidy} />

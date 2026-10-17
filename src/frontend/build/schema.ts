@@ -278,6 +278,17 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "tags", key: "lexicon", label: "Verbs and phrases" },
     { kind: "text", key: "observable", label: "Observable label", optional: true },
     { kind: "bool", key: "adjudicate", label: "Its check always rolls", hint: "Marked for a world whose checks roll only where marked" },
+    {
+      kind: "object",
+      key: "combat",
+      label: "Combat action (offered only where the ruleset has combat)",
+      optional: true,
+      fields: [
+        { kind: "record", key: "cost", label: "Cost (budget → how many)", keyLabel: "Budget", item: { kind: "number", key: "", label: "How many", min: 0, step: 1 } },
+        { kind: "bool", key: "start", label: "Starts a fight (taken only when none is under way)" },
+        { kind: "enum", key: "role", label: "Everyone else's tactics use it to", values: ["attack", "defend"], optional: true },
+      ],
+    },
   ],
   checks: [
     { kind: "dice", key: "dice", label: "Dice" },
