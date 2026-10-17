@@ -191,7 +191,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.keep` | `chatId`, then `keep{messageId}` \| `discard{messageId}` \| `convert{messageId, parentPath, refs}` | `{pending}` |
 | `lre.settings.get` / `.set` | `patch` (deep merge) | `{settings}` |
 | `lre.editor` | `worldId, base`, then `put{collection, id, value}` \| `remove{collection, id}` \| `set{part, value}` | `{draft, lint}` |
-| `lre.world` | `list` \| `get` \| `create` \| `delete` \| `commit` \| `import` \| `export` \| `lint` \| `attach` \| `upgrade` | `{worlds?, world?, revision?, lint?, file?}` |
+| `lre.world` | `list` \| `get` \| `create` \| `delete` \| `commit` \| `import` \| `export` \| `lint` \| `attach` \| `upgrade` \| `sheet{worldId, ruleset, entity?}` | `{worlds?, world?, revision?, lint?, file?, packKinds?, packRelations?, functions?, sheet?}`; `get` adds the packs' kinds and relation types and `functions`, every function a formula may call outside an effect argument (the expression editor's list); `sheet` is the Sheet Designer's preview, the draft with the unsaved ruleset read on the POV (or `entity`) |
 | `lre.job` | `start{kind, worldId, input}` \| `cancel{jobId}` \| `list{worldId}` \| `dismiss{jobId}` | `{jobId}`; `list`: `{jobs}` (`JobSummary[]`, oldest first). Updates arrive as `lre.job.update {jobId, kind, status, progress, message?, result?}` |
 | `lre.lore` | `drift{worldId, id?}` \| `save{chatId, text?}` | `drift`: `{drift}`, the draft's book-sourced entries whose book entry changed (with its text and hash now) or is gone; `save`: `{worldId, id}` of the lore entry saved to the draft of the chat's world |
 
