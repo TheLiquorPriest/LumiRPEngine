@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { moved, parseThresholds, progressionFields, rowChoices, sectionId, tidyRuleset } from "../../src/frontend/build/ruleset-editor";
+import { moved, parseThresholds, progressionFields, rowChoices, sectionId, tableThresholds, tidyRuleset } from "../../src/frontend/build/ruleset-editor";
 import { sheetPreviewRequest } from "../../src/frontend/requests";
 import { DOMAIN_LABEL, floorNote } from "../../src/frontend/settings/realism";
 import { previewSheet } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
+import { thresholdsOf } from "../../src/engine/ruleset";
 import { ALL_PACKS } from "../../src/packs/index";
 import type { RulesetDef, WorldDoc } from "../../src/shared/world";
 import { baseWorld } from "../packs/support";
@@ -97,6 +98,16 @@ describe("progression editor helpers", () => {
     expect(parseThresholds("0 300\n900;2700")).toEqual([0, 300, 900, 2700]);
     expect(parseThresholds("")).toEqual([]);
     expect(parseThresholds("0, three")).toBeNull();
+  });
+
+  test("switching thresholds from a table to a list keeps the column's numbers in row order, as the engine reads them", () => {
+    const world = heroWorld();
+    world.tables.levels = { id: "levels", pack: "sheets", schema: "lre-table/levels/v1", revision: "r1", label: "Levels", columns: { xp: { type: "int" }, title: { type: "text" } }, rows: { l1: { xp: 0, title: "Novice" }, l2: { xp: 300, title: "Adept" }, l3: { xp: "?", title: "Odd" }, l4: { xp: 900, title: "Master" } } };
+    const ref = { table: "levels", column: "xp" };
+    expect(tableThresholds(world, ref)).toEqual([0, 300, 900]);
+    expect(tableThresholds(world, ref)).toEqual(thresholdsOf(world, { label: "Level", xpField: "xp", levelField: "level", thresholds: ref }));
+    expect(tableThresholds(world, { table: "missing", column: "xp" })).toEqual([]);
+    expect(tableThresholds(world, { table: "levels", column: "__proto__" })).toEqual([]);
   });
 });
 

@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { presetAdjudication, readAdjudication } from "../../shared/adjudication";
 import type { JsonObject, JsonValue } from "../../shared/json";
-import { isRecord } from "../../shared/json";
+import { hasOwn, isRecord } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
 import type { SheetSectionView } from "../../shared/state-view";
 import type { FieldDef, ProgressionDef, RulesetDef, SheetLayoutDef, SheetRowDef, SheetSectionDef, WorldDoc } from "../../shared/world";
@@ -377,6 +377,18 @@ export function parseThresholds(text: string): number[] | null {
   return numbers.every((n) => Number.isFinite(n)) ? numbers : null;
 }
 
+/** A data table column's numbers in row order, as the engine reads thresholds from it (`thresholdsOf`). */
+export function tableThresholds(doc: WorldDoc, ref: { table: string; column: string }): number[] {
+  const rows = hasOwn(doc.tables, ref.table) ? doc.tables[ref.table]?.rows : undefined;
+  if (!rows) return [];
+  const out: number[] = [];
+  for (const row of Object.values(rows)) {
+    const v = hasOwn(row, ref.column) ? row[ref.column] : undefined;
+    if (typeof v === "number" && Number.isFinite(v)) out.push(v);
+  }
+  return out;
+}
+
 function ThresholdList(props: { value: number[]; onChange(value: number[]): void }) {
   const [text, setText] = useState(props.value.join(", "));
   useEffect(() => {
@@ -415,6 +427,19 @@ function ProgressionForm(props: { id: string; value: ProgressionDef; doc: WorldD
   const fields = progressionFields(doc, value.kind);
   const fromTable = !Array.isArray(value.thresholds);
   const table = isRecord(value.thresholds) && !Array.isArray(value.thresholds) ? value.thresholds : null;
+  // The source the author switched away from, so switching back doesn't start over.
+  const [earlier, setEarlier] = useState<{ list?: number[]; table?: { table: string; column: string } }>({});
+  const switchTo = (mode: "list" | "table") => {
+    if (mode === (fromTable ? "table" : "list")) return;
+    if (Array.isArray(value.thresholds)) {
+      setEarlier({ ...earlier, list: value.thresholds });
+      set("thresholds", earlier.table ?? { table: "", column: "" });
+      return;
+    }
+    if (table) setEarlier({ ...earlier, table });
+    const read = table ? tableThresholds(doc, table) : [];
+    set("thresholds", read.length > 0 ? read : (earlier.list ?? []));
+  };
   const tableDef = table ? doc.tables[table.table] : undefined;
   const columns = tableDef ? Object.entries(tableDef.columns).filter(([, c]) => c.type === "number" || c.type === "int").map(([id]) => ({ value: id, label: id })) : [];
   // onLevel effects read the entity as `self`, the level reached as `level` and the one before as `from`.
@@ -434,7 +459,7 @@ function ProgressionForm(props: { id: string; value: ProgressionDef; doc: WorldD
             { value: "list", label: "A list" },
             { value: "table", label: "A data table" },
           ]}
-          onChange={(mode) => set("thresholds", mode === "list" ? (fromTable ? [] : value.thresholds) : fromTable ? json.thresholds : { table: "", column: "" })}
+          onChange={switchTo}
         />
       </div>
       {fromTable ? (
