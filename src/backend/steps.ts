@@ -12,7 +12,7 @@ import type { StepPurpose, WorldCurrency, WorldDoc } from "../shared/world";
 import type { Answers, Questions } from "../engine/decide";
 import type { InterpretOutput } from "../engine/steps";
 import { cashGift } from "../packs/gear/core/index";
-import type { HostPort } from "./host";
+import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "./host";
 import type { StepLore } from "./lore-steps";
 import { HELPER_MAX_TOKENS } from "./settings-store";
 import { readStoredJson } from "./stored-json";
@@ -23,13 +23,19 @@ export interface CallRecord {
   ok: boolean;
   ms: number;
   tokens: number;
+  /** A lore lookup round (DESIGN §5.4): a call made because the model asked to read lore. */
+  lookup?: boolean;
 }
 
 interface Tally {
   calls: number;
   tokens: number;
   ms: number;
+  /** Lore lookup rounds among the calls. */
+  lookups: number;
 }
+
+const emptyTally = (): Tally => ({ calls: 0, tokens: 0, ms: 0, lookups: 0 });
 
 interface UserTallies {
   turns: Tally[];
@@ -42,8 +48,12 @@ export const METER_PATH = "call-meter.json";
 /** Closed turns kept per user, for the average and the 95th percentile. */
 export const METER_TURNS = 200;
 
-function isTally(raw: unknown): raw is Tally {
-  return isRecord(raw) && [raw.calls, raw.tokens, raw.ms].every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
+/** A stored tally, or null when it isn't one; one saved before lookups were counted has none. */
+function tallyOf(raw: unknown): Tally | null {
+  if (!isRecord(raw)) return null;
+  const count = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  if (!count(raw.calls) || !count(raw.tokens) || !count(raw.ms)) return null;
+  return { calls: raw.calls, tokens: raw.tokens, ms: raw.ms, lookups: count(raw.lookups) ? raw.lookups : 0 };
 }
 
 /** What the meter needs to keep its tallies. */
@@ -72,11 +82,10 @@ export class CallMeter {
 
   private async load(userId: UserId): Promise<UserTallies> {
     const known = this.users.get(userId);
-    if (known || !this.host) return known ?? this.remember(userId, { turns: [], current: { calls: 0, tokens: 0, ms: 0 } });
-    const raw = await readStoredJson(this.host, METER_PATH, userId, "call meter", (r) => isRecord(r) && r.v === 1 && Array.isArray(r.turns) && isTally(r.current));
-    const turns = isRecord(raw) && Array.isArray(raw.turns) ? raw.turns.filter(isTally).slice(-METER_TURNS) : [];
-    const current = isRecord(raw) && isTally(raw.current) ? raw.current : { calls: 0, tokens: 0, ms: 0 };
-    return this.remember(userId, { turns: turns.map((t) => ({ calls: t.calls, tokens: t.tokens, ms: t.ms })), current: { calls: current.calls, tokens: current.tokens, ms: current.ms } });
+    if (known || !this.host) return known ?? this.remember(userId, { turns: [], current: emptyTally() });
+    const raw = await readStoredJson(this.host, METER_PATH, userId, "call meter", (r) => isRecord(r) && r.v === 1 && Array.isArray(r.turns) && tallyOf(r.current) !== null);
+    const turns = isRecord(raw) && Array.isArray(raw.turns) ? raw.turns.map(tallyOf).filter((t): t is Tally => t !== null).slice(-METER_TURNS) : [];
+    return this.remember(userId, { turns, current: (isRecord(raw) ? tallyOf(raw.current) : null) ?? emptyTally() });
   }
 
   /** Queues `step` after the user's earlier work; the queue never rejects (a failed write is logged). */
@@ -92,7 +101,7 @@ export class CallMeter {
   private change(userId: UserId, apply: (u: UserTallies) => void): void {
     const host = this.host;
     if (!host) {
-      const u = this.users.get(userId) ?? this.remember(userId, { turns: [], current: { calls: 0, tokens: 0, ms: 0 } });
+      const u = this.users.get(userId) ?? this.remember(userId, { turns: [], current: emptyTally() });
       apply(u);
       return;
     }
@@ -111,6 +120,7 @@ export class CallMeter {
       u.current.calls++;
       u.current.tokens += call.tokens;
       u.current.ms += call.ms;
+      if (call.lookup === true) u.current.lookups++;
     });
   }
 
@@ -119,7 +129,7 @@ export class CallMeter {
     this.change(userId, (u) => {
       u.turns.push(u.current);
       if (u.turns.length > METER_TURNS) u.turns.shift();
-      u.current = { calls: 0, tokens: 0, ms: 0 };
+      u.current = emptyTally();
     });
   }
 
@@ -136,7 +146,7 @@ export class CallMeter {
   }
 
   view(userId: UserId): { turn: Tally; average: Tally; p95: Tally } {
-    const { turns, current } = this.users.get(userId) ?? { turns: [], current: { calls: 0, tokens: 0, ms: 0 } };
+    const { turns, current } = this.users.get(userId) ?? { turns: [], current: emptyTally() };
     const last = turns.at(-1) ?? current;
     const avg = (key: keyof Tally): number => (turns.length === 0 ? 0 : Math.round(turns.reduce((s, t) => s + t[key], 0) / turns.length));
     const p95 = (key: keyof Tally): number => {
@@ -144,7 +154,7 @@ export class CallMeter {
       const sorted = turns.map((t) => t[key]).sort((a, b) => a - b);
       return sorted[Math.min(sorted.length - 1, Math.ceil(0.95 * sorted.length) - 1)] ?? 0;
     };
-    return { turn: last, average: { calls: avg("calls"), tokens: avg("tokens"), ms: avg("ms") }, p95: { calls: p95("calls"), tokens: p95("tokens"), ms: p95("ms") } };
+    return { turn: last, average: { calls: avg("calls"), tokens: avg("tokens"), ms: avg("ms"), lookups: avg("lookups") }, p95: { calls: p95("calls"), tokens: p95("tokens"), ms: p95("ms"), lookups: p95("lookups") } };
   }
 }
 
@@ -181,51 +191,83 @@ export class Steps {
     readonly meter: CallMeter,
   ) {}
 
+  /** One metered quiet call. With `retry`, a call that fails transiently is made once more. The reply, or the call's error. */
+  private async quiet(purpose: StepPurpose, request: QuietRequest, userId: UserId, signal: AbortSignal, o: { retry: boolean; lookup: boolean }): Promise<QuietResult | Error> {
+    const t0 = performance.now();
+    const lookup = o.lookup ? { lookup: true } : {};
+    try {
+      const r = await this.host.models.quiet(request, userId, signal);
+      this.meter.record({ purpose, via: "helper", ok: true, ms: performance.now() - t0, tokens: r.tokens, ...lookup }, userId);
+      // A reply that ran out of tokens is cut off mid-JSON; say so, as it reads as no JSON.
+      if (r.finishReason === "length") this.host.log("warn", `[LumiRPEngine] ${purpose} helper reply was cut off at ${request.maxTokens} tokens (${r.content.length} characters)`, userId);
+      return r;
+    } catch (error) {
+      this.meter.record({ purpose, via: "helper", ok: false, ms: performance.now() - t0, tokens: 0, ...lookup }, userId);
+      const again = o.retry && !signal.aborted && transientFailure(error);
+      this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking once more" : ""}: ${error instanceof Error ? error.message : String(error)}`, userId);
+      return again ? this.quiet(purpose, request, userId, signal, { ...o, retry: false }) : error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
   /**
    * A helper JSON call, with one repair call when the reply doesn't parse; with `retryTransient`, a
-   * call that fails transiently (`transientFailure`) is made once more. The step's lore, when it
-   * has any, follows the instructions. Null on failure.
+   * call that fails transiently (`transientFailure`) is made once more. Null on failure.
+   *
+   * The step's lore follows the instructions. When it may look lore up (`StepLore.offer` holds a
+   * round on the phase's lookup budget), the model is offered the lore tools or the need form; each
+   * time it asks, the engine answers in a follow-up message and the call is made again, once per
+   * round held. A connection that refuses the tools is asked again in the need form, and the
+   * refusal is kept once that works.
    */
   async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null } = {}): Promise<JsonValue | null> {
-    const connectionId = config?.route?.connectionId ?? null;
-    const maxTokens = Math.max(config?.maxTokens ?? HELPER_MAX_TOKENS, 1500);
-    const call = async (messages: { role: "system" | "user"; content: string }[], retry: boolean): Promise<string | null> => {
-      const t0 = performance.now();
-      try {
-        const r = await this.host.models.quiet({ messages, maxTokens, json: true, connectionId, model: config?.route?.model ?? null }, userId, signal);
-        this.meter.record({ purpose, via: "helper", ok: true, ms: performance.now() - t0, tokens: r.tokens }, userId);
-        // A reply that ran out of tokens is cut off mid-JSON; say so, as it reads as no JSON.
-        if (r.finishReason === "length") this.host.log("warn", `[LumiRPEngine] ${purpose} helper reply was cut off at ${maxTokens} tokens (${r.content.length} characters)`, userId);
-        return r.content;
-      } catch (error) {
-        this.meter.record({ purpose, via: "helper", ok: false, ms: performance.now() - t0, tokens: 0 }, userId);
-        const again = retry && !signal.aborted && transientFailure(error);
-        this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking once more" : ""}: ${error instanceof Error ? error.message : String(error)}`, userId);
-        return again ? call(messages, false) : null;
+    const base = { maxTokens: Math.max(config?.maxTokens ?? HELPER_MAX_TOKENS, 1500), connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null };
+    const lore = options.lore ?? null;
+    let offer = lore?.offer() ?? null;
+    const opening = (): QuietMessage[] => [{ role: "system", content: [system, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join("\n\n") }, { role: "user", content: user }];
+    // JSON mode stays off while tools are offered: some providers refuse the two together.
+    const ask = (messages: QuietMessage[], tools: boolean, o: { retry: boolean; lookup: boolean }) => this.quiet(purpose, { ...base, messages, json: !tools, ...(tools && lore ? { tools: [...lore.tools] } : {}) }, userId, signal, o);
+    let messages = opening();
+    let reply = await ask(messages, offer === "tools", { retry: options.retryTransient === true, lookup: false });
+    if (reply instanceof Error && offer === "tools" && lore && !signal.aborted && !transientFailure(reply)) {
+      // The connection refused the tools: the same question in the need form, on the round already held.
+      const refusal = reply.message;
+      offer = lore.refuseTools();
+      messages = opening();
+      reply = await ask(messages, false, { retry: false, lookup: false });
+      if (!(reply instanceof Error)) lore.keepRefusal(refusal);
+    }
+    while (lore && offer && !(reply instanceof Error)) {
+      const asks = lore.asked(reply, offer);
+      if (!asks) {
+        lore.release();
+        offer = null;
+        break;
       }
-    };
-    const block = options.lore?.block() ?? "";
-    const first = await call(
-      [
-        { role: "system", content: block === "" ? system : `${system}\n\n${block}` },
-        { role: "user", content: user },
-      ],
-      options.retryTransient === true,
-    );
+      lore.spend();
+      const results = lore.answer(asks);
+      const next = lore.offer();
+      const end = next === "tools" ? "Look up more with the lore tools if you must, or answer now as instructed." : next === "need" ? 'Reply with only {"need": [...]} once more if you must, or answer now as instructed.' : "Now answer as instructed, with what you have. Don't ask for more lore.";
+      messages = [...messages, { role: "assistant", content: lore.echo(reply, offer) }, { role: "user", content: `${results}\n\n${end}` }];
+      offer = next;
+      reply = await ask(messages, next === "tools", { retry: false, lookup: true });
+    }
+    if (lore && offer) lore.release();
+    const first = reply instanceof Error ? null : reply.content;
     if (first === null || first.trim() === "") return null;
     try {
       return parseJsonReply(first);
     } catch {
-      const fixed = await call(
+      const fixed = await ask(
         [
           { role: "system", content: "Rewrite the text as valid JSON with the same meaning. Output JSON only." },
           { role: "user", content: first },
         ],
         false,
+        { retry: false, lookup: false },
       );
-      if (fixed === null) return null;
+      if (fixed instanceof Error) return null;
       try {
-        return parseJsonReply(fixed);
+        return parseJsonReply(fixed.content);
       } catch {
         return null;
       }

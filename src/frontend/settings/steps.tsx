@@ -102,6 +102,9 @@ function Meter(props: { meter: CallMeterView }) {
             Tokens
           </span>
           <span class="hd" role="columnheader">
+            Lookups
+          </span>
+          <span class="hd" role="columnheader">
             Time
           </span>
         </div>
@@ -110,6 +113,7 @@ function Meter(props: { meter: CallMeterView }) {
             <span role="rowheader">{label}</span>
             <span role="cell">{m.calls.toFixed(m.calls % 1 === 0 ? 0 : 1)}</span>
             <span role="cell">{Math.round(m.tokens)}</span>
+            <span role="cell">{m.lookups.toFixed(m.lookups % 1 === 0 ? 0 : 1)}</span>
             <span role="cell">{(m.ms / 1000).toFixed(1)} s</span>
           </div>
         ))}

@@ -24,6 +24,7 @@ import type {
   InterceptorResult,
   ProcessEvent,
   QuietRequest,
+  QuietToolCall,
 } from "../../src/backend/host";
 
 export interface FakeMessage {
@@ -164,10 +165,11 @@ export class FakeHost implements HostPort {
   }
 
   /**
-   * Scripted model replies for tests (a quiet call's text). The default refuses: the ledger suite
-   * makes no model calls. Live model behaviour is checked on the real host only.
+   * Scripted model replies for tests (a quiet call's text, or its text and tool calls); throwing
+   * plays a failed call. The default refuses: the ledger suite makes no model calls. Live model
+   * behaviour is checked on the real host only.
    */
-  quietReply: ((request: QuietRequest) => string) | null = null;
+  quietReply: ((request: QuietRequest) => string | { content: string; toolCalls?: QuietToolCall[] }) | null = null;
   /** Every quiet call made, for assertions. */
   readonly quietCalls: QuietRequest[] = [];
   /** Scripted Decision API answers; null (the default) means no Decision connection, so steps fall back to the helper. */
@@ -178,7 +180,8 @@ export class FakeHost implements HostPort {
     quiet: async (request) => {
       this.quietCalls.push(request);
       if (!this.quietReply) throw new Error("the fake host makes no model calls");
-      return { content: this.quietReply(request), finishReason: "stop", tokens: 0 };
+      const reply = this.quietReply(request);
+      return typeof reply === "string" ? { content: reply, finishReason: "stop", tokens: 0 } : { content: reply.content, finishReason: reply.toolCalls ? "tool_calls" : "stop", tokens: 0, ...(reply.toolCalls ? { toolCalls: reply.toolCalls } : {}) };
     },
     decide: async (request) => {
       this.decideCalls.push(request);

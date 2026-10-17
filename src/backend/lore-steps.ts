@@ -1,13 +1,26 @@
 // The world's lore for RPEngine's own helpers (DESIGN §5.4). Each step run gets a `StepLore`: its
 // lore policy and token budget, the reader it searches with (the step's purpose decides what it
 // may read, and `engine/lore.ts` enforces it), the prefetch built from the step's own inputs at no
-// extra call, and the trace the inspector shows (§6.5).
+// extra call, the lookups its model may ask for, and the trace the inspector shows (§6.5).
+//
+// Lookups reach the model as native tools (`lore_search`, `lore_get`, `lore_list`) or, on a
+// connection seen refusing tools, as the two-phase `{"need": [...]}` form. The host has no tool-role
+// messages, so a round's results go back in a follow-up user message. Every round is one call on
+// the phase's lookup budget, held before the model is offered it: a step that can't hold one gets
+// no tools, and answers with its prefetch only.
 
+import type { UserId } from "../shared/ids";
+import type { JsonObject, JsonValue } from "../shared/json";
+import { hasOwn, isRecord, safeKey } from "../shared/json";
+import { topicIdOf } from "../shared/lore";
 import type { StepLore as StepLoreSetting } from "../shared/settings";
 import type { LoreStepTrace } from "../shared/state-view";
 import type { StepPurpose } from "../shared/world";
-import { loreSearch, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
+import { loreGet, loreList, loreSearch, readableLore, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
 import { findLeaks } from "../engine/visibility";
+import type { HostPort, QuietResult, QuietTool } from "./host";
+import { parseJsonReply } from "./steps";
+import { readStoredJson } from "./stored-json";
 
 /** What a step's prefetch searches with: its own inputs. */
 export interface LoreInputs {
@@ -17,19 +30,100 @@ export interface LoreInputs {
   links: string[];
 }
 
-/** Hits a prefetch may give; the token budget usually binds first. */
-const PREFETCH_LIMIT = 6;
+/** How a step's lookups reach its model. */
+export type LookupTransport = "tools" | "need";
+
+/** One thing the model asked to read. */
+export interface LoreAsk {
+  kind: "search" | "get" | "list";
+  text: string;
+  topic?: string;
+}
+
+/** Hits a prefetch or a search may give; the token budget usually binds first. */
+const SEARCH_LIMIT = 6;
+/** Asks one lookup round answers; the rest of a round's asks are dropped. */
+const ROUND_ASKS = 3;
 /** How much of a query the trace keeps. */
 const TRACE_CHARS = 120;
+/** Topics a lookup's instructions name. */
+const TOPICS_NAMED = 12;
+/**
+ * A lookup round starts only while this share of its phase's time is left, so a step that looks
+ * lore up still has time for its own answer before the phase's deadline.
+ */
+export const LOOKUP_RESERVE = 1 / 3;
+
+/** The lore tools a native lookup offers (Spindle's `ToolSchemaDTO`). */
+export const LORE_TOOLS: readonly QuietTool[] = [
+  {
+    name: "lore_search",
+    description: "Search the world's lore notes by words or names, optionally under one topic. Returns the best matches with excerpts.",
+    parameters: { type: "object", properties: { query: { type: "string", description: "Words or names to look for" }, topic: { type: "string", description: "A topic to look under" } }, required: ["query"] },
+  },
+  { name: "lore_get", description: "Read one lore note by its id (the [id] before a note).", parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
+  { name: "lore_list", description: "List the lore notes filed under a topic.", parameters: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] } },
+];
+
+/**
+ * A phase's lookup budget (DESIGN §5.4): rounds, apart from the phase's calls. A step holds a round
+ * before its model is offered lookups, spends it when the model asks, and releases it when the
+ * model answers instead, so parallel steps never overdraw it. A round may start only within the
+ * first `ms` of the phase, and only while `LOOKUP_RESERVE` of the phase's time is left.
+ */
+export class LookupBudget {
+  private used = 0;
+  private held = 0;
+  private readonly started = performance.now();
+
+  constructor(
+    readonly calls: number,
+    readonly ms: number,
+    private readonly phaseMs: number,
+    private readonly signal: AbortSignal,
+  ) {}
+
+  hold(): boolean {
+    const elapsed = performance.now() - this.started;
+    if (this.used + this.held >= this.calls || elapsed >= this.ms || this.signal.aborted || this.phaseMs - elapsed < this.phaseMs * LOOKUP_RESERVE) return false;
+    this.held++;
+    return true;
+  }
+
+  spend(): void {
+    this.held = Math.max(0, this.held - 1);
+    this.used++;
+  }
+
+  release(): void {
+    this.held = Math.max(0, this.held - 1);
+  }
+
+  get spent(): number {
+    return this.used;
+  }
+}
+
+/** Lookups a step may make: the phase's budget, its transport, and what to do when its connection refuses tools. */
+export interface StepLookups {
+  budget: LookupBudget;
+  transport: LookupTransport;
+  /** Keeps the refusal for the step's connection, once the need form worked instead. */
+  refused(reason: string): void;
+}
 
 export class StepLore {
   readonly trace: LoreStepTrace;
+  /** The tools a native lookup offers. */
+  readonly tools = LORE_TOOLS;
   /** The entries given so far, in the order given. */
   private readonly given = new Map<string, LoreHit>();
   /** An `effects` template reads no secret, whatever its purpose. */
   private readonly effects: boolean;
   /** Called with the snippets of new hits, for the host to count their tokens. */
   private readonly counted: (texts: readonly string[]) => void;
+  private readonly lookups: StepLookups | null;
+  private transport: LookupTransport;
 
   constructor(
     readonly purpose: StepPurpose,
@@ -38,23 +132,35 @@ export class StepLore {
     phase: "pre" | "post",
     /** The unrevealed secrets: a query in the trace that carries one is withheld. */
     private readonly secrets: readonly string[],
-    options: { effects?: boolean; counted?: (texts: readonly string[]) => void } = {},
+    options: { effects?: boolean; counted?: (texts: readonly string[]) => void; lookups?: StepLookups | null } = {},
   ) {
     this.effects = options.effects === true;
     this.counted = options.counted ?? (() => undefined);
+    this.lookups = setting.policy === "lookup" || setting.policy === "prefetch+lookup" ? (options.lookups ?? null) : null;
+    this.transport = this.lookups?.transport ?? "tools";
     this.trace = { step: purpose, phase, policy: setting.policy, transport: "none", queries: [], entries: [], lookups: 0, notes: [] };
   }
 
   /** The prefetch: the index searched with the step's own inputs, at no extra call. */
   prefetch(inputs: LoreInputs): void {
     if (this.setting.policy !== "prefetch" && this.setting.policy !== "prefetch+lookup") return;
-    this.take("prefetch", inputs.text, loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: PREFETCH_LIMIT, tokenBudget: this.setting.tokens }));
+    this.take("prefetch", inputs.text, loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: this.setting.tokens }));
+  }
+
+  private note(text: string): void {
+    if (!this.trace.notes.includes(text)) this.trace.notes.push(text);
+  }
+
+  /** A query as the trace shows it: shortened, and withheld when it carries a secret's text. */
+  private shown(text: string): string {
+    const shown = text.replace(/\s+/g, " ").trim();
+    if (findLeaks(shown, this.secrets).length > 0) return "(withheld: it carries a secret)";
+    return shown.length > TRACE_CHARS ? `${shown.slice(0, TRACE_CHARS)}…` : shown;
   }
 
   /** Records a search in the trace and keeps the hits the step hasn't been given yet. */
   private take(kind: LoreStepTrace["queries"][number]["kind"], text: string, result: LoreResult): LoreHit[] {
-    const shown = text.replace(/\s+/g, " ").trim();
-    this.trace.queries.push({ kind, text: findLeaks(shown, this.secrets).length > 0 ? "(withheld: it carries a secret)" : shown.length > TRACE_CHARS ? `${shown.slice(0, TRACE_CHARS)}…` : shown, matched: result.matched });
+    this.trace.queries.push({ kind, text: this.shown(text), matched: result.matched });
     const fresh = result.hits.filter((h) => !this.given.has(h.id));
     for (const h of fresh) {
       this.given.set(h.id, h);
@@ -73,5 +179,158 @@ export class StepLore {
   block(): string {
     const lines = this.lines();
     return lines.length === 0 ? "" : `World lore (reference notes; they may be incomplete):\n${lines.map((l) => `- ${l}`).join("\n")}`;
+  }
+
+  /**
+   * Holds a lookup round when the step may ask for one: its policy looks up, there is lore it may
+   * read that it hasn't been given, and the phase's lookup budget has a round. The transport to
+   * offer, or null: the step answers with what it has.
+   */
+  offer(): LookupTransport | null {
+    if (!this.lookups) return null;
+    const { reg, world, state } = this.reader;
+    if (!readableLore(reg, world, state, this.purpose, this.effects).some((id) => !this.given.has(id))) return null;
+    if (!this.lookups.budget.hold()) {
+      this.note("No lookup: the phase's lookup budget was spent or its time was up, so the step used its prefetch.");
+      return null;
+    }
+    this.trace.transport = this.transport;
+    return this.transport;
+  }
+
+  /** The held round was made. */
+  spend(): void {
+    this.lookups?.budget.spend();
+    this.trace.lookups++;
+  }
+
+  /** The held round wasn't needed. */
+  release(): void {
+    this.lookups?.budget.release();
+  }
+
+  /** The connection refused the tools: this step asks in the need form instead (the refusal is kept once that works). */
+  refuseTools(): LookupTransport {
+    this.transport = "need";
+    this.trace.transport = "need";
+    this.note("The connection refused the lore tools, so the step asked in the need form.");
+    return "need";
+  }
+
+  /** Keeps a tool refusal for the step's connection. */
+  keepRefusal(reason: string): void {
+    this.lookups?.refused(reason);
+  }
+
+  /** How the model may ask for lore, for its instructions. */
+  instructions(transport: LookupTransport): string {
+    const { world } = this.reader;
+    const topics = Object.values(world.loreIndex.topics)
+      .map((t) => (isRecord(t) && typeof t.label === "string" ? t.label : ""))
+      .filter((l) => l !== "")
+      .slice(0, TOPICS_NAMED);
+    const named = topics.length > 0 ? ` Topics: ${topics.join(", ")}.` : "";
+    if (transport === "tools") return `When the notes given aren't enough, you may look up the world's lore with the lore tools before you answer.${named}`;
+    return `When you need world lore that isn't given here, reply with only {"need": ["a short query", …]} (at most ${ROUND_ASKS}) and nothing else; you'll get what the lore says, then answer.${named}`;
+  }
+
+  /** What the model asked to read in its reply, or null when the reply is its answer. */
+  asked(reply: QuietResult, transport: LookupTransport): LoreAsk[] | null {
+    if (transport === "tools") {
+      const calls = reply.toolCalls ?? [];
+      if (calls.length === 0) return null;
+      const text = (args: JsonObject, key: string): string => {
+        const v = args[key];
+        return typeof v === "string" ? v.trim() : "";
+      };
+      return calls.slice(0, ROUND_ASKS).map((c): LoreAsk => {
+        if (c.name === "lore_get") return { kind: "get", text: text(c.args, "id") };
+        if (c.name === "lore_list") return { kind: "list", text: text(c.args, "topic") };
+        const topic = text(c.args, "topic");
+        return { kind: "search", text: text(c.args, "query"), ...(topic !== "" ? { topic } : {}) };
+      });
+    }
+    let v: JsonValue;
+    try {
+      v = parseJsonReply(reply.content);
+    } catch {
+      return null;
+    }
+    if (!isRecord(v) || !Array.isArray(v.need)) return null;
+    const needs = v.need.filter((n): n is string => typeof n === "string" && n.trim() !== "").slice(0, ROUND_ASKS);
+    return needs.length > 0 ? needs.map((text) => ({ kind: "search", text: text.trim() })) : null;
+  }
+
+  /** Runs what the model asked, within the step's lore tokens for the round: the results as the model reads them. */
+  answer(asks: readonly LoreAsk[]): string {
+    let left = this.setting.tokens;
+    const parts: string[] = [];
+    for (const a of asks) {
+      if (a.kind === "list") {
+        const listed = loreList(this.reader, a.text, this.purpose, this.effects);
+        this.trace.queries.push({ kind: "list", text: this.shown(a.text), matched: listed.length });
+        parts.push(`lore_list "${a.text}": ${listed.length === 0 ? "nothing under that topic" : listed.map((l) => `[${l.id}] ${l.title}`).join("; ")}`);
+        continue;
+      }
+      let result: LoreResult;
+      if (a.kind === "get") {
+        const hit = loreGet(this.reader, a.text, this.purpose, left, this.effects);
+        result = { hits: hit ? [hit] : [], matched: hit ? 1 : 0 };
+      } else {
+        result = loreSearch(this.reader, { query: a.text, ...(a.topic ? { topics: [topicIdOf(a.topic)] } : {}), purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: left, skip: new Set(this.given.keys()) });
+      }
+      const fresh = this.take(a.kind, a.text, result);
+      left = Math.max(0, left - fresh.reduce((s, h) => s + h.tokens, 0));
+      const label = `${a.kind === "get" ? "lore_get" : "lore_search"} "${a.text}"`;
+      parts.push(fresh.length > 0 ? `${label}:\n${fresh.map((h) => `- [${h.id}] ${h.snippet}`).join("\n")}` : `${label}: nothing new${result.matched > 0 ? " (what it matches is given above)" : ""}`);
+    }
+    return `Lore you asked for:\n${parts.join("\n")}`;
+  }
+
+  /** The model's ask as the conversation's assistant turn. */
+  echo(reply: QuietResult, transport: LookupTransport): string {
+    if (transport === "need") return reply.content;
+    const calls = (reply.toolCalls ?? []).map((c) => `${c.name} ${JSON.stringify(c.args)}`).join("\n");
+    return [reply.content.trim(), calls].filter((s) => s !== "").join("\n");
+  }
+}
+
+/** Where the connections seen refusing tool calls are kept (`userStorage/lore-tools.json`). */
+export const TOOL_SUPPORT_PATH = "lore-tools.json";
+
+/**
+ * Which connections refused the lore tools (DESIGN §5.4), learned from a recorded failure and kept
+ * per user, in memory and in storage, so `auto` lookups ask them in the need form from then on.
+ * `ready` loads a user's record before a phase's steps read it.
+ */
+export class ToolSupport {
+  private readonly users = new Map<UserId, Record<string, { at: number; reason: string }>>();
+
+  constructor(private readonly host: Pick<HostPort, "storage" | "log">) {}
+
+  async ready(userId: UserId): Promise<void> {
+    if (this.users.has(userId)) return;
+    const raw = await readStoredJson(this.host, TOOL_SUPPORT_PATH, userId, "lore tool support", (r) => isRecord(r) && r.v === 1 && isRecord(r.refused));
+    const refused: Record<string, { at: number; reason: string }> = {};
+    const stored = isRecord(raw) && isRecord(raw.refused) ? raw.refused : {};
+    for (const [id, v] of Object.entries(stored)) if (safeKey(id) && isRecord(v) && typeof v.at === "number" && typeof v.reason === "string") refused[id] = { at: v.at, reason: v.reason.slice(0, 300) };
+    this.users.set(userId, refused);
+  }
+
+  /** Whether a connection has been seen refusing tools (as far as the loaded record says). */
+  refuses(userId: UserId, connectionId: string): boolean {
+    const refused = this.users.get(userId);
+    return refused !== undefined && hasOwn(refused, connectionId);
+  }
+
+  async refuse(userId: UserId, connectionId: string, reason: string): Promise<void> {
+    if (!safeKey(connectionId)) return;
+    await this.ready(userId);
+    const refused = this.users.get(userId) ?? {};
+    refused[connectionId] = { at: Date.now(), reason: reason.slice(0, 300) };
+    this.users.set(userId, refused);
+    this.host.log("info", `[LumiRPEngine] connection ${connectionId} refused the lore tools (${reason.slice(0, 120)}); its lookups use the need form from now on`, userId);
+    await this.host.storage.write(`${TOOL_SUPPORT_PATH}.tmp`, JSON.stringify({ v: 1, refused }), userId);
+    await this.host.storage.move(`${TOOL_SUPPORT_PATH}.tmp`, TOOL_SUPPORT_PATH, userId);
   }
 }

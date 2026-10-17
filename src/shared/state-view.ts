@@ -153,9 +153,9 @@ export interface PendingMark {
 }
 
 export interface CallMeterView {
-  turn: { calls: number; tokens: number; ms: number };
-  average: { calls: number; tokens: number; ms: number };
-  p95: { calls: number; tokens: number; ms: number };
+  turn: { calls: number; tokens: number; ms: number; lookups: number };
+  average: { calls: number; tokens: number; ms: number; lookups: number };
+  p95: { calls: number; tokens: number; ms: number; lookups: number };
 }
 
 // ---------------------------------------------------------------- palette (DESIGN §12)

@@ -168,7 +168,7 @@ function HudDetails(props: { view: StateView; hud: HudView; popRef: { current: H
           {view.scene ? <Row k="Scene" sub={view.scene.elapsed > 0 ? `last turn ${formatMinutes(view.scene.elapsed)}` : undefined} v={<span class="lre-inline">{humanize(view.scene.sceneType)}{fixButton("scene")}</span>} /> : null}
           <Row k="Weather" v={<span class="lre-inline">{hud.weather ?? "—"}{fixButton("weather")}</span>} />
           <Row k="Cash" v={<span class="lre-inline lre-num">{cashText(hud.cash) ?? "—"}{fixButton("cash")}</span>} />
-          {view.meter ? <Row k="This turn" v={`${view.meter.turn.calls} calls · ${(view.meter.turn.ms / 1000).toFixed(1)} s`} sub={`${view.meter.turn.tokens} tokens`} /> : null}
+          {view.meter ? <Row k="This turn" v={`${view.meter.turn.calls} calls · ${(view.meter.turn.ms / 1000).toFixed(1)} s`} sub={`${view.meter.turn.tokens} tokens${view.meter.turn.lookups > 0 ? ` · ${view.meter.turn.lookups} lore lookup${view.meter.turn.lookups === 1 ? "" : "s"}` : ""}`} /> : null}
           <div class="lre-inline" style={{ marginTop: "8px" }}>
             <button
               type="button"

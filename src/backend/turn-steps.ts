@@ -13,7 +13,7 @@ import type { EntityId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
-import type { ModelUseSettings, StepConfig } from "../shared/settings";
+import type { LookupLimits, ModelUseSettings, StepConfig } from "../shared/settings";
 import type { StepSignal } from "../shared/steps";
 import type { ActionDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock } from "../engine/calendar";
@@ -28,7 +28,7 @@ import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { EngineTurnPlan } from "../engine/turn";
 import { findLeaks } from "../engine/visibility";
-import type { StepLore } from "./lore-steps";
+import { LookupBudget, type StepLore } from "./lore-steps";
 import { inMinorUnits, type Steps } from "./steps";
 
 // ---------------------------------------------------------------- facts the steps see
@@ -192,26 +192,30 @@ function fires(signals: readonly string[], f: SignalFacts): boolean {
   return false;
 }
 
-// ---------------------------------------------------------------- budgets (DESIGN §5.3)
+// ---------------------------------------------------------------- budgets (DESIGN §5.3, §5.4)
 
 /**
  * A phase's call budget: steps run by priority and each takes one call before it starts (a JSON
- * repair call or a decision falling back to the helper is not charged). At the deadline the
- * remaining steps fall back to engine-only; a deadline of 0 ms leaves no time for any call.
+ * repair call, a decision falling back to the helper or a need-form ask after a tool refusal is
+ * not charged). At the deadline the remaining steps fall back to engine-only; a deadline of 0 ms
+ * leaves no time for any call. Its lore lookups have their own budget (`lookup`).
  */
 export class StepBudget {
   private used = 0;
   private readonly open: boolean;
   readonly signal: AbortSignal;
+  readonly lookup: LookupBudget;
 
   constructor(
     readonly calls: number,
     ms: number,
     parent?: AbortSignal,
+    lookup: LookupLimits = { calls: 0, ms: 0 },
   ) {
     this.open = ms > 0;
     const timeout = AbortSignal.timeout(Math.max(1, ms));
     this.signal = parent ? AbortSignal.any([parent, timeout]) : timeout;
+    this.lookup = new LookupBudget(lookup.calls, lookup.ms, ms, this.signal);
   }
 
   take(): boolean {

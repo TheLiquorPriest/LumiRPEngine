@@ -168,19 +168,42 @@ export interface InterceptorResult {
 
 // ---------------------------------------------------------------- model calls
 
+export interface QuietMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
 export interface QuietRequest {
-  messages: { role: "system" | "user" | "assistant"; content: string }[];
+  messages: QuietMessage[];
   maxTokens: number;
   json: boolean;
   connectionId: string | null;
   /** Overrides the connection's saved model for this call (a step's route, DESIGN §5.3 Custom). */
   model: string | null;
+  /** Tools the model may call instead of answering (lore lookups, DESIGN §5.4); absent: none. */
+  tools?: QuietTool[];
+}
+
+/** A tool a quiet call offers (the host's `ToolSchemaDTO`): its parameters as a JSON Schema. */
+export interface QuietTool {
+  name: string;
+  description: string;
+  parameters: JsonObject;
+}
+
+/** A tool call the model made (the host's `ToolCallDTO`), its arguments parsed. */
+export interface QuietToolCall {
+  name: string;
+  args: JsonObject;
+  callId: string;
 }
 
 export interface QuietResult {
   content: string;
   finishReason: string;
   tokens: number;
+  /** Present when the model called tools; the host has no tool-role messages, so results go back in a user message. */
+  toolCalls?: QuietToolCall[];
 }
 
 export interface DecideRequest {

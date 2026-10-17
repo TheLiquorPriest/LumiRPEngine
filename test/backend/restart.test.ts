@@ -210,11 +210,11 @@ describe("a restart", () => {
     const fresh = new CallMeter(host);
     await fresh.ready("user-1");
     await fresh.ready("user-2");
-    expect(fresh.view("user-1").turn).toEqual({ calls: 1, tokens: 40, ms: 5 });
-    expect(fresh.view("user-2").turn).toEqual({ calls: 0, tokens: 0, ms: 0 });
+    expect(fresh.view("user-1").turn).toEqual({ calls: 1, tokens: 40, ms: 5, lookups: 0 });
+    expect(fresh.view("user-2").turn).toEqual({ calls: 0, tokens: 0, ms: 0, lookups: 0 });
     fresh.close("user-1");
     await fresh.ready("user-1");
-    expect(fresh.view("user-1").turn).toEqual({ calls: 1, tokens: 7, ms: 3 });
+    expect(fresh.view("user-1").turn).toEqual({ calls: 1, tokens: 7, ms: 3, lookups: 0 });
   });
 });
 
@@ -234,7 +234,7 @@ describe("damaged files", () => {
     expect(await rig.rt.outcomeNotes.list(chatId, user)).toEqual([]);
     expect((await rig.rt.inspector.load(chatId, user)).records).toEqual([]);
     await rig.rt.meter.ready(user);
-    expect(rig.rt.meter.view(user).turn).toEqual({ calls: 0, tokens: 0, ms: 0 });
+    expect(rig.rt.meter.view(user).turn).toEqual({ calls: 0, tokens: 0, ms: 0, lookups: 0 });
     const logs = rig.host.userLogs.get(user) ?? [];
     for (const [path, text] of damaged) {
       const kept = (await rig.host.storage.list(path, user)).filter((p) => p.startsWith(`${path}${CORRUPT_SUFFIX}`));

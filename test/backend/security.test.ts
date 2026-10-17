@@ -515,8 +515,8 @@ describe("per-user meter and diagnostics", () => {
     const meter = new CallMeter();
     meter.record({ purpose: "extract", via: "helper", ok: true, ms: 5, tokens: 40 }, "user-1");
     meter.close("user-1");
-    expect(meter.view("user-2").turn).toEqual({ calls: 0, tokens: 0, ms: 0 });
-    expect(meter.view("user-1").turn).toEqual({ calls: 1, tokens: 40, ms: 5 });
+    expect(meter.view("user-2").turn).toEqual({ calls: 0, tokens: 0, ms: 0, lookups: 0 });
+    expect(meter.view("user-1").turn).toEqual({ calls: 1, tokens: 40, ms: 5, lookups: 0 });
     const rig = new Rig();
     const chatId = await rig.worldChat();
     await rig.turn(chatId, "I look around.", "Quiet.");

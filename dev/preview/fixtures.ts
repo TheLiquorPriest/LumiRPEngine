@@ -359,7 +359,7 @@ export function stateFixture(chatId: string): StateView {
         npcCalls: 0,
       },
     },
-    meter: { turn: { calls: 3, tokens: 2140, ms: 6200 }, average: { calls: 2.4, tokens: 1890, ms: 5100 }, p95: { calls: 5, tokens: 3900, ms: 11800 } },
+    meter: { turn: { calls: 3, tokens: 2140, ms: 6200, lookups: 1 }, average: { calls: 2.4, tokens: 1890, ms: 5100, lookups: 0.4 }, p95: { calls: 5, tokens: 3900, ms: 11800, lookups: 2 } },
     currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
     packs: { calendar: 1, space: 1, economy: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, sheets: 1, story: 1, weather: 1 },
     mapDisplay: null,

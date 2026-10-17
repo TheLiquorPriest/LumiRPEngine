@@ -1,10 +1,14 @@
 // RPEngine's helpers read the world's lore (DESIGN §5.4): the prefetch puts what a step's own inputs
 // find into its prompt, or into a decision's state, at no extra call and within the step's lore
 // tokens; a step that writes for the player never reads a secret, even one its audience names.
+// Lookups: the model calls the lore tools, or asks in the need form on a connection seen refusing
+// tools; each round is one call on the phase's lookup budget and shows in the call meter; when
+// the budget is spent a step answers with its prefetch; Lean makes none.
 
 import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
-import type { DecideRequest, QuietRequest } from "../../src/backend/host";
+import type { DecideRequest, QuietRequest, QuietToolCall } from "../../src/backend/host";
+import { TOOL_SUPPORT_PATH } from "../../src/backend/lore-steps";
 import { sectionTokens } from "../../src/backend/book";
 import type { JsonObject } from "../../src/shared/json";
 import { Rig } from "../support/rig";
@@ -129,5 +133,91 @@ describe("the prefetch", () => {
     await bare.rig.turn(bare.chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     for (const r of bare.rig.host.quietCalls) expect(r.messages[0]?.content).not.toContain("World lore");
     for (const r of bare.rig.host.decideCalls) expect(JSON.stringify(r.state)).not.toContain('"lore"');
+  });
+});
+
+/** Lore no prefetch on this turn finds: only a lookup reads it. */
+const TIMETABLE: JsonObject = { id: "timetable", title: "Timetable", content: "Boats leave at 7, 12 and 18.", keys: ["timetable"], links: [] };
+const asked = (req: QuietRequest): boolean => req.messages.some((m) => m.content.startsWith("Lore you asked for:"));
+const isStep = (req: QuietRequest, step: string): boolean => req.messages[0]?.content.includes(PROMPTS[step] ?? "\u0000") === true;
+
+describe("lookups", () => {
+  test("a tool-call lookup: the model calls lore_search, the engine answers in a follow-up message, and the meter counts the round", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
+    rig.host.quietReply = (req) => (isStep(req, "interpret") && req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
+    const start = rig.rt.meter.log.length;
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    const interprets = rig.host.quietCalls.filter((r) => isStep(r, "interpret"));
+    expect(interprets.length).toBe(2);
+    const [first, second] = interprets;
+    expect(first?.tools?.map((t) => t.name)).toEqual(["lore_search", "lore_get", "lore_list"]);
+    expect(first?.json).toBe(false);
+    expect(second?.messages.at(-2)).toEqual({ role: "assistant", content: 'lore_search {"query":"timetable"}' });
+    expect(second?.messages.at(-1)?.content).toContain("[timetable] Timetable: Boats leave at 7, 12 and 18.");
+    // The phase's one lookup is spent: the model must answer now.
+    expect(second?.tools).toBeUndefined();
+    const calls = rig.rt.meter.log.slice(start).filter((c) => c.purpose === "interpret");
+    expect(calls.map((c) => c.lookup === true)).toEqual([false, true]);
+    await rig.rt.meter.ready(rig.host.userId);
+    expect(rig.rt.meter.view(rig.host.userId).turn.lookups).toBe(1);
+  });
+
+  test("after a connection refuses the tools, its lookups use the need form, kept across a restart", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const model = (req: QuietRequest): string => {
+      if (req.tools) throw new Error("Provider error (400): this model does not support tools");
+      if (isStep(req, "interpret") && req.messages[0]?.content.includes('{"need"') && !asked(req)) return JSON.stringify({ need: ["timetable"] });
+      return quiet(req);
+    };
+    rig.host.quietReply = model;
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    const interprets = rig.host.quietCalls.filter((r) => isStep(r, "interpret"));
+    // Refused with tools, asked again in the need form, then answered with what it asked for.
+    expect(interprets.map((r) => r.tools !== undefined)).toEqual([true, false, false]);
+    expect(interprets[2]?.messages.at(-1)?.content).toContain("Timetable: Boats leave at 7, 12 and 18.");
+    expect(JSON.parse((await rig.host.storage.read(TOOL_SUPPORT_PATH, rig.host.userId)) ?? "{}").refused.active.reason).toContain("does not support tools");
+    const before = rig.host.quietCalls.length;
+    await rig.turn(chatId, "I wait at the ferry.", "The ferry horn sounds again.");
+    const next = rig.host.quietCalls.slice(before).filter((r) => isStep(r, "interpret"));
+    expect(next.every((r) => r.tools === undefined)).toBe(true);
+    expect(next[0]?.messages[0]?.content).toContain('{"need"');
+    // A restart reads the record from storage.
+    const restarted = new Rig({ host: rig.host });
+    restarted.host.quietReply = model;
+    const kept = rig.host.quietCalls.length;
+    await restarted.turn(chatId, "I wait some more by the ferry.", "Gulls cry.");
+    const after = rig.host.quietCalls.slice(kept).filter((r) => isStep(r, "interpret"));
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.filter((r) => r.tools !== undefined)).toEqual([]);
+  });
+
+  test("when the phase's lookup budget is spent, a step gets no lookup and answers with its prefetch", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: { brief: { enabled: true, signals: ["always"], lore: { policy: "prefetch+lookup", tokens: 400 } } }, budgets: { pre: { lookup: { calls: 1, ms: 60_000 } } } } }], { ...LORE, timetable: TIMETABLE });
+    const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
+    rig.host.quietReply = (req) => (req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(rig.host.quietCalls.filter((r) => isStep(r, "interpret")).length).toBe(2);
+    const briefs = rig.host.quietCalls.filter((r) => isStep(r, "brief"));
+    expect(briefs.length).toBe(1);
+    expect(briefs[0]?.tools).toBeUndefined();
+    expect(briefs[0]?.messages[0]?.content).toContain("The ferry: The ferry crosses to Gull Island");
+    expect(briefs[0]?.messages[0]?.content).not.toContain("lore tools");
+  });
+
+  test("Lean makes no lookups: the same calls as without lore, and no step is offered tools or the need form", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "lean" } }], { ...LORE, timetable: TIMETABLE });
+    const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
+    rig.host.quietReply = (req) => (req.tools ? { content: "", toolCalls: [search] } : req.messages[0]?.content.includes('{"need"') ? JSON.stringify({ need: ["timetable"] }) : quiet(req));
+    const start = rig.rt.meter.log.length;
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    const counts: Record<string, number> = {};
+    for (const c of rig.rt.meter.log.slice(start)) counts[c.purpose] = (counts[c.purpose] ?? 0) + 1;
+    expect(counts).toEqual({ interpret: 1, extract: 1 });
+    for (const r of rig.host.quietCalls) {
+      expect(r.tools).toBeUndefined();
+      expect(r.messages[0]?.content).not.toContain('{"need"');
+    }
+    expect(systemOf(rig, "interpret")).toContain("World lore");
   });
 });

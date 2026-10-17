@@ -131,7 +131,7 @@ select.lre-input{appearance:auto}
 .lre-toasts.inline{position:static;transform:none;width:auto;margin:4px 0}
 .lre-overlay-root{width:100%;height:100%}
 .lre-toast.error{border-color:color-mix(in srgb,var(--lre-danger) 60%,transparent)}
-.lre-meter{display:grid;grid-template-columns:auto repeat(3,1fr);gap:4px 10px;font-size:12px;font-variant-numeric:tabular-nums}
+.lre-meter{display:grid;grid-template-columns:auto repeat(4,1fr);gap:4px 10px;font-size:12px;font-variant-numeric:tabular-nums}
 .lre-meter>.hd{color:var(--lre-muted)}
 .lre-timeline{display:flex;height:16px;border-radius:4px;overflow:hidden;background:rgba(127,127,127,.15);margin-top:6px}
 .lre-timeline>span{height:100%;border-right:1px solid rgba(0,0,0,.25)}

@@ -21,6 +21,7 @@ import type {
   InterceptorEntry,
   InterceptorInput,
   InterceptorResult,
+  QuietToolCall,
   SwipeAction,
 } from "./host";
 
@@ -356,10 +357,14 @@ export function createSpindleHost(): HostPort {
           messages: request.messages,
           parameters,
           ...(request.connectionId ? { connection_id: request.connectionId } : {}),
+          ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) } : {}),
           userId,
           signal,
         });
-        return { content: str(raw, "content") ?? "", finishReason: str(raw, "finish_reason") ?? "", tokens: usageTokens(raw) };
+        // `tool_calls` (`ToolCallDTO[]`): a call without a name is dropped; arguments that aren't an object read as none.
+        const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
+        const toolCalls: QuietToolCall[] = calls.flatMap((c, i) => (isRecord(c) && typeof c.name === "string" ? [{ name: c.name, args: toJsonObject(c.args), callId: str(c, "call_id") ?? `call_${i}` }] : []));
+        return { content: str(raw, "content") ?? "", finishReason: str(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...(toolCalls.length > 0 ? { toolCalls } : {}) };
       },
       async decide(request, userId, signal) {
         // The Decision API takes text, a list or an object as state; scalars go as their text.
