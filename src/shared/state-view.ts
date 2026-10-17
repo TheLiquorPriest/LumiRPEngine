@@ -102,7 +102,6 @@ export type ChipKind =
   | "overdue"
   | "timelapse_offer"
   | "continue_timelapse"
-  | "retry_timelapse"
   | "keep_report"
   | "reread"
   | "retry"

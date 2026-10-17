@@ -30,7 +30,6 @@ const CHIP_ICON: Record<ChipKind, string> = {
   overdue: "⏰",
   timelapse_offer: "⏩",
   continue_timelapse: "⏩",
-  retry_timelapse: "↻",
   keep_report: "⚑",
   reread: "👁",
   retry: "↻",

@@ -100,7 +100,6 @@ Chips are the small buttons and notes under a reply. They tell you what the engi
 | **Timelapse 3 d?** | You asked in your own words to let more than a day pass. Tap **Timelapse** to run it. |
 | **Timelapse stopped: an invitation** | An interrupt ended a Timelapse early; the chip says why (an invitation, a bill, a declined payment, an incident, a quest event, a world rule, someone arriving, an overdue loan, a need, a weather alert) and **Continue** carries on to the original target. The narrator is told the span that actually ran. |
 | **Continue timelapse (n left)** | A long Timelapse was cut at the safety cap; **Continue** carries on from there, with the time left. |
-| **Timelapse didn't run** | A Timelapse could not finish and was not applied at all. **Retry** sends the same request again. |
 | **The narration skipped ahead — run it as a timelapse?** | The reply jumped ahead further than a turn can cover. **Run timelapse** runs the interval so the world catches up. |
 | **Mode change** | A type of change is now applied automatically (or went back to asking) because of how you've been answering. It has an **Undo** button. See [Learning on your own model](#learning-on-your-own-model). |
 | **pending** | Not a chip but a mark: detail you opened, or changes you made, while a reply was still streaming. They land right after the reply finishes. |
@@ -225,7 +224,7 @@ When you use Lumiverse's Continue on the latest reply, the engine reads only the
 
 - **Undo** covers the latest reply. Earlier changes go through Keep or Discard. Each ✎ fix and GM edit on the latest reply has its own **Undo**, on its **Corrected** chip.
 - **Apply / No chips** from a reply expire when you send your next message, and nothing is applied.
-- **Timelapse chips** (offers, Continue, Retry), **suggested choices** and the **contradiction** chip lapse at the next send as well.
+- **Timelapse chips** (offers and Continue), **suggested choices** and the **contradiction** chip lapse at the next send as well.
 - An empty reply is *degraded* and shows **Retry**. The engine never regenerates on its own.
 
 ### Branches
@@ -271,7 +270,7 @@ The first *stop* ends the Timelapse at the end of that time slot. *Notes* go int
 
 **The safety cap.** One Timelapse segment is limited, by default, to **600 agent-days** (the people who are simulated in detail, plus you, times the days) and **5,000 events**; you can lower either but not raise it. A longer request ends at the last whole time slot inside the cap, and a **Continue timelapse** chip carries on from there. Segments add up exactly as if you had done it in one go, as long as nothing else changes the world between them. A Timelapse can reach at most 366 days ahead.
 
-**NPC choices** during a Timelapse use the numbers only; the AI isn't called. If a Timelapse can't finish in time, it isn't applied at all, because a partial result would depend on the clock. You get a **Timelapse didn't run** chip with **Retry**, which sends the same request again.
+**NPC choices** during a Timelapse use the numbers only; the AI isn't called. A Timelapse that can't run at all (the clock is paused, its time has passed or is more than 366 days ahead, or there is no upcoming shift or commitment to run to) simulates nothing, and the turn's changes say why ("Timelapse not run: …").
 
 ### Montage
 
@@ -781,7 +780,7 @@ A saved file the engine couldn't read, or couldn't make sense of, is kept next t
 You opened detail or made a change while a reply was streaming. It lands right after the reply finishes.
 
 **A Timelapse stopped early.**
-Something interrupted it, and the chip says what: **Timelapse stopped: an invitation** (or a bill, a declined payment, an incident, a quest event, a world rule, someone arriving, an overdue loan, a need, a weather alert), with a **Continue** button that carries on to the original target. The Montage and the Journal say the same. A **Continue timelapse** chip means it hit the safety cap, and **Timelapse didn't run** (with **Retry**) means it couldn't be applied.
+Something interrupted it, and the chip says what: **Timelapse stopped: an invitation** (or a bill, a declined payment, an incident, a quest event, a world rule, someone arriving, an overdue loan, a need, a weather alert), with a **Continue** button that carries on to the original target. The Montage and the Journal say the same. A **Continue timelapse** chip means it hit the safety cap, and a Timelapse that couldn't run at all says why in the turn's changes ("Timelapse not run: …").
 
 **My own lore entries are missing.**
 LumiRPEngine doesn't touch your World Info for now, so your entries follow Lumiverse's own rules. Check that the book is attached to the chat, the entry is enabled and its keywords match, and Lumiverse's World Info budget leaves room for it.

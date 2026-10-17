@@ -1203,13 +1203,6 @@ export class Runtime implements TurnHooks {
     const headState = input.core.fold(input.observed).state;
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
     for (const [i, chip] of (plan?.chips ?? []).entries()) {
-      if (chip.kind === "retry_timelapse") {
-        // Retry re-sends the turn's timelapse request (its target and interrupt overrides).
-        const intent = bridge.intentOf(userText);
-        const params = intent?.action === TIMELAPSE_ACTION ? intent.params : null;
-        stored.push({ id: `tl:${at}:${i}`, kind: "retry_timelapse", ...base, label: "Timelapse didn't run", detail: chip.reason, actions: params ? [{ id: "retry", label: "Retry" }] : [], expires: "next_send", payload: params ? { target: params.target ?? null, overrides: params.overrides ?? null } : {} });
-        continue;
-      }
       // DESIGN §9.2 wording: "Timelapse to 07:00 (8 h 55 min)?"
       const to = chip.target.type === "at" && chipWorld ? ` to ${shortClock(calendarOf(chipWorld), headState.clock, chip.target.at)}` : "";
       const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(chip.remaining)})?` : `Continue timelapse (${compactSpan(chip.remaining)} left)`;

@@ -35,8 +35,7 @@ export const TURN_AGENT_DAYS = 30;
 
 export type TurnChip =
   | { kind: "timelapse_offer"; activity: string; target: TimelapseTarget; remaining: number }
-  | { kind: "continue_timelapse"; target: TimelapseTarget; remaining: number }
-  | { kind: "retry_timelapse"; reason: string };
+  | { kind: "continue_timelapse"; target: TimelapseTarget; remaining: number };
 
 /** The plan plus what the renderers and chips need. Only `events` and `elapsedMinutes` are recorded. */
 export interface EngineTurnPlan extends TurnPlan {

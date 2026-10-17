@@ -633,13 +633,11 @@ export class Dispatcher {
         return { applied: true, pending: false };
       }
       case "timelapse_offer":
-      case "continue_timelapse":
-      case "retry_timelapse": {
+      case "continue_timelapse": {
         const target = parseTarget(chip.payload.target);
         if (!target) throw new RequestError("bad_request", "the chip has no target");
         const text = neutralizeMacros(`(Timelapse: ${targetLabel(target)})`);
-        const recorded = chip.kind === "retry_timelapse" ? stringRecord(parseOverrides(chip.payload.overrides)) : {};
-        const overrides = chip.payload.allNote === true ? { invitation: "note", bill: "note", decline: "note", incident: "note", quest: "note", rule: "note", arrival: "note", overdue: "note", needs: "note", weather: "note" } : Object.keys(recorded).length > 0 ? recorded : undefined;
+        const overrides = chip.payload.allNote === true ? { invitation: "note", bill: "note", decline: "note", incident: "note", quest: "note", rule: "note", arrival: "note", overdue: "note", needs: "note", weather: "note" } : undefined;
         this.rt.bridgeOf(chatId)?.setIntent(text, timelapseIntent(target, overrides));
         await this.rt.host.chats.appendUserMessage(chatId, text, { [LEDGER_NAMESPACE]: { action: TIMELAPSE_ACTION, params: JSON.parse(JSON.stringify({ target, ...(overrides ? { overrides } : {}) })) as JsonValue, source: "chip" } }, true, userId);
         return { applied: true, pending: false };
