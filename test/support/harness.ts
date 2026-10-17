@@ -1,6 +1,8 @@
 // Wires the fake host, the test pack and the real backend ledger service for tests.
 
 import { ChatSnapshots, LedgerService, toChain } from "../../src/backend/ledger-io";
+import { defaultSettings } from "../../src/backend/settings-store";
+import { startMarkersFrom } from "../../src/backend/start-markers";
 import type { ChatId } from "../../src/shared/ids";
 import { isRecord } from "../../src/shared/json";
 import type { ChatRun, HeldWrite } from "../../src/shared/ledger";
@@ -13,7 +15,7 @@ import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import combatPack from "../../src/packs/combat/core/index";
 import { FakeHost } from "./fake-host";
-import { startMarkers, testModel, testPack, testWorlds } from "./test-pack";
+import { testModel, testPack, testWorlds } from "./test-pack";
 
 export interface Folds {
   reference: FoldOutput;
@@ -55,12 +57,16 @@ export class Harness {
         const raw = meta[LEDGER_NAMESPACE];
         if (!isRecord(raw) || typeof raw.revision !== "string" || typeof raw.runSeed !== "string" || typeof raw.worldId !== "string") return null;
         const run: ChatRun = { v: 1, worldId: raw.worldId, revision: raw.revision, runSeed: raw.runSeed, startedAt: 0 };
+        const world = this.worlds.get(run.revision);
+        if (!world) return null;
         return {
           types: this.registry,
           worlds: (r) => this.worlds.get(r),
           run,
           model: testModel,
-          startMarkers: () => startMarkers(run.revision),
+          // As a new chat starts in play: the world's own realism and time defaults, the user's
+          // settings filling in, through the code production uses (half-minute ticks included).
+          startMarkers: () => startMarkersFrom(defaultSettings(), world, run.revision),
           newSeed: () => `seed-${++this.seeds}`,
         };
       },

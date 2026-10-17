@@ -12,7 +12,7 @@
 import { hashJson } from "../../src/shared/hash";
 import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import type { LedgerEvent, MarkerBody, PackEvent } from "../../src/shared/ledger";
+import type { LedgerEvent, PackEvent } from "../../src/shared/ledger";
 import { defaultTiers } from "../../src/shared/tiers";
 import type { WorldDoc } from "../../src/shared/world";
 import { DEFAULT_CURRENCY, WORLD_FORMAT } from "../../src/shared/world";
@@ -221,7 +221,8 @@ export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh",
       tierCaps: { principal: {}, supporting: {}, background: {} },
     },
     time: {
-      sceneTicks: { conversation: 2, action: 1, exploration: 10, downtime: 30 },
+      // A half-minute action tick, as the starters write it: a marker plays it as a whole minute.
+      sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 },
       interrupts: { invitation: "stop", bill: "note", decline: "stop", incident: "stop", quest: "stop", rule: "ignore", arrival: "stop", overdue: "ignore", needs: "ignore", weather: "ignore" },
       speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } },
       montage: "key",
@@ -287,11 +288,3 @@ export const testModel: TurnModel = {
     return events;
   },
 };
-
-export function startMarkers(revision: string): MarkerBody[] {
-  return [
-    { kind: "migrate", to: revision },
-    { kind: "resolve", domain: "money", scope: { all: true }, to: 2 },
-    { kind: "time", control: "tick", scope: { sceneType: "conversation" }, to: 3 },
-  ];
-}

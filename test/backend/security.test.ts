@@ -1,13 +1,13 @@
 // Prototype pollution and clamps: request, stored and imported keys never
-// reach a prototype, markers are checked and clamped wherever they enter, and the worker's
-// Object.prototype stays clean.
+// reach a prototype, markers are checked wherever they enter and clamped wherever they apply,
+// and the worker's Object.prototype stays clean.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { PROTOCOL_VERSION, type FrontendToBackend } from "../../src/shared/protocol";
 import { renderSection } from "../../src/backend/book";
 import { neutralizeMacros } from "../../src/shared/macros";
 import { HOST_REPO, hostTwoPass } from "../support/host-macros";
-import { decodeJournal, decodeLedger, journalPath, snapshotsPath, toChain } from "../../src/backend/ledger-io";
+import { decodeJournal, decodeLedger, encodeLedger, journalPath, snapshotsPath, toChain } from "../../src/backend/ledger-io";
 import { defaultSettings, effectiveMode, mergePatch, recordOutcome, SettingsStore } from "../../src/backend/settings-store";
 import { ChipStore } from "../../src/backend/chips";
 import { JOBS_PATH } from "../../src/backend/jobs";
@@ -15,10 +15,11 @@ import { PlanNotes } from "../../src/backend/plan-notes";
 import { CORRUPT_SUFFIX } from "../../src/backend/stored-json";
 import { proposalKnown } from "../../src/backend/runtime";
 import { applyMarker, TIME_BOUNDS, validMarkerBody } from "../../src/engine/events";
+import { markersHash } from "../../src/engine/ledger/path";
 import { runDir } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
 import { hasOwn } from "../../src/shared/json";
-import { LEDGER_NAMESPACE, type MarkerBody } from "../../src/shared/ledger";
+import { LEDGER_NAMESPACE, type MarkerBody, type MessageLedger } from "../../src/shared/ledger";
 import { CallMeter, Steps } from "../../src/backend/steps";
 import { FakeHost } from "../support/fake-host";
 import { Rig } from "../support/rig";
@@ -100,6 +101,14 @@ describe("prototype pollution", () => {
     expect(ledger?.markers).toEqual([{ kind: "resolve", domain: "money", scope: { all: true }, to: 3, seq: 2, at: "" }]);
     expect(Object.keys(ledger?.swipes ?? {})).toEqual(["0"]);
     clean();
+  });
+
+  test("a stored marker that passes the check is kept as written, so a copy of its chat chains the same hash", () => {
+    // An earlier build journaled the starters' half-minute action tick unclamped, and its chain hashed it so.
+    const ledger: MessageLedger = { v: 1, swipes: {}, markers: [{ kind: "time", control: "tick", scope: { sceneType: "action" }, to: 0.5, seq: 1, at: null, start: true }] };
+    const read = decodeLedger(encodeLedger({}, ledger));
+    expect(read).toEqual(ledger);
+    expect(markersHash(read?.markers ?? [])).toBe(markersHash(ledger.markers));
   });
 
   test("editor ids and collections that are prototype keys are refused", async () => {

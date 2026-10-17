@@ -18,7 +18,7 @@ Section numbers are stable: code comments and docs cite them as `DESIGN §9.2`. 
 | `D1`–`D35` | Design decisions (§2) |
 | `G1`–`G9` | Gaps in the host that I plan to propose fixes for (§16) |
 | `P1`–`P4` | The four principles behind the per-chat ledger (§4.3) |
-| `L1`–`L43` | The named invariants the ledger property suite checks (§14) |
+| `L1`–`L45` | The named invariants the ledger property suite checks (§14) |
 | `B0`–`B9` | The internal build blocks (§17); `B0` is the throwaway spike whose checks are in §18 |
 
 A few terms, in plain words:
@@ -848,7 +848,7 @@ I stopped reviewing the ledger on paper once repeated review rounds kept finding
 | **L17 No resurrection** | After a Discard, no re-assert, restart, clobber recovery, swipe-index shift or later operation restores a discarded record. |
 | **L18 Durability** | After foreign or frontend clobbering and a restart, records, markers and held writes are re-asserted and the fold is unchanged. |
 | **L19 Deletion keeps live markers** | Deleting a middle or the latest message keeps its live markers' effect on later folds; its inert markers go with it, journaled. |
-| **L20 Starting markers** | Each chat has exactly one set, on the first record that holds events, live on every path. Later Settings changes, switches, Discards and deletions never change it. |
+| **L20 Starting markers** | Each chat has exactly one set, on the first record that holds events, live on every path, each journaled as the marker check gives it (a world's half-minute tick as the minute it plays). Later Settings changes, switches, Discards and deletions never change it. |
 | **L21 Concrete deltas** | Events hold deltas, never final values, and a view re-applies them. |
 | **L22 The ledger balances** | The trial balance is zero after every operation, at every level mix, including external-economy postings and payroll withholding. |
 | **L23 Uniform representation** | Demote, change and promote leave aggregates and the trial balance intact and restore nothing stale. |
@@ -872,6 +872,8 @@ I stopped reviewing the ledger on paper once repeated review rounds kept finding
 | **L41 Groups land whole** | Within a record, a group of events is dropped whole or kept whole, never in part. |
 | **L42 Snapshots** | A cold fold that starts from the chat's stored snapshots equals the full fold. |
 | **L43 A Re-run carries its fixes** | Every live ✎ fix or GM edit of the swipe a Re-run was made from is on the new record with its `seq`, events and undos, anchored at the record's path, or is a Journal drop; nothing else is copied. |
+| **L44 An Upgrade keeps what play changed** | An Upgrade with picks never takes a revision's value over one play changed, unless the owner picked it. |
+| **L45 Copies fold alike** | A branch or an import folds every message it copied as its chat does: the same folds, paths and state, from the message metadata alone. |
 
 **Loop-sim** (including mixed-level and Story-default scenarios)
 - the clock advances every turn unless paused; timelapses stop only on `stop`-class interrupts;

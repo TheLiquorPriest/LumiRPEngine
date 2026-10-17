@@ -10,9 +10,9 @@
 // L20 starting markers after every operation; L2 switch-and-back (excursion), L3 no pause on a switch
 // or removal, L5 off-path commit, L6 P4 re-render, L8 held writes, L13/L14 Continue, L15 stopped
 // Continue, L19 deletion, L34 dry run, L38 assistant edits, L39 user-edit pause, L43 a Re-run
-// carries its fixes, per operation; L31 determinism in properties.test.ts. L4 is the classification
-// these exercise; L10 and L12 are in scenarios.test.ts and reference.test.ts. Pack-dependent
-// invariants arrive with the packs.
+// carries its fixes, L45 a branch or import folds as its source, per operation; L31 determinism in
+// properties.test.ts. L4 is the classification these exercise; L10 and L12 are in scenarios.test.ts
+// and reference.test.ts. Pack-dependent invariants arrive with the packs.
 
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
@@ -20,7 +20,7 @@ import type { ChatId } from "../../src/shared/ids";
 import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, Rec, Tombstone, UpgradePicks } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE, ROOT_PATH } from "../../src/shared/ledger";
 import { decodeLedger, toChain } from "../../src/backend/ledger-io";
-import { applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent } from "../../src/engine/events";
+import { applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent, validMarkerBody } from "../../src/engine/events";
 import { touchedField } from "../../src/engine/touched";
 import { isLive, isTombstoned } from "../../src/engine/ledger/path";
 import { createRng, type Rng } from "../../src/engine/rng";
@@ -396,21 +396,13 @@ export class Runner {
       case "branch": {
         const all = this.messages();
         if (all.length === 0) return;
-        const copy = host.branch(chat, pick(all, op.at).id);
-        this.chats.push(copy);
-        this.current = copy;
-        await this.h.service.open(copy, host.userId);
-        await host.settle();
+        const at = pick(all, op.at);
+        await this.copy(chat, host.branch(chat, at.id), all.indexOf(at) + 1);
         return;
       }
-      case "import": {
-        const copy = host.importCopy(chat);
-        this.chats.push(copy);
-        this.current = copy;
-        await this.h.service.open(copy, host.userId);
-        await host.settle();
+      case "import":
+        await this.copy(chat, host.importCopy(chat), this.messages().length);
         return;
-      }
       case "write": {
         const w = await this.writeFor(op);
         if (!w) return;
@@ -549,6 +541,26 @@ export class Runner {
 
   private tombstoned(tombstones: readonly { messageId: string }[], messageId: string): boolean {
     return tombstones.some((t) => t.messageId === messageId);
+  }
+
+  /**
+   * L45: a branch or an import folds every message it copied as its source chat folds them: the
+   * same fold, parent paths, paths and state (its metadata is all a copy has to go on). A pause is
+   * the source journal's alone, so a paused source isn't compared.
+   */
+  private async copy(source: ChatId, copy: ChatId, length: number): Promise<void> {
+    const before = await this.h.folds(source, length);
+    this.chats.push(copy);
+    this.current = copy;
+    await this.h.service.open(copy, this.h.host.userId);
+    await this.h.host.settle();
+    if (before.reference.messages.some((m) => m.fold === "paused")) return;
+    const after = await this.h.folds(copy);
+    // Message ids differ in a copy; paths never include them.
+    const was = before.reference.messages.map((m) => [m.fold, m.parentPath, m.path]);
+    const now = after.reference.messages.map((m) => [m.fold, m.parentPath, m.path]);
+    if (hashJson(now) !== hashJson(was)) throw new InvariantError("L45", `${copy}: the copy of ${source} folds its messages otherwise`);
+    if (hashJson(after.reference.state) !== hashJson(before.reference.state)) throw new InvariantError("L45", `${copy}: the copy of ${source} folds to another state`);
   }
 
   /** L3: switches, swipe changes and removals never pause. */
@@ -785,9 +797,14 @@ export class Runner {
         }
       }
       if ([...seqs.keys()].some((s) => s > core.journal.seq)) throw new InvariantError("L9", `${chatId}: a seq above the counter`);
-      // L20: one set of starting markers per chat, never changed once written.
+      // L20: one set of starting markers per chat, never changed once written, each journaled as the
+      // marker check gives it, so the chain hashes the values that fold (a world's half-minute tick).
       const start = starts.length > 0 ? hashJson([...starts].sort((a, b) => a.seq - b.seq)) : null;
       if (memory.start !== null && start !== null && start !== memory.start) throw new InvariantError("L20", `${chatId}: the starting markers changed`);
+      for (const mk of starts) {
+        const { seq: _seq, at: _at, start: _start, ...body } = mk;
+        if (hashJson(validMarkerBody(body)) !== hashJson(body)) throw new InvariantError("L20", `${chatId}: starting marker ${mk.seq} is journaled unclamped`);
+      }
       // L17: tombstones are never forgotten.
       if (core.journal.tombstones.length < memory.tombstones) throw new InvariantError("L17", `${chatId}: a tombstone was forgotten`);
       // L18: with no turn in flight, metadata mirrors the journal.

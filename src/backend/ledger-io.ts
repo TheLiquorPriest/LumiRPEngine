@@ -9,7 +9,7 @@ import type { JsonObject } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { ChatId, MessageId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
-import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MessageLedger, PostKind, Rec, RecStatus } from "../shared/ledger";
+import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PostKind, Rec, RecStatus } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { validMarkerBody } from "../engine/events";
 import type { ChainMessage, FoldSnapshot, SnapshotStore } from "../engine/ledger/chain";
@@ -60,9 +60,9 @@ export function encodeLedger(bag: JsonObject, ledger: MessageLedger): JsonObject
 
 /**
  * The ledger a metadata bag holds, inline or chunked; null when absent, malformed or a chunk is
- * missing. Stored ledgers come from outside (any metadata writer, an imported chat), so markers
- * are re-checked like requests, swipe keys must be swipe indexes, and a record that fails `isRec`
- * is skipped and reported to `damaged` with its swipe key.
+ * missing. Stored ledgers come from outside (any metadata writer, an imported chat), so a marker is
+ * kept only when its body passes the check requests pass, swipe keys must be swipe indexes, and a
+ * record that fails `isRec` is skipped and reported to `damaged` with its swipe key.
  */
 export function decodeLedger(bag: JsonObject, damaged?: (swipe: string) => void): MessageLedger | null {
   let raw: unknown = bag[LEDGER_NAMESPACE];
@@ -91,8 +91,11 @@ export function decodeLedger(bag: JsonObject, damaged?: (swipe: string) => void)
   const markers: Marker[] = [];
   for (const m of raw.markers) {
     if (!isRecord(m) || typeof m.seq !== "number" || !(m.at === null || typeof m.at === "string")) continue;
-    const body = validMarkerBody(m);
-    if (body) markers.push({ ...body, seq: m.seq, at: m.at, ...(m.start === true ? { start: true as const } : {}) });
+    // A body that passes is kept as written, not as the check clamps it: the chain hashed it so when
+    // the marker was made (an earlier build journaled a start marker's half-minute tick unclamped),
+    // and `applyMarker` checks and clamps it again wherever it applies.
+    const { seq: _seq, at: _at, start: _start, ...body } = m;
+    if (validMarkerBody(body)) markers.push({ ...(body as MarkerBody), seq: m.seq, at: m.at, ...(m.start === true ? { start: true as const } : {}) });
   }
   return { v: 1, swipes, markers };
 }

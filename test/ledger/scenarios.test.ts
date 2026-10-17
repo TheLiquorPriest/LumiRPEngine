@@ -2,6 +2,8 @@
 // The randomized gate is properties.test.ts; these name the cases a reader checks first.
 
 import { describe, expect, test } from "bun:test";
+import { journalPath } from "../../src/backend/ledger-io";
+import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
@@ -35,12 +37,44 @@ describe("ledger scenarios", () => {
     await h.send(chat, "buy:map:30", "You buy a map. [found:5]");
     expect(await cash(h, chat)).toBe(75);
     const { optimized } = await h.folds(chat);
-    expect(optimized.state.realism.levels.money).toBe(2);
-    expect(optimized.state.time.sceneTicks.conversation).toBe(3);
+    // The starting markers are the world's own defaults, each as a marker plays it: the half-minute action tick is a minute.
+    expect(optimized.state.time.sceneTicks.action).toBe(1);
+    expect(optimized.state.adjudication).toEqual(presetAdjudication("crunchy"));
     const head = h.host.head(chat);
     const core = await h.core(chat);
     expect(JSON.stringify(head?.bag[LEDGER_NAMESPACE])).toBe(JSON.stringify(head ? core.journal.messages[head.id]?.ledger : undefined));
     await expectAgree(h, chat);
+  });
+
+  test("a branch, an import and a journal rebuilt from metadata fold every record on its path; Undo and Re-read work there", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "look around");
+    await h.send(chat, "earn:5", "Payday. [found:5]");
+    await h.send(chat, "earn:7", "Okay.");
+    const head = h.host.head(chat);
+    if (!head) throw new Error("no head");
+    const branch = h.host.branch(chat, head.id);
+    const imported = h.host.importCopy(chat);
+    // The original as a lost journal leaves it: rebuilt from what its messages' metadata holds.
+    h.host.files.delete(`${h.host.userId}/${journalPath(chat)}`);
+    h.service.forget(chat);
+    for (const id of [branch, imported, chat]) {
+      await h.service.open(id, h.host.userId);
+      await h.host.settle();
+      expect((await h.folds(id)).optimized.messages.filter((m) => m.fold !== "user").map((m) => m.fold)).toEqual(["plain", "on_path", "on_path", "on_path"]);
+      expect(await cash(h, id)).toBe(117);
+      const last = h.host.head(id);
+      if (!last) throw new Error("no head");
+      // Undo the last turn's earn (event 0 is its tick), then Re-read an edit of its reply.
+      expect((await h.write(id, { kind: "undo", id: `u-${id}`, messageId: last.id, swipeId: last.swipeId, refs: [{ in: "events", index: 1 }] })).applied).toBe(true);
+      expect(await cash(h, id)).toBe(110);
+      h.host.editMessage(id, last.id, "Okay. [found:3]");
+      await h.host.settle();
+      expect((await h.write(id, { kind: "reread", id: `r-${id}`, messageId: last.id, swipeId: last.swipeId })).applied).toBe(true);
+      expect(await cash(h, id)).toBe(113);
+      await expectAgree(h, id);
+    }
   });
 
   test("editing an assistant reply keeps the world; Re-read edit re-extracts (L38)", async () => {

@@ -423,7 +423,12 @@ export class LedgerCore {
     let startMarkers: Marker[] = [];
     let seq = this.journal.seq;
     if (!this.journal.started) {
-      startMarkers = this.env.startMarkers().map((body) => ({ ...body, seq: ++seq, at: null, start: true as const }));
+      // Journaled checked and clamped, as every marker is (`apply`), so the chain hashes the values
+      // that fold: the starters' half-minute action tick is journaled as the whole minute it plays.
+      startMarkers = this.env.startMarkers().flatMap((raw) => {
+        const body = validMarkerBody(raw);
+        return body ? [{ ...body, seq: ++seq, at: null, start: true as const }] : [];
+      });
       for (const mk of startMarkers) applyMarker(state, mk, this.env);
     }
     if (p.kind === "renarrate" && target && !dryRun && this.planRenarrate(p, target, out.state, parentPath, world)) {
