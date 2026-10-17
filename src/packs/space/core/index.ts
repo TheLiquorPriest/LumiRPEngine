@@ -29,7 +29,7 @@ import { observeCells } from "../../../engine/seen";
 import { canSeePlace, knownBySelector } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
-import { arrivalEvents, entered, layEvents, POS_EVENT, reach, spotData, spotOf, stepEvents } from "./positions";
+import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
 import { closedRoutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
 import { buildMapView } from "./view";
 
@@ -63,12 +63,12 @@ export function reachable(ctx: ReadContext, from: PlaceId, to: PlaceId): boolean
   return MODES.some((m) => routeAt(ctx, from, to, m) !== null);
 }
 
-/** A walk on the grid the POV stands on at `place`, from its cell to (x, y); null when it has no cell there or nothing joins the two. */
+/** A walk on the grid the POV stands on at `place`, from its cell to (x, y), never through a place it can't see; null when it has no cell there or nothing joins the two. */
 function gridWalk(ctx: ReadContext, place: PlaceId, x: number, y: number): { grid: GridDef; path: GridPath } | null {
   const stand = standingGrid(ctx.world, place);
   const fields = own(ctx.state.entities, ctx.world.pov)?.fields;
   if (!stand || typeof fields?.x !== "number" || typeof fields.y !== "number") return null;
-  const path = findPath(stand.grid, { x: fields.x, y: fields.y }, { x, y });
+  const path = findPath(povGround(ctx, stand.grid), { x: fields.x, y: fields.y }, { x, y });
   return path ? { grid: stand.grid, path } : null;
 }
 

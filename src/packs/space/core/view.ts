@@ -1,21 +1,23 @@
 // The map panel's view model (`space.map`): every scope the POV can open (map-scope.ts), each drawn
 // as its own frame; the scope the map opens on (the one around the POV); and travel options as
 // ready-to-send actions. A scope lists a place the POV can see (`canSeePlace`), and the places the
-// POV is inside even when it can't, each marked known and visited; the frontend draws them by the
-// display mode (DESIGN §12). A grid carries the POV's cell when it stands on it, and, while the grid
-// system is on, the cells it has seen; things lying in cells show once the POV has seen them there.
+// POV is inside even when it can't, each marked known and visited; one it can't see goes by a
+// stand-in (an opaque id and "Somewhere") everywhere the view names it, and is never somewhere to
+// travel to. The frontend draws them by the display mode (DESIGN §12). A grid carries the POV's
+// cell when it stands on it, and, while the grid system is on, the cells it has seen; things lying
+// in cells show once the POV has seen them there.
 
 import type { JsonObject } from "../../../shared/json";
 import type { ActionId, PlaceId, TravelMode } from "../../../shared/ids";
 import { cellIndex, gridOf, hasCell, standingGrid } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
-import type { GridDef, MapDisplay } from "../../../shared/world";
+import type { GridDef, MapDisplay, WorldDoc } from "../../../shared/world";
 import type { ReadContext } from "../../../engine/registry";
 import { optionalQuery, own } from "../../../engine/pack-kit";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { cellsSeen, placeVisit } from "../../../engine/seen";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
-import { defaultScope, hasGrid, placeChildren, placePath, scopeView, WORLD_SCOPE_NAME, type MapItemView, type MapScopeView, type ScopeFilter } from "./map-scope";
+import { byShownId, defaultScope, hasGrid, placeChildren, placePath, scopeView, shownName, WORLD_SCOPE_NAME, type MapItemView, type MapScopeView, type ScopeFilter } from "./map-scope";
 import { routeAt } from "./travel";
 
 export type { MapGridView, MapItemView, MapPlaceView, MapRouteView, MapScopeView } from "./map-scope";
@@ -54,6 +56,13 @@ function itemsOn(ctx: ReadContext, scope: PlaceId, grid: GridDef, seen: string |
   return out;
 }
 
+/** The `n`th stand-in id of a view: opaque, and no place's own id. */
+function standIn(world: Pick<WorldDoc, "places">, n: number): PlaceId {
+  let id = `~${n}`;
+  while (own(world.places, id)) id = `~${id}`;
+  return id;
+}
+
 export function buildMapView(ctx: ReadContext): MapView {
   const { world, state } = ctx;
   const level = ctx.levelOf(world.pov, "space");
@@ -61,10 +70,16 @@ export function buildMapView(ctx: ReadContext): MapView {
   const here = placeOfEntity(state, world.pov);
   const path = placePath(world, here);
   const inside = new Set(path);
+  const known = (id: PlaceId): boolean => canSeePlace(ctx.registry, world, state, world.pov, id);
+  // The places around the POV that it may not know (a secret one, someone's flat it was let into)
+  // are drawn, but never by their own id or name: each goes by a stand-in, outermost first.
+  const standIns = new Map<PlaceId, PlaceId>();
+  for (const id of path) if (!known(id)) standIns.set(id, standIn(world, standIns.size + 1));
   const filter: ScopeFilter = {
-    known: (id) => canSeePlace(ctx.registry, world, state, world.pov, id),
-    drawn: (id) => inside.has(id) || canSeePlace(ctx.registry, world, state, world.pov, id),
+    known,
+    drawn: (id) => inside.has(id) || known(id),
     visited: (id) => placeVisit(state, id) !== null,
+    shown: (id) => standIns.get(id) ?? id,
   };
   const children = placeChildren(world);
   const opens = (id: PlaceId): boolean => hasGrid(world, id) || (children.get(id) ?? []).some(filter.drawn);
@@ -73,13 +88,13 @@ export function buildMapView(ctx: ReadContext): MapView {
   const stand = standingGrid(world, here);
   const fields = own(state.entities, world.pov)?.fields;
   const pov = stand && typeof fields?.x === "number" && typeof fields.y === "number" && cellIndex(stand.grid, { x: fields.x, y: fields.y }) !== null ? { x: fields.x, y: fields.y } : undefined;
-  const ids = [...children.values()].flat().filter(filter.drawn).sort();
+  const ids = [...children.values()].flat().filter(filter.drawn).sort(byShownId(filter));
   const trail = (id: PlaceId): MapScopeView["trail"] => [
     ...(roots.length > 0 ? [{ id: null, name: WORLD_SCOPE_NAME }] : []),
     ...placePath(world, id)
       .slice(0, -1)
       .filter(filter.drawn)
-      .map((p) => ({ id: p, name: own(world.places, p)?.name ?? p })),
+      .map((p) => ({ id: filter.shown(p), name: shownName(world, filter, p) })),
   ];
   const scopes: MapScopeView[] = [];
   if (roots.length > 0) scopes.push(scopeView(world, null, filter, { level, trail: [], children }));
@@ -90,17 +105,19 @@ export function buildMapView(ctx: ReadContext): MapView {
     scopes.push(scopeView(world, id, filter, { level, trail: trail(id), children, ...(pov && stand?.scope === id ? { pov } : {}), ...(seen !== undefined ? { seen } : {}), ...(grid && level >= 2 ? { items: itemsOn(ctx, id, grid, seen) } : {}) }));
   }
   const scope = defaultScope(world, here, children, filter);
-  const drawn = new Set(ids);
+  const shownScope = scope === null ? null : filter.shown(scope);
+  // Somewhere to go is a place the POV knows: a stand-in names nowhere it could ask for.
+  const targets = new Set(ids.filter(known));
   const travel: MapView["travel"] = [];
   if (here && level >= 1) {
-    for (const id of ids) {
+    for (const id of targets) {
       if (id === here) continue;
       const plan = routeAt(ctx, here, id, "walk");
       const name = own(world.places, id)?.name ?? id;
       travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: plan?.minutes ?? 0, action: "go", params: { to: id }, ...(plan ? {} : { disabled: "no walking route" }) });
     }
     const vehicles = optionalQuery(ctx, "vehicles.travel_options");
-    if (vehicles) for (const o of vehicles(ctx, here)) if (drawn.has(o.to)) travel.push(o);
+    if (vehicles) for (const o of vehicles(ctx, here)) if (targets.has(o.to)) travel.push(o);
   }
-  return { level, here, path, scope: scope === null || scopes.some((s) => s.id === scope) ? scope : null, display: settings.display, movement: settings.grid.movement, scopes, travel };
+  return { level, here: here === null ? null : filter.shown(here), path: path.map(filter.shown), scope: shownScope === null || scopes.some((s) => s.id === shownScope) ? shownScope : null, display: settings.display, movement: settings.grid.movement, scopes, travel };
 }

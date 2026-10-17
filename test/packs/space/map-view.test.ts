@@ -11,6 +11,7 @@ import { createRegistry } from "../../../src/engine/registry-impl";
 import { paramCandidates } from "../../../src/engine/resolve";
 import { typedIntent } from "../../../src/engine/typed-intent";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
+import { HIDDEN_PLACE_NAME } from "../../../src/packs/space/core/map-scope";
 import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
 import { startState } from "../support";
@@ -115,7 +116,7 @@ describe("map scopes", () => {
     expect(marina.grid?.width).toBe(18);
   });
 
-  test("known follows what the POV can see: a place known to others is left off until the POV knows it; one the POV is inside shows, unknown", () => {
+  test("known follows what the POV can see: a place known to others is left off until the POV knows it; one the POV is inside shows as somewhere", () => {
     const world = modernUsWorld("w", "R");
     world.places.maya_kitchen = { id: "maya_kitchen", name: "Maya's kitchen", parent: "maya_flat", fields: {} };
     const state = startState(world);
@@ -126,9 +127,13 @@ describe("map scopes", () => {
     state.entities.you!.relations = state.entities.you!.relations.filter((r) => r.to !== "maya_flat");
     state.entities.you!.fields.place = "maya_kitchen";
     const inside = buildMapView(reg.context(world, state));
-    expect(town(inside).find((p) => p.id === "maya_flat")?.known).toBe(false);
-    expect(scopeOf(inside, "maya_flat").places.find((p) => p.id === "maya_kitchen")?.known).toBe(true);
-    expect(inside.scope).toBe("maya_flat");
+    // Inside it without knowing it: drawn, but by a stand-in, never by its own id or name.
+    expect(JSON.stringify(inside)).not.toContain("maya_flat");
+    expect(JSON.stringify(inside)).not.toContain("Maya's flat");
+    const flat = town(inside).find((p) => !p.known);
+    expect(flat?.name).toBe(HIDDEN_PLACE_NAME);
+    expect(scopeOf(inside, flat?.id ?? null).places.find((p) => p.id === "maya_kitchen")?.known).toBe(true);
+    expect(inside.scope).toBe(flat?.id ?? "");
   });
 
   test("routes and the grid show from Space 2, the POV's own cell from Space 3", () => {

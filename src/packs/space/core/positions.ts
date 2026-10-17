@@ -9,15 +9,16 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
 import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent } from "../../../shared/ledger";
-import { arrivalCell, areaPlaceAt, cellIndex, entranceCell, findPath, gridOf, standingGrid, type Cell } from "../../../shared/grid";
+import { arrivalCell, areaPlaceAt, cellIndex, entranceCell, findPath, gridOf, standingGrid, type Cell, type GridShape } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
-import type { GridTrigger, WorldDoc } from "../../../shared/world";
+import type { GridDef, GridTrigger, WorldDoc } from "../../../shared/world";
 import { labelOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import { placeOfEntity } from "../../../engine/scope";
 import { selectorMatches } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
-import { knownBySelector } from "../../../engine/visibility";
+import { canSeePlace, knownBySelector } from "../../../engine/visibility";
+import { placePath } from "./map-scope";
 
 /** The event every position change makes while the grid system is on. */
 export const POS_EVENT = "space.pos";
@@ -70,6 +71,27 @@ function setCell(entity: EntityId, fields: JsonObject, cell: Cell): LedgerEvent[
 }
 
 /**
+ * The cells of a grid that belong to places the POV can't see (DESIGN §7, §12): every zone named
+ * after such a place, unless the POV is inside it. The map draws them as nothing, and the POV never
+ * steps onto them or walks through them, so a secret room is neither shown nor found on foot.
+ */
+export function hiddenCells(ctx: ReadContext, grid: Pick<GridDef, "zones">): Set<number> {
+  const { world, state } = ctx;
+  const inside = new Set(placePath(world, placeOfEntity(state, world.pov)));
+  const out = new Set<number>();
+  for (const [zone, cells] of Object.entries(grid.zones)) {
+    if (!own(world.places, zone) || inside.has(zone) || canSeePlace(ctx.registry, world, state, world.pov, zone)) continue;
+    for (const cell of cells) out.add(cell);
+  }
+  return out;
+}
+
+/** A grid as the POV walks it: the cells of places it can't see are walls (`hiddenCells`). */
+export function povGround(ctx: ReadContext, grid: GridDef, hidden: ReadonlySet<number> = hiddenCells(ctx, grid)): GridShape {
+  return hidden.size > 0 ? { ...grid, blocked: [...grid.blocked, ...hidden] } : grid;
+}
+
+/**
  * Where someone arriving at a place stands (the `space.arrival` service): from Space 3, the POV
  * on the cell the place is drawn at; with the grid system on, at a gridded place's entrance or the
  * middle of a room's area too, and off any grid (its cell cleared) when the place has none.
@@ -91,7 +113,7 @@ export function arrivalEvents(ctx: ReadContext, entity: EntityId, to: PlaceId): 
  * A step to a cell of the grid someone stands on (the `space.step` effect). With the grid system
  * on, crossing into a room's area puts them in that room (at its entrance when it has a grid of its
  * own), and out on open floor in the place the grid draws; walls and blocked cells stop them. Off,
- * the step only sets the cell.
+ * the step only sets the cell. The POV never steps onto, or walks through, a place it can't see.
  */
 export function stepEvents(ctx: ReadContext, entity: EntityId, to: Cell): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, entity);
@@ -101,10 +123,12 @@ export function stepEvents(ctx: ReadContext, entity: EntityId, to: Cell): Ledger
   const index = stand ? cellIndex(stand.grid, to) : null;
   if (!stand || here === null) return { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't on a map's grid here` };
   if (index === null) return { code: "off_grid", reason: "That spot isn't on this map." };
+  const hidden = entity === ctx.world.pov ? hiddenCells(ctx, stand.grid) : new Set<number>();
+  if (hidden.has(index)) return { code: "no_way", reason: "There's no way there from here." };
   if (!mapSettingsOf(ctx.world).grid.movement) return setCell(entity, e.fields, to);
   const from = spotOf(ctx.world, ctx.state, entity);
   if (!from || from.scope !== stand.scope) return { code: "off_grid", reason: `${labelOf(ctx, entity)} isn't standing on this map` };
-  if (!findPath(stand.grid, from, to)) return { code: "no_way", reason: "There's no way there from here." };
+  if (!findPath(povGround(ctx, stand.grid, hidden), from, to)) return { code: "no_way", reason: "There's no way there from here." };
   const room = areaPlaceAt(ctx.world, stand.scope, stand.grid, index) ?? stand.scope;
   if (room === here) return [posEvent(entity, { scope: stand.scope, x: to.x, y: to.y }, from)];
   const out: LedgerEvent[] = e.relations.filter((r) => r.type === "in").map((r) => ({ type: "unlink" as const, rel: "in", from: entity, to: r.to }));

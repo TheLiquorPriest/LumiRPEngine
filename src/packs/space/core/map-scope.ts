@@ -2,7 +2,8 @@
 // inside it. A place with a grid draws its children at their cells on that grid (`cell` is a
 // position on the parent's grid); any other place lays them out as nodes. The world itself is the
 // outermost scope, holding the top-level places. Pure over the world document, so Play's map
-// (filtered to what the POV may see) and Build's map preview draw a scope the same way.
+// (filtered to what the POV may see) and Build's map preview draw a scope the same way. A place
+// the viewer is inside but may not know is drawn by a stand-in: an opaque id and "Somewhere".
 
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
@@ -11,6 +12,9 @@ import { own } from "../../../engine/pack-kit";
 
 /** What the breadcrumbs call the outermost scope, the world's top-level places. */
 export const WORLD_SCOPE_NAME = "World";
+
+/** What the map calls a place the viewer is inside but may not know (a secret one): never its name. */
+export const HIDDEN_PLACE_NAME = "Somewhere";
 
 /** The node layout's extent when no place in it has a position of its own. */
 const NODE_FRAME = 100;
@@ -23,7 +27,7 @@ export interface MapPlaceView {
   y: number;
   /** The place's default scene type. */
   kind?: string;
-  /** Whether the POV knows the place; one the POV is inside shows even when it doesn't. */
+  /** Whether the POV knows the place; one the POV is inside shows even when it doesn't, as a stand-in (`HIDDEN_PLACE_NAME`). */
   known: boolean;
   /** Whether the POV has been there, or somewhere inside it (`space.seen`): one known and not visited is only heard of. */
   visited: boolean;
@@ -76,11 +80,27 @@ export interface MapScopeView {
   routes: MapRouteView[];
 }
 
-/** Which places a scope may draw, which of them the viewer knows, and which it has been to. */
+/** Which places a scope may draw, which of them the viewer knows, which it has been to, and the id each goes by. */
 export interface ScopeFilter {
   drawn(id: PlaceId): boolean;
   known(id: PlaceId): boolean;
   visited(id: PlaceId): boolean;
+  /** The id a drawn place goes by: its own, or an opaque stand-in for one the viewer doesn't know. */
+  shown(id: PlaceId): PlaceId;
+}
+
+/** A drawn place's name as the viewer may read it: its own when known, else `HIDDEN_PLACE_NAME`. */
+export function shownName(world: Pick<WorldDoc, "places">, filter: ScopeFilter, id: PlaceId): string {
+  return filter.known(id) ? (own(world.places, id)?.name ?? id) : HIDDEN_PLACE_NAME;
+}
+
+/** Places in the order of the ids they go by, so a stand-in's place in a list says nothing of its own id. */
+export function byShownId(filter: ScopeFilter): (a: PlaceId, b: PlaceId) => number {
+  return (a, b) => {
+    const x = filter.shown(a);
+    const y = filter.shown(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  };
 }
 
 /** Each place's children by id, and the top-level places under `null`, each list in id order. */
@@ -159,7 +179,7 @@ function ring(ids: readonly PlaceId[], frame: { width: number; height: number })
  * (`layoutPos`, in the node map's `size` when it gives one), and the rest lie on a ring.
  */
 export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; pov?: { x: number; y: number }; seen?: string; items?: MapItemView[] }): MapScopeView {
-  const kids = ((opts.children ?? placeChildren(world)).get(scope) ?? []).filter(filter.drawn);
+  const kids = ((opts.children ?? placeChildren(world)).get(scope) ?? []).filter(filter.drawn).sort(byShownId(filter));
   const def = scope === null ? undefined : own(world.places, scope);
   const grid = def?.grid ? own(world.grids, def.grid) : undefined;
   const at = new Map<PlaceId, { x: number; y: number }>();
@@ -188,7 +208,9 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
   const places: MapPlaceView[] = kids.map((id) => {
     const p = own(world.places, id);
     const pos = at.get(id) ?? { x: 0, y: 0 };
-    return { id, name: p?.name ?? id, x: pos.x, y: pos.y, ...(p?.sceneType ? { kind: p.sceneType } : {}), known: filter.known(id), visited: filter.visited(id) };
+    const known = filter.known(id);
+    // A stand-in carries nothing of the place but where it is: no name, no id, no scene type.
+    return { id: filter.shown(id), name: shownName(world, filter, id), x: pos.x, y: pos.y, ...(known && p?.sceneType ? { kind: p.sceneType } : {}), known, visited: filter.visited(id) };
   });
   const drawn = new Set(kids);
   const routes = new Map<string, MapRouteView>();
@@ -199,7 +221,8 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
       const a = childOf(world, scope, r.from);
       const b = childOf(world, scope, r.to);
       if (a === null || b === null || a === b || !drawn.has(a) || !drawn.has(b)) continue;
-      const [from, to] = a < b ? [a, b] : [b, a];
+      const [x, y] = [filter.shown(a), filter.shown(b)];
+      const [from, to] = x < y ? [x, y] : [y, x];
       const key = `${from}\u0000${to}`;
       const out = routes.get(key) ?? { from, to, modes: {} };
       for (const [mode, leg] of Object.entries(r.modes) as [TravelMode, { minutes: number; distanceKm?: number }][]) {
@@ -210,10 +233,10 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
     }
   }
   const areas: Record<PlaceId, number[]> = {};
-  if (grid) for (const id of kids) if (own(grid.zones, id)) areas[id] = [...(own(grid.zones, id) ?? [])];
+  if (grid) for (const id of kids) if (own(grid.zones, id)) areas[filter.shown(id)] = [...(own(grid.zones, id) ?? [])];
   return {
-    id: scope,
-    name: scope === null ? WORLD_SCOPE_NAME : (def?.name ?? scope),
+    id: scope === null ? null : filter.shown(scope),
+    name: scope === null ? WORLD_SCOPE_NAME : shownName(world, filter, scope),
     trail: opts.trail,
     frame,
     ...(grid && opts.level >= 2

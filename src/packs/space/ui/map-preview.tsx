@@ -18,7 +18,7 @@ export function previewScope(world: WorldDoc, key: string, map: MapDoc): MapScop
   const doc = compileMaps({ ...world, maps: { ...world.maps, [key]: map } });
   const grid = gridOf(doc, map.scope);
   const items = grid ? Object.entries(grid.items ?? {}).map(([id, index]) => ({ id, name: doc.entities[id]?.name ?? id, ...cellAt(grid, index) })) : [];
-  return scopeView(doc, map.scope, { drawn: () => true, known: () => true, visited: () => true }, { level: 4, trail: [], items });
+  return scopeView(doc, map.scope, { drawn: () => true, known: () => true, visited: () => true, shown: (id) => id }, { level: 4, trail: [], items });
 }
 
 /** A proposed map (Describe a map) as Play will draw it, compiled into the draft. */
