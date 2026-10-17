@@ -135,7 +135,7 @@ When the story has you buy something, the engine prices it from the world's cata
 - **Remove it** tells the next reply that the item was narrated but never happened, and to leave it out.
 - **Accept**, which is also what ignoring the chip does, tells the next reply that the payment was declined and that you don't have the item.
 
-That note goes only to the next turn and its swipes, and is kept in memory, so restarting the backend before that turn drops it. At Money level 1 nothing is declined: payments overdraw, and the books track it in bands.
+That note goes only to the next turn and its swipes. It is saved with the chat, so it still reaches that turn if the server or the extension restarts in between. At Money level 1 nothing is declined: payments overdraw, and the books track it in bands.
 
 ### The map
 
@@ -365,7 +365,7 @@ Budgets are a **number of calls and a time limit for each phase**: **Before the 
 
 ### The call meter
 
-The call meter shows each turn's calls, seconds and tokens ("This turn: n calls · s s, n tokens") in the status pill's details. **Settings → Model use** has the **Call meter** table with **This turn**, **Average** and **95th pct**. If a preset costs more than you want, this is where you see it.
+The call meter shows each turn's calls, seconds and tokens ("This turn: n calls · s s, n tokens") in the status pill's details. **Settings → Model use** has the **Call meter** table with **This turn**, **Average** and **95th pct**. If a preset costs more than you want, this is where you see it. The meter is saved for you, so a restart keeps its numbers.
 
 ### Engine tokens versus your context
 
@@ -489,6 +489,8 @@ Already have lore books? **Import from lore**, a tool inside a world, builds a s
 
 **Build with AI** and **Refine with AI** are tools inside a world. You can ask the AI to draft or improve parts of it, and it returns **proposals**, never direct changes: you review them as you would an import, tick the ones you want (each has a confidence badge, and proposals at 70% or more start ticked) and apply them to the draft. A change to an existing entity that leaves out its kind keeps the kind it has. Proposals are checked by the world checker as part of this, and the work happens in the background, so you can keep editing.
 
+Each tool remembers its last run, with its status and its proposals, so you can leave Build, reload or restart and come back to review them. An import saves its proposals as it reads each part of the books. A job the server or the extension stopped while it ran shows as **interrupted**: the proposals it made before it stopped are still there to review and apply, and **Run it again** starts it over with the same books or request. **Dismiss** clears a finished job; the engine keeps only the last few anyway.
+
 ### Data tables
 
 Prices, pay, taxes, rents, vehicles, gear and the calendar's holiday rules come from **data tables**. The defaults are **Modern US**: approximate figures reflecting roughly 2025–26, recalled from public sources and rounded, not live data. Prices are national averages; each state's cost-of-living multiplier scales them when something is priced. Included are about 340 priced items in 19 categories, 56 occupations with pay and typical schedules, the 50 states and DC with tax rates, rents, electricity and minimum wage, finance parameters (credit cards, deposit accounts, loans, investing, payroll deductions, federal tax), 19 vehicle classes, 90 gear items, 34 containers, 5 kits, and federal holidays, common observances and school-year and work-shift patterns.
@@ -542,7 +544,7 @@ You edited an earlier message of yours. Choose **Keep** or **Discard** (see [Edi
 You edited the reply, or continued it in a way the engine couldn't read. Tap **Re-read edit** on that reply (or **Retry read** for a stopped Continue).
 
 **A warning says a saved file was damaged.**
-A saved file the engine couldn't read, or couldn't make sense of, is kept next to the original as `<name>.corrupt-<time>` (a second damaged copy of the same file gets its own time), and the engine carries on: settings fall back to their defaults, and the chat's journal, extraction learning, chips or plans start fresh. A damaged journal is also reported in the **Context** panel's warnings, with where the file is kept. The records saved on your messages still apply; edits, pauses and discards that only the journal held may be gone. A single record on a message that has the wrong shape (from an imported or forked chat, or another extension writing to the same message) is skipped instead: the message reads as if the engine had not simulated it, and the **Context** warnings name the message and swipe. Nothing is deleted.
+A saved file the engine couldn't read, or couldn't make sense of, is kept next to the original as `<name>.corrupt-<time>` (a second damaged copy of the same file gets its own time), and the engine carries on: settings fall back to their defaults, and the chat's journal, extraction learning, chips, plans, Outcome notes or inspector history, your jobs or the call meter start fresh. A damaged journal is also reported in the **Context** panel's warnings, with where the file is kept. The records saved on your messages still apply; edits, pauses and discards that only the journal held may be gone. A single record on a message that has the wrong shape (from an imported or forked chat, or another extension writing to the same message) is skipped instead: the message reads as if the engine had not simulated it, and the **Context** warnings name the message and swipe. Nothing is deleted.
 
 **Something shows "pending".**
 You opened detail or made a change while a reply was streaming. It lands right after the reply finishes.

@@ -66,11 +66,13 @@ Backend layout:
 - `backend/runtime.ts`: the composition root; turn hooks (pre, plan and post phases), the World Info interceptor (engine slots only), chip and slot handling.
 - `backend/turn-model.ts`, `backend/turn-steps.ts`: the ledger's `TurnModel` over the simulation pipeline, and the model steps around a turn.
 - `backend/book.ts`: the engine-managed lore book: slot entries, and removal of lore copies an earlier build synced into it.
-- `backend/steps.ts`: `StepPort` over `HostPort.models`, and the call meter.
+- `backend/steps.ts`: `StepPort` over `HostPort.models`, and the call meter (kept per user in `call-meter.json`).
 - `backend/worlds.ts`, `backend/settings-store.ts`: world storage and revisions; settings, presets and extraction learning.
 - `backend/dispatch.ts`, `backend/view.ts`, `backend/push.ts`, `backend/chips.ts`: request dispatch, the state view, state push, stored chips.
-- `backend/jobs.ts`, `backend/proposals.ts`, `src/worker/background-lane.ts`: background jobs and the child lane; Import and Refine proposals.
+- `backend/jobs.ts`, `backend/proposals.ts`, `src/worker/background-lane.ts`: background jobs (kept per user in `jobs.json`; a job stored as running that the process isn't running reads as interrupted) and the child lane; Import and Refine proposals.
 - `backend/preset-lint.ts`, `backend/plan-notes.ts`: the preset lint; planned-turn lines kept by seed.
+- `backend/outcome-notes.ts`, `backend/inspector-log.ts`: the next turn's Outcome notes and the inspector's history with its delivery badges, per chat.
+- `backend/stored-json.ts`: reading the extension's own JSON files; a damaged one is set aside as `<path>.corrupt-<epoch ms>` with a warning, and the caller starts fresh.
 
 ## 3. Shared types
 
@@ -85,6 +87,17 @@ One JSON document per revision; the revision id is its `hashJson`. Collections a
 - Levels gate processes, rendering and extraction, never the shape (D18).
 
 Storage (DESIGN §4.1): `userStorage/worlds/<worldId>/index.json` (`WorldIndex`) and `rev/<revision>.json`, written temp-then-move. Settings live in `userStorage/settings.json` (`UserSettings`).
+
+Other files the backend keeps, each written temp-then-move and read through `readStoredJson`:
+
+| File | Holds |
+|---|---|
+| `userStorage/jobs.json` | `{v: 1, jobs: JobSummary[]}`: running jobs and the newest 8 ended ones, oldest first, with input and result (an import's proposals after every chunk) |
+| `userStorage/call-meter.json` | `{v: 1, turns, current}`: the last 200 closed turn tallies and the current one |
+| `userStorage/runs/<chatId>/chips.json` | Stored chips until acted on or lapsed |
+| `userStorage/runs/<chatId>/plans.json` | Planned-turn lines by seed (the newest 128), for Re-narrate |
+| `userStorage/runs/<chatId>/outcome-notes.json` | `OutcomeNote[]`: notes for the next turn's Outcome slot, dropped once a later message has committed and another follows |
+| `userStorage/runs/<chatId>/inspector.json` | `{v: 1, records, delivery}`: the last 10 interceptor runs and the last delivery check by slot, read when the chat is first viewed |
 
 ### 3.2 Ledger (`shared/ledger.ts`)
 
@@ -168,6 +181,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.settings.get` / `.set` | `patch` (deep merge) | `{settings}` |
 | `lre.editor` | `worldId, base`, then `put{collection, id, value}` \| `remove{collection, id}` \| `set{part, value}` | `{draft, lint}` |
 | `lre.world` | `list` \| `get` \| `create` \| `delete` \| `commit` \| `import` \| `export` \| `lint` \| `attach` \| `upgrade` | `{worlds?, world?, revision?, lint?, file?}` |
+| `lre.job` | `start{kind, worldId, input}` \| `cancel{jobId}` \| `list{worldId}` \| `dismiss{jobId}` | `{jobId}`; `list`: `{jobs}` (`JobSummary[]`, oldest first). Updates arrive as `lre.job.update {jobId, kind, status, progress, message?, result?}` |
 
 **State push.** The backend keeps a push counter `rev` per (user, chat).
 - On `hello`, `resync` and chat open it sends `lre.state.snapshot {chatId, rev, view}`.

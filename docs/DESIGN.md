@@ -375,7 +375,7 @@ The most a turn can run is what the preset's steps and phase budgets allow: each
 - At the deadline, each remaining step uses its fallback: utility-only NPC choice, beats-only outline, or plain roleplay plus extraction. The post phase keeps the user's deadline, with no hidden floor: a budget of 0 ms means no post call.
 - **Host caps:** context handler 120 s; World Info interceptor 10 s; decisions 30 s per call. Each Import or Refine model call has its own 120 s deadline besides cancel.
 - **Reasoning models:** helper calls to a reasoning model need `max_tokens` of about 1,500 or more; at 160 they failed because reasoning counts toward the limit.
-- The call meter shows each turn's calls, tokens and latency in the HUD, with averages and the 95th percentile in Settings. It is kept per user.
+- The call meter shows each turn's calls, tokens and latency in the HUD, with averages and the 95th percentile in Settings. It is kept per user in `userStorage/call-meter.json` (the last 200 turns and the current one), so a restart keeps its numbers.
 - **Lean** is the documented floor of D3 and does not meet "a model decides" on its own.
 
 ## 6. Context control: the engine's sections
@@ -404,7 +404,7 @@ For world chats:
 - **Leftover lore:** a world lore entry an earlier build synced into the book is deleted the next time the book is ensured (commit, import, Upgrade, attach), or after a generation whose interceptor sees one; the hook itself reads nothing from the host.
 
 ### 6.5 Inspector and limits
-- **Inspector:** per generation, the engine sections with their token cost, clipping and delivery, the section budget used, and the activation confirmation. A section left out over the section budget shows a "clipped" badge with "left out: over the section budget" and is never shown as delivered; a delivery check leaves it unchecked, since it was not in the prompt. It keeps the last 10 interceptor runs per chat in memory (diagnostic data, not persisted); inspector dry runs stay out of the chat history. Its warnings cover a detached book or missing slot entries (both repaired for the next turn), the D32 preset lint and journal notices.
+- **Inspector:** per generation, the engine sections with their token cost, clipping and delivery, the section budget used, and the activation confirmation. A section left out over the section budget shows a "clipped" badge with "left out: over the section budget" and is never shown as delivered; a delivery check leaves it unchecked, since it was not in the prompt. It keeps the last 10 interceptor runs per chat, with the last delivery check by slot, in `userStorage/runs/<chat>/inspector.json`, read when the chat is first viewed, so the history and its badges survive a restart; inspector dry runs stay out of the chat history. Its warnings cover a detached book or missing slot entries (both repaired for the next turn), the D32 preset lint and journal notices.
 - **Other extensions' World Info interceptors:** they cannot switch on an engine-book entry the engine left off; what they do to user entries is theirs. The README lists this caveat.
 - **If the worker stalls:** slots are absent (fail-closed), and the turn is flagged.
 
@@ -582,7 +582,7 @@ I then re-measured with the engine's own `extract` step as shipped (strict rules
   - each side of a narrated transfer is a person or a person's own cash, checking, savings or card account. An account stands for its holder, paying from it (`from`) or depositing into it (`to`), and two sides of one holder move money between two of their accounts, so money is conserved. A thing, a loan or brokerage account, or an account no person holds is refused with a *Didn't apply* chip, and nothing moves. The extract prompt states the contract: transfers are between people (entity ids) or their own cash, checking, savings or card accounts, never things, with method "cash" when bills or coins change hands in person ("hands me $20", "slips her a twenty") and no method for a bank transfer, an app payment or a card;
   - cash handed over (a transfer with method "cash") lands in the payee's carried cash, else checking, and comes from the payer's carried cash when it covers, else the usual source, so "Danny hands me $20 for gas" adds $20 to the wallet. A transfer's other stated method picks the payer's account the way a purchase's does, so *Pay another way* on a declined transfer tries each account;
   - in **lenient** worlds a narrated price inside the band is accepted, and one outside it is clamped with a chip. A capped or clamped purchase's chip has *Edit amount*: on a confirm chip it applies the purchase at the amount typed; on an automatic one's Undo chip `economy.reprice` posts the difference between the same two accounts.
-  - **A decline after the prose** shows a chip: *Pay another way* (retries savings, then card, then checking, then cash), *Remove it* or *Accept*. By default the item stays unowned and the next Outcome slot says so ("the payment was declined; they don't have it"). Remove and Accept only reword that note. Notes are held in memory for the next turn and its swipes, so a restart before the next turn drops the note.
+  - **A decline after the prose** shows a chip: *Pay another way* (retries savings, then card, then checking, then cash), *Remove it* or *Accept*. By default the item stays unowned and the next Outcome slot says so ("the payment was declined; they don't have it"). Remove and Accept only reword that note. Notes go to the next turn and its swipes, and are dropped once a later message has committed and another follows. They are kept in `userStorage/runs/<chat>/outcome-notes.json`, so a restart before the next turn still tells it.
 
 ### 9.6 Scale and storage
 - **Record targets and overflow:** §4.3.
@@ -590,6 +590,7 @@ I then re-measured with the engine's own `extract` step as shipped (strict rules
 - **Previews** are never stored.
 - **Turn-critical work** (simulation, catch-up and timelapse segments) runs in the backend process, inside the context handler, bounded by the deterministic unit caps (§9.2). A default-cap segment took 38 ms on a child process and 2.5 ms in process, far inside the host's 15 s watchdog, so a second process and a per-chat registry copy would have bought nothing (D9).
 - **Background lane** (one child process, `dist/worker/background-lane.js`): Check world, Playtest, imports, Build with AI validation. It sends heartbeats within the host watchdog (15 s) and never blocks a turn.
+- **Jobs** are kept per user in `userStorage/jobs.json`: kind, world, input, status, progress, message and result. An import keeps its checked proposals after every chunk. A job stored as running that the process isn't running (the extension stopped while it ran) reads as **interrupted**: its proposals so far can be reviewed and applied, and **Run it again** starts it with the same input. Running jobs are always kept; of the ended ones, the newest 8, and **Dismiss** removes one. Build lists a world's kept jobs when a tool opens.
 - **G9** (follow-up) if chat-open payloads grow.
 
 ### 9.7 Bootstrapping from existing lore books
@@ -715,6 +716,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - timelapse: zero model calls under Standard, the Custom call cap, nothing applied on a simulation timeout, Speed through `offer` versus `auto`;
 - deleting a middle message keeps its markers' effect on later turns; in a world chat the interceptor sends nothing for user entries and no recursion override while the sections go in; an engine-book entry it didn't fill is voted off, and a lore copy an earlier build left there is removed; a world with a `select` step template loads without it;
 - marker durability (frontend echo, deleting the latest message, restart); Discard tombstones under re-assert, restart and swipe-index shifts; the shadow overlay; Edit-and-Send; Dry Run purity (previews only); background-lane failure and backlog; per-preset call counts;
+- after a restart: an interrupted job is reported and its proposals can still be reviewed and applied; a decline note reaches the next turn's Outcome slot; the inspector's history and delivery badges and the call meter are unchanged; a damaged file of any of these is set aside and a fresh one used;
 - a double-tapped chip applies once.
 
 **Ledger property suite (the ledger gate)**
@@ -977,7 +979,7 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 | Re-narrate always copies its source (P3) | It falls back to a Re-run when the source cannot be reproduced (§4.3) | P3 cannot hold without the source's prefix |
 | A `seq` is never reused (L9) | A Re-narrate copy keeps its source's `seq`; L9 reads "never names two different entries" | P3 and L9 conflicted as written |
 | An undo cascades | An undo that later on-path events depend on is refused (§11) | Keeps L7 |
-| An inspector history kept for diagnostics | The last 10 runs per chat, in memory (§6.5) | Diagnostic data only |
+| An inspector history kept for diagnostics | The last 10 runs per chat with the delivery badges, stored with the chat (§6.5) | Bounded, and a restart keeps it |
 | World document without a currency | Adds `currency`; Build drafts with Commit and Discard (§4.1) | Authoring needed them |
 | Import: accept, edit or reject each proposal | Accept or reject; edit afterwards in the editors (§9.7) | Bounded like extraction |
 | Data tables: worlds can replace them with another region's | The table editor edits a table; replacement is not built (§9.7) | Not on the critical path |
