@@ -19,6 +19,8 @@ export type FieldSpec =
   | { kind: "ref"; key: string; label: string; collection: RefCollection; optional?: boolean; any?: boolean; inline?: boolean }
   | { kind: "refs"; key: string; label: string; collections: readonly RefCollection[] }
   | { kind: "expr"; key: string; label: string; optional?: boolean }
+  /** An effect's arguments: each a value, or a `=` formula in the expression editor's effect mode (where `roll()` works). */
+  | { kind: "effectArgs"; key: string; label: string }
   | { kind: "dice"; key: string; label: string; optional?: boolean }
   | { kind: "tags"; key: string; label: string }
   /** Free-form labels as chips, suggesting the tags other entities already use. */
@@ -100,7 +102,7 @@ export const EFFECT: FieldSpec = {
   label: "Effect",
   fields: [
     { kind: "text", key: "type", label: "Effect type", hint: "e.g. set, add, economy.charge" },
-    { kind: "json", key: "args", label: "Arguments (values or formulas)" },
+    { kind: "effectArgs", key: "args", label: "Arguments (values or formulas)" },
   ],
 };
 

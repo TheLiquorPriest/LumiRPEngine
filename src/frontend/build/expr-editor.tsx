@@ -1,13 +1,39 @@
 // The expression editor (DESIGN §13 special widget): a monospace input with operator and function
-// buttons, identifier suggestions from the world, a bracket and quote balance check, and the
+// buttons, identifier and function suggestions, a bracket and quote balance check, and the
 // backend's lint for this field. Parsing and evaluation stay in the engine; the backend lints.
+// The functions are the backend's own list (`lre.world get` `functions`: the math built-ins, the
+// engine's and the registered packs' formulas), so the editor never offers a name the engine lacks.
 
 import { useRef, useState } from "preact/hooks";
 import type { LintIssue } from "../../shared/protocol";
+import { EFFECT_ONLY_FUNCTIONS } from "../../shared/world";
 
 const OPERATORS = ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "and", "or", "not", "(", ")", "?", ":"];
-/** Query and formula names the engine and packs register (DESIGN §9.2 level contract). */
-const FUNCTIONS = ["min(", "max(", "abs(", "round(", "floor(", "clamp(", "roll(", "wealth(", "can_afford(", "has_item(", "fuel_ok(", "regard_band(", "knows(", "stage(", "at(", "now()", "kind_is(", "in_class(", "has_tag(", "member_of(", "tier_of(", "band_of("];
+
+/**
+ * Where an expression sits: a `formula` (a modifier, requirement, derived field, rule condition or
+ * sheet row) or an `effect` argument, the only place `roll()` and the other effect-only functions
+ * work (DESIGN §11).
+ */
+export type ExprMode = "formula" | "effect";
+
+/** The function names the editor offers in a mode: the backend's list, plus the effect-only ones in an effect argument. */
+export function exprFunctions(functions: readonly string[], mode: ExprMode): string[] {
+  const names = new Set(functions);
+  for (const name of EFFECT_ONLY_FUNCTIONS) {
+    if (mode === "effect") names.add(name);
+    else names.delete(name);
+  }
+  return [...names].sort();
+}
+
+/** Suggestions for the word being typed: identifiers that extend it, then functions (as `name(`) that do. */
+export function exprCompletions(word: string, identifiers: readonly string[], functions: readonly string[]): string[] {
+  if (word === "") return [];
+  const ids = identifiers.filter((id) => id.startsWith(word) && id !== word);
+  const calls = functions.filter((name) => name.startsWith(word)).map((name) => `${name}(`);
+  return [...ids, ...calls].slice(0, 8);
+}
 
 export interface Balance {
   ok: boolean;
@@ -37,12 +63,13 @@ export function checkBalance(text: string): Balance {
   return { ok: true, message: null };
 }
 
-export function ExprEditor(props: { label: string; value: string; identifiers: readonly string[]; lint: readonly LintIssue[]; optional?: boolean; onChange(value: string): void }) {
+export function ExprEditor(props: { label: string; value: string; identifiers: readonly string[]; functions: readonly string[]; mode?: ExprMode; lint: readonly LintIssue[]; optional?: boolean; onChange(value: string): void }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [tools, setTools] = useState(false);
   const balance = checkBalance(props.value);
+  const functions = exprFunctions(props.functions, props.mode ?? "formula");
   const word = /[A-Za-z_][\w.]*$/.exec(props.value)?.[0] ?? "";
-  const suggestions = word.length >= 1 ? props.identifiers.filter((id) => id.startsWith(word) && id !== word).slice(0, 8) : [];
+  const suggestions = exprCompletions(word, props.identifiers, functions);
   const insert = (text: string, replace = 0) => {
     const el = input.current;
     const start = el?.selectionStart ?? props.value.length;
@@ -79,7 +106,7 @@ export function ExprEditor(props: { label: string; value: string; identifiers: r
       ) : null}
       {tools ? (
         <div class="lre-expr-tools">
-          {[...OPERATORS, ...FUNCTIONS].map((token) => (
+          {[...OPERATORS, ...functions.map((name) => `${name}(`)].map((token) => (
             <button key={token} type="button" onClick={() => insert(token)}>
               {token}
             </button>

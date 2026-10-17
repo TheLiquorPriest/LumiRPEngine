@@ -73,6 +73,8 @@ export interface Draft {
   packKinds: Record<string, KindDef>;
   /** Relation types the registered packs define (`lre.world get`), for relation pickers; world relation types win. */
   packRelations: Record<string, RelationTypeDef>;
+  /** Every function a formula may call outside an effect argument (`lre.world get`), for the expression editor. */
+  functions: string[];
 }
 
 export interface Overlays {

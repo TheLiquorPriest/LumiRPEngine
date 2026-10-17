@@ -142,7 +142,7 @@ select.lre-input{appearance:auto}
 .lre-graph svg{display:block}
 .lre-grid-editor{position:relative;width:100%;height:320px;border:1px solid var(--lre-border);border-radius:12px;overflow:hidden;touch-action:none;background:#12141a}
 .lre-grid-editor canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
-.lre-expr-tools{display:flex;gap:4px;flex-wrap:wrap}
+.lre-expr-tools{display:flex;gap:4px;flex-wrap:wrap;max-height:220px;overflow:auto;overscroll-behavior:contain}
 .lre-expr-tools>button{min-height:40px;min-width:40px;padding:0 8px;border-radius:8px;border:1px solid var(--lre-border);background:var(--lre-subtle);font:12px ui-monospace,Menlo,monospace}
 .lre-sched{position:relative;height:44px;border-radius:8px;background:rgba(127,127,127,.12);overflow:hidden}
 .lre-sched>button{position:absolute;top:2px;bottom:2px;border-radius:6px;border:1px solid rgba(0,0,0,.3);background:var(--lre-accent-fill);color:var(--lre-accent-fg);font-size:11px;overflow:hidden;padding:0 4px;min-width:40px}

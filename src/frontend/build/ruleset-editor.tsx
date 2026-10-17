@@ -136,7 +136,7 @@ export function Picker(props: { label: string; value: string | undefined; choice
 
 const ROW_NOUN: Record<RowKind, string> = { field: "Field", formula: "Formula", pool: "Pool", progression: "Progression" };
 
-function RowEditor(props: { row: SheetRowDef; index: number; count: number; choices: RowChoices; identifiers: readonly string[]; lint: readonly LintIssue[]; path: string; onChange(row: SheetRowDef): void; onMove(delta: -1 | 1): void; onRemove(): void }) {
+function RowEditor(props: { row: SheetRowDef; index: number; count: number; choices: RowChoices; identifiers: readonly string[]; functions: readonly string[]; lint: readonly LintIssue[]; path: string; onChange(row: SheetRowDef): void; onMove(delta: -1 | 1): void; onRemove(): void }) {
   const { row } = props;
   const kind = rowKind(row);
   const title = `${ROW_NOUN[kind]} ${kind === "formula" ? row.label || `row ${props.index + 1}` : rowTarget(row) || `row ${props.index + 1}`}`;
@@ -182,7 +182,7 @@ function RowEditor(props: { row: SheetRowDef; index: number; count: number; choi
       {kind === "formula" ? (
         <>
           {label}
-          <ExprEditor label="Formula (the POV is self)" value={rowTarget(row)} identifiers={props.identifiers} lint={lintAt(props.lint, `${props.path}.formula`)} onChange={(formula) => props.onChange({ formula, label: row.label ?? "" })} />
+          <ExprEditor label="Formula (the POV is self)" value={rowTarget(row)} identifiers={props.identifiers} functions={props.functions} lint={lintAt(props.lint, `${props.path}.formula`)} onChange={(formula) => props.onChange({ formula, label: row.label ?? "" })} />
         </>
       ) : (
         <>
@@ -251,7 +251,7 @@ function AddRow(props: { choices: RowChoices; onAdd(row: SheetRowDef): void }) {
 }
 
 /** The Sheet Designer: sections (add, rename, reorder, remove) of rows (add, reorder, remove). */
-function SheetDesigner(props: { sheet: SheetLayoutDef | undefined; choices: RowChoices; identifiers: readonly string[]; lint: readonly LintIssue[]; onChange(sheet: SheetLayoutDef): void }) {
+function SheetDesigner(props: { sheet: SheetLayoutDef | undefined; choices: RowChoices; identifiers: readonly string[]; functions: readonly string[]; lint: readonly LintIssue[]; onChange(sheet: SheetLayoutDef): void }) {
   const sections = Array.isArray(props.sheet?.sections) ? props.sheet.sections : [];
   const set = (next: SheetSectionDef[]) => props.onChange({ ...props.sheet, sections: next });
   const setSection = (index: number, section: SheetSectionDef) => set(sections.map((s, i) => (i === index ? section : s)));
@@ -291,6 +291,7 @@ function SheetDesigner(props: { sheet: SheetLayoutDef | undefined; choices: RowC
                 count={rows.length}
                 choices={props.choices}
                 identifiers={props.identifiers}
+                functions={props.functions}
                 lint={props.lint}
                 path={`${path}.rows.${r}`}
                 onChange={(next) => setSection(index, { ...section, rows: rows.map((x, i) => (i === r ? next : x)) })}
@@ -508,7 +509,7 @@ export function RulesetEditor() {
   useEffect(() => setValue(stored), [storedKey]);
   // Pickers see the packs' kinds too (DESIGN §13); the world's own win.
   const formDoc = useMemo(() => (draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds }, relations: { ...draft.packRelations, ...draft.doc.relations } } : null), [draft?.doc, draft?.packKinds, draft?.packRelations]);
-  const identifiers = useMemo(() => (draft ? [...new Set([...worldIdentifiers(draft.doc), "self"])].sort() : []), [draft?.doc]);
+  const identifiers = useMemo(() => (draft ? worldIdentifiers(draft.doc) : []), [draft?.doc]);
   if (!draft || !formDoc) return null;
   const tidy = tidyRuleset(value);
   const changed = JSON.stringify(tidy) !== JSON.stringify(tidyRuleset(stored));
@@ -521,7 +522,7 @@ export function RulesetEditor() {
     else out[key] = next;
     setValue(out as RulesetDef);
   };
-  const ctx: FormCtx = { doc: formDoc, lint: draft.lint, path: "ruleset", identifiers };
+  const ctx: FormCtx = { doc: formDoc, lint: draft.lint, path: "ruleset", identifiers, functions: draft.functions };
   return (
     <div class="lre-stack" data-lre-editor="part:ruleset">
       <div class="lre-h2">Ruleset</div>
@@ -530,7 +531,7 @@ export function RulesetEditor() {
         <ProgressionEditor value={progression} doc={formDoc} ctx={ctx} onChange={(next) => setValue({ ...value, progression: next })} />
       </Card>
       <Card title="Sheet Designer">
-        <SheetDesigner sheet={value.sheet} choices={choices} identifiers={identifiers} lint={draft.lint} onChange={(sheet) => setValue({ ...value, sheet })} />
+        <SheetDesigner sheet={value.sheet} choices={choices} identifiers={identifiers} functions={draft.functions} lint={draft.lint} onChange={(sheet) => setValue({ ...value, sheet })} />
       </Card>
       <Card title="Sheet preview">
         <SheetPreview draft={draft} ruleset={tidy} />

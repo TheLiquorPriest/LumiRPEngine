@@ -288,7 +288,7 @@ export function TrackEditor(props: EditorProps) {
           <SchemaFields
             specs={stageSpecs(stageIds)}
             value={stage as unknown as JsonObject}
-            ctx={{ doc: props.world, lint: lintAt(app.drafts.get()?.lint ?? [], `tracks.${id}`), path: `tracks.${id}.stages.${selected}`, identifiers }}
+            ctx={{ doc: props.world, lint: lintAt(app.drafts.get()?.lint ?? [], `tracks.${id}`), path: `tracks.${id}.stages.${selected}`, identifiers, functions: app.drafts.get()?.functions ?? [] }}
             onChange={(next) => setTrack({ ...track, stages: { ...track.stages, [selected]: next as unknown as StageDef } })}
           />
         </section>

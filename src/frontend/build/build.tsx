@@ -576,7 +576,7 @@ export function SchemaEditor(props: EditorProps) {
           </div>
         ))}
       {PackConfig ? <PackConfig world={props.world} config={isRecord(value.config) ? value.config : {}} lint={lintAt(draft?.lint ?? [], `${path}.config`)} onChange={(config) => setValue({ ...value, config })} /> : null}
-      <SchemaFields specs={COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers }} onChange={setValue} />
+      <SchemaFields specs={COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [] }} onChange={setValue} />
       <div class="lre-inline" style={{ position: "sticky", bottom: 0, padding: "8px 0", background: "var(--lre-fill)" }}>
         <button type="button" class="lre-btn primary" disabled={busy || (!changed && !isNew)} onClick={save}>
           {isNew ? "Create" : "Save to draft"}
@@ -637,7 +637,7 @@ function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" 
   return (
     <div class="lre-stack" data-lre-editor={`part:${props.part}`}>
       <div class="lre-h2">{PARTS.find((p) => p.id === props.part)?.label}</div>
-      <SchemaFields specs={PART_SPECS[props.part]} value={value} ctx={{ doc: draft.doc, lint: draft.lint, path: props.part, identifiers }} onChange={setValue} />
+      <SchemaFields specs={PART_SPECS[props.part]} value={value} ctx={{ doc: draft.doc, lint: draft.lint, path: props.part, identifiers, functions: draft.functions }} onChange={setValue} />
       <div class="lre-inline">
         <button
           type="button"

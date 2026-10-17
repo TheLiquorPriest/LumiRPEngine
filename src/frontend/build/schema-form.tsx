@@ -13,6 +13,7 @@ import type { LintIssue } from "../../shared/protocol";
 import { BUILTIN_RELATIONS, formatMoney } from "../../shared/world";
 import type { FacetValueDef, FieldDef, WorldCurrency, WorldDoc } from "../../shared/world";
 import { MoneyInput } from "../money-input";
+import { EffectArgsInput } from "./effect-args";
 import { ExprEditor } from "./expr-editor";
 import { ClassesInput, classesOf, FacetValuesInput, facetValuesOf } from "./facet-editor";
 import type { FieldSpec, RefCollection } from "./schema";
@@ -24,6 +25,8 @@ export interface FormCtx {
   /** Document path of the value, e.g. `entities.npc_dev`. */
   path: string;
   identifiers: readonly string[];
+  /** The backend's formula functions (`Draft.functions`), for the expression editor. */
+  functions: readonly string[];
 }
 
 export function lintAt(lint: readonly LintIssue[], path: string): LintIssue[] {
@@ -520,7 +523,9 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
       if (spec.inline && isRecord(props.value)) return <JsonInput label={`${spec.label} (inline)`} value={props.value} optional={spec.optional} issues={issues} onChange={props.onChange} />;
       return <SelectInput label={spec.label} value={props.value} options={spec.any ? [{ value: "*", label: "* (any kind)" }, ...refOptions(ctx.doc, spec.collection)] : refOptions(ctx.doc, spec.collection)} optional={spec.optional} issues={issues} onChange={props.onChange} />;
     case "expr":
-      return <ExprEditor label={spec.label} value={typeof props.value === "string" ? props.value : ""} identifiers={ctx.identifiers} lint={issues} optional={spec.optional} onChange={(next) => props.onChange(next === "" && spec.optional ? undefined : next)} />;
+      return <ExprEditor label={spec.label} value={typeof props.value === "string" ? props.value : ""} identifiers={ctx.identifiers} functions={ctx.functions} lint={issues} optional={spec.optional} onChange={(next) => props.onChange(next === "" && spec.optional ? undefined : next)} />;
+    case "effectArgs":
+      return <EffectArgsInput label={spec.label} value={props.value} identifiers={ctx.identifiers} functions={ctx.functions} lint={(at) => lintAt(ctx.lint, at)} path={path} onChange={props.onChange} />;
     case "tags": {
       const tags = Array.isArray(props.value) ? props.value.filter((t): t is string => typeof t === "string") : [];
       return (
@@ -691,9 +696,12 @@ export function SchemaFields(props: { specs: readonly FieldSpec[]; value: JsonOb
   );
 }
 
-/** Identifiers the expression editor suggests: entity, place, field, track and check ids. */
+/**
+ * Identifiers the expression editor suggests: entity, place, field, track and check ids, and the
+ * names every formula can read (engine/scope): `self`, `pov`, `here` and the clock's.
+ */
 export function worldIdentifiers(doc: WorldDoc): string[] {
-  const out = new Set<string>([...Object.keys(doc.entities), ...Object.keys(doc.places), ...Object.keys(doc.tracks), ...Object.keys(doc.checks), "pov", "scene", "now"]);
+  const out = new Set<string>([...Object.keys(doc.entities), ...Object.keys(doc.places), ...Object.keys(doc.tracks), ...Object.keys(doc.checks), "self", "pov", "here", "clock", "minute", "hour", "day", "weekday", "date", "month", "year", "daypart"]);
   for (const kind of Object.values(doc.kinds)) for (const field of Object.keys(kind.fields)) out.add(field);
   return [...out].sort();
 }
