@@ -1,0 +1,32 @@
+{
+  "id": "calendar.holidays",
+  "pack": "calendar",
+  "schema": "lre-table/calendar.holidays/v1",
+  "revision": "35b4d12795742dc4d5b4b37e388ce776",
+  "label": "Federal holidays",
+  "source": {"dataPack":"modern-us","file":"us/calendar.json","sourceSchema":"lre-data-src/us/calendar/v1","reflectsPeriod":"2025-2026 rules (no dated instances; rules are stable across years)","approximate":true,"basis":"US Code 5 USC 6103 (federal holidays), NIST/US DOT daylight-saving rules (Uniform Time Act as amended 2005), typical K-12 and college academic calendars from state/district and university catalogs as recalled, BLS National Compensation Survey for paid-holiday prevalence, FLSA and FMCSA hours rules."},
+  "columns": {
+    "name": {"type":"text"},
+    "rule_type": {"type":"enum","values":["fixed","nth_weekday"]},
+    "month": {"type":"int","doc":"1-12."},
+    "day": {"type":"int","doc":"Day of month; `fixed` rules.","optional":true},
+    "weekday": {"type":"enum","values":["monday","tuesday","wednesday","thursday","friday","saturday","sunday"],"optional":true},
+    "n": {"type":"int","doc":"`nth_weekday`: 1-4, or -1 for the last.","optional":true},
+    "federal_paid_day_off": {"type":"bool"},
+    "private_sector_paid_day_off": {"type":"enum","values":["few","some","widely"]},
+    "observed_if_weekend": {"type":"text","optional":true}
+  },
+  "rows": {
+    "new_years_day": {"name":"New Year's Day","rule_type":"fixed","month":1,"day":1,"federal_paid_day_off":true,"private_sector_paid_day_off":"widely","observed_if_weekend":"Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"},
+    "mlk_day": {"name":"Martin Luther King Jr. Day","rule_type":"nth_weekday","month":1,"weekday":"monday","n":3,"federal_paid_day_off":true,"private_sector_paid_day_off":"some"},
+    "presidents_day": {"name":"Washington's Birthday (Presidents' Day)","rule_type":"nth_weekday","month":2,"weekday":"monday","n":3,"federal_paid_day_off":true,"private_sector_paid_day_off":"some"},
+    "memorial_day": {"name":"Memorial Day","rule_type":"nth_weekday","month":5,"weekday":"monday","n":-1,"federal_paid_day_off":true,"private_sector_paid_day_off":"widely"},
+    "juneteenth": {"name":"Juneteenth National Independence Day","rule_type":"fixed","month":6,"day":19,"federal_paid_day_off":true,"private_sector_paid_day_off":"some","observed_if_weekend":"Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"},
+    "independence_day": {"name":"Independence Day","rule_type":"fixed","month":7,"day":4,"federal_paid_day_off":true,"private_sector_paid_day_off":"widely","observed_if_weekend":"Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"},
+    "labor_day": {"name":"Labor Day","rule_type":"nth_weekday","month":9,"weekday":"monday","n":1,"federal_paid_day_off":true,"private_sector_paid_day_off":"widely"},
+    "columbus_day": {"name":"Columbus Day (Indigenous Peoples' Day in many places)","rule_type":"nth_weekday","month":10,"weekday":"monday","n":2,"federal_paid_day_off":true,"private_sector_paid_day_off":"few"},
+    "veterans_day": {"name":"Veterans Day","rule_type":"fixed","month":11,"day":11,"federal_paid_day_off":true,"private_sector_paid_day_off":"few","observed_if_weekend":"Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"},
+    "thanksgiving": {"name":"Thanksgiving Day","rule_type":"nth_weekday","month":11,"weekday":"thursday","n":4,"federal_paid_day_off":true,"private_sector_paid_day_off":"widely"},
+    "christmas": {"name":"Christmas Day","rule_type":"fixed","month":12,"day":25,"federal_paid_day_off":true,"private_sector_paid_day_off":"widely","observed_if_weekend":"Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"}
+  }
+}

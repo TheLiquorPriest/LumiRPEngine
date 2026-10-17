@@ -1,0 +1,33 @@
+{
+  "id": "gear.slots",
+  "pack": "gear",
+  "schema": "lre-table/gear.slots/v1",
+  "revision": "3b7a1c09512b25782bd3e5533a74e7ea",
+  "label": "Equip slots",
+  "source": {"dataPack":"modern-us","file":"us/gear.json","sourceSchema":"lre-data-src/us/gear/v1","reflectsPeriod":"2025-2026 retail prices; physical values are typical product weights","approximate":true,"basis":"Typical product weights and dimensions from manufacturer spec sheets and common retail products, rounded; prices from prices.json bands and typical retail. Not a real inventory standard."},
+  "columns": {
+    "description": {"type":"text"}
+  },
+  "rows": {
+    "head": {"description":"Hats, helmets, hard hats"},
+    "face": {"description":"Glasses, sunglasses, masks"},
+    "neck": {"description":"Scarves, bandanas, neckwear"},
+    "torso_base": {"description":"Shirts, undershirts, blouses"},
+    "torso_mid": {"description":"Sweaters, hoodies, fleeces"},
+    "torso_outer": {"description":"Jackets, coats, vests"},
+    "full_body": {"description":"One-piece garments: dresses, coveralls, pajamas, swimsuits"},
+    "hands": {"description":"Gloves"},
+    "wrist": {"description":"Watches, wristbands"},
+    "waist": {"description":"Belts, holsters"},
+    "legs": {"description":"Pants, shorts, skirts"},
+    "underwear": {"description":"Underwear"},
+    "socks": {"description":"Socks"},
+    "feet": {"description":"Shoes and boots"},
+    "back": {"description":"Backpacks"},
+    "shoulder": {"description":"Shoulder and crossbody bags"},
+    "hand_held": {"description":"Carried in hand: luggage, toolboxes, umbrellas"},
+    "pocket": {"description":"Small items carried in a pocket"},
+    "pocket_or_bag": {"description":"Small items carried in a pocket or a bag"},
+    "none": {"description":"Not worn or equipped: furniture, household tools, fixed vehicle storage"}
+  }
+}

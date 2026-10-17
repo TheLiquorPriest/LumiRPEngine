@@ -1,0 +1,23 @@
+{
+  "id": "calendar.work",
+  "pack": "calendar",
+  "schema": "lre-table/calendar.work/v1",
+  "revision": "790bee504417a877b2adc3b5d3c4368a",
+  "label": "Work norms",
+  "source": {"dataPack":"modern-us","file":"us/calendar.json","sourceSchema":"lre-data-src/us/calendar/v1","reflectsPeriod":"2025-2026 rules (no dated instances; rules are stable across years)","approximate":true,"basis":"US Code 5 USC 6103 (federal holidays), NIST/US DOT daylight-saving rules (Uniform Time Act as amended 2005), typical K-12 and college academic calendars from state/district and university catalogs as recalled, BLS National Compensation Survey for paid-holiday prevalence, FLSA and FMCSA hours rules."},
+  "columns": {
+    "full_time_hours_per_week": {"type":"number"},
+    "standard_work_year_h": {"type":"int","unit":"h"},
+    "overtime": {"type":"text"},
+    "vacation_days_after_1_year": {"type":"int","unit":"day"},
+    "vacation_days_after_5_years": {"type":"int","unit":"day"},
+    "vacation_days_after_10_years": {"type":"int","unit":"day"},
+    "sick_days_per_year": {"type":"int","unit":"day"},
+    "paid_time_off_note": {"type":"text"},
+    "paid_holidays_per_year": {"type":"int","unit":"day","doc":"Private-industry typical."},
+    "meal_break": {"type":"text"}
+  },
+  "rows": {
+    "us": {"full_time_hours_per_week":40,"standard_work_year_h":2080,"overtime":"FLSA: 1.5x regular rate for hours over 40 per week for non-exempt employees; some states add daily overtime (California over 8 h).","vacation_days_after_1_year":10,"vacation_days_after_5_years":15,"vacation_days_after_10_years":17,"sick_days_per_year":7,"paid_time_off_note":"BLS NCS style averages for private-industry workers with access; many service workers have none.","paid_holidays_per_year":8,"meal_break":"30-60 min unpaid for shifts over 6 hours in many states"}
+  }
+}

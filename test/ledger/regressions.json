@@ -1,0 +1,67 @@
+[
+  {
+    "seed": "lre-mvbozt2o-6",
+    "note": "L2: a turn made on the switched path stays as a rebased view after the original messages; compare the original prefix",
+    "ops": [{"op":"inFlight","type":0.1858399671321218,"inner":[{"op":"write","kind":0.5764816429015658,"a":0.15555504252032748,"b":0.3438940793744726}],"stop":true,"reply":0.03350075832026844},{"op":"excursion","at":0.6891706178617973,"inner":[{"op":"send","text":0.4055934597211247,"reply":0.19204297468990417,"createAtEnd":false,"rerender":false},{"op":"write","kind":0.3515554842754319,"a":0.6758486359729409,"b":0.8389333138040449}]}]
+  },
+  {
+    "seed": "lre-mvbp11se-2",
+    "note": "L14/L17: accepting a Continue on a discarded record mutated it out of its tombstone; Discard now removes the record",
+    "ops": [{"op":"send","text":0.7014715619848422,"reply":0.13382299675959242,"createAtEnd":true,"rerender":false},{"op":"inFlight","type":0.3807971962330663,"inner":[{"op":"editAssistant","at":0.7048973000292673,"text":0.06698557017858697},{"op":"navigate","at":0.3333084714032811,"swipe":0.3733809220694727}],"stop":false,"reply":0.8128540263852979},{"op":"write","kind":0.8140401613585492,"a":0.35140069377941174,"b":0.6391798678394781},{"op":"continue","at":0.4262247703853097,"reply":0.9181117696602137,"stop":false,"rerenderPrefix":false}]
+  },
+  {
+    "seed": "lre-mvbp1k90-2",
+    "note": "L2: a head Continue on the switched path leaves its text and swipeHash behind (residual risk 10)",
+    "ops": [{"op":"send","text":0.3359596791260083,"reply":0.5104343219191152,"createAtEnd":true,"rerender":false},{"op":"excursion","at":0.22609319775893422,"inner":[{"op":"write","kind":0.21240700357736378,"a":0.1432805249003236,"b":0.42130732043746677},{"op":"continue","at":1,"reply":0.23852718581378562,"stop":false,"rerenderPrefix":false}]}]
+  },
+  {
+    "seed": "lre-mvbp21p6-69",
+    "note": "L2: a bare record made on the switched path took that path, so its entries travelled back; bare records now have path \"\"",
+    "ops": [{"op":"send","text":0.49995730177756315,"reply":0.6937781293206856,"createAtEnd":false,"rerender":false},{"op":"write","kind":0.8466371783247849,"a":0.6693112765324897,"b":0.9647876281549191},{"op":"excursion","at":0.4045914320814886,"inner":[{"op":"write","kind":0.2580946978693325,"a":0.22193617555181844,"b":0.06548038810896784},{"op":"write","kind":0.33262395826670865,"a":0.5371629259185007,"b":0.5490351466977169},{"op":"write","kind":0.5637280035914599,"a":0.6402996175811554,"b":0.7459548992779474},{"op":"send","text":0.25213382146797025,"reply":0.1392612271578102,"createAtEnd":false,"rerender":false}]}]
+  },
+  {
+    "seed": "lre-mvbp3neo-15",
+    "note": "L2: a bare record folds as plain, not on_path",
+    "ops": [{"op":"send","text":0.8977082626090859,"reply":0.6382645570276093,"createAtEnd":true,"rerender":false},{"op":"write","kind":0.81792194275307,"a":0.7021930580778456,"b":0.9335535051537435},{"op":"excursion","at":0.8535957400505534,"inner":[{"op":"write","kind":0.12223521908114009,"a":0.9823295322732827,"b":0.25472720655136827},{"op":"write","kind":0.11175499134834244,"a":0.016330167441417687,"b":0.013644981153435154},{"op":"continue","at":1,"reply":0.4436884049355495,"stop":false,"rerenderPrefix":false},{"op":"continue","at":1,"reply":0.8005379617645536,"stop":false,"rerenderPrefix":false}]}]
+  },
+  {
+    "seed": "lre-mvbp42sn-19",
+    "note": "L19: markers on a paused message had no effect yet; the check skips them",
+    "ops": [{"op":"inFlight","type":0.5668753863380268,"inner":[{"op":"editUser","at":0.07666659182325286,"text":0.71026768264437}],"stop":false,"reply":0.32236127620559274},{"op":"deleteMessage","at":0.7395407160003385}]
+  },
+  {
+    "seed": "lre-mvbp508w-34",
+    "note": "L7: turns planned under a pause got events against the pause-truncated state; they now commit degraded with none",
+    "ops": [{"op":"send","text":0.15757017571151233,"reply":0.8796812419522372,"createAtEnd":false,"rerender":false},{"op":"editUser","at":0.0356136034242136,"text":0.6095580018803088},{"op":"send","text":0.5744562745117674,"reply":0.9345772362240276,"createAtEnd":false,"rerender":false},{"op":"editAndSend","at":0.9384990688372943,"text":0.30403824800464485,"reply":0.7316388633352818,"branch":false},{"op":"import"}]
+  },
+  {
+    "seed": "lre-mvbp6i1c-271",
+    "note": "L38: during a Continue, edits to messages without a record were deferred while the fold read their new text; they are now accepted at once",
+    "ops": [{"op":"inFlight","type":0.09139636363424364,"inner":[{"op":"write","kind":0.05860751761981964,"a":0.6178991310789672,"b":0.5524785369937932}],"stop":false,"reply":0.15262176298523322},{"op":"addSwipe","at":0.7526652719253921,"text":0.2696498390574189},{"op":"write","kind":0.017431491723059356,"a":0.3638483431214663,"b":0.26663254012337645},{"op":"inFlight","type":0.946007570124951,"inner":[{"op":"editAssistant","at":0.07584756502495767,"text":0.9015225500738563}],"stop":false,"reply":0.0763560859212814}]
+  },
+  {
+    "seed": "lre-mvbp8geu-1",
+    "note": "L2: user messages after the head chain the head's path, which a switched-path Continue changes",
+    "ops": [{"op":"send","text":0.8481546529793018,"reply":0.09443449561148409,"createAtEnd":false,"rerender":false},{"op":"send","text":0.8249663586325915,"reply":0.09968821252065219,"createAtEnd":false,"rerender":true},{"op":"send","text":0.31671533805932595,"reply":0.45382039239418315,"createAtEnd":false,"rerender":false},{"op":"send","text":0.44746921821166064,"reply":0.5660661197577618,"createAtEnd":false,"rerender":false},{"op":"branch","at":0.35920959636539174},{"op":"excursion","at":0.5936153048755684,"inner":[{"op":"continue","at":1,"reply":0.5682502103276961,"stop":false,"rerenderPrefix":false},{"op":"send","text":0.34256172316907907,"reply":0.6947698409189215,"createAtEnd":false,"rerender":false}]}]
+  },
+  {
+    "seed": "lre-mvbpazxe-111",
+    "note": "L1/L17: a new record identical to a discarded one matched its tombstone, and the fold cache ignored tombstoned records; records now carry a seq",
+    "ops": [{"op":"send","text":0.35572153208516677,"reply":0.23653715005251486,"createAtEnd":false,"rerender":false},{"op":"editAndSend","at":0.39645227924686044,"text":0.6907630728281664,"reply":0.07846451846945501,"branch":false},{"op":"send","text":0.42338333160934405,"reply":0.09154987561259131,"createAtEnd":false,"rerender":true},{"op":"write","kind":0.8030775814920957,"a":0.8285704312519201,"b":0.8315021417821163},{"op":"regenerate","at":0.9871429661315335,"reply":0.1399892284446873}]
+  },
+  {
+    "seed": "lre-mvbpsjnz-1660",
+    "note": "L7: Re-read on a bare record stored events with no path, so an earlier switch re-validated them as on-path; a read now anchors a bare record and refuses a rebased view",
+    "ops": [{"op":"send","text":0.24952198732329023,"reply":0.8380262383129277,"createAtEnd":false,"rerender":true},{"op":"send","text":0.8625608612493595,"reply":0.7322306256858341,"createAtEnd":true,"rerender":false},{"op":"write","kind":0.8302015395532253,"a":0.6763834458703303,"b":0.16574104208446616},{"op":"send","text":0.7317652908022502,"reply":0.6978822995012033,"createAtEnd":false,"rerender":false},{"op":"send","text":0.7136770282183293,"reply":0.697416670867933,"createAtEnd":false,"rerender":false},{"op":"editAssistant","at":0.4015527729245709,"text":0.783932598232215},{"op":"send","text":0.3177836244497987,"reply":0.8589003814018946,"createAtEnd":false,"rerender":true},{"op":"write","kind":0.9197350601211813,"a":0.9472621169039723,"b":0.3499317071470134},{"op":"inFlight","type":0.29974143550771126,"inner":[{"op":"write","kind":0.2597614505785766,"a":0.3253817941392344,"b":0.363484053532264},{"op":"navigate","at":0.7043228893358489,"swipe":0.21772639014901896},{"op":"write","kind":0.9428723338824366,"a":0.9294611099602116,"b":0.959870435385833}],"stop":false,"reply":0.5013163823979263},{"op":"addSwipe","at":0.17342932806385714,"text":0.4031929978454081}]
+  },
+  {
+    "seed": "lre-mvbx7a7d-8",
+    "note": "L40: a Keep convert of a dropped payment is the player's override; a converted entry may leave the account short",
+    "ops": [{"op":"inFlight","type":0.07252393205655494,"inner":[{"op":"editAssistant","at":0.3924611993281082,"text":0.16441788837252058},{"op":"write","kind":0.30994895360944186,"a":0.15541889642216178,"b":0.5524038561056246}],"stop":false,"reply":0.6742926436222426},{"op":"send","text":0.11630895980445688,"reply":0.08931237588949903,"createAtEnd":false,"rerender":false,"money":0.21593627813844496},{"op":"send","text":0.8936155140477519,"reply":0.4967453580803406,"createAtEnd":false,"rerender":false,"money":0.5422631637759459},{"op":"send","text":0.4714737498139021,"reply":0.2530432027015028,"createAtEnd":true,"rerender":false,"toll":0.6485471366066146},{"op":"excursion","at":0.6561698418975446,"inner":[{"op":"write","kind":0.5940387030555472,"a":0.7161169909573001,"b":0.5722135772779832},{"op":"write","kind":0.4497787536433579,"a":0.9357575872043472,"b":0.855773951504402},{"op":"send","text":0.4171132791592632,"reply":0.078574092928411,"createAtEnd":false,"rerender":false},{"op":"write","kind":0.453512563406009,"a":0.1779686984057598,"b":0.8441967602717425}]},{"op":"send","text":0.015350765272111433,"reply":0.27171634221738916,"createAtEnd":false,"rerender":false},{"op":"send","text":0.8118134615463409,"reply":0.2866158851427949,"createAtEnd":false,"rerender":false},{"op":"send","text":0.959191412088039,"reply":0.8427978727439024,"createAtEnd":false,"rerender":false},{"op":"send","text":0.5832507335247425,"reply":0.46789854844336254,"createAtEnd":false,"rerender":false},{"op":"deleteMessage","at":0.16785430380573696},{"op":"inFlight","type":0.8349068742527503,"inner":[{"op":"write","kind":0.7849089194467986,"a":0.1382236876948909,"b":0.7383843782111111},{"op":"write","kind":0.43583288857535263,"a":0.9955636394949189,"b":0.5798101673300682},{"op":"editAssistant","at":0.15981203058297755,"text":0.23999540577209422}],"stop":false,"reply":0.9696117866211514}]
+  },
+  {
+    "seed": "rc-0d464a0-8843",
+    "note": "L7: a Re-read after an undone planned event read against a state that still had it (a lose of the undone rope's purchase); the read prefix skips undone planned events, and undos of replaced read events are dropped",
+    "ops": [{"op":"send","text":0.3134796449833548,"reply":0.6503376475861898,"createAtEnd":true,"rerender":false},{"op":"editAssistant","at":0.74140217851353,"text":0.7512300352731656},{"op":"inFlight","type":0.5633963839276566,"inner":[{"op":"write","kind":0.7786956644018453,"a":0.8907089852203599,"b":0.3421635726979546},{"op":"write","kind":0.0824113678994085,"a":0.6237519463672119,"b":0.2179198636688785},{"op":"write","kind":0.8632341505931045,"a":0.5579491922336629,"b":0.6155296819441327}],"stop":true,"reply":0.8421060979256823},{"op":"write","kind":0.9077537599001726,"a":0.18656816903269313,"b":0.6115106280516207}]
+  }
+]

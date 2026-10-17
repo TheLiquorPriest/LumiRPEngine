@@ -1,0 +1,20 @@
+{
+  "id": "calendar.dst",
+  "pack": "calendar",
+  "schema": "lre-table/calendar.dst/v1",
+  "revision": "2a5e1e3d531f68983caa2e2f2d02411b",
+  "label": "Daylight saving time, time zones and daylight hours",
+  "source": {"dataPack":"modern-us","file":"us/calendar.json","sourceSchema":"lre-data-src/us/calendar/v1","reflectsPeriod":"2025-2026 rules (no dated instances; rules are stable across years)","approximate":true,"basis":"US Code 5 USC 6103 (federal holidays), NIST/US DOT daylight-saving rules (Uniform Time Act as amended 2005), typical K-12 and college academic calendars from state/district and university catalogs as recalled, BLS National Compensation Survey for paid-holiday prevalence, FLSA and FMCSA hours rules."},
+  "columns": {
+    "start": {"type":"json","doc":"{rule, local_time, effect} of the spring-forward change."},
+    "end": {"type":"json","doc":"{rule, local_time, effect} of the fall-back change."},
+    "duration_weeks_approx": {"type":"int","unit":"week"},
+    "exceptions": {"type":"list","of":"text","doc":"Places that do not observe DST."},
+    "standard_offsets_h": {"type":"json","doc":"IANA zone to its standard-time UTC offset in hours; add 1 during DST except Phoenix and Honolulu."},
+    "note": {"type":"text"},
+    "daylight_hours": {"type":"json","doc":"The source's `daylight_hours_geometric`: {note, rows by latitude with *_h day lengths at the solstices and equinox}."}
+  },
+  "rows": {
+    "us": {"start":{"rule":"second Sunday in March","local_time":"02:00 standard time","effect":"clocks jump to 03:00 (spring forward, lose an hour)"},"end":{"rule":"first Sunday in November","local_time":"02:00 daylight time","effect":"clocks fall back to 01:00 (gain an hour)"},"duration_weeks_approx":34,"exceptions":["Arizona (except the Navajo Nation) does not observe DST","Hawaii does not observe DST","Territories (Puerto Rico, US Virgin Islands, Guam, American Samoa, Northern Marianas) do not observe DST"],"standard_offsets_h":{"America/New_York":-5,"America/Chicago":-6,"America/Denver":-7,"America/Los_Angeles":-8,"America/Anchorage":-9,"Pacific/Honolulu":-10,"America/Phoenix":-7},"note":"Offsets listed are standard time; during DST add +1 hour except Phoenix and Honolulu. Congress has not enacted permanent DST (as of the basis date).","daylight_hours":{"note":"Geometric day length (sunrise to sunset, no atmospheric refraction; add about 8-10 minutes in practice) by latitude at the solstices and equinox. Use for seasonal light cycles.","rows":[{"latitude_deg":25,"example":"Miami / south Texas","summer_solstice_h":13.6,"equinox_h":12,"winter_solstice_h":10.4},{"latitude_deg":30,"example":"New Orleans / Austin","summer_solstice_h":13.9,"equinox_h":12,"winter_solstice_h":10.1},{"latitude_deg":35,"example":"Charlotte / Albuquerque / Memphis","summer_solstice_h":14.4,"equinox_h":12,"winter_solstice_h":9.6},{"latitude_deg":40,"example":"Philadelphia / Denver / Columbus","summer_solstice_h":14.8,"equinox_h":12,"winter_solstice_h":9.2},{"latitude_deg":45,"example":"Minneapolis / Portland, OR","summer_solstice_h":15.4,"equinox_h":12,"winter_solstice_h":8.6},{"latitude_deg":49,"example":"Northern tier (Seattle edge, Montana border)","summer_solstice_h":16,"equinox_h":12,"winter_solstice_h":8},{"latitude_deg":61,"example":"Anchorage","summer_solstice_h":18.9,"equinox_h":12,"winter_solstice_h":5.1}]}}
+  }
+}

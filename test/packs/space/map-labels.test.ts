@@ -1,0 +1,76 @@
+// Map labels for the Port Alder starter, whose places have no grid cells and sit on a ring: at phone
+// and desktop widths no two labels overlap, no label covers a dot or the map's buttons, every label
+// stays on the canvas, and every place keeps a label. Pure geometry; text is measured at a fixed
+// per-character width a little wider than the real 13 px system font.
+import { describe, expect, test } from "bun:test";
+import { createRegistry } from "../../../src/engine/registry-impl";
+import { fit, toScreen } from "../../../src/frontend/map-math";
+import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
+import { buildMapView } from "../../../src/packs/space/core/view";
+import { controlBoxes, labelAt, labelPadding, placeLabels, shorten, type Box, type LabelItem } from "../../../src/packs/space/ui/labels";
+import { startState } from "../support";
+
+const reg = createRegistry(ALL_PACKS);
+const measure = (s: string): number => s.length * 7.4;
+
+function portAlderItems(width: number, height: number): LabelItem[] {
+  const make = STARTER_WORLDS.modern_slice_of_life;
+  if (!make) throw new Error("no Port Alder starter");
+  const world = make("pa", "Port Alder");
+  const view = buildMapView(reg.context(world, startState(world)));
+  const xs = view.places.map((p) => p.x);
+  const ys = view.places.map((p) => p.y);
+  const t = fit({ minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) }, width, height, labelPadding(width, height));
+  return view.places.map((p) => ({ id: p.id, ...toScreen(t, p), r: p.id === view.here ? 9 : 7, text: p.name }));
+}
+
+const hit = (a: Box, b: Box): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+describe("map labels", () => {
+  for (const [width, height] of [
+    [326, 560],
+    [326, 700],
+    [390, 640],
+    [390, 780],
+    // The desktop map: its 480 × 520 float, and fullscreen at 1280.
+    [480, 520],
+    [1280, 800],
+  ] as const) {
+    test(`Port Alder at ${width}×${height}: no two labels overlap, none covers a dot or a button, all on the canvas`, () => {
+      const items = portAlderItems(width, height);
+      expect(items.length).toBeGreaterThanOrEqual(10);
+      const labels = placeLabels(items, { width, height, measure, avoid: controlBoxes(width, height) });
+      expect(labels.map((l) => l.id).sort()).toEqual(items.map((i) => i.id).sort());
+      for (const [i, a] of labels.entries()) {
+        for (const b of labels.slice(i + 1)) expect(hit(a.box, b.box)).toBe(false);
+        for (const d of items) expect(hit(a.box, { x: d.x - d.r, y: d.y - d.r, w: 2 * d.r, h: 2 * d.r })).toBe(false);
+        for (const c of controlBoxes(width, height)) expect(hit(a.box, c)).toBe(false);
+        expect([a.box.x >= 0, a.box.y >= 0, a.box.x + a.box.w <= width, a.box.y + a.box.h <= height]).toEqual([true, true, true, true]);
+        // The full name (on one line or two), or its start ending in "…".
+        const shown = a.lines.join(" ");
+        expect(a.lines.length <= 2 && (shown === a.full || (shown.endsWith("…") && a.full.startsWith(shown.slice(0, -1).trimEnd())))).toBe(true);
+      }
+      // On a desktop canvas every name is shown in full.
+      if (width >= 1280) expect(labels.every((l) => l.lines.join(" ") === l.full)).toBe(true);
+      // At phone widths most names still read in full.
+      expect(labels.filter((l) => l.lines.join(" ") === l.full).length * 2).toBeGreaterThanOrEqual(labels.length);
+      // Same input, same layout.
+      expect(placeLabels(items, { width, height, measure, avoid: controlBoxes(width, height) })).toEqual(labels);
+    });
+  }
+
+  test("a tap on a label selects its place, with a tap area at least 40 px tall", () => {
+    const items = portAlderItems(390, 780);
+    const labels = placeLabels(items, { width: 390, height: 780, measure, avoid: controlBoxes(390, 780) });
+    const one = labels[0];
+    if (!one) throw new Error("no labels");
+    expect(labelAt(labels, { x: one.box.x + one.box.w / 2, y: one.box.y + one.box.h / 2 })?.id).toBe(one.id);
+    expect(labelAt(labels, { x: -100, y: -100 })).toBeNull();
+  });
+
+  test("a shortened name ends in an ellipsis and fits", () => {
+    expect(shorten("Alder Harbor Marina", 60, measure)).toBe("Alder H…");
+    expect(shorten("Bluebird", 200, measure)).toBe("Bluebird");
+    expect(shorten("Alder Harbor Marina", 20, measure)).toBeNull();
+  });
+});

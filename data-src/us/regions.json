@@ -1,0 +1,1054 @@
+{
+  "schema": "lre-data-src/us/regions/v1",
+  "table": "regions",
+  "approximate": true,
+  "country": "US",
+  "currency": "USD",
+  "money_unit": "integer cents",
+  "reflects_period": "2025-2026 (point-in-time, mid-2025 to early-2026 values)",
+  "basis": {
+    "summary": "Rounded, approximate state-level figures compiled from well-known public statistics as recalled; not queried live. Intended as plausible defaults, not as authoritative statistics.",
+    "state_income_tax_effective_pct": "Approximate effective state income tax as a percent of gross wages for a single filer earning about $60,000 (a middle-income band), after the state standard deduction/exemptions; derived from published 2025 state brackets (Tax Foundation / state revenue departments). Rounded to 0.1. Excludes local income taxes (see local_income_tax_pct_typical) and payroll-type state levies such as CA SDI.",
+    "sales_tax_combined_avg_pct": "Tax Foundation 2025 combined state plus population-weighted average local sales tax rate; rounded to 0.01. Hawaii and Alaska values are approximations of the GET / local-only rate.",
+    "cost_of_living_multiplier": "US = 1.00. Approximate from BEA Regional Price Parities (all items, 2022-2023 vintage) smoothed to 2025; rounded to 0.01.",
+    "median_rent_cents_per_month": "Approximate asking-rent medians for 1BR and 2BR units, a blend of Zumper, Apartment List and HUD FY2025 Fair Market Rent state patterns, rounded to $10. 1BR is the anchor; 2BR is derived as 1BR times a regional ratio (Northeast 1.22, Midwest 1.27, South 1.27, West 1.24; DC uses South) rounded to $10. Statewide medians hide large metro-vs-rural spread.",
+    "residential_electricity_cents_per_kwh": "EIA Electric Power Monthly, average residential retail price by state, 2024 annual / 2025 year-to-date, rounded to 0.5 cent. Decimal value in cents (not dollars) per kWh. US average is about 17 cents.",
+    "minimum_wage_cents_per_hour": "Effective statutory floor in 2025 for non-tipped adult workers: the higher of the state rate and the federal $7.25. Where rates vary by locality or employer size (NY, OR, MN) the statewide/largest-area figure is used."
+  },
+  "fields": {
+    "id": "Lower-case state abbreviation; stable key.",
+    "abbr": "USPS two-letter code (DC for the District of Columbia).",
+    "name": "Full jurisdiction name.",
+    "census_region": "US Census Bureau region: Northeast | Midwest | South | West.",
+    "census_division": "US Census Bureau division (nine divisions).",
+    "time_zones": "IANA time-zone ids, primary (most populous area) first. Multi-zone states list every zone in use.",
+    "observes_dst": "Whether the state as a whole observes US daylight saving time (AZ and HI do not; see notes for Navajo Nation).",
+    "state_income_tax_effective_pct": "Percent (4.5 means 4.5%) of gross wages; 0.0 for states with no wage income tax.",
+    "local_income_tax_pct_typical": "Percent; typical additional local/county income tax for a worker in that state (0.0 where uncommon or negligible). Not included in the state rate.",
+    "sales_tax_combined_avg_pct": "Percent applied to taxable retail goods; many states exempt groceries or medicine, which this table does not model.",
+    "cost_of_living_multiplier": "Dimensionless; scale general prices and rents relative to the national average (1.00).",
+    "median_rent_1br_cents_per_month": "Integer cents per month, one-bedroom unit.",
+    "median_rent_2br_cents_per_month": "Integer cents per month, two-bedroom unit.",
+    "residential_electricity_cents_per_kwh": "Cents (decimal) per kilowatt-hour.",
+    "minimum_wage_cents_per_hour": "Integer cents per hour.",
+    "notes": "Optional free-text caveats (zone splits, DST exceptions, excluded taxes)."
+  },
+  "us_reference": {
+    "cost_of_living_multiplier": 1.0,
+    "median_rent_1br_cents_per_month": 135000,
+    "median_rent_2br_cents_per_month": 165000,
+    "residential_electricity_cents_per_kwh": 17.0,
+    "sales_tax_combined_avg_pct": 7.0,
+    "federal_minimum_wage_cents_per_hour": 725
+  },
+  "entries": [
+    {
+      "id": "al",
+      "abbr": "AL",
+      "name": "Alabama",
+      "census_region": "South",
+      "census_division": "East South Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.6,
+      "local_income_tax_pct_typical": 0.1,
+      "sales_tax_combined_avg_pct": 9.46,
+      "cost_of_living_multiplier": 0.9,
+      "median_rent_1br_cents_per_month": 100000,
+      "median_rent_2br_cents_per_month": 127000,
+      "residential_electricity_cents_per_kwh": 15.0,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "ak",
+      "abbr": "AK",
+      "name": "Alaska",
+      "census_region": "West",
+      "census_division": "Pacific",
+      "time_zones": [
+        "America/Anchorage",
+        "America/Adak"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 1.82,
+      "cost_of_living_multiplier": 1.03,
+      "median_rent_1br_cents_per_month": 123000,
+      "median_rent_2br_cents_per_month": 153000,
+      "residential_electricity_cents_per_kwh": 25.0,
+      "minimum_wage_cents_per_hour": 1191,
+      "notes": "Aleutian Islands west of 169.5W use America/Adak (Hawaii-Aleutian time). No state income or state sales tax; many boroughs levy local sales tax."
+    },
+    {
+      "id": "az",
+      "abbr": "AZ",
+      "name": "Arizona",
+      "census_region": "West",
+      "census_division": "Mountain",
+      "time_zones": [
+        "America/Phoenix"
+      ],
+      "observes_dst": false,
+      "state_income_tax_effective_pct": 1.9,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 8.38,
+      "cost_of_living_multiplier": 1.01,
+      "median_rent_1br_cents_per_month": 138000,
+      "median_rent_2br_cents_per_month": 171000,
+      "residential_electricity_cents_per_kwh": 14.5,
+      "minimum_wage_cents_per_hour": 1470,
+      "notes": "Does not observe daylight saving time, except the Navajo Nation, which does."
+    },
+    {
+      "id": "ar",
+      "abbr": "AR",
+      "name": "Arkansas",
+      "census_region": "South",
+      "census_division": "West South Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.2,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 9.46,
+      "cost_of_living_multiplier": 0.89,
+      "median_rent_1br_cents_per_month": 90000,
+      "median_rent_2br_cents_per_month": 114000,
+      "residential_electricity_cents_per_kwh": 12.5,
+      "minimum_wage_cents_per_hour": 1100
+    },
+    {
+      "id": "ca",
+      "abbr": "CA",
+      "name": "California",
+      "census_region": "West",
+      "census_division": "Pacific",
+      "time_zones": [
+        "America/Los_Angeles"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 2.9,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 8.82,
+      "cost_of_living_multiplier": 1.12,
+      "median_rent_1br_cents_per_month": 195000,
+      "median_rent_2br_cents_per_month": 242000,
+      "residential_electricity_cents_per_kwh": 31.0,
+      "minimum_wage_cents_per_hour": 1650
+    },
+    {
+      "id": "co",
+      "abbr": "CO",
+      "name": "Colorado",
+      "census_region": "West",
+      "census_division": "Mountain",
+      "time_zones": [
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.3,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.78,
+      "cost_of_living_multiplier": 1.04,
+      "median_rent_1br_cents_per_month": 155000,
+      "median_rent_2br_cents_per_month": 192000,
+      "residential_electricity_cents_per_kwh": 14.5,
+      "minimum_wage_cents_per_hour": 1481
+    },
+    {
+      "id": "ct",
+      "abbr": "CT",
+      "name": "Connecticut",
+      "census_region": "Northeast",
+      "census_division": "New England",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.6,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.35,
+      "cost_of_living_multiplier": 1.05,
+      "median_rent_1br_cents_per_month": 160000,
+      "median_rent_2br_cents_per_month": 195000,
+      "residential_electricity_cents_per_kwh": 29.5,
+      "minimum_wage_cents_per_hour": 1635
+    },
+    {
+      "id": "de",
+      "abbr": "DE",
+      "name": "Delaware",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.4,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 0.0,
+      "cost_of_living_multiplier": 0.99,
+      "median_rent_1br_cents_per_month": 140000,
+      "median_rent_2br_cents_per_month": 178000,
+      "residential_electricity_cents_per_kwh": 16.5,
+      "minimum_wage_cents_per_hour": 1500,
+      "notes": "No sales tax; gross-receipts tax is paid by businesses."
+    },
+    {
+      "id": "dc",
+      "abbr": "DC",
+      "name": "District of Columbia",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.3,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.0,
+      "cost_of_living_multiplier": 1.11,
+      "median_rent_1br_cents_per_month": 215000,
+      "median_rent_2br_cents_per_month": 273000,
+      "residential_electricity_cents_per_kwh": 18.5,
+      "minimum_wage_cents_per_hour": 1795,
+      "notes": "District of Columbia is not a state; included as a 51st jurisdiction."
+    },
+    {
+      "id": "fl",
+      "abbr": "FL",
+      "name": "Florida",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York",
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.02,
+      "cost_of_living_multiplier": 1.02,
+      "median_rent_1br_cents_per_month": 170000,
+      "median_rent_2br_cents_per_month": 216000,
+      "residential_electricity_cents_per_kwh": 14.5,
+      "minimum_wage_cents_per_hour": 1400,
+      "notes": "Western panhandle (west of the Apalachicola River) is Central time."
+    },
+    {
+      "id": "ga",
+      "abbr": "GA",
+      "name": "Georgia",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.2,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.42,
+      "cost_of_living_multiplier": 0.97,
+      "median_rent_1br_cents_per_month": 142000,
+      "median_rent_2br_cents_per_month": 180000,
+      "residential_electricity_cents_per_kwh": 14.0,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "hi",
+      "abbr": "HI",
+      "name": "Hawaii",
+      "census_region": "West",
+      "census_division": "Pacific",
+      "time_zones": [
+        "Pacific/Honolulu"
+      ],
+      "observes_dst": false,
+      "state_income_tax_effective_pct": 6.2,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 4.5,
+      "cost_of_living_multiplier": 1.1,
+      "median_rent_1br_cents_per_month": 190000,
+      "median_rent_2br_cents_per_month": 236000,
+      "residential_electricity_cents_per_kwh": 41.0,
+      "minimum_wage_cents_per_hour": 1400,
+      "notes": "Does not observe daylight saving time. Sales-type tax is the General Excise Tax (about 4.0-4.7%)."
+    },
+    {
+      "id": "id",
+      "abbr": "ID",
+      "name": "Idaho",
+      "census_region": "West",
+      "census_division": "Mountain",
+      "time_zones": [
+        "America/Boise",
+        "America/Los_Angeles"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.03,
+      "cost_of_living_multiplier": 0.97,
+      "median_rent_1br_cents_per_month": 125000,
+      "median_rent_2br_cents_per_month": 155000,
+      "residential_electricity_cents_per_kwh": 11.0,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "Northern panhandle (north of the Salmon River) is Pacific time; the rest is Mountain."
+    },
+    {
+      "id": "il",
+      "abbr": "IL",
+      "name": "Illinois",
+      "census_region": "Midwest",
+      "census_division": "East North Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.7,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 8.86,
+      "cost_of_living_multiplier": 0.99,
+      "median_rent_1br_cents_per_month": 135000,
+      "median_rent_2br_cents_per_month": 171000,
+      "residential_electricity_cents_per_kwh": 16.0,
+      "minimum_wage_cents_per_hour": 1500
+    },
+    {
+      "id": "in",
+      "abbr": "IN",
+      "name": "Indiana",
+      "census_region": "Midwest",
+      "census_division": "East North Central",
+      "time_zones": [
+        "America/Indiana/Indianapolis",
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.0,
+      "local_income_tax_pct_typical": 1.6,
+      "sales_tax_combined_avg_pct": 7.0,
+      "cost_of_living_multiplier": 0.92,
+      "median_rent_1br_cents_per_month": 105000,
+      "median_rent_2br_cents_per_month": 133000,
+      "residential_electricity_cents_per_kwh": 15.5,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "Most of the state is Eastern; the northwest and southwest corners are Central. County income tax is extra (see local_income_tax_pct_typical)."
+    },
+    {
+      "id": "ia",
+      "abbr": "IA",
+      "name": "Iowa",
+      "census_region": "Midwest",
+      "census_division": "West North Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.94,
+      "cost_of_living_multiplier": 0.92,
+      "median_rent_1br_cents_per_month": 95000,
+      "median_rent_2br_cents_per_month": 121000,
+      "residential_electricity_cents_per_kwh": 13.5,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "ks",
+      "abbr": "KS",
+      "name": "Kansas",
+      "census_region": "Midwest",
+      "census_division": "West North Central",
+      "time_zones": [
+        "America/Chicago",
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.7,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 8.69,
+      "cost_of_living_multiplier": 0.92,
+      "median_rent_1br_cents_per_month": 95000,
+      "median_rent_2br_cents_per_month": 121000,
+      "residential_electricity_cents_per_kwh": 14.0,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "Four far-western counties are Mountain time."
+    },
+    {
+      "id": "ky",
+      "abbr": "KY",
+      "name": "Kentucky",
+      "census_region": "South",
+      "census_division": "East South Central",
+      "time_zones": [
+        "America/New_York",
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.8,
+      "local_income_tax_pct_typical": 0.8,
+      "sales_tax_combined_avg_pct": 6.0,
+      "cost_of_living_multiplier": 0.9,
+      "median_rent_1br_cents_per_month": 100000,
+      "median_rent_2br_cents_per_month": 127000,
+      "residential_electricity_cents_per_kwh": 13.5,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "Roughly the western half is Central; the eastern half is Eastern."
+    },
+    {
+      "id": "la",
+      "abbr": "LA",
+      "name": "Louisiana",
+      "census_region": "South",
+      "census_division": "West South Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 2.4,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 10.11,
+      "cost_of_living_multiplier": 0.92,
+      "median_rent_1br_cents_per_month": 100000,
+      "median_rent_2br_cents_per_month": 127000,
+      "residential_electricity_cents_per_kwh": 13.0,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "me",
+      "abbr": "ME",
+      "name": "Maine",
+      "census_region": "Northeast",
+      "census_division": "New England",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.6,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 5.5,
+      "cost_of_living_multiplier": 1.0,
+      "median_rent_1br_cents_per_month": 130000,
+      "median_rent_2br_cents_per_month": 159000,
+      "residential_electricity_cents_per_kwh": 26.0,
+      "minimum_wage_cents_per_hour": 1465
+    },
+    {
+      "id": "md",
+      "abbr": "MD",
+      "name": "Maryland",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.2,
+      "local_income_tax_pct_typical": 3.0,
+      "sales_tax_combined_avg_pct": 6.0,
+      "cost_of_living_multiplier": 1.05,
+      "median_rent_1br_cents_per_month": 155000,
+      "median_rent_2br_cents_per_month": 197000,
+      "residential_electricity_cents_per_kwh": 18.5,
+      "minimum_wage_cents_per_hour": 1500,
+      "notes": "County income tax (2.25-3.2%) is extra."
+    },
+    {
+      "id": "ma",
+      "abbr": "MA",
+      "name": "Massachusetts",
+      "census_region": "Northeast",
+      "census_division": "New England",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.6,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.25,
+      "cost_of_living_multiplier": 1.08,
+      "median_rent_1br_cents_per_month": 230000,
+      "median_rent_2br_cents_per_month": 281000,
+      "residential_electricity_cents_per_kwh": 30.0,
+      "minimum_wage_cents_per_hour": 1500
+    },
+    {
+      "id": "mi",
+      "abbr": "MI",
+      "name": "Michigan",
+      "census_region": "Midwest",
+      "census_division": "East North Central",
+      "time_zones": [
+        "America/New_York",
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.9,
+      "local_income_tax_pct_typical": 0.2,
+      "sales_tax_combined_avg_pct": 6.0,
+      "cost_of_living_multiplier": 0.95,
+      "median_rent_1br_cents_per_month": 110000,
+      "median_rent_2br_cents_per_month": 140000,
+      "residential_electricity_cents_per_kwh": 19.5,
+      "minimum_wage_cents_per_hour": 1248,
+      "notes": "Four Upper Peninsula counties bordering Wisconsin are Central."
+    },
+    {
+      "id": "mn",
+      "abbr": "MN",
+      "name": "Minnesota",
+      "census_region": "Midwest",
+      "census_division": "West North Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.3,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.49,
+      "cost_of_living_multiplier": 0.99,
+      "median_rent_1br_cents_per_month": 125000,
+      "median_rent_2br_cents_per_month": 159000,
+      "residential_electricity_cents_per_kwh": 15.0,
+      "minimum_wage_cents_per_hour": 1113
+    },
+    {
+      "id": "ms",
+      "abbr": "MS",
+      "name": "Mississippi",
+      "census_region": "South",
+      "census_division": "East South Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.1,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.06,
+      "cost_of_living_multiplier": 0.88,
+      "median_rent_1br_cents_per_month": 90000,
+      "median_rent_2br_cents_per_month": 114000,
+      "residential_electricity_cents_per_kwh": 14.0,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "mo",
+      "abbr": "MO",
+      "name": "Missouri",
+      "census_region": "Midwest",
+      "census_division": "West North Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.1,
+      "local_income_tax_pct_typical": 0.2,
+      "sales_tax_combined_avg_pct": 8.4,
+      "cost_of_living_multiplier": 0.92,
+      "median_rent_1br_cents_per_month": 100000,
+      "median_rent_2br_cents_per_month": 127000,
+      "residential_electricity_cents_per_kwh": 12.5,
+      "minimum_wage_cents_per_hour": 1375
+    },
+    {
+      "id": "mt",
+      "abbr": "MT",
+      "name": "Montana",
+      "census_region": "West",
+      "census_division": "Mountain",
+      "time_zones": [
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.7,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 0.0,
+      "cost_of_living_multiplier": 0.98,
+      "median_rent_1br_cents_per_month": 115000,
+      "median_rent_2br_cents_per_month": 143000,
+      "residential_electricity_cents_per_kwh": 12.5,
+      "minimum_wage_cents_per_hour": 1085,
+      "notes": "No general sales tax; resort-area local taxes exist."
+    },
+    {
+      "id": "ne",
+      "abbr": "NE",
+      "name": "Nebraska",
+      "census_region": "Midwest",
+      "census_division": "West North Central",
+      "time_zones": [
+        "America/Chicago",
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.8,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.97,
+      "cost_of_living_multiplier": 0.93,
+      "median_rent_1br_cents_per_month": 100000,
+      "median_rent_2br_cents_per_month": 127000,
+      "residential_electricity_cents_per_kwh": 12.0,
+      "minimum_wage_cents_per_hour": 1500,
+      "notes": "The western panhandle is Mountain time."
+    },
+    {
+      "id": "nv",
+      "abbr": "NV",
+      "name": "Nevada",
+      "census_region": "West",
+      "census_division": "Mountain",
+      "time_zones": [
+        "America/Los_Angeles",
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 8.24,
+      "cost_of_living_multiplier": 0.99,
+      "median_rent_1br_cents_per_month": 140000,
+      "median_rent_2br_cents_per_month": 174000,
+      "residential_electricity_cents_per_kwh": 14.5,
+      "minimum_wage_cents_per_hour": 1200,
+      "notes": "West Wendover uses Mountain time."
+    },
+    {
+      "id": "nh",
+      "abbr": "NH",
+      "name": "New Hampshire",
+      "census_region": "Northeast",
+      "census_division": "New England",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 0.0,
+      "cost_of_living_multiplier": 1.05,
+      "median_rent_1br_cents_per_month": 160000,
+      "median_rent_2br_cents_per_month": 195000,
+      "residential_electricity_cents_per_kwh": 26.5,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "No tax on wages; the interest and dividends tax was repealed effective 2025. No sales tax."
+    },
+    {
+      "id": "nj",
+      "abbr": "NJ",
+      "name": "New Jersey",
+      "census_region": "Northeast",
+      "census_division": "Middle Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 2.9,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.6,
+      "cost_of_living_multiplier": 1.09,
+      "median_rent_1br_cents_per_month": 190000,
+      "median_rent_2br_cents_per_month": 232000,
+      "residential_electricity_cents_per_kwh": 18.5,
+      "minimum_wage_cents_per_hour": 1549
+    },
+    {
+      "id": "nm",
+      "abbr": "NM",
+      "name": "New Mexico",
+      "census_region": "West",
+      "census_division": "Mountain",
+      "time_zones": [
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.2,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.62,
+      "cost_of_living_multiplier": 0.95,
+      "median_rent_1br_cents_per_month": 105000,
+      "median_rent_2br_cents_per_month": 130000,
+      "residential_electricity_cents_per_kwh": 15.0,
+      "minimum_wage_cents_per_hour": 1200
+    },
+    {
+      "id": "ny",
+      "abbr": "NY",
+      "name": "New York",
+      "census_region": "Northeast",
+      "census_division": "Middle Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.5,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 8.54,
+      "cost_of_living_multiplier": 1.08,
+      "median_rent_1br_cents_per_month": 220000,
+      "median_rent_2br_cents_per_month": 268000,
+      "residential_electricity_cents_per_kwh": 25.0,
+      "minimum_wage_cents_per_hour": 1650,
+      "notes": "Excludes New York City resident income tax (roughly 3-4% more) and the MCTMT."
+    },
+    {
+      "id": "nc",
+      "abbr": "NC",
+      "name": "North Carolina",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.3,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.99,
+      "cost_of_living_multiplier": 0.97,
+      "median_rent_1br_cents_per_month": 135000,
+      "median_rent_2br_cents_per_month": 171000,
+      "residential_electricity_cents_per_kwh": 14.0,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "nd",
+      "abbr": "ND",
+      "name": "North Dakota",
+      "census_region": "Midwest",
+      "census_division": "West North Central",
+      "time_zones": [
+        "America/Chicago",
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.1,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.04,
+      "cost_of_living_multiplier": 0.95,
+      "median_rent_1br_cents_per_month": 90000,
+      "median_rent_2br_cents_per_month": 114000,
+      "residential_electricity_cents_per_kwh": 11.5,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "The southwest corner is Mountain time. Effective income tax is near zero for the middle band (large 0% bracket)."
+    },
+    {
+      "id": "oh",
+      "abbr": "OH",
+      "name": "Ohio",
+      "census_region": "Midwest",
+      "census_division": "East North Central",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 1.4,
+      "local_income_tax_pct_typical": 1.5,
+      "sales_tax_combined_avg_pct": 7.24,
+      "cost_of_living_multiplier": 0.93,
+      "median_rent_1br_cents_per_month": 110000,
+      "median_rent_2br_cents_per_month": 140000,
+      "residential_electricity_cents_per_kwh": 16.5,
+      "minimum_wage_cents_per_hour": 1070,
+      "notes": "Municipal income taxes (about 1-2.5%) apply in most cities and are extra."
+    },
+    {
+      "id": "ok",
+      "abbr": "OK",
+      "name": "Oklahoma",
+      "census_region": "South",
+      "census_division": "West South Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.5,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 9.14,
+      "cost_of_living_multiplier": 0.89,
+      "median_rent_1br_cents_per_month": 95000,
+      "median_rent_2br_cents_per_month": 121000,
+      "residential_electricity_cents_per_kwh": 13.0,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "or",
+      "abbr": "OR",
+      "name": "Oregon",
+      "census_region": "West",
+      "census_division": "Pacific",
+      "time_zones": [
+        "America/Los_Angeles",
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 6.5,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 0.0,
+      "cost_of_living_multiplier": 1.04,
+      "median_rent_1br_cents_per_month": 150000,
+      "median_rent_2br_cents_per_month": 186000,
+      "residential_electricity_cents_per_kwh": 13.5,
+      "minimum_wage_cents_per_hour": 1505,
+      "notes": "Most of Malheur County is Mountain time. No state sales tax; effective income tax is among the highest for a middle band."
+    },
+    {
+      "id": "pa",
+      "abbr": "PA",
+      "name": "Pennsylvania",
+      "census_region": "Northeast",
+      "census_division": "Middle Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.1,
+      "local_income_tax_pct_typical": 1.0,
+      "sales_tax_combined_avg_pct": 6.34,
+      "cost_of_living_multiplier": 0.97,
+      "median_rent_1br_cents_per_month": 125000,
+      "median_rent_2br_cents_per_month": 152000,
+      "residential_electricity_cents_per_kwh": 18.0,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "Local earned-income tax (about 1% typical, Philadelphia 3.75%) is extra."
+    },
+    {
+      "id": "ri",
+      "abbr": "RI",
+      "name": "Rhode Island",
+      "census_region": "Northeast",
+      "census_division": "New England",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.1,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.0,
+      "cost_of_living_multiplier": 1.03,
+      "median_rent_1br_cents_per_month": 165000,
+      "median_rent_2br_cents_per_month": 201000,
+      "residential_electricity_cents_per_kwh": 31.0,
+      "minimum_wage_cents_per_hour": 1500
+    },
+    {
+      "id": "sc",
+      "abbr": "SC",
+      "name": "South Carolina",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.6,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.44,
+      "cost_of_living_multiplier": 0.96,
+      "median_rent_1br_cents_per_month": 120000,
+      "median_rent_2br_cents_per_month": 152000,
+      "residential_electricity_cents_per_kwh": 14.5,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "sd",
+      "abbr": "SD",
+      "name": "South Dakota",
+      "census_region": "Midwest",
+      "census_division": "West North Central",
+      "time_zones": [
+        "America/Chicago",
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.11,
+      "cost_of_living_multiplier": 0.92,
+      "median_rent_1br_cents_per_month": 90000,
+      "median_rent_2br_cents_per_month": 114000,
+      "residential_electricity_cents_per_kwh": 13.0,
+      "minimum_wage_cents_per_hour": 1150,
+      "notes": "The western half (west of the Missouri River, mostly) is Mountain time."
+    },
+    {
+      "id": "tn",
+      "abbr": "TN",
+      "name": "Tennessee",
+      "census_region": "South",
+      "census_division": "East South Central",
+      "time_zones": [
+        "America/Chicago",
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 9.61,
+      "cost_of_living_multiplier": 0.95,
+      "median_rent_1br_cents_per_month": 130000,
+      "median_rent_2br_cents_per_month": 165000,
+      "residential_electricity_cents_per_kwh": 12.5,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "East Tennessee is Eastern time; the rest is Central. No wage income tax."
+    },
+    {
+      "id": "tx",
+      "abbr": "TX",
+      "name": "Texas",
+      "census_region": "South",
+      "census_division": "West South Central",
+      "time_zones": [
+        "America/Chicago",
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 8.19,
+      "cost_of_living_multiplier": 0.98,
+      "median_rent_1br_cents_per_month": 125000,
+      "median_rent_2br_cents_per_month": 159000,
+      "residential_electricity_cents_per_kwh": 15.0,
+      "minimum_wage_cents_per_hour": 725,
+      "notes": "El Paso and Hudspeth counties are Mountain time."
+    },
+    {
+      "id": "ut",
+      "abbr": "UT",
+      "name": "Utah",
+      "census_region": "West",
+      "census_division": "Mountain",
+      "time_zones": [
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 7.25,
+      "cost_of_living_multiplier": 1.0,
+      "median_rent_1br_cents_per_month": 130000,
+      "median_rent_2br_cents_per_month": 161000,
+      "residential_electricity_cents_per_kwh": 11.5,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "vt",
+      "abbr": "VT",
+      "name": "Vermont",
+      "census_region": "Northeast",
+      "census_division": "New England",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.3,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.39,
+      "cost_of_living_multiplier": 1.0,
+      "median_rent_1br_cents_per_month": 145000,
+      "median_rent_2br_cents_per_month": 177000,
+      "residential_electricity_cents_per_kwh": 23.0,
+      "minimum_wage_cents_per_hour": 1401
+    },
+    {
+      "id": "va",
+      "abbr": "VA",
+      "name": "Virginia",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 4.4,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 5.75,
+      "cost_of_living_multiplier": 1.02,
+      "median_rent_1br_cents_per_month": 145000,
+      "median_rent_2br_cents_per_month": 184000,
+      "residential_electricity_cents_per_kwh": 14.5,
+      "minimum_wage_cents_per_hour": 1241
+    },
+    {
+      "id": "wa",
+      "abbr": "WA",
+      "name": "Washington",
+      "census_region": "West",
+      "census_division": "Pacific",
+      "time_zones": [
+        "America/Los_Angeles"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 9.43,
+      "cost_of_living_multiplier": 1.07,
+      "median_rent_1br_cents_per_month": 170000,
+      "median_rent_2br_cents_per_month": 211000,
+      "residential_electricity_cents_per_kwh": 11.5,
+      "minimum_wage_cents_per_hour": 1666,
+      "notes": "No wage income tax. Capital-gains excise tax applies only to large gains."
+    },
+    {
+      "id": "wv",
+      "abbr": "WV",
+      "name": "West Virginia",
+      "census_region": "South",
+      "census_division": "South Atlantic",
+      "time_zones": [
+        "America/New_York"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.4,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 6.57,
+      "cost_of_living_multiplier": 0.9,
+      "median_rent_1br_cents_per_month": 90000,
+      "median_rent_2br_cents_per_month": 114000,
+      "residential_electricity_cents_per_kwh": 15.0,
+      "minimum_wage_cents_per_hour": 875
+    },
+    {
+      "id": "wi",
+      "abbr": "WI",
+      "name": "Wisconsin",
+      "census_region": "Midwest",
+      "census_division": "East North Central",
+      "time_zones": [
+        "America/Chicago"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 3.5,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 5.7,
+      "cost_of_living_multiplier": 0.94,
+      "median_rent_1br_cents_per_month": 110000,
+      "median_rent_2br_cents_per_month": 140000,
+      "residential_electricity_cents_per_kwh": 16.0,
+      "minimum_wage_cents_per_hour": 725
+    },
+    {
+      "id": "wy",
+      "abbr": "WY",
+      "name": "Wyoming",
+      "census_region": "West",
+      "census_division": "Mountain",
+      "time_zones": [
+        "America/Denver"
+      ],
+      "observes_dst": true,
+      "state_income_tax_effective_pct": 0.0,
+      "local_income_tax_pct_typical": 0.0,
+      "sales_tax_combined_avg_pct": 5.36,
+      "cost_of_living_multiplier": 0.95,
+      "median_rent_1br_cents_per_month": 95000,
+      "median_rent_2br_cents_per_month": 118000,
+      "residential_electricity_cents_per_kwh": 12.5,
+      "minimum_wage_cents_per_hour": 725
+    }
+  ]
+}

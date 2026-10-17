@@ -1,0 +1,3 @@
+[test]
+# The suite lives in test/; nothing outside it (such as a local reference copy) is part of it.
+root = "test"

@@ -1,0 +1,2770 @@
+{
+  "schema": "lre-template/v1",
+  "id": "modern-slice-of-life",
+  "name": "Port Alder",
+  "version": 1,
+  "genre": "slice of life",
+  "tags": ["modern", "small town", "Great Lakes", "work and friends", "boats", "simulation"],
+  "blurb": "A small Michigan lake town in the last good weeks of boating season: a garage that needs you, a loan and a landlord to keep paid, a friend with a pontoon, and a harbor festival on the way.",
+  "contentNotes": "All-ages. Everyday money, work and friendship. No real people, businesses or events; Port Alder is fictional and the numbers are approximate 2025-26 US figures.",
+  "realism": {
+    "preset": "simulation",
+    "rationale": "Simulation shows off everything the engine can count: payroll with withholding, rent and loan payments, a credit card with statements, fuel and maintenance, and the weekly lives of the people around you. Drop it to Grounded or Story for a lighter chat."
+  },
+  "dataPack": "modern-us",
+  "region": "mi",
+  "currency": {
+    "id": "usd",
+    "label": "US dollars",
+    "baseUnit": "cent",
+    "denominations": [
+      {"id": "cent", "label": "cent", "value": 1},
+      {"id": "nickel", "label": "nickel", "value": 5},
+      {"id": "dime", "label": "dime", "value": 10},
+      {"id": "quarter", "label": "quarter", "value": 25},
+      {"id": "one", "label": "$1 bill", "value": 100},
+      {"id": "five", "label": "$5 bill", "value": 500},
+      {"id": "ten", "label": "$10 bill", "value": 1000},
+      {"id": "twenty", "label": "$20 bill", "value": 2000}
+    ],
+    "note": "Money is integer cents. National prices are scaled by the region's cost-of-living multiplier (Michigan 0.95) at pricing time.",
+    "code": "USD",
+    "symbol": "$",
+    "minorUnit": "cent",
+    "decimals": 2,
+    "format": "{sign}{symbol}{amount}"
+  },
+  "travelSpeedKmh": {"walk": [1.5, 6], "road": [15, 110], "offroad": [4, 40], "water": [5, 35]},
+  "calendar": {
+    "system": "gregorian",
+    "epoch": "2026-09-14T00:00",
+    "timeZone": "America/New_York",
+    "dayParts": [
+      {"id": "early", "label": "Early morning", "start": "05:00"},
+      {"id": "morning", "label": "Morning", "start": "08:00"},
+      {"id": "midday", "label": "Midday", "start": "11:30"},
+      {"id": "afternoon", "label": "Afternoon", "start": "14:00"},
+      {"id": "evening", "label": "Evening", "start": "17:30"},
+      {"id": "night", "label": "Night", "start": "21:30"}
+    ],
+    "inheritHolidays": "calendar.holidays",
+    "holidays": [
+      {
+        "id": "harbor_fest",
+        "label": "Harbor Fest",
+        "rule": {"type": "nth_weekday", "month": 9, "weekday": 6, "n": 4},
+        "dayOff": false
+      }
+    ]
+  },
+  "start": {
+    "place": "harbor_street_114",
+    "at": "2026-09-14T06:15",
+    "weekday": "Monday",
+    "display": "Monday 14 September 2026, 6:15 a.m.",
+    "scene": "downtime",
+    "summary": "Your alarm has gone off over the hardware store on Harbor Street. It is gray and cool, the lake is flat, and the garage opens at seven with a list of cars waiting."
+  },
+  "time": {
+    "sceneTypes": [
+      {"id": "conversation", "label": "Conversation", "tickMinutes": 2},
+      {"id": "action", "label": "Action", "tickMinutes": 0.5},
+      {"id": "exploration", "label": "Exploration", "tickMinutes": 10},
+      {"id": "downtime", "label": "Downtime", "tickMinutes": 30},
+      {"id": "work", "label": "Work", "tickMinutes": 15}
+    ],
+    "montage": "key",
+    "speedThrough": {
+      "sleep": {"mode": "offer", "thresholdMinutes": 30},
+      "work_shift": {"mode": "offer", "thresholdMinutes": 30},
+      "travel": {"mode": "offer", "thresholdMinutes": 30},
+      "waiting": {"mode": "offer", "thresholdMinutes": 30}
+    }
+  },
+  "flags": [
+    {"id": "shop_open", "description": "Alder Automotive is open for business.", "default": true},
+    {
+      "id": "fleet_contract_signed",
+      "description": "The township has signed the fleet service contract.",
+      "default": false
+    },
+    {"id": "township_truck_fixed", "description": "The township's pickup starts and runs.", "default": false},
+    {"id": "small_craft_advisory", "description": "A small-craft advisory is in force on the lake.", "default": false},
+    {"id": "ferry_running", "description": "The Gull Island ferry is running.", "default": true},
+    {"id": "pontoon_loaned", "description": "Dale has lent the pontoon to the player.", "default": false},
+    {"id": "fleet_deal_accepted", "description": "The player has taken the township truck job.", "default": false},
+    {
+      "id": "relay_replaced",
+      "description": "The township pickup's fuel pump relay has been replaced.",
+      "default": false
+    },
+    {"id": "priya_walked", "description": "The player has walked Priya through the repair.", "default": false},
+    {"id": "fleet_serviced", "description": "The township fleet service run is finished.", "default": false},
+    {"id": "pontoon_looked_at", "description": "The player has agreed to look at Dale's pontoon.", "default": false},
+    {"id": "pontoon_diagnosed", "description": "The pontoon's fault is diagnosed.", "default": false},
+    {"id": "pontoon_repaired", "description": "The pontoon is repaired.", "default": false},
+    {"id": "pontoon_trial_done", "description": "The sea trial is complete.", "default": false},
+    {"id": "pontoon_out", "description": "The pontoon has left the marina on loan.", "default": false},
+    {"id": "asked_about_marcus", "description": "The player has asked about Marcus.", "default": false},
+    {"id": "read_notice", "description": "The player has read the past-due notice.", "default": false},
+    {"id": "read_statement", "description": "The player has read the shop's bank statement.", "default": false},
+    {
+      "id": "talked_marcus",
+      "description": "The player has talked to Marcus about the shop's money.",
+      "default": false
+    }
+  ],
+  "regard": {
+    "axes": [
+      {"id": "warmth", "label": "Warmth", "min": -100, "max": 100},
+      {"id": "trust", "label": "Trust", "min": -100, "max": 100},
+      {"id": "respect", "label": "Respect", "min": -100, "max": 100}
+    ],
+    "bands": [
+      {"label": "hostile", "max": -60},
+      {"label": "cold", "min": -60, "max": -20},
+      {"label": "neutral", "min": -20, "max": 20},
+      {"label": "warm", "min": 20, "max": 60},
+      {"label": "devoted", "min": 60}
+    ]
+  },
+  "places": [
+    {
+      "id": "lakeshore_county",
+      "name": "Lakeshore County",
+      "timeZone": "America/New_York",
+      "sceneType": "exploration",
+      "visibility": "public",
+      "tags": ["region"],
+      "description": "A long strip of dunes, orchards and small harbor towns on the east shore of Lake Michigan."
+    },
+    {
+      "id": "port_alder",
+      "name": "Port Alder",
+      "parent": "lakeshore_county",
+      "timeZone": "America/New_York",
+      "sceneType": "exploration",
+      "visibility": "public",
+      "tags": ["town"],
+      "description": "A harbor town of about 6,500 people with a brick Main Street, a working marina, two stoplights and an unreasonable number of coffee shops in summer."
+    },
+    {
+      "id": "harbor_street_114",
+      "name": "114 Harbor Street",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "downtime",
+      "visibility": "public",
+      "tags": ["home"],
+      "description": "A three-storey brick building with Harbor Hardware on the ground floor and four apartments above. Unit 2B has a lake view if you lean out of the bathroom window."
+    },
+    {
+      "id": "alder_automotive",
+      "name": "Alder Automotive",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "work",
+      "visibility": "public",
+      "tags": ["workplace"],
+      "description": "A three-bay repair shop on Lake Avenue with a customer counter, a parts shelf and a back lot full of cars waiting for one more part. The radio is always on."
+    },
+    {
+      "id": "rusty_anchor",
+      "name": "The Rusty Anchor",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "conversation",
+      "visibility": "public",
+      "tags": ["bar"],
+      "description": "A waterfront bar and grill with a deck over the harbor, a wall of old buoys and the best burger in the county. Trivia is on Thursdays."
+    },
+    {
+      "id": "bluebird_coffee",
+      "name": "Bluebird Coffee",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "conversation",
+      "visibility": "public",
+      "tags": ["cafe"],
+      "description": "A bright corner cafe on Main Street with mismatched chairs, a good espresso machine and a pastry case that empties by ten."
+    },
+    {
+      "id": "township_hall",
+      "name": "Alder Township Hall",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "conversation",
+      "visibility": "public",
+      "tags": ["civic"],
+      "description": "A low brick building with a flagpole and a bulletin board. Permits, tax bills and the township's vehicle yard are all handled here."
+    },
+    {
+      "id": "community_clinic",
+      "name": "Alder Community Clinic",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "conversation",
+      "visibility": "public",
+      "tags": ["clinic"],
+      "description": "A one-storey clinic with urgent care, a pharmacy window and a waiting room that smells of hand sanitizer and old magazines."
+    },
+    {
+      "id": "alder_harbor_marina",
+      "name": "Alder Harbor Marina",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "exploration",
+      "grid": "marina_grid",
+      "visibility": "public",
+      "tags": ["marina", "water"],
+      "description": "Eighty slips, a boat ramp, a fuel dock and a barn full of winter storage. The harbor office has a bell on the door and a coffee pot that is never quite empty."
+    },
+    {
+      "id": "lakefront_park",
+      "name": "Lakefront Park",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "exploration",
+      "visibility": "public",
+      "tags": ["park"],
+      "description": "A strip of beach, lawn and picnic tables beside the marina. The pavilion hosts the weekly farmers' market in summer and Harbor Fest in September."
+    },
+    {
+      "id": "alder_market",
+      "name": "Alder Market",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "downtime",
+      "visibility": "public",
+      "tags": ["grocery"],
+      "description": "The town's only full grocery store, with a deli counter, a rack of local apples and a bulletin board covered in lost-cat flyers."
+    },
+    {
+      "id": "shoreline_fuel",
+      "name": "Shoreline Fuel",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "action",
+      "visibility": "public",
+      "tags": ["fuel"],
+      "description": "A gas station and convenience store on the road out of town, with four pumps, a car wash and surprisingly good hot dogs."
+    },
+    {
+      "id": "dune_trails",
+      "name": "Shoreline Dunes Trail System",
+      "parent": "lakeshore_county",
+      "timeZone": "America/New_York",
+      "sceneType": "exploration",
+      "visibility": "public",
+      "tags": ["offroad"],
+      "description": "Twelve miles of marked sand trails through the dunes, open to ATVs and side-by-sides from a trailhead lot off County Road 12. The sand is deep, the views are huge and the rules are posted on a sign no one reads."
+    },
+    {
+      "id": "gull_island",
+      "name": "Gull Island State Park",
+      "parent": "lakeshore_county",
+      "timeZone": "America/New_York",
+      "sceneType": "exploration",
+      "visibility": "public",
+      "tags": ["island", "water"],
+      "description": "A wooded island six kilometers offshore with a lighthouse, a small campground and a ferry that runs from the marina several times a day in season."
+    },
+    {
+      "id": "chicago_il",
+      "name": "Chicago, Illinois",
+      "timeZone": "America/Chicago",
+      "sceneType": "exploration",
+      "visibility": "public",
+      "tags": ["city", "off-map"],
+      "description": "The nearest big city, about a three-and-a-half-hour drive around the bottom of the lake, in the Central time zone: an hour behind Port Alder."
+    },
+    {
+      "id": "lakeshore_school",
+      "name": "Lakeshore Consolidated School",
+      "parent": "port_alder",
+      "sceneType": "work",
+      "visibility": "public",
+      "tags": ["school"],
+      "description": "A low brick school on the edge of town that serves Port Alder and the farms behind the dunes: one long corridor, a gym that doubles as the auditorium, and a flagpole in front. Classes run from eight until ten past three."
+    }
+  ],
+  "routes": [
+    {
+      "id": "rt_home_bluebird",
+      "from": "harbor_street_114",
+      "to": "bluebird_coffee",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 2, "distanceKm": 0.1}}
+    },
+    {
+      "id": "rt_home_anchor",
+      "from": "harbor_street_114",
+      "to": "rusty_anchor",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 4, "distanceKm": 0.3}}
+    },
+    {
+      "id": "rt_home_shop",
+      "from": "harbor_street_114",
+      "to": "alder_automotive",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 11, "distanceKm": 0.9}, "road": {"minutes": 3, "distanceKm": 0.9}}
+    },
+    {
+      "id": "rt_home_hall",
+      "from": "harbor_street_114",
+      "to": "township_hall",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 6, "distanceKm": 0.5}, "road": {"minutes": 2, "distanceKm": 0.6}}
+    },
+    {
+      "id": "rt_home_market",
+      "from": "harbor_street_114",
+      "to": "alder_market",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 9, "distanceKm": 0.7}, "road": {"minutes": 3, "distanceKm": 0.9}}
+    },
+    {
+      "id": "rt_home_marina",
+      "from": "harbor_street_114",
+      "to": "alder_harbor_marina",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 12, "distanceKm": 1.0}, "road": {"minutes": 4, "distanceKm": 1.2}}
+    },
+    {
+      "id": "rt_home_clinic",
+      "from": "harbor_street_114",
+      "to": "community_clinic",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 14, "distanceKm": 1.1}, "road": {"minutes": 4, "distanceKm": 1.3}}
+    },
+    {
+      "id": "rt_shop_fuel",
+      "from": "alder_automotive",
+      "to": "shoreline_fuel",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 5, "distanceKm": 0.4}, "road": {"minutes": 1, "distanceKm": 0.5}}
+    },
+    {
+      "id": "rt_marina_park",
+      "from": "alder_harbor_marina",
+      "to": "lakefront_park",
+      "bidirectional": true,
+      "modes": {
+        "walk": {"minutes": 8, "distanceKm": 0.6},
+        "road": {"minutes": 3, "distanceKm": 0.8},
+        "water": {"minutes": 9, "distanceKm": 2.0}
+      }
+    },
+    {
+      "id": "rt_marina_gull",
+      "from": "alder_harbor_marina",
+      "to": "gull_island",
+      "bidirectional": true,
+      "modes": {"water": {"minutes": 25, "distanceKm": 6.0, "terrain": "open lake"}}
+    },
+    {
+      "id": "rt_alder_dunes",
+      "from": "port_alder",
+      "to": "dune_trails",
+      "bidirectional": true,
+      "modes": {
+        "road": {"minutes": 12, "distanceKm": 9.0, "terrain": "County Road 12"},
+        "offroad": {"minutes": 22, "distanceKm": 7.0, "terrain": "sand trail"}
+      }
+    },
+    {
+      "id": "rt_alder_chicago",
+      "from": "port_alder",
+      "to": "chicago_il",
+      "bidirectional": true,
+      "modes": {"road": {"minutes": 215, "distanceKm": 305, "terrain": "interstate"}}
+    },
+    {
+      "id": "rt_home_school",
+      "from": "harbor_street_114",
+      "to": "lakeshore_school",
+      "bidirectional": true,
+      "modes": {"walk": {"minutes": 16, "distanceKm": 1.2}, "road": {"minutes": 5, "distanceKm": 1.4}}
+    }
+  ],
+  "grids": [
+    {
+      "id": "marina_grid",
+      "place": "alder_harbor_marina",
+      "width": 18,
+      "height": 11,
+      "cellMeters": 5,
+      "legend": {
+        "~": {"terrain": "water", "blockedFor": ["walk", "road"]},
+        "a": {"terrain": "asphalt"},
+        "s": {"terrain": "sand and grass"},
+        "b": {"terrain": "building", "blocked": true},
+        "r": {"terrain": "boat ramp"},
+        "d": {"terrain": "dock"},
+        "f": {"terrain": "fuel dock"},
+        "D": {"terrain": "doorway"}
+      },
+      "rows": [
+        "abbbbaabbbbbbaabba",
+        "abbbbaabbbbbbaabba",
+        "aaDaaaaaaDaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaa",
+        "ssdddddddddssrrsss",
+        "~~d~~~d~~~d~~rr~ff",
+        "~~d~~~d~~~d~~rr~ff",
+        "~~d~~~d~~~d~~rr~~~",
+        "~~d~~~d~~~d~~rr~~~",
+        "~~d~~~d~~~~~~~~~~~",
+        "~~~~~~~~~~~~~~~~~~"
+      ],
+      "zones": {
+        "parking": [[0, 2, 18, 2]],
+        "harbor_office_front": [[1, 2, 4, 1]],
+        "storage_barn_front": [[7, 2, 6, 1]],
+        "shoreline": [[0, 4, 18, 1]],
+        "boat_ramp": [[13, 4, 2, 5]],
+        "pier_a": [[2, 5, 1, 5]],
+        "pier_b": [[6, 5, 1, 5]],
+        "pier_c": [[10, 5, 1, 4]],
+        "fuel_dock": [[16, 5, 2, 2]],
+        "open_water": [[0, 9, 18, 2]]
+      },
+      "exits": {"harbor_street_114": [0, 3], "lakefront_park": [17, 3], "gull_island": {"cell": [8, 10], "mode": "water"}}
+    }
+  ],
+  "characters": [
+    {
+      "id": "pov",
+      "name": "Jordan Ellis",
+      "kind": "character",
+      "tier": "pov",
+      "agent": false,
+      "age": 29,
+      "role": "Auto mechanic at Alder Automotive",
+      "occupation": "auto_mechanic",
+      "summary": "Eight months into the job and a year into living in Port Alder, you are good with engines, careful with money and still learning the town's unwritten rules. You rent 2B above the hardware store, make payments on a pickup older than it looks, and keep an old fishing boat on a trailer at the marina for days off.",
+      "traits": ["capable", "practical", "a little guarded"],
+      "home": "harbor_street_114",
+      "location": "harbor_street_114",
+      "sheet": {"mechanics": 7, "driving": 6, "boating": 3, "cooking": 4, "charm": 5, "fitness": 5},
+      "job": {
+        "employer": "alder_automotive",
+        "occupation": "auto_mechanic",
+        "hourlyCents": 2350,
+        "hoursPerWeek": 40,
+        "payFrequency": "weekly",
+        "payday": "Friday",
+        "depositTo": "acct_pov_checking",
+        "shiftPattern": "trades_day_7_330"
+      },
+      "schedule": [
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "07:00",
+          "end": "12:00",
+          "place": "alder_automotive",
+          "activity": "working on cars"
+        },
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "12:00",
+          "end": "12:30",
+          "place": "bluebird_coffee",
+          "activity": "lunch"
+        },
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "12:30",
+          "end": "15:30",
+          "place": "alder_automotive",
+          "activity": "working on cars"
+        }
+      ],
+      "regard": [],
+      "wealth": "modest"
+    },
+    {
+      "id": "marcus_delgado",
+      "name": "Marcus Delgado",
+      "kind": "character",
+      "tier": "principal",
+      "agent": true,
+      "age": 52,
+      "role": "Owner of Alder Automotive",
+      "occupation": null,
+      "summary": "Heavy-set, patient and fond of old pickup trucks. He built the shop up over eleven years, remembers every customer's name and keeps a lot of his worries to himself.",
+      "traits": ["patient", "proud", "secretive about money"],
+      "home": "port_alder",
+      "agenda": "a_marcus_delgado",
+      "sheet": {"mechanics": 9, "driving": 6, "boating": 4, "cooking": 5, "charm": 7, "fitness": 4},
+      "job": {
+        "employer": "alder_automotive",
+        "occupation": null,
+        "selfEmployed": true,
+        "estimatedAnnualIncomeCents": 8500000,
+        "depositTo": "acct_marcus_shop"
+      },
+      "schedule": [
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "06:30",
+          "end": "12:00",
+          "place": "alder_automotive",
+          "activity": "running the counter and the books"
+        },
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "12:00",
+          "end": "12:45",
+          "place": "rusty_anchor",
+          "activity": "lunch"
+        },
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "12:45",
+          "end": "17:30",
+          "place": "alder_automotive",
+          "activity": "running the counter and the books"
+        },
+        {
+          "days": ["Saturday"],
+          "start": "08:00",
+          "end": "13:00",
+          "place": "alder_automotive",
+          "activity": "open Saturday hours"
+        },
+        {
+          "days": ["Sunday"],
+          "start": "09:30",
+          "end": "11:00",
+          "place": "bluebird_coffee",
+          "activity": "coffee and the paper"
+        }
+      ],
+      "regard": [
+        {"toward": "danny_okafor", "axes": {"warmth": 45, "trust": 55, "respect": 60}},
+        {"toward": "priya_nair", "axes": {"warmth": 25, "trust": 30, "respect": 35}},
+        {"toward": "dale_whitcomb", "axes": {"warmth": 35, "trust": 40, "respect": 40}},
+        {"toward": "pov", "axes": {"warmth": 20, "trust": 25, "respect": 30}}
+      ],
+      "wealth": "comfortable"
+    },
+    {
+      "id": "danny_okafor",
+      "name": "Danny Okafor",
+      "kind": "character",
+      "tier": "principal",
+      "agent": true,
+      "age": 31,
+      "role": "Senior mechanic at Alder Automotive",
+      "occupation": "auto_mechanic",
+      "summary": "Funny, quick with a wrench and a little too keen on being the one who knows how to fix things. He has worked at the shop six years and lives in 2A, across the landing from you.",
+      "traits": ["funny", "competitive", "loyal"],
+      "home": "harbor_street_114",
+      "agenda": "a_danny_okafor",
+      "trips": [{"from": "2026-09-25T17:30", "until": "2026-09-27T19:00", "place": "chicago_il", "label": "Visiting family in Chicago"}],
+      "sheet": {"mechanics": 8, "driving": 7, "boating": 5, "cooking": 3, "charm": 6, "fitness": 6},
+      "job": {
+        "employer": "alder_automotive",
+        "occupation": "auto_mechanic",
+        "hourlyCents": 2650,
+        "hoursPerWeek": 40,
+        "payFrequency": "weekly",
+        "payday": "Friday",
+        "depositTo": "acct_danny_checking",
+        "shiftPattern": "trades_day_7_330"
+      },
+      "schedule": [
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "07:00",
+          "end": "12:00",
+          "place": "alder_automotive",
+          "activity": "working on cars"
+        },
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "12:00",
+          "end": "12:30",
+          "place": "shoreline_fuel",
+          "activity": "gas-station lunch"
+        },
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "12:30",
+          "end": "15:30",
+          "place": "alder_automotive",
+          "activity": "working on cars"
+        },
+        {
+          "days": ["Friday"],
+          "start": "17:30",
+          "end": "21:30",
+          "place": "rusty_anchor",
+          "activity": "drinks with friends"
+        },
+        {
+          "days": ["Saturday"],
+          "start": "10:00",
+          "end": "14:00",
+          "place": "alder_harbor_marina",
+          "activity": "helping Dale with boats"
+        },
+        {"days": ["Sunday"], "start": "11:00", "end": "15:00", "place": "dune_trails", "activity": "riding"}
+      ],
+      "regard": [
+        {"toward": "marcus_delgado", "axes": {"warmth": 45, "trust": 55, "respect": 60}},
+        {"toward": "jess_kowalczyk", "axes": {"warmth": 30, "trust": 35, "respect": 25}},
+        {"toward": "priya_nair", "axes": {"warmth": 20, "trust": 25, "respect": 25}},
+        {"toward": "dale_whitcomb", "axes": {"warmth": 40, "trust": 45, "respect": 40}},
+        {"toward": "pov", "axes": {"warmth": 30, "trust": 25, "respect": 30}}
+      ],
+      "wealth": "modest"
+    },
+    {
+      "id": "priya_nair",
+      "name": "Priya Nair",
+      "kind": "character",
+      "tier": "principal",
+      "agent": true,
+      "age": 34,
+      "role": "Township accountant and Harbor Fest organizer",
+      "occupation": "accountant",
+      "summary": "Organized, warm and permanently carrying a clipboard. She keeps the township's books, runs the festival committee and is quietly hoping someone will volunteer to help.",
+      "traits": ["organized", "warm", "overcommitted"],
+      "home": "port_alder",
+      "agenda": "a_priya_nair",
+      "sheet": {"mechanics": 2, "driving": 5, "boating": 4, "cooking": 7, "charm": 7, "fitness": 6},
+      "job": {
+        "employer": "township_hall",
+        "occupation": "accountant",
+        "hourlyCents": 3800,
+        "hoursPerWeek": 40,
+        "payFrequency": "semimonthly",
+        "payday": "15th and the last day of the month",
+        "depositTo": "acct_priya_checking",
+        "shiftPattern": "std_weekday_9_5"
+      },
+      "schedule": [
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "09:00",
+          "end": "12:30",
+          "place": "township_hall",
+          "activity": "keeping the township's books"
+        },
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "12:30",
+          "end": "13:15",
+          "place": "bluebird_coffee",
+          "activity": "lunch with the festival committee"
+        },
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "13:15",
+          "end": "17:00",
+          "place": "township_hall",
+          "activity": "keeping the township's books"
+        },
+        {"days": ["Tuesday"], "start": "18:00", "end": "19:30", "place": "bluebird_coffee", "activity": "book club"},
+        {
+          "days": ["Friday"],
+          "start": "18:00",
+          "end": "21:00",
+          "place": "rusty_anchor",
+          "activity": "after-work drinks"
+        },
+        {
+          "days": ["Saturday"],
+          "start": "09:00",
+          "end": "11:00",
+          "place": "lakefront_park",
+          "activity": "running by the lake"
+        },
+        {
+          "days": ["Sunday"],
+          "start": "10:00",
+          "end": "12:00",
+          "place": "alder_market",
+          "activity": "farmers' stalls and groceries"
+        }
+      ],
+      "regard": [
+        {"toward": "marcus_delgado", "axes": {"warmth": 25, "trust": 30, "respect": 35}},
+        {"toward": "danny_okafor", "axes": {"warmth": 20, "trust": 25, "respect": 25}},
+        {"toward": "jess_kowalczyk", "axes": {"warmth": 40, "trust": 40, "respect": 30}},
+        {"toward": "dale_whitcomb", "axes": {"warmth": 30, "trust": 30, "respect": 35}},
+        {"toward": "pov", "axes": {"warmth": 15, "trust": 10, "respect": 15}}
+      ],
+      "wealth": "comfortable"
+    },
+    {
+      "id": "jess_kowalczyk",
+      "name": "Jess Kowalczyk",
+      "kind": "character",
+      "tier": "supporting",
+      "agent": false,
+      "age": 24,
+      "role": "Bartender at the Rusty Anchor",
+      "occupation": "bartender",
+      "summary": "Dry-witted, sharp with names and pouring a pint faster than anyone in town. She lives in 1A with her grandmother and her fifteen-year-old sister, Maddie, and is saving to start a boat-charter business of her own.",
+      "traits": ["dry", "sharp", "ambitious"],
+      "home": "harbor_street_114",
+      "sheet": {"mechanics": 3, "driving": 5, "boating": 7, "cooking": 5, "charm": 8, "fitness": 5},
+      "job": {
+        "employer": "rusty_anchor",
+        "occupation": "bartender",
+        "hourlyCents": 1650,
+        "hoursPerWeek": 32,
+        "payFrequency": "weekly",
+        "payday": "Friday",
+        "depositTo": "acct_jess_checking",
+        "shiftPattern": "bar_night",
+        "tipped": true
+      },
+      "schedule": [
+        {
+          "days": ["Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+          "start": "16:30",
+          "end": "24:00",
+          "place": "rusty_anchor",
+          "activity": "tending bar"
+        },
+        {
+          "days": ["Monday"],
+          "start": "09:00",
+          "end": "11:00",
+          "place": "bluebird_coffee",
+          "activity": "coffee and charter-business spreadsheets"
+        },
+        {
+          "days": ["Tuesday"],
+          "start": "10:00",
+          "end": "13:00",
+          "place": "alder_harbor_marina",
+          "activity": "scouting boats to buy"
+        }
+      ],
+      "regard": [
+        {"toward": "helen_kowalczyk", "axes": {"warmth": 80, "trust": 70, "respect": 70}},
+        {"toward": "danny_okafor", "axes": {"warmth": 30, "trust": 30, "respect": 25}},
+        {"toward": "priya_nair", "axes": {"warmth": 40, "trust": 40, "respect": 30}},
+        {"toward": "dale_whitcomb", "axes": {"warmth": 40, "trust": 50, "respect": 55}},
+        {"toward": "maddie_kowalczyk", "axes": {"warmth": 85, "trust": 75, "respect": 55}},
+        {"toward": "pov", "axes": {"warmth": 15, "trust": 10, "respect": 10}}
+      ],
+      "goals": {
+        "label": "Save for a charter boat",
+        "steps": ["Put aside $200 a week", "Look at three boats for sale", "Draft a business plan and show it to Dale"]
+      },
+      "wealth": "poor"
+    },
+    {
+      "id": "maddie_kowalczyk",
+      "name": "Maddie Kowalczyk",
+      "kind": "character",
+      "tier": "supporting",
+      "agent": true,
+      "age": 15,
+      "role": "Student at Lakeshore Consolidated School",
+      "occupation": null,
+      "summary": "Fifteen, quick and a little too observant, Jess's kid sister is a sophomore at Lakeshore Consolidated. She lives in 1A with Jess and their grandmother, rides to school on the morning bus, and spends her free hours at the coffee shop or hanging around the marina dock.",
+      "traits": ["observant", "restless", "kind"],
+      "home": "harbor_street_114",
+      "agenda": "a_maddie_kowalczyk",
+      "sheet": {"mechanics": 2, "driving": 1, "boating": 5, "cooking": 4, "charm": 7, "fitness": 7},
+      "schedule": [
+        {"days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "start": "06:00", "end": "08:00", "place": "harbor_street_114", "activity": "getting ready for the bus"},
+        {"days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "start": "08:00", "end": "15:10", "place": "lakeshore_school", "activity": "school", "term": {"from": "2026-08-31", "until": "2026-11-20", "except": ["labor_day"]}},
+        {"days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "start": "08:00", "end": "15:10", "place": "lakeshore_school", "activity": "school", "term": {"from": "2026-11-30", "until": "2026-12-18"}},
+        {"days": ["Monday", "Wednesday"], "start": "15:30", "end": "17:30", "place": "bluebird_coffee", "activity": "studying at the coffee shop"},
+        {"days": ["Tuesday", "Thursday"], "start": "15:30", "end": "17:30", "place": "lakefront_park", "activity": "walking the beach with friends"},
+        {"days": ["Friday"], "start": "15:30", "end": "18:00", "place": "alder_harbor_marina", "activity": "hanging around the dock"},
+        {"days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "start": "18:00", "end": "22:00", "place": "harbor_street_114", "activity": "dinner and studying"},
+        {"days": ["Saturday"], "start": "10:00", "end": "13:00", "place": "alder_market", "activity": "grocery run with Helen"},
+        {"days": ["Saturday"], "start": "13:00", "end": "17:00", "place": "lakefront_park", "activity": "out with friends"},
+        {"days": ["Sunday"], "start": "11:00", "end": "15:00", "place": "harbor_street_114", "activity": "studying and laundry"}
+      ],
+      "regard": [
+        {"toward": "jess_kowalczyk", "axes": {"warmth": 85, "trust": 80, "respect": 60}},
+        {"toward": "helen_kowalczyk", "axes": {"warmth": 80, "trust": 75, "respect": 70}},
+        {"toward": "dale_whitcomb", "axes": {"warmth": 50, "trust": 55, "respect": 65}},
+        {"toward": "pov", "axes": {"warmth": 25, "trust": 20, "respect": 30}}
+      ],
+      "wealth": "broke"
+    },
+    {
+      "id": "dale_whitcomb",
+      "name": "Dale Whitcomb",
+      "kind": "character",
+      "tier": "principal",
+      "agent": true,
+      "age": 61,
+      "role": "Owner of Alder Harbor Marina",
+      "occupation": null,
+      "summary": "Weathered, deliberate and usually wearing a faded cap from a long-closed tackle shop. He has run the marina for twenty-five years and is happiest when someone asks him how to read the lake.",
+      "traits": ["deliberate", "generous", "stubborn about boats"],
+      "home": "alder_harbor_marina",
+      "agenda": "a_dale_whitcomb",
+      "sheet": {"mechanics": 6, "driving": 4, "boating": 9, "cooking": 5, "charm": 5, "fitness": 5},
+      "job": {
+        "employer": "alder_harbor_marina",
+        "occupation": null,
+        "selfEmployed": true,
+        "estimatedAnnualIncomeCents": 6200000,
+        "depositTo": "acct_dale_marina"
+      },
+      "schedule": [
+        {
+          "days": ["Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+          "start": "07:00",
+          "end": "18:00",
+          "place": "alder_harbor_marina",
+          "activity": "running the marina"
+        },
+        {"days": ["Monday"], "start": "09:00", "end": "11:00", "place": "alder_market", "activity": "stocking up"},
+        {
+          "days": ["Monday"],
+          "start": "13:00",
+          "end": "16:00",
+          "place": "alder_harbor_marina",
+          "activity": "boat paperwork"
+        }
+      ],
+      "regard": [
+        {"toward": "marcus_delgado", "axes": {"warmth": 35, "trust": 40, "respect": 40}},
+        {"toward": "danny_okafor", "axes": {"warmth": 40, "trust": 45, "respect": 40}},
+        {"toward": "jess_kowalczyk", "axes": {"warmth": 45, "trust": 55, "respect": 55}},
+        {"toward": "pov", "axes": {"warmth": 15, "trust": 15, "respect": 20}}
+      ],
+      "wealth": "comfortable"
+    },
+    {
+      "id": "helen_kowalczyk",
+      "name": "Helen Kowalczyk",
+      "kind": "character",
+      "tier": "supporting",
+      "agent": false,
+      "age": 71,
+      "role": "Landlady and owner of 114 Harbor Street",
+      "occupation": null,
+      "summary": "Small, firm and fond of crossword puzzles and the ball game on the radio. She has owned the building for forty years, keeps the rents low and knows every tenant's footsteps on the stairs.",
+      "traits": ["firm", "kind", "nosy"],
+      "home": "harbor_street_114",
+      "sheet": {"mechanics": 2, "driving": 4, "boating": 3, "cooking": 8, "charm": 7, "fitness": 3},
+      "job": {
+        "employer": null,
+        "occupation": null,
+        "retired": true,
+        "incomeMonthlyCents": 195000,
+        "depositTo": "acct_helen_checking"
+      },
+      "schedule": [
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "start": "09:00",
+          "end": "10:30",
+          "place": "bluebird_coffee",
+          "activity": "coffee and the crossword"
+        },
+        {
+          "days": ["Sunday"],
+          "start": "09:00",
+          "end": "11:00",
+          "place": "bluebird_coffee",
+          "activity": "coffee and church-hall gossip"
+        }
+      ],
+      "regard": [
+        {"toward": "jess_kowalczyk", "axes": {"warmth": 85, "trust": 75, "respect": 70}},
+        {"toward": "maddie_kowalczyk", "axes": {"warmth": 85, "trust": 75, "respect": 65}},
+        {"toward": "danny_okafor", "axes": {"warmth": 35, "trust": 40, "respect": 40}},
+        {"toward": "pov", "axes": {"warmth": 20, "trust": 20, "respect": 25}}
+      ],
+      "goals": {
+        "label": "Keep the building in good repair",
+        "steps": ["Fix the ninth stair", "Collect the rents on the 1st", "Plan the winter heating with the plumber"]
+      },
+      "wealth": "modest"
+    },
+    {
+      "id": "nora_whitfield",
+      "name": "Nora Whitfield",
+      "kind": "character",
+      "tier": "supporting",
+      "agent": false,
+      "age": 34,
+      "role": "Registered nurse at the Community Clinic",
+      "occupation": "registered_nurse",
+      "summary": "Tired, funny and endlessly practical. She works three twelve-hour shifts a week, lives alone with a very old cat, and would like very much to sleep through one entire Saturday.",
+      "traits": ["tired", "funny", "practical"],
+      "home": "port_alder",
+      "sheet": {"mechanics": 3, "driving": 5, "boating": 3, "cooking": 6, "charm": 6, "fitness": 5},
+      "job": {
+        "employer": "community_clinic",
+        "occupation": "registered_nurse",
+        "hourlyCents": 4300,
+        "hoursPerWeek": 36,
+        "payFrequency": "biweekly",
+        "payday": "every other Friday",
+        "depositTo": "acct_nora_checking",
+        "shiftPattern": "three_12h"
+      },
+      "schedule": [
+        {
+          "days": ["Monday", "Tuesday", "Thursday"],
+          "start": "07:00",
+          "end": "19:30",
+          "place": "community_clinic",
+          "activity": "twelve-hour shift"
+        },
+        {"days": ["Saturday"], "start": "10:00", "end": "12:00", "place": "alder_market", "activity": "groceries"},
+        {
+          "days": ["Sunday"],
+          "start": "11:00",
+          "end": "13:00",
+          "place": "bluebird_coffee",
+          "activity": "brunch, finally"
+        }
+      ],
+      "regard": [
+        {"toward": "priya_nair", "axes": {"warmth": 45, "trust": 45, "respect": 40}},
+        {"toward": "jess_kowalczyk", "axes": {"warmth": 35, "trust": 35, "respect": 30}},
+        {"toward": "pov", "axes": {"warmth": 10, "trust": 10, "respect": 10}}
+      ],
+      "goals": {
+        "label": "Get one full night's sleep",
+        "steps": ["Swap a shift", "Skip the extra overtime", "Sleep in on Saturday"]
+      },
+      "wealth": "modest"
+    },
+    {
+      "id": "sam_reyes",
+      "name": "Sam Reyes",
+      "kind": "character",
+      "tier": "background",
+      "agent": false,
+      "age": 38,
+      "role": "Port Alder police officer",
+      "occupation": "police_officer",
+      "summary": "Calm, dry and good at finding the lost dog in under an hour. Sam works the afternoon shift and knows who is parked where in this town.",
+      "traits": ["calm", "dry"],
+      "home": "port_alder",
+      "job": {
+        "employer": "port_alder",
+        "occupation": "police_officer",
+        "hourlyCents": 3650,
+        "hoursPerWeek": 40,
+        "payFrequency": "biweekly",
+        "payday": "every other Friday",
+        "depositTo": "acct_sam_checking",
+        "shiftPattern": "shift_8h_rotating"
+      },
+      "schedule": [
+        {
+          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "start": "15:00",
+          "end": "23:00",
+          "place": "port_alder",
+          "activity": "patrol"
+        }
+      ],
+      "regard": [
+        {"toward": "marcus_delgado", "axes": {"warmth": 20, "trust": 30, "respect": 30}},
+        {"toward": "jess_kowalczyk", "axes": {"warmth": 25, "trust": 30, "respect": 25}},
+        {"toward": "pov", "axes": {"warmth": 5, "trust": 5, "respect": 10}}
+      ],
+      "goals": {
+        "label": "Keep Harbor Fest orderly",
+        "steps": ["Plan the traffic cones with Priya", "Walk the park at dusk", "Be at the parade route by 14:00 on Saturday"]
+      },
+      "wealth": "modest"
+    }
+  ],
+  "items": [
+    {
+      "id": "pov_keys",
+      "name": "Keys",
+      "tableItem": "keys_set",
+      "description": "Truck, apartment, shop back door and a bottle opener.",
+      "owner": "pov",
+      "in": "pov",
+      "worn": true,
+      "slot": "pocket"
+    },
+    {
+      "id": "pov_phone",
+      "name": "Phone",
+      "tableItem": "smartphone",
+      "description": "A midrange phone with a cracked corner and too many unread group chats.",
+      "owner": "pov",
+      "in": "pov",
+      "worn": true,
+      "slot": "pocket"
+    },
+    {
+      "id": "pov_watch",
+      "name": "Wristwatch",
+      "tableItem": "watch_analog_quartz",
+      "description": "A cheap analog watch with a stretched band. Reliable.",
+      "owner": "pov",
+      "in": "pov",
+      "worn": true,
+      "slot": "wrist"
+    },
+    {
+      "id": "pov_pocketknife",
+      "name": "Pocketknife",
+      "tableItem": "pocketknife",
+      "description": "A folding knife from your grandfather.",
+      "owner": "pov",
+      "in": "pov",
+      "worn": true,
+      "slot": "pocket"
+    },
+    {
+      "id": "pov_id",
+      "name": "Driver's license",
+      "tableItem": "id_card",
+      "description": "Michigan license, address updated last year.",
+      "owner": "pov",
+      "in": "pov_wallet"
+    },
+    {
+      "id": "pov_debit_card",
+      "name": "Debit card",
+      "tableItem": "credit_or_debit_card",
+      "description": "Lakeshore Credit Union debit card.",
+      "owner": "pov",
+      "in": "pov_wallet"
+    },
+    {
+      "id": "pov_credit_card",
+      "name": "Credit card",
+      "tableItem": "credit_or_debit_card",
+      "description": "A basic rewards card with a $4,500 limit.",
+      "owner": "pov",
+      "in": "pov_wallet"
+    },
+    {
+      "id": "pov_headlamp",
+      "name": "Headlamp",
+      "tableItem": "headlamp",
+      "description": "A headlamp with a dented strap, kept in the toolbox for undercar work.",
+      "owner": "pov",
+      "in": "pov_toolbox"
+    },
+    {
+      "id": "pov_flashlight",
+      "name": "Pocket flashlight",
+      "tableItem": "flashlight_pocket_led",
+      "description": "A small LED light that lives in the glovebox.",
+      "owner": "pov",
+      "in": "pov_truck_glovebox"
+    },
+    {
+      "id": "pov_first_aid",
+      "name": "First-aid pouch",
+      "tableItem": "first_aid_pocket",
+      "description": "A pocket first-aid kit, half used.",
+      "owner": "pov",
+      "in": "pov_truck_glovebox"
+    },
+    {
+      "id": "spare_relay",
+      "name": "Spare relay",
+      "description": "A 30-amp automotive relay in a plastic bag, in the parts shelf bin marked RELAYS.",
+      "owner": "marcus_delgado",
+      "in": "alder_automotive",
+      "weightG": 40
+    },
+    {
+      "id": "relay_fuel_pump",
+      "name": "Fuel-pump relay (installed)",
+      "description": "The relay in the township truck's under-hood fuse box. Slightly discolored.",
+      "in": "township_pickup",
+      "weightG": 40,
+      "fixed": true
+    },
+    {
+      "id": "shop_office_key",
+      "name": "Shop office key",
+      "tableItem": "keys_set",
+      "description": "A brass key for the back-office door.",
+      "owner": "marcus_delgado",
+      "in": "marcus_delgado",
+      "worn": true,
+      "slot": "pocket"
+    },
+    {
+      "id": "past_due_notice",
+      "name": "Past-due notice",
+      "description": "A formal letter on bank letterhead, stamped PAST DUE in red.",
+      "in": "alder_automotive",
+      "weightG": 5,
+      "visibility": "secret",
+      "hidden": true
+    },
+    {
+      "id": "shop_bank_statement",
+      "name": "Shop bank statement",
+      "description": "A three-page bank statement with a handwritten sum in the margin.",
+      "in": "alder_automotive",
+      "weightG": 15,
+      "visibility": "secret",
+      "hidden": true
+    },
+    {
+      "id": "fleet_contract_draft",
+      "name": "Fleet service contract draft",
+      "description": "A township service agreement on letterhead, with Marcus's coffee ring on the cover.",
+      "owner": "marcus_delgado",
+      "in": "alder_automotive",
+      "weightG": 60
+    },
+    {
+      "id": "pontoon_keys",
+      "name": "Pontoon keys",
+      "tableItem": "keys_set",
+      "description": "A float with a brass key on a ring marked Whitcomb.",
+      "owner": "dale_whitcomb",
+      "in": "dale_whitcomb",
+      "worn": true,
+      "slot": "pocket"
+    },
+    {
+      "id": "festival_clipboard",
+      "name": "Festival clipboard",
+      "description": "A clipboard stacked with schedules, vendor lists and a hand-drawn map of the park.",
+      "owner": "priya_nair",
+      "in": "priya_nair",
+      "weightG": 450
+    }
+  ],
+  "containers": [
+    {
+      "id": "pov_wallet",
+      "name": "Wallet",
+      "tableContainer": "wallet",
+      "description": "A bifold wallet gone soft at the folds.",
+      "owner": "pov",
+      "in": "pov",
+      "worn": true,
+      "slot": "pocket"
+    },
+    {
+      "id": "pov_toolbox",
+      "name": "Mechanic's toolbox",
+      "tableContainer": "toolbox_20in",
+      "description": "A red 20-inch steel toolbox, dented in two places and organized to the millimeter.",
+      "owner": "pov",
+      "in": "alder_automotive"
+    },
+    {
+      "id": "pov_truck_glovebox",
+      "name": "Truck glovebox",
+      "tableContainer": "glovebox",
+      "description": "The glovebox of your pickup.",
+      "owner": "pov",
+      "in": "pov_truck",
+      "stock": "carried"
+    },
+    {
+      "id": "pov_truck_bed",
+      "name": "Truck bed",
+      "tableContainer": "truck_bed_midsize",
+      "description": "The bed of your pickup, with a bungee net and a little sand in the corners.",
+      "owner": "pov",
+      "in": "pov_truck",
+      "stock": "tool"
+    },
+    {
+      "id": "pov_atv_racks",
+      "name": "ATV racks",
+      "tableContainer": "atv_racks",
+      "description": "Front and rear racks on your ATV.",
+      "owner": "pov",
+      "in": "pov_atv",
+      "stock": "tool"
+    },
+    {
+      "id": "pontoon_locker",
+      "name": "Pontoon storage",
+      "tableContainer": "boat_storage_pontoon",
+      "description": "Under-seat storage on the pontoon, with life jackets and a bailer.",
+      "owner": "dale_whitcomb",
+      "in": "marina_pontoon"
+    }
+  ],
+  "kits": [
+    {
+      "id": "pov_toolbox_kit",
+      "name": "Mechanic's toolbox kit",
+      "tableKit": "mechanic_toolbox_45",
+      "container": "pov_toolbox",
+      "owner": "pov",
+      "pieceCount": 45,
+      "overrides": []
+    }
+  ],
+  "vehicles": [
+    {
+      "id": "pov_truck",
+      "name": "Your pickup",
+      "class": "pickup_midsize",
+      "year": 2017,
+      "owner": "pov",
+      "location": "harbor_street_114",
+      "fuelFraction": 0.45,
+      "odometerMiles": 96400,
+      "condition": 62,
+      "lastOilChangeMiles": 91200,
+      "homeBase": "harbor_street_114",
+      "description": "A midsize pickup with a faded paint job and a rattle you know the source of but haven't fixed. Financed through the credit union."
+    },
+    {
+      "id": "pov_atv",
+      "name": "Your ATV",
+      "class": "atv_utility",
+      "year": 2019,
+      "owner": "pov",
+      "location": "alder_automotive",
+      "fuelFraction": 0.5,
+      "engineHours": 212,
+      "condition": 70,
+      "homeBase": "alder_automotive",
+      "description": "A used utility ATV bought for cash last spring. It lives in the back bay at the shop."
+    },
+    {
+      "id": "pov_boat",
+      "name": "Your fishing boat",
+      "class": "bass_boat_outboard",
+      "year": 2008,
+      "owner": "pov",
+      "location": "alder_harbor_marina",
+      "fuelFraction": 0.6,
+      "engineHours": 910,
+      "condition": 48,
+      "homeBase": "alder_harbor_marina",
+      "description": "A scuffed 18-foot outboard fishing boat that came to you in trade for an engine overhaul on a customer's account. It sits on a trailer in the yard by Dale's boat ramp, and you launch it when you want the lake."
+    },
+    {
+      "id": "marina_pontoon",
+      "name": "Dale's pontoon",
+      "class": "pontoon_boat",
+      "year": 2015,
+      "owner": "dale_whitcomb",
+      "location": "alder_harbor_marina",
+      "fuelFraction": 0.3,
+      "engineHours": 640,
+      "condition": 55,
+      "homeBase": "alder_harbor_marina",
+      "assignedTo": null,
+      "description": "A 22-foot pontoon with a tired outboard, a bimini top and a faded cushion on every seat. It runs when it feels like it."
+    },
+    {
+      "id": "shop_tow_truck",
+      "name": "The shop's tow truck",
+      "class": "pickup_heavy_duty_diesel",
+      "year": 2014,
+      "owner": "marcus_delgado",
+      "location": "alder_automotive",
+      "fuelFraction": 0.6,
+      "odometerMiles": 142000,
+      "condition": 58,
+      "homeBase": "alder_automotive",
+      "description": "A heavy-duty diesel with a flatbed and a winch. Marcus names it something different every year."
+    },
+    {
+      "id": "township_pickup",
+      "name": "Township pickup",
+      "class": "pickup_fullsize",
+      "year": 2011,
+      "owner": "township_hall",
+      "location": "alder_automotive",
+      "fuelFraction": 0.7,
+      "odometerMiles": 118300,
+      "condition": 40,
+      "homeBase": "township_hall",
+      "description": "A white full-size pickup with the township seal on the door. It cranks and cranks and does not catch."
+    }
+  ],
+  "accounts": [
+    {
+      "id": "acct_pov_checking",
+      "name": "Your checking account",
+      "kind": "checking",
+      "owner": "pov",
+      "institution": "Lakeshore Credit Union",
+      "balance": 184217,
+      "aprPct": 0.1
+    },
+    {
+      "id": "acct_pov_savings",
+      "name": "Your savings account",
+      "kind": "savings",
+      "owner": "pov",
+      "institution": "Lakeshore Credit Union",
+      "balance": 326000,
+      "aprPct": 3.8
+    },
+    {
+      "id": "acct_pov_brokerage",
+      "name": "Your index-fund account",
+      "kind": "brokerage",
+      "owner": "pov",
+      "institution": "Great Lakes Bank",
+      "balance": 0,
+      "holdingsCents": 312500,
+      "symbol": "broad_us_equity_index"
+    },
+    {
+      "id": "acct_pov_card",
+      "name": "Your credit card",
+      "kind": "card",
+      "owner": "pov",
+      "institution": "Great Lakes Bank",
+      "owedCents": 63840,
+      "limitCents": 450000,
+      "aprPct": 22.0,
+      "statementDay": 18,
+      "dueDay": 13,
+      "autopay": "minimum from acct_pov_checking"
+    },
+    {
+      "id": "acct_pov_auto_loan",
+      "name": "Your auto loan",
+      "kind": "loan",
+      "owner": "pov",
+      "institution": "Lakeshore Credit Union",
+      "principalCents": 1740000,
+      "aprPct": 9.4,
+      "remainingMonths": 48,
+      "paymentCents": 43631,
+      "dueDay": 10,
+      "autopay": "from acct_pov_checking"
+    },
+    {
+      "id": "acct_pov_cash",
+      "name": "Your wallet cash",
+      "kind": "cash",
+      "owner": "pov",
+      "container": "pov_wallet",
+      "balance": 8500,
+      "coins": {"twenty": 2, "ten": 2, "five": 4, "one": 5}
+    },
+    {
+      "id": "acct_marcus_shop",
+      "name": "Alder Automotive operating account",
+      "kind": "checking",
+      "owner": "marcus_delgado",
+      "institution": "Great Lakes Bank",
+      "balance": 2340000
+    },
+    {
+      "id": "acct_danny_checking",
+      "name": "Danny's checking",
+      "kind": "checking",
+      "owner": "danny_okafor",
+      "institution": "Lakeshore Credit Union",
+      "balance": 195000
+    },
+    {
+      "id": "acct_priya_checking",
+      "name": "Priya's checking",
+      "kind": "checking",
+      "owner": "priya_nair",
+      "institution": "Lakeshore Credit Union",
+      "balance": 412000
+    },
+    {
+      "id": "acct_jess_checking",
+      "name": "Jess's checking",
+      "kind": "checking",
+      "owner": "jess_kowalczyk",
+      "institution": "Lakeshore Credit Union",
+      "balance": 61000
+    },
+    {
+      "id": "acct_dale_marina",
+      "name": "Alder Harbor Marina account",
+      "kind": "checking",
+      "owner": "dale_whitcomb",
+      "institution": "Great Lakes Bank",
+      "balance": 1890000
+    },
+    {
+      "id": "acct_helen_checking",
+      "name": "Helen's checking",
+      "kind": "checking",
+      "owner": "helen_kowalczyk",
+      "institution": "Lakeshore Credit Union",
+      "balance": 1235000
+    },
+    {
+      "id": "acct_nora_checking",
+      "name": "Nora's checking",
+      "kind": "checking",
+      "owner": "nora_whitfield",
+      "institution": "Lakeshore Credit Union",
+      "balance": 278000
+    },
+    {
+      "id": "acct_sam_checking",
+      "name": "Sam's checking",
+      "kind": "checking",
+      "owner": "sam_reyes",
+      "institution": "Lakeshore Credit Union",
+      "balance": 330000
+    }
+  ],
+  "bills": [
+    {
+      "id": "bill_rent",
+      "kind": "rent",
+      "payer": "pov",
+      "payee": "helen_kowalczyk",
+      "label": "Rent, Unit 2B",
+      "amountCents": 99500,
+      "every": "month",
+      "day": 1,
+      "from": "acct_pov_checking"
+    },
+    {
+      "id": "bill_renters",
+      "payer": "pov",
+      "payee": "Harbor Mutual",
+      "label": "Renters insurance",
+      "catalogItem": "renters_insurance",
+      "amountCents": 1700,
+      "every": "month",
+      "day": 1,
+      "from": "acct_pov_card"
+    },
+    {
+      "id": "bill_streaming",
+      "payer": "pov",
+      "payee": "StreamBox",
+      "label": "Streaming video",
+      "catalogItem": "streaming_video_standard",
+      "amountCents": 1799,
+      "every": "month",
+      "day": 3,
+      "from": "acct_pov_card"
+    },
+    {
+      "id": "bill_music",
+      "payer": "pov",
+      "payee": "TuneBox",
+      "label": "Music streaming",
+      "catalogItem": "music_streaming",
+      "amountCents": 1199,
+      "every": "month",
+      "day": 3,
+      "from": "acct_pov_card"
+    },
+    {
+      "id": "bill_auto_insurance",
+      "payer": "pov",
+      "payee": "Midlake Mutual",
+      "label": "Auto insurance, full coverage",
+      "vehicleClass": "pickup_midsize",
+      "amountCents": 22500,
+      "every": "month",
+      "day": 5,
+      "from": "acct_pov_checking"
+    },
+    {
+      "id": "bill_internet",
+      "payer": "pov",
+      "payee": "Alder Broadband",
+      "label": "Home internet",
+      "catalogItem": "internet_home",
+      "amountCents": 6500,
+      "every": "month",
+      "day": 8,
+      "from": "acct_pov_card"
+    },
+    {
+      "id": "bill_auto_loan",
+      "payer": "pov",
+      "payee": "Lakeshore Credit Union",
+      "label": "Auto loan payment",
+      "loan": "acct_pov_auto_loan",
+      "amountCents": 43631,
+      "every": "month",
+      "day": 10,
+      "from": "acct_pov_checking"
+    },
+    {
+      "id": "bill_phone",
+      "payer": "pov",
+      "payee": "Northwind Mobile",
+      "label": "Mobile phone",
+      "catalogItem": "mobile_single_line",
+      "amountCents": 5000,
+      "every": "month",
+      "day": 14,
+      "from": "acct_pov_card"
+    },
+    {
+      "id": "bill_electric",
+      "payer": "pov",
+      "payee": "Alder Light & Power",
+      "label": "Electricity, 370 kWh",
+      "usageKwh": 370,
+      "rateCentsPerKwh": 19.5,
+      "amountCents": 7215,
+      "every": "month",
+      "day": 20,
+      "from": "acct_pov_checking"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "q_fleet_contract",
+      "kind": "quest",
+      "label": "The Fleet Contract",
+      "visibility": "public",
+      "start": "kickoff",
+      "summary": "Help Alder Automotive win the township's vehicle-service contract by fixing the township pickup and passing Priya's shop inspection.",
+      "stages": {
+        "kickoff": {
+          "label": "A deal on the table",
+          "cue": "Marcus calls the shop together before opening: the township wants a single shop to service all its vehicles, and he wants it. Priya Nair will inspect the shop Tuesday morning, and the township's old pickup is sitting in Bay 2 as a test.",
+          "objectives": ["Hear Marcus out on Monday morning", "Clear Bay 2 for the township pickup"],
+          "next": [
+            {
+              "to": "trial",
+              "when": "the player has spoken with [[marcus_delgado]] and agrees to take the township truck",
+              "expr": "story.fleet_deal_accepted"
+            }
+          ],
+          "objectiveExprs": ["story.fleet_deal_accepted", "story.fleet_deal_accepted"]
+        },
+        "trial": {
+          "label": "Fix the township pickup",
+          "objectives": [
+            "Find out why [[township_pickup]] cranks but won't start",
+            "Fix it before Wednesday 17:00 with [[pov_toolbox]] and parts on hand"
+          ],
+          "effects": [{"type": "link", "text": "The township pickup is yours to diagnose.", "args": {"rel": "knows", "from": "pov", "to": "township_pickup"}}],
+          "next": [
+            {
+              "to": "inspection",
+              "when": "[[p_township_truck]] is solved and [[flag:township_truck_fixed]] is true",
+              "expr": "story.township_truck_fixed"
+            }
+          ],
+          "fail": {
+            "when": "it is Wednesday 17:00 or later and [[flag:township_truck_fixed]] is false",
+            "to": "lost",
+            "expr": "clock >= @2026-09-16T17:00 and not story.township_truck_fixed"
+          },
+          "hints": [
+            "Start with the basics: fuel, spark, then what runs the pump.",
+            "Danny might have a quick trick for this model."
+          ],
+          "objectiveExprs": ["story.relay_replaced", "story.township_truck_fixed"]
+        },
+        "inspection": {
+          "label": "Pass Priya's inspection",
+          "objectives": [
+            "Show [[priya_nair]] the shop on Tuesday or Wednesday",
+            "Leave her with a good impression of the bay and the paperwork"
+          ],
+          "next": [
+            {
+              "to": "service_run",
+              "when": "[[priya_nair]]'s respect for the player is at least 25 and [[flag:fleet_contract_signed]] is true",
+              "expr": "regard('priya_nair', 'pov', 'respect') >= 25 and story.fleet_contract_signed"
+            }
+          ],
+          "fail": {
+            "when": "it is Friday 17:00 and [[flag:fleet_contract_signed]] is false",
+            "to": "lost",
+            "expr": "clock >= @2026-09-18T17:00 and not story.fleet_contract_signed"
+          },
+          "objectiveExprs": ["story.priya_walked", "regard('priya_nair', 'pov', 'respect') >= 25"]
+        },
+        "service_run": {
+          "label": "Service the township fleet",
+          "objectives": ["Complete oil-and-inspection service on the township's other six vehicles by Friday 25 September 17:00"],
+          "gate": "[[flag:fleet_contract_signed]] is true",
+          "next": [
+            {
+              "to": "done",
+              "when": "all six township vehicles have been serviced and returned to [[township_hall]]",
+              "expr": "story.fleet_serviced"
+            }
+          ],
+          "fail": {
+            "when": "it is Friday 25 September 17:00 or later and the service run is incomplete",
+            "to": "lost",
+            "expr": "clock >= @2026-09-25T17:00 and not story.fleet_serviced"
+          },
+          "gateExpr": "story.fleet_contract_signed",
+          "objectiveExprs": ["story.fleet_serviced"]
+        },
+        "done": {
+          "label": "Contract delivered",
+          "cue": "Priya signs the final form against the hood of the last truck and hands you the pen. Marcus does something rare: he smiles with his whole face.",
+          "next": [],
+          "rewards": [
+            {
+              "type": "pay",
+              "text": "Marcus gives the player a $300 bonus.",
+              "args": {"from": "marcus_delgado", "to": "pov", "amount": 30000, "currency": "usd"}
+            },
+            {
+              "type": "regard",
+              "text": "Marcus is grateful.",
+              "args": {"who": "marcus_delgado", "toward": "pov", "axis": "respect", "delta": 25}
+            },
+            {
+              "type": "regard",
+              "text": "Priya trusts the player.",
+              "args": {"who": "priya_nair", "toward": "pov", "axis": "trust", "delta": 20}
+            }
+          ]
+        },
+        "lost": {
+          "label": "The contract goes elsewhere",
+          "cue": "The township signs with a bigger shop in the next town. Marcus says it was not your fault, in a voice that tells you it is going to cost him.",
+          "next": [],
+          "effects": [
+            {
+              "type": "regard",
+              "text": "Marcus is disappointed.",
+              "args": {"who": "marcus_delgado", "toward": "pov", "axis": "respect", "delta": -10}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "q_pontoon_weekend",
+      "kind": "quest",
+      "label": "A Weekend on the Water",
+      "visibility": "public",
+      "start": "offer",
+      "summary": "Get Dale's tired pontoon running, then take it out for a weekend and bring it back on time.",
+      "stages": {
+        "offer": {
+          "label": "Dale needs a hand",
+          "cue": "Dale Whitcomb props himself on the pontoon's rail and shakes his head: the engine coughs and dies. He'd pay for a mechanic's afternoon, or lend the boat out for a weekend, whichever you want.",
+          "objectives": ["Talk to [[dale_whitcomb]] at [[alder_harbor_marina]]"],
+          "next": [
+            {
+              "to": "diagnose",
+              "when": "the player agrees to look at [[marina_pontoon]]",
+              "expr": "story.pontoon_looked_at"
+            }
+          ],
+          "objectiveExprs": ["story.pontoon_looked_at"]
+        },
+        "diagnose": {
+          "label": "Find the fault",
+          "objectives": ["Run the engine and check fuel, spark and the lower unit"],
+          "next": [
+            {
+              "to": "repair",
+              "when": "the player has diagnosed the fault in [[marina_pontoon]] (a dirty carburetor and a fouled plug)",
+              "expr": "story.pontoon_diagnosed"
+            }
+          ],
+          "hints": ["It starts, then dies as it warms up.", "Fuel in the bowl looks darker than it should."],
+          "objectiveExprs": ["story.pontoon_diagnosed"]
+        },
+        "repair": {
+          "label": "Fix it",
+          "objectives": [
+            "Clean the carburetor and replace the plug with parts from [[alder_market]] or Dale's shelf",
+            "Use [[pov_toolbox]]"
+          ],
+          "next": [
+            {
+              "to": "sea_trial",
+              "when": "[[marina_pontoon]] runs smoothly for ten minutes at the dock",
+              "expr": "story.pontoon_repaired"
+            }
+          ],
+          "objectiveExprs": ["story.pontoon_repaired", "story.pontoon_repaired"]
+        },
+        "sea_trial": {
+          "label": "Sea trial",
+          "objectives": ["Take [[marina_pontoon]] out with Dale for twenty minutes"],
+          "next": [
+            {
+              "to": "loan",
+              "when": "the sea trial is complete and [[dale_whitcomb]]'s trust toward the player is at least 20",
+              "expr": "story.pontoon_trial_done and regard('dale_whitcomb', 'pov', 'trust') >= 20"
+            }
+          ],
+          "effects": [
+            {
+              "type": "note",
+              "text": "At cruise the pontoon burns about 5.5 gallons an hour; the tank holds 26 gallons.",
+              "args": {}
+            }
+          ],
+          "objectiveExprs": ["story.pontoon_trial_done"]
+        },
+        "loan": {
+          "label": "The boat is yours until Sunday evening",
+          "cue": "Dale tosses you the keys. 'Back by six on Sunday, full tank, and you tell me how she ran.'",
+          "objectives": ["Return [[marina_pontoon]] to the marina by Sunday 20 September, 18:00, with a full tank"],
+          "gate": "[[flag:small_craft_advisory]] is false, so the boat can safely leave the harbor",
+          "next": [
+            {
+              "to": "done",
+              "when": "[[marina_pontoon]] is back at [[alder_harbor_marina]] by Sunday 20 September, 18:00",
+              "expr": "story.pontoon_out and at('marina_pontoon', 'alder_harbor_marina') and fuel_pct('marina_pontoon') >= 90"
+            }
+          ],
+          "effects": [
+            {
+              "type": "assign_vehicle",
+              "text": "Dale lends the pontoon to the player.",
+              "args": {"vehicle": "marina_pontoon", "to": "pov", "until": "2026-09-20T18:00"}
+            },
+            {"type": "set_flag", "text": "The pontoon is on loan.", "args": {"flag": "pontoon_loaned", "value": true}}
+          ],
+          "fail": {
+            "when": "the clock is past Sunday 20 September, 18:00 and [[marina_pontoon]] is not at [[alder_harbor_marina]]",
+            "to": "overdue",
+            "expr": "clock > @2026-09-20T18:00 and not at('marina_pontoon', 'alder_harbor_marina')"
+          },
+          "gateExpr": "not story.small_craft_advisory",
+          "objectiveExprs": ["story.pontoon_out and at('marina_pontoon', 'alder_harbor_marina') and fuel_pct('marina_pontoon') >= 90"]
+        },
+        "done": {
+          "label": "Returned, full tank",
+          "cue": "Dale sticks the dipstick in, nods, and writes something in a small notebook.",
+          "next": [],
+          "rewards": [
+            {
+              "type": "regard",
+              "text": "Dale respects the player.",
+              "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "respect", "delta": 25}
+            },
+            {
+              "type": "regard",
+              "text": "Dale trusts the player.",
+              "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "trust", "delta": 20}
+            }
+          ]
+        },
+        "overdue": {
+          "label": "Late with the boat",
+          "cue": "Dale is on the dock with his arms folded when you finally tie up. He doesn't say anything at all, which is worse.",
+          "next": [],
+          "effects": [
+            {
+              "type": "regard",
+              "text": "Dale loses some trust.",
+              "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "trust", "delta": -15}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "s_shop_trouble",
+      "kind": "secret",
+      "label": "What Marcus isn't saying",
+      "visibility": "secret",
+      "start": "cue",
+      "summary": "Why Marcus is so anxious about the township contract.",
+      "stages": {
+        "cue": {
+          "label": "Calls in the parking lot",
+          "cue": "Marcus has been taking phone calls in the parking lot and checking the mail twice a day. When you walk past, he changes the subject.",
+          "next": [
+            {
+              "to": "rumor",
+              "when": "the player has asked [[danny_okafor]] or [[jess_kowalczyk]] about Marcus",
+              "expr": "story.asked_about_marcus"
+            }
+          ]
+        },
+        "rumor": {
+          "label": "Whispers",
+          "cue": "Danny says Marcus hasn't taken a day off since January. Jess says the owner of the Rusty Anchor heard from a banker that a chain has been asking around about the shop.",
+          "next": [
+            {
+              "to": "notice",
+              "when": "the player is in [[alder_automotive]] after hours with [[shop_office_key]] or with Marcus out of the room",
+              "expr": "at(pov, 'alder_automotive') and (hour >= 18 or hour < 6) and (carries(pov, 'shop_office_key') or not at('marcus_delgado', here))"
+            }
+          ]
+        },
+        "notice": {
+          "label": "A formal letter",
+          "cue": "A formal letter on the desk, face-up and half under a stack of invoices. The bank's name is at the top and the stamp is red.",
+          "next": [{"to": "statement", "when": "the player has read [[past_due_notice]]", "expr": "story.read_notice"}],
+          "effects": [
+            {
+              "type": "reveal_item",
+              "text": "A formal letter turns up on the shop desk.",
+              "args": {"item": "past_due_notice", "to": "pov"}
+            }
+          ]
+        },
+        "statement": {
+          "label": "The margin note",
+          "cue": "A bank statement, with Marcus's handwriting in the margin: a figure circled three times.",
+          "next": [
+            {
+              "to": "truth",
+              "when": "the player has read [[shop_bank_statement]] and has confronted or comforted [[marcus_delgado]]",
+              "expr": "story.read_statement and story.talked_marcus"
+            }
+          ],
+          "effects": [
+            {
+              "type": "reveal_item",
+              "text": "A bank statement with a margin note lies under the notice.",
+              "args": {"item": "shop_bank_statement", "to": "pov"}
+            }
+          ]
+        },
+        "truth": {
+          "label": "What was going on",
+          "cue": "Marcus finally puts down the wrench and tells you.",
+          "truth": "Alder Automotive is about $112,000 behind on its lease and its lift-equipment loan after a slow winter. Marcus has been covering payroll from a personal line of credit and has an offer from a regional chain that would keep the staff but cut everyone's pay and end the shop's name. He wants the township contract to prove the shop can pay its own way.",
+          "leakTerms": ["$112,000", "behind on", "line of credit", "regional chain"],
+          "next": [],
+          "rewards": [
+            {
+              "type": "reveal",
+              "text": "The player learns what Marcus has been hiding.",
+              "args": {"track": "s_shop_trouble", "stage": "truth", "to": "pov"}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "p_township_truck",
+      "owner": "township_pickup",
+      "kind": "puzzle",
+      "label": "The truck that won't start",
+      "visibility": "known_by",
+      "start": "stuck",
+      "summary": "A township pickup cranks but will not start.",
+      "stages": {
+        "stuck": {
+          "label": "Cranks, doesn't catch",
+          "cue": "The township pickup turns over fine but never fires. You hear nothing from the fuel tank when you turn the key to ON.",
+          "objectives": ["Work out why [[township_pickup]] won't start"],
+          "answer": {"expect": ["fuel pump relay", "the fuel pump relay", "bad fuel pump relay", "relay"], "normalize": true},
+          "hints": [
+            "No priming hum from the tank: the pump isn't getting power.",
+            "Check the fuse first, then swap the relay with a known good one.",
+            "The relay for the fuel pump is in the under-hood box; tap it and swap it."
+          ],
+          "next": [
+            {
+              "to": "fixed",
+              "when": "the player has tested [[relay_fuel_pump]] and replaced it with [[spare_relay]] in [[township_pickup]]",
+              "expr": "story.relay_replaced"
+            }
+          ],
+          "objectiveExprs": ["story.relay_replaced"]
+        },
+        "fixed": {
+          "label": "It fires",
+          "cue": "The pump hums, the engine catches, and the exhaust note settles into a steady idle.",
+          "next": [],
+          "effects": [
+            {
+              "type": "set_flag",
+              "text": "The township pickup runs.",
+              "args": {"flag": "township_truck_fixed", "value": true}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a_marcus_delgado",
+      "kind": "agenda",
+      "label": "Marcus's agenda",
+      "owner": "marcus_delgado",
+      "visibility": "secret",
+      "start": "win_contract",
+      "summary": "Win the township contract and keep the shop's name.",
+      "stages": {
+        "win_contract": {
+          "label": "Win the township contract",
+          "priority": 8,
+          "objectives": ["Impress Priya", "Keep the bays full"],
+          "next": [
+            {
+              "to": "keep_afloat",
+              "when": "[[q_fleet_contract.lost]] has been reached",
+              "expr": "stage('q_fleet_contract') == 'lost'"
+            },
+            {
+              "to": "celebrate",
+              "when": "[[q_fleet_contract.done]] has been reached",
+              "expr": "stage('q_fleet_contract') == 'done'"
+            }
+          ]
+        },
+        "keep_afloat": {
+          "label": "Find money another way",
+          "priority": 9,
+          "objectives": ["Take extra jobs", "Listen to the chain's offer"],
+          "next": []
+        },
+        "celebrate": {"label": "Take a breath", "priority": 3, "objectives": ["Buy the crew lunch"], "next": []}
+      }
+    },
+    {
+      "id": "a_danny_okafor",
+      "kind": "agenda",
+      "label": "Danny's agenda",
+      "owner": "danny_okafor",
+      "visibility": "public",
+      "start": "prove_himself",
+      "summary": "Be the shop's go-to mechanic and save for a house.",
+      "stages": {
+        "prove_himself": {
+          "label": "Be the shop's go-to mechanic",
+          "priority": 5,
+          "objectives": ["Take the hard jobs", "Keep his own pride intact"],
+          "next": [
+            {
+              "to": "sulk",
+              "when": "Marcus has praised the player in front of Danny more than twice this week",
+              "expr": "regard('marcus_delgado', 'pov', 'respect') >= 40 and since('a_danny_okafor') >= 4320"
+            }
+          ]
+        },
+        "sulk": {
+          "label": "Stew quietly",
+          "priority": 6,
+          "objectives": ["Withhold shortcuts", "Stay late at the shop"],
+          "next": [
+            {
+              "to": "prove_himself",
+              "when": "the player and Danny spend an evening together at the Rusty Anchor",
+              "expr": "hour >= 18 and at(pov, 'rusty_anchor') and at('danny_okafor', 'rusty_anchor')"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a_priya_nair",
+      "kind": "agenda",
+      "label": "Priya's agenda",
+      "owner": "priya_nair",
+      "visibility": "public",
+      "start": "plan_fest",
+      "summary": "Pull off Harbor Fest without losing her mind.",
+      "stages": {
+        "plan_fest": {
+          "label": "Finish the festival plan",
+          "priority": 6,
+          "objectives": ["Confirm vendors", "Find volunteers"],
+          "next": [
+            {
+              "to": "run_fest",
+              "when": "the clock reaches Saturday 26 September, 08:00",
+              "expr": "clock >= @2026-09-26T08:00"
+            }
+          ]
+        },
+        "run_fest": {
+          "label": "Run Harbor Fest",
+          "priority": 10,
+          "objectives": ["Open the pavilion", "Oversee the boat parade"],
+          "next": [
+            {
+              "to": "recover",
+              "when": "the clock reaches Sunday 27 September, 06:00",
+              "expr": "clock >= @2026-09-27T06:00"
+            }
+          ]
+        },
+        "recover": {"label": "Sleep", "priority": 2, "objectives": ["Do absolutely nothing"], "next": []}
+      }
+    },
+    {
+      "id": "a_dale_whitcomb",
+      "kind": "agenda",
+      "label": "Dale's agenda",
+      "owner": "dale_whitcomb",
+      "visibility": "public",
+      "start": "finish_season",
+      "summary": "Finish the boating season and haul out the fleet.",
+      "stages": {
+        "finish_season": {
+          "label": "Finish the season",
+          "priority": 5,
+          "objectives": ["Keep the rental pontoons running", "Take bookings through Harbor Fest"],
+          "next": [{"to": "haul_out", "when": "the clock reaches Monday 5 October", "expr": "clock >= @2026-10-05T00:00"}]
+        },
+        "haul_out": {
+          "label": "Haul out and winterize",
+          "priority": 8,
+          "objectives": ["Schedule hauling", "Store the boats in the barn"],
+          "next": []
+        }
+      }
+    },
+    {
+      "id": "a_maddie_kowalczyk",
+      "kind": "agenda",
+      "label": "Maddie's agenda",
+      "owner": "maddie_kowalczyk",
+      "visibility": "public",
+      "start": "first_quarter",
+      "summary": "Get through the first quarter, then work up the nerve to ask Dale for weekend dock work.",
+      "stages": {
+        "first_quarter": {
+          "label": "Finish the first quarter",
+          "priority": 5,
+          "objectives": ["Hand in the history essay", "Keep her grades up"],
+          "next": [{"to": "ask_dale", "when": "the clock reaches Friday 23 October", "expr": "clock >= @2026-10-23T00:00"}]
+        },
+        "ask_dale": {
+          "label": "Ask Dale about weekend dock work",
+          "priority": 6,
+          "objectives": ["Work up the nerve", "Ask Dale at the marina"],
+          "next": [{"to": "winter_break", "when": "the clock reaches the end of school on Friday 18 December", "expr": "clock >= @2026-12-18T15:10"}]
+        },
+        "winter_break": {
+          "label": "Winter break",
+          "priority": 2,
+          "objectives": ["Sleep late"],
+          "next": []
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "r_rent_due",
+      "label": "Rent is due",
+      "on": {"tick": "day"},
+      "trigger": "On the 1st of each month.",
+      "when": "the day of the month is 1",
+      "do": [
+        {
+          "type": "pay",
+          "text": "Rent for Unit 2B is paid from checking.",
+          "args": {
+            "from": "acct_pov_checking",
+            "to": "helen_kowalczyk",
+            "amount": 99500,
+            "currency": "usd",
+            "memo": "Rent, Unit 2B"
+          }
+        }
+      ],
+      "beat": {"hint": "Helen knocks twice on your door at nine with a plate of cookies and no mention of the rent."},
+      "handledBy": "economy.bills"
+    },
+    {
+      "id": "r_payday_semimonthly",
+      "label": "Township payday",
+      "on": {"tick": "day"},
+      "trigger": "On the 15th and the last day of the month of each month.",
+      "when": "the day of the month is 1 or 15",
+      "do": [
+        {
+          "type": "payroll",
+          "text": "Township employees (Priya) are paid net of withholding.",
+          "args": {"employer": "township_hall", "payFrequency": "semimonthly"}
+        },
+        {
+          "type": "note",
+          "text": "If payday is a Friday, Priya treats the committee to the first round at the Rusty Anchor.",
+          "args": {}
+        }
+      ],
+      "beat": {
+        "hint": "Priya hums on her way into the Rusty Anchor: payday and the first festival shipment, on the same day."
+      },
+      "handledBy": "economy.payroll"
+    },
+    {
+      "id": "r_payday_weekly",
+      "label": "Friday payday at the shop",
+      "on": {"tick": "day"},
+      "trigger": "Every Friday at 15:00.",
+      "when": "the weekday is Friday and the time is 15:00 or later",
+      "do": [
+        {
+          "type": "payroll",
+          "text": "The shop pays its crew net of withholding.",
+          "args": {"employer": "alder_automotive", "payFrequency": "weekly"}
+        }
+      ],
+      "handledBy": "economy.payroll"
+    },
+    {
+      "id": "r_small_craft_advisory",
+      "label": "Small-craft advisory",
+      "on": {"at": "2026-09-23T14:00"},
+      "trigger": "At 14:00 on Wednesday 23 September a strong blow comes down the lake and lasts about twenty hours.",
+      "when": "always",
+      "once": true,
+      "interrupt": true,
+      "do": [
+        {
+          "type": "set_weather",
+          "text": "A gale-force wind and high waves hit the lake.",
+          "args": {"region": "port_alder", "state": "gale", "minutes": 1200}
+        },
+        {
+          "type": "set_flag",
+          "text": "A small-craft advisory is in force.",
+          "args": {"flag": "small_craft_advisory", "value": true}
+        },
+        {
+          "type": "set_route",
+          "text": "The Gull Island ferry stops running.",
+          "args": {"route": "rt_marina_gull", "open": false}
+        },
+        {"type": "set_flag", "text": "The ferry is not running.", "args": {"flag": "ferry_running", "value": false}}
+      ],
+      "beat": {"hint": "The flags at the marina snap straight out, and Dale starts doubling every dock line."}
+    },
+    {
+      "id": "r_small_craft_advisory_ends",
+      "label": "The advisory is lifted",
+      "on": {"at": "2026-09-24T10:00"},
+      "trigger": "At 10:00 on Thursday 24 September, twenty hours after the gale began.",
+      "when": "always",
+      "once": true,
+      "do": [
+        {
+          "type": "set_flag",
+          "text": "The small-craft advisory is lifted.",
+          "args": {"flag": "small_craft_advisory", "value": false}
+        },
+        {"type": "set_flag", "text": "The ferry is running again.", "args": {"flag": "ferry_running", "value": true}},
+        {
+          "type": "set_route",
+          "text": "The Gull Island ferry resumes.",
+          "args": {"route": "rt_marina_gull", "open": true}
+        }
+      ]
+    },
+    {
+      "id": "r_harbor_fest",
+      "label": "Harbor Fest",
+      "on": {"at": "2026-09-26T10:00"},
+      "trigger": "At 10:00 on Saturday 26 September the festival opens at Lakefront Park, with a boat parade at 14:00.",
+      "when": "always",
+      "once": true,
+      "interrupt": true,
+      "do": [
+        {
+          "type": "move",
+          "text": "The town heads to Lakefront Park.",
+          "args": {"who": "town_cast", "place": "lakefront_park"}
+        },
+        {
+          "type": "set_scene",
+          "text": "The park fills with food stalls and music.",
+          "args": {"place": "lakefront_park", "sceneType": "conversation"}
+        }
+      ],
+      "beat": {"hint": "Smoke from the grill, a brass band warming up, and Priya running past with a walkie-talkie."}
+    },
+    {
+      "id": "r_danny_jealous",
+      "label": "Danny gets prickly",
+      "on": {"tick": "day"},
+      "trigger": "Once Marcus's respect for the player is high, at most once a week.",
+      "when": "[[marcus_delgado]] has praised the player in front of [[danny_okafor]] at least twice since Monday",
+      "cooldownMinutes": 10080,
+      "do": [
+        {
+          "type": "regard",
+          "text": "Danny cools toward the player.",
+          "args": {"who": "danny_okafor", "toward": "pov", "axis": "warmth", "delta": -10}
+        },
+        {
+          "type": "note",
+          "text": "Danny stops sharing his shortcuts and finds reasons to be on the other side of the shop.",
+          "args": {}
+        }
+      ],
+      "beat": {"hint": "Danny slides the right-sized socket just out of reach and says it must have gone missing."},
+      "whenExpr": "regard('marcus_delgado', 'pov', 'respect') >= 40"
+    },
+    {
+      "id": "r_pontoon_overdue",
+      "label": "Pontoon overdue",
+      "on": {"tick": "slot"},
+      "trigger": "When the pontoon is on loan and the return time has passed.",
+      "when": "[[flag:pontoon_loaned]] is true and the clock is past Sunday 20 September, 18:00 and [[marina_pontoon]] is not at [[alder_harbor_marina]]",
+      "interrupt": true,
+      "once": true,
+      "do": [
+        {"type": "flag_overdue", "text": "The loan is overdue.", "args": {"vehicle": "marina_pontoon"}},
+        {
+          "type": "regard",
+          "text": "Dale loses a little trust.",
+          "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "trust", "delta": -10}
+        }
+      ],
+      "beat": {"hint": "Your phone buzzes: three texts from Dale in a row, each shorter than the last."},
+      "whenExpr": "story.pontoon_loaned and clock > @2026-09-20T18:00 and not at('marina_pontoon', 'alder_harbor_marina')"
+    },
+    {
+      "id": "r_oil_change_due",
+      "label": "Oil change due",
+      "on": {"tick": "day"},
+      "trigger": "When the pickup has gone 7,500 miles since its last oil change.",
+      "when": "[[pov_truck]]'s odometer is at least 7,500 miles past its last oil change",
+      "cooldownMinutes": 10080,
+      "do": [
+        {
+          "type": "note",
+          "text": "The oil-change reminder comes on, and Marcus offers a friendly employee discount on parts.",
+          "args": {}
+        }
+      ],
+      "whenExpr": "field('pov_truck', 'odometer_mi') - field('pov_truck', 'last_service') >= 7500"
+    },
+    {
+      "id": "r_pontoon_out",
+      "label": "The pontoon leaves the marina",
+      "on": {"tick": "slot"},
+      "trigger": "While the pontoon is on loan and away from its slip.",
+      "when": "the loan is running and the pontoon is not at the marina",
+      "whenExpr": "stage('q_pontoon_weekend') == 'loan' and not at('marina_pontoon', 'alder_harbor_marina')",
+      "once": true,
+      "do": [
+        {
+          "type": "set_flag",
+          "text": "The pontoon is out on the lake.",
+          "args": {"flag": "pontoon_out", "value": true}
+        }
+      ]
+    }
+  ],
+  "groups": {
+    "town_cast": [
+      "marcus_delgado",
+      "danny_okafor",
+      "priya_nair",
+      "jess_kowalczyk",
+      "dale_whitcomb",
+      "helen_kowalczyk",
+      "nora_whitfield"
+    ]
+  },
+  "weather": {
+    "climates": [
+      {
+        "region": "lakeshore_county",
+        "label": "Lake-moderated Great Lakes shore",
+        "states": [
+          {"id": "clear", "label": "Clear", "effects": {}},
+          {"id": "cloudy", "label": "Cloudy", "effects": {}},
+          {
+            "id": "rain",
+            "label": "Rain",
+            "effects": {"travelTimeMultiplier": {"walk": 1.1, "road": 1.1, "offroad": 1.3}}
+          },
+          {"id": "fog", "label": "Lake fog", "effects": {"travelTimeMultiplier": {"road": 1.2, "water": 1.5}}},
+          {
+            "id": "thunderstorm",
+            "label": "Thunderstorm",
+            "effects": {"travelTimeMultiplier": {"walk": 1.3, "road": 1.3, "offroad": 1.6}, "closes": ["water"]}
+          },
+          {
+            "id": "gale",
+            "label": "Gale (small-craft advisory)",
+            "effects": {"travelTimeMultiplier": {"walk": 1.3, "road": 1.2, "water": 2.0}, "closes": ["water"]}
+          },
+          {
+            "id": "snow",
+            "label": "Lake-effect snow",
+            "effects": {"travelTimeMultiplier": {"walk": 1.4, "road": 1.6, "offroad": 2.5}, "closes": ["water"]}
+          }
+        ],
+        "seasons": [
+          {
+            "label": "Winter",
+            "months": [12, 1, 2],
+            "weights": {"clear": 10, "cloudy": 35, "rain": 5, "fog": 5, "snow": 40, "gale": 5},
+            "tempC": [-9, 0]
+          },
+          {
+            "label": "Spring",
+            "months": [3, 4, 5],
+            "weights": {"clear": 25, "cloudy": 30, "rain": 30, "fog": 7, "thunderstorm": 5, "gale": 3},
+            "tempC": [3, 15]
+          },
+          {
+            "label": "Summer",
+            "months": [6, 7, 8],
+            "weights": {"clear": 45, "cloudy": 20, "rain": 15, "fog": 3, "thunderstorm": 15, "gale": 2},
+            "tempC": [16, 28]
+          },
+          {
+            "label": "Autumn",
+            "months": [9, 10, 11],
+            "weights": {"clear": 30, "cloudy": 32, "rain": 20, "fog": 8, "thunderstorm": 4, "gale": 6},
+            "tempC": [4, 16]
+          }
+        ],
+        "note": "The gale on Wednesday 23 September is scripted by a rule; ordinary weather is drawn from the season."
+      },
+      {
+        "region": "chicago_il",
+        "label": "Continental big-city lakefront",
+        "states": [
+          {"id": "clear", "label": "Clear", "effects": {}},
+          {"id": "cloudy", "label": "Cloudy", "effects": {}},
+          {"id": "rain", "label": "Rain", "effects": {"travelTimeMultiplier": {"walk": 1.1, "road": 1.15}}},
+          {"id": "fog", "label": "Fog", "effects": {"travelTimeMultiplier": {"road": 1.2}}},
+          {
+            "id": "thunderstorm",
+            "label": "Thunderstorm",
+            "effects": {"travelTimeMultiplier": {"walk": 1.3, "road": 1.4}}
+          },
+          {"id": "snow", "label": "Snow", "effects": {"travelTimeMultiplier": {"walk": 1.4, "road": 1.7}}}
+        ],
+        "seasons": [
+          {
+            "label": "Winter",
+            "months": [12, 1, 2],
+            "weights": {"clear": 20, "cloudy": 35, "rain": 5, "fog": 5, "snow": 35},
+            "tempC": [-9, 0]
+          },
+          {
+            "label": "Spring",
+            "months": [3, 4, 5],
+            "weights": {"clear": 28, "cloudy": 30, "rain": 28, "fog": 6, "thunderstorm": 8},
+            "tempC": [3, 16]
+          },
+          {
+            "label": "Summer",
+            "months": [6, 7, 8],
+            "weights": {"clear": 45, "cloudy": 18, "rain": 12, "thunderstorm": 25},
+            "tempC": [18, 30]
+          },
+          {
+            "label": "Autumn",
+            "months": [9, 10, 11],
+            "weights": {"clear": 35, "cloudy": 30, "rain": 22, "fog": 8, "thunderstorm": 5},
+            "tempC": [5, 17]
+          }
+        ],
+        "note": "Chicago is in the Central time zone, an hour behind Port Alder."
+      }
+    ]
+  },
+  "lore": [
+    {
+      "id": "lore_port_alder",
+      "title": "Port Alder",
+      "category": "place",
+      "about": "port_alder",
+      "keys": ["Port Alder", "Alder", "the town"],
+      "text": "Port Alder sits on the east shore of Lake Michigan with about 6,500 residents. It began as a lumber port, became a fruit-shipping town and is now mostly a place where people fish, sail, ride dune buggies and commute to somewhere larger. It has two stoplights, one high school and no tolerance for being called quaint."
+    },
+    {
+      "id": "lore_harbor_street",
+      "title": "114 Harbor Street",
+      "category": "place",
+      "about": "harbor_street_114",
+      "keys": ["Harbor Street", "114", "Unit 2B", "Harbor Hardware"],
+      "text": "114 Harbor Street is a brick building with Harbor Hardware on the ground floor and four apartments above. Helen Kowalczyk has owned it for forty years and keeps the rents under what the neighbors charge. The stairs creak on the ninth step, and everyone on the second floor knows who is coming home."
+    },
+    {
+      "id": "lore_shop",
+      "title": "Alder Automotive",
+      "category": "place",
+      "about": "alder_automotive",
+      "keys": ["Alder Automotive", "the shop", "the garage"],
+      "text": "Alder Automotive has three bays, a counter, a parts shelf and a back lot of cars waiting for a part. Marcus Delgado opened it eleven years ago. It repairs everything from boat trailers to the township's tractors and is the first place locals call when a tow is needed."
+    },
+    {
+      "id": "lore_anchor",
+      "title": "The Rusty Anchor",
+      "category": "place",
+      "about": "rusty_anchor",
+      "keys": ["Rusty Anchor", "the Anchor", "bar"],
+      "text": "The Rusty Anchor is the local bar and grill. It has a deck over the harbor, a wall of old buoys, a pool table with a wobbly leg and a Thursday trivia night that gets competitive. The burger is excellent. The jukebox only plays a handful of songs, and everyone knows them all."
+    },
+    {
+      "id": "lore_bluebird",
+      "title": "Bluebird Coffee",
+      "category": "place",
+      "about": "bluebird_coffee",
+      "keys": ["Bluebird", "coffee", "cafe"],
+      "text": "Bluebird Coffee is a bright corner cafe on Main Street with a good espresso machine, an overworked barista and a pastry case that empties by ten. A drip coffee costs three dollars; a latte costs about six. Half the town's business is conducted at its mismatched tables."
+    },
+    {
+      "id": "lore_township_hall",
+      "title": "Alder Township Hall",
+      "category": "place",
+      "about": "township_hall",
+      "keys": ["Township Hall", "township", "permit"],
+      "text": "The township handles permits, property taxes, the vehicle yard and the festival fund. Its staff is small and overworked: an accountant, a clerk, a supervisor and a handful of part-timers. It owns a fleet of aging trucks that are serviced wherever the lowest bidder is this year."
+    },
+    {
+      "id": "lore_clinic",
+      "title": "Alder Community Clinic",
+      "category": "place",
+      "about": "community_clinic",
+      "keys": ["clinic", "urgent care", "pharmacy"],
+      "text": "A one-storey clinic with urgent care, primary care and a pharmacy window. It covers most of what a small town needs, and sends the rest to a hospital forty minutes away. Staff are friendly, the waiting room is cold, and the vending machine is always out of the good snack."
+    },
+    {
+      "id": "lore_marina",
+      "title": "Alder Harbor Marina",
+      "category": "place",
+      "about": "alder_harbor_marina",
+      "keys": ["marina", "harbor", "slip", "boat ramp"],
+      "text": "The marina has eighty slips, a boat ramp, a fuel dock and a barn for winter storage. Dale Whitcomb has run it for twenty-five years. In season, a slip rents by the month; for guests, a night at the dock is cheap and the coffee in the office is free. Dale lets a few regulars keep a trailered boat in the yard by the ramp, and launches it for them on request."
+    },
+    {
+      "id": "lore_park",
+      "title": "Lakefront Park",
+      "category": "place",
+      "about": "lakefront_park",
+      "keys": ["Lakefront Park", "park", "beach", "pavilion"],
+      "text": "A strip of beach, lawn and picnic tables beside the marina, with a pavilion that hosts the farmers' market on summer Saturdays. It fills up on the Fourth of July and on the fourth weekend of September for Harbor Fest."
+    },
+    {
+      "id": "lore_market",
+      "title": "Alder Market",
+      "category": "place",
+      "about": "alder_market",
+      "keys": ["market", "grocery", "groceries"],
+      "text": "The only full grocery store in town carries what you need, a few things you don't and a rack of local apples in fall. Its bulletin board advertises everything from lost cats to dune-buggy repairs. Prices run a little under national averages."
+    },
+    {
+      "id": "lore_fuel",
+      "title": "Shoreline Fuel",
+      "category": "place",
+      "about": "shoreline_fuel",
+      "keys": ["Shoreline", "gas station", "fuel"],
+      "text": "Shoreline Fuel has four pumps, a car wash and a rotating selection of hot dogs. Regular gasoline runs about three dollars and fifteen cents a gallon. It is open from five in the morning until eleven at night and is the first place anyone stops after a flat tire."
+    },
+    {
+      "id": "lore_dunes",
+      "title": "Shoreline Dunes Trail System",
+      "category": "place",
+      "about": "dune_trails",
+      "keys": ["dunes", "trail", "ATV", "riding"],
+      "text": "Twelve miles of marked sand trails run through the dunes, open to ATVs and side-by-sides from a trailhead off County Road 12. Riders must stay on the marked trail, wear helmets, and keep an eye on the weather: a front can roll off the lake in minutes."
+    },
+    {
+      "id": "lore_gull_island",
+      "title": "Gull Island State Park",
+      "category": "place",
+      "about": "gull_island",
+      "keys": ["Gull Island", "island", "ferry", "lighthouse"],
+      "text": "Gull Island has a lighthouse, a small campground and a long shingle beach. A ferry from the marina makes the crossing in about twenty-five minutes, several times a day in season, and costs around nine dollars. It does not run when the wind is up."
+    },
+    {
+      "id": "lore_harbor_fest",
+      "title": "Harbor Fest",
+      "category": "history",
+      "keys": ["Harbor Fest", "festival", "boat parade"],
+      "text": "Harbor Fest is held on the fourth Saturday of September. It has food stalls, a brass band, a pie contest and a parade of decorated boats at two in the afternoon. The township's festival fund pays for most of it, and Priya Nair has organized it for the last four years."
+    },
+    {
+      "id": "lore_marcus",
+      "title": "Marcus Delgado",
+      "category": "person",
+      "about": "marcus_delgado",
+      "keys": ["Marcus", "Delgado", "the boss"],
+      "text": "Marcus Delgado owns Alder Automotive. He is fifty-two, heavy-set and patient, and fixes everything slowly and well. Employees say he never raises his voice and never forgets a mistake. He works longer hours than any of them."
+    },
+    {
+      "id": "lore_danny",
+      "title": "Danny Okafor",
+      "category": "person",
+      "about": "danny_okafor",
+      "keys": ["Danny", "Okafor"],
+      "text": "Danny Okafor is the shop's senior mechanic. Thirty-one, funny and fast, he knows every engine in town by its sound. He lives in 2A and tells everyone he has no plans to leave Port Alder, though he drives down to Chicago to see his family when the shop can spare him. He is competitive in a way he thinks is invisible."
+    },
+    {
+      "id": "lore_priya",
+      "title": "Priya Nair",
+      "category": "person",
+      "about": "priya_nair",
+      "keys": ["Priya", "Nair"],
+      "text": "Priya Nair is the township accountant and Harbor Fest's organizer. She is warm, brisk and permanently holding a clipboard. She can tell you the festival budget to the dollar and the name of every vendor's cousin."
+    },
+    {
+      "id": "lore_jess",
+      "title": "Jess Kowalczyk",
+      "category": "person",
+      "about": "jess_kowalczyk",
+      "keys": ["Jess", "Kowalczyk", "bartender"],
+      "text": "Jess Kowalczyk tends bar at the Rusty Anchor five nights a week. Twenty-four, dry-witted and exact with a pour, she lives in 1A with her grandmother and her kid sister Maddie, and spends her days off looking at boats she cannot yet afford."
+    },
+    {
+      "id": "lore_maddie",
+      "title": "Maddie Kowalczyk",
+      "category": "person",
+      "about": "maddie_kowalczyk",
+      "keys": ["Maddie", "Jess's sister", "the Kowalczyk girl"],
+      "text": "Maddie Kowalczyk is fifteen, Jess's kid sister, and a sophomore at Lakeshore Consolidated. She walks to the bus on school mornings, does her homework at the Bluebird Coffee shop twice a week and spends Friday afternoons on the marina dock, where Dale lets her coil lines in return for a lesson now and then."
+    },
+    {
+      "id": "lore_school",
+      "title": "Lakeshore Consolidated School",
+      "category": "place",
+      "about": "lakeshore_school",
+      "keys": ["school", "Lakeshore Consolidated", "Consolidated", "term", "winter break", "Thanksgiving break"],
+      "text": "Lakeshore Consolidated serves Port Alder and the farms behind the dunes. The fall term began on Monday 31 August and runs to Friday 20 November; the school closes for Thanksgiving week, reopens on Monday 30 November and lets out for winter break after Friday 18 December. Classes run from eight o'clock until ten past three."
+    },
+    {
+      "id": "lore_dale",
+      "title": "Dale Whitcomb",
+      "category": "person",
+      "about": "dale_whitcomb",
+      "keys": ["Dale", "Whitcomb", "harbormaster"],
+      "text": "Dale Whitcomb owns the marina. Sixty-one, weathered and unhurried, he is happiest when someone asks him how to read the lake. He lends boats to people he trusts, and has strong opinions about the people he does not."
+    },
+    {
+      "id": "lore_helen",
+      "title": "Helen Kowalczyk",
+      "category": "person",
+      "about": "helen_kowalczyk",
+      "keys": ["Helen", "landlady", "Mrs. Kowalczyk"],
+      "text": "Helen Kowalczyk, seventy-one, owns 114 Harbor Street and has lived on its ground floor for forty years. She is firm, kind, nosy in equal measure, and still does the crossword in pen."
+    },
+    {
+      "id": "lore_nora",
+      "title": "Nora Whitfield",
+      "category": "person",
+      "about": "nora_whitfield",
+      "keys": ["Nora", "Whitfield", "nurse"],
+      "text": "Nora Whitfield is a nurse at the clinic. She works three twelve-hour shifts a week, lives alone with an elderly cat, and is the person to ask about any medical question at three in the morning."
+    },
+    {
+      "id": "lore_sam",
+      "title": "Sam Reyes",
+      "category": "person",
+      "about": "sam_reyes",
+      "keys": ["Sam", "Reyes", "officer"],
+      "text": "Officer Sam Reyes works the afternoon patrol. Calm and dry, Sam is more likely to resolve a dispute with a conversation than a ticket, and has found the missing dog in less than an hour more times than anyone can count."
+    },
+    {
+      "id": "lore_lake",
+      "title": "The lake",
+      "category": "history",
+      "keys": ["lake", "Lake Michigan", "storm", "gale"],
+      "text": "Lake Michigan is calm for weeks and then, with almost no warning, isn't. Locals check the marine forecast before they put a boat in the water, and the marina flies a pennant when a small-craft advisory is in force."
+    },
+    {
+      "id": "lore_cost_of_living",
+      "title": "Living in Port Alder",
+      "category": "history",
+      "keys": ["rent", "cost of living", "prices", "wages"],
+      "text": "Port Alder is cheaper than most of the country: a one-bedroom rents for about eleven hundred dollars a month, groceries cost a little under the national average and electricity runs close to twenty cents a kilowatt-hour. A mechanic makes about twenty-four dollars an hour and a nurse about forty-five."
+    }
+  ],
+  "actions": [
+    {
+      "id": "accept_fleet_job",
+      "label": "Take the township truck job from Marcus",
+      "requires": ["at(pov, 'alder_automotive')", "at('marcus_delgado', here)", "not story.fleet_deal_accepted"],
+      "duration": 15,
+      "lexicon": ["take the township job", "accept the fleet contract job"],
+      "observable": "talks with Marcus",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "fleet_deal_accepted", "value": true}},
+        {
+          "type": "note",
+          "args": {
+            "text": "Marcus slides the township pickup's work order across the counter: it cranks and does not catch, and the contract depends on it."
+          }
+        }
+      ]
+    },
+    {
+      "id": "replace_fuel_pump_relay",
+      "label": "Replace the fuel pump relay",
+      "requires": [
+        "stage('q_fleet_contract') == 'trial'",
+        "at(pov, 'alder_automotive')",
+        "at('spare_relay', 'alder_automotive')",
+        "not story.relay_replaced"
+      ],
+      "duration": 60,
+      "lexicon": ["replace the relay", "swap the fuel pump relay"],
+      "observable": "works under the township pickup's hood",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "relay_replaced", "value": true}},
+        {
+          "type": "note",
+          "args": {
+            "text": "The old relay clicks and does nothing; the spare from the RELAYS bin fits, and the pickup catches on the first try."
+          }
+        }
+      ]
+    },
+    {
+      "id": "walk_priya_through_repair",
+      "label": "Walk Priya through the repair",
+      "requires": ["stage('q_fleet_contract') == 'inspection'", "at('priya_nair', here)", "not story.priya_walked"],
+      "duration": 30,
+      "lexicon": ["show priya the repair", "walk priya through it"],
+      "observable": "explains a repair",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "priya_walked", "value": true}},
+        {"type": "regard", "args": {"who": "priya_nair", "toward": "pov", "axis": "respect", "delta": 15}}
+      ]
+    },
+    {
+      "id": "sign_fleet_contract",
+      "label": "Sign the fleet contract at the township hall",
+      "requires": [
+        "stage('q_fleet_contract') == 'inspection'",
+        "at(pov, 'township_hall')",
+        "at('priya_nair', here)",
+        "not story.fleet_contract_signed"
+      ],
+      "duration": 20,
+      "lexicon": ["sign the contract"],
+      "observable": "signs a contract",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "fleet_contract_signed", "value": true}},
+        {"type": "note", "args": {"text": "Priya countersigns, stamps the copy and hands you yours."}}
+      ]
+    },
+    {
+      "id": "service_township_fleet",
+      "label": "Service the township fleet",
+      "requires": ["stage('q_fleet_contract') == 'service_run'", "at(pov, 'alder_automotive')", "not story.fleet_serviced"],
+      "duration": 480,
+      "lexicon": ["service the fleet", "do the oil changes"],
+      "observable": "works through a row of township vehicles",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "fleet_serviced", "value": true}},
+        {
+          "type": "note",
+          "args": {"text": "Six vehicles: oil, filters, belts, a tire rotation and a signed checklist for each."}
+        }
+      ]
+    },
+    {
+      "id": "look_at_pontoon",
+      "label": "Agree to look at Dale's pontoon",
+      "requires": ["at(pov, 'alder_harbor_marina')", "at('dale_whitcomb', here)", "not story.pontoon_looked_at"],
+      "duration": 15,
+      "lexicon": ["look at the pontoon", "help dale with the boat"],
+      "observable": "talks with Dale",
+      "effects": [{"type": "set_flag", "args": {"flag": "pontoon_looked_at", "value": true}}]
+    },
+    {
+      "id": "diagnose_pontoon",
+      "label": "Diagnose the pontoon's engine",
+      "requires": ["story.pontoon_looked_at", "at(pov, 'alder_harbor_marina')", "not story.pontoon_diagnosed"],
+      "duration": 90,
+      "lexicon": ["diagnose the engine", "figure out what's wrong with the boat"],
+      "observable": "tinkers with an outboard",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "pontoon_diagnosed", "value": true}},
+        {
+          "type": "note",
+          "args": {"text": "A varnished carburetor and a fouled plug: the engine floods when it idles."}
+        }
+      ]
+    },
+    {
+      "id": "repair_pontoon",
+      "label": "Clean the carburetor and replace the plug",
+      "requires": ["story.pontoon_diagnosed", "at(pov, 'alder_harbor_marina')", "not story.pontoon_repaired"],
+      "duration": 180,
+      "lexicon": ["fix the pontoon", "repair the outboard"],
+      "observable": "tinkers with an outboard",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "pontoon_repaired", "value": true}},
+        {"type": "set", "args": {"entity": "marina_pontoon", "field": "status", "value": "ok"}}
+      ]
+    },
+    {
+      "id": "run_sea_trial",
+      "label": "Run the pontoon on the lake for a sea trial",
+      "requires": ["story.pontoon_repaired", "at(pov, 'alder_harbor_marina')", "not story.pontoon_trial_done"],
+      "duration": 30,
+      "lexicon": ["take the boat out for a test"],
+      "observable": "idles the pontoon off the dock",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "pontoon_trial_done", "value": true}},
+        {"type": "regard", "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "trust", "delta": 10}}
+      ]
+    },
+    {
+      "id": "ask_about_marcus",
+      "label": "Ask Danny or Jess how Marcus has been",
+      "requires": ["at('danny_okafor', here) or at('jess_kowalczyk', here)", "not story.asked_about_marcus"],
+      "duration": 15,
+      "lexicon": ["ask about marcus"],
+      "observable": "asks around",
+      "effects": [
+        {"type": "set_flag", "args": {"flag": "asked_about_marcus", "value": true}},
+        {
+          "type": "note",
+          "args": {
+            "text": "Danny shrugs; Jess says Marcus has been taking calls in the parking lot and coming back looking grey."
+          }
+        }
+      ]
+    },
+    {
+      "id": "read_past_due_notice",
+      "label": "Read the past-due notice",
+      "requires": ["stage('s_shop_trouble') == 'notice'", "at(pov, 'alder_automotive')", "not story.read_notice"],
+      "duration": 10,
+      "lexicon": ["read the notice"],
+      "observable": "reads a letter",
+      "effects": [{"type": "set_flag", "args": {"flag": "read_notice", "value": true}}]
+    },
+    {
+      "id": "read_bank_statement",
+      "label": "Read the shop's bank statement",
+      "requires": ["stage('s_shop_trouble') == 'statement'", "at(pov, 'alder_automotive')", "not story.read_statement"],
+      "duration": 15,
+      "lexicon": ["read the bank statement"],
+      "observable": "reads a statement",
+      "effects": [{"type": "set_flag", "args": {"flag": "read_statement", "value": true}}]
+    },
+    {
+      "id": "talk_to_marcus",
+      "label": "Talk to Marcus about the shop's money",
+      "requires": ["story.read_statement", "at('marcus_delgado', here)", "not story.talked_marcus"],
+      "duration": 30,
+      "lexicon": ["confront marcus", "talk to marcus about the money"],
+      "observable": "talks quietly with Marcus",
+      "effects": [{"type": "set_flag", "args": {"flag": "talked_marcus", "value": true}}]
+    }
+  ],
+  "sheets": {
+    "scale": [1, 10],
+    "stats": [
+      {"id": "mechanics", "label": "Mechanics"},
+      {"id": "driving", "label": "Driving"},
+      {"id": "boating", "label": "Boating"},
+      {"id": "cooking", "label": "Cooking"},
+      {"id": "charm", "label": "Charm"},
+      {"id": "fitness", "label": "Fitness"}
+    ],
+    "derived": {
+      "health": {"label": "Health", "formula": "8 + fitness"},
+      "composure": {"label": "Composure", "formula": "6 + floor((charm + fitness) / 3)"}
+    }
+  }
+}

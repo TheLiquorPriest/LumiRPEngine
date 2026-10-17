@@ -1,0 +1,33 @@
+# Dependencies and local reference copies
+node_modules/
+/vendor/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and debug output
+*.log
+bun-debug.log*
+npm-debug.log*
+
+# Test, benchmark and build-tool output
+coverage/
+evidence/
+.cache/
+*.tsbuildinfo
+
+# Scratch and probe files
+*.tmp
+*.bak
+*.orig
+scratch/
+probe-*
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/

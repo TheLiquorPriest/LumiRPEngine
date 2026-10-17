@@ -1,0 +1,3582 @@
+{
+  "schema": "lre-data-src/us/prices/v1",
+  "table": "prices",
+  "approximate": true,
+  "country": "US",
+  "currency": "USD",
+  "money_unit": "integer cents",
+  "reflects_period": "2025-2026 (point-in-time, mid-2025 to early-2026 values)",
+  "basis": "Rounded national-average retail prices recalled from well-known public sources (BLS CPI average prices, USDA, EIA, AAA, STR, DOT, FDA/KFF) and published list prices; not queried live. Apply regions.cost_of_living_multiplier to scale for local conditions (it moves most goods less than rent). Sales tax is not included.",
+  "fields": {
+    "categories[].id": "Stable category key.",
+    "categories[].basis": "Short note on where the category figures come from.",
+    "items[].id": "Stable item key.",
+    "items[].name": "Item description.",
+    "items[].unit": "Quantity the price applies to (per gallon, per night, per month, per person, and so on).",
+    "items[].price_cents.min": "Integer cents; low end (store brand, discount, budget tier or low-cost region).",
+    "items[].price_cents.typical": "Integer cents; central national value.",
+    "items[].price_cents.max": "Integer cents; ordinary high end (premium mainstream, not luxury or surge extremes).",
+    "items[].notes": "Optional caveat."
+  },
+  "conventions": {
+    "ordering": "min <= typical <= max for every item (validated).",
+    "tax_and_tip": "Prices exclude sales tax and tip unless the item name says otherwise.",
+    "fuel_and_charging": "Fuel is cents per gallon; EV charging rows are cents per kWh."
+  },
+  "categories": [
+    {
+      "id": "groceries_staples",
+      "name": "Groceries: per-item staples",
+      "basis": "BLS CPI average prices (2025) and USDA retail scans, rounded; min = store brand or sale, max = organic or premium.",
+      "items": [
+        {
+          "id": "milk_whole",
+          "name": "Milk, whole",
+          "unit": "1 gallon",
+          "price_cents": {
+            "min": 300,
+            "typical": 410,
+            "max": 780
+          },
+          "notes": "max reflects organic"
+        },
+        {
+          "id": "eggs_large",
+          "name": "Eggs, grade A large",
+          "unit": "1 dozen",
+          "price_cents": {
+            "min": 250,
+            "typical": 400,
+            "max": 800
+          },
+          "notes": "2025 prices swung strongly (avian flu); typical shown is a mid-2025 to early-2026 blend"
+        },
+        {
+          "id": "bread_white",
+          "name": "Bread, white sandwich loaf",
+          "unit": "1 loaf (about 20 oz)",
+          "price_cents": {
+            "min": 150,
+            "typical": 250,
+            "max": 500
+          }
+        },
+        {
+          "id": "butter",
+          "name": "Butter, salted",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 380,
+            "typical": 480,
+            "max": 700
+          }
+        },
+        {
+          "id": "cheddar",
+          "name": "Cheddar cheese",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 450,
+            "typical": 600,
+            "max": 1100
+          }
+        },
+        {
+          "id": "yogurt",
+          "name": "Yogurt, plain or flavored",
+          "unit": "32 oz tub",
+          "price_cents": {
+            "min": 250,
+            "typical": 400,
+            "max": 700
+          }
+        },
+        {
+          "id": "chicken_breast",
+          "name": "Chicken breast, boneless",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 250,
+            "typical": 400,
+            "max": 700
+          }
+        },
+        {
+          "id": "chicken_whole",
+          "name": "Chicken, whole fryer",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 120,
+            "typical": 200,
+            "max": 350
+          }
+        },
+        {
+          "id": "ground_beef",
+          "name": "Ground beef, 80-93% lean",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 450,
+            "typical": 620,
+            "max": 1000
+          }
+        },
+        {
+          "id": "steak_sirloin",
+          "name": "Beef steak, sirloin",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 800,
+            "typical": 1200,
+            "max": 2200
+          }
+        },
+        {
+          "id": "bacon",
+          "name": "Bacon, sliced",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 500,
+            "typical": 650,
+            "max": 1000
+          }
+        },
+        {
+          "id": "pork_chops",
+          "name": "Pork chops, bone-in",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 300,
+            "typical": 450,
+            "max": 800
+          }
+        },
+        {
+          "id": "salmon_fillet",
+          "name": "Salmon fillet",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 800,
+            "typical": 1200,
+            "max": 2000
+          }
+        },
+        {
+          "id": "deli_turkey",
+          "name": "Deli turkey, sliced",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 700,
+            "typical": 1000,
+            "max": 1600
+          }
+        },
+        {
+          "id": "rice_white",
+          "name": "Rice, long-grain white",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 80,
+            "typical": 130,
+            "max": 300
+          }
+        },
+        {
+          "id": "pasta_dry",
+          "name": "Pasta, dry",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 100,
+            "typical": 150,
+            "max": 300
+          }
+        },
+        {
+          "id": "dry_beans",
+          "name": "Dried beans",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 100,
+            "typical": 200,
+            "max": 350
+          }
+        },
+        {
+          "id": "flour_ap",
+          "name": "Flour, all-purpose",
+          "unit": "5 lb bag",
+          "price_cents": {
+            "min": 250,
+            "typical": 400,
+            "max": 700
+          }
+        },
+        {
+          "id": "sugar_white",
+          "name": "Sugar, granulated",
+          "unit": "4 lb bag",
+          "price_cents": {
+            "min": 300,
+            "typical": 400,
+            "max": 600
+          }
+        },
+        {
+          "id": "cooking_oil",
+          "name": "Vegetable or canola oil",
+          "unit": "48 oz bottle",
+          "price_cents": {
+            "min": 400,
+            "typical": 700,
+            "max": 1200
+          }
+        },
+        {
+          "id": "potatoes",
+          "name": "Potatoes, russet",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 70,
+            "typical": 110,
+            "max": 200
+          }
+        },
+        {
+          "id": "onions",
+          "name": "Onions, yellow",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 80,
+            "typical": 130,
+            "max": 200
+          }
+        },
+        {
+          "id": "tomatoes",
+          "name": "Tomatoes, slicing",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 120,
+            "typical": 200,
+            "max": 350
+          }
+        },
+        {
+          "id": "carrots",
+          "name": "Carrots",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 70,
+            "typical": 110,
+            "max": 200
+          }
+        },
+        {
+          "id": "lettuce",
+          "name": "Lettuce, romaine or iceberg",
+          "unit": "1 head",
+          "price_cents": {
+            "min": 150,
+            "typical": 250,
+            "max": 400
+          }
+        },
+        {
+          "id": "bananas",
+          "name": "Bananas",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 50,
+            "typical": 65,
+            "max": 90
+          }
+        },
+        {
+          "id": "apples",
+          "name": "Apples",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 120,
+            "typical": 190,
+            "max": 300
+          }
+        },
+        {
+          "id": "oranges",
+          "name": "Oranges",
+          "unit": "1 lb",
+          "price_cents": {
+            "min": 100,
+            "typical": 150,
+            "max": 250
+          }
+        },
+        {
+          "id": "coffee_ground",
+          "name": "Coffee, ground",
+          "unit": "12 oz can or bag",
+          "price_cents": {
+            "min": 600,
+            "typical": 950,
+            "max": 1500
+          }
+        },
+        {
+          "id": "cereal",
+          "name": "Breakfast cereal",
+          "unit": "12 oz box",
+          "price_cents": {
+            "min": 300,
+            "typical": 450,
+            "max": 650
+          }
+        },
+        {
+          "id": "peanut_butter",
+          "name": "Peanut butter",
+          "unit": "16 oz jar",
+          "price_cents": {
+            "min": 250,
+            "typical": 350,
+            "max": 600
+          }
+        },
+        {
+          "id": "canned_soup",
+          "name": "Soup, canned",
+          "unit": "1 can",
+          "price_cents": {
+            "min": 100,
+            "typical": 180,
+            "max": 300
+          }
+        },
+        {
+          "id": "canned_vegetables",
+          "name": "Vegetables, canned",
+          "unit": "1 can (15 oz)",
+          "price_cents": {
+            "min": 80,
+            "typical": 130,
+            "max": 220
+          }
+        },
+        {
+          "id": "frozen_pizza",
+          "name": "Pizza, frozen",
+          "unit": "1 pie",
+          "price_cents": {
+            "min": 400,
+            "typical": 600,
+            "max": 1000
+          }
+        },
+        {
+          "id": "soda_12pack",
+          "name": "Soda, cans",
+          "unit": "12-pack",
+          "price_cents": {
+            "min": 500,
+            "typical": 700,
+            "max": 900
+          }
+        },
+        {
+          "id": "bottled_water_24",
+          "name": "Bottled water",
+          "unit": "24-pack",
+          "price_cents": {
+            "min": 300,
+            "typical": 500,
+            "max": 800
+          }
+        },
+        {
+          "id": "orange_juice",
+          "name": "Orange juice",
+          "unit": "52 oz carton",
+          "price_cents": {
+            "min": 300,
+            "typical": 450,
+            "max": 700
+          }
+        },
+        {
+          "id": "snack_chips",
+          "name": "Potato chips",
+          "unit": "1 family-size bag",
+          "price_cents": {
+            "min": 300,
+            "typical": 500,
+            "max": 700
+          }
+        },
+        {
+          "id": "ice_cream",
+          "name": "Ice cream",
+          "unit": "1.5 qt tub",
+          "price_cents": {
+            "min": 300,
+            "typical": 550,
+            "max": 900
+          }
+        }
+      ]
+    },
+    {
+      "id": "groceries_baskets",
+      "name": "Groceries: weekly baskets",
+      "basis": "USDA Food Plans, cost of food at home (2025 monthly reports), converted to weekly. Individual figures are for an adult 19-50; family is two adults and two children.",
+      "notes": "Use per-item staples for single purchases and baskets for the abstract weekly grocery spend.",
+      "items": [
+        {
+          "id": "basket_person_thrifty",
+          "name": "Weekly grocery basket, one adult, thrifty plan",
+          "unit": "person per week",
+          "price_cents": {
+            "min": 6000,
+            "typical": 7200,
+            "max": 8500
+          }
+        },
+        {
+          "id": "basket_person_moderate",
+          "name": "Weekly grocery basket, one adult, moderate plan",
+          "unit": "person per week",
+          "price_cents": {
+            "min": 8500,
+            "typical": 10000,
+            "max": 12000
+          }
+        },
+        {
+          "id": "basket_person_liberal",
+          "name": "Weekly grocery basket, one adult, liberal plan",
+          "unit": "person per week",
+          "price_cents": {
+            "min": 11000,
+            "typical": 13500,
+            "max": 17000
+          }
+        },
+        {
+          "id": "basket_family4_thrifty",
+          "name": "Weekly grocery basket, family of four, thrifty plan",
+          "unit": "household per week",
+          "price_cents": {
+            "min": 21000,
+            "typical": 23500,
+            "max": 27000
+          }
+        },
+        {
+          "id": "basket_family4_moderate",
+          "name": "Weekly grocery basket, family of four, moderate plan",
+          "unit": "household per week",
+          "price_cents": {
+            "min": 28000,
+            "typical": 31500,
+            "max": 37000
+          }
+        },
+        {
+          "id": "basket_family4_liberal",
+          "name": "Weekly grocery basket, family of four, liberal plan",
+          "unit": "household per week",
+          "price_cents": {
+            "min": 36000,
+            "typical": 41000,
+            "max": 50000
+          }
+        }
+      ]
+    },
+    {
+      "id": "meals_out",
+      "name": "Fast food and sit-down meals",
+      "basis": "National chain menu prices and BLS CPI food-away-from-home trends (2025), rounded. Prices exclude tax and tip.",
+      "notes": "Typical tip guidance: 15-20% for table service, none or optional at counters.",
+      "items": [
+        {
+          "id": "fast_food_burger",
+          "name": "Fast-food burger, sandwich only",
+          "unit": "each",
+          "price_cents": {
+            "min": 400,
+            "typical": 650,
+            "max": 1000
+          }
+        },
+        {
+          "id": "fast_food_combo",
+          "name": "Fast-food combo meal (sandwich, fries, drink)",
+          "unit": "meal",
+          "price_cents": {
+            "min": 800,
+            "typical": 1150,
+            "max": 1600
+          }
+        },
+        {
+          "id": "fast_food_fries",
+          "name": "Fast-food fries, medium",
+          "unit": "each",
+          "price_cents": {
+            "min": 250,
+            "typical": 380,
+            "max": 550
+          }
+        },
+        {
+          "id": "fast_food_chicken_nuggets",
+          "name": "Chicken nuggets, 10 piece",
+          "unit": "each",
+          "price_cents": {
+            "min": 500,
+            "typical": 750,
+            "max": 1100
+          }
+        },
+        {
+          "id": "fast_food_breakfast",
+          "name": "Fast-food breakfast sandwich",
+          "unit": "each",
+          "price_cents": {
+            "min": 300,
+            "typical": 500,
+            "max": 800
+          }
+        },
+        {
+          "id": "pizza_slice",
+          "name": "Pizza, by the slice",
+          "unit": "slice",
+          "price_cents": {
+            "min": 250,
+            "typical": 400,
+            "max": 700
+          }
+        },
+        {
+          "id": "pizza_large_delivery",
+          "name": "Pizza, large 14-16 in, delivered",
+          "unit": "pie",
+          "price_cents": {
+            "min": 1300,
+            "typical": 1900,
+            "max": 2800
+          }
+        },
+        {
+          "id": "fast_casual_bowl",
+          "name": "Fast-casual burrito or bowl",
+          "unit": "each",
+          "price_cents": {
+            "min": 1000,
+            "typical": 1250,
+            "max": 1600
+          }
+        },
+        {
+          "id": "deli_sandwich",
+          "name": "Deli sandwich",
+          "unit": "each",
+          "price_cents": {
+            "min": 900,
+            "typical": 1300,
+            "max": 1900
+          }
+        },
+        {
+          "id": "diner_breakfast",
+          "name": "Diner breakfast plate",
+          "unit": "plate",
+          "price_cents": {
+            "min": 1000,
+            "typical": 1500,
+            "max": 2200
+          }
+        },
+        {
+          "id": "casual_dining_entree",
+          "name": "Casual-dining entree (chain restaurant)",
+          "unit": "entree",
+          "price_cents": {
+            "min": 1400,
+            "typical": 2000,
+            "max": 3200
+          }
+        },
+        {
+          "id": "casual_dining_per_person",
+          "name": "Casual-dining meal per person (appetizer or drink, entree, tax and 18% tip)",
+          "unit": "person",
+          "price_cents": {
+            "min": 2500,
+            "typical": 3800,
+            "max": 6000
+          }
+        },
+        {
+          "id": "upscale_dining_per_person",
+          "name": "Upscale dining per person (entree, drink, tax and tip)",
+          "unit": "person",
+          "price_cents": {
+            "min": 6000,
+            "typical": 10000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "fine_dining_tasting",
+          "name": "Fine-dining tasting menu per person (before drinks)",
+          "unit": "person",
+          "price_cents": {
+            "min": 10000,
+            "typical": 22000,
+            "max": 60000
+          }
+        },
+        {
+          "id": "dessert",
+          "name": "Restaurant dessert",
+          "unit": "each",
+          "price_cents": {
+            "min": 700,
+            "typical": 1000,
+            "max": 1600
+          }
+        },
+        {
+          "id": "kids_meal",
+          "name": "Kids meal",
+          "unit": "meal",
+          "price_cents": {
+            "min": 500,
+            "typical": 750,
+            "max": 1000
+          }
+        },
+        {
+          "id": "delivery_app_fees",
+          "name": "Food-delivery app fees (delivery plus service) on top of menu price",
+          "unit": "order",
+          "price_cents": {
+            "min": 300,
+            "typical": 600,
+            "max": 1200
+          }
+        }
+      ]
+    },
+    {
+      "id": "coffee",
+      "name": "Coffee",
+      "basis": "Chain cafe menu prices (2025), rounded.",
+      "items": [
+        {
+          "id": "coffee_gas_station",
+          "name": "Gas-station or office coffee",
+          "unit": "cup",
+          "price_cents": {
+            "min": 100,
+            "typical": 190,
+            "max": 300
+          }
+        },
+        {
+          "id": "coffee_drip_cafe",
+          "name": "Drip coffee, 12 oz, cafe",
+          "unit": "cup",
+          "price_cents": {
+            "min": 200,
+            "typical": 300,
+            "max": 450
+          }
+        },
+        {
+          "id": "espresso_shot",
+          "name": "Espresso shot",
+          "unit": "each",
+          "price_cents": {
+            "min": 250,
+            "typical": 330,
+            "max": 450
+          }
+        },
+        {
+          "id": "americano",
+          "name": "Americano, 16 oz",
+          "unit": "cup",
+          "price_cents": {
+            "min": 300,
+            "typical": 420,
+            "max": 550
+          }
+        },
+        {
+          "id": "latte_16oz",
+          "name": "Latte, 16 oz",
+          "unit": "cup",
+          "price_cents": {
+            "min": 400,
+            "typical": 575,
+            "max": 750
+          }
+        },
+        {
+          "id": "cold_brew_16oz",
+          "name": "Cold brew, 16 oz",
+          "unit": "cup",
+          "price_cents": {
+            "min": 400,
+            "typical": 550,
+            "max": 700
+          }
+        },
+        {
+          "id": "specialty_drink",
+          "name": "Seasonal or blended specialty drink, 16-20 oz",
+          "unit": "cup",
+          "price_cents": {
+            "min": 500,
+            "typical": 700,
+            "max": 900
+          }
+        },
+        {
+          "id": "pastry",
+          "name": "Pastry or muffin",
+          "unit": "each",
+          "price_cents": {
+            "min": 250,
+            "typical": 400,
+            "max": 650
+          }
+        }
+      ]
+    },
+    {
+      "id": "alcohol",
+      "name": "Alcohol",
+      "basis": "Retail shelf prices and bar menu prices (2025), rounded.",
+      "notes": "Legal drinking age 21 in all states.",
+      "items": [
+        {
+          "id": "beer_domestic_6",
+          "name": "Beer, domestic lager",
+          "unit": "6-pack",
+          "price_cents": {
+            "min": 700,
+            "typical": 950,
+            "max": 1300
+          }
+        },
+        {
+          "id": "beer_domestic_12",
+          "name": "Beer, domestic lager",
+          "unit": "12-pack",
+          "price_cents": {
+            "min": 1200,
+            "typical": 1600,
+            "max": 2100
+          }
+        },
+        {
+          "id": "beer_craft_6",
+          "name": "Beer, craft or import",
+          "unit": "6-pack",
+          "price_cents": {
+            "min": 1000,
+            "typical": 1300,
+            "max": 1800
+          }
+        },
+        {
+          "id": "beer_bar_pint",
+          "name": "Beer at a bar",
+          "unit": "pint",
+          "price_cents": {
+            "min": 500,
+            "typical": 750,
+            "max": 1100
+          }
+        },
+        {
+          "id": "wine_bottle_retail",
+          "name": "Wine, table bottle (retail)",
+          "unit": "750 ml",
+          "price_cents": {
+            "min": 800,
+            "typical": 1400,
+            "max": 3000
+          }
+        },
+        {
+          "id": "wine_glass_bar",
+          "name": "Wine by the glass at a bar",
+          "unit": "glass",
+          "price_cents": {
+            "min": 900,
+            "typical": 1300,
+            "max": 1900
+          }
+        },
+        {
+          "id": "liquor_vodka_whiskey",
+          "name": "Vodka or whiskey, mid-shelf (retail)",
+          "unit": "750 ml",
+          "price_cents": {
+            "min": 1500,
+            "typical": 2400,
+            "max": 5000
+          }
+        },
+        {
+          "id": "liquor_premium",
+          "name": "Liquor, premium (retail)",
+          "unit": "750 ml",
+          "price_cents": {
+            "min": 4000,
+            "typical": 6500,
+            "max": 15000
+          }
+        },
+        {
+          "id": "cocktail_bar",
+          "name": "Cocktail at a bar",
+          "unit": "drink",
+          "price_cents": {
+            "min": 1000,
+            "typical": 1400,
+            "max": 2000
+          }
+        },
+        {
+          "id": "shot_bar",
+          "name": "Shot at a bar",
+          "unit": "shot",
+          "price_cents": {
+            "min": 600,
+            "typical": 800,
+            "max": 1200
+          }
+        },
+        {
+          "id": "hard_seltzer_12",
+          "name": "Hard seltzer",
+          "unit": "12-pack",
+          "price_cents": {
+            "min": 1500,
+            "typical": 1900,
+            "max": 2400
+          }
+        }
+      ]
+    },
+    {
+      "id": "clothing",
+      "name": "Clothing, basics through outerwear",
+      "basis": "Big-box and mall retail prices (2025), rounded; min = discount or sale, max = premium mainstream (not designer).",
+      "items": [
+        {
+          "id": "t_shirt",
+          "name": "T-shirt, basic cotton",
+          "unit": "each",
+          "price_cents": {
+            "min": 600,
+            "typical": 1500,
+            "max": 3500
+          }
+        },
+        {
+          "id": "dress_shirt",
+          "name": "Dress shirt",
+          "unit": "each",
+          "price_cents": {
+            "min": 2500,
+            "typical": 4500,
+            "max": 9000
+          }
+        },
+        {
+          "id": "blouse",
+          "name": "Blouse or casual top",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 7000
+          }
+        },
+        {
+          "id": "sweater",
+          "name": "Sweater",
+          "unit": "each",
+          "price_cents": {
+            "min": 2500,
+            "typical": 4500,
+            "max": 10000
+          }
+        },
+        {
+          "id": "hoodie",
+          "name": "Hoodie or sweatshirt",
+          "unit": "each",
+          "price_cents": {
+            "min": 2000,
+            "typical": 4000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "jeans",
+          "name": "Jeans",
+          "unit": "pair",
+          "price_cents": {
+            "min": 3000,
+            "typical": 5500,
+            "max": 12000
+          }
+        },
+        {
+          "id": "trousers_chinos",
+          "name": "Trousers or chinos",
+          "unit": "pair",
+          "price_cents": {
+            "min": 2500,
+            "typical": 4500,
+            "max": 9000
+          }
+        },
+        {
+          "id": "shorts",
+          "name": "Shorts",
+          "unit": "pair",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 6000
+          }
+        },
+        {
+          "id": "skirt_or_dress_casual",
+          "name": "Dress or skirt, casual",
+          "unit": "each",
+          "price_cents": {
+            "min": 2500,
+            "typical": 5000,
+            "max": 12000
+          }
+        },
+        {
+          "id": "suit",
+          "name": "Suit, off the rack",
+          "unit": "each",
+          "price_cents": {
+            "min": 12000,
+            "typical": 30000,
+            "max": 80000
+          }
+        },
+        {
+          "id": "underwear_3pack",
+          "name": "Underwear",
+          "unit": "3-pack",
+          "price_cents": {
+            "min": 1000,
+            "typical": 1800,
+            "max": 3500
+          }
+        },
+        {
+          "id": "socks_6pack",
+          "name": "Socks",
+          "unit": "6-pack",
+          "price_cents": {
+            "min": 800,
+            "typical": 1400,
+            "max": 2500
+          }
+        },
+        {
+          "id": "sneakers",
+          "name": "Sneakers",
+          "unit": "pair",
+          "price_cents": {
+            "min": 3500,
+            "typical": 7500,
+            "max": 16000
+          }
+        },
+        {
+          "id": "work_boots",
+          "name": "Work boots",
+          "unit": "pair",
+          "price_cents": {
+            "min": 7000,
+            "typical": 14000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "dress_shoes",
+          "name": "Dress shoes",
+          "unit": "pair",
+          "price_cents": {
+            "min": 5000,
+            "typical": 9000,
+            "max": 20000
+          }
+        },
+        {
+          "id": "sandals",
+          "name": "Sandals or flip-flops",
+          "unit": "pair",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2500,
+            "max": 6000
+          }
+        },
+        {
+          "id": "belt",
+          "name": "Belt",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "hat_cap",
+          "name": "Baseball cap or sun hat",
+          "unit": "each",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2200,
+            "max": 4500
+          }
+        },
+        {
+          "id": "beanie_winter_hat",
+          "name": "Knit winter hat",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 1800,
+            "max": 4000
+          }
+        },
+        {
+          "id": "scarf",
+          "name": "Scarf",
+          "unit": "each",
+          "price_cents": {
+            "min": 1200,
+            "typical": 2500,
+            "max": 6000
+          }
+        },
+        {
+          "id": "gloves_winter",
+          "name": "Winter gloves",
+          "unit": "pair",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "light_jacket",
+          "name": "Light jacket or windbreaker",
+          "unit": "each",
+          "price_cents": {
+            "min": 3000,
+            "typical": 6000,
+            "max": 15000
+          }
+        },
+        {
+          "id": "rain_jacket",
+          "name": "Rain jacket",
+          "unit": "each",
+          "price_cents": {
+            "min": 3000,
+            "typical": 7000,
+            "max": 20000
+          }
+        },
+        {
+          "id": "winter_coat",
+          "name": "Insulated winter coat or parka",
+          "unit": "each",
+          "price_cents": {
+            "min": 6000,
+            "typical": 15000,
+            "max": 50000
+          }
+        },
+        {
+          "id": "pajamas",
+          "name": "Pajamas",
+          "unit": "set",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 7000
+          }
+        },
+        {
+          "id": "swimsuit",
+          "name": "Swimsuit",
+          "unit": "each",
+          "price_cents": {
+            "min": 2000,
+            "typical": 4500,
+            "max": 10000
+          }
+        },
+        {
+          "id": "dry_cleaning_shirt",
+          "name": "Dry cleaning, one shirt",
+          "unit": "each",
+          "price_cents": {
+            "min": 300,
+            "typical": 450,
+            "max": 700
+          },
+          "notes": "service, not a garment"
+        }
+      ]
+    },
+    {
+      "id": "electronics",
+      "name": "Electronics",
+      "basis": "Retail list and street prices (2025), rounded; min = budget or older generation, max = high-end consumer.",
+      "items": [
+        {
+          "id": "smartphone_budget",
+          "name": "Smartphone, budget",
+          "unit": "each",
+          "price_cents": {
+            "min": 12000,
+            "typical": 25000,
+            "max": 40000
+          }
+        },
+        {
+          "id": "smartphone_midrange",
+          "name": "Smartphone, mid-range",
+          "unit": "each",
+          "price_cents": {
+            "min": 35000,
+            "typical": 50000,
+            "max": 70000
+          }
+        },
+        {
+          "id": "smartphone_flagship",
+          "name": "Smartphone, flagship",
+          "unit": "each",
+          "price_cents": {
+            "min": 70000,
+            "typical": 110000,
+            "max": 160000
+          }
+        },
+        {
+          "id": "laptop_budget",
+          "name": "Laptop, budget",
+          "unit": "each",
+          "price_cents": {
+            "min": 30000,
+            "typical": 50000,
+            "max": 70000
+          }
+        },
+        {
+          "id": "laptop_mainstream",
+          "name": "Laptop, mainstream",
+          "unit": "each",
+          "price_cents": {
+            "min": 70000,
+            "typical": 110000,
+            "max": 160000
+          }
+        },
+        {
+          "id": "laptop_premium",
+          "name": "Laptop, premium or gaming",
+          "unit": "each",
+          "price_cents": {
+            "min": 150000,
+            "typical": 220000,
+            "max": 400000
+          }
+        },
+        {
+          "id": "tablet",
+          "name": "Tablet",
+          "unit": "each",
+          "price_cents": {
+            "min": 12000,
+            "typical": 35000,
+            "max": 130000
+          }
+        },
+        {
+          "id": "tv_55_4k",
+          "name": "Television, 55 in 4K",
+          "unit": "each",
+          "price_cents": {
+            "min": 22000,
+            "typical": 40000,
+            "max": 120000
+          }
+        },
+        {
+          "id": "tv_65_4k",
+          "name": "Television, 65 in 4K",
+          "unit": "each",
+          "price_cents": {
+            "min": 35000,
+            "typical": 60000,
+            "max": 200000
+          }
+        },
+        {
+          "id": "monitor_24",
+          "name": "Computer monitor, 24 in",
+          "unit": "each",
+          "price_cents": {
+            "min": 8000,
+            "typical": 14000,
+            "max": 30000
+          }
+        },
+        {
+          "id": "game_console",
+          "name": "Game console",
+          "unit": "each",
+          "price_cents": {
+            "min": 30000,
+            "typical": 50000,
+            "max": 70000
+          }
+        },
+        {
+          "id": "smartwatch",
+          "name": "Smartwatch",
+          "unit": "each",
+          "price_cents": {
+            "min": 10000,
+            "typical": 30000,
+            "max": 80000
+          }
+        },
+        {
+          "id": "earbuds_wireless",
+          "name": "Wireless earbuds",
+          "unit": "pair",
+          "price_cents": {
+            "min": 1500,
+            "typical": 7500,
+            "max": 25000
+          }
+        },
+        {
+          "id": "headphones_wired",
+          "name": "Headphones, wired",
+          "unit": "pair",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2500,
+            "max": 8000
+          }
+        },
+        {
+          "id": "bluetooth_speaker",
+          "name": "Bluetooth speaker",
+          "unit": "each",
+          "price_cents": {
+            "min": 2500,
+            "typical": 7000,
+            "max": 30000
+          }
+        },
+        {
+          "id": "wifi_router",
+          "name": "Wi-Fi router",
+          "unit": "each",
+          "price_cents": {
+            "min": 4000,
+            "typical": 10000,
+            "max": 30000
+          }
+        },
+        {
+          "id": "charger_cable",
+          "name": "Charging cable",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 1500,
+            "max": 3500
+          }
+        },
+        {
+          "id": "wall_charger",
+          "name": "USB wall charger",
+          "unit": "each",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2000,
+            "max": 5000
+          }
+        },
+        {
+          "id": "power_bank",
+          "name": "Power bank",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "phone_case",
+          "name": "Phone case",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 2000,
+            "max": 5000
+          }
+        },
+        {
+          "id": "screen_protector",
+          "name": "Screen protector",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 1500,
+            "max": 4000
+          }
+        },
+        {
+          "id": "usb_flash_drive",
+          "name": "USB flash drive",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 1500,
+            "max": 4000
+          }
+        },
+        {
+          "id": "external_ssd",
+          "name": "External SSD, 1 TB",
+          "unit": "each",
+          "price_cents": {
+            "min": 7000,
+            "typical": 12000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "keyboard",
+          "name": "Keyboard",
+          "unit": "each",
+          "price_cents": {
+            "min": 2000,
+            "typical": 5000,
+            "max": 20000
+          }
+        },
+        {
+          "id": "mouse",
+          "name": "Mouse",
+          "unit": "each",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2500,
+            "max": 10000
+          }
+        },
+        {
+          "id": "printer_inkjet",
+          "name": "Inkjet printer",
+          "unit": "each",
+          "price_cents": {
+            "min": 6000,
+            "typical": 11000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "batteries_aa_12",
+          "name": "AA batteries",
+          "unit": "12-pack",
+          "price_cents": {
+            "min": 800,
+            "typical": 1400,
+            "max": 2500
+          }
+        }
+      ]
+    },
+    {
+      "id": "tools_hardware",
+      "name": "Tools and hardware",
+      "basis": "Home-improvement retail prices (2025), rounded; min = house brand, max = prosumer.",
+      "items": [
+        {
+          "id": "hammer_claw",
+          "name": "Claw hammer",
+          "unit": "each",
+          "price_cents": {
+            "min": 1200,
+            "typical": 2500,
+            "max": 4500
+          }
+        },
+        {
+          "id": "screwdriver_set",
+          "name": "Screwdriver set",
+          "unit": "set",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2500,
+            "max": 6000
+          }
+        },
+        {
+          "id": "wrench_set",
+          "name": "Combination wrench set",
+          "unit": "set",
+          "price_cents": {
+            "min": 2500,
+            "typical": 6000,
+            "max": 20000
+          }
+        },
+        {
+          "id": "socket_set_mechanic",
+          "name": "Mechanic socket and ratchet set, 45-100 pieces",
+          "unit": "set",
+          "price_cents": {
+            "min": 3000,
+            "typical": 7500,
+            "max": 25000
+          }
+        },
+        {
+          "id": "adjustable_wrench",
+          "name": "Adjustable wrench",
+          "unit": "each",
+          "price_cents": {
+            "min": 1200,
+            "typical": 2200,
+            "max": 5000
+          }
+        },
+        {
+          "id": "pliers_set",
+          "name": "Pliers set",
+          "unit": "set",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3500,
+            "max": 9000
+          }
+        },
+        {
+          "id": "tape_measure_25",
+          "name": "Tape measure, 25 ft",
+          "unit": "each",
+          "price_cents": {
+            "min": 600,
+            "typical": 1500,
+            "max": 3500
+          }
+        },
+        {
+          "id": "utility_knife",
+          "name": "Utility knife",
+          "unit": "each",
+          "price_cents": {
+            "min": 500,
+            "typical": 1200,
+            "max": 3000
+          }
+        },
+        {
+          "id": "hand_saw",
+          "name": "Hand saw",
+          "unit": "each",
+          "price_cents": {
+            "min": 1200,
+            "typical": 2500,
+            "max": 5000
+          }
+        },
+        {
+          "id": "level_2ft",
+          "name": "Level, 2 ft",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 1800,
+            "max": 4500
+          }
+        },
+        {
+          "id": "cordless_drill_kit",
+          "name": "Cordless drill kit",
+          "unit": "kit",
+          "price_cents": {
+            "min": 5000,
+            "typical": 9900,
+            "max": 25000
+          }
+        },
+        {
+          "id": "circular_saw",
+          "name": "Circular saw, corded or cordless",
+          "unit": "each",
+          "price_cents": {
+            "min": 5000,
+            "typical": 12000,
+            "max": 30000
+          }
+        },
+        {
+          "id": "work_gloves",
+          "name": "Work gloves",
+          "unit": "pair",
+          "price_cents": {
+            "min": 800,
+            "typical": 1600,
+            "max": 4000
+          }
+        },
+        {
+          "id": "safety_glasses",
+          "name": "Safety glasses",
+          "unit": "pair",
+          "price_cents": {
+            "min": 500,
+            "typical": 1200,
+            "max": 3000
+          }
+        },
+        {
+          "id": "ladder_6ft",
+          "name": "Step ladder, 6 ft",
+          "unit": "each",
+          "price_cents": {
+            "min": 5000,
+            "typical": 9000,
+            "max": 20000
+          }
+        },
+        {
+          "id": "extension_cord_25",
+          "name": "Extension cord, 25 ft",
+          "unit": "each",
+          "price_cents": {
+            "min": 1200,
+            "typical": 2000,
+            "max": 4000
+          }
+        },
+        {
+          "id": "duct_tape",
+          "name": "Duct tape",
+          "unit": "roll",
+          "price_cents": {
+            "min": 500,
+            "typical": 900,
+            "max": 1500
+          }
+        },
+        {
+          "id": "nails_1lb",
+          "name": "Nails, common",
+          "unit": "1 lb box",
+          "price_cents": {
+            "min": 500,
+            "typical": 900,
+            "max": 1500
+          }
+        },
+        {
+          "id": "screws_assorted",
+          "name": "Screws, assorted box",
+          "unit": "box",
+          "price_cents": {
+            "min": 600,
+            "typical": 1100,
+            "max": 2200
+          }
+        },
+        {
+          "id": "paint_gallon",
+          "name": "Interior paint",
+          "unit": "gallon",
+          "price_cents": {
+            "min": 2000,
+            "typical": 3500,
+            "max": 7000
+          }
+        },
+        {
+          "id": "toolbox_20in",
+          "name": "Toolbox, 20 in",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "shovel",
+          "name": "Shovel",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 6000
+          }
+        },
+        {
+          "id": "garden_hose_50",
+          "name": "Garden hose, 50 ft",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 6000
+          }
+        },
+        {
+          "id": "wd40_11oz",
+          "name": "WD-40 or similar lubricant",
+          "unit": "11 oz can",
+          "price_cents": {
+            "min": 600,
+            "typical": 900,
+            "max": 1400
+          }
+        }
+      ]
+    },
+    {
+      "id": "household_goods",
+      "name": "Household goods",
+      "basis": "Mass-merchant retail prices (2025), rounded.",
+      "items": [
+        {
+          "id": "toilet_paper_12",
+          "name": "Toilet paper",
+          "unit": "12 rolls",
+          "price_cents": {
+            "min": 1000,
+            "typical": 1800,
+            "max": 3000
+          }
+        },
+        {
+          "id": "paper_towels_6",
+          "name": "Paper towels",
+          "unit": "6 rolls",
+          "price_cents": {
+            "min": 800,
+            "typical": 1300,
+            "max": 2200
+          }
+        },
+        {
+          "id": "dish_soap",
+          "name": "Dish soap",
+          "unit": "~20 oz",
+          "price_cents": {
+            "min": 200,
+            "typical": 400,
+            "max": 700
+          }
+        },
+        {
+          "id": "laundry_detergent",
+          "name": "Laundry detergent",
+          "unit": "64 oz",
+          "price_cents": {
+            "min": 700,
+            "typical": 1400,
+            "max": 2400
+          }
+        },
+        {
+          "id": "trash_bags_40",
+          "name": "Trash bags",
+          "unit": "40 count",
+          "price_cents": {
+            "min": 600,
+            "typical": 1000,
+            "max": 1800
+          }
+        },
+        {
+          "id": "sponges_6",
+          "name": "Sponges",
+          "unit": "6 pack",
+          "price_cents": {
+            "min": 300,
+            "typical": 500,
+            "max": 900
+          }
+        },
+        {
+          "id": "cleaning_spray",
+          "name": "All-purpose cleaner",
+          "unit": "~28 oz",
+          "price_cents": {
+            "min": 250,
+            "typical": 400,
+            "max": 700
+          }
+        },
+        {
+          "id": "light_bulbs_led_4",
+          "name": "LED light bulbs",
+          "unit": "4 pack",
+          "price_cents": {
+            "min": 600,
+            "typical": 1000,
+            "max": 2000
+          }
+        },
+        {
+          "id": "bedding_sheet_set",
+          "name": "Bed sheet set, queen",
+          "unit": "set",
+          "price_cents": {
+            "min": 2000,
+            "typical": 4500,
+            "max": 12000
+          }
+        },
+        {
+          "id": "bath_towel",
+          "name": "Bath towel",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 1500,
+            "max": 3500
+          }
+        },
+        {
+          "id": "pillow",
+          "name": "Pillow",
+          "unit": "each",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2500,
+            "max": 6000
+          }
+        },
+        {
+          "id": "blanket",
+          "name": "Blanket or throw",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3500,
+            "max": 9000
+          }
+        },
+        {
+          "id": "mattress_queen",
+          "name": "Mattress, queen",
+          "unit": "each",
+          "price_cents": {
+            "min": 25000,
+            "typical": 70000,
+            "max": 200000
+          }
+        },
+        {
+          "id": "vacuum_cleaner",
+          "name": "Vacuum cleaner",
+          "unit": "each",
+          "price_cents": {
+            "min": 8000,
+            "typical": 20000,
+            "max": 60000
+          }
+        },
+        {
+          "id": "microwave",
+          "name": "Microwave oven",
+          "unit": "each",
+          "price_cents": {
+            "min": 7000,
+            "typical": 12000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "coffee_maker",
+          "name": "Coffee maker",
+          "unit": "each",
+          "price_cents": {
+            "min": 2500,
+            "typical": 6000,
+            "max": 20000
+          }
+        },
+        {
+          "id": "cookware_set",
+          "name": "Cookware set",
+          "unit": "set",
+          "price_cents": {
+            "min": 4000,
+            "typical": 12000,
+            "max": 40000
+          }
+        },
+        {
+          "id": "dish_set_16",
+          "name": "Dish set",
+          "unit": "16 piece",
+          "price_cents": {
+            "min": 3000,
+            "typical": 6000,
+            "max": 15000
+          }
+        },
+        {
+          "id": "office_desk",
+          "name": "Desk",
+          "unit": "each",
+          "price_cents": {
+            "min": 8000,
+            "typical": 18000,
+            "max": 50000
+          }
+        },
+        {
+          "id": "office_chair",
+          "name": "Office chair",
+          "unit": "each",
+          "price_cents": {
+            "min": 5000,
+            "typical": 15000,
+            "max": 40000
+          }
+        },
+        {
+          "id": "sofa",
+          "name": "Sofa, 3-seat",
+          "unit": "each",
+          "price_cents": {
+            "min": 30000,
+            "typical": 80000,
+            "max": 200000
+          }
+        },
+        {
+          "id": "air_freshener_candle",
+          "name": "Candle or air freshener",
+          "unit": "each",
+          "price_cents": {
+            "min": 500,
+            "typical": 1200,
+            "max": 3000
+          }
+        },
+        {
+          "id": "pet_food_dog_30lb",
+          "name": "Dog food",
+          "unit": "30 lb bag",
+          "price_cents": {
+            "min": 2500,
+            "typical": 4500,
+            "max": 8000
+          }
+        },
+        {
+          "id": "cat_litter_20lb",
+          "name": "Cat litter",
+          "unit": "20 lb",
+          "price_cents": {
+            "min": 1200,
+            "typical": 2000,
+            "max": 3200
+          }
+        }
+      ]
+    },
+    {
+      "id": "personal_care",
+      "name": "Personal care",
+      "basis": "Drugstore and salon prices (2025), rounded.",
+      "items": [
+        {
+          "id": "shampoo",
+          "name": "Shampoo",
+          "unit": "~12 oz",
+          "price_cents": {
+            "min": 300,
+            "typical": 600,
+            "max": 1500
+          }
+        },
+        {
+          "id": "toothpaste",
+          "name": "Toothpaste",
+          "unit": "each",
+          "price_cents": {
+            "min": 200,
+            "typical": 400,
+            "max": 700
+          }
+        },
+        {
+          "id": "toothbrush",
+          "name": "Toothbrush",
+          "unit": "each",
+          "price_cents": {
+            "min": 200,
+            "typical": 400,
+            "max": 1000
+          }
+        },
+        {
+          "id": "deodorant",
+          "name": "Deodorant",
+          "unit": "each",
+          "price_cents": {
+            "min": 300,
+            "typical": 600,
+            "max": 1000
+          }
+        },
+        {
+          "id": "body_wash_soap",
+          "name": "Body wash or bar soap",
+          "unit": "each",
+          "price_cents": {
+            "min": 300,
+            "typical": 600,
+            "max": 1000
+          }
+        },
+        {
+          "id": "razor_cartridges",
+          "name": "Razor cartridges",
+          "unit": "4-8 pack",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2000,
+            "max": 3500
+          }
+        },
+        {
+          "id": "sunscreen",
+          "name": "Sunscreen",
+          "unit": "~8 oz",
+          "price_cents": {
+            "min": 700,
+            "typical": 1200,
+            "max": 2200
+          }
+        },
+        {
+          "id": "makeup_basic",
+          "name": "Makeup item (basic)",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 1500,
+            "max": 4000
+          }
+        },
+        {
+          "id": "feminine_products",
+          "name": "Feminine hygiene products",
+          "unit": "box",
+          "price_cents": {
+            "min": 400,
+            "typical": 800,
+            "max": 1500
+          }
+        },
+        {
+          "id": "diapers",
+          "name": "Diapers",
+          "unit": "~100 count",
+          "price_cents": {
+            "min": 2000,
+            "typical": 3000,
+            "max": 4500
+          }
+        },
+        {
+          "id": "haircut",
+          "name": "Haircut, men or basic",
+          "unit": "visit",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 7500
+          },
+          "notes": "tip extra"
+        },
+        {
+          "id": "haircut_salon",
+          "name": "Haircut, salon",
+          "unit": "visit",
+          "price_cents": {
+            "min": 4000,
+            "typical": 7500,
+            "max": 15000
+          },
+          "notes": "tip extra"
+        },
+        {
+          "id": "hair_color",
+          "name": "Hair coloring, salon",
+          "unit": "visit",
+          "price_cents": {
+            "min": 6000,
+            "typical": 12000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "manicure",
+          "name": "Manicure",
+          "unit": "visit",
+          "price_cents": {
+            "min": 2000,
+            "typical": 3500,
+            "max": 6000
+          }
+        },
+        {
+          "id": "massage_hour",
+          "name": "Massage, 60 minutes",
+          "unit": "hour",
+          "price_cents": {
+            "min": 6000,
+            "typical": 10000,
+            "max": 18000
+          }
+        },
+        {
+          "id": "gym_day_pass",
+          "name": "Gym day pass",
+          "unit": "day",
+          "price_cents": {
+            "min": 1000,
+            "typical": 1800,
+            "max": 3000
+          }
+        }
+      ]
+    },
+    {
+      "id": "medical",
+      "name": "Medical",
+      "basis": "KFF, Healthcare Bluebook / FAIR Health typical charges and common plan copays (2025), rounded; \"uninsured\" rows are cash or billed amounts, insured patients pay copays, deductibles and coinsurance instead.",
+      "notes": "Monthly premiums and deductibles are in finance.json.",
+      "items": [
+        {
+          "id": "copay_primary_care",
+          "name": "Primary-care visit copay (insured)",
+          "unit": "visit",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 6000
+          }
+        },
+        {
+          "id": "copay_specialist",
+          "name": "Specialist visit copay (insured)",
+          "unit": "visit",
+          "price_cents": {
+            "min": 2500,
+            "typical": 5000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "copay_urgent_care",
+          "name": "Urgent-care visit copay (insured)",
+          "unit": "visit",
+          "price_cents": {
+            "min": 3000,
+            "typical": 7500,
+            "max": 15000
+          }
+        },
+        {
+          "id": "copay_er",
+          "name": "Emergency-room copay (insured)",
+          "unit": "visit",
+          "price_cents": {
+            "min": 15000,
+            "typical": 30000,
+            "max": 50000
+          }
+        },
+        {
+          "id": "primary_care_cash",
+          "name": "Primary-care visit, uninsured cash price",
+          "unit": "visit",
+          "price_cents": {
+            "min": 10000,
+            "typical": 17500,
+            "max": 30000
+          }
+        },
+        {
+          "id": "urgent_care_cash",
+          "name": "Urgent-care visit, uninsured cash price",
+          "unit": "visit",
+          "price_cents": {
+            "min": 10000,
+            "typical": 18000,
+            "max": 30000
+          }
+        },
+        {
+          "id": "er_visit_billed",
+          "name": "ER visit, billed or uninsured",
+          "unit": "visit",
+          "price_cents": {
+            "min": 80000,
+            "typical": 220000,
+            "max": 500000
+          }
+        },
+        {
+          "id": "ambulance_ride",
+          "name": "Ground ambulance ride, billed",
+          "unit": "trip",
+          "price_cents": {
+            "min": 80000,
+            "typical": 150000,
+            "max": 300000
+          }
+        },
+        {
+          "id": "hospital_night_billed",
+          "name": "Hospital stay, billed",
+          "unit": "night",
+          "price_cents": {
+            "min": 200000,
+            "typical": 300000,
+            "max": 600000
+          }
+        },
+        {
+          "id": "rx_generic_copay",
+          "name": "Prescription, generic, insured copay",
+          "unit": "fill (30 days)",
+          "price_cents": {
+            "min": 500,
+            "typical": 1200,
+            "max": 2000
+          }
+        },
+        {
+          "id": "rx_brand_copay",
+          "name": "Prescription, brand, insured copay",
+          "unit": "fill (30 days)",
+          "price_cents": {
+            "min": 2500,
+            "typical": 4500,
+            "max": 9000
+          }
+        },
+        {
+          "id": "rx_generic_cash",
+          "name": "Prescription, generic, cash or discount-card price",
+          "unit": "fill (30 days)",
+          "price_cents": {
+            "min": 400,
+            "typical": 1500,
+            "max": 4000
+          }
+        },
+        {
+          "id": "rx_brand_cash",
+          "name": "Prescription, brand, cash list price",
+          "unit": "fill (30 days)",
+          "price_cents": {
+            "min": 15000,
+            "typical": 50000,
+            "max": 120000
+          }
+        },
+        {
+          "id": "dental_cleaning",
+          "name": "Dental cleaning and exam",
+          "unit": "visit",
+          "price_cents": {
+            "min": 7500,
+            "typical": 12000,
+            "max": 20000
+          }
+        },
+        {
+          "id": "dental_filling",
+          "name": "Dental filling",
+          "unit": "tooth",
+          "price_cents": {
+            "min": 15000,
+            "typical": 25000,
+            "max": 45000
+          }
+        },
+        {
+          "id": "dental_crown",
+          "name": "Dental crown",
+          "unit": "tooth",
+          "price_cents": {
+            "min": 80000,
+            "typical": 120000,
+            "max": 200000
+          }
+        },
+        {
+          "id": "eye_exam",
+          "name": "Eye exam",
+          "unit": "visit",
+          "price_cents": {
+            "min": 8000,
+            "typical": 15000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "eyeglasses",
+          "name": "Eyeglasses with lenses",
+          "unit": "pair",
+          "price_cents": {
+            "min": 10000,
+            "typical": 25000,
+            "max": 60000
+          }
+        },
+        {
+          "id": "flu_shot",
+          "name": "Flu shot (often free with insurance)",
+          "unit": "shot",
+          "price_cents": {
+            "min": 0,
+            "typical": 3500,
+            "max": 6500
+          }
+        },
+        {
+          "id": "otc_pain_reliever",
+          "name": "Over-the-counter pain reliever",
+          "unit": "bottle",
+          "price_cents": {
+            "min": 500,
+            "typical": 900,
+            "max": 1800
+          }
+        },
+        {
+          "id": "otc_cold_medicine",
+          "name": "Over-the-counter cold or allergy medicine",
+          "unit": "box",
+          "price_cents": {
+            "min": 600,
+            "typical": 1100,
+            "max": 2000
+          }
+        }
+      ]
+    },
+    {
+      "id": "entertainment",
+      "name": "Entertainment",
+      "basis": "Box-office, venue and retailer prices (2025), rounded.",
+      "items": [
+        {
+          "id": "movie_ticket",
+          "name": "Movie ticket, adult",
+          "unit": "ticket",
+          "price_cents": {
+            "min": 800,
+            "typical": 1250,
+            "max": 2200
+          },
+          "notes": "min = matinee, max = IMAX or premium"
+        },
+        {
+          "id": "movie_popcorn",
+          "name": "Movie theater popcorn, medium",
+          "unit": "each",
+          "price_cents": {
+            "min": 700,
+            "typical": 900,
+            "max": 1300
+          }
+        },
+        {
+          "id": "concert_ticket",
+          "name": "Concert ticket",
+          "unit": "ticket",
+          "price_cents": {
+            "min": 3500,
+            "typical": 9000,
+            "max": 35000
+          },
+          "notes": "arena or club; stadium headliners can exceed max"
+        },
+        {
+          "id": "sports_ticket",
+          "name": "Pro sports ticket",
+          "unit": "ticket",
+          "price_cents": {
+            "min": 2500,
+            "typical": 6000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "theme_park_day",
+          "name": "Theme park admission",
+          "unit": "day",
+          "price_cents": {
+            "min": 6500,
+            "typical": 12000,
+            "max": 19000
+          }
+        },
+        {
+          "id": "museum_admission",
+          "name": "Museum admission",
+          "unit": "person",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2200,
+            "max": 3500
+          }
+        },
+        {
+          "id": "bowling_game",
+          "name": "Bowling, one game",
+          "unit": "person",
+          "price_cents": {
+            "min": 400,
+            "typical": 700,
+            "max": 1200
+          }
+        },
+        {
+          "id": "mini_golf",
+          "name": "Mini golf round",
+          "unit": "person",
+          "price_cents": {
+            "min": 800,
+            "typical": 1400,
+            "max": 2000
+          }
+        },
+        {
+          "id": "golf_round",
+          "name": "Golf round, public course",
+          "unit": "round",
+          "price_cents": {
+            "min": 3000,
+            "typical": 6500,
+            "max": 20000
+          }
+        },
+        {
+          "id": "live_theater",
+          "name": "Live theater ticket",
+          "unit": "ticket",
+          "price_cents": {
+            "min": 2500,
+            "typical": 6500,
+            "max": 30000
+          }
+        },
+        {
+          "id": "video_game_new",
+          "name": "Video game, new release",
+          "unit": "each",
+          "price_cents": {
+            "min": 2000,
+            "typical": 6000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "book_paperback",
+          "name": "Book, paperback",
+          "unit": "each",
+          "price_cents": {
+            "min": 800,
+            "typical": 1700,
+            "max": 2800
+          }
+        },
+        {
+          "id": "streaming_rental",
+          "name": "Streaming movie rental",
+          "unit": "each",
+          "price_cents": {
+            "min": 399,
+            "typical": 599,
+            "max": 699
+          }
+        },
+        {
+          "id": "bar_cover",
+          "name": "Bar or club cover charge",
+          "unit": "person",
+          "price_cents": {
+            "min": 500,
+            "typical": 1500,
+            "max": 4000
+          }
+        },
+        {
+          "id": "arcade_session",
+          "name": "Arcade session",
+          "unit": "visit",
+          "price_cents": {
+            "min": 500,
+            "typical": 1500,
+            "max": 3000
+          }
+        },
+        {
+          "id": "amusement_ride_carnival",
+          "name": "Carnival or fair ride",
+          "unit": "ride",
+          "price_cents": {
+            "min": 300,
+            "typical": 600,
+            "max": 1000
+          }
+        }
+      ]
+    },
+    {
+      "id": "transport",
+      "name": "Transport (public and for-hire)",
+      "basis": "Transit agencies, TNC and taxi rate cards, DOT Air Travel Consumer Report and Amtrak fares (2025), rounded; rideshare rates vary widely by metro and surge.",
+      "items": [
+        {
+          "id": "bus_fare_local",
+          "name": "Local bus fare",
+          "unit": "ride",
+          "price_cents": {
+            "min": 100,
+            "typical": 225,
+            "max": 350
+          }
+        },
+        {
+          "id": "subway_fare",
+          "name": "Subway or metro fare",
+          "unit": "ride",
+          "price_cents": {
+            "min": 200,
+            "typical": 290,
+            "max": 400
+          }
+        },
+        {
+          "id": "transit_pass_monthly",
+          "name": "Transit pass, unlimited",
+          "unit": "month",
+          "price_cents": {
+            "min": 4000,
+            "typical": 7500,
+            "max": 13200
+          }
+        },
+        {
+          "id": "commuter_rail_ticket",
+          "name": "Commuter rail ticket",
+          "unit": "trip",
+          "price_cents": {
+            "min": 500,
+            "typical": 1200,
+            "max": 2500
+          }
+        },
+        {
+          "id": "rideshare_base_fare",
+          "name": "Rideshare base fare (flag drop plus booking fee)",
+          "unit": "ride",
+          "price_cents": {
+            "min": 250,
+            "typical": 400,
+            "max": 600
+          }
+        },
+        {
+          "id": "rideshare_per_mile",
+          "name": "Rideshare distance rate",
+          "unit": "mile",
+          "price_cents": {
+            "min": 100,
+            "typical": 180,
+            "max": 300
+          }
+        },
+        {
+          "id": "rideshare_per_minute",
+          "name": "Rideshare time rate",
+          "unit": "minute",
+          "price_cents": {
+            "min": 15,
+            "typical": 30,
+            "max": 60
+          }
+        },
+        {
+          "id": "rideshare_minimum_fare",
+          "name": "Rideshare minimum fare",
+          "unit": "ride",
+          "price_cents": {
+            "min": 500,
+            "typical": 800,
+            "max": 1200
+          }
+        },
+        {
+          "id": "taxi_flag_drop",
+          "name": "Taxi flag drop",
+          "unit": "ride",
+          "price_cents": {
+            "min": 250,
+            "typical": 350,
+            "max": 500
+          }
+        },
+        {
+          "id": "taxi_per_mile",
+          "name": "Taxi distance rate",
+          "unit": "mile",
+          "price_cents": {
+            "min": 200,
+            "typical": 300,
+            "max": 400
+          }
+        },
+        {
+          "id": "flight_domestic_segment",
+          "name": "Domestic flight, per segment (one-way, economy)",
+          "unit": "segment",
+          "price_cents": {
+            "min": 6000,
+            "typical": 19000,
+            "max": 60000
+          },
+          "notes": "basic economy to last-minute fares"
+        },
+        {
+          "id": "flight_checked_bag",
+          "name": "Checked bag, first, domestic",
+          "unit": "bag per direction",
+          "price_cents": {
+            "min": 3500,
+            "typical": 4000,
+            "max": 7000
+          }
+        },
+        {
+          "id": "train_amtrak_regional",
+          "name": "Amtrak regional or corridor train ticket",
+          "unit": "trip",
+          "price_cents": {
+            "min": 2500,
+            "typical": 8000,
+            "max": 30000
+          }
+        },
+        {
+          "id": "intercity_bus",
+          "name": "Intercity bus ticket",
+          "unit": "trip",
+          "price_cents": {
+            "min": 1500,
+            "typical": 4000,
+            "max": 9000
+          }
+        },
+        {
+          "id": "parking_garage_hour",
+          "name": "Parking, garage or lot",
+          "unit": "hour",
+          "price_cents": {
+            "min": 200,
+            "typical": 500,
+            "max": 1500
+          }
+        },
+        {
+          "id": "parking_garage_day",
+          "name": "Parking, garage or lot",
+          "unit": "day",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 6000
+          }
+        },
+        {
+          "id": "bridge_toll",
+          "name": "Toll, typical road or bridge",
+          "unit": "crossing",
+          "price_cents": {
+            "min": 100,
+            "typical": 300,
+            "max": 1500
+          }
+        },
+        {
+          "id": "bike_share_ride",
+          "name": "Bike or scooter share ride, 20 minutes",
+          "unit": "ride",
+          "price_cents": {
+            "min": 200,
+            "typical": 500,
+            "max": 900
+          }
+        },
+        {
+          "id": "ferry_ticket",
+          "name": "Local ferry fare",
+          "unit": "crossing",
+          "price_cents": {
+            "min": 300,
+            "typical": 900,
+            "max": 2500
+          }
+        }
+      ]
+    },
+    {
+      "id": "fuel",
+      "name": "Fuel and charging",
+      "basis": "AAA / EIA 2025 national average pump prices with state ranges, EV charging from network rate cards and EIA, marina fuel-dock quotes, rounded. Fuel prices are in cents per gallon (or per kWh for charging), so 315 means $3.15.",
+      "price_unit_note": "All prices are integer cents. Per-kWh rows are in cents per kWh.",
+      "items": [
+        {
+          "id": "gasoline_regular",
+          "name": "Gasoline, regular",
+          "unit": "gallon",
+          "price_cents": {
+            "min": 260,
+            "typical": 315,
+            "max": 500
+          },
+          "notes": "AAA national average roughly $3.10-3.30 in 2025; California runs $1.00+ above"
+        },
+        {
+          "id": "gasoline_midgrade",
+          "name": "Gasoline, midgrade",
+          "unit": "gallon",
+          "price_cents": {
+            "min": 300,
+            "typical": 395,
+            "max": 600
+          }
+        },
+        {
+          "id": "gasoline_premium",
+          "name": "Gasoline, premium",
+          "unit": "gallon",
+          "price_cents": {
+            "min": 330,
+            "typical": 430,
+            "max": 650
+          }
+        },
+        {
+          "id": "diesel",
+          "name": "Diesel",
+          "unit": "gallon",
+          "price_cents": {
+            "min": 330,
+            "typical": 375,
+            "max": 560
+          }
+        },
+        {
+          "id": "e85",
+          "name": "E85 ethanol blend",
+          "unit": "gallon",
+          "price_cents": {
+            "min": 230,
+            "typical": 280,
+            "max": 400
+          }
+        },
+        {
+          "id": "marine_gasoline",
+          "name": "Marine gasoline at a fuel dock",
+          "unit": "gallon",
+          "price_cents": {
+            "min": 400,
+            "typical": 500,
+            "max": 700
+          },
+          "notes": "ethanol-free premium typical at marinas; fuel docks carry a premium over road fuel"
+        },
+        {
+          "id": "marine_diesel",
+          "name": "Marine diesel at a fuel dock",
+          "unit": "gallon",
+          "price_cents": {
+            "min": 400,
+            "typical": 500,
+            "max": 650
+          }
+        },
+        {
+          "id": "ev_home_kwh",
+          "name": "EV charging at home",
+          "unit": "kWh",
+          "price_cents": {
+            "min": 10,
+            "typical": 17,
+            "max": 38
+          },
+          "notes": "residential electricity rate; see regions.json"
+        },
+        {
+          "id": "ev_public_l2_kwh",
+          "name": "EV charging, public Level 2",
+          "unit": "kWh",
+          "price_cents": {
+            "min": 20,
+            "typical": 30,
+            "max": 50
+          }
+        },
+        {
+          "id": "ev_dc_fast_kwh",
+          "name": "EV charging, DC fast",
+          "unit": "kWh",
+          "price_cents": {
+            "min": 35,
+            "typical": 52,
+            "max": 75
+          },
+          "notes": "cents per kWh"
+        },
+        {
+          "id": "propane_20lb_exchange",
+          "name": "Propane cylinder, 20 lb exchange or refill",
+          "unit": "cylinder",
+          "price_cents": {
+            "min": 2200,
+            "typical": 2800,
+            "max": 3500
+          }
+        }
+      ]
+    },
+    {
+      "id": "vehicle_services",
+      "name": "Vehicle services",
+      "basis": "AAA, Consumer Reports, RepairPal and shop price sheets (2025), rounded; shop labor rates run $110-$200 per hour.",
+      "items": [
+        {
+          "id": "oil_change_conventional",
+          "name": "Oil change, conventional",
+          "unit": "service",
+          "price_cents": {
+            "min": 3500,
+            "typical": 5500,
+            "max": 8500
+          }
+        },
+        {
+          "id": "oil_change_synthetic",
+          "name": "Oil change, full synthetic",
+          "unit": "service",
+          "price_cents": {
+            "min": 6500,
+            "typical": 9500,
+            "max": 14000
+          }
+        },
+        {
+          "id": "tire_rotation",
+          "name": "Tire rotation and balance",
+          "unit": "service",
+          "price_cents": {
+            "min": 2500,
+            "typical": 4000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "tire_set_of_4_installed",
+          "name": "Tires, set of four installed",
+          "unit": "set",
+          "price_cents": {
+            "min": 40000,
+            "typical": 70000,
+            "max": 140000
+          }
+        },
+        {
+          "id": "tire_patch",
+          "name": "Tire patch or plug",
+          "unit": "service",
+          "price_cents": {
+            "min": 1500,
+            "typical": 2500,
+            "max": 4000
+          }
+        },
+        {
+          "id": "brake_pads_axle",
+          "name": "Brake pads, one axle",
+          "unit": "axle",
+          "price_cents": {
+            "min": 15000,
+            "typical": 25000,
+            "max": 40000
+          }
+        },
+        {
+          "id": "brake_job_pads_rotors_axle",
+          "name": "Brake pads and rotors, one axle",
+          "unit": "axle",
+          "price_cents": {
+            "min": 30000,
+            "typical": 50000,
+            "max": 90000
+          }
+        },
+        {
+          "id": "state_inspection",
+          "name": "State safety inspection",
+          "unit": "inspection",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2500,
+            "max": 7000
+          },
+          "notes": "many states have none; fee and scope vary widely"
+        },
+        {
+          "id": "emissions_test",
+          "name": "Emissions test",
+          "unit": "test",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 7500
+          }
+        },
+        {
+          "id": "car_wash_automatic",
+          "name": "Car wash, automatic",
+          "unit": "wash",
+          "price_cents": {
+            "min": 800,
+            "typical": 1500,
+            "max": 2500
+          }
+        },
+        {
+          "id": "car_wash_hand",
+          "name": "Car wash, hand or full-service",
+          "unit": "wash",
+          "price_cents": {
+            "min": 2500,
+            "typical": 4000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "car_detail",
+          "name": "Interior and exterior detail",
+          "unit": "job",
+          "price_cents": {
+            "min": 15000,
+            "typical": 30000,
+            "max": 60000
+          }
+        },
+        {
+          "id": "tow_hookup",
+          "name": "Tow, local hook-up fee",
+          "unit": "tow",
+          "price_cents": {
+            "min": 7500,
+            "typical": 12500,
+            "max": 25000
+          }
+        },
+        {
+          "id": "tow_per_mile",
+          "name": "Tow, per mile after the first 5-10",
+          "unit": "mile",
+          "price_cents": {
+            "min": 300,
+            "typical": 450,
+            "max": 700
+          }
+        },
+        {
+          "id": "jump_start_roadside",
+          "name": "Jump start or roadside service call",
+          "unit": "call",
+          "price_cents": {
+            "min": 4000,
+            "typical": 6500,
+            "max": 10000
+          },
+          "notes": "free with many membership plans"
+        },
+        {
+          "id": "battery_replacement",
+          "name": "Car battery replacement",
+          "unit": "job",
+          "price_cents": {
+            "min": 12000,
+            "typical": 20000,
+            "max": 35000
+          }
+        },
+        {
+          "id": "wiper_blades",
+          "name": "Wiper blades, pair installed",
+          "unit": "pair",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 6000
+          }
+        },
+        {
+          "id": "wheel_alignment",
+          "name": "Wheel alignment",
+          "unit": "service",
+          "price_cents": {
+            "min": 8000,
+            "typical": 12000,
+            "max": 20000
+          }
+        },
+        {
+          "id": "coolant_flush",
+          "name": "Coolant flush",
+          "unit": "service",
+          "price_cents": {
+            "min": 10000,
+            "typical": 15000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "windshield_replacement",
+          "name": "Windshield replacement",
+          "unit": "job",
+          "price_cents": {
+            "min": 25000,
+            "typical": 40000,
+            "max": 100000
+          }
+        },
+        {
+          "id": "transmission_service",
+          "name": "Transmission fluid service",
+          "unit": "service",
+          "price_cents": {
+            "min": 15000,
+            "typical": 25000,
+            "max": 45000
+          }
+        },
+        {
+          "id": "diagnostic_fee",
+          "name": "Diagnostic (check-engine) fee",
+          "unit": "service",
+          "price_cents": {
+            "min": 5000,
+            "typical": 9500,
+            "max": 18000
+          }
+        }
+      ]
+    },
+    {
+      "id": "lodging",
+      "name": "Lodging",
+      "basis": "STR / CoStar average daily rates by segment, KOA and recreation.gov camping fees (2025), rounded; before taxes and resort fees.",
+      "items": [
+        {
+          "id": "hotel_budget",
+          "name": "Hotel, budget or economy",
+          "unit": "night",
+          "price_cents": {
+            "min": 6000,
+            "typical": 9500,
+            "max": 14000
+          }
+        },
+        {
+          "id": "hotel_midscale",
+          "name": "Hotel, midscale to upper-midscale",
+          "unit": "night",
+          "price_cents": {
+            "min": 12000,
+            "typical": 16000,
+            "max": 26000
+          }
+        },
+        {
+          "id": "hotel_upscale",
+          "name": "Hotel, upscale",
+          "unit": "night",
+          "price_cents": {
+            "min": 19000,
+            "typical": 26000,
+            "max": 45000
+          }
+        },
+        {
+          "id": "hotel_luxury",
+          "name": "Hotel, luxury",
+          "unit": "night",
+          "price_cents": {
+            "min": 35000,
+            "typical": 60000,
+            "max": 150000
+          }
+        },
+        {
+          "id": "hostel_dorm_bed",
+          "name": "Hostel dorm bed",
+          "unit": "night",
+          "price_cents": {
+            "min": 3000,
+            "typical": 5000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "short_term_rental",
+          "name": "Short-term rental (whole unit)",
+          "unit": "night",
+          "price_cents": {
+            "min": 8000,
+            "typical": 16000,
+            "max": 35000
+          }
+        },
+        {
+          "id": "campground_tent_site",
+          "name": "Campground tent site",
+          "unit": "night",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3500,
+            "max": 6000
+          }
+        },
+        {
+          "id": "campground_rv_site",
+          "name": "Campground RV site with hookups",
+          "unit": "night",
+          "price_cents": {
+            "min": 3500,
+            "typical": 6000,
+            "max": 10000
+          }
+        },
+        {
+          "id": "resort_fee",
+          "name": "Resort or destination fee",
+          "unit": "night",
+          "price_cents": {
+            "min": 2500,
+            "typical": 3500,
+            "max": 5000
+          }
+        }
+      ]
+    },
+    {
+      "id": "utilities",
+      "name": "Utilities and services (monthly)",
+      "basis": "EIA, FCC/Ookla, BLS CPI and major-carrier price lists (2025), rounded. Household electricity use is about 860 kWh per month nationally (EIA), so a typical bill is roughly kWh x state rate in regions.json.",
+      "items": [
+        {
+          "id": "internet_home",
+          "name": "Home internet, broadband",
+          "unit": "month",
+          "price_cents": {
+            "min": 3000,
+            "typical": 6500,
+            "max": 10000
+          }
+        },
+        {
+          "id": "mobile_single_line",
+          "name": "Mobile plan, single line",
+          "unit": "month",
+          "price_cents": {
+            "min": 2000,
+            "typical": 5000,
+            "max": 9000
+          }
+        },
+        {
+          "id": "mobile_family_4",
+          "name": "Mobile plan, four lines",
+          "unit": "month",
+          "price_cents": {
+            "min": 6000,
+            "typical": 14000,
+            "max": 24000
+          }
+        },
+        {
+          "id": "water_sewer",
+          "name": "Water and sewer, household",
+          "unit": "month",
+          "price_cents": {
+            "min": 4000,
+            "typical": 8500,
+            "max": 15000
+          }
+        },
+        {
+          "id": "natural_gas",
+          "name": "Natural gas, household (seasonal average)",
+          "unit": "month",
+          "price_cents": {
+            "min": 3000,
+            "typical": 7500,
+            "max": 20000
+          }
+        },
+        {
+          "id": "electricity_household",
+          "name": "Electricity, household",
+          "unit": "month",
+          "price_cents": {
+            "min": 8000,
+            "typical": 14500,
+            "max": 25000
+          },
+          "notes": "about 860 kWh per month nationally"
+        },
+        {
+          "id": "trash_collection",
+          "name": "Trash and recycling collection",
+          "unit": "month",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 6000
+          }
+        },
+        {
+          "id": "cable_tv",
+          "name": "Cable or satellite TV",
+          "unit": "month",
+          "price_cents": {
+            "min": 5000,
+            "typical": 9000,
+            "max": 15000
+          }
+        },
+        {
+          "id": "renters_insurance",
+          "name": "Renters insurance",
+          "unit": "month",
+          "price_cents": {
+            "min": 1000,
+            "typical": 1700,
+            "max": 3000
+          }
+        },
+        {
+          "id": "homeowners_insurance",
+          "name": "Homeowners insurance",
+          "unit": "month",
+          "price_cents": {
+            "min": 12000,
+            "typical": 20000,
+            "max": 40000
+          }
+        },
+        {
+          "id": "home_security_monitoring",
+          "name": "Home security monitoring",
+          "unit": "month",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3500,
+            "max": 6500
+          }
+        }
+      ]
+    },
+    {
+      "id": "subscriptions",
+      "name": "Subscriptions",
+      "basis": "Published US list prices (late 2025), rounded; \"per year\" rows are annual fees.",
+      "items": [
+        {
+          "id": "streaming_video_ads",
+          "name": "Video streaming, ad-supported tier",
+          "unit": "month",
+          "price_cents": {
+            "min": 799,
+            "typical": 999,
+            "max": 1199
+          }
+        },
+        {
+          "id": "streaming_video_standard",
+          "name": "Video streaming, standard ad-free tier",
+          "unit": "month",
+          "price_cents": {
+            "min": 1299,
+            "typical": 1799,
+            "max": 2299
+          }
+        },
+        {
+          "id": "streaming_video_premium",
+          "name": "Video streaming, premium tier",
+          "unit": "month",
+          "price_cents": {
+            "min": 1899,
+            "typical": 2499,
+            "max": 3199
+          }
+        },
+        {
+          "id": "music_streaming",
+          "name": "Music streaming, individual",
+          "unit": "month",
+          "price_cents": {
+            "min": 1099,
+            "typical": 1199,
+            "max": 1399
+          }
+        },
+        {
+          "id": "music_streaming_family",
+          "name": "Music streaming, family",
+          "unit": "month",
+          "price_cents": {
+            "min": 1699,
+            "typical": 1999,
+            "max": 2399
+          }
+        },
+        {
+          "id": "video_platform_ad_free",
+          "name": "Video platform ad-free subscription",
+          "unit": "month",
+          "price_cents": {
+            "min": 1199,
+            "typical": 1399,
+            "max": 1799
+          }
+        },
+        {
+          "id": "retail_membership_prime",
+          "name": "Retail delivery membership",
+          "unit": "year",
+          "price_cents": {
+            "min": 11900,
+            "typical": 13900,
+            "max": 13900
+          }
+        },
+        {
+          "id": "warehouse_club_membership",
+          "name": "Warehouse club membership",
+          "unit": "year",
+          "price_cents": {
+            "min": 6000,
+            "typical": 6500,
+            "max": 13000
+          }
+        },
+        {
+          "id": "game_subscription",
+          "name": "Game subscription service",
+          "unit": "month",
+          "price_cents": {
+            "min": 999,
+            "typical": 1799,
+            "max": 2999
+          }
+        },
+        {
+          "id": "gym_membership",
+          "name": "Gym membership",
+          "unit": "month",
+          "price_cents": {
+            "min": 1000,
+            "typical": 4500,
+            "max": 20000
+          }
+        },
+        {
+          "id": "news_subscription",
+          "name": "News subscription",
+          "unit": "month",
+          "price_cents": {
+            "min": 400,
+            "typical": 1500,
+            "max": 3500
+          }
+        },
+        {
+          "id": "cloud_storage_2tb",
+          "name": "Cloud storage",
+          "unit": "month",
+          "price_cents": {
+            "min": 299,
+            "typical": 999,
+            "max": 1999
+          }
+        },
+        {
+          "id": "software_suite",
+          "name": "Productivity or creative software suite",
+          "unit": "month",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2299,
+            "max": 5500
+          }
+        },
+        {
+          "id": "audiobook_service",
+          "name": "Audiobook service",
+          "unit": "month",
+          "price_cents": {
+            "min": 1495,
+            "typical": 1495,
+            "max": 2495
+          }
+        },
+        {
+          "id": "ai_assistant_plus",
+          "name": "AI assistant plan",
+          "unit": "month",
+          "price_cents": {
+            "min": 0,
+            "typical": 2000,
+            "max": 20000
+          },
+          "notes": "free tiers exist; max reflects pro tier"
+        },
+        {
+          "id": "meal_kit",
+          "name": "Meal-kit subscription",
+          "unit": "week",
+          "price_cents": {
+            "min": 6000,
+            "typical": 9000,
+            "max": 15000
+          }
+        },
+        {
+          "id": "vpn",
+          "name": "VPN",
+          "unit": "month",
+          "price_cents": {
+            "min": 300,
+            "typical": 1000,
+            "max": 1300
+          }
+        },
+        {
+          "id": "magazine",
+          "name": "Magazine subscription",
+          "unit": "year",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3500,
+            "max": 6000
+          }
+        }
+      ]
+    },
+    {
+      "id": "gifts",
+      "name": "Gifts and occasions",
+      "basis": "Typical consumer spending from retailer and NRF survey patterns (2025), rounded.",
+      "items": [
+        {
+          "id": "greeting_card",
+          "name": "Greeting card",
+          "unit": "each",
+          "price_cents": {
+            "min": 300,
+            "typical": 500,
+            "max": 1000
+          }
+        },
+        {
+          "id": "flowers_bouquet",
+          "name": "Flower bouquet",
+          "unit": "each",
+          "price_cents": {
+            "min": 2500,
+            "typical": 5500,
+            "max": 12000
+          }
+        },
+        {
+          "id": "chocolate_box",
+          "name": "Box of chocolates",
+          "unit": "each",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2500,
+            "max": 6000
+          }
+        },
+        {
+          "id": "gift_card",
+          "name": "Gift card, typical",
+          "unit": "each",
+          "price_cents": {
+            "min": 2500,
+            "typical": 5000,
+            "max": 10000
+          }
+        },
+        {
+          "id": "gift_coworker",
+          "name": "Gift for a coworker or acquaintance",
+          "unit": "each",
+          "price_cents": {
+            "min": 1000,
+            "typical": 2000,
+            "max": 3500
+          }
+        },
+        {
+          "id": "gift_friend",
+          "name": "Gift for a friend or family member",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3500,
+            "max": 7500
+          }
+        },
+        {
+          "id": "gift_partner",
+          "name": "Gift for a partner or spouse",
+          "unit": "each",
+          "price_cents": {
+            "min": 5000,
+            "typical": 15000,
+            "max": 50000
+          }
+        },
+        {
+          "id": "gift_child",
+          "name": "Gift for a child (toy or game)",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "jewelry_basic",
+          "name": "Jewelry, basic gift piece",
+          "unit": "each",
+          "price_cents": {
+            "min": 5000,
+            "typical": 15000,
+            "max": 100000
+          }
+        },
+        {
+          "id": "wine_gift",
+          "name": "Bottle of wine as a gift",
+          "unit": "each",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3000,
+            "max": 8000
+          }
+        },
+        {
+          "id": "wedding_gift",
+          "name": "Wedding gift (cash or registry)",
+          "unit": "each",
+          "price_cents": {
+            "min": 5000,
+            "typical": 10000,
+            "max": 25000
+          }
+        },
+        {
+          "id": "baby_shower_gift",
+          "name": "Baby shower gift",
+          "unit": "each",
+          "price_cents": {
+            "min": 3000,
+            "typical": 5000,
+            "max": 10000
+          }
+        },
+        {
+          "id": "wrapping_paper",
+          "name": "Wrapping paper or gift bag",
+          "unit": "each",
+          "price_cents": {
+            "min": 300,
+            "typical": 600,
+            "max": 1200
+          }
+        },
+        {
+          "id": "holiday_decorations",
+          "name": "Seasonal decorations, small set",
+          "unit": "set",
+          "price_cents": {
+            "min": 1500,
+            "typical": 3500,
+            "max": 9000
+          }
+        }
+      ]
+    }
+  ]
+}

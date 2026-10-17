@@ -1,0 +1,899 @@
+{
+  "schema": "lre-data-src/us/calendar/v1",
+  "table": "calendar",
+  "approximate": true,
+  "country": "US",
+  "reflects_period": "2025-2026 rules (no dated instances; rules are stable across years)",
+  "basis": "US Code 5 USC 6103 (federal holidays), NIST/US DOT daylight-saving rules (Uniform Time Act as amended 2005), typical K-12 and college academic calendars from state/district and university catalogs as recalled, BLS National Compensation Survey for paid-holiday prevalence, FLSA and FMCSA hours rules.",
+  "fields": {
+    "rule.type": "fixed (month/day) | nth_weekday (month, weekday, n; n=-1 is last) | relative (offset_days from another holiday) | relative_to_easter | computed | lunar | window | rule | irregular | weekday_in_window.",
+    "federal_holidays[].observed_if_weekend": "Federal observance rule for fixed-date holidays.",
+    "private_sector_paid_day_off": "widely (about three-quarters or more of private-sector workers), some (roughly a third to half), few (roughly a fifth); approximate BLS NCS-style prevalence.",
+    "work_shift_patterns[].id": "Stable key referenced by occupations.json schedule.pattern.",
+    "work_shift_patterns[].typical_shift_hours": "Hours per shift (decimal).",
+    "work_shift_patterns[].weekend_work": "none | occasional | rotating | always."
+  },
+  "federal_holidays": [
+    {
+      "id": "new_years_day",
+      "name": "New Year's Day",
+      "rule": {
+        "type": "fixed",
+        "month": 1,
+        "day": 1
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "widely",
+      "observed_if_weekend": "Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"
+    },
+    {
+      "id": "mlk_day",
+      "name": "Martin Luther King Jr. Day",
+      "rule": {
+        "type": "nth_weekday",
+        "month": 1,
+        "weekday": "monday",
+        "n": 3
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "some"
+    },
+    {
+      "id": "presidents_day",
+      "name": "Washington's Birthday (Presidents' Day)",
+      "rule": {
+        "type": "nth_weekday",
+        "month": 2,
+        "weekday": "monday",
+        "n": 3
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "some"
+    },
+    {
+      "id": "memorial_day",
+      "name": "Memorial Day",
+      "rule": {
+        "type": "nth_weekday",
+        "month": 5,
+        "weekday": "monday",
+        "n": -1
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "widely"
+    },
+    {
+      "id": "juneteenth",
+      "name": "Juneteenth National Independence Day",
+      "rule": {
+        "type": "fixed",
+        "month": 6,
+        "day": 19
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "some",
+      "observed_if_weekend": "Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"
+    },
+    {
+      "id": "independence_day",
+      "name": "Independence Day",
+      "rule": {
+        "type": "fixed",
+        "month": 7,
+        "day": 4
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "widely",
+      "observed_if_weekend": "Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"
+    },
+    {
+      "id": "labor_day",
+      "name": "Labor Day",
+      "rule": {
+        "type": "nth_weekday",
+        "month": 9,
+        "weekday": "monday",
+        "n": 1
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "widely"
+    },
+    {
+      "id": "columbus_day",
+      "name": "Columbus Day (Indigenous Peoples' Day in many places)",
+      "rule": {
+        "type": "nth_weekday",
+        "month": 10,
+        "weekday": "monday",
+        "n": 2
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "few"
+    },
+    {
+      "id": "veterans_day",
+      "name": "Veterans Day",
+      "rule": {
+        "type": "fixed",
+        "month": 11,
+        "day": 11
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "few",
+      "observed_if_weekend": "Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"
+    },
+    {
+      "id": "thanksgiving",
+      "name": "Thanksgiving Day",
+      "rule": {
+        "type": "nth_weekday",
+        "month": 11,
+        "weekday": "thursday",
+        "n": 4
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "widely"
+    },
+    {
+      "id": "christmas",
+      "name": "Christmas Day",
+      "rule": {
+        "type": "fixed",
+        "month": 12,
+        "day": 25
+      },
+      "federal_paid_day_off": true,
+      "private_sector_paid_day_off": "widely",
+      "observed_if_weekend": "Saturday -> preceding Friday; Sunday -> following Monday (federal rule)"
+    }
+  ],
+  "common_observances": [
+    {
+      "id": "groundhog_day",
+      "name": "Groundhog Day",
+      "rule": {
+        "type": "fixed",
+        "month": 2,
+        "day": 2
+      }
+    },
+    {
+      "id": "super_bowl_sunday",
+      "name": "Super Bowl Sunday",
+      "rule": {
+        "type": "weekday_in_window",
+        "weekday": "sunday",
+        "window": "Feb 2-Feb 15",
+        "note": "In practice the Sunday ~3 weeks after the NFL conference championships; first or second Sunday of February"
+      }
+    },
+    {
+      "id": "valentines_day",
+      "name": "Valentine's Day",
+      "rule": {
+        "type": "fixed",
+        "month": 2,
+        "day": 14
+      }
+    },
+    {
+      "id": "mardi_gras",
+      "name": "Mardi Gras (Fat Tuesday)",
+      "rule": {
+        "type": "relative_to_easter",
+        "offset_days": -47,
+        "note": "Regional (Gulf Coast, esp. New Orleans)"
+      }
+    },
+    {
+      "id": "st_patricks_day",
+      "name": "St. Patrick's Day",
+      "rule": {
+        "type": "fixed",
+        "month": 3,
+        "day": 17
+      }
+    },
+    {
+      "id": "april_fools",
+      "name": "April Fools' Day",
+      "rule": {
+        "type": "fixed",
+        "month": 4,
+        "day": 1
+      }
+    },
+    {
+      "id": "tax_day",
+      "name": "Federal income tax filing deadline",
+      "rule": {
+        "type": "fixed",
+        "month": 4,
+        "day": 15,
+        "note": "Moves to the next business day when Apr 15 is a weekend or DC holiday; extensions to Oct 15"
+      }
+    },
+    {
+      "id": "easter",
+      "name": "Easter Sunday",
+      "rule": {
+        "type": "computed",
+        "algorithm": "Gregorian computus (anonymous Gregorian algorithm / Meeus-Jones-Butcher)",
+        "note": "Falls between Mar 22 and Apr 25. Good Friday = Easter - 2 days; Easter Monday = +1 day"
+      }
+    },
+    {
+      "id": "earth_day",
+      "name": "Earth Day",
+      "rule": {
+        "type": "fixed",
+        "month": 4,
+        "day": 22
+      }
+    },
+    {
+      "id": "cinco_de_mayo",
+      "name": "Cinco de Mayo",
+      "rule": {
+        "type": "fixed",
+        "month": 5,
+        "day": 5
+      }
+    },
+    {
+      "id": "mothers_day",
+      "name": "Mother's Day",
+      "rule": {
+        "type": "nth_weekday",
+        "month": 5,
+        "weekday": "sunday",
+        "n": 2
+      }
+    },
+    {
+      "id": "fathers_day",
+      "name": "Father's Day",
+      "rule": {
+        "type": "nth_weekday",
+        "month": 6,
+        "weekday": "sunday",
+        "n": 3
+      }
+    },
+    {
+      "id": "prime_day_season",
+      "name": "Big mid-summer online sale event (varies)",
+      "rule": {
+        "type": "irregular",
+        "window": "July",
+        "note": "Announced yearly"
+      }
+    },
+    {
+      "id": "back_to_school_season",
+      "name": "Back-to-school shopping season",
+      "rule": {
+        "type": "window",
+        "start": "07-15",
+        "end": "09-05"
+      }
+    },
+    {
+      "id": "halloween",
+      "name": "Halloween",
+      "rule": {
+        "type": "fixed",
+        "month": 10,
+        "day": 31
+      }
+    },
+    {
+      "id": "election_day",
+      "name": "General Election Day",
+      "rule": {
+        "type": "rule",
+        "rule": "Tuesday after the first Monday in November, in even-numbered years",
+        "month": 11
+      }
+    },
+    {
+      "id": "diwali",
+      "name": "Diwali",
+      "rule": {
+        "type": "lunar",
+        "note": "Hindu lunisolar calendar; falls mid-October to mid-November"
+      }
+    },
+    {
+      "id": "thanksgiving_eve",
+      "name": "Thanksgiving Eve (busiest travel and bar night)",
+      "rule": {
+        "type": "relative",
+        "base": "thanksgiving",
+        "offset_days": -1
+      }
+    },
+    {
+      "id": "black_friday",
+      "name": "Black Friday",
+      "rule": {
+        "type": "relative",
+        "base": "thanksgiving",
+        "offset_days": 1
+      }
+    },
+    {
+      "id": "small_business_saturday",
+      "name": "Small Business Saturday",
+      "rule": {
+        "type": "relative",
+        "base": "thanksgiving",
+        "offset_days": 2
+      }
+    },
+    {
+      "id": "cyber_monday",
+      "name": "Cyber Monday",
+      "rule": {
+        "type": "relative",
+        "base": "thanksgiving",
+        "offset_days": 4
+      }
+    },
+    {
+      "id": "hanukkah",
+      "name": "Hanukkah (8 days)",
+      "rule": {
+        "type": "lunar",
+        "note": "Begins evening of 25 Kislev; between late November and late December"
+      }
+    },
+    {
+      "id": "christmas_eve",
+      "name": "Christmas Eve",
+      "rule": {
+        "type": "fixed",
+        "month": 12,
+        "day": 24
+      }
+    },
+    {
+      "id": "kwanzaa",
+      "name": "Kwanzaa (Dec 26-Jan 1)",
+      "rule": {
+        "type": "window",
+        "start": "12-26",
+        "end": "01-01"
+      }
+    },
+    {
+      "id": "new_years_eve",
+      "name": "New Year's Eve",
+      "rule": {
+        "type": "fixed",
+        "month": 12,
+        "day": 31
+      }
+    },
+    {
+      "id": "lunar_new_year",
+      "name": "Lunar New Year",
+      "rule": {
+        "type": "lunar",
+        "note": "Second new moon after the winter solstice; between Jan 21 and Feb 20"
+      }
+    },
+    {
+      "id": "ramadan_eid",
+      "name": "Ramadan and Eid al-Fitr",
+      "rule": {
+        "type": "lunar",
+        "note": "Islamic (Hijri) calendar, shifts about 11 days earlier each Gregorian year"
+      }
+    },
+    {
+      "id": "passover",
+      "name": "Passover (8 days)",
+      "rule": {
+        "type": "lunar",
+        "note": "Begins 15 Nisan; March-April"
+      }
+    },
+    {
+      "id": "rosh_hashanah",
+      "name": "Rosh Hashanah",
+      "rule": {
+        "type": "lunar",
+        "note": "1 Tishrei; September-early October"
+      }
+    },
+    {
+      "id": "pride_month",
+      "name": "Pride Month",
+      "rule": {
+        "type": "window",
+        "start": "06-01",
+        "end": "06-30"
+      }
+    }
+  ],
+  "daylight_saving_time": {
+    "start": {
+      "rule": "second Sunday in March",
+      "local_time": "02:00 standard time",
+      "effect": "clocks jump to 03:00 (spring forward, lose an hour)"
+    },
+    "end": {
+      "rule": "first Sunday in November",
+      "local_time": "02:00 daylight time",
+      "effect": "clocks fall back to 01:00 (gain an hour)"
+    },
+    "duration_weeks_approx": 34,
+    "exceptions": [
+      "Arizona (except the Navajo Nation) does not observe DST",
+      "Hawaii does not observe DST",
+      "Territories (Puerto Rico, US Virgin Islands, Guam, American Samoa, Northern Marianas) do not observe DST"
+    ],
+    "time_zone_offsets_standard_hours": {
+      "America/New_York": -5,
+      "America/Chicago": -6,
+      "America/Denver": -7,
+      "America/Los_Angeles": -8,
+      "America/Anchorage": -9,
+      "Pacific/Honolulu": -10,
+      "America/Phoenix": -7
+    },
+    "note": "Offsets listed are standard time; during DST add +1 hour except Phoenix and Honolulu. Congress has not enacted permanent DST (as of the basis date)."
+  },
+  "daylight_hours_geometric": {
+    "note": "Geometric day length (sunrise to sunset, no atmospheric refraction; add about 8-10 minutes in practice) by latitude at the solstices and equinox. Use for seasonal light cycles.",
+    "rows": [
+      {
+        "latitude_deg": 25,
+        "example": "Miami / south Texas",
+        "summer_solstice_h": 13.6,
+        "equinox_h": 12.0,
+        "winter_solstice_h": 10.4
+      },
+      {
+        "latitude_deg": 30,
+        "example": "New Orleans / Austin",
+        "summer_solstice_h": 13.9,
+        "equinox_h": 12.0,
+        "winter_solstice_h": 10.1
+      },
+      {
+        "latitude_deg": 35,
+        "example": "Charlotte / Albuquerque / Memphis",
+        "summer_solstice_h": 14.4,
+        "equinox_h": 12.0,
+        "winter_solstice_h": 9.6
+      },
+      {
+        "latitude_deg": 40,
+        "example": "Philadelphia / Denver / Columbus",
+        "summer_solstice_h": 14.8,
+        "equinox_h": 12.0,
+        "winter_solstice_h": 9.2
+      },
+      {
+        "latitude_deg": 45,
+        "example": "Minneapolis / Portland, OR",
+        "summer_solstice_h": 15.4,
+        "equinox_h": 12.0,
+        "winter_solstice_h": 8.6
+      },
+      {
+        "latitude_deg": 49,
+        "example": "Northern tier (Seattle edge, Montana border)",
+        "summer_solstice_h": 16.0,
+        "equinox_h": 12.0,
+        "winter_solstice_h": 8.0
+      },
+      {
+        "latitude_deg": 61,
+        "example": "Anchorage",
+        "summer_solstice_h": 18.9,
+        "equinox_h": 12.0,
+        "winter_solstice_h": 5.1
+      }
+    ]
+  },
+  "school_year": {
+    "k12": {
+      "instructional_days": {
+        "typical": 180,
+        "min_by_state": 160,
+        "max_by_state": 186,
+        "note": "Most states require 175-180 days; some set hours instead of days."
+      },
+      "start_window_by_region": {
+        "South and Southwest": "Aug 4-Aug 15",
+        "West": "Aug 10-Sep 1",
+        "Midwest": "Aug 15-Sep 3",
+        "Northeast": "Aug 28-Sep 8 (after Labor Day in NY/NJ/New England)"
+      },
+      "end_window_by_region": {
+        "South and Southwest": "May 16-May 30",
+        "West": "Jun 1-Jun 12",
+        "Midwest": "May 24-Jun 8",
+        "Northeast": "Jun 10-Jun 25"
+      },
+      "typical_school_day": {
+        "elementary": "08:30-15:15",
+        "middle": "08:00-15:10",
+        "high": "07:30-14:45",
+        "instructional_hours_per_day_approx": 6.5
+      },
+      "breaks": [
+        {
+          "id": "labor_day",
+          "name": "Labor Day",
+          "when": "first Monday of September",
+          "length_days": 1
+        },
+        {
+          "id": "fall_break",
+          "name": "Fall or October break (some districts)",
+          "when": "mid-October, varies",
+          "length_days": "1-5"
+        },
+        {
+          "id": "thanksgiving",
+          "name": "Thanksgiving break",
+          "when": "Wednesday before Thanksgiving through the Friday after (a full week in some Southern districts)",
+          "length_days": "3-5"
+        },
+        {
+          "id": "winter_break",
+          "name": "Winter break",
+          "when": "around Dec 20 through Jan 2",
+          "length_days": "10-16"
+        },
+        {
+          "id": "mlk_day",
+          "name": "Martin Luther King Jr. Day",
+          "when": "third Monday of January",
+          "length_days": 1
+        },
+        {
+          "id": "presidents_week",
+          "name": "Presidents' Day or mid-winter break",
+          "when": "third Monday of February; a full week in the Northeast",
+          "length_days": "1-5"
+        },
+        {
+          "id": "spring_break",
+          "name": "Spring break",
+          "when": "one week between early March and mid-April (often near Easter)",
+          "length_days": "5-9"
+        },
+        {
+          "id": "memorial_day",
+          "name": "Memorial Day",
+          "when": "last Monday of May",
+          "length_days": 1
+        }
+      ],
+      "summer_break_weeks_approx": 10,
+      "note": "School year start/end shown as windows; the engine should pick a consistent date per region."
+    },
+    "college": {
+      "semester_system": {
+        "fall": {
+          "classes_begin_window": "Aug 18-Sep 3",
+          "thanksgiving_break": "Wed-Sun of Thanksgiving week",
+          "classes_end_window": "Dec 5-Dec 12",
+          "finals_window": "Dec 8-Dec 20",
+          "instructional_weeks": 15
+        },
+        "winter_break_weeks": "4-5 (about Dec 20-Jan 15)",
+        "spring": {
+          "classes_begin_window": "Jan 12-Jan 25 (often the week of MLK Day)",
+          "spring_break": "one week, March 8-March 25",
+          "classes_end_window": "Apr 28-May 10",
+          "finals_window": "May 5-May 15",
+          "commencement_window": "May 8-May 25",
+          "instructional_weeks": 15
+        },
+        "summer_sessions": {
+          "window": "May 20-Aug 15",
+          "note": "Shorter 4-6 week terms; fewer students."
+        }
+      },
+      "quarter_system": {
+        "fall": "late Sep-mid Dec",
+        "winter": "early Jan-mid Mar",
+        "spring": "late Mar-early Jun",
+        "summer": "optional, Jun-Aug",
+        "instructional_weeks_per_term": 10,
+        "note": "Used by a minority of colleges (e.g. several UC and Pacific Northwest schools)."
+      },
+      "typical_course_load": {
+        "full_time_credits_per_term": "12-15",
+        "weekly_class_hours": "12-16",
+        "study_hours_per_week_approx": "20-30"
+      }
+    }
+  },
+  "work": {
+    "full_time_hours_per_week": 40,
+    "standard_work_year_hours": 2080,
+    "overtime": "FLSA: 1.5x regular rate for hours over 40 per week for non-exempt employees; some states add daily overtime (California over 8 h).",
+    "paid_time_off_typical": {
+      "vacation_days_after_1_year": 10,
+      "vacation_days_after_5_years": 15,
+      "vacation_days_after_10_years": 17,
+      "sick_days_per_year": 7,
+      "note": "BLS NCS style averages for private-industry workers with access; many service workers have none."
+    },
+    "paid_holidays_private_industry_typical_per_year": 8,
+    "meal_break": "30-60 min unpaid for shifts over 6 hours in many states"
+  },
+  "work_shift_patterns": [
+    {
+      "id": "std_weekday_9_5",
+      "name": "Standard office day",
+      "description": "Mon-Fri, one daytime shift",
+      "days_per_week": 5,
+      "typical_start": "09:00",
+      "typical_shift_hours": 8.0,
+      "typical_hours_per_week": 40,
+      "weekend_work": "none",
+      "notes": "Typical salaried or hourly office work; flextime and hybrid/remote variants common. 30-60 min unpaid meal inside the shift."
+    },
+    {
+      "id": "trades_day_7_330",
+      "name": "Trades and construction day",
+      "description": "Mon-Fri, early start",
+      "days_per_week": 5,
+      "typical_start": "07:00",
+      "typical_shift_hours": 8.5,
+      "typical_hours_per_week": 42,
+      "weekend_work": "occasional",
+      "notes": "Starts 06:00-07:30, ends 15:00-16:00; overtime and Saturdays common in busy season; weather-dependent in construction."
+    },
+    {
+      "id": "retail_rotating",
+      "name": "Retail rotating shifts",
+      "description": "4-8 h shifts, 4-6 days a week, schedule posted 1-2 weeks ahead",
+      "days_per_week": 5,
+      "typical_start": "varies (08:00-22:00 store hours)",
+      "typical_shift_hours": 6.0,
+      "typical_hours_per_week": 28,
+      "weekend_work": "rotating",
+      "notes": "Opening, mid and closing shifts; weekends and holiday rushes included; hours vary week to week."
+    },
+    {
+      "id": "food_service_split",
+      "name": "Restaurant and counter service",
+      "description": "Lunch and dinner shifts, 4-6 per week",
+      "days_per_week": 5,
+      "typical_start": "varies (10:00 / 16:00)",
+      "typical_shift_hours": 6.0,
+      "typical_hours_per_week": 30,
+      "weekend_work": "always",
+      "notes": "Weekend and holiday heavy; closing shifts end 22:00-02:00; part-time common."
+    },
+    {
+      "id": "bar_night",
+      "name": "Bar and nightlife",
+      "description": "Evening into night",
+      "days_per_week": 5,
+      "typical_start": "17:00",
+      "typical_shift_hours": 8.5,
+      "typical_hours_per_week": 34,
+      "weekend_work": "always",
+      "notes": "Shift runs about 17:00-02:00; Thursday-Saturday are peak."
+    },
+    {
+      "id": "three_12h",
+      "name": "Three 12-hour shifts",
+      "description": "3 x 12 h per week, day or night, rotating weekends",
+      "days_per_week": 3,
+      "typical_start": "07:00 or 19:00",
+      "typical_shift_hours": 12.0,
+      "typical_hours_per_week": 36,
+      "weekend_work": "rotating",
+      "notes": "Hospital style: 07:00-19:30 days or 19:00-07:30 nights; 36 paid hours; extra shifts are overtime or per-diem."
+    },
+    {
+      "id": "four_10h",
+      "name": "Four 10-hour shifts",
+      "description": "4 x 10 h per week",
+      "days_per_week": 4,
+      "typical_start": "06:00-07:00",
+      "typical_shift_hours": 10.0,
+      "typical_hours_per_week": 40,
+      "weekend_work": "occasional",
+      "notes": "Compressed week, usually Mon-Thu or Tue-Fri; common in pharmacy, manufacturing, warehouses and some trades."
+    },
+    {
+      "id": "shift_8h_rotating",
+      "name": "Three 8-hour shifts, rotating",
+      "description": "Day 07:00-15:00, evening 15:00-23:00, night 23:00-07:00, 5 days a week",
+      "days_per_week": 5,
+      "typical_start": "07:00 / 15:00 / 23:00",
+      "typical_shift_hours": 8.0,
+      "typical_hours_per_week": 40,
+      "weekend_work": "rotating",
+      "notes": "24/7 services; rotation or seniority bidding decides who works nights and weekends."
+    },
+    {
+      "id": "fire_24_48",
+      "name": "24 hours on, 48 hours off",
+      "description": "One 24 h shift (08:00-08:00) then 48 h off (about 2.33 shifts per week on average)",
+      "days_per_week": 2.33,
+      "typical_start": "08:00",
+      "typical_shift_hours": 24.0,
+      "typical_hours_per_week": 56,
+      "weekend_work": "rotating",
+      "notes": "Average about 56 scheduled hours a week; sleep allowed between calls. Some departments use 48/96."
+    },
+    {
+      "id": "school_year_day",
+      "name": "School-year day",
+      "description": "Mon-Fri, about 7:30-15:30, roughly 180-190 contract days",
+      "days_per_week": 5,
+      "typical_start": "07:30",
+      "typical_shift_hours": 8.0,
+      "typical_hours_per_week": 40,
+      "weekend_work": "none",
+      "notes": "Summer, winter and spring breaks off (see school_year); pay is often spread across 12 months. Extra duties and grading outside hours."
+    },
+    {
+      "id": "academic_faculty",
+      "name": "Faculty teaching load",
+      "description": "Teaching blocks Mon/Wed/Fri or Tue/Thu plus office hours and research",
+      "days_per_week": 4,
+      "typical_start": "varies",
+      "typical_shift_hours": 10.0,
+      "typical_hours_per_week": 50,
+      "weekend_work": "occasional",
+      "notes": "About 9-12 contact hours a week plus preparation and service; paid on a 9-month or 12-month basis; summers lighter."
+    },
+    {
+      "id": "otr_trucking",
+      "name": "Over-the-road trucking",
+      "description": "Weeks on the road, days at home",
+      "days_per_week": 6,
+      "typical_start": "varies",
+      "typical_shift_hours": 11.0,
+      "typical_hours_per_week": 60,
+      "weekend_work": "always",
+      "notes": "FMCSA hours-of-service: 11 h driving inside a 14 h window, 10 h off duty, 60/70 h cap over 7/8 days, 34 h restart. Paid per mile; typically 2-3 weeks out then 3-4 days home."
+    },
+    {
+      "id": "route_delivery_day",
+      "name": "Local delivery route",
+      "description": "Mon-Fri daytime route",
+      "days_per_week": 5,
+      "typical_start": "06:00-08:00",
+      "typical_shift_hours": 9.0,
+      "typical_hours_per_week": 45,
+      "weekend_work": "occasional",
+      "notes": "Regional or last-mile courier: load-out at the depot, route stops, return; peaks in Nov-Dec."
+    },
+    {
+      "id": "warehouse_shifts",
+      "name": "Warehouse and fulfillment shifts",
+      "description": "First/second/third shift, 4x10 or 5x8",
+      "days_per_week": 5,
+      "typical_start": "06:00 / 14:30 / 23:00",
+      "typical_shift_hours": 8.0,
+      "typical_hours_per_week": 40,
+      "weekend_work": "rotating",
+      "notes": "Mandatory overtime during peaks; night shift differential 5-15%."
+    },
+    {
+      "id": "postal_route",
+      "name": "Postal carrier route",
+      "description": "6 days a week, rotating day off",
+      "days_per_week": 6,
+      "typical_start": "07:30",
+      "typical_shift_hours": 8.0,
+      "typical_hours_per_week": 45,
+      "weekend_work": "rotating",
+      "notes": "Casual 8-10 h days, Saturdays included; parcels push hours up in December."
+    },
+    {
+      "id": "physician_clinic",
+      "name": "Physician clinic plus call",
+      "description": "4-5 clinic days, call rotation",
+      "days_per_week": 5,
+      "typical_start": "07:30",
+      "typical_shift_hours": 9.5,
+      "typical_hours_per_week": 50,
+      "weekend_work": "rotating",
+      "notes": "Clinic 07:30-17:30 with charting after; call weekends or nights; hospital-based doctors use 3x12 or similar."
+    },
+    {
+      "id": "evening_cleaning",
+      "name": "Evening cleaning crew",
+      "description": "Evening to late night",
+      "days_per_week": 5,
+      "typical_start": "18:00",
+      "typical_shift_hours": 8.0,
+      "typical_hours_per_week": 36,
+      "weekend_work": "occasional",
+      "notes": "Commercial buildings cleaned after hours (18:00-02:00)."
+    },
+    {
+      "id": "security_12h",
+      "name": "Security 12-hour shifts",
+      "description": "Day 06:00-18:00 or night 18:00-06:00, 3-4 per week",
+      "days_per_week": 3.5,
+      "typical_start": "06:00 or 18:00",
+      "typical_shift_hours": 12.0,
+      "typical_hours_per_week": 42,
+      "weekend_work": "rotating",
+      "notes": "Posts are staffed 24/7; overtime common."
+    },
+    {
+      "id": "salon_by_appointment",
+      "name": "Salon and personal services by appointment",
+      "description": "Tue-Sat, appointment blocks",
+      "days_per_week": 5,
+      "typical_start": "09:00",
+      "typical_shift_hours": 8.0,
+      "typical_hours_per_week": 32,
+      "weekend_work": "always",
+      "notes": "Saturdays busiest; Sunday/Monday often closed; booth rent or commission common."
+    },
+    {
+      "id": "childcare_center_day",
+      "name": "Childcare center day",
+      "description": "Mon-Fri, open to close",
+      "days_per_week": 5,
+      "typical_start": "06:30",
+      "typical_shift_hours": 9.0,
+      "typical_hours_per_week": 40,
+      "weekend_work": "none",
+      "notes": "Center open about 06:30-18:00; staff work staggered open/close shifts."
+    },
+    {
+      "id": "gig_flexible",
+      "name": "Gig and app work, self-scheduled",
+      "description": "Self-scheduled blocks",
+      "days_per_week": 5,
+      "typical_start": "varies",
+      "typical_shift_hours": 4.0,
+      "typical_hours_per_week": 25,
+      "weekend_work": "rotating",
+      "notes": "Demand peaks 07:00-09:30 and 16:00-19:00 on weekdays and Friday/Saturday 17:00-02:00; no guaranteed hours."
+    },
+    {
+      "id": "student_part_time",
+      "name": "Student part-time",
+      "description": "8-15 h a week around classes",
+      "days_per_week": 4,
+      "typical_start": "varies",
+      "typical_shift_hours": 3.5,
+      "typical_hours_per_week": 12,
+      "weekend_work": "rotating",
+      "notes": "Federal Work-Study / campus jobs cap at about 20 h a week in term; evenings and weekends."
+    },
+    {
+      "id": "summer_full_time",
+      "name": "Summer full-time job",
+      "description": "Mon-Fri or retail schedule for 8-12 weeks",
+      "days_per_week": 5,
+      "typical_start": "varies",
+      "typical_shift_hours": 8.0,
+      "typical_hours_per_week": 38,
+      "weekend_work": "rotating",
+      "notes": "June-August seasonal work: camps, lifeguards, retail, landscaping."
+    },
+    {
+      "id": "seasonal_construction",
+      "name": "Seasonal outdoor work",
+      "description": "Weather-dependent days",
+      "days_per_week": 5,
+      "typical_start": "07:00",
+      "typical_shift_hours": 9.0,
+      "typical_hours_per_week": 40,
+      "weekend_work": "occasional",
+      "notes": "Fewer paid weeks in cold climates; included in weeks_per_year."
+    }
+  ]
+}

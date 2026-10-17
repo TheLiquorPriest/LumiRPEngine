@@ -1,0 +1,565 @@
+{
+  "schema": "lre-data-src/us/finance/v1",
+  "table": "finance",
+  "approximate": true,
+  "country": "US",
+  "currency": "USD",
+  "money_unit": "integer cents",
+  "reflects_period": "2025-2026 (rates as of late 2025; Fed funds target 3.50-3.75% after the Dec 2025 cut)",
+  "basis": "Rounded typical consumer-finance parameters recalled from Federal Reserve G.19 and H.15, FDIC national rates, Freddie Mac PMMS, Bankrate / Edmunds surveys, CFPB, KFF Employer Health Benefits Survey 2025, Vanguard How America Saves 2025, IRS Rev. Proc. 2024-40 and IRS notices for 2025/2026; not queried live. Treat as plausible defaults.",
+  "fields": {
+    "rate fields ending _pct": "Percent per year (22.0 means 22.0% APR) unless stated.",
+    "*_cents": "Integer cents.",
+    "range objects": "{min, typical, max} (percent or cents as named)."
+  },
+  "macro": {
+    "fed_funds_target_pct": {
+      "min": 3.5,
+      "max": 3.75,
+      "note": "Target range after the December 2025 FOMC cut; was 4.25-4.50 for most of H1 2025."
+    },
+    "prime_rate_pct": 6.75,
+    "inflation_cpi_yoy_pct": {
+      "typical": 2.9,
+      "min": 2.3,
+      "max": 3.5,
+      "note": "Annual CPI-U change, 2025."
+    },
+    "treasury_10y_yield_pct": 4.1,
+    "treasury_bill_3m_yield_pct": 3.8,
+    "unemployment_rate_pct": 4.4
+  },
+  "credit_card": {
+    "apr_pct": {
+      "min": 15.0,
+      "typical": 22.0,
+      "max": 29.99,
+      "note": "Fed G.19 average on accounts assessed interest is ~22%; new-offer averages ~24%; best-credit cards 15-18%, subprime 28-30%."
+    },
+    "intro_apr_offers": {
+      "apr_pct": 0.0,
+      "months_typical": 15,
+      "balance_transfer_fee_pct": {
+        "min": 3.0,
+        "typical": 5.0,
+        "max": 5.0
+      }
+    },
+    "penalty_apr_pct": 29.99,
+    "grace_period_days": {
+      "min": 21,
+      "typical": 25,
+      "note": "No interest if the previous balance is paid in full; none on cash advances."
+    },
+    "minimum_payment": {
+      "formula": "min(statement_balance + interest + fees, max(floor_cents, ceil(statement_balance * principal_pct / 100 + interest_this_cycle + fees_this_cycle)))",
+      "variants": [
+        {
+          "issuer_style": "1% of balance plus interest and fees",
+          "principal_pct": 1.0,
+          "floor_cents": 3500,
+          "prevalence": "most large issuers"
+        },
+        {
+          "issuer_style": "2% of balance, no extra interest add-on",
+          "principal_pct": 2.0,
+          "floor_cents": 2500,
+          "prevalence": "some retail and credit-union cards"
+        },
+        {
+          "issuer_style": "2.5-3% of balance",
+          "principal_pct": 3.0,
+          "floor_cents": 2500,
+          "prevalence": "some bank cards"
+        }
+      ],
+      "default": {
+        "principal_pct": 1.0,
+        "floor_cents": 3500,
+        "includes_interest_and_fees": true
+      },
+      "interest_per_cycle": "balance * apr_pct / 100 / 12 (monthly periodic rate; issuers use average daily balance with daily rate = apr/365)"
+    },
+    "late_fee_cents": {
+      "first": 3200,
+      "repeat": 4300,
+      "note": "Reg Z safe-harbor amounts for 2025 ($32 first, $43 repeat); the CFPB $8 cap was vacated in April 2025. Issuers commonly charge $30-$41."
+    },
+    "returned_payment_fee_cents": {
+      "typical": 3200
+    },
+    "cash_advance_fee": {
+      "pct": 5.0,
+      "minimum_cents": 1000,
+      "apr_pct_typical": 27.0,
+      "note": "No grace period; interest starts the same day."
+    },
+    "foreign_transaction_fee_pct": {
+      "typical": 3.0,
+      "min": 0.0,
+      "note": "Many travel cards charge none."
+    },
+    "annual_fee_cents": {
+      "none_common": 0,
+      "rewards_typical": 9500,
+      "premium_typical": 69500
+    },
+    "credit_limit_cents": {
+      "starter": 50000,
+      "typical": 1000000,
+      "good_credit": 1500000
+    },
+    "credit_score": {
+      "us_average_fico": 715,
+      "bands": {
+        "poor": [
+          300,
+          579
+        ],
+        "fair": [
+          580,
+          669
+        ],
+        "good": [
+          670,
+          739
+        ],
+        "very_good": [
+          740,
+          799
+        ],
+        "exceptional": [
+          800,
+          850
+        ]
+      }
+    }
+  },
+  "deposit_accounts": {
+    "savings_apy_pct": {
+      "regular_national_average": {
+        "min": 0.01,
+        "typical": 0.4,
+        "max": 0.6,
+        "note": "FDIC national rate ~0.4%."
+      },
+      "high_yield": {
+        "min": 3.0,
+        "typical": 3.8,
+        "max": 4.5,
+        "note": "Online banks; floating with the Fed funds rate."
+      }
+    },
+    "money_market_apy_pct": {
+      "typical": 3.5,
+      "min": 0.5,
+      "max": 4.3
+    },
+    "cd_12_month_apy_pct": {
+      "typical": 4.0,
+      "min": 1.5,
+      "max": 4.5
+    },
+    "checking_apy_pct": {
+      "typical": 0.07,
+      "max": 4.0,
+      "note": "Most checking accounts pay near zero; a few reward accounts pay 3-4% up to a balance cap."
+    },
+    "fdic_insurance_limit_cents": 25000000,
+    "checking_fees_cents": {
+      "monthly_maintenance": {
+        "none_common": 0,
+        "min": 0,
+        "typical": 500,
+        "max": 1500,
+        "note": "Often waived with direct deposit or a minimum balance ($1,000-$1,500)."
+      },
+      "minimum_balance_to_waive_cents": {
+        "typical": 150000
+      },
+      "atm_out_of_network_total": {
+        "typical": 473,
+        "note": "Bankrate-style average ~$4.73 (operator surcharge plus bank fee)."
+      },
+      "overdraft": {
+        "typical": 2700,
+        "max": 3500,
+        "note": "Average ~$27; many banks have cut or eliminated overdraft fees; cap per day typical 3 charges."
+      },
+      "nsf_returned_item": {
+        "typical": 1700,
+        "note": "Many banks charge nothing."
+      },
+      "wire_domestic_outgoing": {
+        "typical": 2500
+      },
+      "wire_international_outgoing": {
+        "typical": 4500
+      },
+      "paper_statement": {
+        "typical": 300
+      },
+      "cashier_check": {
+        "typical": 1000
+      },
+      "stop_payment": {
+        "typical": 3000
+      },
+      "debit_card_replacement": {
+        "typical": 0,
+        "rush_typical": 2500
+      }
+    }
+  },
+  "loans": {
+    "auto": {
+      "apr_pct_new": {
+        "min": 5.0,
+        "typical": 7.0,
+        "max": 15.0
+      },
+      "apr_pct_used": {
+        "min": 7.0,
+        "typical": 11.0,
+        "max": 21.0
+      },
+      "apr_by_credit_tier_new_pct": {
+        "super_prime_781_850": 5.2,
+        "prime_661_780": 6.9,
+        "nonprime_601_660": 9.8,
+        "subprime_501_600": 13.2,
+        "deep_subprime_300_500": 15.8
+      },
+      "apr_by_credit_tier_used_pct": {
+        "super_prime_781_850": 7.0,
+        "prime_661_780": 9.4,
+        "nonprime_601_660": 13.5,
+        "subprime_501_600": 18.5,
+        "deep_subprime_300_500": 21.3
+      },
+      "term_months": {
+        "min": 36,
+        "typical": 68,
+        "max": 84
+      },
+      "down_payment_pct_typical": 12,
+      "amount_financed_cents": {
+        "new_typical": 4200000,
+        "used_typical": 2600000
+      },
+      "payment_formula": "payment = P * r / (1 - (1 + r)^-n), r = apr_pct/100/12, n = term_months"
+    },
+    "mortgage": {
+      "apr_pct_30yr_fixed": {
+        "min": 5.8,
+        "typical": 6.4,
+        "max": 8.5,
+        "note": "Freddie Mac PMMS 30-year averaged about 6.3-6.9% through 2025; borrowers with lower credit pay more."
+      },
+      "apr_pct_15yr_fixed": {
+        "min": 5.0,
+        "typical": 5.6,
+        "max": 7.5
+      },
+      "term_months": {
+        "typical": 360,
+        "alternatives": [
+          180,
+          240
+        ]
+      },
+      "down_payment_pct": {
+        "first_time_typical": 9,
+        "repeat_typical": 20,
+        "minimum_conventional": 3,
+        "minimum_fha": 3.5
+      },
+      "pmi_pct_per_year": {
+        "min": 0.3,
+        "typical": 0.7,
+        "max": 1.5,
+        "note": "Applies when down payment is under 20%."
+      },
+      "closing_costs_pct_of_price": {
+        "min": 2.0,
+        "typical": 3.0,
+        "max": 5.0
+      },
+      "median_existing_home_price_cents": 41000000,
+      "property_tax_pct_of_value_per_year": {
+        "min": 0.3,
+        "typical": 1.0,
+        "max": 2.2,
+        "note": "Effective rate; varies by state and county."
+      },
+      "homeowners_insurance_cents_per_month": {
+        "min": 12000,
+        "typical": 20000,
+        "max": 40000,
+        "note": "Higher in hurricane, hail and wildfire areas."
+      }
+    },
+    "personal": {
+      "apr_pct": {
+        "min": 6.5,
+        "typical": 12.3,
+        "max": 35.99,
+        "note": "Fed G.19 24-month personal loan average ~12%; online lenders 7-36%."
+      },
+      "origination_fee_pct": {
+        "min": 0.0,
+        "typical": 5.0,
+        "max": 10.0
+      },
+      "term_months": {
+        "min": 12,
+        "typical": 36,
+        "max": 84
+      },
+      "amount_cents": {
+        "min": 100000,
+        "typical": 800000,
+        "max": 5000000
+      }
+    },
+    "student_federal_2025_26": {
+      "undergraduate_direct_pct": 6.39,
+      "graduate_unsubsidized_pct": 7.94,
+      "parent_plus_and_grad_plus_pct": 8.94,
+      "term_months_standard": 120,
+      "origination_fee_pct": 1.057
+    },
+    "payday": {
+      "fee_per_100_cents_two_weeks": 1500,
+      "apr_pct_equivalent": 391,
+      "note": "High-cost; usually avoided; included for debt-trap scenarios."
+    },
+    "buy_now_pay_later": {
+      "apr_pct": {
+        "min": 0.0,
+        "typical": 0.0,
+        "max": 36.0
+      },
+      "installments_typical": 4,
+      "interval_weeks": 2
+    }
+  },
+  "investing": {
+    "broad_us_equity_index": {
+      "description": "Total-return broad US stock index (S&P 500 style) for seeded price paths; use geometric Brownian motion with these parameters.",
+      "annual_return_arithmetic_pct": 11.0,
+      "annual_return_geometric_pct": 9.8,
+      "annual_volatility_pct": 16.0,
+      "monthly_mean_pct": 0.88,
+      "monthly_volatility_pct": 4.62,
+      "daily_volatility_pct": 1.0,
+      "drawdown_typical_pct": {
+        "correction": -10,
+        "bear": -20,
+        "severe": -35
+      },
+      "dividend_yield_pct": 1.3,
+      "long_run_basis": "1926-2024 nominal total return ~10% geometric, ~12% arithmetic, ~19% volatility; modern-era (post-1990) volatility ~15-17%; the typical 5-year-ahead expectation is lower, ~6-8% nominal.",
+      "gbm_note": "S(t+dt) = S(t) * exp((mu - sigma^2/2) dt + sigma sqrt(dt) Z) with mu=0.11, sigma=0.16 per year; use a seeded RNG."
+    },
+    "bonds_aggregate": {
+      "annual_return_pct": 4.5,
+      "annual_volatility_pct": 6.0,
+      "yield_to_maturity_pct": 4.4
+    },
+    "cash": {
+      "annual_return_pct": 3.8,
+      "annual_volatility_pct": 0.5
+    },
+    "real_estate_home_price_appreciation_pct": {
+      "typical": 4.0,
+      "volatility_pct": 5.0
+    },
+    "retirement_account_limits_cents": {
+      "k401_employee_deferral_2025": 2350000,
+      "k401_catch_up_age_50_2025": 750000,
+      "k401_super_catch_up_age_60_63_2025": 1125000,
+      "ira_contribution_2025": 700000,
+      "hsa_self_only_2025": 430000,
+      "hsa_family_2025": 855000,
+      "k401_employee_deferral_2026": 2450000,
+      "ira_contribution_2026": 750000,
+      "note": "IRS limits for 2025; 2026 values as announced in IRS Notice 2025-67 (401(k) $24,500, catch-up $8,000, IRA $7,500).",
+      "k401_catch_up_age_50_2026": 800000
+    }
+  },
+  "payroll_deductions_other_than_tax": {
+    "health_insurance_employee_share_cents_per_month": {
+      "single": {
+        "min": 0,
+        "typical": 12000,
+        "max": 30000,
+        "note": "KFF 2025: average worker contribution ~$1,440/yr (about 16% of a ~$9,300 premium) for single coverage."
+      },
+      "family": {
+        "min": 20000,
+        "typical": 57000,
+        "max": 110000,
+        "note": "KFF 2025: average worker contribution ~$6,850/yr (~26% of a ~$27,000 premium)."
+      }
+    },
+    "health_deductible_cents": {
+      "single_typical": 170000,
+      "family_typical": 350000,
+      "note": "Annual deductible; KFF average single deductible ~ $1,800 in 2025."
+    },
+    "out_of_pocket_max_cents_2025": {
+      "single_aca_limit": 920000,
+      "family_aca_limit": 1840000
+    },
+    "dental_cents_per_month": {
+      "single": {
+        "min": 1000,
+        "typical": 2000,
+        "max": 4500
+      },
+      "family": {
+        "min": 3000,
+        "typical": 6000,
+        "max": 12000
+      }
+    },
+    "vision_cents_per_month": {
+      "single": {
+        "min": 300,
+        "typical": 800,
+        "max": 1500
+      }
+    },
+    "retirement_401k": {
+      "default_auto_enroll_deferral_pct": 3.0,
+      "typical_employee_deferral_pct": 7.7,
+      "employer_match_typical": {
+        "formula": "50% of the first 6% of pay (3% of pay)",
+        "average_match_pct_of_pay": 4.6,
+        "vesting_years_typical": 3
+      },
+      "participation_rate_when_offered_pct": 85,
+      "note": "Vanguard How America Saves 2025: average deferral ~7.7% (12% total with employer); most common auto-enroll default 3-4%."
+    },
+    "hsa_fsa": {
+      "fsa_health_limit_cents_2025": 330000,
+      "pre_tax": true
+    },
+    "life_and_disability_cents_per_month": {
+      "basic_life_employer_paid": 0,
+      "supplemental_typical": 1000,
+      "short_term_disability_typical": 1500
+    },
+    "union_dues_pct_of_pay_typical": 1.2,
+    "commuter_benefit_pre_tax_cents_per_month_limit_2025": 32500,
+    "garnishment": {
+      "child_support_max_pct_of_disposable": 50,
+      "creditor_max_pct_of_disposable": 25,
+      "note": "Federal CCPA limits; not applied by default."
+    }
+  },
+  "taxes_federal": {
+    "tax_year": 2025,
+    "standard_deduction_cents": {
+      "single": 1575000,
+      "married_filing_jointly": 3150000,
+      "head_of_household": 2362500,
+      "note": "Amounts after the July 2025 legislation (OBBBA): $15,750 / $31,500 / $23,625."
+    },
+    "brackets_single": [
+      {
+        "from_cents": 0,
+        "to_cents": 1192500,
+        "rate_pct": 10
+      },
+      {
+        "from_cents": 1192500,
+        "to_cents": 4847500,
+        "rate_pct": 12
+      },
+      {
+        "from_cents": 4847500,
+        "to_cents": 10335000,
+        "rate_pct": 22
+      },
+      {
+        "from_cents": 10335000,
+        "to_cents": 19730000,
+        "rate_pct": 24
+      },
+      {
+        "from_cents": 19730000,
+        "to_cents": 25052500,
+        "rate_pct": 32
+      },
+      {
+        "from_cents": 25052500,
+        "to_cents": 62635000,
+        "rate_pct": 35
+      },
+      {
+        "from_cents": 62635000,
+        "to_cents": null,
+        "rate_pct": 37
+      }
+    ],
+    "brackets_married_filing_jointly": [
+      {
+        "from_cents": 0,
+        "to_cents": 2385000,
+        "rate_pct": 10
+      },
+      {
+        "from_cents": 2385000,
+        "to_cents": 9695000,
+        "rate_pct": 12
+      },
+      {
+        "from_cents": 9695000,
+        "to_cents": 20670000,
+        "rate_pct": 22
+      },
+      {
+        "from_cents": 20670000,
+        "to_cents": 39460000,
+        "rate_pct": 24
+      },
+      {
+        "from_cents": 39460000,
+        "to_cents": 50105000,
+        "rate_pct": 32
+      },
+      {
+        "from_cents": 50105000,
+        "to_cents": 75160000,
+        "rate_pct": 35
+      },
+      {
+        "from_cents": 75160000,
+        "to_cents": null,
+        "rate_pct": 37
+      }
+    ],
+    "fica": {
+      "social_security_employee_pct": 6.2,
+      "social_security_wage_base_cents_2025": 17610000,
+      "social_security_wage_base_cents_2026": 18450000,
+      "medicare_employee_pct": 1.45,
+      "additional_medicare_pct_over_200k_single": 0.9,
+      "self_employment_pct": 15.3,
+      "note": "Employer pays a matching 7.65%."
+    },
+    "child_tax_credit_cents_2025": 220000,
+    "earned_income_credit_max_cents_2025_one_child": 432800,
+    "capital_gains_long_term_pct": {
+      "bands": [
+        0,
+        15,
+        20
+      ]
+    },
+    "irs_standard_mileage_cents_per_mile_2025": 70,
+    "effective_withholding_note": "occupations.json withholding_rate_pct was computed from these parameters."
+  }
+}

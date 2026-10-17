@@ -1,0 +1,18 @@
+{
+  "id": "vehicles.factors",
+  "pack": "vehicles",
+  "schema": "lre-table/vehicles.factors/v1",
+  "revision": "491579e3ac37e00325a6adb017d7a9c7",
+  "label": "Consumption factor guides",
+  "source": {"dataPack":"modern-us","file":"us/vehicles.json","sourceSchema":"lre-data-src/us/vehicles/v1","reflectsPeriod":"2025-2026 (model-year 2025 new prices; used = about 3-5 years old)","approximate":true,"basis":{"prices_and_economy":"Typical new MSRP bands, used-market (Edmunds, Kelley Blue Book, NADA) values and EPA fueleconomy.gov combined ratings for representative models, rounded; marine and off-road from manufacturer spec sheets (Mercury, Yamaha, Sea-Doo, Polaris, Honda) and dealer pricing.","insurance":"Bankrate / Insurify 2025 average premiums: full coverage about $2,300-$2,700 per year for a clean-record adult, state-minimum liability about $600-$800 per year; EVs are 15-25% higher; boats about 1.5% of value per year; rounded to cents per month.","maintenance":"Manufacturer service schedules and AAA / RepairPal cost surveys, rounded.","registration":"State DMV fee ranges; actual cost varies by weight, value, age and county."}},
+  "columns": {
+    "basis": {"type":"text"},
+    "factors": {"type":"json","doc":"Factor id to consumption multiplier (>1 burns more). Road: relative to the combined rating; marine: to cruise_planing; off-road: to normal_trail."},
+    "note": {"type":"text","optional":true}
+  },
+  "rows": {
+    "road": {"basis":"Multipliers on fuel (or energy) consumed per mile relative to the combined rating; >1 burns more. Rounded rules of thumb from EPA/fueleconomy.gov and AAA tests.","factors":{"highway_steady_55_65mph":0.88,"stop_and_go_city":1.15,"hilly_or_mountain":1.15,"highway_75mph":1.15,"highway_80mph_plus":1.3,"cold_below_20F":1.15,"hot_ac_on_95F":1.1,"headwind_strong":1.1,"loaded_to_payload":1.2,"towing_near_rated":1.6,"roof_cargo_or_box":1.1,"off_pavement_dirt_gravel":1.2,"sand_mud_snow":1.5},"note":"For EVs the same multipliers apply to kWh per mile (cold weather is harsher: use 1.35; highway 75 mph: 1.30; towing: 2.0)."},
+    "marine": {"basis":"Multipliers on gallons per hour at planing cruise; rules of thumb from engine makers' fuel curves (Mercury, Yamaha, Volvo Penta) and BoatUS guidance.","factors":{"idle_or_no_wake_trolling":0.12,"displacement_or_slow_cruise":0.35,"planing_cruise_default":1,"wide_open_throttle":1.8,"rough_chop_head_sea":1.3,"heavy_load_full_crew":1.15,"strong_current_against":1.25,"sailing_under_sail":0},"note":"Plan on the 1/3 out, 1/3 back, 1/3 reserve fuel rule. Marine tank capacities are usable gallons."},
+    "offroad": {"basis":"Multipliers on gallons per hour at normal trail pace; rule-of-thumb values from OEM spec sheets and trail-riding reports.","factors":{"idle":0.15,"easy_trail_forest_road":0.8,"normal_trail_default":1,"technical_climb_rock":1.3,"sand_dunes_deep_mud":1.6,"sustained_high_speed_desert_race_pace":1.5,"two_up_or_loaded_cargo":1.15}}
+  }
+}

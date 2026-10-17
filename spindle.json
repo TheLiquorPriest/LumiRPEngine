@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "name": "LumiRPEngine",
+  "identifier": "lumi_rp_engine",
+  "author": "TheLiquorPriest",
+  "github": "https://github.com/TheLiquorPriest/LumiRPEngine",
+  "homepage": "https://github.com/TheLiquorPriest/LumiRPEngine",
+  "description": "Persistent world simulation and roleplay engine for Lumiverse.",
+  "permissions": [
+    "generation",
+    "context_handler",
+    "chats",
+    "chat_mutation",
+    "world_books",
+    "presets",
+    "decisions",
+    "ui_panels"
+  ],
+  "entry_backend": "dist/backend.js",
+  "entry_frontend": "dist/frontend.js"
+}

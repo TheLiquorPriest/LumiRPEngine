@@ -1,0 +1,1088 @@
+{
+  "schema": "lre-data-src/us/vehicles/v1",
+  "table": "vehicles",
+  "approximate": true,
+  "country": "US",
+  "currency": "USD",
+  "money_unit": "integer cents",
+  "reflects_period": "2025-2026 (model-year 2025 new prices; used = about 3-5 years old)",
+  "basis": {
+    "prices_and_economy": "Typical new MSRP bands, used-market (Edmunds, Kelley Blue Book, NADA) values and EPA fueleconomy.gov combined ratings for representative models, rounded; marine and off-road from manufacturer spec sheets (Mercury, Yamaha, Sea-Doo, Polaris, Honda) and dealer pricing.",
+    "insurance": "Bankrate / Insurify 2025 average premiums: full coverage about $2,300-$2,700 per year for a clean-record adult, state-minimum liability about $600-$800 per year; EVs are 15-25% higher; boats about 1.5% of value per year; rounded to cents per month.",
+    "maintenance": "Manufacturer service schedules and AAA / RepairPal cost surveys, rounded.",
+    "registration": "State DMV fee ranges; actual cost varies by weight, value, age and county."
+  },
+  "unit_conventions": {
+    "mpg": "miles per US gallon",
+    "mi_per_kwh": "miles per kilowatt-hour of usable battery energy",
+    "gal_per_hour": "US gallons per hour of engine run time",
+    "tank_capacity": "Usable fuel in US gallons (also given in liters).",
+    "battery_capacity_kwh_usable": "Usable kWh.",
+    "cargo_l": "Cargo volume in liters (road: usually seats-folded for SUVs and minivans; boats and ATVs: storage plus racks).",
+    "payload_kg": "Maximum payload including passengers, in kilograms.",
+    "towing_kg": "Maximum rated towing capacity in kilograms (0 if not rated)."
+  },
+  "consumption_factor_guides": {
+    "road": {
+      "basis": "Multipliers on fuel (or energy) consumed per mile relative to the combined rating; >1 burns more. Rounded rules of thumb from EPA/fueleconomy.gov and AAA tests.",
+      "highway_steady_55_65mph": 0.88,
+      "stop_and_go_city": 1.15,
+      "hilly_or_mountain": 1.15,
+      "highway_75mph": 1.15,
+      "highway_80mph_plus": 1.3,
+      "cold_below_20F": 1.15,
+      "hot_ac_on_95F": 1.1,
+      "headwind_strong": 1.1,
+      "loaded_to_payload": 1.2,
+      "towing_near_rated": 1.6,
+      "roof_cargo_or_box": 1.1,
+      "off_pavement_dirt_gravel": 1.2,
+      "sand_mud_snow": 1.5,
+      "ev_note": "For EVs the same multipliers apply to kWh per mile (cold weather is harsher: use 1.35; highway 75 mph: 1.30; towing: 2.0)."
+    },
+    "marine": {
+      "basis": "Multipliers on gallons per hour at planing cruise; rules of thumb from engine makers' fuel curves (Mercury, Yamaha, Volvo Penta) and BoatUS guidance.",
+      "idle_or_no_wake_trolling": 0.12,
+      "displacement_or_slow_cruise": 0.35,
+      "planing_cruise_default": 1.0,
+      "wide_open_throttle": 1.8,
+      "rough_chop_head_sea": 1.3,
+      "heavy_load_full_crew": 1.15,
+      "strong_current_against": 1.25,
+      "sailing_under_sail": 0.0,
+      "note": "Plan on the 1/3 out, 1/3 back, 1/3 reserve fuel rule. Marine tank capacities are usable gallons."
+    },
+    "offroad": {
+      "basis": "Multipliers on gallons per hour at normal trail pace; rule-of-thumb values from OEM spec sheets and trail-riding reports.",
+      "idle": 0.15,
+      "easy_trail_forest_road": 0.8,
+      "normal_trail_default": 1.0,
+      "technical_climb_rock": 1.3,
+      "sand_dunes_deep_mud": 1.6,
+      "sustained_high_speed_desert_race_pace": 1.5,
+      "two_up_or_loaded_cargo": 1.15
+    }
+  },
+  "fields": {
+    "id": "Stable vehicle-class key.",
+    "domain": "road | marine | offroad.",
+    "fuel_type": "gasoline | diesel | electricity.",
+    "consumption": "Rate by unit; road gives city/highway/combined, marine and off-road give gallons per hour by regime.",
+    "range_miles_typical": "Approximate range on a full tank or battery at combined consumption.",
+    "range_hours_typical": "Approximate engine hours on a full tank at the \"normal/cruise\" rate.",
+    "price_new_cents": "Integer cents {min, typical, max}.",
+    "price_used_cents": "Integer cents {min, typical, max}; about 3-5 years old (boats and off-road: 3-7).",
+    "insurance_cents_per_month": "Integer cents per month for a clean-record adult: state-minimum liability and full coverage (liability + collision/comprehensive).",
+    "maintenance": "Intervals in miles or hours and an annual cost in cents; null interval = not applicable.",
+    "registration_cents_per_year": "Integer cents per year {min, typical, max}.",
+    "passengers": "Seats / rated persons.",
+    "consumption_factors_ref": "Pointer to the multiplier guide for terrain/load."
+  },
+  "entries": [
+    {
+      "id": "compact_car",
+      "name": "Compact car (Civic / Corolla class)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 12.4,
+      "tank_capacity_l": 46.9,
+      "consumption": {
+        "unit": "mpg",
+        "city": 30,
+        "highway": 40,
+        "combined": 33
+      },
+      "range_miles_typical": 410,
+      "price_new_cents": {
+        "min": 2200000,
+        "typical": 2600000,
+        "max": 3100000
+      },
+      "price_used_cents": {
+        "min": 1200000,
+        "typical": 1750000,
+        "max": 2200000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 6000,
+        "full_coverage": 20000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 7500,
+        "oil_type": "synthetic",
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 45000,
+        "brake_pads_interval_miles": 50000,
+        "major_service_interval_miles": [
+          30000,
+          60000,
+          90000
+        ],
+        "annual_maintenance_cents_typical": 90000
+      },
+      "registration_cents_per_year": {
+        "min": 3000,
+        "typical": 12500,
+        "max": 50000
+      },
+      "passengers": 5,
+      "cargo_l": 425,
+      "payload_kg": 430,
+      "towing_kg": 0,
+      "notes": "US new-vehicle average transaction price is near $49,000 in 2025 across all classes; compacts are at the low end.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "midsize_sedan",
+      "name": "Midsize sedan (Camry / Accord class)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 14.5,
+      "tank_capacity_l": 54.9,
+      "consumption": {
+        "unit": "mpg",
+        "city": 28,
+        "highway": 38,
+        "combined": 31
+      },
+      "range_miles_typical": 450,
+      "price_new_cents": {
+        "min": 2700000,
+        "typical": 3200000,
+        "max": 4000000
+      },
+      "price_used_cents": {
+        "min": 1500000,
+        "typical": 2100000,
+        "max": 2700000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 6000,
+        "full_coverage": 21500
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 7500,
+        "oil_type": "synthetic",
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 45000,
+        "brake_pads_interval_miles": 50000,
+        "major_service_interval_miles": [
+          30000,
+          60000,
+          90000
+        ],
+        "annual_maintenance_cents_typical": 100000
+      },
+      "registration_cents_per_year": {
+        "min": 3000,
+        "typical": 13000,
+        "max": 55000
+      },
+      "passengers": 5,
+      "cargo_l": 450,
+      "payload_kg": 450,
+      "towing_kg": 700,
+      "notes": "Hybrid variants reach 45-52 mpg combined.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "pickup_midsize",
+      "name": "Midsize pickup (Tacoma / Colorado class)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 21.1,
+      "tank_capacity_l": 79.9,
+      "consumption": {
+        "unit": "mpg",
+        "city": 19,
+        "highway": 24,
+        "combined": 21
+      },
+      "range_miles_typical": 440,
+      "price_new_cents": {
+        "min": 3300000,
+        "typical": 4200000,
+        "max": 5800000
+      },
+      "price_used_cents": {
+        "min": 2200000,
+        "typical": 3000000,
+        "max": 4000000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 6200,
+        "full_coverage": 22500
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 7500,
+        "oil_type": "synthetic",
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 40000,
+        "brake_pads_interval_miles": 45000,
+        "major_service_interval_miles": [
+          30000,
+          60000,
+          90000
+        ],
+        "annual_maintenance_cents_typical": 110000
+      },
+      "registration_cents_per_year": {
+        "min": 3500,
+        "typical": 15000,
+        "max": 70000
+      },
+      "passengers": 5,
+      "cargo_l": 1000,
+      "payload_kg": 620,
+      "towing_kg": 3000,
+      "notes": "Cargo is the open bed (about 5 ft). Towing about 6,500 lb.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "pickup_fullsize",
+      "name": "Full-size pickup (F-150 / Silverado class)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 26.0,
+      "tank_capacity_l": 98.4,
+      "consumption": {
+        "unit": "mpg",
+        "city": 18,
+        "highway": 24,
+        "combined": 20
+      },
+      "range_miles_typical": 520,
+      "price_new_cents": {
+        "min": 4000000,
+        "typical": 5800000,
+        "max": 8500000
+      },
+      "price_used_cents": {
+        "min": 2800000,
+        "typical": 3800000,
+        "max": 5200000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 6500,
+        "full_coverage": 24000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 7500,
+        "oil_type": "synthetic",
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 40000,
+        "brake_pads_interval_miles": 45000,
+        "major_service_interval_miles": [
+          30000,
+          60000,
+          90000
+        ],
+        "annual_maintenance_cents_typical": 120000
+      },
+      "registration_cents_per_year": {
+        "min": 4000,
+        "typical": 17000,
+        "max": 90000
+      },
+      "passengers": 5,
+      "cargo_l": 1500,
+      "payload_kg": 900,
+      "towing_kg": 4500,
+      "notes": "Cargo is the open bed (5.5-6.5 ft). Towing up to ~10,000 lb with the right package.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "pickup_heavy_duty_diesel",
+      "name": "Heavy-duty diesel pickup (2500 / F-250 class)",
+      "domain": "road",
+      "fuel_type": "diesel",
+      "tank_capacity_gal": 34.0,
+      "tank_capacity_l": 128.7,
+      "consumption": {
+        "unit": "mpg",
+        "city": 14,
+        "highway": 19,
+        "combined": 16
+      },
+      "range_miles_typical": 540,
+      "price_new_cents": {
+        "min": 5500000,
+        "typical": 7200000,
+        "max": 10000000
+      },
+      "price_used_cents": {
+        "min": 3800000,
+        "typical": 5000000,
+        "max": 7000000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 7500,
+        "full_coverage": 27000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 10000,
+        "oil_type": "diesel synthetic",
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 45000,
+        "brake_pads_interval_miles": 45000,
+        "major_service_interval_miles": [
+          30000,
+          60000,
+          90000
+        ],
+        "fuel_filter_interval_miles": 15000,
+        "annual_maintenance_cents_typical": 180000
+      },
+      "registration_cents_per_year": {
+        "min": 5000,
+        "typical": 22000,
+        "max": 120000
+      },
+      "passengers": 5,
+      "cargo_l": 1700,
+      "payload_kg": 1500,
+      "towing_kg": 7000,
+      "notes": "DEF fluid (diesel exhaust fluid) refills every ~5,000 miles, about $15-25/ 2.5 gal. Towing up to 15,000-20,000 lb.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "suv_compact",
+      "name": "Compact SUV (RAV4 / CR-V class)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 14.5,
+      "tank_capacity_l": 54.9,
+      "consumption": {
+        "unit": "mpg",
+        "city": 27,
+        "highway": 35,
+        "combined": 30
+      },
+      "range_miles_typical": 430,
+      "price_new_cents": {
+        "min": 3000000,
+        "typical": 3600000,
+        "max": 4600000
+      },
+      "price_used_cents": {
+        "min": 1900000,
+        "typical": 2600000,
+        "max": 3400000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 6200,
+        "full_coverage": 22000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 7500,
+        "oil_type": "synthetic",
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 45000,
+        "brake_pads_interval_miles": 50000,
+        "major_service_interval_miles": [
+          30000,
+          60000,
+          90000
+        ],
+        "annual_maintenance_cents_typical": 105000
+      },
+      "registration_cents_per_year": {
+        "min": 3000,
+        "typical": 14000,
+        "max": 60000
+      },
+      "passengers": 5,
+      "cargo_l": 1100,
+      "payload_kg": 450,
+      "towing_kg": 700,
+      "notes": "Cargo volume is with the rear seats folded: about 1,100 L; behind seats about 540 L. Hybrids reach 38-41 mpg.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "suv_midsize_3row",
+      "name": "Midsize three-row SUV (Highlander / Explorer class)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 18.0,
+      "tank_capacity_l": 68.1,
+      "consumption": {
+        "unit": "mpg",
+        "city": 20,
+        "highway": 27,
+        "combined": 23
+      },
+      "range_miles_typical": 410,
+      "price_new_cents": {
+        "min": 4000000,
+        "typical": 5000000,
+        "max": 6800000
+      },
+      "price_used_cents": {
+        "min": 2600000,
+        "typical": 3400000,
+        "max": 4400000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 6500,
+        "full_coverage": 24000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 7500,
+        "oil_type": "synthetic",
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 45000,
+        "brake_pads_interval_miles": 45000,
+        "major_service_interval_miles": [
+          30000,
+          60000,
+          90000
+        ],
+        "annual_maintenance_cents_typical": 125000
+      },
+      "registration_cents_per_year": {
+        "min": 3500,
+        "typical": 16000,
+        "max": 75000
+      },
+      "passengers": 7,
+      "cargo_l": 2300,
+      "payload_kg": 600,
+      "towing_kg": 2300,
+      "notes": "Cargo with second and third rows folded about 2,300 L; behind the third row about 480 L.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "minivan",
+      "name": "Minivan (Sienna / Odyssey / Pacifica class)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 19.5,
+      "tank_capacity_l": 73.8,
+      "consumption": {
+        "unit": "mpg",
+        "city": 19,
+        "highway": 28,
+        "combined": 22
+      },
+      "range_miles_typical": 430,
+      "price_new_cents": {
+        "min": 3800000,
+        "typical": 4400000,
+        "max": 5600000
+      },
+      "price_used_cents": {
+        "min": 2400000,
+        "typical": 3000000,
+        "max": 3800000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 6200,
+        "full_coverage": 22000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 7500,
+        "oil_type": "synthetic",
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 45000,
+        "brake_pads_interval_miles": 45000,
+        "major_service_interval_miles": [
+          30000,
+          60000,
+          90000
+        ],
+        "annual_maintenance_cents_typical": 115000
+      },
+      "registration_cents_per_year": {
+        "min": 3500,
+        "typical": 15000,
+        "max": 65000
+      },
+      "passengers": 8,
+      "cargo_l": 4000,
+      "payload_kg": 650,
+      "towing_kg": 1600,
+      "notes": "Hybrid minivans (Sienna) return 35-36 mpg combined; cargo with rows folded is about 4,000 L (140 cu ft).",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "ev_sedan",
+      "name": "Electric sedan (Model 3 / Ioniq 6 class)",
+      "domain": "road",
+      "fuel_type": "electricity",
+      "battery_capacity_kwh_usable": 60.0,
+      "consumption": {
+        "unit": "mi_per_kwh",
+        "city": 4.3,
+        "highway": 3.4,
+        "combined": 3.8
+      },
+      "range_miles_typical": 270,
+      "charging": {
+        "home_level2_kw": "7-11",
+        "dc_fast_peak_kw": "150-250",
+        "dc_fast_10_to_80_minutes": "25-35",
+        "wall_outlet_120v_miles_per_hour": "3-5"
+      },
+      "price_new_cents": {
+        "min": 3800000,
+        "typical": 4400000,
+        "max": 5600000
+      },
+      "price_used_cents": {
+        "min": 1900000,
+        "typical": 2600000,
+        "max": 3400000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 7000,
+        "full_coverage": 27000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": null,
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 35000,
+        "brake_pads_interval_miles": 100000,
+        "cabin_filter_interval_miles": 20000,
+        "battery_coolant_interval_miles": 100000,
+        "major_service_interval_miles": [
+          25000,
+          50000,
+          75000
+        ],
+        "annual_maintenance_cents_typical": 50000
+      },
+      "registration_cents_per_year": {
+        "min": 5000,
+        "typical": 17500,
+        "max": 80000
+      },
+      "passengers": 5,
+      "cargo_l": 600,
+      "payload_kg": 450,
+      "towing_kg": 0,
+      "notes": "No oil changes. Many states add an EV registration surcharge of about $100-$250 per year, included in the registration band. Tires wear faster (instant torque, weight).",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "ev_crossover",
+      "name": "Electric crossover (Model Y / Equinox EV class)",
+      "domain": "road",
+      "fuel_type": "electricity",
+      "battery_capacity_kwh_usable": 75.0,
+      "consumption": {
+        "unit": "mi_per_kwh",
+        "city": 3.6,
+        "highway": 3.0,
+        "combined": 3.3
+      },
+      "range_miles_typical": 300,
+      "charging": {
+        "home_level2_kw": "7-11",
+        "dc_fast_peak_kw": "150-250",
+        "dc_fast_10_to_80_minutes": "25-40",
+        "wall_outlet_120v_miles_per_hour": "3-5"
+      },
+      "price_new_cents": {
+        "min": 4000000,
+        "typical": 5000000,
+        "max": 6500000
+      },
+      "price_used_cents": {
+        "min": 2200000,
+        "typical": 3100000,
+        "max": 4200000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 7200,
+        "full_coverage": 28000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": null,
+        "tire_rotation_interval_miles": 7500,
+        "tire_replace_interval_miles": 35000,
+        "brake_pads_interval_miles": 100000,
+        "cabin_filter_interval_miles": 20000,
+        "battery_coolant_interval_miles": 100000,
+        "major_service_interval_miles": [
+          25000,
+          50000,
+          75000
+        ],
+        "annual_maintenance_cents_typical": 55000
+      },
+      "registration_cents_per_year": {
+        "min": 5000,
+        "typical": 18000,
+        "max": 85000
+      },
+      "passengers": 5,
+      "cargo_l": 1900,
+      "payload_kg": 480,
+      "towing_kg": 1600,
+      "notes": "Cargo volume with rear seats folded.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "motorcycle_standard",
+      "name": "Motorcycle, standard or cruiser (500-900 cc)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 4.5,
+      "tank_capacity_l": 17.0,
+      "consumption": {
+        "unit": "mpg",
+        "city": 45,
+        "highway": 52,
+        "combined": 48
+      },
+      "range_miles_typical": 200,
+      "price_new_cents": {
+        "min": 700000,
+        "typical": 1000000,
+        "max": 1600000
+      },
+      "price_used_cents": {
+        "min": 350000,
+        "typical": 550000,
+        "max": 900000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 3500,
+        "full_coverage": 7500
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 5000,
+        "oil_type": "synthetic",
+        "tire_rotation_interval_miles": null,
+        "tire_replace_interval_miles": 8000,
+        "brake_pads_interval_miles": 15000,
+        "chain_lube_interval_miles": 500,
+        "valve_check_interval_miles": 16000,
+        "major_service_interval_miles": [
+          6000,
+          12000,
+          24000
+        ],
+        "annual_maintenance_cents_typical": 45000
+      },
+      "registration_cents_per_year": {
+        "min": 1500,
+        "typical": 5000,
+        "max": 15000
+      },
+      "passengers": 2,
+      "cargo_l": 30,
+      "payload_kg": 180,
+      "towing_kg": 0,
+      "notes": "Cargo is saddlebags or a tail bag; a passenger seat is optional. Front/rear tires are replaced separately (rear wears ~2x faster). Helmet laws vary by state.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "scooter_150",
+      "name": "Scooter or moped (50-150 cc)",
+      "domain": "road",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 1.5,
+      "tank_capacity_l": 5.7,
+      "consumption": {
+        "unit": "mpg",
+        "city": 80,
+        "highway": 65,
+        "combined": 75
+      },
+      "range_miles_typical": 110,
+      "price_new_cents": {
+        "min": 250000,
+        "typical": 400000,
+        "max": 650000
+      },
+      "price_used_cents": {
+        "min": 100000,
+        "typical": 200000,
+        "max": 350000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 1800,
+        "full_coverage": 4000
+      },
+      "maintenance": {
+        "oil_change_interval_miles": 2500,
+        "oil_type": "scooter 10W-40",
+        "tire_rotation_interval_miles": null,
+        "tire_replace_interval_miles": 6000,
+        "brake_pads_interval_miles": 8000,
+        "belt_replace_interval_miles": 10000,
+        "major_service_interval_miles": [
+          3000,
+          6000,
+          12000
+        ],
+        "annual_maintenance_cents_typical": 20000
+      },
+      "registration_cents_per_year": {
+        "min": 500,
+        "typical": 3000,
+        "max": 10000
+      },
+      "passengers": 2,
+      "cargo_l": 30,
+      "payload_kg": 150,
+      "towing_kg": 0,
+      "notes": "Under-seat storage about 25-35 L. Mopeds under 50 cc often need no registration or license in some states; top speed 30-60 mph.",
+      "consumption_factors_ref": "consumption_factor_guides.road"
+    },
+    {
+      "id": "bass_boat_outboard",
+      "name": "Outboard bass boat (18-20 ft, 150-200 hp)",
+      "domain": "marine",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 40.0,
+      "tank_capacity_l": 151.4,
+      "consumption": {
+        "unit": "gal_per_hour",
+        "idle_no_wake": 0.8,
+        "cruise_planing": 9.0,
+        "wide_open": 16.0
+      },
+      "range_hours_typical": 4.0,
+      "price_new_cents": {
+        "min": 4000000,
+        "typical": 6500000,
+        "max": 10000000
+      },
+      "price_used_cents": {
+        "min": 1800000,
+        "typical": 3200000,
+        "max": 5500000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 2500,
+        "full_coverage": 7500
+      },
+      "maintenance": {
+        "engine_service_interval_hours": 100,
+        "engine_service_note": "oil, filters and lower-unit gear oil every 100 hours or annually",
+        "water_pump_impeller_interval_hours": 300,
+        "winterization_cents_annual": 45000,
+        "trailer_bearing_interval_miles": 12000,
+        "annual_maintenance_cents_typical": 120000,
+        "slip_or_storage_cents_per_month": {
+          "min": 0,
+          "typical": 15000,
+          "max": 60000
+        }
+      },
+      "registration_cents_per_year": {
+        "min": 1000,
+        "typical": 5000,
+        "max": 15000
+      },
+      "passengers": 4,
+      "cargo_l": 250,
+      "payload_kg": 450,
+      "notes": "Boat state registration usually renews every 1-3 years (annualised here); trailer is registered separately (~$30-$100/year). Price includes motor and trailer. Cruise burn is at planing speed with a normal load.",
+      "consumption_factors_ref": "consumption_factor_guides.marine"
+    },
+    {
+      "id": "pontoon_boat",
+      "name": "Pontoon boat (22-24 ft, 90-150 hp outboard)",
+      "domain": "marine",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 26.0,
+      "tank_capacity_l": 98.4,
+      "consumption": {
+        "unit": "gal_per_hour",
+        "idle_no_wake": 0.6,
+        "cruise_planing": 5.5,
+        "wide_open": 11.0
+      },
+      "range_hours_typical": 4.7,
+      "price_new_cents": {
+        "min": 3500000,
+        "typical": 6000000,
+        "max": 10000000
+      },
+      "price_used_cents": {
+        "min": 2000000,
+        "typical": 3000000,
+        "max": 5000000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 2000,
+        "full_coverage": 6500
+      },
+      "maintenance": {
+        "engine_service_interval_hours": 100,
+        "water_pump_impeller_interval_hours": 300,
+        "winterization_cents_annual": 40000,
+        "trailer_bearing_interval_miles": 12000,
+        "annual_maintenance_cents_typical": 90000,
+        "slip_or_storage_cents_per_month": {
+          "min": 0,
+          "typical": 20000,
+          "max": 80000
+        }
+      },
+      "registration_cents_per_year": {
+        "min": 1000,
+        "typical": 5000,
+        "max": 15000
+      },
+      "passengers": 10,
+      "cargo_l": 300,
+      "payload_kg": 1000,
+      "notes": "Capacity plate typically 8-13 persons / 1,500-2,500 lb total.",
+      "consumption_factors_ref": "consumption_factor_guides.marine"
+    },
+    {
+      "id": "jet_ski_pwc",
+      "name": "Personal watercraft / jet ski (1-3 seats)",
+      "domain": "marine",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 15.9,
+      "tank_capacity_l": 60.2,
+      "consumption": {
+        "unit": "gal_per_hour",
+        "idle_no_wake": 0.8,
+        "cruise_planing": 6.0,
+        "wide_open": 13.0
+      },
+      "range_hours_typical": 2.6,
+      "price_new_cents": {
+        "min": 800000,
+        "typical": 1300000,
+        "max": 2500000
+      },
+      "price_used_cents": {
+        "min": 500000,
+        "typical": 850000,
+        "max": 1500000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 1500,
+        "full_coverage": 4500
+      },
+      "maintenance": {
+        "engine_service_interval_hours": 50,
+        "engine_service_note": "oil and filter every 50 hours or annually",
+        "winterization_cents_annual": 20000,
+        "annual_maintenance_cents_typical": 60000,
+        "slip_or_storage_cents_per_month": {
+          "min": 0,
+          "typical": 10000,
+          "max": 40000
+        }
+      },
+      "registration_cents_per_year": {
+        "min": 1000,
+        "typical": 4500,
+        "max": 12000
+      },
+      "passengers": 3,
+      "cargo_l": 60,
+      "payload_kg": 250,
+      "notes": "Premium-grade fuel recommended by most makers. Price excludes trailer ($800-$2,500).",
+      "consumption_factors_ref": "consumption_factor_guides.marine"
+    },
+    {
+      "id": "sailboat_auxiliary",
+      "name": "Cruising sailboat with auxiliary diesel (30-35 ft)",
+      "domain": "marine",
+      "fuel_type": "diesel",
+      "tank_capacity_gal": 25.0,
+      "tank_capacity_l": 94.6,
+      "consumption": {
+        "unit": "gal_per_hour",
+        "idle_no_wake": 0.3,
+        "cruise_planing": 0.8,
+        "wide_open": 1.4,
+        "note": "Displacement hull: motors at hull speed (~6 knots) burning 0.6-1.0 gph; sailing uses no fuel."
+      },
+      "range_hours_typical": 31.0,
+      "price_new_cents": {
+        "min": 15000000,
+        "typical": 25000000,
+        "max": 40000000
+      },
+      "price_used_cents": {
+        "min": 2500000,
+        "typical": 6000000,
+        "max": 12000000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 2500,
+        "full_coverage": 15000
+      },
+      "maintenance": {
+        "engine_service_interval_hours": 150,
+        "engine_service_note": "oil and filters every 100-150 hours; impeller every 200 hours",
+        "haul_out_bottom_paint_cents_annual": 250000,
+        "rigging_and_sails_cents_annual": 80000,
+        "annual_maintenance_cents_typical": 400000,
+        "slip_or_storage_cents_per_month": {
+          "min": 25000,
+          "typical": 80000,
+          "max": 250000
+        }
+      },
+      "registration_cents_per_year": {
+        "min": 1000,
+        "typical": 4500,
+        "max": 12000
+      },
+      "passengers": 6,
+      "cargo_l": 1500,
+      "payload_kg": 900,
+      "notes": "Documented vessels (US Coast Guard documentation) pay no state registration. A rule of thumb is that ownership costs 10% of value per year. Sleeps 4-6.",
+      "consumption_factors_ref": "consumption_factor_guides.marine"
+    },
+    {
+      "id": "atv_utility",
+      "name": "ATV, utility quad (450-700 cc)",
+      "domain": "offroad",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 4.5,
+      "tank_capacity_l": 17.0,
+      "consumption": {
+        "unit": "gal_per_hour",
+        "idle": 0.15,
+        "normal_trail": 1.0,
+        "hard_use": 1.8,
+        "approx_mpg_trail": 18
+      },
+      "range_hours_typical": 4.5,
+      "price_new_cents": {
+        "min": 700000,
+        "typical": 950000,
+        "max": 1400000
+      },
+      "price_used_cents": {
+        "min": 300000,
+        "typical": 500000,
+        "max": 800000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 1500,
+        "full_coverage": 3500
+      },
+      "maintenance": {
+        "oil_change_interval_hours": 50,
+        "oil_change_interval_miles": 1000,
+        "tire_replace_interval_miles": 3000,
+        "air_filter_interval_hours": 25,
+        "chain_or_driveshaft_service_interval_hours": 100,
+        "annual_maintenance_cents_typical": 35000
+      },
+      "registration_cents_per_year": {
+        "min": 0,
+        "typical": 2500,
+        "max": 6000
+      },
+      "passengers": 1,
+      "cargo_l": 120,
+      "payload_kg": 130,
+      "towing_kg": 500,
+      "notes": "Cargo: front and rear racks, about 40 kg front and 80 kg rear. Many states require an off-highway vehicle (OHV) sticker/permit rather than road registration; helmet and age rules vary.",
+      "consumption_factors_ref": "consumption_factor_guides.offroad"
+    },
+    {
+      "id": "utv_side_by_side",
+      "name": "UTV / side-by-side (Ranger / RZR class, 2-4 seats)",
+      "domain": "offroad",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 10.0,
+      "tank_capacity_l": 37.9,
+      "consumption": {
+        "unit": "gal_per_hour",
+        "idle": 0.2,
+        "normal_trail": 1.8,
+        "hard_use": 3.0,
+        "approx_mpg_trail": 14
+      },
+      "range_hours_typical": 5.5,
+      "price_new_cents": {
+        "min": 1400000,
+        "typical": 2200000,
+        "max": 3500000
+      },
+      "price_used_cents": {
+        "min": 900000,
+        "typical": 1400000,
+        "max": 2200000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 2500,
+        "full_coverage": 6000
+      },
+      "maintenance": {
+        "oil_change_interval_hours": 100,
+        "oil_change_interval_miles": 1500,
+        "tire_replace_interval_miles": 4000,
+        "belt_replace_interval_miles": 3000,
+        "air_filter_interval_hours": 25,
+        "annual_maintenance_cents_typical": 60000
+      },
+      "registration_cents_per_year": {
+        "min": 0,
+        "typical": 3500,
+        "max": 8000
+      },
+      "passengers": 4,
+      "cargo_l": 350,
+      "payload_kg": 450,
+      "towing_kg": 900,
+      "notes": "Utility models carry a dump bed up to ~450 kg; sport models carry people only. Roll cage and belts required.",
+      "consumption_factors_ref": "consumption_factor_guides.offroad"
+    },
+    {
+      "id": "dirt_bike_250",
+      "name": "Dirt bike, 250 cc four-stroke",
+      "domain": "offroad",
+      "fuel_type": "gasoline",
+      "tank_capacity_gal": 1.9,
+      "tank_capacity_l": 7.2,
+      "consumption": {
+        "unit": "gal_per_hour",
+        "idle": 0.08,
+        "normal_trail": 0.5,
+        "hard_use": 0.8,
+        "approx_mpg_trail": 40
+      },
+      "range_hours_typical": 3.8,
+      "price_new_cents": {
+        "min": 550000,
+        "typical": 800000,
+        "max": 1050000
+      },
+      "price_used_cents": {
+        "min": 200000,
+        "typical": 380000,
+        "max": 600000
+      },
+      "insurance_cents_per_month": {
+        "liability_only": 1000,
+        "full_coverage": 2500
+      },
+      "maintenance": {
+        "oil_change_interval_hours": 15,
+        "oil_change_interval_miles": 300,
+        "tire_replace_interval_miles": 800,
+        "air_filter_interval_hours": 5,
+        "top_end_rebuild_interval_hours": 150,
+        "chain_lube_interval_miles": 100,
+        "annual_maintenance_cents_typical": 55000
+      },
+      "registration_cents_per_year": {
+        "min": 0,
+        "typical": 2000,
+        "max": 5000
+      },
+      "passengers": 1,
+      "cargo_l": 5,
+      "payload_kg": 100,
+      "towing_kg": 0,
+      "notes": "Competition bikes are not street legal; plated dual-sport bikes use the motorcycle class. Premium fuel with 91+ octane typical.",
+      "consumption_factors_ref": "consumption_factor_guides.offroad"
+    }
+  ]
+}
