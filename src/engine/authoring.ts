@@ -18,7 +18,7 @@ import type { Registry } from "./registry-impl";
 import { buildEntitySheet } from "./ruleset";
 import type { InterpretOutput, TurnPipeline } from "./steps";
 import type { WorldState } from "./state";
-import { findLeaks, unrevealedTruths } from "./visibility";
+import { findLeaks, unrevealedSecrets } from "./visibility";
 import { lintLore } from "./lore-lint";
 import { lintStructure } from "./world-lint";
 import { initialState } from "./world-state";
@@ -280,7 +280,7 @@ export function checkWorldDay(registry: Registry, pipeline: TurnPipeline, world:
     notes.push(`failed: ${error instanceof Error ? error.message : String(error)}`);
     return { turn: { user: label, reply: "(the simulation failed)", notes }, state };
   }
-  const secrets = unrevealedTruths(world, next);
+  const secrets = unrevealedSecrets(registry, world, next);
   const ctx = registry.context(world, next);
   for (const r of registry.renderers) {
     try {

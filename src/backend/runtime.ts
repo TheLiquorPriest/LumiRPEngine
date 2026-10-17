@@ -35,7 +35,7 @@ import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { playerKnows } from "../engine/player-events";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { Working } from "../engine/working";
 import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
@@ -597,7 +597,7 @@ export class Runtime implements TurnHooks {
       return;
     }
     const budget = this.preBudgets.get(input.generationId) ?? new StepBudget(settings.modelUse.budgets.pre.calls, settings.modelUse.budgets.pre.ms, input.signal, settings.modelUse.budgets.pre.lookup);
-    const secrets = unrevealedTruths(render.world, render.state);
+    const secrets = unrevealedSecrets(this.registry, render.world, render.state);
     const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, ""), secrets);
     const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join("\n"), links: this.sceneLinks(render.world, render.state) };
     const at = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget);
@@ -690,6 +690,17 @@ export class Runtime implements TurnHooks {
       this.host.log("warn", `[LumiRPEngine] interpret: couldn't read the player's action; the turn runs as plain roleplay`, userId);
       bridge.setOffer(text, null);
       bridge.setUnread(text);
+      return;
+    }
+    // `interpret` may read secret lore its audience allows (DESIGN §7): what it returns becomes chips,
+    // Journal lines and the Outcome, so an answer carrying a secret's unrevealed text is played as
+    // roleplay. Words the player typed are theirs to repeat.
+    const typedText = text.toLowerCase();
+    const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typedText.includes(s.toLowerCase()));
+    if (findLeaks({ params: result.params, ...(result.then ? { then: result.then } : {}) }, secrets).length > 0) {
+      this.host.log("info", `[LumiRPEngine] interpret: ${result.action ?? "no action"} carried an unrevealed secret; played as roleplay`, userId);
+      bridge.setOffer(text, null);
+      bridge.setIntent(text, null);
       return;
     }
     // A bare time span reads as the timelapse itself; one after another action ("I head home and
@@ -912,7 +923,7 @@ export class Runtime implements TurnHooks {
     const facts: SignalFacts = { ...(pre?.facts ?? noFacts()), ...(pre ? planFacts(context.world, pre.start, context.state, plan) : {}), reply: text.trim() !== "", present: false, offscreen: ties.offscreen.length > 0, tieZone: ties.offscreen.length > 0 };
     // The user's post-phase deadline as set (no silent 15 s floor).
     const budget = new StepBudget(settings.modelUse.budgets.post.calls, settings.modelUse.budgets.post.ms, undefined, settings.modelUse.budgets.post.lookup);
-    const secrets = unrevealedTruths(context.world, context.state);
+    const secrets = unrevealedSecrets(this.registry, context.world, context.state);
     const vars = safeVars(this.stepVars(context.world, context.state, plan, pre?.text ?? "", text), secrets);
     const modelUse = settings.modelUse;
     // What the reply's steps search lore with: the reply and the player's message, in the POV's scene.
@@ -1240,7 +1251,7 @@ export class Runtime implements TurnHooks {
     const slotIds = bookId ? await this.book.slotEntries(bookId, input.userId) : new Map<string, string>();
     const present = new Set(input.entries.filter((e) => e.bookId === bookId).map((e) => e.id));
     const ctx = this.registry.context(world, state);
-    const secrets = unrevealedTruths(world, state);
+    const secrets = unrevealedSecrets(this.registry, world, state);
     const plan = Object.values(core.journal.pending).filter((p) => p.planned).at(-1);
     const turnPlan = plan ? this.bridges.get(input.chatId)?.planFor(plan.seed) : undefined;
     const prose = turnPlan && plan ? this.bridges.get(input.chatId)?.proseFor(plan.seed) : undefined;

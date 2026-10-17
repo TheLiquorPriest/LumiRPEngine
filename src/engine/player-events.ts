@@ -15,7 +15,7 @@ import type { Registry } from "./registry-impl";
 import { bandOf, fieldDef, GONE_FIELD } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
-import { canSeeEntity, canSeeField, canSeePlace, eventVisible, findLeaks, knows, trackKnown, unrevealedTruths, visibilityOf } from "./visibility";
+import { canSeeEntity, canSeeField, canSeePlace, eventVisible, findLeaks, knows, trackKnown, unrevealedSecrets, visibilityOf } from "./visibility";
 
 /** Event types that are engine or pack bookkeeping: never player-facing lines. */
 const BOOKKEEPING = new Set<string>([
@@ -237,9 +237,9 @@ function relabel(line: string, refs: readonly Ref[], world: WorldDoc, state: Rea
   return out;
 }
 
-/** Text that must never reach a player line: unrevealed truths, and hidden tracks' labels. */
+/** Text that must never reach a player line: unrevealed truths and gated secret lore, and hidden tracks' labels. */
 function secretsOf(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
-  const out = unrevealedTruths(world, state);
+  const out = unrevealedSecrets(reg, world, state);
   for (const [id, t] of Object.entries(world.tracks)) {
     if (trackShown(reg, world, state, pov, id)) continue;
     out.push(t.label);

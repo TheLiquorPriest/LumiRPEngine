@@ -53,7 +53,7 @@ function decide(req: DecideRequest): Answers {
 }
 
 /** A world chat whose world has `lore`, with an open tie for Dev (with Sam) and for Kim (elsewhere). */
-export async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject> = LORE): Promise<{ rig: Rig; chatId: string }> {
+async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject> = LORE, actions: Record<string, JsonObject> = {}): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig();
   for (const patch of settings) rig.body(await rig.send({ type: "lre.settings.set", patch }));
   const worldId = await rig.newWorld("Harbor");
@@ -69,6 +69,7 @@ export async function loreChat(settings: JsonObject[], lore: Record<string, Json
   await put("entities", "kim", { id: "kim", kind: "person", name: "Kim", tier: "background", fields: { tie: true }, relations: [], agent: true });
   await put("actions", "wait", { id: "wait", label: "Wait", params: {}, requires: [], outcomes: { default: [] }, duration: "10", lexicon: ["wait"] });
   for (const [id, value] of Object.entries(lore)) await put("lore", id, value);
+  for (const [id, value] of Object.entries(actions)) await put("actions", id, value);
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning, Sam.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -263,5 +264,29 @@ describe("the decision pre-pass", () => {
     const state = JSON.stringify(lean.rig.host.decideCalls.find((r) => JSON.stringify(r.state).includes('"agent":"Dev"'))?.state);
     expect(state).toContain("Dev's past");
     expect(state).not.toContain("Timetable");
+  });
+});
+
+describe("secret lore stays off what the player sees", () => {
+  const SAY: JsonObject = { id: "say", label: "Say something", params: { words: { type: "text" } }, requires: [], outcomes: { default: [] }, duration: "1", lexicon: ["say"] };
+
+  test("an interpret answer carrying a secret's text plays as roleplay, unless the player typed it", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], LORE, { say: SAY });
+    rig.host.quietReply = (req) => (isStep(req, "interpret") ? JSON.stringify({ action: "say", params: { words: `Psst: ${SECRET.toLowerCase()}!` }, confidence: 1 }) : quiet(req));
+    await rig.turn(chatId, "I say something about the ferry.", "Dev blinks.");
+    const logs = (): string[] => rig.host.userLogs.get(rig.host.userId) ?? [];
+    expect(logs().some((l) => l.includes("interpret: say carried an unrevealed secret; played as roleplay"))).toBe(true);
+    const before = logs().length;
+    await rig.turn(chatId, `I say "${SECRET}" to see what happens.`, "Dev blinks again.");
+    expect(logs().slice(before).some((l) => l.includes("carried an unrevealed secret"))).toBe(false);
+  });
+
+  test("a proposal carrying a secret lore phrase never becomes a chip", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }]);
+    rig.host.quietReply = (req) => (isStep(req, "extract") ? JSON.stringify({ proposals: [{ type: "condition", who: "sam", condition: `haunted: ${SECRET}` }] }) : quiet(req));
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect((rig.host.userLogs.get(rig.host.userId) ?? []).some((l) => l.includes("dropped 1 proposal(s) carrying an unrevealed secret"))).toBe(true);
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
+    expect(JSON.stringify(chips).toLowerCase()).not.toContain(SECRET.toLowerCase());
   });
 });
