@@ -14,7 +14,7 @@ import type { ChatRun } from "../shared/ledger";
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { EditorRequest, LintIssue, WorldCollection, WorldPart } from "../shared/protocol";
-import type { WorldDoc, WorldIndex } from "../shared/world";
+import type { RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { WORLD_FORMAT } from "../shared/world";
 import { blankWorld, currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, stamped } from "../engine/authoring";
 import type { Registry } from "../engine/registry-impl";
@@ -204,6 +204,11 @@ export class WorldStore {
     return { base: head.revision, doc: structuredClone(head.world), stored: false };
   }
 
+  /** The world as Build sees it: the stored draft, else the head. For previews; nothing is written. */
+  async working(worldId: WorldId, userId: UserId): Promise<WorldDoc> {
+    return (await this.draft(worldId, userId)).doc;
+  }
+
   /** One editor operation on the draft; `base` must match the draft's base (else `conflict`). `get` and `discard` ignore it. */
   async edit(request: EditorRequest, userId: UserId): Promise<{ draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean }> {
     if (request.op === "discard") await this.host.storage.remove(`${worldDir(request.worldId)}draft.json`, userId).catch(() => undefined);
@@ -276,6 +281,12 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     doc.tiers = Object.fromEntries(Object.entries(value.tiers).filter(([id]) => safeKey(id))) as unknown as WorldDoc["tiers"];
     if (typeof value.spawnTier === "string") doc.spawnTier = value.spawnTier;
     else delete doc.spawnTier;
+    return;
+  }
+  // The ruleset is optional (DESIGN §11): an empty one is no ruleset, so the document stays as a world without one.
+  if (part === "ruleset") {
+    if (Object.keys(value).length === 0) delete doc.ruleset;
+    else doc.ruleset = value as RulesetDef;
     return;
   }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.

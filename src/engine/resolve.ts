@@ -1,14 +1,13 @@
 // Action resolution (DESIGN §3 Actions, §11): parameters, requirements, then the check, then the
-// outcome's effects, then the duration and any activity the action starts. One check mechanism:
-// a dice expression plus a modifier, mapped to outcome bands, with exact odds. The odds shown in
-// the palette (`actionOdds`) and the roll (`rollCheck`) read the same bands, so shown odds are
-// the real odds.
+// outcome's effects, then the duration and any activity the action starts. The check is the one
+// check mechanism (engine/checks): the palette's odds (`actionOdds`) and the roll read the same
+// ready check, so shown odds are the real odds. Outcome effects see the roll as `roll.*`.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
-import type { ActionDef, CheckBand, CheckDef, EffectSpec, Expr, WorldDoc } from "../shared/world";
-import { diceDistribution, rollDice, type DiceRoll } from "./dice";
+import type { ActionDef, CheckDef, EffectSpec, Expr, WorldDoc } from "../shared/world";
+import { checkOdds, checkOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
 import { applyEffects } from "./effects";
 import type { EnvVars, ExprEnv, Value } from "./expr";
 import { materializeAll } from "./materialize";
@@ -21,9 +20,6 @@ import { Working } from "./working";
 import { canSeePlace } from "./visibility";
 import { labelOf, own } from "./pack-kit";
 
-/** The outcome when no band covers a total (lint flags gaps). */
-export const NO_BAND = "none";
-
 export interface ActionRequest {
   action: ActionId | ActionDef;
   /** Defaults to the POV. */
@@ -31,14 +27,15 @@ export interface ActionRequest {
   params?: JsonObject;
 }
 
-export interface CheckResult {
+export interface CheckResult extends CheckRoll {
   check: CheckDef;
+  /** The notation rolled: advantage applied, an opponent's roll subtracted. */
+  notation: string;
   modifier: number;
+  advantage: -1 | 0 | 1;
+  dc: number | null;
   /** Exact probability of each outcome, as shown. */
   odds: Record<string, number>;
-  roll: DiceRoll;
-  total: number;
-  outcome: string;
 }
 
 export interface Resolution {
@@ -60,37 +57,6 @@ export interface Resolution {
 
 export function findAction(reg: Registry, world: WorldDoc, id: ActionId): ActionDef | undefined {
   return own(world.actions, id) ?? reg.actions.get(id);
-}
-
-export function findCheck(world: WorldDoc, action: ActionDef): CheckDef | null {
-  if (!action.check) return null;
-  return typeof action.check === "string" ? (own(world.checks, action.check) ?? null) : action.check;
-}
-
-/** The first band containing `total` (inclusive bounds), or null. */
-export function bandOutcome(bands: readonly CheckBand[], total: number): string | null {
-  for (const b of bands) if ((b.min === undefined || total >= b.min) && (b.max === undefined || total <= b.max)) return b.outcome;
-  return null;
-}
-
-/** Exact outcome probabilities for a check with a fixed modifier. */
-export function checkOdds(check: CheckDef, modifier: number): Record<string, number> {
-  const dist = diceDistribution(check.dice);
-  const out: Record<string, number> = {};
-  for (const b of check.bands) out[b.outcome] = 0;
-  dist.probs.forEach((p, i) => {
-    if (p === 0) return;
-    const outcome = bandOutcome(check.bands, dist.min + i + modifier) ?? NO_BAND;
-    out[outcome] = (out[outcome] ?? 0) + p;
-  });
-  return out;
-}
-
-/** Rolls a check. Draws only from `rng` through the dice roller. */
-export function rollCheck(check: CheckDef, modifier: number, rng: Rng): { roll: DiceRoll; total: number; outcome: string } {
-  const roll = rollDice(check.dice, rng);
-  const total = roll.total + modifier;
-  return { roll, total, outcome: bandOutcome(check.bands, total) ?? NO_BAND };
 }
 
 interface Prepared {
@@ -154,22 +120,27 @@ export interface Availability {
   failed: { code: string; reason: string; requirement?: Expr } | null;
   odds: Record<string, number> | null;
   modifier: number;
+  /** How the check would roll (its notation, advantage, DC and opponent), when the action has one. */
+  check: { notation: string; advantage: -1 | 0 | 1; dc: number | null; opponent: EntityId | null } | null;
   duration: number;
 }
 
 /** What the palette shows: availability, exact odds and duration, against the current state. */
 export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, req: ActionRequest): Availability {
   const p = prepare(reg, world, state, req);
-  if ("code" in p) return { available: false, failed: p, odds: null, modifier: 0, duration: 0 };
-  const env = scopeEnv({ reg, ctx: reg.context(world, state), bindings: p.bindings, vars: p.vars });
+  if ("code" in p) return { available: false, failed: p, odds: null, modifier: 0, check: null, duration: 0 };
+  const ctx = reg.context(world, state);
+  const env = scopeEnv({ reg, ctx, bindings: p.bindings, vars: p.vars });
   const unmet = firstUnmet(p.action, env);
-  const check = findCheck(world, p.action);
-  const modifier = check ? Math.round(Number(evalExpr(check.modifier ?? 0, env, 0)) || 0) : 0;
+  const def = checkOf(world, p.action.check);
+  const ready = def ? readyCheck(reg, ctx, def, p.bindings, p.vars) : null;
+  const usable = ready && !("code" in ready) ? ready : null;
   return {
-    available: unmet === null,
-    failed: unmet === null ? null : { code: "requirement", reason: `requires ${unmet}`, requirement: unmet },
-    odds: check ? checkOdds(check, modifier) : null,
-    modifier,
+    available: unmet === null && usable === ready,
+    failed: unmet !== null ? { code: "requirement", reason: `requires ${unmet}`, requirement: unmet } : ready && "code" in ready ? ready : null,
+    odds: usable ? checkOdds(usable) : null,
+    modifier: usable?.modifier ?? 0,
+    check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
   };
 }
@@ -219,20 +190,23 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
     activity = { type: p.action.activity.type, until: Math.max(w.state.clock, Math.round(Number.isFinite(until) ? until : w.state.clock + duration)) };
   }
 
-  const checkDef = findCheck(w.world, p.action);
+  const checkDef = checkOf(w.world, p.action.check);
   let check: CheckResult | null = null;
   let outcome: string;
+  let vars = p.vars;
   if (checkDef) {
-    const modifier = Math.round(Number(evalExpr(checkDef.modifier ?? 0, env, 0)) || 0);
-    const rolled = rollCheck(checkDef, modifier, rng.fork("check"));
-    check = { check: checkDef, modifier, odds: checkOdds(checkDef, modifier), ...rolled };
+    const ready = readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars);
+    if ("code" in ready) return { ...base, actor: p.actor, failed: ready, events: w.events.slice(start) };
+    const rolled = rollCheck(ready, rng.fork("check"));
+    check = { ...rolled, check: checkDef, notation: ready.notation, modifier: ready.modifier, advantage: ready.advantage, dc: ready.dc, odds: checkOdds(ready) };
     outcome = rolled.outcome;
+    vars = { ...p.vars, roll: rollVars(ready, rolled) };
   } else {
     outcome = Object.prototype.hasOwnProperty.call(p.action.outcomes, "default") ? "default" : (Object.keys(p.action.outcomes)[0] ?? "default");
   }
 
   const effects = own(p.action.outcomes, outcome) ?? [];
-  const result = applyEffects(reg, w, effects, { bindings: p.bindings, vars: p.vars, params: p.params, rng: rng.fork("effects") });
+  const result = applyEffects(reg, w, effects, { bindings: p.bindings, vars, params: p.params, rng: rng.fork("effects") });
 
   if (activity) {
     w.apply({ type: "set", entity: p.actor, field: "activity", value: activity.type });

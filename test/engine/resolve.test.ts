@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { actionOdds, checkOdds, NO_BAND, resolveAction, resolveOn, rollCheck } from "../../src/engine/resolve";
+import { checkOdds, fixedCheck, NO_BAND, rollCheck } from "../../src/engine/checks";
+import { actionOdds, resolveAction, resolveOn } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import { Working } from "../../src/engine/working";
 import type { ActionDef, CheckDef } from "../../src/shared/world";
@@ -58,8 +59,8 @@ describe("checks: shown odds are the real odds", () => {
   test("exact enumeration of the roll equals the displayed distribution, for several modifiers", () => {
     for (const modifier of [-3, 0, 1, 4]) {
       const outcomes = ["fail", "partial", "success", NO_BAND];
-      const real = enumerateOutcomes((rng) => outcomes.indexOf(rollCheck(lockCheck, modifier, rng).outcome));
-      const shown = checkOdds(lockCheck, modifier);
+      const real = enumerateOutcomes((rng) => outcomes.indexOf(rollCheck(fixedCheck(lockCheck, { modifier }), rng).outcome));
+      const shown = checkOdds(fixedCheck(lockCheck, { modifier }));
       for (const [i, name] of outcomes.entries()) expect(real.get(i) ?? 0).toBeCloseTo(shown[name] ?? 0, 12);
       expect(Object.values(shown).reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
     }
@@ -85,7 +86,7 @@ describe("checks: shown odds are the real odds", () => {
 
   test("bands with gaps report the uncovered mass under `none`", () => {
     const gappy: CheckDef = { id: "g", dice: "1d6", bands: [{ outcome: "low", max: 2 }, { outcome: "high", min: 5 }] };
-    const odds = checkOdds(gappy, 0);
+    const odds = checkOdds(fixedCheck(gappy, {}));
     expect(Object.keys(odds).sort()).toEqual(["high", "low", "none"]);
     for (const p of Object.values(odds)) expect(p).toBeCloseTo(1 / 3, 12);
   });

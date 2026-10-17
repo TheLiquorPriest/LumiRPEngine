@@ -1,21 +1,15 @@
-// Play → You: the POV's sheet (bands as words at Sheets 1, stats and skills above), conditions,
-// place and activity, with ✎ fixes on the rows that have a fix target.
+// Play → You: the POV's sheet (bands as words at Sheets 1, stats and skills above, or the world
+// ruleset's designed sheet with pool bars and XP toward the next level), conditions, place and
+// activity, with ✎ fixes on the rows that have a fix target.
 
 import { useState } from "preact/hooks";
 import { isRecord } from "../../../shared/json";
 import type { JsonValue } from "../../../shared/json";
-import type { FixTarget } from "../../../shared/state-view";
+import type { FixTarget, SheetRowView, SheetSectionView } from "../../../shared/state-view";
 import { Card, Empty, JsonView } from "../../../frontend/components";
 import { list, obj, optStr, str, strings } from "../../../frontend/decode";
 import { FixEditor } from "../../../frontend/fix-editor";
 import type { PanelProps } from "../../../frontend/registry";
-
-interface SheetRow {
-  label: string;
-  value: string;
-  detail?: string;
-  fix?: FixTarget;
-}
 
 export interface YouView {
   name: string;
@@ -23,7 +17,27 @@ export interface YouView {
   place?: string;
   activity?: string;
   conditions: string[];
-  sections: { title: string; rows: SheetRow[] }[];
+  sections: SheetSectionView[];
+}
+
+/** A row's pool bar or progression meter from JSON (DESIGN §11); anything malformed is left out. */
+function decodeMeters(r: Record<string, unknown>): Pick<SheetRowView, "pool" | "progress"> {
+  const pool = obj(r.pool);
+  const progress = obj(r.progress);
+  const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+  return {
+    ...(pool && num(pool.current) && num(pool.min) && (pool.max === null || num(pool.max)) ? { pool: { current: pool.current, min: pool.min, max: pool.max } } : {}),
+    ...(progress && num(progress.level) && num(progress.xp) && num(progress.from) && (progress.next === null || num(progress.next)) ? { progress: { level: progress.level, xp: progress.xp, from: progress.from, next: progress.next } } : {}),
+  };
+}
+
+/** How full a bar is, 0–100: a pool between its min and max, a level's XP between its threshold and the next. */
+function fill(row: SheetRowView): number | null {
+  const ratio = (lo: number, hi: number | null, at: number): number | null => (hi === null || hi <= lo ? null : Math.max(0, Math.min(100, ((at - lo) / (hi - lo)) * 100)));
+  if (row.pool) return ratio(row.pool.min, row.pool.max, row.pool.current);
+  // A progression at its top level shows a full bar.
+  if (row.progress) return row.progress.next === null ? 100 : ratio(row.progress.from, row.progress.next, row.progress.xp);
+  return null;
 }
 
 const FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] as const;
@@ -55,7 +69,7 @@ export function decodeYouView(value: unknown): YouView | null {
     conditions: strings(value.conditions),
     sections: list(value.sections, (s) => ({
       title: str(s.title),
-      rows: list(s.rows, (r) => ({ label: str(r.label), value: str(r.value), detail: optStr(r.detail), fix: decodeFix(r.fix) })),
+      rows: list(s.rows, (r) => ({ label: str(r.label), value: str(r.value), detail: optStr(r.detail), fix: decodeFix(r.fix), ...decodeMeters(r) })),
     })),
   };
 }
@@ -84,20 +98,28 @@ export function YouPanel(props: PanelProps) {
           {section.rows.map((row) => {
             const key = `${section.title}:${row.label}`;
             if (fixing === key && row.fix) return <FixEditor key={key} label={row.label} target={row.fix} onDone={() => setFixing(null)} />;
+            const meter = fill(row);
             return (
-              <div key={key} class="lre-row">
-                <span class="k">
-                  {row.label}
-                  {row.detail ? <span class="sub">{row.detail}</span> : null}
-                </span>
-                <span class="v lre-inline">
-                  {row.value}
-                  {row.fix ? (
-                    <button type="button" class="lre-btn small ghost" aria-label={`Fix ${row.label}`} onClick={() => setFixing(key)}>
-                      ✎
-                    </button>
-                  ) : null}
-                </span>
+              <div key={key} class="lre-stack" style={{ gap: "2px" }}>
+                <div class="lre-row">
+                  <span class="k">
+                    {row.label}
+                    {row.detail ? <span class="sub">{row.detail}</span> : null}
+                  </span>
+                  <span class="v lre-inline">
+                    {row.value}
+                    {row.fix ? (
+                      <button type="button" class="lre-btn small ghost" aria-label={`Fix ${row.label}`} onClick={() => setFixing(key)}>
+                        ✎
+                      </button>
+                    ) : null}
+                  </span>
+                </div>
+                {meter !== null ? (
+                  <div class={row.pool && meter <= 25 ? "lre-bar low" : "lre-bar"} role="meter" aria-label={row.pool ? `${row.label}: ${row.value}` : `${row.label}: ${row.detail ?? row.value}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(meter)}>
+                    <span style={{ width: `${meter}%` }} />
+                  </div>
+                ) : null}
               </div>
             );
           })}

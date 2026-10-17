@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../../src/shared/world";
 import { applyEffects } from "../../../src/engine/effects";
 import { createRegistry } from "../../../src/engine/registry-impl";
-import { actionOdds, checkOdds, resolveAction } from "../../../src/engine/resolve";
+import { checkOdds, fixedCheck } from "../../../src/engine/checks";
+import { actionOdds, resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { stepTracks } from "../../../src/engine/tracks";
 import { findLeaks, unrevealedTruths } from "../../../src/engine/visibility";
@@ -78,7 +79,7 @@ describe("sheets", () => {
     const req = { action: "attempt", params: { stat: "wits", difficulty: 12 } };
     const a = actionOdds(reg, w.world, w.state, req);
     expect(a.modifier).toBe(-1);
-    expect(a.odds).toEqual(checkOdds(STAT_CHECK, -1));
+    expect(a.odds).toEqual(checkOdds(fixedCheck(STAT_CHECK, { modifier: -1 })));
     expect(a.odds?.success).toBeCloseTo(0.5, 10);
     applyEffects(reg, w, [{ type: "sheets.condition", args: { who: "you", condition: "Injured", minutes: 60 } }], { bindings: {}, rng: createRng("c") });
     expect(actionOdds(reg, w.world, w.state, req).modifier).toBe(-3);

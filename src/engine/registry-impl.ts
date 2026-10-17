@@ -23,6 +23,7 @@ import type {
   TableDef,
 } from "./registry";
 import type { WorldState } from "./state";
+import { clampLevel } from "./time-limits";
 
 export interface Registry extends EventTypes {
   readonly packs: readonly PackDef[];
@@ -65,6 +66,16 @@ export function effectiveLevel(world: Pick<WorldDoc, "pov" | "tiers">, state: Re
   const band = entity === world.pov ? null : tierBand(world, e.tier);
   const cap = band ? state.realism.tierCaps[band][domain] : undefined;
   return cap === undefined ? domainLevel : (Math.min(cap, domainLevel) as Level);
+}
+
+/**
+ * A world ruleset's floor on a domain's effective level (DESIGN §11): its math needs, say, Sheets 3
+ * for stat modifiers, whatever the realism settings, tier caps or overrides say. Wraps every
+ * effective level the engine reads.
+ */
+export function rulesetFloor(world: Pick<WorldDoc, "ruleset">, domain: DomainId, level: Level): Level {
+  const floor = world.ruleset?.minLevels?.[domain];
+  return floor === undefined ? level : (Math.max(level, clampLevel(floor)) as Level);
 }
 
 export function createRegistry(packs: readonly PackDef[]): Registry {
@@ -115,7 +126,7 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
         world,
         state,
         tables: { get: (id) => world.tables[id] },
-        levelOf: (entity, domain) => effectiveLevel(world, state, entity, domain),
+        levelOf: (entity, domain) => rulesetFloor(world, domain, effectiveLevel(world, state, entity, domain)),
         service<K extends keyof ServiceMap>(name: K): ServiceMap[K] {
           if (!services.has(String(name))) throw new RegistryError(`no service ${String(name)}`);
           return services.get(String(name)) as ServiceMap[K];

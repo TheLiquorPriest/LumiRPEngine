@@ -50,6 +50,23 @@ export interface FixTarget {
   max?: number;
 }
 
+/** One row of a character sheet: Play → You, the Sheet Designer's preview, anyone's sheet in a GM view. */
+export interface SheetRowView {
+  label: string;
+  value: string;
+  detail?: string;
+  /** A pool's bar: its current value between its min and its max (null when the max can't be read). */
+  pool?: { current: number; min: number; max: number | null };
+  /** A progression: the level, the XP, the XP that level needed and the next level needs (null at the top). */
+  progress?: { level: number; xp: number; from: number; next: number | null };
+  fix?: FixTarget;
+}
+
+export interface SheetSectionView {
+  title: string;
+  rows: SheetRowView[];
+}
+
 export interface HudView {
   clock: ClockView;
   place: { id: PlaceId; name: string } | null;
@@ -192,8 +209,16 @@ export interface PaletteView {
 
 /** The running chat's folded realism and time controls (Play → Calendar, "This chat" realism). */
 export interface ControlsView {
-  /** Levels and caps per detail band; `bandTiers` lists the world's tiers each band's caps reach, in order. */
-  realism: { preset: RealismPresetId; levels: Record<DomainId, Level>; tierCaps: Record<Band, Partial<Record<DomainId, Level>>>; bandTiers: Record<Band, string[]> };
+  realism: {
+    preset: RealismPresetId;
+    levels: Record<DomainId, Level>;
+    /** Caps per detail band. */
+    tierCaps: Record<Band, Partial<Record<DomainId, Level>>>;
+    /** The world's tiers each band's caps reach, in order. */
+    bandTiers: Record<Band, string[]>;
+    /** The world ruleset's floors (DESIGN §11): effective levels never go below them, so neither do the sliders. */
+    floors: Partial<Record<DomainId, Level>>;
+  };
   time: {
     sceneType: SceneTypeId;
     sceneTicks: Record<SceneTypeId, number>;

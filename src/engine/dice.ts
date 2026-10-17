@@ -30,7 +30,10 @@
 //   * Notation length, term count and flat-bonus size are bounded.
 //   * Warp's d20-only helpers (d20Tier, d20Odds, rollD20) are replaced by diceDistribution and
 //     the probAt* functions, which cover any expression: a check is "roll an expression, compare
-//     the total to bands", and probAtLeast(d, target) is the success chance.
+//     the total to bands", and probAtLeast(d, target) is the success chance. What tabletop checks
+//     need on top is notation-level too: the natural die (`naturalDie`, the face `natural` bands
+//     read), advantage as more natural dice (`withAdvantage`), an opposed roll as one notation
+//     (`opposedDice`) and the joint law of the natural die and the total (`naturalSplit`).
 
 import type { Rng } from "./rng";
 
@@ -318,19 +321,8 @@ function groupDist(g: DiceGroup, work: Work): Dist {
   return g.sign === -1 ? negate(dist) : dist;
 }
 
-/**
- * The exact probability of every total of a notation, including keep/drop and exploding dice
- * (with the same 21-face chain cap rollDice uses). Throws DiceError for invalid notation and for
- * expressions too large to count (DICE_LIMITS.maxExactWork), e.g. 100d1000kh50; rolling those is
- * still fine.
- */
-export function diceDistribution(notation: string): DiceDistribution {
-  const parsed = parseDice(notation);
-  const work = new Work();
-  let dist: Dist = { lo: parsed.flat, p: Float64Array.of(1) };
-  for (const g of parsed.groups) dist = convolve(dist, groupDist(g, work), work);
-
-  // Drop zero tails, clamp float dust and renormalise so the table sums to 1.
+/** Drops zero tails, clamps float dust and renormalises so the table sums to 1. */
+function finish(dist: Dist): DiceDistribution {
   let first = 0;
   let last = dist.p.length - 1;
   while (first < last && dist.p[first] <= 0) first++;
@@ -343,6 +335,94 @@ export function diceDistribution(notation: string): DiceDistribution {
     mean += probs[i] * (dist.lo + first + i);
   }
   return { min: dist.lo + first, max: dist.lo + last, probs, mean };
+}
+
+/**
+ * The exact probability of every total of a notation, including keep/drop and exploding dice
+ * (with the same 21-face chain cap rollDice uses). Throws DiceError for invalid notation and for
+ * expressions too large to count (DICE_LIMITS.maxExactWork), e.g. 100d1000kh50; rolling those is
+ * still fine.
+ */
+export function diceDistribution(notation: string): DiceDistribution {
+  const parsed = parseDice(notation);
+  const work = new Work();
+  let dist: Dist = { lo: parsed.flat, p: Float64Array.of(1) };
+  for (const g of parsed.groups) dist = convolve(dist, groupDist(g, work), work);
+  return finish(dist);
+}
+
+// ───────────────────────────── the natural die, advantage, opposed rolls ─────────────────────────────
+
+/**
+ * A notation's natural die: its first dice term when that term keeps exactly one plain die (`d20`,
+ * `2d20kh1`, `3d20kl1`), else null (`3d6`, `4d6kh3`, an exploding `d6!`). Its face is
+ * `DiceRoll.natural`; checks match `natural` bands and apply advantage on it.
+ */
+export function naturalDie(parsed: ParsedDice): DiceGroup | null {
+  const g = parsed.groups[0];
+  if (!g || g.explode) return null;
+  const kept = g.keep && g.keep.n < g.count ? g.keep.n : g.count;
+  return kept === 1 ? g : null;
+}
+
+/** Writes parsed dice back as notation: the terms in order, then the flat part (`2d20kh1+1d4-1`). */
+export function formatDice(parsed: Pick<ParsedDice, "groups" | "flat">): string {
+  let out = "";
+  parsed.groups.forEach((g, i) => {
+    const sign = g.sign === -1 ? "-" : i === 0 ? "" : "+";
+    const keep = g.keep && g.keep.n < g.count ? `${g.keep.mode}${g.keep.n}` : "";
+    out += `${sign}${g.count}d${g.sides}${keep}${g.explode ? "!" : ""}`;
+  });
+  if (parsed.flat !== 0) out += parsed.flat > 0 ? `+${parsed.flat}` : `-${-parsed.flat}`;
+  return out;
+}
+
+/**
+ * The notation with advantage applied: +1 rolls one more natural die and keeps the highest, −1 one
+ * more and keeps the lowest (`d20` → `2d20kh1` or `2d20kl1`, `d100` → `2d100kh1`). A notation that
+ * already keeps one of several counts its extra dice signed, so the two cancel a die at a time
+ * (`2d20kh1` with +1 is `3d20kh1`, with −1 is `1d20`). Other terms and the flat part are untouched.
+ * Zero returns the notation as it is; null when it has no natural die to apply the advantage to.
+ */
+export function withAdvantage(notation: string, advantage: number): string | null {
+  if (advantage === 0) return notation;
+  const parsed = parseDice(notation);
+  const die = naturalDie(parsed);
+  if (!die) return null;
+  const extra = (die.count - 1) * (die.keep?.mode === "kl" ? -1 : 1) + Math.sign(advantage);
+  const count = Math.abs(extra) + 1;
+  if (count > DICE_LIMITS.maxCount) return null;
+  const next: DiceGroup = { count, sides: die.sides, sign: die.sign, ...(extra !== 0 ? { keep: { mode: extra > 0 ? "kh" : "kl", n: 1 } } : {}) };
+  return formatDice({ groups: [next, ...parsed.groups.slice(1)], flat: parsed.flat });
+}
+
+/**
+ * An opposed roll as one notation: `a` minus `b` (`1d20` against `1d20+2` is `1d20-1d20-2`), so its
+ * exact odds come from one distribution and its natural die stays `a`'s. Throws DiceError when the
+ * combination leaves the notation's limits.
+ */
+export function opposedDice(a: string, b: string): string {
+  const pa = parseDice(a);
+  const pb = parseDice(b);
+  const flipped = pb.groups.map((g): DiceGroup => ({ ...g, sign: g.sign === 1 ? -1 : 1 }));
+  const out = formatDice({ groups: [...pa.groups, ...flipped], flat: pa.flat - pb.flat });
+  parseDice(out);
+  return out;
+}
+
+/**
+ * The exact joint law of a notation's natural die and the rest of its total. The natural face and
+ * the sum of the other terms plus the flat part are independent, so P(natural = n, total = t) is
+ * `natural(n) × rest(t − sign·n)`. Null when the notation has no natural die.
+ */
+export function naturalSplit(notation: string): { sign: 1 | -1; natural: DiceDistribution; rest: DiceDistribution } | null {
+  const parsed = parseDice(notation);
+  const die = naturalDie(parsed);
+  if (!die) return null;
+  const work = new Work();
+  let rest: Dist = { lo: parsed.flat, p: Float64Array.of(1) };
+  for (const g of parsed.groups.slice(1)) rest = convolve(rest, groupDist(g, work), work);
+  return { sign: die.sign, natural: finish(groupDist({ ...die, sign: 1 }, work)), rest: finish(rest) };
 }
 
 /** P(total = t). */

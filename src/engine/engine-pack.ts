@@ -1,7 +1,8 @@
 // The built-in `engine` pack: bookkeeping events the runtime records (rule firings, interrupt
-// signals, agent catch-up cursors, recorded choices, puzzle attempts, reveals, the paused scene),
-// the GM view and the engine's narration channels (`knows`, `spawn`). Every registry is built with
-// it first: `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
+// signals, agent catch-up cursors, recorded choices, puzzle attempts, reveals, the paused scene,
+// checks rolled by the `check` effect), the GM view and the engine's narration channels (`knows`,
+// `spawn`). Every registry is built with it first: `createRegistry([enginePack, ...packs])`. Its
+// state lives in `state.packs.engine`.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -28,6 +29,8 @@ export const ENGINE_EVENTS = {
   attempt: "engine.attempt",
   revealed: "engine.revealed",
   pause: "engine.pause",
+  /** A check the `check` effect rolled, with its final values (the outcome's effects follow it). */
+  check: "engine.check",
 } as const;
 
 export interface EngineSlice {
@@ -191,6 +194,15 @@ const events: EventTypeDef<PackEvent>[] = [
       slice(state).pauseScene = typeof e.data.scene === "string" ? e.data.scene : null;
     },
     describe: () => "clock pause",
+  },
+  {
+    type: ENGINE_EVENTS.check,
+    validate: (e, ctx) => need(e, "actor", "outcome") ?? (own(ctx.state.entities, str(e, "actor")) ? null : { code: "missing_entity", reason: `no entity ${str(e, "actor")}` }),
+    apply: noop,
+    describe: (e) => {
+      const total = typeof e.data.total === "number" ? ` (rolled ${e.data.total}${typeof e.data.dc === "number" ? ` against ${e.data.dc}` : ""})` : "";
+      return `${str(e, "actor")}: ${str(e, "check").replace(/_/g, " ")}, ${str(e, "outcome").replace(/_/g, " ")}${total}`;
+    },
   },
 ];
 

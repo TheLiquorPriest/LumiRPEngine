@@ -12,7 +12,7 @@ import { applyMarker } from "./events";
 import { identifiers } from "./expr";
 import { isMaterialized } from "./materialize";
 import type { Registry } from "./registry-impl";
-import { effectiveLevel } from "./registry-impl";
+import { effectiveLevel, rulesetFloor } from "./registry-impl";
 import { kindFields } from "./scope";
 import type { RealismState, WorldState } from "./state";
 import { own } from "./pack-kit";
@@ -138,8 +138,8 @@ export function previewLevelChange(reg: Registry, world: WorldDoc, state: Readon
   const demoted: LevelChange[] = [];
   const materialize: LevelPreview["materialize"] = [];
   for (const id of Object.keys(state.entities).sort()) {
-    const from = effectiveLevel(world, state, id, body.domain);
-    const to = effectiveLevel(world, after, id, body.domain);
+    const from = rulesetFloor(world, body.domain, effectiveLevel(world, state, id, body.domain));
+    const to = rulesetFloor(world, body.domain, effectiveLevel(world, after, id, body.domain));
     if (to > from) {
       promoted.push({ entity: id, domain: body.domain, from, to });
       if (reg.materializers.has(body.domain) && !isMaterialized(state, id, body.domain)) materialize.push({ entity: id, domain: body.domain });
@@ -149,8 +149,8 @@ export function previewLevelChange(reg: Registry, world: WorldDoc, state: Readon
   const processesOff: string[] = [];
   for (const p of reg.processes) {
     if (p.domain !== body.domain) continue;
-    const was = state.realism.levels[p.domain] >= p.minLevel;
-    const now = after.realism.levels[p.domain] >= p.minLevel;
+    const was = rulesetFloor(world, p.domain, state.realism.levels[p.domain]) >= p.minLevel;
+    const now = rulesetFloor(world, p.domain, after.realism.levels[p.domain]) >= p.minLevel;
     if (now && !was) processesOn.push(p.id);
     if (was && !now) processesOff.push(p.id);
   }
@@ -172,6 +172,6 @@ export function fieldLive(reg: Registry, world: WorldDoc, state: Readonly<WorldS
   if (!e) return false;
   const def = own(kindFields(reg, world, e.kind), field);
   if (!def?.domain) return true;
-  const lvl = effectiveLevel(world, state, entity, def.domain);
+  const lvl = rulesetFloor(world, def.domain, effectiveLevel(world, state, entity, def.domain));
   return lvl > 0 && lvl >= (def.level ?? 1);
 }

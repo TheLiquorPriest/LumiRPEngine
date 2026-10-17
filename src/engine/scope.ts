@@ -15,23 +15,79 @@
 //               month, year, daypart
 //   <entityId>  any entity in the state, as for a binding; `<placeId>.<field>` a place's field
 //
-// Functions: math built-ins (expr), then the engine's (below), then the registry's formulas.
+// Functions: math built-ins (expr), then the engine's (`BUILTIN_FUNCTIONS`, below), then the
+// registry's formulas. Among the engine's:
+//   table(id, key, column)         a cell of one of the world's pinned data tables, or null
+//   table_step(id, value, column)  the cell of the row whose numeric key is the largest ≤ value
+//   roll(notation)                 a dice total, only where the environment has a generator: effect
+//                                  arguments (DESIGN §11); anywhere else null, and a lint error
 //
 // Effect arguments: a string starting with `=` is a formula; a string naming a binding is that
 // entity's id; any other value is taken literally (objects and arrays element-wise).
 
 import type { JsonObject, JsonValue } from "../shared/json";
-import { isRecord } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
 import type { DomainId, EntityId, KindId } from "../shared/ids";
 import { DOMAINS } from "../shared/ids";
-import type { BandDef, FieldDef, KindDef, WorldDoc } from "../shared/world";
+import type { BandDef, FieldDef, KindDef, PoolDef, WorldDoc } from "../shared/world";
+import { EFFECT_ONLY_FUNCTIONS } from "../shared/world";
 import { calendarOf, clockAt, dateAt, dayPartAt, holidaysOn, nextTimeOfDay, parseHHMM } from "./calendar";
+import { DiceError, rollDice } from "./dice";
 import type { EnvVars, ExprEnv, Value } from "./expr";
-import { compile, ExprError, runProgram } from "./expr";
+import { compile, ExprError, MATH_FUNCTIONS, runProgram } from "./expr";
 import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
+import type { Rng } from "./rng";
 import type { EntityState } from "./state";
 import { own } from "./pack-kit";
+
+export interface ScopeInput {
+  reg: Registry;
+  ctx: ReadContext;
+  /** Name → entity id. `self` defaults to the POV. */
+  bindings?: Record<string, EntityId>;
+  vars?: EnvVars;
+  /** The effect's own generator: only effect arguments get one, and with it `roll()` (DESIGN §11). */
+  rng?: Rng;
+}
+
+/** The engine's own formula functions, as `call` below handles them. */
+export const BUILTIN_FUNCTIONS = [
+  "field",
+  "rel",
+  "has_rel",
+  "rel_count",
+  "rel_field",
+  "stage",
+  "since",
+  "place",
+  "at",
+  "level",
+  "knows",
+  "fired",
+  "attempts",
+  "revealed",
+  "band",
+  "next_time",
+  "today_at",
+  "hours",
+  "days",
+  "holiday",
+  "count_at",
+  "table",
+  "table_step",
+  "roll",
+] as const;
+
+/**
+ * Every function a formula outside an effect argument may call: the math built-ins, the engine's
+ * and the registry's formulas, sorted (Build's expression editor offers them).
+ */
+export function formulaFunctions(reg: Registry): string[] {
+  const names = new Set<string>([...MATH_FUNCTIONS, ...BUILTIN_FUNCTIONS, ...reg.formulas.keys()]);
+  for (const name of EFFECT_ONLY_FUNCTIONS) names.delete(name);
+  return [...names].sort();
+}
 
 export interface ScopeInput {
   reg: Registry;
@@ -190,6 +246,8 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
       }
     }
     if (raw === undefined) raw = def?.default;
+    // An unset pool with no default is full (DESIGN §11): new characters start at their max.
+    if (raw === undefined && tail.length === 0 && def?.pool) return poolMax(reg, ctx, id, def.pool) ?? undefined;
     for (const seg of tail) {
       if (!isRecord(raw)) return undefined;
       raw = own(raw as JsonObject, seg);
@@ -352,6 +410,35 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
         }
         return n;
       }
+      case "table":
+      case "table_step": {
+        // table(id, key, column): a cell of the world's pinned data table; table_step(id, value,
+        // column): the cell of the row whose numeric key is the largest at or below value
+        // (DESIGN §11). Tables are pinned per revision, so both are deterministic and allowed anywhere.
+        const table = own(world.tables, str(a0));
+        const rows: JsonObject = table && isRecord(table.rows) ? (table.rows as JsonObject) : {};
+        let key: string | null = str(a1);
+        if (name === "table_step") {
+          key = null;
+          for (const k of Object.keys(rows)) {
+            const at = k.trim() === "" ? NaN : Number(k);
+            if (Number.isFinite(at) && at <= num(a1) && (key === null || at > Number(key))) key = k;
+          }
+        }
+        const row = key === null ? undefined : own(rows, key);
+        return isRecord(row) && hasOwn(row, str(a2)) ? (toValue((row as JsonObject)[str(a2)]) ?? null) : null;
+      }
+      case "roll": {
+        // Effect arguments only (DESIGN §11): the effect's own generator, the total recorded in its
+        // event. Elsewhere there is no generator and a roll is nothing (lint flags it).
+        if (!input.rng) return null;
+        try {
+          return rollDice(str(a0), input.rng).total;
+        } catch (e) {
+          if (e instanceof DiceError) return null;
+          throw e;
+        }
+      }
       default: {
         const fn = reg.formulas.get(name);
         return fn ? fn(ctx, ...args) : undefined;
@@ -360,6 +447,27 @@ export function scopeEnv(input: ScopeInput): ExprEnv {
   };
 
   return { lookup, call };
+}
+
+/** Pool reads in progress: a max that reads its own pool stops here instead of recursing. */
+let poolReads = 0;
+
+/**
+ * A pool's max for an entity (DESIGN §11): `max` names a field of the entity (derived ones
+ * computed) or is a formula with the entity as `self`. Null when it doesn't read as a number.
+ */
+export function poolMax(reg: Registry, ctx: ReadContext, entity: EntityId, pool: PoolDef): number | null {
+  const e = own(ctx.state.entities, entity);
+  if (!e || typeof pool.max !== "string" || poolReads > 8) return null;
+  poolReads++;
+  try {
+    const src = fieldDef(reg, ctx.world, e.kind, pool.max) ? `self.${pool.max}` : pool.max;
+    const v = evalExpr(src, scopeEnv({ reg, ctx, bindings: { self: entity } }), null);
+    const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+    return Number.isFinite(n) ? n : null;
+  } finally {
+    poolReads--;
+  }
 }
 
 /** Evaluates a formula; parse errors and unknown names yield `fallback`. */

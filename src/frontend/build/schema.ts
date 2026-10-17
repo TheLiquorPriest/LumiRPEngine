@@ -347,6 +347,11 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers">, FieldSpec[]> = {
     { kind: "levels", key: "levels", label: "Domain levels" },
     { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
   ],
+  ruleset: [
+    { kind: "levels", key: "minLevels", label: "Level floors (the lowest level this ruleset plays each domain at)" },
+    { kind: "json", key: "progression", label: "Progression", optional: true, hint: '{"character": {"label": "Level", "xpField": "xp", "levelField": "level", "thresholds": [0, 300, 900], "onLevel": [{"type": "add", "args": {"entity": "self", "field": "skill_points", "delta": 2}}]}}' },
+    { kind: "json", key: "sheet", label: "Sheet layout", optional: true, hint: '{"sections": [{"id": "vitals", "label": "Vitals", "rows": [{"pool": "hp"}, {"progression": "character"}, {"field": "might"}, {"formula": "stat_mod(self, \'might\')", "label": "Might mod"}]}]}' },
+  ],
   time: [
     { kind: "record", key: "sceneTicks", label: "Default tick per scene type (min)", keyLabel: "Scene type", item: { kind: "number", key: "", label: "Minutes", min: 0, step: 0.5 } },
     { kind: "json", key: "interrupts", label: "Interrupt policy" },

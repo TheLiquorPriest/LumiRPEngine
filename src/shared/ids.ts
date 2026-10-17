@@ -18,6 +18,8 @@ export type ScheduleId = string;
 export type TrackId = string;
 export type StageId = string;
 export type TableId = string;
+/** A progression in a world's ruleset (`WorldDoc.ruleset.progression`). */
+export type ProgressionId = string;
 export type GeneratorId = string;
 export type SlotId = string;
 export type StepTemplateId = string;

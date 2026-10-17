@@ -1,12 +1,14 @@
 // Problems (DESIGN §13): the backend's full lint of the world, grouped by severity, each issue
-// opening the item it points at.
+// opening the item or the world part it points at.
 
 import { useEffect, useState } from "preact/hooks";
-import type { LintIssue, WorldCollection } from "../../shared/protocol";
+import type { LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import { useApp } from "../app";
 import { Card, Empty, Seg, useBusy } from "../components";
 
 const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore"];
+/** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part. */
+const PARTS: readonly WorldPart[] = ["calendar", "realism", "time", "ruleset"];
 
 /** The editor an issue path opens: `entities.npc_dev.fields.cash` → entities / npc_dev. */
 export function issueTarget(path: string): { collection: WorldCollection; id: string } | null {
@@ -58,6 +60,7 @@ export function CheckView(props: { worldId: string }) {
           <Card>
             {shown.map((issue, i) => {
               const target = issueTarget(issue.path);
+              const part = target ? undefined : PARTS.find((p) => p === issue.path.split(".")[0]);
               return (
                 <div key={`${issue.path}:${issue.code}:${i}`} class="lre-lint">
                   <span class={issue.severity === "error" ? "lre-badge neg" : issue.severity === "warning" ? "lre-badge warn" : "lre-badge"}>{issue.severity}</span>
@@ -69,6 +72,10 @@ export function CheckView(props: { worldId: string }) {
                   </span>
                   {target ? (
                     <button type="button" class="lre-btn small" aria-label={`Open ${issue.path}`} onClick={() => app.ui.update((ui) => ({ ...ui, build: { view: "item", worldId: props.worldId, collection: target.collection, id: target.id } }))}>
+                      Open
+                    </button>
+                  ) : part ? (
+                    <button type="button" class="lre-btn small" aria-label={`Open ${issue.path}`} onClick={() => app.ui.update((ui) => ({ ...ui, build: { view: "part", worldId: props.worldId, part } }))}>
                       Open
                     </button>
                   ) : null}

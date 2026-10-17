@@ -24,6 +24,7 @@ import type {
   Level,
   PackId,
   PlaceId,
+  ProgressionId,
   RealismPresetId,
   RelationTypeId,
   RouteId,
@@ -49,6 +50,13 @@ export const ENGINE_VERSION = "0.1.0";
 
 /** An expression in the safe formula language. */
 export type Expr = string;
+/**
+ * Expression functions only an effect argument (a `=` formula in an effect's args) may call
+ * (DESIGN §11): `roll(notation)` draws from the effect's own seeded generator and its event stores
+ * the result. Anywhere else it is a lint error and evaluates to null, so shown odds and reads stay
+ * deterministic.
+ */
+export const EFFECT_ONLY_FUNCTIONS: readonly string[] = ["roll"];
 /** Dice notation, e.g. `2d6+1`. */
 export type DiceExpr = string;
 /** In-world time as minutes since the world calendar's epoch. */
@@ -74,12 +82,34 @@ export interface BandDef {
   max?: number;
 }
 
+/** An inclusive range on a number; either end may be open. */
+export interface Span {
+  min?: number;
+  max?: number;
+}
+
+/**
+ * A pool (DESIGN §11): a number field whose current value lives between `min` and a maximum read
+ * from the entity (hit points, mana, stress). It stays a plain field, so undo, Keep and rebase
+ * treat it like any other; the `set`, `add` and `recover` effects clamp it to the evaluated max.
+ */
+export interface PoolDef {
+  /** The most it holds: the id of a field of the same entity (often a derived one), or a formula with the entity as `self`. */
+  max: Expr | FieldId;
+  /** The least it holds; default 0. */
+  min?: number;
+  /** What a `recover` effect restores when it names no amount (a night's rest): a formula with the entity as `self`. Absent: back to the max. */
+  recover?: Expr;
+}
+
 export interface FieldDef {
   type: FieldType;
   label?: string;
   default?: JsonValue;
   min?: number;
   max?: number;
+  /** A pool field: a current value under an evaluated max. Number fields only; an unset pool with no default is full. */
+  pool?: PoolDef;
   /** `enum` values. */
   values?: string[];
   /** `ref` target kind (or any kind when absent). */
@@ -275,19 +305,56 @@ export interface ParamDef {
   optional?: boolean;
 }
 
+/**
+ * A check outcome band. A band matches when every range it states holds; bands with a `natural`
+ * range are tried first, in order, then the rest, in order (DESIGN §11).
+ */
 export interface CheckBand {
   outcome: string;
   /** Inclusive range on the check total. */
   min?: number;
   max?: number;
+  /** Inclusive range on the natural die: the face of the first dice term's single kept die (`d20`, `2d20kh1`). */
+  natural?: Span;
+  /** Inclusive range on the margin, the total minus the DC. Needs a DC: `dc`, a passive opponent, or an opponent who rolls (DC 0). */
+  margin?: Span;
 }
 
-/** The one check mechanism: a dice expression plus outcome bands, with exact odds. */
+/**
+ * The other side of an opposed check, read with the opponent as `self` (DESIGN §11). An opponent
+ * who rolls is folded into one notation (`1d20-1d20`) whose modifier is the difference, so the odds
+ * stay exact and the total is the difference. With none of `check`, `modifier` and `passive`, the
+ * opponent rolls this same check.
+ */
+export interface OpposedRoll {
+  /** The binding that names the opponent: a ref parameter of the action, or the `check` effect's `target`. Default `target`. */
+  who?: string;
+  /** The opponent rolls this check (its dice, advantage and modifier). */
+  check?: CheckId;
+  /** The opponent rolls this check's own dice with this modifier. */
+  modifier?: Expr;
+  /** The opponent doesn't roll: this score becomes the DC. */
+  passive?: Expr;
+}
+
+/**
+ * The one check mechanism: a dice expression plus outcome bands, with exact odds. What a check
+ * reads (modifier, advantage, DC, the opponent) is evaluated from the state before the roll.
+ */
 export interface CheckDef {
   id: CheckId;
   dice: DiceExpr;
   modifier?: Expr;
-  bands: CheckBand[];
+  /**
+   * −1 (disadvantage), 0 or 1 (advantage). It changes the dice, never the modifier: the natural die
+   * gets one more of its size and keeps the highest (`d20` → `2d20kh1`) or the lowest (`2d20kl1`).
+   */
+  advantage?: Expr;
+  /** The difficulty. With a DC and no bands, the outcomes are `failure` (margin below 0) and `success`. */
+  dc?: Expr;
+  vs?: OpposedRoll;
+  /** Absent or empty: the DC's two bands when the check has a DC or an opponent, else every roll reads `none`. */
+  bands?: CheckBand[];
 }
 
 export interface ActivitySpec {
@@ -540,6 +607,57 @@ export type SuppressedSource =
   | { bookId: string; entryId: string }
   | { bookId: string; comment: string; contentHash: string };
 
+// ---------------------------------------------------------------- ruleset
+
+/**
+ * A progression (DESIGN §11): experience in one field, the level in another, and the thresholds
+ * between them. After an effect changes an entity's XP, the engine raises its level to the last
+ * threshold reached, one level at a time, running `onLevel` for each.
+ */
+export interface ProgressionDef {
+  label: string;
+  /** The number field that holds experience. */
+  xpField: FieldId;
+  /** The number field that holds the level; the engine sets it. */
+  levelField: FieldId;
+  /**
+   * The XP each level needs, from level 1 (usually 0): the level is how many thresholds the XP has
+   * reached. A list, or a data table's column read in row order.
+   */
+  thresholds: number[] | { table: TableId; column: string };
+  /** Run once per level gained, with the entity as `self`, `level` the level reached and `from` the level before the gain. */
+  onLevel?: EffectSpec[];
+  /** The highest level; XP beyond its threshold raises nothing. */
+  maxLevel?: number;
+  /** The kind it applies to (descendants included); absent: every entity whose kind has both fields. */
+  kind?: KindId;
+}
+
+/** One row of a designed sheet: a field, a formula, a pool's bar or a progression's level and XP. */
+export type SheetRowDef = { field: FieldId; label?: string } | { formula: Expr; label: string } | { pool: FieldId; label?: string } | { progression: ProgressionId; label?: string };
+
+export interface SheetSectionDef {
+  id: string;
+  label: string;
+  rows: SheetRowDef[];
+}
+
+/** The sheet Play → You shows in place of the Sheets pack's own (DESIGN §11), laid out in Build's Sheet Designer. */
+export interface SheetLayoutDef {
+  sections: SheetSectionDef[];
+}
+
+/**
+ * A world's tabletop ruleset (DESIGN §11): progression, the sheet layout and the realism floors its
+ * math needs. Every key is optional; later parts of the ruleset add their own keys to this interface.
+ */
+export interface RulesetDef {
+  progression?: Record<ProgressionId, ProgressionDef>;
+  sheet?: SheetLayoutDef;
+  /** The lowest effective level each domain plays at, whatever the realism settings: stat modifiers need Sheets 3. */
+  minLevels?: Partial<Record<DomainId, Level>>;
+}
+
 export interface WorldDoc {
   format: typeof WORLD_FORMAT;
   id: WorldId;
@@ -571,6 +689,8 @@ export interface WorldDoc {
   lore: Record<string, LoreEntryDef>;
   /** Classification facets by id (DESIGN §4.1); entities hold values in `class`. */
   classifications: Record<FacetId, FacetDef>;
+  /** The world's tabletop ruleset (DESIGN §11); absent in worlds that have none. */
+  ruleset?: RulesetDef;
   /** Action seeds: a fresh seed per Re-run, or `hash(runSeed, parent path, action)` (DESIGN §4.3). */
   seedMode: "fresh" | "same_roll";
   /** Lenient worlds accept a narrated price inside its band (DESIGN §9.5). */

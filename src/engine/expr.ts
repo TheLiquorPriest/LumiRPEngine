@@ -390,6 +390,9 @@ const MATH: Record<string, (a: number[]) => number> = {
   abs: ([v]) => Math.abs(v),
 };
 
+/** The math built-ins' names (they resolve before any environment function). */
+export const MATH_FUNCTIONS: readonly string[] = Object.keys(MATH);
+
 /** A finite number, or 0 for NaN / Infinity. */
 function fin(x: number): number {
   return Number.isFinite(x) ? x : 0;
@@ -536,6 +539,41 @@ export function identifiers(src: string | number | boolean | undefined, limits?:
     if (!(e instanceof ExprError)) throw e;
   }
   return [...out];
+}
+
+/** A function call a formula makes: its name, and each argument as its literal when it is a string or number literal (else null). */
+export interface FormulaCall {
+  name: string;
+  args: (string | number | null)[];
+}
+
+/**
+ * Every call a formula makes, outer calls first: "table('xp', 3, 'level') + roll('1d6')" → table
+ * ['xp', 3, 'level'], roll ['1d6']. Lint reads it to find calls by name (`roll()` outside effect
+ * arguments, unknown tables). A formula that does not parse makes none; one that exceeds a limit
+ * throws ExprLimitError, as `identifiers` does.
+ */
+export function callsIn(src: string | number | boolean | undefined, limits?: Partial<ExprLimits>): FormulaCall[] {
+  if (typeof src !== "string") return [];
+  const out: FormulaCall[] = [];
+  const visit = (n: Node): void => {
+    switch (n.k) {
+      case "call":
+        out.push({ name: n.name, args: n.args.map((a) => (a.k === "num" || a.k === "str" ? a.v : null)) });
+        n.args.forEach(visit);
+        break;
+      case "un": visit(n.a); break;
+      case "bin": visit(n.a); visit(n.b); break;
+      case "tern": visit(n.c); visit(n.a); visit(n.b); break;
+    }
+  };
+  try {
+    visit(compile(src, limits).root);
+  } catch (e) {
+    if (e instanceof ExprLimitError) throw e;
+    if (!(e instanceof ExprError)) throw e;
+  }
+  return out;
 }
 
 // ───────────────────────────── environment helper ─────────────────────────────

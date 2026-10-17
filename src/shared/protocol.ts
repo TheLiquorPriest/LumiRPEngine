@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "./json";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, Level, MessageId, PanelId, RevisionId, WorldId } from "./ids";
 import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
-import type { StateView } from "./state-view";
+import type { SheetSectionView, StateView } from "./state-view";
 import type { KindDef, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
@@ -180,8 +180,8 @@ export type WorldCollection =
   | "packs"
   | "lore";
 
-/** Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1). */
-export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers";
+/** Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is optional: an empty one removes it. */
+export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset";
 
 /**
  * Build-draft operations. `get` returns the stored draft (or a fresh copy of the head when there is
@@ -195,6 +195,10 @@ export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: Re
     | { op: "set"; part: WorldPart; value: JsonValue }
   );
 
+/**
+ * World operations. `sheet` previews the Sheet Designer's layout: the draft world with `ruleset` in
+ * place of its own, read on `entity` (the POV by default) as a new chat would start; nothing is saved.
+ */
 export type WorldRequest = Request<"lre.world"> &
   (
     | { op: "list" }
@@ -207,6 +211,7 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "lint"; worldId: WorldId }
     | { op: "attach"; worldId: WorldId; chatId: ChatId }
     | { op: "upgrade"; chatId: ChatId; to: RevisionId }
+    | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
   );
 
 export type FrontendToBackend =
@@ -268,9 +273,12 @@ export interface ResultBodies {
   "lre.editor": { draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean };
   /**
    * `get` also carries `packKinds`: every kind the registered packs define (label, extends,
-   * fields), for Build's kind pickers and typed field forms. A world kind with the same id wins.
+   * fields), for Build's kind pickers and typed field forms (a world kind with the same id wins);
+   * and `functions`: every function a formula may call outside an effect's arguments (the math
+   * built-ins, the engine's and the packs' formulas), for the expression editor. `sheet` answers
+   * the `sheet` preview: the sections, or null when the ruleset designs no sheet.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef> };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; functions?: string[]; sheet?: SheetSectionView[] | null };
   "lre.ui": { done: true };
   "lre.job": { jobId: string };
 }

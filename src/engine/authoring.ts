@@ -1,18 +1,20 @@
 // Authoring tools shared by the backend, the background lane and the studio seam (DESIGN §13, §15):
-// world-document checks and migration, lint, Playtest turns and Check world days. Pure and
-// deterministic: no packages, no host, no clock.
+// world-document checks and migration, lint, Playtest turns, Check world days and the Sheet
+// Designer's preview. Pure and deterministic: no packages, no host, no clock.
 
-import type { WorldId } from "../shared/ids";
+import type { EntityId, WorldId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import { macroHazards } from "../shared/macros";
 import type { LintIssue } from "../shared/protocol";
+import type { SheetSectionView } from "../shared/state-view";
 import { knownSignal, STEP_OUTPUTS, STEP_PLACEHOLDERS } from "../shared/steps";
 import { defaultTiers, leadTierOf, tierOf } from "../shared/tiers";
 import type { WorldCurrency, WorldDoc } from "../shared/world";
 import { DEFAULT_CURRENCY, ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { applyEvent, validateEvent } from "./events";
 import type { Registry } from "./registry-impl";
+import { buildEntitySheet } from "./ruleset";
 import type { InterpretOutput, TurnPipeline } from "./steps";
 import type { WorldState } from "./state";
 import { findLeaks, unrevealedTruths } from "./visibility";
@@ -102,8 +104,9 @@ export function currencyOf(v: unknown): WorldCurrency | null {
  * already name; a POV still on the legacy `pov` tier moves to the lead tier (the POV is `pov`, never
  * capped whatever its tier); step templates for the retired `select` purpose are dropped; and the
  * economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor units; a set
- * `unpricedCap` wins). Revisions are immutable, so this runs whenever one is read. Returns the same
- * object when nothing changes.
+ * `unpricedCap` wins). A world without a `ruleset` keeps none: every part of one is optional, and
+ * nothing reads a missing one. Revisions are immutable, so this runs whenever one is read. Returns
+ * the same object when nothing changes.
  */
 export function migrateWorld(doc: WorldDoc): WorldDoc {
   const currency: unknown = doc.currency;
@@ -285,6 +288,15 @@ export function checkWorldDay(registry: Registry, pipeline: TurnPipeline, world:
   }
   const lines = authorLines(registry, world, next, events, 40);
   return { turn: { user: label, reply: lines.length > 0 ? lines.join("\n") : "(nothing happened)", notes }, state: next };
+}
+
+/**
+ * The Sheet Designer's preview (DESIGN §11, §13): a world's designed sheet as an entity (the POV by
+ * default) has it when a chat starts, so derived fields, pools and progressions read their
+ * authored values. Null when the world designs no sheet; nothing is recorded.
+ */
+export function previewSheet(registry: Registry, world: WorldDoc, entity: EntityId = world.pov): SheetSectionView[] | null {
+  return buildEntitySheet(registry.context(world, initialState(world, "preview")), entity);
 }
 
 /** Stamps the engine version the document was last written by. */

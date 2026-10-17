@@ -14,12 +14,13 @@
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
-import type { FixTarget } from "../../../shared/state-view";
+import type { SheetSectionView } from "../../../shared/state-view";
 import { tierLabel } from "../../../shared/tiers";
 import type { BandDef, CheckDef } from "../../../shared/world";
 import { createEnv, evalNumber } from "../../../engine/expr";
 import { labelOf, numOf, objOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
+import { buildEntitySheet } from "../../../engine/ruleset";
 import { bandOf, kindIs, placeOfEntity } from "../../../engine/scope";
 
 export interface StatDef {
@@ -183,7 +184,11 @@ function checkMod(ctx: ReadContext, who: EntityId, stat: string): number {
   return statMod(statValue(ctx, who, statId(ctx, stat)));
 }
 
-/** Play → You (the UI's YouView): the POV's sheet as rows; ✎ fixes on stats from level 2. */
+/**
+ * Play → You (the UI's YouView): the POV's sheet as rows. A world whose ruleset designs a sheet
+ * shows that one (DESIGN §11, pools as bars, progressions with XP toward the next level); else the
+ * pack's own stats and derived values. ✎ fixes from level 2; nothing at level 0.
+ */
 export interface SheetView {
   level: number;
   name: string;
@@ -192,14 +197,15 @@ export interface SheetView {
   place?: string;
   activity?: string;
   conditions: string[];
-  sections: { title: string; rows: { label: string; value: string; detail?: string; fix?: FixTarget }[] }[];
+  sections: SheetSectionView[];
 }
 
 export function buildSheetView(ctx: ReadContext): SheetView {
   const pov = ctx.world.pov;
   const e = own(ctx.state.entities, pov);
   const level = ctx.levelOf(pov, "sheets");
-  const stats = level === 0
+  const designed = level === 0 ? null : buildEntitySheet(ctx, pov, { fixes: level >= 2 });
+  const stats = level === 0 || designed
     ? []
     : statsOf(ctx).map((s) => {
         const v = statValue(ctx, pov, s.id);
@@ -208,7 +214,7 @@ export function buildSheetView(ctx: ReadContext): SheetView {
         if (level === 1) return { label: s.label, value: word };
         return { label: s.label, value: level >= 3 ? `${v} (${mod >= 0 ? "+" : ""}${mod})` : String(v), detail: word, fix: { entity: pov, field: s.id, type: "number" as const, value: v, min: s.min, max: s.max } };
       });
-  const derived = level >= 3 ? Object.entries(derivedOf(ctx)).map(([id, d]) => ({ label: d.label, value: String(derivedValue(ctx, pov, id)) })) : [];
+  const derived = level >= 3 && !designed ? Object.entries(derivedOf(ctx)).map(([id, d]) => ({ label: d.label, value: String(derivedValue(ctx, pov, id)) })) : [];
   const place = placeOfEntity(ctx.state, pov);
   const activity = strOf(e?.fields.activity);
   return {
@@ -218,7 +224,7 @@ export function buildSheetView(ctx: ReadContext): SheetView {
     ...(place ? { place: own(ctx.world.places, place)?.name ?? place } : {}),
     ...(activity !== "" ? { activity } : {}),
     conditions: activeConditions(ctx, pov).map((c) => c.label),
-    sections: [...(stats.length > 0 ? [{ title: "Stats", rows: stats }] : []), ...(derived.length > 0 ? [{ title: "Derived", rows: derived }] : [])],
+    sections: designed ?? [...(stats.length > 0 ? [{ title: "Stats", rows: stats }] : []), ...(derived.length > 0 ? [{ title: "Derived", rows: derived }] : [])],
   };
 }
 

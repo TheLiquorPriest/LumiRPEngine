@@ -22,7 +22,7 @@ import { calendarOf, MINUTES_PER_DAY, slotIndexAt, slotOf, slotsEnding, type Slo
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "./events";
 import type { ProcessDef, ReadContext, SlotInfo } from "./registry";
-import type { Registry } from "./registry-impl";
+import { rulesetFloor, type Registry } from "./registry-impl";
 import { createRng, type Rng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick, type RuleFiring } from "./rules";
 import { allSchedules, instantEvents, scheduleInstants, type ScheduleInstant } from "./schedules";
@@ -191,7 +191,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     clockTo(w, slot.end, cause, e);
     const info: SlotInfo = { start: slot.start, end: slot.end, index: slot.index };
     for (const def of reg.processes) {
-      if (def.scope === "agent" || (w.state.realism.levels[def.domain] ?? 0) < def.minLevel) continue;
+      if (def.scope === "agent" || rulesetFloor(w.world, def.domain, w.state.realism.levels[def.domain] ?? 0) < def.minLevel) continue;
       e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
     }
     for (const agent of agents) {

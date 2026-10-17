@@ -19,8 +19,8 @@ import { optionalQuery } from "../engine/pack-kit";
 import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
 import { presetOf } from "../engine/realism";
-import { effectiveLevel, type Registry } from "../engine/registry-impl";
-import { actionOdds, paramCandidates } from "../engine/resolve";
+import type { Registry } from "../engine/registry-impl";
+import { actionOdds, paramCandidates, type Availability } from "../engine/resolve";
 import { kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { findLeaks, unrevealedTruths } from "../engine/visibility";
@@ -65,7 +65,7 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   const placeId = placeOfEntity(state, pov);
   const place = placeId ? world.places[placeId] : undefined;
   const offset = placeOffset(world, state.clock, placeId);
-  const money = effectiveLevel(world, state, pov, "money");
+  const money = ctx.levelOf(pov, "money");
   const economy = panels["economy.money"];
   const band = isRecord(economy) && typeof economy.band === "string" ? economy.band : null;
   // The economy pack's panel knows the POV's cash accounts; without it, the POV's account or cash field.
@@ -120,6 +120,16 @@ function unavailable(failed: { code: string; reason: string } | null | undefined
   return failed.code === "requirement" ? "Not possible here and now" : failed.reason;
 }
 
+/**
+ * How an option's check rolls, beside its odds (DESIGN §11): advantage or disadvantage, and the DC
+ * when it isn't an opposed roll (the option already names the opponent).
+ */
+function checkDetail(a: Availability): { detail?: string } {
+  const c = a.check;
+  const parts = c ? [c.advantage > 0 ? "with advantage" : c.advantage < 0 ? "with disadvantage" : "", c.dc !== null && c.opponent === null ? `DC ${c.dc}` : ""].filter((p) => p !== "") : [];
+  return parts.length > 0 ? { detail: parts.join(" · ") } : {};
+}
+
 /** A param's label for a palette step: its own, else its ref kind's ("Person"), else its name in words ("Days"). */
 function paramLabel(action: ActionDef, name: string, world: WorldDoc, registry: Registry): string {
   const def = action.params[name];
@@ -163,6 +173,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
       options.push({
         label: stat.label,
         params,
+        ...checkDetail(odds),
         ...(odds.odds ? { odds: Object.entries(odds.odds).map(([outcome, p]) => ({ outcome, p })) } : {}),
         ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
         ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
@@ -184,6 +195,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
       return {
         label,
         params,
+        ...checkDetail(odds),
         ...(odds.odds ? { odds: Object.entries(odds.odds).map(([outcome, p]) => ({ outcome, p })) } : {}),
         ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
         ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
@@ -223,7 +235,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
     });
   }
   entries.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-  const calendar = effectiveLevel(world, state, world.pov, "calendar");
+  const calendar = ctx.levelOf(world.pov, "calendar");
   const timelapse: TimelapseView = {
     action: TIMELAPSE_ACTION,
     blocked: calendar < 1 ? "Calendar is off" : state.time.paused ? "Resume the clock first" : null,
@@ -243,7 +255,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
 function controls(world: WorldDoc, state: WorldState, sceneType: string): ControlsView {
   return {
     // The chat's own preset: a new chat may start from the user's settings, and This chat changes it.
-    realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world) },
+    realism: { preset: presetOf(state.realism), levels: { ...state.realism.levels }, tierCaps: structuredClone(state.realism.tierCaps), bandTiers: bandTiers(world), floors: { ...world.ruleset?.minLevels } },
     time: {
       sceneType,
       sceneTicks: { ...state.time.sceneTicks },

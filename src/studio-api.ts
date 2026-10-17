@@ -7,16 +7,17 @@ import { hashJson } from "./shared/hash";
 import { isRecord } from "./shared/json";
 import type { JsonValue } from "./shared/json";
 import type { LintIssue } from "./shared/protocol";
-import type { StudioState, WorldDoc } from "./shared/world";
+import type { SheetSectionView } from "./shared/state-view";
+import type { RulesetDef, StudioState, WorldDoc } from "./shared/world";
 import { ENGINE_VERSION, WORLD_FORMAT } from "./shared/world";
-import { blankWorld, checkWorldDay, isWorldDoc, lintWorld, migrateWorld, playtestStart, playtestTurn, type PlaytestTurn } from "./engine/authoring";
+import { blankWorld, checkWorldDay, isWorldDoc, lintWorld, migrateWorld, playtestStart, playtestTurn, previewSheet, type PlaytestTurn } from "./engine/authoring";
 import { createRegistry, type Registry } from "./engine/registry-impl";
 import type { WorldState } from "./engine/state";
 import { planTurn, postTurn, timelapseIntent } from "./engine/turn";
 import { ALL_PACKS } from "./packs/index";
 
 export { ENGINE_VERSION, WORLD_FORMAT };
-export type { LintIssue, PlaytestTurn, StudioState, WorldDoc };
+export type { LintIssue, PlaytestTurn, RulesetDef, SheetSectionView, StudioState, WorldDoc };
 
 /** The export file wrapper `lre.world export` writes. */
 export const EXPORT_FORMAT = "lre-world-export-v1";
@@ -51,7 +52,14 @@ export function validate(doc: unknown): LintIssue[] {
   if (!Array.isArray(doc.suppressed)) err("suppressed", "suppressed must be a list");
   if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll") err("seedMode", "seedMode must be fresh or same_roll");
   if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", "lenientPricing must be true or false");
+  // The ruleset is optional (DESIGN §11); lint checks its parts.
+  if (doc.ruleset !== undefined && !isRecord(doc.ruleset)) err("ruleset", "ruleset must be an object");
   return issues;
+}
+
+/** The Sheet Designer's preview: the world's designed sheet as an entity (the POV by default) starts with it; null without one. */
+export function sheetPreview(world: WorldDoc, entity?: string): SheetSectionView[] | null {
+  return previewSheet(registryOf(), world, entity);
 }
 
 export type LoadResult = { ok: true; world: WorldDoc; issues: LintIssue[] } | { ok: false; issues: LintIssue[] };

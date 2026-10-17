@@ -961,7 +961,10 @@ export class Runtime implements TurnHooks {
           .map(([band, p]) => `${band} ${Math.round(p * 100)}%`)
           .join(" · ");
         const mod = res.check.modifier !== 0 ? ` ${res.check.modifier > 0 ? "+" : "−"} ${Math.abs(res.check.modifier)}` : "";
-        stored.push({ id: `roll:${at}`, kind: "roll", ...base, label: `${label}: ${res.check.outcome}`, detail: `Rolled ${res.check.roll.notation}${mod} = ${res.check.total}. Odds: ${odds}.`, actions: [], expires: "never", payload: {} });
+        // The natural die when a band reads it, and the DC a margin is measured from (DESIGN §11).
+        const natural = res.check.natural !== null && (res.check.check.bands ?? []).some((b) => b.natural) ? ` (natural ${res.check.natural})` : "";
+        const dc = res.check.dc !== null && res.check.dc !== 0 ? ` against ${res.check.dc}` : "";
+        stored.push({ id: `roll:${at}`, kind: "roll", ...base, label: `${label}: ${res.check.outcome}`, detail: `Rolled ${res.check.roll.notation}${mod} = ${res.check.total}${natural}${dc}. Odds: ${odds}.`, actions: [], expires: "never", payload: {} });
       }
       if (!res.ok && res.failed) stored.push({ id: `decline:${at}`, kind: "decline", ...base, label: `${label}: couldn't`, detail: playerReason(res.failed), actions: [], expires: "next_send", payload: {} });
       else if (res.rejected.length > 0) stored.push({ id: `decline:${at}`, kind: "decline", ...base, label: `${label}: declined`, detail: res.rejected.map((r) => r.rejection.reason).join("; "), actions: [], expires: "next_send", payload: {} });

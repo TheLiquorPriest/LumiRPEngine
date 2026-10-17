@@ -1,6 +1,7 @@
 // Structural world lint (DESIGN §13): references, field types, cycles, unreachable track stages,
-// tiers, expressions that don't parse, unbalanced authored postings and predicates frozen at the
-// world's current realism. Pure; the authoring lint runs it with the registry (pack kinds and fields).
+// tiers, expressions that don't parse, unbalanced authored postings, predicates frozen at the world's
+// current realism, and the ruleset primitives' own lint (engine/ruleset-lint). Pure; the authoring
+// lint runs it with the registry (pack kinds and fields).
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -11,7 +12,8 @@ import type { EffectSpec, FieldDef, WorldDoc } from "../shared/world";
 import { objectiveWhen } from "../shared/world";
 import { compile } from "./expr";
 import { frozenPredicates } from "./realism";
-import type { Registry } from "./registry-impl";
+import { rulesetFloor, type Registry } from "./registry-impl";
+import { effectLists, lintRuleset } from "./ruleset-lint";
 import { kindFields } from "./scope";
 import { own } from "./pack-kit";
 
@@ -37,20 +39,6 @@ function typeProblem(f: FieldDef, v: JsonValue, world: WorldDoc): string | null 
     default:
       return null;
   }
-}
-
-/** Every authored effect list in the world, with its path. */
-function effectLists(world: WorldDoc): { path: string; effects: EffectSpec[] }[] {
-  const out: { path: string; effects: EffectSpec[] }[] = [];
-  for (const [id, a] of Object.entries(world.actions)) for (const [o, list] of Object.entries(a.outcomes)) out.push({ path: `actions.${id}.outcomes.${o}`, effects: list });
-  for (const [id, r] of Object.entries(world.rules)) out.push({ path: `rules.${id}.do`, effects: r.do });
-  for (const [id, t] of Object.entries(world.tracks)) {
-    for (const [sid, s] of Object.entries(t.stages)) {
-      if (s.effects) out.push({ path: `tracks.${id}.stages.${sid}.effects`, effects: s.effects });
-      if (s.rewards) out.push({ path: `tracks.${id}.stages.${sid}.rewards`, effects: s.rewards });
-    }
-  }
-  return out;
 }
 
 export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
@@ -161,11 +149,14 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
     });
   }
 
-  // Predicates on fields the world's current realism freezes (after a demotion, or authored above it).
+  // Predicates on fields the world's current realism freezes (after a demotion, or authored above
+  // it); a ruleset's floor raises the level they play at.
   for (const domain of DOMAINS) {
-    for (const p of frozenPredicates(reg, world, domain, world.realism.levels[domain])) {
-      warn(`${p.where}s.${p.id}`, "frozen_predicate", `A condition of ${p.where} ${p.id} reads ${p.field}, which ${domain} level ${world.realism.levels[domain]} doesn't track, so it never changes.`);
+    const level = rulesetFloor(world, domain, world.realism.levels[domain]);
+    for (const p of frozenPredicates(reg, world, domain, level)) {
+      warn(`${p.where}s.${p.id}`, "frozen_predicate", `A condition of ${p.where} ${p.id} reads ${p.field}, which ${domain} level ${level} doesn't track, so it never changes.`);
     }
   }
+  issues.push(...lintRuleset(world, reg));
   return issues;
 }

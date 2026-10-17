@@ -8,6 +8,12 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
+import { hashParts } from "../shared/hash";
+import type { RulesetDef } from "../shared/world";
+import { previewSheet } from "../engine/authoring";
+import { levelUps } from "../engine/effects";
+import { createRng } from "../engine/rng";
+import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
@@ -194,7 +200,9 @@ export class Dispatcher {
           const rejection = w.apply(e);
           if (rejection) throw new RequestError("validation", rejection.reason);
         }
-        const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events } }) : { pending: false };
+        // A fix to XP levels up like any other change to it (DESIGN §11); the level-ups are part of the fix.
+        levelUps(this.rt.registry, w, events, { bindings: {}, rng: createRng(hashParts(this.runSeedOf(r.chatId), "fix", r.entity, r.field, JSON.stringify(r.value))) });
+        const result = w.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: [...w.events] } }) : { pending: false };
         reply("lre.fix", { pending: result.pending });
         return;
       }
@@ -266,7 +274,7 @@ export class Dispatcher {
       case "list":
         return { worlds: await store.list(userId) };
       case "get":
-        return { ...(await store.get(r.worldId, userId, r.revision)), packKinds: Object.fromEntries(this.rt.registry.kinds) };
+        return { ...(await store.get(r.worldId, userId, r.revision)), packKinds: Object.fromEntries(this.rt.registry.kinds), functions: formulaFunctions(this.rt.registry) };
       case "create": {
         const template = r.template && hasOwn(this.rt.templates, r.template) ? this.rt.templates[r.template] : undefined;
         if (r.template && !template) throw new RequestError("not_found", `unknown template ${r.template}`);
@@ -319,6 +327,13 @@ export class Dispatcher {
         await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body: { kind: "migrate", to: r.to } });
         await this.syncBook(before.worldId, userId);
         return { revision: r.to };
+      }
+      case "sheet": {
+        // The Sheet Designer's live preview: the draft with the unsaved ruleset, as a chat would start.
+        const draft = await store.working(r.worldId, userId);
+        const world = { ...draft, ruleset: isRecord(r.ruleset) ? (r.ruleset as unknown as RulesetDef) : undefined };
+        const entity = typeof r.entity === "string" && hasOwn(world.entities, r.entity) ? r.entity : world.pov;
+        return { sheet: previewSheet(this.rt.registry, world, entity) };
       }
     }
   }

@@ -46,6 +46,7 @@ const PARTS: { id: WorldPart; label: string }[] = [
   { id: "realism", label: "Realism defaults" },
   { id: "tiers", label: "Tiers" },
   { id: "time", label: "Time defaults" },
+  { id: "ruleset", label: "Ruleset" },
 ];
 
 const TEMPLATES: { id: string | null; label: string }[] = [
@@ -556,6 +557,9 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers">): JsonObject
       return doc.time as unknown as JsonObject;
     case "meta":
       return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, currency: { ...doc.currency } };
+    case "ruleset":
+      // Absent in a world without one; saving an empty ruleset removes it again.
+      return isRecord(doc.ruleset) ? (doc.ruleset as unknown as JsonObject) : {};
   }
 }
 
