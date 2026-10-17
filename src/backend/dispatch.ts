@@ -2,18 +2,18 @@
 // `lre.error` with its `reqId`. Ledger writes go through the queue and are held inside open
 // windows (P2: `pending: true`).
 
-import type { Band, ChatId, DomainId, UserId, WorldId } from "../shared/ids";
+import type { Band, ChatId, DomainId, RevisionId, UserId, WorldId } from "../shared/ids";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import type { RulesetDef } from "../shared/world";
+import type { RulesetDef, WorldDoc } from "../shared/world";
 import { previewSheet } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
-import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies } from "../shared/protocol";
+import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import { EXTRACTION_TYPES } from "../shared/settings";
 import type { TimelapseTarget } from "../shared/ledger";
@@ -22,6 +22,7 @@ import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService } from "../engine/pack-kit";
 import { parseOverrides, parseTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
+import { definitionsLag, planUpgrade } from "../engine/upgrade";
 import { Working } from "../engine/working";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { activeRecord } from "../engine/ledger/path";
@@ -32,6 +33,7 @@ import { bookDrift, saveFromChat } from "./lore";
 import { ACTIVE_CONNECTION, declineNote, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
+import { upgradePreview } from "./upgrade-preview";
 import { TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
 import { newChatRun, WorldError } from "./worlds";
@@ -216,7 +218,7 @@ export class Dispatcher {
         return;
       }
       case "lre.marker": {
-        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : { kind: "migrate", to: r.to });
+        const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
         if (!body) throw new RequestError("bad_request", "not a valid marker");
         if (body.kind === "migrate") {
           // An Upgrade target must be a revision of this chat's world.
@@ -349,7 +351,10 @@ export class Dispatcher {
       case "upgrade": {
         const before = await this.rt.runOf(r.chatId, userId);
         if (!before || !(await this.rt.worlds.hasRevision(before.worldId, r.to, userId))) throw new RequestError("not_found", "unknown world revision");
-        await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body: { kind: "migrate", to: r.to } });
+        // With picks, the revision's definition changes come into the chat as the owner chose (DESIGN §4.3 `migrate`).
+        const body = validMarkerBody({ kind: "migrate", to: r.to, merge: r.merge });
+        if (!body) throw new RequestError("bad_request", "not a valid Upgrade");
+        await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
         await this.syncBook(before.worldId, userId);
         return { revision: r.to };
       }
@@ -390,8 +395,24 @@ export class Dispatcher {
       lines.push({ text: `${body.control} changes from the next turn; earlier turns keep the setting they were planned with.`, tone: "info" });
     } else {
       lines.push({ text: `The chat moves to revision ${body.to.slice(0, 8)} of ${world.name} from the next turn.`, tone: "info" });
+      return { lines, upgrade: await this.upgradePreview(chatId, userId, state, body.to) };
     }
     return { lines };
+  }
+
+  /** What an Upgrade with picks would bring into the chat, from the head state: the plan the fold applies, worded. */
+  private async upgradePreview(chatId: ChatId, userId: UserId, state: Working["state"], to: RevisionId): Promise<UpgradePreview> {
+    const run = await this.rt.runOf(chatId, userId);
+    if (!run) throw new RequestError("not_world_chat", "this chat is not attached to a world");
+    const docs = new Map<RevisionId, WorldDoc>();
+    for (const revision of new Set([definitionsLag(state) ?? state.revision, state.revision, to])) docs.set(revision, (await this.rt.worlds.get(run.worldId, userId, revision)).world);
+    const doc = (revision: RevisionId): WorldDoc => {
+      const found = docs.get(revision);
+      if (!found) throw new RequestError("not_found", `revision ${revision} of the world not found`);
+      return found;
+    };
+    const plan = planUpgrade(state, { worlds: (revision) => docs.get(revision), types: this.rt.registry }, to);
+    return upgradePreview(this.rt.registry, plan, state, doc(to), doc(state.revision));
   }
 
   private async chip(chatId: ChatId, userId: UserId, id: string, choice: string, payload?: JsonObject): Promise<ResultBodies["lre.chip"]> {

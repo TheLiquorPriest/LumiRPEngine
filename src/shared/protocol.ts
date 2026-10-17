@@ -8,7 +8,7 @@
 import type { JsonObject, JsonValue } from "./json";
 import type { LoreIndexAddition } from "./lore";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
-import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope } from "./ledger";
+import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { KindDef, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
@@ -128,16 +128,62 @@ export interface GmRequest extends Request<"lre.gm"> {
   chatId: ChatId;
 }
 
-/** A Play change to the running chat: a realism, time or Upgrade marker. With `preview`, nothing is written. */
+/**
+ * A Play change to the running chat: a realism, time or Upgrade marker. With `preview`, nothing is
+ * written. An Upgrade with `merge` brings the revision's definition changes in as the picks say.
+ */
 export type MarkerRequest = Request<"lre.marker"> & { chatId: ChatId; preview?: true } & (
     | { kind: "resolve"; domain: DomainId; scope: ResolveScope; to: Level }
     | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue }
-    | { kind: "migrate"; to: RevisionId }
+    | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   );
 
-/** What a marker would do (DESIGN §9.2: the demotion preview lists predicates whose inputs will freeze). */
+/** Where an Upgrade pick is written (DESIGN §4.3 `migrate`): a whole entity, one of its parts, a field, or one relation by type and target. */
+export type UpgradeTarget =
+  | { entity: EntityId; part: "entity" | UpgradeAspect }
+  | { entity: EntityId; part: "field"; field: FieldId }
+  | { entity: EntityId; part: "relation"; rel: RelationTypeId; to: string };
+
+/** One change an Upgrade can bring into the chat, with its default pick and why. */
+export interface UpgradeChange {
+  /** Unique within the preview. */
+  id: string;
+  label: string;
+  /** The chat's value now and the revision's, in words. */
+  from: string;
+  to: string;
+  /** Take or keep; for an entity gone from the revision, keep or remove. */
+  options: EntityUpgradePick[];
+  /** The default: take what play never touched, keep what it did. */
+  pick: EntityUpgradePick;
+  why: "changed in play" | "unchanged" | "new" | "removed";
+  /** Where a pick is written: both sides of a symmetric or inverse pair, which change together. */
+  targets: UpgradeTarget[];
+}
+
+export interface UpgradeEntityRow {
+  entity: EntityId;
+  name: string;
+  /** The kind's label. */
+  kind: string;
+  status: "new" | "removed" | "changed";
+  changes: UpgradeChange[];
+}
+
+/** What an Upgrade brings into the chat, entity by entity (DESIGN §4.3 `migrate`). */
+export interface UpgradePreview {
+  /** The revision the chat's definitions come from (its own, unless an earlier Upgrade left them behind) and the one it moves to. */
+  from: RevisionId;
+  to: RevisionId;
+  entities: UpgradeEntityRow[];
+  /** Tracks that go back to their start, in words. */
+  tracks: string[];
+}
+
+/** What a marker would do (DESIGN §9.2: the demotion preview lists predicates whose inputs will freeze; an Upgrade's lists its definition changes). */
 export interface MarkerPreview {
   lines: { text: string; tone: "freeze" | "promote" | "materialize" | "info" }[];
+  upgrade?: UpgradePreview;
 }
 
 /** Keep-report and pause decisions (DESIGN §4.3). */
@@ -283,7 +329,7 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "export"; worldId: WorldId; revision?: RevisionId }
     | { op: "lint"; worldId: WorldId }
     | { op: "attach"; worldId: WorldId; chatId: ChatId }
-    | { op: "upgrade"; chatId: ChatId; to: RevisionId }
+    | { op: "upgrade"; chatId: ChatId; to: RevisionId; merge?: UpgradePicks }
     | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
   );
 

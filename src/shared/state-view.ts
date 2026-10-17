@@ -241,6 +241,8 @@ export interface StateView {
   chatId: ChatId;
   worldId: WorldId | null;
   revision: RevisionId | null;
+  /** The revision the chat's entity definitions still come from, when an Upgrade left them behind `revision` (DESIGN §4.3 `migrate`). */
+  definitionsFrom?: RevisionId;
   status: ChatStatus;
   hud: HudView | null;
   scene: SceneView | null;

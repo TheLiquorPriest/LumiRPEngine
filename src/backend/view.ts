@@ -23,6 +23,7 @@ import type { Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates, type Availability } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
+import { definitionsLag } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, findLeaks, unrevealedTruths } from "../engine/visibility";
 import type { StoredChip } from "./chips";
 
@@ -566,11 +567,13 @@ export function buildView(input: ViewInput): StateView {
   const drops = playerDrops(registry, world, state, recordOf, fold.notes, fold.keepReport);
   const chips: Chip[] = [...shown.map(({ payload: _payload, ...chip }) => chip), ...derivedChips(chain, fold, drops.keep, core, registry, world)];
   const next = core.renderState(observed)?.state ?? state;
+  const lag = definitionsLag(state);
   return {
     v: 1,
     chatId: input.chatId,
     worldId: input.run.worldId,
     revision: state.revision,
+    ...(lag !== null ? { definitionsFrom: lag } : {}),
     status: core.journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
     hud: hud(world, state, panels, ctx),
     scene: sceneView,
