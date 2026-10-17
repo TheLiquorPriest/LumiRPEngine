@@ -24,7 +24,8 @@ import type {
   WorldId,
 } from "./ids";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
-import type { AdjudicationDef, FieldType, MapDisplay, WorldCurrency } from "./world";
+import type { AdjudicationDef, FieldType, MapDisplay, StepPurpose, WorldCurrency } from "./world";
+import type { LorePolicy } from "./settings";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
 
@@ -363,6 +364,27 @@ export interface GmMoney {
   recent: { at: string; memo: string; cents: number; account: string }[];
   /** Their latest payday, bill and decline notes, newest first. */
   notes: { at: string; text: string }[];
+}
+
+/**
+ * What one model step read of the world's lore (DESIGN §5.4, §6.5). It is shown to the player, so
+ * an unrevealed secret entry is named only as secret and a query carrying a secret's text is
+ * withheld.
+ */
+export interface LoreStepTrace {
+  step: StepPurpose;
+  phase: "pre" | "post";
+  policy: LorePolicy;
+  /** How lookups reached the model: `none` when none were offered. */
+  transport: "none" | "tools" | "need";
+  /** Each search: the prefetch over the step's inputs, or a lookup the model asked for. */
+  queries: { kind: "prefetch" | "search" | "get" | "list"; text: string; matched: number }[];
+  /** The entries the step was given, in order, with their token cost. */
+  entries: { title: string; tokens: number; cut: boolean; secret: boolean }[];
+  /** Lookup rounds made: one model call each, on the phase's lookup budget. */
+  lookups: number;
+  /** Why lookups stopped or changed course (the lookup budget ran out, the connection refused tools). */
+  notes: string[];
 }
 
 /** One interceptor run in the context inspector (`core.context`, DESIGN §6.5). */

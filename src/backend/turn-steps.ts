@@ -28,6 +28,7 @@ import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { EngineTurnPlan } from "../engine/turn";
 import { findLeaks } from "../engine/visibility";
+import type { StepLore } from "./lore-steps";
 import { inMinorUnits, type Steps } from "./steps";
 
 // ---------------------------------------------------------------- facts the steps see
@@ -312,19 +313,19 @@ function strings(v: JsonValue | undefined, max: number, chars = 300): string[] {
  * instructions, the output contract, and the facts. Prose comes back leak-checked; null when
  * the call fails.
  */
-export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, secrets: readonly string[], userId: UserId, signal: AbortSignal): Promise<string[] | null> {
+export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, secrets: readonly string[], userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string[] | null> {
   const instructions = renderTemplate(run.template?.template ?? BUILTIN[kind], vars);
-  const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal);
+  const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore });
   if (!isRecord(raw)) return null;
   const lines = kind === "brief" ? strings(raw.text, 1, 600) : kind === "outline" ? strings(raw.beats, 4) : strings(raw.choices, 4, 120);
   return lines.filter((l) => findLeaks(l, secrets).length === 0);
 }
 
 /** A prompted `effects` step (a world template with `output: "effects"`): proposals, for the caller to validate and bound like extraction. */
-export async function promptedEffects(steps: Steps, run: StepRun, vars: Readonly<Record<string, string>>, currency: WorldCurrency, userId: UserId, signal: AbortSignal): Promise<JsonObject[]> {
+export async function promptedEffects(steps: Steps, run: StepRun, vars: Readonly<Record<string, string>>, currency: WorldCurrency, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<JsonObject[]> {
   if (!run.template) return [];
   const money = `Money amounts are plain amounts in ${currency.code} as written (8 for ${currency.symbol}8).`;
-  const raw = await steps.helperJson(run.purpose, `${renderTemplate(run.template.template, vars)}\n${CONTRACT.effects} ${money}`, dataBlock(vars), run.config, userId, signal);
+  const raw = await steps.helperJson(run.purpose, `${renderTemplate(run.template.template, vars)}\n${CONTRACT.effects} ${money}`, dataBlock(vars), run.config, userId, signal, { lore });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : [];
   const out: JsonObject[] = [];
   for (const p of list.slice(0, 15)) if (isRecord(p) && typeof p.type === "string") out.push(inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, currency));
@@ -347,7 +348,7 @@ const humanize = (id: string): string => id.replace(/[_:.-]+/g, " ").trim();
  * sampled with the turn's seeded rng; returns `castlife.decision` events. The questions may carry
  * agents' private plans, so this call never includes prose.
  */
-export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[], describe: (tie: Tie) => JsonValue, rng: Rng, userId: UserId, signal: AbortSignal): Promise<LedgerEvent[]> {
+export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[], describe: (tie: Tie) => JsonValue, rng: Rng, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<LedgerEvent[]> {
   const asked = ties.filter((t) => t.options.length > 1).slice(0, 12);
   if (asked.length === 0) return [];
   const questions: Questions = {};
@@ -358,7 +359,7 @@ export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[]
     questions[`t${i}`] = { type: "choice", instructions: run.template?.template ?? "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.", criteria };
     state[`t${i}`] = describe(t);
   });
-  const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal);
+  const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal, lore);
   if (!answer) return [];
   return decisionEvents(asked, answer.answers, rng);
 }
@@ -381,7 +382,7 @@ export function decisionEvents(asked: readonly Tie[], answers: Answers, rng: Rng
  * `contradiction` (DESIGN §5.2, §18 "narrator contradiction"): which engine fact, if any, the reply
  * contradicts. Facts are player-visible only. Null when no fact is contradicted or the call fails.
  */
-export async function contradiction(steps: Steps, run: StepRun, facts: readonly string[], reply: string, userId: UserId, signal: AbortSignal): Promise<string | null> {
+export async function contradiction(steps: Steps, run: StepRun, facts: readonly string[], reply: string, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string | null> {
   const asked = facts.slice(0, 12);
   if (asked.length === 0 || reply.trim() === "") return null;
   const criteria: Record<string, string> = { none: "The reply is consistent with every fact." };
@@ -389,7 +390,7 @@ export async function contradiction(steps: Steps, run: StepRun, facts: readonly 
     criteria[`f${i}`] = f;
   });
   const questions: Questions = { contradicts: { type: "choice", instructions: run.template?.template ?? "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.", criteria } };
-  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run.config, userId, signal);
+  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run.config, userId, signal, lore);
   const a = answer?.answers.contradicts;
   if (!a || a.type !== "choice" || a.choice === "none" || a.confidence < 0.5) return null;
   const index = Number(a.choice.slice(1));
@@ -400,9 +401,9 @@ export async function contradiction(steps: Steps, run: StepRun, facts: readonly 
  * `puzzle.answer` (DESIGN §10, authored opt-in): the probability that the player's answer is
  * correct. The question carries the accepted answers (a secret), so it is its own decision call.
  */
-export async function puzzleAnswer(steps: Steps, run: StepRun, question: string, accepted: readonly string[], answer: string, userId: UserId, signal: AbortSignal): Promise<number | null> {
+export async function puzzleAnswer(steps: Steps, run: StepRun, question: string, accepted: readonly string[], answer: string, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<number | null> {
   const questions: Questions = { correct: { type: "noul", instructions: run.template?.template ?? "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?" } };
-  const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run.config, userId, signal);
+  const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run.config, userId, signal, lore);
   const a = result?.answers.correct;
   return a && a.type === "noul" ? a.noul : null;
 }

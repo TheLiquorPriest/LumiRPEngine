@@ -9,10 +9,10 @@ import { hasOwn, isRecord } from "../shared/json";
 import type { ChatRun, EventRef, GenerationKind, LedgerEvent, PostEvent, TimelapseTarget } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
-import type { ExtractionType, UserSettings } from "../shared/settings";
-import { EXTRACTION_TYPES } from "../shared/settings";
-import type { ChipAction, ContextGeneration, ContextView, StateView } from "../shared/state-view";
-import type { ActionDef, WorldDoc } from "../shared/world";
+import type { ExtractionType, StepConfig, UserSettings } from "../shared/settings";
+import { EXTRACTION_TYPES, stepLoreOf } from "../shared/settings";
+import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
+import type { ActionDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
@@ -35,7 +35,7 @@ import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { playerKnows } from "../engine/player-events";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedTruths } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets, unrevealedTruths } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { Working } from "../engine/working";
 import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
@@ -46,6 +46,7 @@ import { LedgerService, toChain, type TurnContext, type TurnHooks } from "./ledg
 import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
+import { StepLore, type LoreInputs } from "./lore-steps";
 import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, saidPayMethod, Steps } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
@@ -392,6 +393,8 @@ export class Runtime implements TurnHooks {
   private readonly lastPlace = new Map<ChatId, string | null>();
   /** What the pre phase saw, per generation, for the plan phase's signals. */
   private readonly prePhase = new Map<string, { facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null }>();
+  /** Each generation's lore traces, step by step (the inspector shows them, DESIGN §6.5). */
+  private readonly loreTraces = new Map<string, LoreStepTrace[]>();
 
   constructor(options: RuntimeOptions) {
     this.host = options.host;
@@ -541,15 +544,16 @@ export class Runtime implements TurnHooks {
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION,
     };
     // Intent and present-agent choices are independent: they run side by side.
-    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, settings, facts, budget, input.userId);
+    const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, settings, facts, budget, input.userId, p.generationId);
     const npcRuns = runsOf(settings.modelUse, render.world, "npc.choose", facts);
-    const npcTask = npcRuns.length > 0 && ties.present.length > 0 && budget.take() ? npcChoose(this.steps, npcRuns[0] as StepRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal) : Promise.resolve([]);
+    const npcRun = npcRuns[0];
+    const npcTask = npcRun && ties.present.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, "pre", render.world, render.state, input.userId, p.generationId, this.tieInputs(ties.present, render.state))) : Promise.resolve([]);
     const [, decisions] = await Promise.all([intentTask, npcTask]);
     bridge.setDecisions(text, decisions);
     this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId });
     trimMap(this.prePhase);
     if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${budget.spent} pre call(s)`, input.userId);
-    await this.judgeAnswer(bridge, text, render, settings, facts, budget, input.userId);
+    await this.judgeAnswer(bridge, text, render, settings, facts, budget, input.userId, p.generationId);
     await this.judgeApproach(bridge, text, render, settings, facts, budget, input.userId);
   }
 
@@ -578,7 +582,8 @@ export class Runtime implements TurnHooks {
     const budget = this.preBudgets.get(input.generationId) ?? new StepBudget(settings.modelUse.budgets.pre.calls, settings.modelUse.budgets.pre.ms, input.signal);
     const secrets = unrevealedTruths(render.world, render.state);
     const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, ""), secrets);
-    const run = (r: StepRun, kind: "brief" | "outline"): Promise<string[]> => (budget.take() ? promptedText(this.steps, r, kind, vars, secrets, input.userId, budget.signal).then((lines) => lines ?? []) : Promise.resolve([]));
+    const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join("\n"), links: this.sceneLinks(render.world, render.state) };
+    const run = (r: StepRun, kind: "brief" | "outline"): Promise<string[]> => (budget.take() ? promptedText(this.steps, r, kind, vars, secrets, input.userId, budget.signal, this.stepLore(r, "pre", render.world, render.state, input.userId, input.generationId, inputs)).then((lines) => lines ?? []) : Promise.resolve([]));
     const [briefs, outlines] = await Promise.all([Promise.all(briefRuns.map((r) => run(r, "brief"))), Promise.all(outlineRuns.map((r) => run(r, "outline")))]);
     const brief = briefs.flat().join(" ").trim();
     const prose = { brief: brief === "" ? null : brief, outline: outlines.flat() };
@@ -619,7 +624,7 @@ export class Runtime implements TurnHooks {
   }
 
   /** The turn's intent: a recorded palette or chip action, else `interpret` (helper JSON, or a Decision choice over the actions). */
-  private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, userId: UserId): Promise<void> {
+  private async readIntent(bridge: TurnBridge, text: string, recorded: JsonValue | undefined, render: { world: WorldDoc; state: WorldState }, all: ActionDef[], settings: UserSettings, facts: SignalFacts, budget: StepBudget, userId: UserId, key: string): Promise<void> {
     // A palette or chip action records its intent on the user message (dispatch `lre.action`); it
     // survives restarts and a bridge that never saw the request.
     if (isRecord(recorded) && typeof recorded.action === "string") {
@@ -645,19 +650,20 @@ export class Runtime implements TurnHooks {
     const labelOf = (a: ActionDef): string => (a.pack === "story" && a.id === "answer" && puzzles.length > 0 ? `${a.label} (open: ${puzzles.join("; ")})` : a.label);
     const catalog = [...all.map((a) => ({ id: a.id, label: labelOf(a), params: Object.keys(a.params), ...(a.lexicon ? { lexicon: a.lexicon } : {}) })), timelapseEntry];
     let result: InterpretOutput | null;
+    const lore = this.stepLore(run, "pre", render.world, render.state, userId, key, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
     if (run.config.route?.provider === "decision") {
       // A Decision route answers which action (or none); a helper call fills its params when it has any.
       const criteria: Record<string, string> = { none: "Not an action: speech, a request, a feeling or a recap." };
       for (const a of all) criteria[a.id] = labelOf(a);
       criteria[TIMELAPSE_ACTION] = timelapseEntry.label;
-      const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal);
+      const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore);
       const a = answer?.answers.action;
       const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null } } : all.find((x) => x.id === a.choice)) : undefined;
       if (!chosen) result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
       else if (Object.keys(chosen.params).length === 0 || !budget.take()) result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
-      else result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal);
+      else result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore);
     } else {
-      result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined);
+      result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore);
     }
     // The call failed (a transient failure already had its second try): the turn runs as plain
     // roleplay, and a chip says the action went unread, with a Retry that runs the turn again.
@@ -702,7 +708,7 @@ export class Runtime implements TurnHooks {
   }
 
   /** `puzzle.answer` (DESIGN §10): an Answer the stage can't match exactly is judged, then retried with the probability. */
-  private async judgeAnswer(bridge: TurnBridge, text: string, render: { world: WorldDoc; state: WorldState }, settings: UserSettings, facts: SignalFacts, budget: StepBudget, userId: UserId): Promise<void> {
+  private async judgeAnswer(bridge: TurnBridge, text: string, render: { world: WorldDoc; state: WorldState }, settings: UserSettings, facts: SignalFacts, budget: StepBudget, userId: UserId, key: string): Promise<void> {
     const intent = bridge.intentOf(text);
     if (!intent?.action || this.registry.actions.get(intent.action)?.pack !== "story" || intent.action !== "answer") return;
     // The model names the puzzle loosely, or not at all: resolve it as the story pack does.
@@ -712,7 +718,8 @@ export class Runtime implements TurnHooks {
     const stage = render.world.tracks[track]?.stages[render.state.tracks[track]?.stage ?? render.world.tracks[track]?.start ?? ""];
     const run = runsOf(settings.modelUse, render.world, "puzzle.answer", facts)[0];
     if (!run || !stage?.answer || !budget.take()) return;
-    const p = await puzzleAnswer(this.steps, run, stage.label, stage.answer.expect, answer, userId, budget.signal);
+    const owner = render.world.tracks[track]?.owner;
+    const p = await puzzleAnswer(this.steps, run, stage.label, stage.answer.expect, answer, userId, budget.signal, this.stepLore(run, "pre", render.world, render.state, userId, key, { text: `${stage.label}\n${answer}`, links: owner ? [owner] : [] }));
     if (p !== null) bridge.setIntent(text, { ...intent, params: { ...intent.params, puzzle: track, decision: p } }, bridge.wasInterpreted(text));
   }
 
@@ -748,6 +755,71 @@ export class Runtime implements TurnHooks {
     const e = state.entities[t.agent];
     const place = placeOfEntity(state, t.agent);
     return { agent: e?.name ?? t.agent, at: place ? (world.places[place]?.name ?? place) : null, time: formatClock(calendarOf(world), state.clock), options: t.options };
+  }
+
+  /**
+   * A step run's lore (DESIGN §5.4): null when the world has none or the step's policy is off.
+   * Its prefetch searches the step's own inputs now, at no call; its trace is kept under `key`
+   * (the generation, or the read) for the inspector. Snippets cost the host's count of their text
+   * once it has one for this user, else the estimate, and are counted in the background.
+   */
+  private stepLore(run: { purpose: StepPurpose; config: StepConfig }, phase: "pre" | "post", world: WorldDoc, state: WorldState, userId: UserId, key: string, inputs: LoreInputs, effects = false): StepLore | null {
+    if (Object.keys(world.lore).length === 0) return null;
+    const setting = stepLoreOf(run.config);
+    if (setting.policy === "none") return null;
+    const reader = { reg: this.registry, world, state, tokens: (text: string) => this.tokenCounts.get(hashParts("lre.tokens", userId, text)) ?? sectionTokens(text) };
+    const lore = new StepLore(run.purpose, setting, reader, phase, unrevealedSecrets(this.registry, world, state), { effects, counted: (texts) => this.countLater(userId, texts) });
+    lore.prefetch(inputs);
+    lruSet(this.loreTraces, key, [...(this.loreTraces.get(key) ?? []), lore.trace], 64);
+    return lore;
+  }
+
+  /** Who and where a scene's step is about: the POV, its place and the places that hold it, and the people it can see there. */
+  private sceneLinks(world: WorldDoc, state: WorldState): string[] {
+    const here = placeOfEntity(state, world.pov);
+    const out = [world.pov];
+    for (let place = here ?? undefined, i = 0; place !== undefined && i < 4; place = world.places[place]?.parent, i++) out.push(place);
+    if (here) for (const id of Object.keys(state.entities)) if (id !== world.pov && placeOfEntity(state, id) === here && canSeeEntity(this.registry, world, state, world.pov, id)) out.push(id);
+    return out;
+  }
+
+  /** The tracks the POV can see, as words a lore search can match: label, stage and cue. */
+  private trackWords(world: WorldDoc, state: WorldState): string {
+    const lines: string[] = [];
+    for (const id of Object.keys(world.tracks)) {
+      const t = playerTrack(this.registry, world, state, world.pov, id);
+      if (t) lines.push([t.label, t.stage, t.cue ?? ""].join(" ").trim());
+    }
+    return lines.join("\n");
+  }
+
+  /** What `npc.choose` searches lore with: the agents, their options and where they are. */
+  private tieInputs(ties: readonly Tie[], state: WorldState): LoreInputs {
+    const links = ties.flatMap((t) => [t.agent, ...[placeOfEntity(state, t.agent)].filter((p): p is string => typeof p === "string")]);
+    const text = ties.map((t) => `${state.entities[t.agent]?.name ?? t.agent}: ${t.options.map((o) => o.replace(/[_:.-]+/g, " ")).join(", ")}`).join("\n");
+    return { text, links: [...new Set(links)] };
+  }
+
+  /**
+   * Asks the host to count texts it hasn't counted for this user yet, in the background; later
+   * reads use the counts. A count that isn't a finite number from 0 to `TOKEN_COUNT_CAP` times
+   * the estimate is ignored, so a bogus count can't clip every section.
+   */
+  private countLater(userId: UserId, texts: readonly string[]): void {
+    const asked = [...new Set(texts)].map((content) => [hashParts("lre.tokens", userId, content), content] as const).filter(([key]) => !this.tokenCounts.has(key));
+    if (asked.length === 0) return;
+    void this.host.tokens
+      .count(
+        asked.map(([, content]) => content),
+        userId,
+      )
+      .then((counts) =>
+        counts?.forEach((n, i) => {
+          const [key, content] = asked[i] ?? ["", ""];
+          if (key !== "" && Number.isFinite(n) && n >= 0 && n <= TOKEN_COUNT_CAP * sectionTokens(content)) lruSet(this.tokenCounts, key, n, 1024);
+        }),
+      )
+      .catch(() => undefined);
   }
 
   /**
@@ -803,19 +875,22 @@ export class Runtime implements TurnHooks {
     const secrets = unrevealedTruths(context.world, context.state);
     const vars = safeVars(this.stepVars(context.world, context.state, plan, pre?.text ?? "", text), secrets);
     const modelUse = settings.modelUse;
+    // What the reply's steps search lore with: the reply and the player's message, in the POV's scene.
+    const read = { text: `${text}\n${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
+    const lore = (r: StepRun, effects = false) => this.stepLore(r, "post", context.world, context.state, userId, key, read, effects);
     // Each step takes its call from the budget when it starts, in priority order.
     const extractRun = runsOf(modelUse, context.world, "extract", facts).find((r) => r.template === null || r.template.output !== "effects");
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" || this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined)
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" || this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun))
       : Promise.resolve([]);
-    const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, "effects")).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal) : Promise.resolve([])));
+    const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, "effects")).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts)[0];
-    const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal) : Promise.resolve([]);
+    const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, "post", context.world, context.state, userId, key, this.tieInputs(ties.offscreen, context.state))) : Promise.resolve([]);
     const contradictionRun = runsOf(modelUse, context.world, "contradiction", facts).find((r) => r.template === null || r.template.output === "decision");
     const told = [...(plan ? planLines(plan, context.world, this.registry).outcome : []), ...factLines(this.registry, context.world, context.state, secrets)];
-    const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text, userId, budget.signal) : Promise.resolve(null);
+    const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text, userId, budget.signal, lore(contradictionRun)) : Promise.resolve(null);
     const choiceRuns = runsOf(modelUse, context.world, "choices", facts, "text");
-    const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal).then((lines) => lines ?? []) : Promise.resolve([])));
+    const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
     const [extracted, effects, decisions, contradicted, choices] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks)]);
     // Proposals naming what the POV can't know (a hidden or unmet entity, a secret place) are dropped,
     // and so is the turn's own action told again: a give of what it lent, a purchase it made (with
@@ -1146,7 +1221,7 @@ export class Runtime implements TurnHooks {
     // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2).
     let budget = settings.modelUse.tokens.sections;
     const { delivery } = await this.inspector.load(input.chatId, input.userId);
-    const uncounted = new Map<string, string>();
+    const uncounted: string[] = [];
     for (const section of sectionsOf(world)) {
       const entryId = slotIds.get(section.id);
       if (!entryId || !present.has(entryId)) continue;
@@ -1173,7 +1248,7 @@ export class Runtime implements TurnHooks {
       const content = renderSection(section.label, section.template, safe);
       const key = hashParts("lre.tokens", input.userId, content);
       const counted = this.tokenCounts.get(key);
-      if (counted === undefined) uncounted.set(key, content);
+      if (counted === undefined) uncounted.push(content);
       const cost = counted ?? sectionTokens(content);
       const clipped = section.rank > 0 && cost > budget;
       // A clipped section wasn't in the prompt, so an earlier delivery check says nothing about it.
@@ -1185,18 +1260,7 @@ export class Runtime implements TurnHooks {
       result.forced.push(entryId);
       result.mutated.push({ id: entryId, content, ...(placement ? { placement } : {}) });
     }
-    if (uncounted.size > 0) {
-      const asked = [...uncounted];
-      void this.host.tokens
-        .count(asked.map(([, content]) => content), input.userId)
-        .then((counts) =>
-          counts?.forEach((n, i) => {
-            const [key, content] = asked[i] ?? ["", ""];
-            if (key !== "" && Number.isFinite(n) && n >= 0 && n <= TOKEN_COUNT_CAP * sectionTokens(content)) lruSet(this.tokenCounts, key, n, 1024);
-          }),
-        )
-        .catch(() => undefined);
-    }
+    this.countLater(input.userId, uncounted);
     record.budget.used = settings.modelUse.tokens.sections - budget;
     // Every engine-book entry the engine didn't fill this turn is voted off, so one re-enabled in the
     // host's UI (an unused slot, a lore entry an earlier build left) can't activate natively. Other

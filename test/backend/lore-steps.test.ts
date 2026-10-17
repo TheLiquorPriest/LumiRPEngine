@@ -1,0 +1,133 @@
+// RPEngine's helpers read the world's lore (DESIGN §5.4): the prefetch puts what a step's own inputs
+// find into its prompt, or into a decision's state, at no extra call and within the step's lore
+// tokens; a step that writes for the player never reads a secret, even one its audience names.
+
+import { describe, expect, test } from "bun:test";
+import type { Answers } from "../../src/engine/decide";
+import type { DecideRequest, QuietRequest } from "../../src/backend/host";
+import { sectionTokens } from "../../src/backend/book";
+import type { JsonObject } from "../../src/shared/json";
+import { Rig } from "../support/rig";
+
+const SECRET = "The ferryman scuttled the old boat for the insurance money";
+
+const LORE: Record<string, JsonObject> = {
+  ferry: { id: "ferry", title: "The ferry", content: "The ferry crosses to Gull Island twice a day; the last boat leaves at six.", keys: ["ferry"], links: [] },
+  dev_past: { id: "dev_past", title: "Dev's past", content: "Dev ran the harbor café before the storm.", keys: [], links: ["dev"] },
+  wreck: { id: "wreck", title: "The wreck", content: `${SECRET}.`, keys: ["ferry", "wreck"], links: ["dev"], secret: true, gate: "self.cash > 100000", audience: ["interpret", "npc.choose", "brief"] },
+};
+
+const PROMPTS: Record<string, string> = {
+  interpret: "You map a player's typed input",
+  extract: "propose concrete state changes",
+  brief: "You brief a roleplay narrator",
+  outline: "You outline a roleplay narrator",
+  choices: "Suggest three short",
+  contradiction: "Answer each question about the state",
+};
+
+function quiet(req: QuietRequest): string {
+  const system = req.messages[0]?.content ?? "";
+  if (system.includes(PROMPTS.interpret ?? "")) return JSON.stringify({ action: null, params: {}, confidence: 0.9 });
+  if (system.includes(PROMPTS.extract ?? "")) return JSON.stringify({ proposals: [] });
+  if (system.includes(PROMPTS.brief ?? "")) return JSON.stringify({ text: "Sam waits at home for the ferry." });
+  if (system.includes(PROMPTS.outline ?? "")) return JSON.stringify({ beats: ["The horn sounds."] });
+  if (system.includes(PROMPTS.choices ?? "")) return JSON.stringify({ choices: ["I board the ferry"] });
+  return "{}";
+}
+
+function decide(req: DecideRequest): Answers {
+  const out: Answers = {};
+  for (const [key, q] of Object.entries(req.questions)) {
+    if (q.type === "noul") out[key] = { type: "noul", noul: 0.9 };
+    else if (q.type === "choice") {
+      const first = Object.keys(q.criteria)[0] ?? "none";
+      out[key] = { type: "choice", choice: first, probabilities: { [first]: 1 }, confidence: 1 };
+    }
+  }
+  return out;
+}
+
+/** A world chat whose world has `lore`, with an open tie for Dev (with Sam) and for Kim (elsewhere). */
+export async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject> = LORE): Promise<{ rig: Rig; chatId: string }> {
+  const rig = new Rig();
+  for (const patch of settings) rig.body(await rig.send({ type: "lre.settings.set", patch }));
+  const worldId = await rig.newWorld("Harbor");
+  const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId })) as { draft: { entities: Record<string, JsonObject & { fields: JsonObject }> } };
+  const put = async (collection: string, id: string, value: JsonObject): Promise<void> => {
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
+  };
+  const dev = draft.entities.dev;
+  const sam = draft.entities.sam;
+  if (!dev || !sam) throw new Error("no dev or sam");
+  await put("entities", "dev", { ...dev, fields: { ...dev.fields, place: "home", tie: true } });
+  await put("entities", "sam", { ...sam, fields: { ...sam.fields, place: "home" } });
+  await put("entities", "kim", { id: "kim", kind: "person", name: "Kim", tier: "background", fields: { tie: true }, relations: [], agent: true });
+  await put("actions", "wait", { id: "wait", label: "Wait", params: {}, requires: [], outcomes: { default: [] }, duration: "10", lexicon: ["wait"] });
+  for (const [id, value] of Object.entries(lore)) await put("lore", id, value);
+  rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  const chatId = rig.host.createChat("Morning, Sam.");
+  rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+  rig.host.quietReply = quiet;
+  rig.host.decideReply = decide;
+  return { rig, chatId };
+}
+
+const systemOf = (rig: Rig, step: string): string => rig.host.quietCalls.find((r) => r.messages[0]?.content.includes(PROMPTS[step] ?? "\u0000"))?.messages[0]?.content ?? "";
+/** The snippets of a prompt's lore block. */
+const loreLines = (prompt: string): string[] => (prompt.split("World lore (reference notes; they may be incomplete):\n")[1] ?? "").split("\n").filter((l) => l.startsWith("- [")).map((l) => l.replace(/^- \[[^\]]+\] /, ""));
+
+describe("the prefetch", () => {
+  test("puts what each step's inputs find into its prompt or its decision's state, at no extra call", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }]);
+    const start = rig.rt.meter.log.length;
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(rig.rt.ledger.errors).toEqual([]);
+    const counts: Record<string, number> = {};
+    for (const c of rig.rt.meter.log.slice(start)) counts[c.purpose] = (counts[c.purpose] ?? 0) + 1;
+    // The calls Full makes on this turn without lore (DESIGN §5.3).
+    expect(counts).toEqual({ interpret: 1, "npc.choose": 2, brief: 1, outline: 1, extract: 1, contradiction: 1 });
+    expect(systemOf(rig, "interpret")).toContain("The ferry: The ferry crosses to Gull Island");
+    expect(systemOf(rig, "extract")).toContain("The ferry: The ferry crosses to Gull Island");
+    expect(systemOf(rig, "brief")).toContain("The ferry: The ferry crosses to Gull Island");
+    // npc.choose on the Decision connection reads its lore in the state: Dev's own entry.
+    const npc = rig.host.decideCalls.find((r) => JSON.stringify(r.state).includes("Dev"));
+    expect(JSON.stringify(npc?.state)).toContain("Dev's past: Dev ran the harbor café before the storm.");
+  });
+
+  test("a secret reaches the decision steps in its audience, never a step that writes for the player", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }]);
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(systemOf(rig, "interpret")).toContain(SECRET);
+    expect(JSON.stringify(rig.host.decideCalls.map((r) => r.state))).toContain(SECRET);
+    // Brief is in its audience but writes prose; extract and contradiction aren't in it.
+    for (const step of ["brief", "outline", "extract", "contradiction"]) {
+      expect(systemOf(rig, step)).not.toBe("");
+      expect(systemOf(rig, step)).not.toContain(SECRET);
+    }
+  });
+
+  test("the lore block stays within the step's lore tokens", async () => {
+    const long = Array.from({ length: 300 }, (_, i) => `The ferry log ${i} notes calm water.`).join(" ");
+    const lore = { ...LORE, log: { id: "log", title: "Ferry log", content: long, keys: ["ferry"], links: [] } };
+    for (const tokens of [90, 150]) {
+      const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: { interpret: { enabled: true, signals: ["always"], lore: { policy: "prefetch", tokens } } } } }], lore);
+      await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+      const lines = loreLines(systemOf(rig, "interpret"));
+      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.reduce((s, l) => s + sectionTokens(l), 0)).toBeLessThanOrEqual(tokens);
+      expect(lines.some((l) => l.endsWith("…"))).toBe(true);
+    }
+  });
+
+  test("a step whose lore is off gets none, and a world without lore changes no prompt", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { modelUse: { preset: "custom", steps: { interpret: { enabled: true, signals: ["always"], lore: { policy: "none", tokens: 400 } } } } }]);
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    expect(systemOf(rig, "interpret")).not.toContain("World lore");
+    expect(systemOf(rig, "extract")).toContain("World lore");
+    const bare = await loreChat([{ modelUse: { preset: "full" } }], {});
+    await bare.rig.turn(bare.chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    for (const r of bare.rig.host.quietCalls) expect(r.messages[0]?.content).not.toContain("World lore");
+    for (const r of bare.rig.host.decideCalls) expect(JSON.stringify(r.state)).not.toContain('"lore"');
+  });
+});
