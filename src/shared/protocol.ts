@@ -313,6 +313,8 @@ export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ru
 /**
  * Build-draft operations. `get` returns the stored draft (or a fresh copy of the head when there is
  * none) so a reload or a second device resumes it; its `base` is ignored. `discard` drops the draft.
+ * `profile` applies a ruleset profile to the draft in one write (`shared/profiles`), each
+ * conflicting item kept or taken by its path in `choices` (kept when unnamed).
  */
 export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: RevisionId | null } & (
     | { op: "get" }
@@ -320,6 +322,7 @@ export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: Re
     | { op: "put"; collection: WorldCollection; id: string; value: JsonValue }
     | { op: "remove"; collection: WorldCollection; id: string }
     | { op: "set"; part: WorldPart; value: JsonValue }
+    | { op: "profile"; profile: string; choices: Record<string, "mine" | "profile"> }
   );
 
 /**

@@ -20,6 +20,7 @@ import { blankWorld, currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, 
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort } from "./host";
+import { applyProfile, profileChoices, profileOf } from "../shared/profiles/index";
 
 interface Draft {
   base: RevisionId | null;
@@ -226,6 +227,11 @@ export class WorldStore {
     let doc = draft.doc;
     if (request.op === "set") {
       setPart(doc, request.part, request.value);
+    } else if (request.op === "profile") {
+      // A ruleset profile (DESIGN §11) in one write, read against the packs' kinds as Build previewed it.
+      const profile = profileOf(request.profile);
+      if (!profile) throw new WorldError("bad_request", `unknown profile ${String(request.profile)}`);
+      doc = applyProfile(doc, profile, Object.fromEntries(this.registry.kinds), profileChoices(request.choices));
     } else {
       if (!hasOwn(WORLD_COLLECTIONS, request.collection)) throw new WorldError("bad_request", `unknown collection ${request.collection}`);
       if (!safeKey(request.id)) throw new WorldError("bad_request", "not a valid id");

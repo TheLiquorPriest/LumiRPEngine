@@ -2,13 +2,15 @@
 // level floors, the progressions, the Sheet Designer and the Combat card, saved together as the
 // `ruleset` part. The designer previews the sheet live through `lre.world sheet`, on the POV as a
 // chat would start, with the ruleset as edited (saved or not). Keys this editor doesn't know are
-// kept as they are, so other ruleset parts survive a save.
+// kept as they are, so other ruleset parts survive a save. "Start from a profile…" applies a ready-made
+// ruleset to the draft in its own write (`profile-picker`), with the edits here saved or reverted first.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { presetAdjudication, readAdjudication } from "../../shared/adjudication";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
+import { profileOf } from "../../shared/profiles/index";
 import type { SheetSectionView } from "../../shared/state-view";
 import type { FieldDef, ProgressionDef, RulesetDef, SheetLayoutDef, SheetRowDef, SheetSectionDef, WorldDoc } from "../../shared/world";
 import { SheetSectionCards } from "../../packs/sheets/ui/panel";
@@ -20,6 +22,7 @@ import { sheetPreviewRequest } from "../requests";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
 import { ExprEditor } from "./expr-editor";
+import { ProfilePicker } from "./profile-picker";
 import { EFFECT, type FieldSpec } from "./schema";
 import type { FormCtx } from "./schema-form";
 import { FieldInput, kindFields, lintAt, refOptions, worldIdentifiers } from "./schema-form";
@@ -572,6 +575,7 @@ export function RulesetEditor() {
   const storedKey = JSON.stringify(stored);
   const [value, setValue] = useState<RulesetDef>(stored);
   const [busy, run] = useBusy();
+  const [picking, setPicking] = useState(false);
   useEffect(() => setValue(stored), [storedKey]);
   // Pickers see the packs' kinds too (DESIGN §13); the world's own win.
   const formDoc = useMemo(() => (draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds }, relations: { ...draft.packRelations, ...draft.doc.relations } } : null), [draft?.doc, draft?.packKinds, draft?.packRelations]);
@@ -591,7 +595,18 @@ export function RulesetEditor() {
   const ctx: FormCtx = { doc: formDoc, lint: draft.lint, path: "ruleset", identifiers, functions: draft.functions };
   return (
     <div class="lre-stack" data-lre-editor="part:ruleset">
-      <div class="lre-h2">Ruleset</div>
+      <div class="lre-spread">
+        <div class="lre-h2">Ruleset</div>
+        <button type="button" class="lre-btn" aria-expanded={picking} disabled={busy} onClick={() => setPicking(!picking)}>
+          Start from a profile…
+        </button>
+      </div>
+      {typeof value.profile === "string" ? <span class="lre-small lre-muted">Started from the {profileOf(value.profile)?.label ?? value.profile} profile.</span> : null}
+      {picking ? (
+        <Card title="Start from a profile">
+          <ProfilePicker draft={draft} blocked={changed ? "Save or revert your ruleset edits first: a profile is applied to the draft as it is stored." : null} onDone={() => setPicking(false)} />
+        </Card>
+      ) : null}
       <Card title="How checks are decided">
         <div class="lre-stack" data-lre-adjudication="world">
           <HostSwitch label="This world sets how its checks are decided" checked={value.adjudication !== undefined} disabled={busy} onChange={(on) => update("adjudication", on ? (presetAdjudication("crunchy") as unknown as JsonObject) : undefined)} />
