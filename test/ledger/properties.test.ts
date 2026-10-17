@@ -65,6 +65,8 @@ describe("ledger property suite", () => {
       if (!ONE && RUNS >= 100) expect(coverage.carryDrops).toBeGreaterThan(0);
       // L46 coverage: a Re-run does carry a fix without the materialization its new swipe already made.
       if (!ONE && RUNS >= 100) expect(coverage.stripped).toBeGreaterThan(0);
+      // L45 coverage: copies of an earlier build's chats do restore its starting markers to fold alike.
+      if (!ONE && RUNS >= 100) expect(coverage.earlierCopies).toBeGreaterThan(0);
       // Fights start, act, pass the turn and end (on any view, swipes and rebases included).
       for (const k of ["start", "act", "turn", "end"] as const) if (!ONE && RUNS >= 100) expect(coverage.fights[k]).toBeGreaterThan(0);
     },

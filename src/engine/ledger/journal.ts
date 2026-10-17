@@ -4,7 +4,7 @@
 // persists `journal` after each call; `dirty()` lists the messages whose metadata mirror must be
 // written. Classification is a function of the chain-snapshot diff, never of event names (L4).
 
-import { hashParts } from "../../shared/hash";
+import { hashJson, hashParts } from "../../shared/hash";
 import type { GenerationId, MessageId, RevisionId } from "../../shared/ids";
 import type {
   ChainEntry,
@@ -32,7 +32,7 @@ import type { ReadContext } from "../registry";
 import type { WorldState } from "../state";
 import type { ChainMessage, FoldOutput, SnapshotStore } from "./chain";
 import type { LedgerFold } from "./fold";
-import { activeRecord, activeText, contentId, isLive, isTombstoned, sameContent, stepPath, storedRecordHash, turnPath } from "./path";
+import { activeRecord, activeText, contentId, isLive, isTombstoned, nextPath, sameContent, stepPath, storedRecordHash, turnPath } from "./path";
 import type { FoldTypes } from "./reference";
 
 /** What the core needs to plan a turn and read a reply. Supplied by the engine (and by test packs). */
@@ -82,6 +82,9 @@ const EMPTY_LEDGER = (): MessageLedger => ({ v: 1, swipes: {}, markers: [] });
 const REFUSED_KEPT = 8;
 
 export class LedgerCore {
+  /** Whether this open has checked the starting markers against the chain's stored paths (`restoreStartMarkers`). */
+  private startsChecked = false;
+
   constructor(
     public journal: Journal,
     private readonly env: LedgerEnv,
@@ -165,6 +168,10 @@ export class LedgerCore {
     const j = this.journal;
     if (j.chain.length === 0 && Object.keys(j.messages).length === 0) this.bootstrap(observed);
     if (deletedSwipe) this.shiftSwipes(deletedSwipe.messageId, deletedSwipe.swipeId);
+    if (!this.startsChecked) {
+      this.startsChecked = true;
+      this.restoreStartMarkers(observed);
+    }
     // Removals: live markers move to the nearest surviving earlier assistant message (DESIGN §4.3, L19).
     const now = new Set(observed.map((m) => m.id));
     for (const [index, old] of j.chain.entries()) if (!now.has(old.id)) this.moveMarkersOnDelete(old, index, observed);
@@ -214,6 +221,70 @@ export class LedgerCore {
         if (rec.events.length > 0) j.started = true;
       }
       if (m.ledger.markers.some((mk) => mk.start)) j.started = true;
+    }
+  }
+
+  /**
+   * An earlier build journaled the starting markers as the world writes them (the starters'
+   * half-minute action tick as 0.5) and hashed the chain with them, but flushed them to message
+   * metadata as the marker check clamps them (1). Where the journal came from that metadata (a
+   * branch, an import or a rebuilt journal, made by either build), every stored path after them
+   * missed and the records folded as rebased views. So, once per open, a starting marker stored
+   * clamped, where the chat's own marker as the world writes it differs from it and clamps to it,
+   * is put back as written if the first later stored path that either reading matches is matched
+   * with it put back: the chain then hashes what its paths were hashed with, and the flush writes
+   * it back to metadata. A chat this build started journaled them clamped, so that path matches
+   * them as they stand.
+   */
+  private restoreStartMarkers(observed: readonly ChainMessage[]): void {
+    const raws = this.env.startMarkers().flatMap((raw) => {
+      const clamped = hashJson(validMarkerBody(raw));
+      const written = hashJson(raw);
+      return written === clamped ? [] : [{ raw, clamped }];
+    });
+    if (raws.length === 0) return;
+    const chain = this.chain(observed);
+    const restored = new Map<number, Marker[]>();
+    for (const [index, m] of chain.entries()) {
+      let changed = false;
+      const markers = (m.ledger?.markers ?? []).map((mk) => {
+        if (!mk.start) return mk;
+        const { seq, at, start: _start, ...body } = mk;
+        const stored = hashJson(body);
+        const raw = raws.find((r) => r.clamped === stored)?.raw;
+        if (!raw) return mk;
+        changed = true;
+        return { ...raw, seq, at, start: true as const };
+      });
+      if (changed) restored.set(index, markers);
+    }
+    if (restored.size === 0) return;
+    const first = Math.min(...restored.keys());
+    const alt = chain.map((m, index) => {
+      const markers = restored.get(index);
+      return markers && m.ledger ? { ...m, ledger: { ...m.ledger, markers } } : m;
+    });
+    // Both readings share every path up to the first starting marker; after it, the first stored
+    // path either one gives decides (one made on another branch matches neither).
+    let asStored = ROOT_PATH;
+    let asRestored = ROOT_PATH;
+    for (const [index, m] of chain.entries()) {
+      const ledger = m.ledger;
+      if (index > first && ledger) {
+        const paths = storedPaths(ledger);
+        if (paths.has(asStored)) return;
+        if (paths.has(asRestored)) {
+          for (const [at, markers] of restored) {
+            const message = observed[at];
+            if (message) this.ledgerFor(message.id, message).markers = markers;
+          }
+          return;
+        }
+      }
+      const a = alt[index];
+      if (!a) return;
+      asStored = nextPath(m, asStored, this.journal.tombstones);
+      asRestored = nextPath(a, asRestored, this.journal.tombstones);
     }
   }
 
@@ -1064,4 +1135,20 @@ export class LedgerCore {
 /** A record's undos that still point at something it holds: its planned events and its remaining post entries (a read just replaced the rest). */
 function plannedUndos(rec: Pick<Rec, "undone" | "pre" | "post">): EventRef[] {
   return rec.undone.filter((u) => (u.in === "events" ? u.index < rec.pre : rec.post.some((p) => p.seq === u.seq)));
+}
+
+/**
+ * The parent paths a message's ledger was written at: each record's turn path and `keep` entries,
+ * and the `at` of its post entries and markers. On a chain hashed as it was then, those made on
+ * this path equal the message's parent path.
+ */
+function storedPaths(ledger: MessageLedger): Set<PathHash> {
+  const out = new Set<PathHash>();
+  for (const rec of Object.values(ledger.swipes)) {
+    if (rec.path !== "") out.add(rec.path);
+    for (const key of Object.keys(rec.keep ?? {})) out.add(key);
+    for (const p of rec.post) out.add(p.at);
+  }
+  for (const mk of ledger.markers) if (mk.at !== null) out.add(mk.at);
+  return out;
 }

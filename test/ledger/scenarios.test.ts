@@ -2,12 +2,17 @@
 // The randomized gate is properties.test.ts; these name the cases a reader checks first.
 
 import { describe, expect, test } from "bun:test";
-import { journalPath } from "../../src/backend/ledger-io";
+import { decodeLedger, journalPath } from "../../src/backend/ledger-io";
+import { defaultSettings } from "../../src/backend/settings-store";
+import { startMarkersFrom } from "../../src/backend/start-markers";
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
-import type { LedgerEvent } from "../../src/shared/ledger";
+import type { ChatId, MessageId } from "../../src/shared/ids";
+import type { JsonValue } from "../../src/shared/json";
+import { isRecord } from "../../src/shared/json";
+import type { Journal, LedgerEvent, Marker } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
-import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
+import { EXTERNAL_ACCOUNT_PREFIX, validMarkerBody } from "../../src/engine/events";
 import { Harness } from "../support/harness";
 import { balanceOf, openMoney, POV } from "../support/test-pack";
 
@@ -29,6 +34,41 @@ async function expectAgree(h: Harness, chatId: string): Promise<void> {
 
 function assistantIds(h: Harness, chatId: string): string[] {
   return h.host.chat(chatId).messages.filter((m) => !m.isUser).map((m) => m.id);
+}
+
+/**
+ * A chat as an earlier build left it: its starting markers journaled as the world writes them (the
+ * half-minute action tick as 0.5), so the chain after them was hashed with those, while its flush
+ * wrote them to metadata as the marker check clamps them (1). The turns of the test below.
+ */
+async function earlierBuildChat(h: Harness): Promise<{ chat: ChatId; first: MessageId; clamped: Marker[] }> {
+  const chat = await h.newChat();
+  await h.send(chat, "look around");
+  const first = h.host.head(chat)?.id ?? "";
+  const jm = (await h.core(chat)).journal.messages[first];
+  const world = h.worlds.get(h.revision);
+  if (!jm || !world) throw new Error("no starting markers");
+  const clamped = structuredClone(jm.ledger.markers);
+  const raws = startMarkersFrom(defaultSettings(), world, h.revision).filter((raw) => hashJson(validMarkerBody(raw)) !== hashJson(raw));
+  expect(raws.length).toBeGreaterThan(0);
+  jm.ledger.markers = jm.ledger.markers.map((mk) => {
+    const { seq, at, start: _start, ...body } = mk;
+    const raw = mk.start ? raws.find((r) => hashJson(validMarkerBody(r)) === hashJson(body)) : undefined;
+    return raw ? { ...raw, seq, at, start: true as const } : mk;
+  });
+  await h.send(chat, "earn:5", "Payday. [found:5]");
+  await h.send(chat, "earn:7", "Okay.");
+  const message = h.host.chat(chat).messages.find((m) => m.id === first);
+  const stored = message?.bag[LEDGER_NAMESPACE];
+  if (!message || !isRecord(stored)) throw new Error("no stored ledger");
+  message.bag = { ...message.bag, [LEDGER_NAMESPACE]: { ...stored, markers: clamped as unknown as JsonValue } };
+  return { chat, first, clamped };
+}
+
+/** The action tick among a chat's journaled starting markers. */
+async function startTick(h: Harness, chatId: ChatId): Promise<unknown> {
+  const starts = Object.values((await h.core(chatId)).journal.messages).flatMap((jm) => jm.ledger.markers.filter((mk) => mk.start));
+  return starts.find((mk) => mk.kind === "time" && mk.control === "tick" && "sceneType" in mk.scope && mk.scope.sceneType === "action")?.to;
 }
 
 describe("ledger scenarios", () => {
@@ -76,6 +116,54 @@ describe("ledger scenarios", () => {
       expect(await cash(h, id)).toBe(113);
       await expectAgree(h, id);
     }
+  });
+
+  test("a chat an earlier build wrote folds on its path once branched, imported or rebuilt, and gets its starting markers back as they were hashed", async () => {
+    const h = new Harness();
+    const { chat, first, clamped } = await earlierBuildChat(h);
+    const lost = (await earlierBuildChat(h)).chat;
+    const head = h.host.head(chat);
+    if (!head) throw new Error("no head");
+    const branch = h.host.branch(chat, head.id);
+    const imported = h.host.importCopy(chat);
+    // A journal the earlier build rebuilt from that metadata holds the clamped markers too.
+    const file = `${h.host.userId}/${journalPath(chat)}`;
+    const journal = JSON.parse(h.host.files.get(file) ?? "null") as Journal;
+    const held = journal.messages[first];
+    if (!held) throw new Error("no journaled starting markers");
+    held.ledger.markers = clamped;
+    h.host.files.set(file, JSON.stringify(journal));
+    h.service.forget(chat);
+    // A lost journal is rebuilt from that metadata now.
+    h.host.files.delete(`${h.host.userId}/${journalPath(lost)}`);
+    h.service.forget(lost);
+    for (const id of [branch, imported, chat, lost]) {
+      await h.service.open(id, h.host.userId);
+      await h.host.settle();
+      const folds = await h.folds(id);
+      expect(folds.optimized.messages.filter((m) => m.fold !== "user").map((m) => m.fold)).toEqual(["plain", "on_path", "on_path", "on_path"]);
+      expect(folds.cold.messages).toEqual(folds.reference.messages);
+      expect(hashJson(folds.cold.state)).toBe(hashJson(folds.reference.state));
+      // Journaled as the chain was hashed, and written back, so a later copy folds alike.
+      expect(await startTick(h, id)).toBe(0.5);
+      const core = await h.core(id);
+      for (const m of h.host.chat(id).messages) if (core.journal.messages[m.id]) expect(JSON.stringify(decodeLedger(m.bag))).toBe(JSON.stringify(core.journal.messages[m.id]?.ledger));
+      expect(await cash(h, id)).toBe(117);
+      const last = h.host.head(id);
+      if (!last) throw new Error("no head");
+      expect((await h.write(id, { kind: "undo", id: `u-${id}`, messageId: last.id, swipeId: last.swipeId, refs: [{ in: "events", index: 1 }] })).applied).toBe(true);
+      expect(await cash(h, id)).toBe(110);
+      await expectAgree(h, id);
+    }
+    // A chat this build started keeps its starting markers clamped: its paths were hashed with them.
+    const current = await h.newChat();
+    await h.send(current, "look around");
+    await h.send(current, "earn:5");
+    const copy = h.host.branch(current, h.host.head(current)?.id ?? "");
+    await h.service.open(copy, h.host.userId);
+    await h.host.settle();
+    for (const id of [current, copy]) expect(await startTick(h, id)).toBe(1);
+    expect((await h.folds(copy)).optimized.messages.filter((m) => m.fold !== "user").map((m) => m.fold)).toEqual(["plain", "on_path", "on_path"]);
   });
 
   test("editing an assistant reply keeps the world; Re-read edit re-extracts (L38)", async () => {

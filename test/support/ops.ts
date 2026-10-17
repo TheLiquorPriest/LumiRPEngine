@@ -10,23 +10,26 @@
 // L20 starting markers after every operation; L2 switch-and-back (excursion), L3 no pause on a switch
 // or removal, L5 off-path commit, L6 P4 re-render, L8 held writes, L13/L14 Continue, L15 stopped
 // Continue, L19 deletion, L34 dry run, L38 assistant edits, L39 user-edit pause, L43 a Re-run
-// carries its fixes, L45 a branch or import folds as its source, L46 detail materialized once, per
+// carries its fixes, L45 a branch or import folds as its source (an earlier build's chat included), L46 detail materialized once, per
 // operation; L31 determinism in properties.test.ts. L4 is the classification these exercise; L10 and
 // L12 are in scenarios.test.ts and reference.test.ts. Pack-dependent invariants arrive with the packs.
 
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { hashJson } from "../../src/shared/hash";
 import type { ChatId } from "../../src/shared/ids";
+import { runDir } from "../../src/shared/ids";
 import { hasOwn } from "../../src/shared/json";
 import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, Rec, Tombstone, UpgradePicks } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE, ROOT_PATH } from "../../src/shared/ledger";
-import { decodeLedger, toChain } from "../../src/backend/ledger-io";
+import { decodeLedger, encodeLedger, toChain } from "../../src/backend/ledger-io";
+import { defaultSettings } from "../../src/backend/settings-store";
+import { startMarkersFrom } from "../../src/backend/start-markers";
 import { applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent, validMarkerBody } from "../../src/engine/events";
 import { touchedField } from "../../src/engine/touched";
 import { isLive, isTombstoned } from "../../src/engine/ledger/path";
 import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
-import type { Harness } from "./harness";
+import type { Folds, Harness } from "./harness";
 import { openMoney, POV } from "./test-pack";
 
 export type Op =
@@ -56,7 +59,9 @@ export type Op =
   | { op: "excursion"; at: number; inner: Op[] }
   | { op: "inFlight"; type: number; inner: Op[]; stop: boolean; reply: number; opens?: number }
   /** An Upgrade with picks (the definition merge) to one of the revisions, `picks` choosing them. */
-  | { op: "upgrade"; to: number; picks: number };
+  | { op: "upgrade"; to: number; picks: number }
+  /** The chat as an earlier build wrote it from here (`Runner.earlierBuildStarts`): first in a sequence, if at all. */
+  | { op: "earlierBuild" };
 
 const USER_TEXTS = ["buy:map:30", "buy:lamp:20", "buy:rope:90", "use:map", "use:lamp", "use:rope", "earn:15", "roll", "look around"];
 const REPLIES = ["Okay.", "You find coins. [found:5]", "The lamp slips away. [lose:lamp]", "A windfall! [found:40]", "You drop the map. [lose:map]", "Nothing happens."];
@@ -73,8 +78,9 @@ const OPENING_REPLIES = ["Dev counts out his wages. [opens:dev]", "Dev pays you 
 
 /**
  * How often a run exercised a funds drop, a grouped drop on a rebased view, a Re-run carrying or
- * dropping a fix, a Re-run dropping a fix whose materialization its new swipe had already made, and
- * a fight's start, acts, turns and end (the suite asserts they happen).
+ * dropping a fix, a Re-run dropping a fix whose materialization its new swipe had already made, a
+ * copy of an earlier build's chat whose starting markers it had to restore, and a fight's start,
+ * acts, turns and end (the suite asserts they happen).
  */
 export interface Coverage {
   fundsDrops: number;
@@ -82,12 +88,13 @@ export interface Coverage {
   carried: number;
   carryDrops: number;
   stripped: number;
+  earlierCopies: number;
   fights: Record<"start" | "act" | "turn" | "end", number>;
 }
 
 /** A fresh count for a runner or a whole suite. */
 export function noCoverage(): Coverage {
-  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, stripped: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
+  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, stripped: 0, earlierCopies: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
 }
 
 const FIGHT_EVENTS: Record<string, keyof Coverage["fights"]> = { "combat.start": "start", "combat.act": "act", "combat.turn": "turn", "combat.end": "end" };
@@ -134,6 +141,26 @@ function gmFix(which: number, x: number): LedgerEvent[] {
   ];
 }
 
+/** Starting markers as an earlier build journaled them: each one the marker check clamps, as the world writes it. */
+function writtenStarts(markers: readonly Marker[], raws: readonly MarkerBody[]): Marker[] {
+  return markers.map((mk) => {
+    if (!mk.start) return mk;
+    const { seq, at, start: _start, ...body } = mk;
+    const raw = raws.find((r) => hashJson(r) !== hashJson(body) && hashJson(validMarkerBody(r)) === hashJson(body));
+    return raw ? { ...raw, seq, at, start: true as const } : mk;
+  });
+}
+
+/** Starting markers as that build's flush wrote them to metadata: clamped. */
+function clampedStarts(markers: readonly Marker[]): Marker[] {
+  return markers.map((mk) => {
+    if (!mk.start) return mk;
+    const { seq, at, start: _start, ...body } = mk;
+    const clamped = validMarkerBody(body);
+    return clamped ? { ...clamped, seq, at, start: true as const } : mk;
+  });
+}
+
 // ------------------------------------------------------------------ generation
 
 export function generate(rng: Rng, length: number, depth = 0): Op[] {
@@ -168,6 +195,8 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     else if (depth === 0) ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3), opens), stop: r() < 0.25, reply: r(), ...(opens.next() < 0.3 ? { opens: opens.next() } : {}) });
     else ops.push({ op: "write", kind: r(), a: r(), b: r() });
   }
+  // Drawn from a stream of its own, so the sequence is otherwise as before.
+  if (depth === 0 && rng.fork("earlier-build").next() < 0.25) ops.unshift({ op: "earlierBuild" });
   return ops;
 }
 
@@ -229,6 +258,10 @@ export class Runner {
    * the save and open the P4 window early), so inner operations leave it alone.
    */
   private streaming: string | null = null;
+  /** Chats an earlier build writes (`earlierBuild`). */
+  private readonly earlier = new Set<ChatId>();
+  /** Chats whose starting markers are journaled as the world writes them: an earlier build's, and their copies. */
+  private readonly asWritten = new Set<ChatId>();
 
   constructor(readonly h: Harness) {}
 
@@ -326,8 +359,11 @@ export class Runner {
         let userId = u.id;
         let assistantId = next.id;
         if (op.branch) {
+          // A branch holding the starting markers journals them as its chat's metadata holds them.
+          const inherits = this.asWritten.has(chat) && (await this.h.chain(chat)).slice(0, index + 2).some((m) => m.ledger?.markers.some((mk) => mk.start));
           target = host.branch(chat, next.id);
           this.chats.push(target);
+          if (inherits) this.asWritten.add(target);
           const copy = host.chat(target).messages;
           userId = copy[index]?.id ?? "";
           assistantId = copy[index + 1]?.id ?? "";
@@ -560,7 +596,76 @@ export class Runner {
         }
         return;
       }
+      case "earlierBuild":
+        this.earlier.add(chat);
+        return;
     }
+  }
+
+  /** The starting markers the harness's chats get, as the world writes them. */
+  private raws(): MarkerBody[] {
+    const world = this.h.worlds.get(this.h.revision);
+    return world ? startMarkersFrom(defaultSettings(), world, this.h.revision) : [];
+  }
+
+  /**
+   * An earlier build journaled a chat's starting markers as the world writes them (the half-minute
+   * tick as 0.5) and hashed its chain with them, though its flush wrote them to metadata clamped
+   * (`earlierFlush`). When they land on an `earlierBuild` chat, they are journaled so if they are
+   * on its latest message, before anything is hashed with them; otherwise the chat stays as it is.
+   */
+  async earlierBuildStarts(): Promise<void> {
+    for (const chatId of [...this.earlier]) {
+      await this.h.service.with(chatId, this.h.host.userId, (core, observed) => {
+        const holder = Object.values(core.journal.messages).find((jm) => jm.ledger.markers.some((mk) => mk.start));
+        if (!holder) return;
+        this.earlier.delete(chatId);
+        if (holder !== core.journal.messages[observed.at(-1)?.id ?? ""]) return;
+        holder.ledger.markers = writtenStarts(holder.ledger.markers, this.raws());
+        holder.flushed = false;
+        this.asWritten.add(chatId);
+      });
+    }
+  }
+
+  /**
+   * A copy of a chat whose starting markers are journaled as the world writes them: its metadata
+   * holds them so once that chat is opened on this build, but an earlier build's flush wrote them
+   * clamped. Where a record after them folds on its path (it was hashed with them), the copy gets
+   * them clamped, as from that build, and must restore them to fold as its chat does. Says whether
+   * the copy holds the starting markers, and whether they were clamped.
+   */
+  private async earlierFlush(source: ChatId, copy: ChatId, before: Folds): Promise<{ holds: boolean; clamped: boolean }> {
+    const chain = await this.h.chain(source);
+    const at = chain.findIndex((m, index) => index < before.reference.messages.length && m.ledger?.markers.some((mk) => mk.start));
+    if (at < 0) return { holds: false, clamped: false };
+    const m = this.h.host.chat(copy).messages[at];
+    const ledger = m ? decodeLedger(m.bag) : null;
+    if (!m || !ledger || !before.reference.messages.slice(at + 1).some((x) => x.fold === "on_path")) return { holds: true, clamped: false };
+    m.bag = encodeLedger(m.bag, { ...ledger, markers: clampedStarts(ledger.markers) });
+    this.coverage.earlierCopies++;
+    return { holds: true, clamped: true };
+  }
+
+  /**
+   * L45 for an earlier build's chat as it stands after every operation: a copy made from its
+   * metadata as that build flushed it folds every message as the chat does. The copy is dropped again.
+   */
+  private async earlierCopy(): Promise<void> {
+    const source = this.current;
+    if (!this.asWritten.has(source)) return;
+    const before = await this.h.folds(source);
+    if (before.reference.messages.some((m) => m.fold === "paused")) return;
+    const host = this.h.host;
+    const copy = host.importCopy(source);
+    if ((await this.earlierFlush(source, copy, before)).clamped) {
+      await this.h.service.open(copy, host.userId);
+      await host.settle();
+      await this.foldsAlike(source, copy, before);
+    }
+    this.h.service.forget(copy);
+    host.chatsById.delete(copy);
+    for (const key of [...host.files.keys()]) if (key.startsWith(`${host.userId}/${runDir(copy)}`)) host.files.delete(key);
   }
 
   private earlierAssistant(x: number): FakeMessage | undefined {
@@ -582,9 +687,14 @@ export class Runner {
     const before = await this.h.folds(source, length);
     this.chats.push(copy);
     this.current = copy;
+    if (this.asWritten.has(source) && (await this.earlierFlush(source, copy, before)).holds) this.asWritten.add(copy);
     await this.h.service.open(copy, this.h.host.userId);
     await this.h.host.settle();
     if (before.reference.messages.some((m) => m.fold === "paused")) return;
+    await this.foldsAlike(source, copy, before);
+  }
+
+  private async foldsAlike(source: ChatId, copy: ChatId, before: Folds): Promise<void> {
     const after = await this.h.folds(copy);
     // Message ids differ in a copy; paths never include them.
     const was = before.reference.messages.map((m) => [m.fold, m.parentPath, m.path]);
@@ -850,12 +960,14 @@ export class Runner {
       }
       if ([...seqs.keys()].some((s) => s > core.journal.seq)) throw new InvariantError("L9", `${chatId}: a seq above the counter`);
       // L20: one set of starting markers per chat, never changed once written, each journaled as the
-      // marker check gives it, so the chain hashes the values that fold (a world's half-minute tick).
+      // marker check gives it, so the chain hashes the values that fold (a world's half-minute tick);
+      // a chat an earlier build started, and its copies, keep them as it journaled them.
       const start = starts.length > 0 ? hashJson([...starts].sort((a, b) => a.seq - b.seq)) : null;
       if (memory.start !== null && start !== null && start !== memory.start) throw new InvariantError("L20", `${chatId}: the starting markers changed`);
+      const raws = this.asWritten.has(chatId) ? this.raws() : null;
       for (const mk of starts) {
-        const { seq: _seq, at: _at, start: _start, ...body } = mk;
-        if (hashJson(validMarkerBody(body)) !== hashJson(body)) throw new InvariantError("L20", `${chatId}: starting marker ${mk.seq} is journaled unclamped`);
+        const want = raws ? writtenStarts([mk], raws)[0] : clampedStarts([mk])[0];
+        if (hashJson(want) !== hashJson(mk)) throw new InvariantError("L20", `${chatId}: starting marker ${mk.seq} is journaled ${raws ? "clamped, though its chain was hashed as the world writes it" : "unclamped"}`);
       }
       // L17: tombstones are never forgotten.
       if (core.journal.tombstones.length < memory.tombstones) throw new InvariantError("L17", `${chatId}: a tombstone was forgotten`);
@@ -866,6 +978,7 @@ export class Runner {
       }
       this.memory.set(chatId, { start: memory.start ?? start, maxSeq: core.journal.seq, tombstones: core.journal.tombstones.length });
     }
+    await this.earlierCopy();
   }
 }
 
@@ -881,6 +994,7 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
   try {
     for (const op of ops) {
       await runner.run(op);
+      await runner.earlierBuildStarts();
       await runner.check();
     }
     if (digest) {
@@ -896,6 +1010,7 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       coverage.carried += runner.coverage.carried;
       coverage.carryDrops += runner.coverage.carryDrops;
       coverage.stripped += runner.coverage.stripped;
+      coverage.earlierCopies += runner.coverage.earlierCopies;
       for (const k of ["start", "act", "turn", "end"] as const) coverage.fights[k] += runner.coverage.fights[k];
     }
     return null;

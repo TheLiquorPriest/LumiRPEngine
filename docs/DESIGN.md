@@ -240,6 +240,8 @@ Six concepts plus one pipeline.
   - **Preview.** The marker preview lists every change, each with its default pick and why (changed in play, or unchanged). It words the same plan the fold applies.
 
   **Starting markers.** The first record that holds events carries the chat's starting state as markers: `migrate{to}` naming the world revision (and so its pins, §9.2), `resolve` for every domain's level and the band caps (§9.1), `time` for every time control (§9.2) and `adjudicate` for the adjudication policy (§11). They come from the world's own realism and time defaults, with the user's settings filling in what the world leaves out, or from the user's settings with "Use my settings" on; the policy is the world ruleset's, the user's where the world sets none, or the user's with "Use my check rules" on. Any Play changes made before that commit seed only these markers too, and later settings changes never reach a running chat. They are written once per chat, carry no `at` and are live on every path, so a switch, a Discard or a deletion never removes or re-seeds them. A chat started before the policy existed has no `adjudicate` marker and plays by its world revision's policy, else plain rolling. A Continue before that commit is accepted unread (§5.1 step 5).
+
+  Starting markers are journaled as the marker check gives them (a world's half-minute tick as the minute it plays). An earlier build journaled them as the world writes them and hashed the chain with those, but flushed them to metadata clamped. A journal built from that metadata (a branch, an import or a rebuilt journal, by either build) held them clamped, and every record after them folded as a rebased view. So each time a chat opens, its starting markers are checked: where one is stored clamped but the chat's own marker, as the world writes it, differs from it and clamps to it, the written form is put back if that makes the first later stored path (a record's `path` or `keep` entry, a post entry's or marker's `at`) match the chain. The journal then holds them as written and writes them back to metadata. A chat this build started hashed its chain with the clamped markers, so its stored paths match as they stand and nothing changes.
 - **Fold order per message** (its active swipe; live entries only, P1):
   1. this message's markers with `seq ≤ Rec.markersApplied`;
   2. `Rec.events`;
@@ -849,7 +851,7 @@ I stopped reviewing the ledger on paper once repeated review rounds kept finding
 | **L17 No resurrection** | After a Discard, no re-assert, restart, clobber recovery, swipe-index shift or later operation restores a discarded record. |
 | **L18 Durability** | After foreign or frontend clobbering and a restart, records, markers and held writes are re-asserted and the fold is unchanged. |
 | **L19 Deletion keeps live markers** | Deleting a middle or the latest message keeps its live markers' effect on later folds; its inert markers go with it, journaled. |
-| **L20 Starting markers** | Each chat has exactly one set, on the first record that holds events, live on every path, each journaled as the marker check gives it (a world's half-minute tick as the minute it plays). Later Settings changes, switches, Discards and deletions never change it. |
+| **L20 Starting markers** | Each chat has exactly one set, on the first record that holds events, live on every path, each journaled as the marker check gives it (a world's half-minute tick as the minute it plays); a chat an earlier build started keeps them as that build journaled them, since its paths were hashed with those. Later Settings changes, switches, Discards and deletions never change it. |
 | **L21 Concrete deltas** | Events hold deltas, never final values, and a view re-applies them. |
 | **L22 The ledger balances** | The trial balance is zero after every operation, at every level mix, including external-economy postings and payroll withholding. |
 | **L23 Uniform representation** | Demote, change and promote leave aggregates and the trial balance intact and restore nothing stale. |
@@ -874,7 +876,7 @@ I stopped reviewing the ledger on paper once repeated review rounds kept finding
 | **L42 Snapshots** | A cold fold that starts from the chat's stored snapshots equals the full fold. |
 | **L43 A Re-run carries its fixes** | Every live ✎ fix or GM edit of the swipe a Re-run was made from is on the new record with its `seq`, events and undos, anchored at the record's path, or is a Journal drop; nothing else is copied. |
 | **L44 An Upgrade keeps what play changed** | An Upgrade with picks never takes a revision's value over one play changed, unless the owner picked it. |
-| **L45 Copies fold alike** | A branch or an import folds every message it copied as its chat does: the same folds, paths and state, from the message metadata alone. |
+| **L45 Copies fold alike** | A branch or an import folds every message it copied as its chat does: the same folds, paths and state, from the message metadata alone, including a copy of a chat an earlier build wrote. |
 | **L46 Detail materializes once** | On any path, an entity's detail in a domain is materialized at most once (a Keep conversion aside), however its entries are carried, kept, held or rebased. |
 
 **Loop-sim** (including mixed-level and Story-default scenarios)
