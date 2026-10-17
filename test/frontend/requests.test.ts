@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { chipIntent, convertRequest, fixRequest, paletteRequest, resolveMarker, timelapseRequest, timeMarker, travelRequest } from "../../src/frontend/requests";
-import type { Chip, PaletteEntry, TimelapseView } from "../../src/shared/state-view";
+import { adjustOp, chipIntent, convertRequest, editRequest, entityStateOp, fixRequest, paletteRequest, relationFields, resolveMarker, timelapseRequest, timeMarker, travelRequest } from "../../src/frontend/requests";
+import type { Chip, GmEntity, PaletteEntry, TimelapseView } from "../../src/shared/state-view";
+import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 
@@ -125,5 +126,63 @@ describe("fixes and markers", () => {
     expect(timeMarker("c1", "pause", { all: true }, true)).toEqual({ type: "lre.marker", chatId: "c1", kind: "time", control: "pause", scope: { all: true }, to: true });
     expect(resolveMarker("c1", "money", { all: true }, 3, true)).toEqual({ type: "lre.marker", chatId: "c1", kind: "resolve", domain: "money", scope: { all: true }, to: 3, preview: true });
     expect(resolveMarker("c1", "money", { tier: "background" }, 1)).toEqual({ type: "lre.marker", chatId: "c1", kind: "resolve", domain: "money", scope: { tier: "background" }, to: 1 });
+  });
+});
+
+describe("GM edits", () => {
+  const rosie: GmEntity = {
+    id: "npc_rosie",
+    name: "Rosie Alvarez",
+    kind: "npc",
+    tier: "principal",
+    agent: true,
+    pov: false,
+    gone: false,
+    spawned: false,
+    visibility: "public",
+    place: "diner",
+    holder: null,
+    fields: [],
+    relations: [],
+    levels: [
+      { domain: "money", level: 3, override: null },
+      { domain: "castlife", level: 2, override: 2 },
+    ],
+    sheet: null,
+  };
+  const regard = [
+    { id: "warmth", label: "Warmth", type: "number" as const, min: -100, max: 100 },
+    { id: "since", label: "Since", type: "text" as const },
+    { id: "mood", label: "Mood", type: "enum" as const, values: ["warm", "cold"] },
+    { id: "close", label: "Close", type: "bool" as const },
+  ];
+
+  test("an edit sends its operations in order as one lre.edit", () => {
+    const ops = [
+      { op: "set" as const, entity: "npc_rosie", field: "mood", value: "happy" },
+      { op: "despawn" as const, entity: "npc_vic" },
+    ];
+    expect(editRequest("chat-1", ops)).toEqual({ type: "lre.edit", chatId: "chat-1", ops });
+  });
+
+  test("the simulation form sends only what changed, and nothing when nothing did", () => {
+    expect(entityStateOp(rosie, "principal", true, { money: null, castlife: 2 })).toBeNull();
+    expect(entityStateOp(rosie, "supporting", true, { money: null, castlife: 2 })).toEqual({ op: "entity", entity: "npc_rosie", tier: "supporting" });
+    expect(entityStateOp(rosie, "principal", false, { money: 4, castlife: null })).toEqual({ op: "entity", entity: "npc_rosie", agent: false, levels: { money: 4, castlife: null } });
+  });
+
+  test("relation fields are typed by their definitions, checked against bounds and values, and keep what the type doesn't declare", () => {
+    expect(relationFields(regard, { warmth: "40", since: " spring ", mood: "warm", close: "true" })).toEqual({ warmth: 40, since: "spring", mood: "warm", close: true });
+    expect(relationFields(regard, { warmth: "", since: "" }, { warmth: 10, decay: 0.5 })).toEqual({ decay: 0.5 });
+    expect(relationFields(regard, { warmth: "140" })).toBeNull();
+    expect(relationFields(regard, { warmth: "lots" })).toBeNull();
+    expect(relationFields(regard, { mood: "angry" })).toBeNull();
+  });
+
+  test("money goes in or out of an account in minor units, and only for an amount above zero", () => {
+    expect(adjustOp("dev_checking", "12.50", DEFAULT_CURRENCY, false)).toEqual({ op: "adjust", account: "dev_checking", cents: 1250 });
+    expect(adjustOp("dev_checking", "$1,000", DEFAULT_CURRENCY, true)).toEqual({ op: "adjust", account: "dev_checking", cents: -100000 });
+    expect(adjustOp("dev_checking", "0", DEFAULT_CURRENCY, false)).toBeNull();
+    expect(adjustOp("dev_checking", "a lot", DEFAULT_CURRENCY, false)).toBeNull();
   });
 });
