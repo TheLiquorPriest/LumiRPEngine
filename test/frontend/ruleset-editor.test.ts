@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { moved, rowChoices, sectionId, tidyRuleset } from "../../src/frontend/build/ruleset-editor";
+import { moved, parseThresholds, progressionFields, rowChoices, sectionId, tidyRuleset } from "../../src/frontend/build/ruleset-editor";
 import { sheetPreviewRequest } from "../../src/frontend/requests";
 import { previewSheet } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -75,5 +75,26 @@ describe("Sheet Designer helpers", () => {
       ["Might mod", "2"],
       ["Twice might", "28"],
     ]);
+  });
+});
+
+describe("progression editor helpers", () => {
+  test("XP and level pickers offer only number fields the engine can set, of the kind with its inherited fields", () => {
+    const world = heroWorld();
+    const ids = progressionFields(world, "hero").map((c) => c.value);
+    expect(ids).toEqual(expect.arrayContaining(["might", "xp", "level", "hp", "skill", "stress"]));
+    expect(ids).not.toContain("might_mod");
+    expect(ids).not.toContain("activity");
+    // With no kind named, any kind's number fields, each once.
+    const any = progressionFields(world, undefined).map((c) => c.value);
+    expect(any).toContain("xp");
+    expect(new Set(any).size).toBe(any.length);
+  });
+
+  test("thresholds read as numbers separated by commas or spaces, and anything else is refused", () => {
+    expect(parseThresholds("0, 300, 900")).toEqual([0, 300, 900]);
+    expect(parseThresholds("0 300\n900;2700")).toEqual([0, 300, 900, 2700]);
+    expect(parseThresholds("")).toEqual([]);
+    expect(parseThresholds("0, three")).toBeNull();
   });
 });

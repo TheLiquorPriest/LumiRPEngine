@@ -93,7 +93,8 @@ export const FIELD_DEF: FieldSpec = {
   ],
 };
 
-const EFFECT: FieldSpec = {
+/** One effect, as rules' `do` and progressions' `onLevel` list them. */
+export const EFFECT: FieldSpec = {
   kind: "object",
   key: "",
   label: "Effect",

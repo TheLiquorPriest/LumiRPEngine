@@ -11,13 +11,15 @@ import type { SheetSectionView } from "../../shared/state-view";
 import type { FieldDef, ProgressionDef, RulesetDef, SheetLayoutDef, SheetRowDef, SheetSectionDef, WorldDoc } from "../../shared/world";
 import { SheetSectionCards } from "../../packs/sheets/ui/panel";
 import { useApp } from "../app";
-import { Card, Empty, useBusy } from "../components";
+import { Card, Empty, Seg, useBusy } from "../components";
 import type { Draft } from "../app";
 import { sheetPreviewRequest } from "../requests";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
 import { ExprEditor } from "./expr-editor";
-import { FieldInput, kindFields, lintAt, worldIdentifiers } from "./schema-form";
+import { EFFECT } from "./schema";
+import type { FormCtx } from "./schema-form";
+import { FieldInput, kindFields, lintAt, refOptions, worldIdentifiers } from "./schema-form";
 
 export type RowKind = "field" | "formula" | "pool" | "progression";
 
@@ -350,6 +352,151 @@ function SheetPreview(props: { draft: Draft; ruleset: JsonObject }) {
   );
 }
 
+/**
+ * The fields a progression may keep XP or the level in: number fields the engine can set (not
+ * derived), of its kind with inherited ones, or of every kind when it names none.
+ */
+export function progressionFields(doc: WorldDoc, kind: string | undefined): Choice[] {
+  const out: Record<string, Choice> = {};
+  for (const k of kind ? [kind] : Object.keys(doc.kinds)) {
+    for (const [id, def] of Object.entries(kindFields(doc, k))) {
+      if (def.type === "number" && def.derived === undefined && !(id in out)) out[id] = { value: id, label: def.label && def.label !== id ? `${def.label} (${id})` : id };
+    }
+  }
+  return Object.values(out).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Thresholds as typed ("0, 300, 900" or one per line): the numbers, or null while any part isn't one. */
+export function parseThresholds(text: string): number[] | null {
+  const parts = text.split(/[\s,;]+/).filter((part) => part !== "");
+  const numbers = parts.map(Number);
+  return numbers.every((n) => Number.isFinite(n)) ? numbers : null;
+}
+
+function ThresholdList(props: { value: number[]; onChange(value: number[]): void }) {
+  const [text, setText] = useState(props.value.join(", "));
+  useEffect(() => {
+    if (JSON.stringify(parseThresholds(text)) !== JSON.stringify(props.value)) setText(props.value.join(", "));
+  }, [JSON.stringify(props.value)]);
+  const parsed = parseThresholds(text);
+  return (
+    <label class="lre-field">
+      <span class="label">XP each level needs, from level 1</span>
+      <input
+        class={parsed ? "lre-input" : "lre-input invalid"}
+        inputMode="numeric"
+        value={text}
+        placeholder="0, 300, 900, 2700"
+        onInput={(event) => {
+          setText(event.currentTarget.value);
+          const next = parseThresholds(event.currentTarget.value);
+          if (next) props.onChange(next);
+        }}
+      />
+      {parsed ? <span class="lre-small lre-dim">{parsed.length === 0 ? "No levels yet." : `${parsed.length} level${parsed.length === 1 ? "" : "s"}; level 1 at ${parsed[0]} XP.`}</span> : <span class="lre-small lre-neg">Numbers only, separated by commas.</span>}
+    </label>
+  );
+}
+
+function ProgressionForm(props: { id: string; value: ProgressionDef; doc: WorldDoc; ctx: FormCtx; onChange(value: ProgressionDef): void }) {
+  const { value, doc } = props;
+  const path = `ruleset.progression.${props.id}`;
+  const json = value as unknown as JsonObject;
+  const set = (key: keyof ProgressionDef, next: JsonValue | undefined) => {
+    const out: Record<string, unknown> = { ...value };
+    if (next === undefined) delete out[key];
+    else out[key] = next;
+    props.onChange(out as unknown as ProgressionDef);
+  };
+  const fields = progressionFields(doc, value.kind);
+  const fromTable = !Array.isArray(value.thresholds);
+  const table = isRecord(value.thresholds) && !Array.isArray(value.thresholds) ? value.thresholds : null;
+  const tableDef = table ? doc.tables[table.table] : undefined;
+  const columns = tableDef ? Object.entries(tableDef.columns).filter(([, c]) => c.type === "number" || c.type === "int").map(([id]) => ({ value: id, label: id })) : [];
+  // onLevel effects read the entity as `self`, the level reached as `level` and the one before as `from`.
+  const ctx: FormCtx = { ...props.ctx, path, identifiers: [...new Set([...props.ctx.identifiers, "level", "from"])].sort() };
+  return (
+    <div class="lre-stack" data-lre-progression={props.id}>
+      <FieldInput spec={{ kind: "text", key: "label", label: "Label", hint: "The sheet and the Journal show it: “You reached Level 3.”" }} value={json.label} ctx={ctx} path={path} parent={json} onChange={(next) => set("label", typeof next === "string" ? next : "")} />
+      <Picker label="Applies to kind" value={value.kind} none="Any kind with both fields" choices={refOptions(doc, "kinds")} onChange={(next) => set("kind", next)} />
+      <Picker label="XP field" value={value.xpField} choices={fields} onChange={(next) => set("xpField", next ?? "")} />
+      <Picker label="Level field (the engine sets it)" value={value.levelField} choices={fields} onChange={(next) => set("levelField", next ?? "")} />
+      <div class="lre-field">
+        <span class="label">Thresholds from</span>
+        <Seg<"list" | "table">
+          label="Thresholds from"
+          value={fromTable ? "table" : "list"}
+          options={[
+            { value: "list", label: "A list" },
+            { value: "table", label: "A data table" },
+          ]}
+          onChange={(mode) => set("thresholds", mode === "list" ? (fromTable ? [] : value.thresholds) : fromTable ? json.thresholds : { table: "", column: "" })}
+        />
+      </div>
+      {fromTable ? (
+        <>
+          <Picker label="Data table (rows in order, level 1 first)" value={table?.table || undefined} choices={refOptions(doc, "tables")} onChange={(next) => set("thresholds", { table: next ?? "", column: "" })} />
+          <Picker label="Column" value={table?.column || undefined} choices={columns} onChange={(next) => set("thresholds", { table: table?.table ?? "", column: next ?? "" })} />
+        </>
+      ) : (
+        <ThresholdList value={Array.isArray(value.thresholds) ? value.thresholds : []} onChange={(next) => set("thresholds", next)} />
+      )}
+      <FieldInput spec={{ kind: "number", key: "maxLevel", label: "Top level", min: 1, step: 1, optional: true, hint: "XP beyond its threshold raises nothing" }} value={json.maxLevel} ctx={ctx} path={path} parent={json} onChange={(next) => set("maxLevel", next)} />
+      <FieldInput spec={{ kind: "list", key: "onLevel", label: "On each level gained", item: EFFECT, title: "type" }} value={json.onLevel} ctx={ctx} path={path} parent={json} onChange={(next) => set("onLevel", Array.isArray(next) && next.length > 0 ? next : undefined)} />
+      <Issues issues={props.ctx.lint.filter((issue) => issue.path === path || issue.path === `${path}.xpField` || issue.path === `${path}.levelField` || issue.path.startsWith(`${path}.thresholds`))} />
+    </div>
+  );
+}
+
+/** The progressions by id: add one, open one to edit it, remove one. */
+function ProgressionEditor(props: { value: Record<string, ProgressionDef>; doc: WorldDoc; ctx: FormCtx; onChange(value: Record<string, ProgressionDef>): void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [newId, setNewId] = useState("");
+  const id = newId.trim();
+  return (
+    <div class="lre-stack" data-lre-progressions>
+      {Object.keys(props.value).length === 0 ? <span class="lre-muted">No progressions: levels never change on their own.</span> : null}
+      {Object.entries(props.value).map(([key, prog]) => (
+        <div key={key} class="lre-card" style={{ padding: "6px 8px" }}>
+          <div class="lre-spread">
+            <button type="button" class="lre-btn small ghost" aria-expanded={open === key} onClick={() => setOpen(open === key ? null : key)}>
+              <span aria-hidden="true">{open === key ? "▾" : "▸"}</span> {prog.label || key} <code class="lre-dim">{key}</code>
+            </button>
+            <button
+              type="button"
+              class="lre-btn small ghost"
+              aria-label={`Remove progression ${prog.label || key}`}
+              onClick={() => {
+                const next = { ...props.value };
+                delete next[key];
+                props.onChange(next);
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          {open === key ? <ProgressionForm id={key} value={prog} doc={props.doc} ctx={props.ctx} onChange={(next) => props.onChange({ ...props.value, [key]: next })} /> : null}
+        </div>
+      ))}
+      <form
+        class="lre-inline"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!id || id in props.value) return;
+          props.onChange({ ...props.value, [id]: { label: "Level", xpField: "", levelField: "", thresholds: [0] } });
+          setOpen(id);
+          setNewId("");
+        }}
+      >
+        <input class="lre-input" style={{ flex: 1 }} placeholder="Progression id, e.g. character" aria-label="Progression id" value={newId} onInput={(event) => setNewId(event.currentTarget.value.replace(/\s+/g, "_"))} />
+        <button type="submit" class="lre-btn small" disabled={!id || id in props.value}>
+          + Add
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export function RulesetEditor() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
@@ -374,12 +521,14 @@ export function RulesetEditor() {
     else out[key] = next;
     setValue(out as RulesetDef);
   };
-  const ctx = { doc: formDoc, lint: draft.lint, path: "ruleset", identifiers };
+  const ctx: FormCtx = { doc: formDoc, lint: draft.lint, path: "ruleset", identifiers };
   return (
     <div class="lre-stack" data-lre-editor="part:ruleset">
       <div class="lre-h2">Ruleset</div>
       <FieldInput spec={{ kind: "levels", key: "minLevels", label: "Level floors (the lowest level this ruleset plays each domain at)" }} value={json.minLevels} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("minLevels", next)} />
-      <FieldInput spec={{ kind: "json", key: "progression", label: "Progression", optional: true }} value={json.progression} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("progression", next)} />
+      <Card title="Progression">
+        <ProgressionEditor value={progression} doc={formDoc} ctx={ctx} onChange={(next) => setValue({ ...value, progression: next })} />
+      </Card>
       <Card title="Sheet Designer">
         <SheetDesigner sheet={value.sheet} choices={choices} identifiers={identifiers} lint={draft.lint} onChange={(sheet) => setValue({ ...value, sheet })} />
       </Card>
