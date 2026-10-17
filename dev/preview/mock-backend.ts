@@ -8,6 +8,8 @@ import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUp
 import type { UserSettings } from "../../src/shared/settings";
 import type { GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
+import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
+import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
 import { extractionView, freshFixture, gmFixture, pausedFixture, settingsFixture, starterMap, stateFixture, WORLDS, worldFixture } from "./fixtures";
 
 type Emit = (payload: unknown) => void;
@@ -70,6 +72,13 @@ export class MockBackend {
   readonly log: FrontendToBackend[] = [];
 
   constructor(private readonly emit: Emit, private readonly options: MockOptions) {}
+
+  /** Describe a map's proposal as the backend's job makes it, with a small grid map standing in for the helper's answer. */
+  private mapProposals(input: unknown) {
+    const request = readMapRequest(this.draft, isRecord(input) ? input : {});
+    const answer = readMapAnswer(this.draft, request, mapTemplate("grid", request.mapId, request.scope) as unknown as JsonValue);
+    return answer.map === null ? [] : [mapProposal(request, { ...answer, map: answer.map })];
+  }
 
   /** Replaces the view and pushes the change as a delta. */
   mutate(change: (view: StateView) => void, delayMs = 0): void {
@@ -383,10 +392,12 @@ export class MockBackend {
           else delete this.draft.spawnTier;
         }
         else if (message.op === "set") (this.draft as unknown as Record<string, JsonValue>)[message.part] = message.value;
+        // As the backend does on every write: the map's places, grid and routes follow it.
+        this.draft = compileMaps(this.draft);
         const stored = JSON.stringify(this.draft) !== JSON.stringify(this.world);
         const cap = this.draft.packs.economy?.config.unpricedCap;
         const capLint = cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0) ? [] : [{ severity: "warning" as const, path: "packs.economy.config.unpricedCap", code: "economy.unpriced_cap", message: "The narrated-price cap should be a whole number of cents above zero; narrated prices are capped at the default, $14.00." }];
-        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: WORLDS[0]?.head ?? null, stored, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }, ...capLint] });
+        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: WORLDS[0]?.head ?? null, stored, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }, ...capLint, ...mapLint(this.draft)] });
       }
       case "lre.ui":
         this.options.closeDrawer();
@@ -401,6 +412,7 @@ export class MockBackend {
         this.jobs += 1;
         const jobId = `job-${this.jobs}`;
         const kind = message.kind;
+        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : PROPOSALS;
         this.result(reqId, "lre.job", { jobId });
         const update = (status: JobUpdate["status"], progress: number, extra: Partial<JobUpdate> = {}) => this.emit({ lre: 1, type: "lre.job.update", jobId, kind, status, progress, ...extra });
         setTimeout(() => update("running", 0.35, { message: kind === "playtest" ? "Turn 2 of 5" : "Reading 14 entries…" }), 200);
@@ -412,7 +424,7 @@ export class MockBackend {
                 kind === "playtest"
                   ? { turns: [{ user: "I ask Rosie for a raise.", reply: "Rosie sets down the coffee pot. “After the rush,” she says.", notes: ["Check persuade: 9 vs 8 (success)", "+5 min"] }, { user: "I cover Mara's shift.", reply: "The afternoon blurs into orders and refills.", notes: ["Timelapse 6 h", "Payroll accrues"] }], lint: [{ severity: "warning", path: "rules.payday", code: "no_effect", message: "Rule payday never fired in 2 turns." }] }
                   : {
-                      proposals: PROPOSALS,
+                      proposals,
                     },
             }),
           1200,

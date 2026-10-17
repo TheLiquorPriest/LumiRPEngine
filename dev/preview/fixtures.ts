@@ -8,6 +8,7 @@ import type { ExtractionModeView } from "../../src/shared/protocol";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
+import { compileMaps } from "../../src/shared/maps";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
@@ -502,7 +503,8 @@ export function starterMap(template: string): JsonValue {
   const make = STARTER_WORLDS[template];
   if (!make) return null;
   const world = make("preview", template);
-  return buildMapView(createRegistry(ALL_PACKS).context(world, initialState(world, "preview"))) as unknown as JsonValue;
+  const registry = createRegistry(ALL_PACKS);
+  return buildMapView(registry.context(world, initialState(world, "preview", registry))) as unknown as JsonValue;
 }
 
 /**
@@ -563,7 +565,7 @@ export const WORLDS: WorldIndex[] = [
 export function worldFixture(): WorldDoc {
   const terrain: string[] = [];
   for (let y = 0; y < 12; y += 1) for (let x = 0; x < 16; x += 1) terrain.push(y === 6 || x === 7 ? "road" : x > 11 && y < 4 ? "water" : (x + y) % 7 === 0 ? "forest" : x < 4 && y > 8 ? "building" : "grass");
-  return {
+  return compileMaps({
     format: "lre-world-v1",
     id: "w-maple",
     name: "Maple Falls",
@@ -612,6 +614,20 @@ export function worldFixture(): WorldDoc {
     },
     routes: { r1: { id: "r1", from: "apartment", to: "diner", modes: { walk: { minutes: 18 }, road: { minutes: 5, distanceKm: 2.4 } }, bidirectional: true } },
     grids: { town: { id: "town", width: 16, height: 12, cellMeters: 100, terrain, blocked: [20, 21, 36, 37], zones: { downtown: [87, 88, 89, 103, 104, 105] } } },
+    maps: {
+      diner_floor: {
+        id: "diner_floor",
+        scope: "diner",
+        title: "Rosie's Diner",
+        layout: ["###########", "#bbbb#kkkk#", "#bbbb+kkkk#", "#cccccccc.#", "####+######"],
+        legend: { b: { place: "diner_booths" }, k: { place: "diner_kitchen" }, c: { place: "diner_counter" } },
+        places: [
+          { id: "diner_booths", name: "Booths" },
+          { id: "diner_kitchen", name: "Kitchen" },
+          { id: "diner_counter", name: "Counter" },
+        ],
+      },
+    },
     rules: { payday: { id: "payday", on: { tick: "day" }, when: "weekday(now) == 5", do: [{ type: "economy.pay", args: { to: "pov", cents: "61240" } }], interrupt: false } },
     actions: { "sheets.persuade": { id: "sheets.persuade", label: "Persuade", params: { target: { type: "ref", ref: "person" } }, requires: ["present(target)"], check: "persuade", outcomes: { success: [], partial: [], fail: [] }, duration: "5", lexicon: ["persuade", "convince", "talk into"], observable: "talks earnestly" } },
     checks: { persuade: { id: "persuade", dice: "2d6", modifier: "charm(pov)", bands: [{ outcome: "fail", max: 5 }, { outcome: "partial", min: 6, max: 7 }, { outcome: "success", min: 8 }] } },
@@ -673,7 +689,7 @@ export function worldFixture(): WorldDoc {
       background: { label: "Background", band: "background", order: 3 },
     },
     start: { place: "apartment", at: "2026-10-19T07:00" },
-  };
+  });
 }
 
 export function settingsFixture(): UserSettings {
