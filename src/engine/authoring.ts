@@ -97,11 +97,13 @@ export function currencyOf(v: unknown): WorldCurrency | null {
 
 /**
  * Brings an older `lre-world-v1` document up to this engine: documents written before `currency`,
- * `lore` or `tiers` existed (and templates without them) get Modern US money, no lore and the three
- * default tiers, whose ids are the band ids their entities already name; a POV still on the legacy
- * `pov` tier moves to the lead tier (the POV is `pov`, never capped whatever its tier); and step
- * templates for the retired `select` purpose are dropped. Revisions are immutable, so this runs
- * whenever one is read. Returns the same object when nothing changes.
+ * `lore`, `classifications` or `tiers` existed (and templates without them) get Modern US money, no
+ * lore, no classifications and the three default tiers, whose ids are the band ids their entities
+ * already name; a POV still on the legacy `pov` tier moves to the lead tier (the POV is `pov`, never
+ * capped whatever its tier); step templates for the retired `select` purpose are dropped; and the
+ * economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor units; a set
+ * `unpricedCap` wins). Revisions are immutable, so this runs whenever one is read. Returns the same
+ * object when nothing changes.
  */
 export function migrateWorld(doc: WorldDoc): WorldDoc {
   const currency: unknown = doc.currency;
@@ -113,13 +115,21 @@ export function migrateWorld(doc: WorldDoc): WorldDoc {
   const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && t.purpose === "select" ? [id] : [])) : [];
   const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
   const legacyPov = pov?.tier === "pov" && !tierOf({ tiers }, "pov");
-  if (isCurrency(currency) && isRecord(lore) && isRecord(classifications) && hasTiers && retired.length === 0 && !legacyPov) return doc;
+  const economy: unknown = isRecord(doc.packs) ? doc.packs.economy : undefined;
+  const config = isRecord(economy) && isRecord(economy.config) ? economy.config : null;
+  const oldCap = config !== null && "unpricedCapCents" in config;
+  if (isCurrency(currency) && isRecord(lore) && isRecord(classifications) && hasTiers && retired.length === 0 && !legacyPov && !oldCap) return doc;
   const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, tiers };
   if (retired.length > 0) {
     out.steps = { ...doc.steps };
     for (const id of retired) delete out.steps[id];
   }
   if (pov && legacyPov) out.entities = { ...doc.entities, [doc.pov]: { ...pov, tier: leadTierOf(out) } };
+  const pack = out.packs.economy;
+  if (oldCap && config !== null && pack) {
+    const { unpricedCapCents: cents, ...rest } = config;
+    out.packs = { ...out.packs, economy: { ...pack, config: { ...rest, ...(typeof cents === "number" && rest.unpricedCap === undefined ? { unpricedCap: cents } : {}) } } };
+  }
   return out;
 }
 

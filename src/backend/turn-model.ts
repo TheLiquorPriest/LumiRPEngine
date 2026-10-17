@@ -107,6 +107,8 @@ export class TurnBridge implements TurnModel {
   private readonly intents = new Map<string, InterpretOutput | null>();
   /** User texts whose intent `interpret` read from typed text (a "Not an action?" chip applies). */
   private readonly interpreted = new Set<string>();
+  /** User texts whose `interpret` call failed: their turn ran as plain roleplay ("Couldn't read your action"). */
+  private readonly unread = new Set<string>();
   /** Prepared reads keyed by `hashParts(text)`. */
   private readonly reads = new Map<string, PreparedRead>();
   /** Engine plans keyed by seed: elapsed minutes for `appliedMinutes`, chips and outline lines. */
@@ -129,9 +131,26 @@ export class TurnBridge implements TurnModel {
   setIntent(userText: string, intent: InterpretOutput | null, interpreted = false): void {
     this.intents.set(userText, intent);
     trim(this.intents);
+    this.unread.delete(userText);
     if (interpreted && intent) this.interpreted.add(userText);
     else this.interpreted.delete(userText);
     if (this.interpreted.size > 64) this.interpreted.delete(this.interpreted.values().next().value ?? "");
+  }
+
+  /**
+   * The `interpret` call for this text failed. No intent is kept, so the turn plans as plain
+   * roleplay and the next turn on the same text (the chip's Retry, a Re-run) reads it again.
+   */
+  setUnread(userText: string): void {
+    this.intents.delete(userText);
+    this.interpreted.delete(userText);
+    this.unread.add(userText);
+    if (this.unread.size > 64) this.unread.delete(this.unread.values().next().value ?? "");
+  }
+
+  /** Whether this text's turn ran unread because its `interpret` call failed. */
+  wasUnread(userText: string): boolean {
+    return this.unread.has(userText);
   }
 
   /** Whether this text's intent came from `interpret` (not a palette or chip action). */

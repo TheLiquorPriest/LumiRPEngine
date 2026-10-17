@@ -12,10 +12,11 @@ export type Req<K extends RequestBody["type"]> = Extract<RequestBody, { type: K 
 
 /**
  * What a chip button does. `regenerate` (the Retry chip on an empty reply, D32) runs the host's
- * own Regenerate: only the frontend can start it. A swipe option (`renarrate`, `rerun`) and a
- * contradiction's Re-narrate record the one-shot choice with `lre.chip`, then run the same
- * Regenerate. Every other choice, the pause chip's Keep and Discard included, is
- * `lre.chip {chip, choice: action.id}`.
+ * own Regenerate: only the frontend can start it. A swipe option (`renarrate`, `rerun`), a
+ * contradiction's Re-narrate and the Retry of an unread action (`read_failed`, a Re-run) record
+ * the one-shot choice with `lre.chip`, then run the same Regenerate. Every other choice, the pause
+ * chip's Keep and Discard included, is `lre.chip {chip, choice: action.id}`, with the value an
+ * action's input asked for as its payload.
  */
 export interface ChipIntent {
   request: Req<"lre.chip"> | null;
@@ -25,7 +26,7 @@ export interface ChipIntent {
 export function chipIntent(chip: Chip, choice: string, chatId: ChatId, payload?: JsonObject): ChipIntent {
   if (choice === "regenerate") return { request: null, regenerate: true };
   const request: Req<"lre.chip"> = payload ? { type: "lre.chip", chatId, chip: chip.id, choice, payload } : { type: "lre.chip", chatId, chip: chip.id, choice };
-  return { request, regenerate: (chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (chip.kind === "contradiction" && choice === "renarrate") };
+  return { request, regenerate: (chip.kind === "swipe_option" && (choice === "renarrate" || choice === "rerun")) || (chip.kind === "contradiction" && choice === "renarrate") || (chip.kind === "read_failed" && choice === "rerun") };
 }
 
 /** Convert one Keep-report entry; markers have no event ref and cannot be converted. */

@@ -27,7 +27,7 @@ import { isMaterialized, pinnedVersion, tablesRevision } from "../../../engine/m
 import { hashParts } from "../../../shared/hash";
 import { formatMoney } from "../../../shared/world";
 import { labelOf, mutableSlice, numOf, objOf, optionalService, sliceOf, sliceRecord, strOf, own, rowOf } from "../../../engine/pack-kit";
-import type { EventTypeDef, PackDef, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
+import type { EffectContext, EventTypeDef, PackDef, ReadContext, Rejection, ServiceMap, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
@@ -37,6 +37,7 @@ import {
   anchorOf,
   balance,
   bandByLabel,
+  CORRECTION_ACCOUNT,
   DEFAULT_SYMBOL,
   external,
   MARKET,
@@ -45,6 +46,7 @@ import {
   priceOf,
   priceOfSymbol,
   spendable,
+  unpricedCap,
   wealthBand,
   wealthOf,
   withholding,
@@ -52,6 +54,7 @@ import {
   type Price,
   type PriceRef,
 } from "./model";
+import { catalogName, itemName, stem } from "./items";
 import { buildMoneyView, buildPeopleMoney } from "./view";
 import catalog from "./tables/modern-us/catalog.json";
 import categories from "./tables/modern-us/categories.json";
@@ -73,11 +76,11 @@ export interface ChargeOptions {
   /** External counterparty id when there is no payee entity (`employer`, `landlord`, …). */
   counterparty?: string;
   category?: string;
+  /** A narrated price the charge doesn't match, for the history line: capped at the world's `unpricedCap`, or clamped into the item's band. */
+  narrated?: { cents: number; limited: "cap" | "band" };
 }
 
 const PAY_METHODS: readonly NonNullable<ChargeOptions["method"]>[] = ["auto", "cash", "card", "checking", "savings"];
-/** The most an uncatalogued purchase priced only by its narration may cost (world config `unpricedCapCents`). */
-const UNPRICED_CAP_CENTS = 50000;
 
 /**
  * A payment method said in words ("pay with my card"): an exact method ("card", the
@@ -130,19 +133,24 @@ const TAG_CATEGORIES: Readonly<Record<string, readonly string[]>> = {
 };
 const OFFER_CAP = 24;
 
+/** What a place sells: its own `sells` list (categories or catalog ids), else the categories its tags sell, and its tags. */
+function placeTrade(ctx: ReadContext, place: string | null): { categories: string[]; sells: string[]; tags: string[] } {
+  const p = place ? own(ctx.world.places, place) : undefined;
+  const sells = Array.isArray(p?.fields.sells) ? p.fields.sells.filter((x): x is string => typeof x === "string") : [];
+  const tags = Array.isArray(p?.fields.tags) ? p.fields.tags.filter((x): x is string => typeof x === "string") : [];
+  return { categories: [...new Set(sells.length > 0 ? sells : tags.flatMap((t) => own(TAG_CATEGORIES, t) ?? []))], sells, tags };
+}
+
 function offersAt(ctx: ReadContext, who: EntityId): Offer[] {
   return offersAtPlace(ctx, placeOfEntity(ctx.state, who));
 }
 
 function offersAtPlace(ctx: ReadContext, place: string | null): Offer[] {
-  const p = place ? own(ctx.world.places, place) : undefined;
-  if (!p) return [];
-  const sells = Array.isArray(p.fields.sells) ? p.fields.sells.filter((x): x is string => typeof x === "string") : [];
-  const tags = Array.isArray(p.fields.tags) ? p.fields.tags.filter((x): x is string => typeof x === "string") : [];
-  const categories = sells.length > 0 ? sells : tags.flatMap((t) => own(TAG_CATEGORIES, t) ?? []);
+  if (!place || !own(ctx.world.places, place)) return [];
+  const { categories, sells } = placeTrade(ctx, place);
   const catalog = ctx.tables.get("economy.catalog")?.rows ?? {};
   const out: Offer[] = [];
-  for (const category of [...new Set(categories)]) {
+  for (const category of categories) {
     for (const id of Object.keys(catalog).sort()) {
       if (out.length >= OFFER_CAP) return out;
       const row = catalog[id];
@@ -154,36 +162,30 @@ function offersAtPlace(ctx: ReadContext, place: string | null): Offer[] {
   return out;
 }
 
-/** Words of a free-text item, singular, without filler. */
-function itemWords(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 3 && !FILLER.has(w))
-    .map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w));
-}
-const FILLER = new Set(["the", "and", "for", "some", "round", "rounds", "few", "with", "pack", "bottle", "glass", "cup", "table", "everyone"]);
-
 /**
- * The catalog row a free-text item names: the row whose id or name holds the most of its words (at
- * least half), then one whose category the place sells, then one that mentions a place tag (a pint
- * at a bar), then the first id. Null when nothing matches.
+ * The catalog row a free-text item names (DESIGN §9.5), or null. A row fits only when the item's
+ * main noun is one the row names, word for word with simple plurals ("bran muffin" fits "Pastry or
+ * muffin"; "desk lamp" doesn't fit "Desk", nor "chocolate bar" "Bar or club cover charge"). Of the
+ * rows that fit, the one holding the most of the item's words wins ("pint of beer" is "Beer at a
+ * bar", by its id); then one whose own noun is that noun, one in the category the purchase gives,
+ * one the place sells, one that mentions a place tag (a pint at a bar), then the first id.
  */
-function matchCatalog(ctx: ReadContext, text: string, place: string | null): string | null {
-  const words = itemWords(text);
-  if (words.length === 0) return null;
+export function matchCatalog(ctx: ReadContext, text: string, place: string | null, category = ""): string | null {
+  const item = itemName(text);
+  if (!item) return null;
+  const said = new Set([...item.words, ...(item.trailing?.words ?? [])]);
   const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
-  const p = place ? own(ctx.world.places, place) : undefined;
-  const tags = Array.isArray(p?.fields.tags) ? p.fields.tags.filter((x): x is string => typeof x === "string") : [];
-  const sold = new Set(offersAtPlace(ctx, place).map((o) => o.category));
-  let best: { id: string; score: number } | null = null;
+  const trade = placeTrade(ctx, place);
+  const tags = trade.tags.map((t) => stem(t.toLowerCase()));
+  let best: { id: string; score: number[] } | null = null;
   for (const id of Object.keys(rows).sort()) {
     const row = rows[id];
-    const hay = `${id.replace(/_/g, " ")} ${strOf(row?.name)}`.toLowerCase();
-    const hits = words.filter((w) => hay.includes(w)).length;
-    if (hits === 0 || hits * 2 < words.length) continue;
-    const score = hits * 4 + (sold.has(strOf(row?.category)) ? 2 : 0) + (tags.some((t) => hay.includes(t)) ? 1 : 0);
-    if (!best || score > best.score) best = { id, score };
+    const name = catalogName(id, strOf(row?.name, id));
+    if (!name.heads.has(item.head)) continue;
+    const rowCategory = strOf(row?.category);
+    const score = [[...said].filter((w) => name.words.has(w)).length, name.main === item.head ? 1 : 0, rowCategory === category ? 1 : 0, trade.categories.includes(rowCategory) ? 1 : 0, tags.some((t) => name.words.has(t)) ? 1 : 0];
+    const first = best ? score.findIndex((s, i) => s !== best?.score[i]) : 0;
+    if (!best || (first >= 0 && (score[first] ?? 0) > (best.score[first] ?? 0))) best = { id, score };
   }
   return best?.id ?? null;
 }
@@ -198,6 +200,14 @@ declare module "../../../engine/registry" {
     "economy.transfer": (ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, method?: ChargeOptions["method"]) => LedgerEvent[] | Rejection;
     /** The cash inside `item` goes with it: lost to the outside world, or stolen by `thief`. */
     "economy.lose": (ctx: ReadContext, item: EntityId, thief?: EntityId) => LedgerEvent[] | Rejection;
+    /**
+     * A correction that makes `holder`'s cash (the sum of their cash accounts, as the Money panel and
+     * the HUD show it) come to `cents`: a balanced posting between their cash and the outside
+     * correction account. Empty when it already does; null when the holder has no cash account.
+     */
+    "economy.set_cash": (ctx: ReadContext, holder: EntityId, cents: number) => LedgerEvent[] | Rejection | null;
+    /** A purchase that applied (its events) repriced to `cents` in all: the difference moves between the two accounts its payment used. */
+    "economy.reprice": (ctx: ReadContext, events: readonly LedgerEvent[], cents: number) => LedgerEvent[] | Rejection;
   }
   interface QueryMap {
     wealth: (ctx: ReadContext, who: EntityId) => string;
@@ -208,6 +218,8 @@ declare module "../../../engine/registry" {
     "economy.offers": (ctx: ReadContext, who: EntityId) => Offer[];
     /** The range a Buy recorded as "Bought `name`" can be charged for `qty` where `who` is: its catalog row's (else its category's) regional band. Null for an item neither prices. */
     "economy.bought_band": (ctx: ReadContext, name: string, qty: number, who: EntityId) => { min: number; max: number } | null;
+    /** Catalog items to pick for a purchase nothing priced: rows sharing a word with `item` first, then what `who` can buy where they are; at most 12, quoted where `who` is. */
+    "economy.item_choices": (ctx: ReadContext, item: string, who: EntityId) => Offer[];
   }
 }
 
@@ -389,9 +401,10 @@ function payeeSide(ctx: ReadContext, opts: ChargeOptions, cents: number): { acco
   return { account: external(opts.counterparty ?? "market"), extra: [] };
 }
 
-function txn(memo: string, lines: readonly PostingLine[]): LedgerEvent {
+/** A posting's history line: the lines on accounts in the world, and the narrated price a purchase's charge doesn't match (chips say so). */
+function txn(memo: string, lines: readonly PostingLine[], narrated?: ChargeOptions["narrated"]): LedgerEvent {
   const mine = lines.filter((l) => !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX));
-  return { type: "economy.txn", data: { memo, lines: mine.map((l) => ({ account: l.account, amount: l.amount })) } };
+  return { type: "economy.txn", data: { memo, lines: mine.map((l) => ({ account: l.account, amount: l.amount })), ...(narrated ? { narrated: narrated.cents, limited: narrated.limited } : {}) } };
 }
 
 /**
@@ -426,7 +439,46 @@ const charge: ChargeService = (ctx, payer, rawCents, memo, opts = {}) => {
     { account: source, amount: -cents },
     { account: dest.account, amount: cents },
   ];
-  return asUnit([{ type: "post", lines, memo }, ...out, ...dest.extra, txn(memo, lines)]);
+  return asUnit([{ type: "post", lines, memo }, ...out, ...dest.extra, txn(memo, lines, opts.narrated)]);
+};
+
+const setCash: ServiceMap["economy.set_cash"] = (ctx, holder, cents) => {
+  const s = ctx.state;
+  const cash = ofType(s, holder, "cash");
+  // Carried cash first (the wallet), then any other cash: what's added lands in the first, and what's
+  // taken empties them in turn, so no account goes below zero.
+  const [first, ...rest] = [...cash.filter((id) => onOwner(s, id)), ...cash.filter((id) => !onOwner(s, id))];
+  if (!first) return null;
+  const target = Math.round(cents);
+  if (!Number.isSafeInteger(target) || target < 0) return reject("bad_amount", "cash can't be less than nothing");
+  let left = target - cash.reduce((a, id) => a + balance(s, id), 0);
+  if (left === 0) return [];
+  const lines: PostingLine[] = left > 0 ? [{ account: first, amount: left }] : [];
+  for (const id of [first, ...rest]) {
+    if (left >= 0) break;
+    const take = Math.min(-left, Math.max(0, balance(s, id)));
+    if (take > 0) lines.push({ account: id, amount: -take });
+    left += take;
+  }
+  lines.push({ account: CORRECTION_ACCOUNT, amount: -lines.reduce((a, l) => a + l.amount, 0) });
+  return asUnit([{ type: "post", lines, memo: "Correction" }, txn("Correction", lines)]);
+};
+
+const reprice: ServiceMap["economy.reprice"] = (ctx, events, cents) => {
+  const post = events.find((e): e is PostEvent => e.type === "post" && e.memo.startsWith("Bought "));
+  const paid = post?.lines.find((l) => l.amount < 0);
+  const got = post?.lines.find((l) => l.amount > 0);
+  if (!post || !paid || !got || post.lines.length !== 2) return reject("not_a_purchase", "there's no purchase to reprice");
+  const total = Math.round(cents);
+  if (!Number.isSafeInteger(total) || total <= 0) return reject("bad_amount", "the amount must be positive");
+  const diff = total - got.amount;
+  if (diff === 0) return [];
+  const memo = `${post.memo}: price corrected`;
+  const lines: PostingLine[] = [
+    { account: paid.account, amount: -diff },
+    { account: got.account, amount: diff },
+  ];
+  return asUnit([{ type: "post", lines, memo }, txn(memo, lines)]);
 };
 
 /**
@@ -1113,6 +1165,44 @@ function amountOf(v: JsonValue | undefined): number {
   return typeof v === "number" ? Math.round(v) : NaN;
 }
 
+/** An `economy.buy`'s price, the catalog row it is priced as, and a narrated price the charge doesn't match. */
+interface Quote {
+  price: Price;
+  row: string | null;
+  narrated?: ChargeOptions["narrated"];
+}
+
+/**
+ * What an `economy.buy` of `qty` costs (DESIGN §9.5). A price the player set on a chip (`exact`) is
+ * charged as set. Otherwise the item's catalog row prices it: the row it names by id, or the row
+ * that names it (`matchCatalog`); in lenient worlds a narrated price inside the row's band is
+ * taken and one outside it clamped. Without a row, the stated price: the player's own (`stated`)
+ * in full, the narration's alone capped at the world's `unpricedCap`. Then the band of the category
+ * the purchase gives, or that the item names. Null when nothing prices it.
+ */
+function quote(ctx: EffectContext, args: JsonObject, payer: EntityId, qty: number): Quote | null {
+  const place = placeOfEntity(ctx.state, payer);
+  const named = strOf(args.item);
+  const given = strOf(args.category);
+  const row = named === "" ? null : rowOf(ctx, "economy.catalog", named) ? named : matchCatalog(ctx, named, place, given);
+  const category = given !== "" ? given : !row && rowOf(ctx, "economy.categories", named) ? named : "";
+  const said = typeof args.price === "number" && args.price > 0 ? Math.round(args.price) : undefined;
+  const rowDef = row ? rowOf(ctx, "economy.catalog", row) : undefined;
+  // A price taken as it is: the item keeps its row's name and category, else its own words and the category it gives.
+  const asIs = (cents: number): Price => ({ cents, unitCents: Math.round(cents / qty), band: { min: cents, typical: cents, max: cents }, source: row ? "catalog" : "category", clamped: false, name: strOf(rowDef?.name, named || "something"), category: rowDef ? strOf(rowDef.category) : rowOf(ctx, "economy.categories", category) ? category : "misc" });
+  if (said !== undefined && args.exact === true) return { price: asIs(said), row };
+  if (row) {
+    const price = priceOf(ctx, { catalog: row, qty, place, ...(said !== undefined ? { narrated: said } : {}) }, ctx.rng);
+    if (price) return { price, row, ...(price.clamped && said !== undefined ? { narrated: { cents: said, limited: "band" as const } } : {}) };
+  }
+  if (said !== undefined) {
+    const cents = Math.min(said, args.stated === true ? Infinity : unpricedCap(ctx.world));
+    return { price: { ...asIs(cents), clamped: cents !== said }, row: null, ...(cents !== said ? { narrated: { cents: said, limited: "cap" as const } } : {}) };
+  }
+  const banded = category !== "" ? priceOf(ctx, { category, qty, place }, ctx.rng) : null;
+  return banded ? { price: banded, row: null } : null;
+}
+
 export const economyPack: PackDef = {
   id: "economy",
   label: "Economy",
@@ -1128,6 +1218,8 @@ export const economyPack: PackDef = {
     r.service("economy.charge", charge);
     r.service("economy.transfer", transfer);
     r.service("economy.lose", loseWith);
+    r.service("economy.set_cash", setCash);
+    r.service("economy.reprice", reprice);
     r.query("wealth", (ctx, who) => wealthOf(ctx.state, who));
     r.query("can_afford", (ctx, who, cents) => {
       const level = ctx.levelOf(who, "money");
@@ -1143,6 +1235,25 @@ export const economyPack: PackDef = {
     });
 
     r.query("economy.offers", offersAt);
+    r.query("economy.item_choices", (ctx, text, who) => {
+      const place = placeOfEntity(ctx.state, who);
+      const item = itemName(text);
+      const said = new Set(item ? [...item.words, ...(item.trailing?.words ?? [])] : []);
+      const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
+      const near = Object.keys(rows)
+        .sort()
+        .map((id) => ({ id, shared: [...catalogName(id, strOf(rows[id]?.name, id)).words].filter((w) => said.has(w)).length }))
+        .filter((r) => r.shared > 0)
+        .sort((a, b) => b.shared - a.shared)
+        .slice(0, 6);
+      const out: Offer[] = [];
+      for (const { id } of near) {
+        const price = priceOf(ctx, { catalog: id, place });
+        if (price) out.push({ item: id, name: price.name, cents: price.unitCents, category: price.category });
+      }
+      for (const offer of offersAtPlace(ctx, place)) if (!out.some((o) => o.item === offer.item)) out.push(offer);
+      return out.slice(0, 12);
+    });
     // Ledger 1.10: a posting folds only if its owner can afford it (the fold-time twin of pickSource's declines).
     r.guard({ type: "post", validate: (e, ctx) => (e.type === "post" ? postGuard(ctx, e.lines) : null) });
     r.formula("wealth", (ctx, who) => wealthOf(ctx.state, String(who ?? ctx.world.pov)));
@@ -1155,23 +1266,10 @@ export const economyPack: PackDef = {
       type: "economy.buy",
       resolve(args, ctx) {
         const payer = strOf(args.payer) || ctx.world.pov;
-        const named = strOf(args.item);
-        const direct = named !== "" && !!rowOf(ctx, "economy.catalog", named);
-        // Free text ("beer", "a round of beers") is matched to a catalog row, preferring what the place sells.
-        const matched = direct || named === "" || strOf(args.category) !== "" || rowOf(ctx, "economy.categories", named) ? null : matchCatalog(ctx, named, placeOfEntity(ctx.state, payer));
-        const item = matched ?? named;
-        const known = direct || matched !== null;
-        const category = strOf(args.category) || (known ? "" : item);
         const qty = typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
-        const narrated = typeof args.price === "number" && args.price > 0 ? args.price : undefined;
-        const banded = priceOf(ctx, { ...(known ? { catalog: item } : { category }), qty, place: placeOfEntity(ctx.state, payer), ...(narrated !== undefined ? { narrated } : {}) }, ctx.rng);
-        // Neither in the catalog nor a category: an uncatalogued "misc" purchase at its narrated price.
-        // A price the narration alone gives (extraction) is capped, since the model may invent it; the
-        // player's own stated price (the Buy action) is charged in full, and declines if it can't be paid.
-        const cap = args.stated === true ? Infinity : numOf(objOf(ctx.world.packs.economy?.config).unpricedCapCents, UNPRICED_CAP_CENTS);
-        const misc = Math.min(Math.round(narrated ?? 0), cap);
-        const price: Price | null = banded ?? (narrated !== undefined ? { cents: misc, unitCents: Math.round(misc / qty), band: { min: misc, typical: misc, max: misc }, source: "category", clamped: misc !== Math.round(narrated), name: item || "something", category: "misc" } : null);
-        if (!price) return reject("unpriced", `no price for ${labelOf(ctx, item || category)}`);
+        const priced = quote(ctx, args, payer, qty);
+        if (!priced) return reject("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
+        const { price, row } = priced;
         const name = strOf(args.name) || price.name;
         // "Pay another way" retries name a method (savings, card, checking, cash) or a specific account
         // (`from`); the Buy action passes the player's words ("with my card"). A said kind of account the
@@ -1179,12 +1277,12 @@ export const economyPack: PackDef = {
         const said = payMethodOf(strOf(args.method));
         const has = (t: AccountType): boolean => ofType(ctx.state, payer, t).length > 0;
         const method = said === "auto" || said === "account" || has(said) ? said : said === "card" && has("checking") ? "checking" : "auto";
-        const paid = charge(ctx, payer, price.cents, `Bought ${name}${qty > 1 ? ` ×${qty}` : ""}`, { method, category: price.category, ...(typeof args.payee === "string" ? { payee: args.payee } : {}), ...(strOf(args.from) !== "" ? { source: strOf(args.from) } : {}) });
+        const paid = charge(ctx, payer, price.cents, `Bought ${name}${qty > 1 ? ` ×${qty}` : ""}`, { method, category: price.category, ...(priced.narrated ? { narrated: priced.narrated } : {}), ...(typeof args.payee === "string" ? { payee: args.payee } : {}), ...(strOf(args.from) !== "" ? { source: strOf(args.from) } : {}) });
         if (isRejection(paid)) return paid;
         const out = [...paid];
         const spawn = PHYSICAL.has(price.category) && args.keep !== false ? optionalService(ctx, "gear.spawn") : null;
         if (spawn && ctx.levelOf(payer, "gear") >= 1) {
-          const made = spawn(ctx, { name, owner: payer, holder: payer, ...(known ? { catalog: item } : {}), category: price.category, qty, salt: `buy:${ctx.rng.seed}` });
+          const made = spawn(ctx, { name, owner: payer, holder: payer, ...(row ? { catalog: row } : {}), category: price.category, qty, salt: `buy:${ctx.rng.seed}` });
           if (Array.isArray(made)) out.push(...made);
         }
         return out;
@@ -1318,13 +1416,19 @@ export const economyPack: PackDef = {
         if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
         if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, payer)?.kind ?? "", "person")) return reject("bad_payer", "a payer must be an account holder");
         const item = strOf(p.item);
-        if (item === "" && strOf(p.category) === "") return reject("bad_proposal", "a purchase needs an item or a category");
-        if (item !== "" && !rowOf(ctx, "economy.catalog", item) && strOf(p.category) === "" && !rowOf(ctx, "economy.categories", item) && !(typeof p.price === "number" && p.price > 0) && !matchCatalog(ctx, item, placeOfEntity(ctx.state, payer))) return reject("unpriced", `no catalog item or category ${item}, and no price`);
-        return null;
+        const category = strOf(p.category);
+        if (item === "" && category === "") return reject("bad_proposal", "a purchase needs an item or a category");
+        // Priced as `economy.buy` prices it: a catalog row that names the item, a price, or a category's band.
+        const priced = (typeof p.price === "number" && p.price > 0) || (typeof p.playerPrice === "number" && p.playerPrice > 0) || !!rowOf(ctx, "economy.categories", category) || (item !== "" && (!!rowOf(ctx, "economy.catalog", item) || !!rowOf(ctx, "economy.categories", item) || matchCatalog(ctx, item, placeOfEntity(ctx.state, payer), category) !== null));
+        return priced ? null : reject("unpriced", `no catalog item or category ${item || category}, and no price`);
       },
+      // `playerPrice` (minor units) is the price the player set on a chip, charged as set; the engine
+      // adds it, never a model (`inMinorUnits` drops it from model output).
       toEffects: (p, ctx) => {
         const { payer, from, method } = purchaser(p, ctx);
-        return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...(typeof p.price === "number" ? { price: p.price } : {}), ...(method !== undefined ? { method } : {}), ...(from !== undefined ? { from } : {}) } }];
+        const set = typeof p.playerPrice === "number" && p.playerPrice > 0 ? p.playerPrice : undefined;
+        const price = set ?? (typeof p.price === "number" ? p.price : undefined);
+        return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...(price !== undefined ? { price } : {}), ...(set !== undefined ? { exact: true } : {}), ...(method !== undefined ? { method } : {}), ...(from !== undefined ? { from } : {}) } }];
       },
     });
     r.proposal({

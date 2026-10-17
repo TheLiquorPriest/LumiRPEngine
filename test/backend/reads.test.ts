@@ -157,9 +157,12 @@ describe("a Re-read of an edited reply", () => {
     await tap(rig, chatId, "reread", "reread");
     const offered = (await chips(rig, chatId)).filter((c) => c.kind === "confirm" && `${c.label} ${c.detail ?? ""}`.includes("motor oil"));
     expect(offered).toHaveLength(1);
+    // The amount the chip shows (the catalog's motor oil row prices it), charged once, in cents.
+    const shown = /\$(\d[\d,]*\.\d{2})/.exec(offered[0]?.label ?? "");
+    expect(shown).not.toBeNull();
     await tap(rig, chatId, "confirm", "confirm");
     const after = await accounts();
-    expect((after.acct_pov_checking ?? 0) - (before.acct_pov_checking ?? 0)).toBe(-800);
+    expect((after.acct_pov_checking ?? 0) - (before.acct_pov_checking ?? 0)).toBe(-Math.round(Number((shown?.[1] ?? "").replaceAll(",", "")) * 100));
     expect([after.acct_pov_cash, after.acct_pov_card]).toEqual([before.acct_pov_cash, before.acct_pov_card]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });

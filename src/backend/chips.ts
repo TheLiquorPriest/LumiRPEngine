@@ -16,13 +16,20 @@ export interface StoredChip extends Chip {
   payload: JsonObject;
 }
 
+/** A chip action's input as stored: an amount (with an optional starting amount) or a list of options. */
+function isChipInput(raw: unknown): boolean {
+  if (!isRecord(raw) || typeof raw.label !== "string") return false;
+  if (raw.type === "money") return raw.value === undefined || Number.isSafeInteger(raw.value);
+  return raw.type === "choice" && Array.isArray(raw.options) && raw.options.every((o) => isRecord(o) && typeof o.value === "string" && typeof o.label === "string");
+}
+
 /** A stored entry with every field of the type the frontend reads; anything else is dropped (the file comes from storage, not from us). */
 function isStoredChip(raw: unknown): raw is StoredChip {
   if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.kind !== "string" || typeof raw.messageId !== "string" || typeof raw.label !== "string" || !isRecord(raw.payload)) return false;
   if (raw.swipeId !== undefined && !Number.isInteger(raw.swipeId)) return false;
   if (raw.detail !== undefined && typeof raw.detail !== "string") return false;
   if (raw.expires !== "next_send" && raw.expires !== "never") return false;
-  return Array.isArray(raw.actions) && raw.actions.every((a) => isRecord(a) && typeof a.id === "string" && typeof a.label === "string" && (a.style === undefined || a.style === "primary" || a.style === "danger"));
+  return Array.isArray(raw.actions) && raw.actions.every((a) => isRecord(a) && typeof a.id === "string" && typeof a.label === "string" && (a.style === undefined || a.style === "primary" || a.style === "danger") && (a.input === undefined || isChipInput(a.input)));
 }
 
 export class ChipStore {

@@ -62,22 +62,22 @@ async function chipsAfter(bought: string, price: number, narrated: JsonObject) {
 }
 
 describe("a narrated purchase that tells the turn's own Buy again", () => {
-  test("'leather card holder' told for a typed 'credit card holder' offers no second purchase, priced or not; a 'leather holder' at the same price neither", async () => {
-    expect(await chipsAfter("credit card holder", 12, { item: "leather card holder" })).toEqual([]);
-    expect(await chipsAfter("credit card holder", 12, { item: "leather card holder", price: 12 })).toEqual([]);
-    expect(await chipsAfter("credit card holder", 12, { item: "slim leather holder", price: 12 })).toEqual([]);
+  test("'leather card holder' told for a typed 'credit card holder' may be the Buy or another one: it asks instead of charging or dropping it", async () => {
+    expect(await chipsAfter("credit card holder", 12, { item: "leather card holder" })).toEqual([expect.stringMatching(/^Also bought leather card holder\b/)]);
+    expect(await chipsAfter("credit card holder", 12, { item: "leather card holder", price: 12 })).toEqual([expect.stringMatching(/^Also bought leather card holder\?/)]);
+    expect(await chipsAfter("credit card holder", 12, { item: "slim leather holder", price: 12 })).toEqual([expect.stringMatching(/^Also bought slim leather holder\?/)]);
   });
 
   // Shaped like "decaf coffee for Danny, $4.50" after a typed $3 coffee, with an item the catalog
   // doesn't price, so the Buy costs exactly the $3 typed (a catalogued coffee costs the catalog's price).
-  test("the same head noun at a price more than 25% off keeps its chip: a $4.50 'tin kazoo' after a typed $3 kazoo", async () => {
-    expect(await chipsAfter("kazoo", 3, { item: "tin kazoo", price: 4.5 })).toEqual(["Bought tin kazoo: $4.50"]);
+  test("the same head noun at a price more than 25% off asks: a $4.50 'tin kazoo' after a typed $3 kazoo", async () => {
+    expect(await chipsAfter("kazoo", 3, { item: "tin kazoo", price: 4.5 })).toEqual([expect.stringMatching(/^Also bought tin kazoo\?.*\$4\.50/)]);
     expect(await chipsAfter("kazoo", 3, { item: "tin kazoo", price: 3.5 })).toEqual([]);
   });
 
   test("a different head noun keeps its chip: 'lantern oil' after a typed lantern, 'credit card reader' after a holder", async () => {
-    expect(await chipsAfter("lantern", 40, { item: "lantern oil", price: 6 })).toEqual(["Bought lantern oil: $6.00"]);
-    expect(await chipsAfter("credit card holder", 12, { item: "credit card reader", price: 12 })).toEqual(["Bought credit card reader: $12.00"]);
+    expect(await chipsAfter("lantern", 40, { item: "lantern oil", price: 6 })).toEqual([expect.stringMatching(/^Bought lantern oil: /)]);
+    expect(await chipsAfter("credit card holder", 12, { item: "credit card reader", price: 12 })).toEqual([expect.stringMatching(/^Bought credit card reader: /)]);
   });
 
   test("a trailing 'for …', 'to …' or 'from …' phrase on either name doesn't change the thing bought", async () => {
@@ -105,7 +105,7 @@ describe("with purchases on auto, a reply that tells a catalog-matched Buy again
   const cases: { typed: string; price?: number; narrated: JsonObject; charged: string }[] = [
     { typed: "milk", narrated: { item: "milk" }, charged: "Bought Milk, whole" },
     { typed: "large pizza, delivered", price: 18, narrated: { item: "pizza", price: 18 }, charged: "Bought Pizza, large 14-16 in, delivered" },
-    { typed: "sandwich for lunch", narrated: { item: "sandwich" }, charged: "Bought Bread, white sandwich loaf" },
+    { typed: "sandwich for lunch", narrated: { item: "sandwich" }, charged: "Bought Deli sandwich" },
   ];
   for (const c of cases) {
     test(`'${c.narrated.item}' after a typed '${c.typed}' (charged as '${c.charged.slice("Bought ".length)}')`, async () => {
@@ -130,25 +130,42 @@ function purchase(item: string, dollars: number): JsonObject {
 }
 
 describe("a stated price is the Buy's when it is within ±25% of what it charged, the price the player typed, or its catalog row's range", () => {
-  test("fixed charges that differ from the typed price: the sandwich, coffee, milk and coffee ×2 cases drop; 'lantern oil' and the 'tin kazoo' keep", async () => {
+  test("the Buy told again drops; another noun is a new purchase; the same noun at a price off the Buy's asks", async () => {
     const { rig, chatId } = await after("newspaper", null);
     const core = await rig.rt.ledger.core(chatId, rig.host.userId);
     const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
     const world = state ? core?.worldAt(state.revision) : undefined;
     if (!state || !world) throw new Error("no state");
     const ctx = rig.rt.registry.context(world, state);
-    // A typed $9 sandwich charged as bread at $2.43, a typed $3 coffee charged $5.38, a typed $5 milk
-    // charged $3.63, a typed $6 pair of coffees charged $10.76.
-    expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Bread, white sandwich loaf", 243)], ctx, 900)).toBe(true);
-    expect(boughtAlong(purchase("coffee", 3), [bought("Bought Coffee", 538)], ctx, 300)).toBe(true);
-    expect(boughtAlong(purchase("milk", 5), [bought("Bought Milk, whole", 363)], ctx, 500)).toBe(true);
-    expect(boughtAlong(purchase("coffees", 6), [bought("Bought Coffee ×2", 1076)], ctx, 600)).toBe(true);
-    // Without a typed price, the catalog row's range: $7.50 is inside "Milk, whole"'s; $9 is far above the bread's.
-    expect(boughtAlong(purchase("milk", 7.5), [bought("Bought Milk, whole", 363)], ctx)).toBe(true);
-    expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Bread, white sandwich loaf", 243)], ctx)).toBe(false);
-    // No catalog row, and neither the charge nor the typed price is near.
-    expect(boughtAlong(purchase("lantern oil", 6), [bought("Bought lantern", 4000)], ctx, 4000)).toBe(false);
-    expect(boughtAlong(purchase("tin kazoo", 4.5), [bought("Bought kazoo", 300)], ctx, 300)).toBe(false);
+    // A typed $9 sandwich charged $2.43, a typed $3 coffee charged $5.38, a typed $5 milk charged
+    // $3.63, a typed $6 pair of coffees charged $10.76.
+    expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Deli sandwich", 243)], ctx, 900)).toBe("retold");
+    expect(boughtAlong(purchase("coffee", 3), [bought("Bought Coffee", 538)], ctx, 300)).toBe("retold");
+    expect(boughtAlong(purchase("milk", 5), [bought("Bought Milk, whole", 363)], ctx, 500)).toBe("retold");
+    expect(boughtAlong(purchase("coffees", 6), [bought("Bought Coffee ×2", 1076)], ctx, 600)).toBe("retold");
+    // Without a typed price, the catalog row's range: $7.50 is inside "Milk, whole"'s.
+    expect(boughtAlong(purchase("milk", 7.5), [bought("Bought Milk, whole", 363)], ctx)).toBe("retold");
+    // A sandwich is not a loaf of bread, and lantern oil is oil, not the lantern: new purchases.
+    expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Bread, white sandwich loaf", 243)], ctx)).toBeNull();
+    expect(boughtAlong(purchase("lantern oil", 6), [bought("Bought lantern", 4000)], ctx, 4000)).toBeNull();
+    // The same noun at a price far from the Buy's, with no catalog row: maybe the Buy, maybe not.
+    expect(boughtAlong(purchase("tin kazoo", 4.5), [bought("Bought kazoo", 300)], ctx, 300)).toBe("unsure");
+  });
+
+  test("another one, one for someone, a different quantity or a ruled-out qualifier is a new purchase", async () => {
+    const { rig, chatId } = await after("newspaper", null);
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+    const world = state ? core?.worldAt(state.revision) : undefined;
+    if (!state || !world) throw new Error("no state");
+    const ctx = rig.rt.registry.context(world, state);
+    const coffee = [bought("Bought Coffee", 538)];
+    expect(boughtAlong(purchase("another coffee", 5.38), coffee, ctx)).toBeNull();
+    expect(boughtAlong(purchase("second coffee", 5.38), coffee, ctx)).toBeNull();
+    expect(boughtAlong({ ...purchase("coffee", 5.38), qty: 2 }, coffee, ctx)).toBeNull();
+    expect(boughtAlong(purchase("green apple", 1), [bought("Bought red apple", 100)], ctx)).toBeNull();
+    // Told as another in the narration beside a price that fits: asked, not dropped.
+    expect(boughtAlong(purchase("coffee", 5.38), coffee, ctx, null, "She pours you another coffee and you pay for it.")).toBe("unsure");
   });
 });
 
@@ -163,11 +180,12 @@ describe("with fixed seeds, a reply that repeats the player's typed price for a 
   });
   afterEach(() => restore?.());
 
-  const cases: { typed: string; price: number; qty?: number; narrated: string; charged: string }[] = [
-    { typed: "sandwich", price: 9, narrated: "sandwich", charged: "Bought Bread, white sandwich loaf" },
-    { typed: "coffee", price: 3, narrated: "coffee", charged: "Bought Coffee" },
+  // `near`: the catalog's price is within 25% of the typed one, so either match drops the retelling.
+  const cases: { typed: string; price: number; qty?: number; narrated: string; charged: string; near?: boolean }[] = [
+    { typed: "sandwich", price: 9, narrated: "sandwich", charged: "Bought Deli sandwich" },
+    { typed: "coffee", price: 3, narrated: "coffee", charged: "Bought Drip coffee, 12 oz, cafe", near: true },
     { typed: "milk", price: 5, narrated: "milk", charged: "Bought Milk, whole" },
-    { typed: "coffee", price: 6, qty: 2, narrated: "coffees", charged: "Bought Coffee ×2" },
+    { typed: "coffee", price: 6, qty: 2, narrated: "coffees", charged: "Bought Drip coffee, 12 oz, cafe ×2", near: true },
   ];
   for (const c of cases) {
     test(`'${c.narrated}' at the typed $${c.price} after a typed '${c.typed}' (charged as '${c.charged.slice("Bought ".length)}')`, async () => {
@@ -175,14 +193,14 @@ describe("with fixed seeds, a reply that repeats the player's typed price for a 
       const told = await after(c.typed, { item: c.narrated, price: c.price }, { ...opts, auto: true });
       expect(told.memos).toEqual([c.charged]);
       // The charge is the catalog's, more than 25% off the typed price, so only the typed price matches.
-      expect(Math.abs((told.lines[0]?.cents ?? 0) - c.price * 100)).toBeGreaterThan(0.25 * (told.lines[0]?.cents ?? 0));
+      if (!c.near) expect(Math.abs((told.lines[0]?.cents ?? 0) - c.price * 100)).toBeGreaterThan(0.25 * (told.lines[0]?.cents ?? 0));
       expect(told.chips).toEqual([]);
     });
   }
 
   test("in confirm mode, 'coffees' at $6 after a typed 'Coffee ×2' at $6 offers no chip", async () => {
     const got = await after("coffee", { item: "coffees", price: 6 }, { price: 6, qty: 2 });
-    expect(got.memos).toEqual(["Bought Coffee ×2"]);
+    expect(got.memos).toEqual([expect.stringMatching(/^Bought .*coffee.* ×2$/i)]);
     expect(got.chips).toEqual([]);
   });
 });

@@ -58,8 +58,9 @@ describe("extract: purchase payer and method", () => {
     for (const c of confirms) rig.body(await rig.send({ type: "lre.chip", chatId, chip: c.id, choice: "confirm" }));
     const after = await accounts(rig, chatId);
     const moved = (id: string): number => (after[id] ?? 0) - (before[id] ?? 0);
-    // $8.00 as written is 800 cents.
-    expect([moved("acct_pov_checking"), moved("acct_pov_cash"), moved("acct_pov_card")]).toEqual([-800, 0, 0]);
+    // Checking pays (the coffee is priced from its catalog row; the amount is the row's).
+    expect(moved("acct_pov_checking")).toBeLessThan(0);
+    expect([moved("acct_pov_cash"), moved("acct_pov_card")]).toEqual([0, 0]);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

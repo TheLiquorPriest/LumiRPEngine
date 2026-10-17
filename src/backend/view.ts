@@ -77,7 +77,10 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   if (placeId) {
     fixes.place = { entity: pov, field: "place", type: "ref", value: placeId, options: Object.values(world.places).map((p) => ({ value: p.id, label: p.name })) };
   }
-  if (money >= 2 && cents !== null) fixes.cash = { entity: pov, field: "cash", type: "money", value: cents, min: 0 };
+  // Cash from the economy panel is the POV's cash accounts: its ✎ posts a correction to them
+  // (`lre.fix`), so it needs one. Without the panel's cash, the ✎ sets the cash field the pill shows.
+  const cashAccount = isRecord(economy) && Array.isArray(economy.accounts) && economy.accounts.some((a) => isRecord(a) && a.kind === "cash");
+  if (money >= 2 && cents !== null && (typeof panelCash?.cents !== "number" || cashAccount)) fixes.cash = { entity: pov, field: "cash", type: "money", value: cents, min: 0 };
   // Weather lives on the region over the player; the weather pack knows its climate's states.
   const weatherFix = optionalQuery(ctx, "weather.fix")?.(ctx) ?? null;
   if (weatherFix) fixes.weather = weatherFix;

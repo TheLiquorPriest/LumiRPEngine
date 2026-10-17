@@ -9,6 +9,8 @@ import { Working } from "../../src/engine/working";
 import { materializeAll } from "../../src/engine/materialize";
 import { ALL_PACKS } from "../../src/packs/index";
 import { buildMoneyView } from "../../src/packs/economy/core/view";
+import { unpricedCap } from "../../src/packs/economy/core/model";
+import { isRecord } from "../../src/shared/json";
 import { buildGearView } from "../../src/packs/gear/core/view";
 import { modernUsWorld } from "./riverton";
 import { startState } from "./support";
@@ -30,14 +32,27 @@ function propose(w: Working, type: string, p: Record<string, string | number>): 
 }
 
 describe("narration proposals", () => {
-  test("an uncatalogued purchase is charged at its narrated price (capped); without a price it is refused", () => {
-    const w = setup();
+  test("an uncatalogued purchase is charged at its narrated price (capped at the world's unpricedCap); without a price it is refused", () => {
+    const world = modernUsWorld("p", "R");
+    const economy = world.packs.economy;
+    if (economy) economy.config = { ...economy.config, unpricedCap: 50_000 };
+    const w = new Working(reg, world, startState(world));
+    materializeAll(reg, w, world.pov, "run");
     expect(propose(w, "purchase", { item: "gum", name: "a pack of gum" })).toBe("unpriced");
     const r = propose(w, "purchase", { item: "gum", name: "a pack of gum", price: 200 });
     expect(typeof r === "string" ? r : r.rejected).toEqual([]);
     expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought a pack of gum")?.cents).toBe(-200);
-    propose(w, "purchase", { item: "antique clock", price: 9_000_000 });
-    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought antique clock")?.cents).toBe(-50000);
+    propose(w, "purchase", { item: "antique astrolabe", price: 9_000_000 });
+    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought antique astrolabe")?.cents).toBe(-50_000);
+  });
+
+  test("without an authored cap, the cap is the dearest catalog row's top price, else 500 of the currency", () => {
+    const world = modernUsWorld("p", "R");
+    const rows = Object.values(world.tables["economy.catalog"]?.rows ?? {});
+    const dearest = Math.max(...rows.map((row) => (isRecord(row.price_cents) && typeof row.price_cents.max === "number" ? row.price_cents.max : 0)));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(unpricedCap(world)).toBe(dearest);
+    expect(unpricedCap({ ...world, tables: {} })).toBe(500 * 10 ** world.currency.decimals);
   });
 
   test("an NPC can hand the POV an item the world didn't track; the POV can't give what it doesn't have", () => {

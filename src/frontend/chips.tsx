@@ -1,12 +1,18 @@
 // Chips under each message (DESIGN §11, §12), rendered by a DOM decorator on `message_body_after`.
 // A pack can override a kind's rendering through `UiRegistry.chip`; everything else uses the
-// default chip, whose buttons send exactly the request `chipRequest` builds.
+// default chip, whose buttons send exactly the request `chipRequest` builds. An action that asks for
+// a value first (an amount, a catalog item) opens a small form in the chip.
 
+import { useState } from "preact/hooks";
 import type { ChatId, MessageId } from "../shared/ids";
+import type { JsonObject } from "../shared/json";
 import type { KeepLine } from "../shared/ledger";
-import type { Chip, ChipKind } from "../shared/state-view";
+import { formatMoneyInput, parseMoneyInput } from "../shared/money";
+import type { Chip, ChipAction, ChipInput, ChipKind } from "../shared/state-view";
+import { DEFAULT_CURRENCY, type WorldCurrency } from "../shared/world";
 import { useApp, useView } from "./app";
 import { useBusy } from "./components";
+import { MoneyInput } from "./money-input";
 import type { ChipProps } from "./registry";
 import { chipIntent, convertRequest } from "./requests";
 
@@ -33,6 +39,7 @@ const CHIP_ICON: Record<ChipKind, string> = {
   mode_change: "⚙",
   choice: "➜",
   contradiction: "≠",
+  read_failed: "⚠",
 };
 
 /** Matches the decorator scope `message:<id>:…` (dom-decorator-service scope templates). */
@@ -59,14 +66,14 @@ export function MessageChips(props: { messageId: MessageId }) {
   );
 }
 
-function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string) => void] {
+function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, payload?: JsonObject) => void] {
   const app = useApp();
   const [busy, run] = useBusy();
   return [
     busy,
-    (choice) =>
+    (choice, payload) =>
       run(async () => {
-        const intent = chipIntent(chip, choice, chatId);
+        const intent = chipIntent(chip, choice, chatId, payload);
         if (intent.request) {
           const message = await app.send(intent.request);
           if (message.type === "lre.error") {
@@ -80,10 +87,53 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string) =
   ];
 }
 
+/** The small form an action with an input opens: an amount in the world's currency, or one of its options; Apply sends it as the chip's payload. */
+function ChipInputForm(props: { action: ChipAction; input: ChipInput; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
+  const { input } = props;
+  const [text, setText] = useState(() => (input.type === "money" && input.value !== undefined ? formatMoneyInput(input.value, props.currency) : ""));
+  const [picked, setPicked] = useState(() => (input.type === "choice" ? (input.options[0]?.value ?? "") : ""));
+  const cents = input.type === "money" ? parseMoneyInput(text, props.currency) : null;
+  const ok = input.type === "money" ? cents !== null && cents > 0 : picked !== "";
+  return (
+    <form
+      class="lre-chip-form"
+      data-lre-chip-input={props.action.id}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (ok) props.onSend(input.type === "money" ? { cents } : { value: picked });
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") props.onCancel();
+      }}
+    >
+      {input.type === "money" ? (
+        <MoneyInput currency={props.currency} value={text} onInput={setText} label={input.label} invalid={text.trim() !== "" && !ok} autoFocus />
+      ) : (
+        <select class="lre-input" aria-label={input.label} value={picked} onChange={(event) => setPicked(event.currentTarget.value)}>
+          {input.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      )}
+      <button type="submit" class="primary" disabled={props.busy || !ok}>
+        Apply
+      </button>
+      <button type="button" disabled={props.busy} onClick={props.onCancel}>
+        Cancel
+      </button>
+    </form>
+  );
+}
+
 export function DefaultChip(props: ChipProps) {
   const { chip } = props;
+  const view = useView();
   const [busy, choose] = useChipAction(chip, props.chatId);
+  const [asking, setAsking] = useState<string | null>(null);
   const info = chip.actions.length === 0;
+  const open = chip.actions.find((action) => action.id === asking);
   return (
     <div class={`lre-chip${info ? " info" : ""}${busy ? " busy" : ""}`} data-kind={chip.kind} title={chip.detail}>
       <span class="lab">
@@ -92,10 +142,11 @@ export function DefaultChip(props: ChipProps) {
         {chip.detail ? <span class="det"> · {chip.detail}</span> : null}
       </span>
       {chip.actions.map((action) => (
-        <button key={action.id} type="button" class={action.style} disabled={busy} onClick={() => choose(action.id)}>
+        <button key={action.id} type="button" class={action.style} disabled={busy} aria-expanded={action.input ? asking === action.id : undefined} onClick={() => (action.input ? setAsking(asking === action.id ? null : action.id) : choose(action.id))}>
           {action.label}
         </button>
       ))}
+      {open?.input ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null}
     </div>
   );
 }

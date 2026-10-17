@@ -1,7 +1,8 @@
 // Model steps over the host (DESIGN §5.2, §9.4, D10, D31). Routing: `interpret` and `extract` on
 // the helper (a quiet JSON call on the user's connection); `npc.choose` on the
-// Decision connection, falling back to the helper, then to engine-only. No blind retry; one JSON
-// repair call when a helper reply doesn't parse (DESIGN §18.4). Prompts are model-agnostic.
+// Decision connection, falling back to the helper, then to engine-only. No blind retry: one JSON
+// repair call when a helper reply doesn't parse (DESIGN §18.4), and `interpret` asks once more after
+// a transient failure (a network reset, a timeout, a 5xx). Prompts are model-agnostic.
 
 import type { ActionId, EntityId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -90,17 +91,31 @@ export function parseJsonReply(text: string): JsonValue {
 /** What model steps need from the host (narrow, so scripts can drive the real steps over REST). */
 export type StepsHost = Pick<HostPort, "models" | "log">;
 
+/**
+ * A failure worth one more try: the connection reset or dropped, the request timed out, or the
+ * provider answered with a 5xx (the host words these as "… failed (502): …"). An abort is the
+ * engine's own deadline, never retried.
+ */
+export function transientFailure(error: unknown): boolean {
+  const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  if (/\bAbortError\b/.test(text)) return false;
+  return /\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|ESOCKETTIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|UND_ERR_[A-Z_]+)\b|socket hang up|socket connection was closed|connection (?:was )?(?:reset|closed)|fetch failed|network error|timed? ?out|\(5\d\d\)|\b(?:status|HTTP)\s*:?\s*5\d\d\b/i.test(text);
+}
+
 export class Steps {
   constructor(
     private readonly host: StepsHost,
     readonly meter: CallMeter,
   ) {}
 
-  /** A helper JSON call, with one repair call when the reply doesn't parse. Null on failure. */
-  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal): Promise<JsonValue | null> {
+  /**
+   * A helper JSON call, with one repair call when the reply doesn't parse; with `retryTransient`, a
+   * call that fails transiently (`transientFailure`) is made once more. Null on failure.
+   */
+  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean } = {}): Promise<JsonValue | null> {
     const connectionId = config?.route?.connectionId ?? null;
     const maxTokens = Math.max(config?.maxTokens ?? HELPER_MAX_TOKENS, 1500);
-    const call = async (messages: { role: "system" | "user"; content: string }[]): Promise<string | null> => {
+    const call = async (messages: { role: "system" | "user"; content: string }[], retry: boolean): Promise<string | null> => {
       const t0 = performance.now();
       try {
         const r = await this.host.models.quiet({ messages, maxTokens, json: true, connectionId, model: config?.route?.model ?? null }, userId, signal);
@@ -110,22 +125,29 @@ export class Steps {
         return r.content;
       } catch (error) {
         this.meter.record({ purpose, via: "helper", ok: false, ms: performance.now() - t0, tokens: 0 }, userId);
-        this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed: ${error instanceof Error ? error.message : String(error)}`, userId);
-        return null;
+        const again = retry && !signal.aborted && transientFailure(error);
+        this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking once more" : ""}: ${error instanceof Error ? error.message : String(error)}`, userId);
+        return again ? call(messages, false) : null;
       }
     };
-    const first = await call([
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ]);
+    const first = await call(
+      [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      options.retryTransient === true,
+    );
     if (first === null || first.trim() === "") return null;
     try {
       return parseJsonReply(first);
     } catch {
-      const fixed = await call([
-        { role: "system", content: "Rewrite the text as valid JSON with the same meaning. Output JSON only." },
-        { role: "user", content: first },
-      ]);
+      const fixed = await call(
+        [
+          { role: "system", content: "Rewrite the text as valid JSON with the same meaning. Output JSON only." },
+          { role: "user", content: first },
+        ],
+        false,
+      );
       if (fixed === null) return null;
       try {
         return parseJsonReply(fixed);
@@ -229,7 +251,8 @@ export async function interpret(
   if (actions.length === 0) return { action: null, params: {}, probabilities: { none: 1 } };
   const catalog = actions.map((a) => `${a.id} — ${a.label}${a.params.length > 0 ? ` (params: ${a.params.join(", ")})` : ""}${a.lexicon && a.lexicon.length > 0 ? ` [said as: ${a.lexicon.slice(0, 6).join(", ")}]` : ""}`).join("\n");
   const system = `${instructions ? `${instructions}\n` : ""}You map a player's typed input in a roleplay to at most one engine action.\n${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}\nAction catalog:\n${catalog}\nRules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). If the input has two actions, return the first. If it also lets time pass after that action ("…and sleep until the next morning", "…then wait two hours"), add "then": {"minutes": number} or {"until": a day part, "shift" or "commitment"}. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "then"?: {...}}.`;
-  const raw = await steps.helperJson("interpret", system, text, config, userId, signal);
+  // A transient failure (a reset connection, a timeout) gets one more try: a turn whose action went unread runs as plain roleplay.
+  const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { retryTransient: true });
   if (!isRecord(raw)) return null;
   const action = typeof raw.action === "string" && actions.some((a) => a.id === raw.action) ? raw.action : null;
   const params: JsonObject = {};
@@ -263,6 +286,7 @@ export const EXTRACT_STRICT_RULES = [
   "regard only when the prose states a clear change in how one character feels about another.",
   "give only for an explicit handover between two characters; a seller handing over what was bought is part of the purchase; picking something up is not a give.",
   "A purchase already covers its payment: do not add a transfer for it.",
+  "One purchase per item: two things bought are two purchases, each with its own item and price; never one item that names both.",
   "Never duplicate a change. When unsure, leave it out.",
 ];
 
@@ -299,13 +323,15 @@ export async function extract(
  * proposal's money once: a purchase's `price`, a transfer's `amount`, and cash handed over
  * (`give` of "$20", "a twenty", "cash" with an `amount`), which becomes a cash transfer
  * (`method: "cash"`: bills changing hands go wallet to wallet) of the amount it states (in
- * `amount`, else in the item's own words). A model's own transfer keeps its method. Every proposal
- * a model step returns (`extract`, a world's `effects` templates) goes through it once.
+ * `amount`, else in the item's own words). A model's own transfer keeps its method. A purchase's
+ * `playerPrice` is the player's own, set on a chip, so a model's is dropped. Every proposal a model
+ * step returns (`extract`, a world's `effects` templates) goes through it once.
  */
 export function inMinorUnits(p: JsonObject, currency: WorldCurrency): JsonObject {
   const cash = p.type === "give" && typeof p.item === "string" ? cashGift(p.item, currency) : null;
   const amount = typeof p.amount === "number" ? p.amount : (cash?.amount ?? undefined);
   const q: JsonObject = cash ? { type: "transfer", ...(typeof p.from === "string" ? { from: p.from } : {}), ...(typeof p.to === "string" ? { to: p.to } : {}), ...(amount !== undefined ? { amount } : {}), method: "cash" } : p;
+  delete q.playerPrice;
   const money = q.type === "purchase" ? "price" : q.type === "transfer" ? "amount" : null;
   const v = money ? q[money] : undefined;
   if (money && typeof v === "number" && Number.isFinite(v)) q[money] = Math.round(v * 10 ** currency.decimals);

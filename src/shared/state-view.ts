@@ -93,12 +93,22 @@ export type ChipKind =
   /** A suggested next move (DESIGN §5.2 `choices`); Send posts it as the player's message. */
   | "choice"
   /** The reply went against an engine fact (DESIGN §5.2 `contradiction`): Re-narrate, or It's fine. */
-  | "contradiction";
+  | "contradiction"
+  /** The call that reads typed text failed, so the turn ran as plain roleplay; Retry runs it again (DESIGN §9.4). */
+  | "read_failed";
+
+/**
+ * A value a chip action asks for before it's sent, in its `lre.chip` payload: an amount in the
+ * world's currency (`{cents}`, minor units; `value` is the amount it starts at), or one of
+ * `options` (`{value}`).
+ */
+export type ChipInput = { type: "money"; label: string; value?: number } | { type: "choice"; label: string; options: { value: string; label: string }[] };
 
 export interface ChipAction {
   id: string;
   label: string;
   style?: "primary" | "danger";
+  input?: ChipInput;
 }
 
 export interface Chip {

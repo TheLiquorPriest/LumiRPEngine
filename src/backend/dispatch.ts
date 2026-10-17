@@ -6,7 +6,7 @@ import type { Band, ChatId, DomainId, UserId, WorldId } from "../shared/ids";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { HeldWrite, MarkerBody } from "../shared/ledger";
+import type { HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies } from "../shared/protocol";
@@ -15,6 +15,7 @@ import { EXTRACTION_TYPES } from "../shared/settings";
 import type { TimelapseTarget } from "../shared/ledger";
 import { validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
+import { optionalService } from "../engine/pack-kit";
 import { parseOverrides, parseTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
 import { Working } from "../engine/working";
@@ -150,7 +151,7 @@ export class Dispatcher {
         return;
       }
       case "lre.chip": {
-        reply("lre.chip", await this.chip(r.chatId, userId, r.chip, r.choice));
+        reply("lre.chip", await this.chip(r.chatId, userId, r.chip, r.choice, r.payload));
         return;
       }
       case "lre.view.open": {
@@ -183,9 +184,17 @@ export class Dispatcher {
       case "lre.fix": {
         const { state, world } = await this.head(r.chatId, userId);
         const w = new Working(this.rt.registry, world, state);
-        const rejection = w.apply({ type: "set", entity: r.entity, field: r.field, value: r.value });
-        if (rejection) throw new RequestError("validation", rejection.reason);
-        const result = await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: [{ type: "set", entity: r.entity, field: r.field, value: r.value }] } });
+        // Cash held in cash accounts is corrected by a balanced posting against the outside
+        // correction account (DESIGN §9.2), so the cash shown becomes the amount and the books still
+        // balance; any other value (and cash without a cash account) is set on its field.
+        const corrected = r.field === "cash" && typeof r.value === "number" ? (optionalService(w.ctx, "economy.set_cash")?.(w.ctx, r.entity, r.value) ?? null) : null;
+        if (corrected !== null && !Array.isArray(corrected)) throw new RequestError("validation", corrected.reason);
+        const events: LedgerEvent[] = corrected ?? [{ type: "set", entity: r.entity, field: r.field, value: r.value }];
+        for (const e of events) {
+          const rejection = w.apply(e);
+          if (rejection) throw new RequestError("validation", rejection.reason);
+        }
+        const result = events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events } }) : { pending: false };
         reply("lre.fix", { pending: result.pending });
         return;
       }
@@ -345,7 +354,7 @@ export class Dispatcher {
     return { lines };
   }
 
-  private async chip(chatId: ChatId, userId: UserId, id: string, choice: string): Promise<ResultBodies["lre.chip"]> {
+  private async chip(chatId: ChatId, userId: UserId, id: string, choice: string, payload?: JsonObject): Promise<ResultBodies["lre.chip"]> {
     await this.requireWorldChat(chatId, userId);
     const observed = toChain(await this.rt.host.chats.messages(chatId, userId));
     const [kind, messageId = "", swipe = "0"] = id.split(":");
@@ -404,7 +413,7 @@ export class Dispatcher {
     return this.locked(`${userId}\u0000${chatId}`, async () => {
       const chip = (await this.rt.chips.list(chatId, userId)).find((c) => c.id === id);
       if (!chip) throw new RequestError("not_found", "the chip has lapsed");
-      const result = await this.storedChip(chatId, userId, id, choice, chip, toChain(await this.rt.host.chats.messages(chatId, userId)));
+      const result = await this.storedChip(chatId, userId, id, choice, chip, toChain(await this.rt.host.chats.messages(chatId, userId)), payload);
       await this.rt.takeChip(chatId, userId, id);
       return result;
     });
@@ -427,7 +436,7 @@ export class Dispatcher {
     }
   }
 
-  private async storedChip(chatId: ChatId, userId: UserId, id: string, choice: string, chip: StoredChip, observed: ChainMessage[]): Promise<ResultBodies["lre.chip"]> {
+  private async storedChip(chatId: ChatId, userId: UserId, id: string, choice: string, chip: StoredChip, observed: ChainMessage[], payload?: JsonObject): Promise<ResultBodies["lre.chip"]> {
     const settings = await this.rt.settings.get(userId);
     const learning = await this.rt.settings.learningOf(userId);
     const type = EXTRACTION_TYPES.find((t) => t === chip.payload.type);
@@ -446,13 +455,19 @@ export class Dispatcher {
     };
     switch (chip.kind) {
       case "confirm": {
-        if (choice !== "confirm") {
+        if (choice !== "confirm" && choice !== "amount") {
           await settle("rejected");
           this.rt.push.changed(chatId, userId);
           return { applied: false, pending: false };
         }
         const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
         if (!proposal) throw new RequestError("bad_request", "the chip has no proposal");
+        // Edit amount: the purchase is charged what the player set, as set.
+        if (choice === "amount") {
+          const cents = chipValue(chip, choice, payload);
+          if (typeof cents !== "number") throw new RequestError("bad_request", "the amount isn't a positive amount of money");
+          proposal.playerPrice = cents;
+        }
         const { state, world } = await this.head(chatId, userId);
         const w = new Working(this.rt.registry, world, state);
         // The seed the chip's check used, so a purchase charges the amount its label shows.
@@ -468,6 +483,25 @@ export class Dispatcher {
         const rec = m?.ledger?.swipes[String(m.swipeId)];
         const events = Array.isArray(chip.payload.events) ? chip.payload.events : [];
         if (!m || !rec) throw new RequestError("not_found", "the turn is gone");
+        if (choice === "amount") {
+          // Edit amount on a purchase that applied by itself: the difference to what it charged moves
+          // between the same two accounts, as a correction beside it.
+          const cents = chipValue(chip, choice, payload);
+          if (typeof cents !== "number") throw new RequestError("bad_request", "the amount isn't a positive amount of money");
+          const { state, world } = await this.head(chatId, userId);
+          const w = new Working(this.rt.registry, world, state);
+          const postings = events.flatMap((e): LedgerEvent[] => (isRecord(e) && e.type === "post" && typeof e.memo === "string" && Array.isArray(e.lines) ? [{ type: "post", memo: e.memo, lines: e.lines.flatMap((l) => (isRecord(l) && typeof l.account === "string" && typeof l.amount === "number" ? [{ account: l.account, amount: l.amount }] : [])) }] : []));
+          const repriced = optionalService(w.ctx, "economy.reprice")?.(w.ctx, postings, cents);
+          if (!repriced) throw new RequestError("bad_request", "there's no purchase to reprice");
+          if (!Array.isArray(repriced)) throw new RequestError("validation", repriced.reason);
+          for (const e of repriced) {
+            const rejection = w.apply(e);
+            if (rejection) throw new RequestError("validation", rejection.reason);
+          }
+          const result = repriced.length > 0 ? await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: repriced } }) : { applied: false, pending: false };
+          await settle("accepted");
+          return { applied: result.applied, pending: result.pending };
+        }
         const refs = Runtime.refsOf(rec, events);
         if (refs.length === 0) return { applied: false, pending: false };
         const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
@@ -514,7 +548,8 @@ export class Dispatcher {
       case "decline": {
         const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
         const reason = typeof chip.payload.reason === "string" ? chip.payload.reason : "declined";
-        if (!proposal) {
+        if (!proposal || choice === "dismiss") {
+          this.rt.setOutcomeNote(chatId, chip.id, null);
           this.rt.push.changed(chatId, userId);
           return { applied: false, pending: false };
         }
@@ -523,6 +558,20 @@ export class Dispatcher {
           this.rt.setOutcomeNote(chatId, chip.id, declineNote(proposal, reason, choice, state, world));
           this.rt.push.changed(chatId, userId);
           return { applied: true, pending: false };
+        }
+        if (choice === "price" || choice === "item") {
+          // A purchase nothing priced (DESIGN §9.5): at the price the player set, or as the catalog
+          // item they picked, at its price.
+          const value = chipValue(chip, choice, payload);
+          if (value === null) throw new RequestError("bad_request", choice === "price" ? "the price isn't a positive amount of money" : "pick one of the chip's items");
+          const { price: _price, name: _name, ...rest } = proposal;
+          const priced: JsonObject = choice === "price" ? { ...proposal, playerPrice: value } : { ...rest, item: value };
+          const w = new Working(this.rt.registry, world, state);
+          const [outcome] = applyProposals(this.rt.registry, w, [priced], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:${choice}`, this.runSeedOf(chatId));
+          if (!outcome || outcome.rejection || outcome.events.length === 0) throw new RequestError("validation", outcome?.rejection?.reason ?? "the purchase no longer applies");
+          this.rt.setOutcomeNote(chatId, chip.id, null);
+          const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
+          return { applied: result.applied, pending: result.pending };
         }
         if (choice !== "other") throw new RequestError("bad_request", `unknown choice ${choice}`);
         // Pay another way (DESIGN §9.5): the first payment method that covers it.
@@ -536,6 +585,12 @@ export class Dispatcher {
         }
         // Nothing covers it: the chip stays for Remove or Accept.
         throw new RequestError("validation", "No other way to pay covers it.");
+      }
+      case "read_failed": {
+        // Retry: the next swipe re-runs the turn, reading the typed text afresh; the UI swipes.
+        if (choice !== "rerun") throw new RequestError("bad_request", `unknown choice ${choice}`);
+        this.rt.setSwipeChoice(chatId, "rerun");
+        return { applied: true, pending: false };
       }
       case "choice": {
         // A suggestion is model text: it goes in as the player's message with its braces neutralized.
@@ -559,6 +614,17 @@ export class Dispatcher {
         return { applied: false, pending: false };
     }
   }
+}
+
+/**
+ * What a chip action's input sent (`ChipAction.input`): a positive whole amount in minor units, or
+ * one of the action's own options. Null when the action takes no input or the value doesn't fit.
+ */
+function chipValue(chip: StoredChip, choice: string, payload: JsonObject | undefined): number | string | null {
+  const input = chip.actions.find((a) => a.id === choice)?.input;
+  if (!input || !payload) return null;
+  if (input.type === "money") return typeof payload.cents === "number" && Number.isSafeInteger(payload.cents) && payload.cents > 0 ? payload.cents : null;
+  return typeof payload.value === "string" && input.options.some((o) => o.value === payload.value) ? payload.value : null;
 }
 
 function stringRecord(o: Record<string, string> | Partial<Record<string, string>>): Record<string, string> {

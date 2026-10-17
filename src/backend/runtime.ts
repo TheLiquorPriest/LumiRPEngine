@@ -6,15 +6,16 @@ import { hashParts } from "../shared/hash";
 import type { ChatId, ChipId, InterruptClass, MessageId, RevisionId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { ChatRun, EventRef, GenerationKind, LedgerEvent, TimelapseTarget } from "../shared/ledger";
+import type { ChatRun, EventRef, GenerationKind, LedgerEvent, PostEvent, TimelapseTarget } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { ExtractionType, UserSettings } from "../shared/settings";
 import { EXTRACTION_TYPES } from "../shared/settings";
-import type { ContextGeneration, ContextView, StateView } from "../shared/state-view";
+import type { ChipAction, ContextGeneration, ContextView, StateView } from "../shared/state-view";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { transferCents } from "../packs/economy/core/index";
+import { itemName, stem } from "../packs/economy/core/items";
 import type { EngineTurnPlan } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { parseOverrides, parseTarget } from "../engine/time";
@@ -27,7 +28,7 @@ import { optionalQuery } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
-import { placeOfEntity } from "../engine/scope";
+import { kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
@@ -174,81 +175,127 @@ export function lentAlong(p: JsonObject, pre: readonly LedgerEvent[], state: Rea
   return pre.some((e) => e.type === "link" && e.rel === "uses" && e.from === to && (e.to === item || inside(e.to)));
 }
 
-/** Words that don't name the thing bought ("a box of matches" is matches). */
-const FILLER_WORDS: Record<string, true> = { a: true, an: true, the: true, of: true, some: true, my: true, your: true, his: true, her: true, their: true, our: true, this: true, that: true, and: true, or: true, for: true, to: true, from: true, at: true, with: true, in: true, on: true, by: true, per: true };
+/** A narrated purchase measured against the turn's own Buy: told again (dropped), maybe told again (an "Also bought …?" chip), or not the Buy at all (null). */
+export type Along = "retold" | "unsure" | null;
 
-/** Words that start a trailing phrase about where, when or who a thing is for ("sandwich for lunch", "bus ticket to Boston"). */
-const TRAILING_PREPOSITIONS: Record<string, true> = { for: true, to: true, from: true, at: true, with: true, in: true, on: true };
+/** Words that make a narrated purchase another one: "another coffee", "a second coffee", "one more coffee", "an extra one". */
+const ANOTHER = /\b(?:another|second|third|extra|(?:one|two|three|some|a few) more)\b/i;
 
-/** A word's singular, simply: "coffees" coffee, "lunches" lunch, "glasses" glass; "bus" and "glass" stay. */
-function singular(w: string): string {
-  if (w.length <= 3 || /(?:ss|us|is)$/.test(w)) return w;
-  if (/(?:s|x|z|ch|sh)es$/.test(w)) return w.slice(0, -2);
-  return w.endsWith("s") ? w.slice(0, -1) : w;
-}
+/** Words after "for" that name someone else: pronouns and the people one buys for (a person's name counts too). */
+const FOR_SOMEONE: Readonly<Record<string, true>> = { him: true, her: true, them: true, friend: true, wife: true, husband: true, partner: true, son: true, daughter: true, kid: true, child: true, mom: true, dad: true, mother: true, father: true, brother: true, sister: true, boyfriend: true, girlfriend: true, date: true, guest: true };
 
-/**
- * A purchase's name as two names are compared: lowercase; a catalog name's "Noun, qualifier" (or
- * "Noun (qualifier)") read as the noun, its qualifier's words kept for overlap ("Milk, whole" is milk,
- * with whole); a trailing "for/to/from/at/with/in/on …" phrase dropped ("sandwich for lunch" is a
- * sandwich); articles and stop words dropped; plurals singular. The head noun is the noun's last word.
- */
-function itemWords(name: string): { head: string; words: Set<string> } | null {
-  const text = name.toLowerCase().replace(/['’]/g, "");
-  const cut = text.search(/[,(]/);
-  const base = (cut < 0 ? text : text.slice(0, cut)).match(/[a-z0-9]+/g) ?? [];
-  const qualifier = cut < 0 ? [] : (text.slice(cut + 1).match(/[a-z0-9]+/g) ?? []);
-  const trailing = base.findIndex((w, i) => i > 0 && hasOwn(TRAILING_PREPOSITIONS, w));
-  const kept = (ws: readonly string[]): string[] => ws.filter((w) => !hasOwn(FILLER_WORDS, w)).map(singular);
-  const noun = kept(trailing < 0 ? base : base.slice(0, trailing));
-  const head = noun.at(-1);
-  return head === undefined ? null : { head, words: new Set([...noun, ...kept(qualifier)]) };
-}
+/** Qualifiers that rule each other out, by class (a red apple isn't a green one, a small coffee isn't a large one, an iced one isn't hot), keyed by their stems. */
+const CONTRAST: Readonly<Record<string, number>> = Object.fromEntries(
+  [
+    ["red", "orange", "yellow", "green", "blue", "purple", "pink", "brown", "black", "white", "grey", "silver", "gold", "golden", "beige", "navy", "teal"],
+    ["small", "medium", "large", "big", "little", "tiny", "huge", "tall", "grande", "venti", "regular", "mini", "jumbo"],
+    ["hot", "iced", "cold", "warm"],
+    ["single", "double", "triple"],
+  ].flatMap((words, cls) => words.map((w) => [stem(w), cls])),
+);
 
-/**
- * Whether a narrated purchase is the one this turn's own action already made: the player typed the
- * Buy and the reply tells it again ("milk" for the bought "Milk, whole", "leather card holder" for
- * the bought "credit card holder"). Names compare as `itemWords` reads them. They match when one
- * name's words hold all of the other's, or when the head noun is the same and the shorter name
- * shares at least 2/3 of its words with the other; either way with any price the narration states
- * within ±25% of the Buy's: of what it charged, of the price the player typed for it (`typed`, minor
- * units), or of anywhere in its catalog row's (or category's) range, since a catalogued Buy is
- * charged the catalog's price, not the typed one ("you pay $3 for the coffee" after a typed $3
- * coffee charged $5.38). The same head noun at an equal stated price matches too ("slim leather
- * holder", $12). A different thing bought in the same turn stays ("lantern oil" at $6 after a $40
- * lantern). Only a purchase the player character (or something they own) pays for.
- */
-export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext, typed: number | null = null): boolean {
-  const { world, state } = ctx;
-  if (p.type !== "purchase" || typeof p.item !== "string") return false;
+/** Whether a narrated purchase is the player character's own (or paid by something they own): only those can tell their Buy again. */
+function povPays(p: JsonObject, world: WorldDoc, state: Readonly<WorldState>): boolean {
   const payer = typeof p.payer === "string" ? p.payer.trim() : "";
-  if (payer !== "" && payer !== world.pov && hasOwn(state.entities, payer) && state.entities[payer]?.fields.owner !== world.pov) return false;
-  const said = itemWords(p.item);
-  if (!said) return false;
+  return payer === "" || payer === world.pov || !hasOwn(state.entities, payer) || state.entities[payer]?.fields.owner === world.pov;
+}
+
+/** The turn's own Buys, from its pre-reply events: each "Bought …" posting or history line, with its name, quantity and what it charged. */
+function buysIn(pre: readonly LedgerEvent[]): { name: string; qty: number; cents: number }[] {
+  const out: { name: string; qty: number; cents: number }[] = [];
+  for (const e of pre) {
+    const memo = e.type === "economy.txn" && "data" in e ? e.data.memo : e.type === "post" ? e.memo : undefined;
+    if (typeof memo !== "string" || !memo.startsWith("Bought ")) continue;
+    // What it charged: a posting's incoming side, or what left the payer's own accounts in its history line.
+    const lines = e.type === "post" ? e.lines : "data" in e && Array.isArray(e.data.lines) ? e.data.lines : [];
+    const cents = lines.reduce((sum: number, l) => sum + (isRecord(l) && typeof l.amount === "number" && (e.type === "post" ? l.amount > 0 : l.amount < 0) ? Math.abs(l.amount) : 0), 0);
+    out.push({ name: memo.slice("Bought ".length).replace(/\s×\d+$/, ""), qty: Number(/\s×(\d+)$/.exec(memo)?.[1] ?? 1), cents });
+  }
+  return out;
+}
+
+/** Whether `words` (after "for") name someone other than the player character: a pronoun, a relation, or a word of a person's name. */
+function forSomeone(words: readonly string[], ctx: ReadContext): boolean {
+  const { world, state } = ctx;
+  return words.some(
+    (w) =>
+      FOR_SOMEONE[w] === true ||
+      Object.entries(state.entities).some(([id, e]) => id !== world.pov && kindIs(ctx.registry, world, e.kind, "person") && e.name.toLowerCase().split(/[^a-z0-9]+/).some((part) => part.length > 1 && stem(part) === w)),
+  );
+}
+
+/** Whether the narration says, next to the item's main noun, that it's another one ("another coffee", "a coffee for Danny"). */
+function toldAsAnother(narration: string, head: string, ctx: ReadContext): boolean {
+  const words = narration.toLowerCase().replace(/['’]/g, "").match(/[a-z0-9]+(?:-[a-z0-9]+)*/g) ?? [];
+  return words.some((w, i) => {
+    if (stem(w) !== head) return false;
+    if (ANOTHER.test(words.slice(Math.max(0, i - 3), i).join(" "))) return true;
+    return words[i + 1] === "for" && forSomeone(words.slice(i + 2, i + 4).map(stem), ctx);
+  });
+}
+
+/**
+ * A narrated purchase measured against the Buy this turn's own action made (DESIGN §11 Confirm
+ * chips). Only the same thing can be the Buy told again: the same main noun, as `itemName` reads
+ * names ("milk" for the bought "Milk, whole", "brass lantern" for "old brass lantern"; "lantern
+ * oil" is oil, not the lantern). Even then it's another purchase when its own words say so
+ * ("another coffee", "a second one", "coffee for Danny"), when it names a different quantity, or a
+ * qualifier that rules the Buy's out (green for red, large for small, iced for hot). It is the Buy
+ * told again (`retold`) when one name's words hold all of the other's and any price the narration
+ * states is the Buy's: within ±25% of what it charged, of the price the player typed for it
+ * (`typed`, minor units), or of anywhere in its catalog row's (or category's) range, since a
+ * catalogued Buy is charged the catalog's price ("you pay $3 for the coffee" after a typed $3
+ * coffee charged $5.38). Anything else of the same noun may be either (`unsure`): other qualifiers
+ * ("leather card holder" for "credit card holder"), a price off the Buy's, or a narration that
+ * says "another" beside it. Only a purchase the player character (or something they own) pays for.
+ */
+export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext, typed: number | null = null, narration = ""): Along {
+  const { world, state } = ctx;
+  if (p.type !== "purchase" || typeof p.item !== "string" || !povPays(p, world, state)) return null;
+  const said = itemName(p.item);
+  if (!said) return null;
   const stated = typeof p.price === "number" && Number.isFinite(p.price) ? Math.abs(p.price) : null;
   const near = (v: number): boolean => stated === null || Math.abs(stated - v) <= 0.25 * v;
-  return pre.some((e) => {
-    const memo = e.type === "economy.txn" && "data" in e ? e.data.memo : e.type === "post" ? e.memo : undefined;
-    if (typeof memo !== "string" || !memo.startsWith("Bought ")) return false;
-    const name = memo.slice("Bought ".length).replace(/\s×\d+$/, "");
-    const qty = Number(/\s×(\d+)$/.exec(memo)?.[1] ?? 1);
-    const bought = itemWords(name);
-    if (!bought) return false;
-    // The Buy's price: a posting moves it twice (out and in); the history line once, from the payer's own accounts.
-    const lines = e.type === "post" ? e.lines : "data" in e && Array.isArray(e.data.lines) ? e.data.lines : [];
-    const moved = lines.reduce((sum: number, l) => sum + (isRecord(l) && typeof l.amount === "number" ? Math.abs(l.amount) : 0), 0);
-    const cents = e.type === "post" ? moved / 2 : moved;
-    const sameHead = bought.head === said.head;
-    if (sameHead && stated !== null && stated === cents) return true;
+  const another = ANOTHER.test(`${p.item} ${typeof p.name === "string" ? p.name : ""}`) || (said.trailing?.word === "for" && forSomeone(said.trailing.words, ctx));
+  let verdict: Along = null;
+  for (const buy of buysIn(pre)) {
+    const bought = itemName(buy.name);
+    if (!bought || bought.head !== said.head || another) continue;
+    if (typeof p.qty === "number" && p.qty !== buy.qty) continue;
+    const contrast = [...said.words].some((w) => CONTRAST[w] !== undefined && !bought.words.has(w) && [...bought.words].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
+    if (contrast) continue;
+    const holds = [...said.words].every((w) => bought.words.has(w)) || [...bought.words].every((w) => said.words.has(w));
     const inBand = (): boolean => {
-      const band = stated === null ? null : optionalQuery(ctx, "economy.bought_band")?.(ctx, name, qty, world.pov);
+      const band = stated === null ? null : optionalQuery(ctx, "economy.bought_band")?.(ctx, buy.name, buy.qty, world.pov);
       return !!band && stated !== null && stated >= 0.75 * band.min && stated <= 1.25 * band.max;
     };
-    if (!near(cents) && !(typed !== null && near(typed)) && !inBand()) return false;
-    const [shorter, longer] = said.words.size <= bought.words.size ? [said.words, bought.words] : [bought.words, said.words];
-    const shared = [...shorter].filter((w) => longer.has(w)).length;
-    return shared === shorter.size || (sameHead && shared * 3 >= shorter.size * 2);
-  });
+    const priced = near(buy.cents) || (typed !== null && near(typed)) || inBand();
+    if (holds && priced && !toldAsAnother(narration, said.head, ctx)) return "retold";
+    verdict = "unsure";
+  }
+  return verdict;
+}
+
+/**
+ * A narrated purchase that names several things ("coffee and bran muffin", "a coffee, a muffin and a
+ * bagel") one of which is the turn's own Buy: the Buy's part is dropped, and every other part is a
+ * purchase of its own, priced on its own (a price the narration gave was for them together). A
+ * purchase that holds no part of the Buy stays whole ("fish and chips").
+ */
+export function splitAlongBuy(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext): JsonObject[] {
+  if (p.type !== "purchase" || typeof p.item !== "string" || !povPays(p, ctx.world, ctx.state)) return [p];
+  const parts = p.item
+    .split(/\s*(?:,|&|\band\b|\bplus\b)\s*/i)
+    .map((part) => part.trim())
+    .filter((part) => itemName(part) !== null);
+  const buys = buysIn(pre).map((b) => itemName(b.name));
+  const isBuy = (part: string): boolean => {
+    const n = itemName(part);
+    return !!n && buys.some((b) => !!b && b.head === n.head && ([...n.words].every((w) => b.words.has(w)) || [...b.words].every((w) => n.words.has(w))));
+  };
+  if (parts.length < 2 || !parts.some(isBuy)) return [p];
+  const { price: _price, qty: _qty, name: _name, ...rest } = p;
+  return parts.filter((part) => !isBuy(part)).map((item) => ({ ...rest, item }));
 }
 
 /** What an extraction reads against: the state, its world, the record's seed and its pre-reply events. */
@@ -601,6 +648,14 @@ export class Runtime implements TurnHooks {
     } else {
       result = await interpret(this.steps, text, povWorld(render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined);
     }
+    // The call failed (a transient failure already had its second try): the turn runs as plain
+    // roleplay, and a chip says the action went unread, with a Retry that runs the turn again.
+    if (result === null) {
+      this.host.log("warn", `[LumiRPEngine] interpret: couldn't read the player's action; the turn runs as plain roleplay`, userId);
+      bridge.setOffer(text, null);
+      bridge.setUnread(text);
+      return;
+    }
     // A bare time span reads as the timelapse itself; one after another action ("I head home and
     // sleep until the next morning") is offered once that action has run.
     const timeOnly = result?.action === TIMELAPSE_ACTION ? result.params : result && !result.action && result.then ? result.then : null;
@@ -725,11 +780,22 @@ export class Runtime implements TurnHooks {
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal).then((lines) => lines ?? []) : Promise.resolve([])));
     const [extracted, effects, decisions, contradicted, choices] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks)]);
     // Proposals naming what the POV can't know (a hidden or unmet entity, a secret place) are dropped,
-    // and so are the turn's own action told again: a give of what it lent, a purchase it made (with
-    // the price the player typed for this turn's Buy, in minor units, when there is one).
+    // and so is the turn's own action told again: a give of what it lent, a purchase it made (with
+    // the price the player typed for this turn's Buy, in minor units, when there is one). A purchase
+    // that names the Buy with other things keeps the others, each its own purchase; one that may be
+    // the Buy told again is only ever offered ("Also bought …?").
     const intent = pre ? bridge.intentOf(pre.text) : null;
     const typed = intent?.action === "buy" && typeof intent.params.price === "number" ? intent.params.price : null;
-    const deduped = dedupeProposals([...extracted, ...effects.flat()], context.world.pov).filter((p) => !lentAlong(p, context.pre, context.state) && !boughtAlong(p, context.pre, ctx, typed));
+    const unsure = new Set<JsonObject>();
+    const deduped = dedupeProposals(
+      [...extracted, ...effects.flat()].flatMap((p) => splitAlongBuy(p, context.pre, ctx)),
+      context.world.pov,
+    ).filter((p) => {
+      if (lentAlong(p, context.pre, context.state)) return false;
+      const along = boughtAlong(p, context.pre, ctx, typed, text);
+      if (along === "unsure") unsure.add(p);
+      return along !== "retold";
+    });
     const known = deduped.filter((p) => proposalKnown(p, context.world, context.state));
     if (known.length < deduped.length) this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${deduped.length - known.length} proposal(s) naming what the player hasn't seen`, userId);
     // So is one carrying a secret's unrevealed truth: its chip would show it.
@@ -751,62 +817,80 @@ export class Runtime implements TurnHooks {
       const field = typeof p.field === "string" ? p.field : undefined;
       const bounded = boundProposal(this.registry, context.world, context.state, { type, ...(entity ? { entity } : {}), ...(field ? { field } : {}), ...(typeof p.delta === "number" ? { delta: p.delta } : {}) }, { typeMode, ...(settings.extraction[type]?.maxDelta !== undefined ? { typeMaxDelta: settings.extraction[type]?.maxDelta } : {}) });
       const fitted: JsonObject = bounded.delta !== undefined ? { ...p, delta: bounded.delta } : p;
-      if (bounded.mode === "auto") auto.push(fitted);
-      else if (bounded.mode === "confirm") confirm.push(fitted);
+      if (bounded.mode === "never") continue;
+      if (unsure.has(p)) unsure.add(fitted);
+      if (bounded.mode === "auto" && !unsure.has(p)) auto.push(fitted);
+      else confirm.push(fitted);
     }
     bridge.prepareRead(input.content, { auto, post, events: decisions });
     // `choices` and `contradiction` become chips below, with the read's others.
     // Each automatic proposal gets an undo chip; each confirm proposal a confirm chip (DESIGN §11).
     // An automatic proposal the engine refuses gets a decline chip instead, never silence: a payment
     // that can't be covered (with Pay another way), or anything else that can't apply (no amount, an
-    // unknown item). The next Outcome slot says it didn't happen (DESIGN §9.5).
+    // unknown item). The next Outcome slot says it didn't happen (DESIGN §9.5). A purchase's chip
+    // shows what it charges, and one whose narrated price was capped or clamped can be re-priced.
     const w = new Working(this.registry, context.world, context.state);
     const outcomes = applyProposals(this.registry, w, auto.filter((p) => p.type !== "time_advance"), `${context.seed}:preview`, bridge.runSeed);
     const stored: StoredChip[] = [];
-    const declines: { proposal: JsonObject; reason: string; payment: boolean }[] = [];
+    const declines: { proposal: JsonObject; reason: string; payment: boolean; unpriced: boolean }[] = [];
     outcomes.forEach((o, i) => {
       if (o.rejection) {
         if (o.rejection.code !== "declined") this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: ${describeProposal(o.proposal)} didn't apply (${o.rejection.code}: ${o.rejection.reason})`, input.userId);
-        declines.push({ proposal: o.proposal, reason: o.rejection.reason, payment: o.rejection.code === "declined" });
+        declines.push({ proposal: o.proposal, reason: o.rejection.reason, payment: o.rejection.code === "declined", unpriced: o.rejection.code === "unpriced" });
         return;
       }
       if (o.events.length === 0) return;
       const type = String(o.proposal.type);
+      const quote = purchaseQuote(o.proposal, o.events, context.world);
       stored.push({
         id: `undo:${input.messageId}:${input.generationId}:${i}`,
         kind: "undo",
         messageId: input.messageId,
         swipeId,
-        label: describeProposal(o.proposal, context.world, context.state),
+        label: `${describeProposal(o.proposal, context.world, context.state)}${quote?.text ?? ""}`,
         detail: "Applied automatically.",
-        actions: [{ id: "undo", label: "Undo", style: "danger" }],
+        actions: [{ id: "undo", label: "Undo", style: "danger" }, ...(quote?.limited ? [{ id: "amount", label: "Edit amount", input: { type: "money" as const, label: "Amount", value: quote.cents } }] : [])],
         expires: "next_send",
         payload: { type, connection, events: JSON.parse(JSON.stringify(o.events)) as JsonValue },
       });
     });
     confirm.forEach((proposal, i) => {
-      // Offer Apply only for what would apply now: a decline gets its own chip; anything else
-      // that can't validate (an unknown item, no price) is logged and dropped.
+      // Offer Apply only for what would apply now: a decline gets its own chip, a purchase nothing
+      // prices asks for a price; anything else that can't validate (an unknown item) is logged and dropped.
+      const also = unsure.has(proposal);
       const [check] = applyProposals(this.registry, new Working(this.registry, context.world, w.state), [proposal], `${context.seed}:check`, bridge.runSeed);
-      if (check?.rejection?.code === "declined") {
-        declines.push({ proposal, reason: check.rejection.reason, payment: true });
+      // One that may be the Buy told again declines into nothing: the Buy itself was paid.
+      if (check?.rejection?.code === "declined" && !also) {
+        declines.push({ proposal, reason: check.rejection.reason, payment: true, unpriced: false });
+        return;
+      }
+      if (check?.rejection?.code === "unpriced") {
+        stored.push({
+          id: `unpriced:${input.messageId}:${input.generationId}:${i}`,
+          kind: "decline",
+          messageId: input.messageId,
+          swipeId,
+          label: `${also ? "Also bought" : "Bought"} ${describeItem(proposal)}: no price`,
+          detail: "The narration gives no price and the catalog doesn't list it, so nothing changed. Set a price or pick an item to apply it.",
+          actions: [...pricingActions(proposal, ctx), { id: "dismiss", label: "Dismiss" }],
+          expires: "next_send",
+          payload: { type: "purchase", connection, proposal, reason: check.rejection.reason, seed: `${context.seed}:check` },
+        });
         return;
       }
       if (!check || check.rejection || check.events.length === 0) {
         this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(proposal)} (${check?.rejection?.reason ?? "no change"})`, input.userId);
         return;
       }
+      const quote = purchaseQuote(proposal, check.events, context.world);
       stored.push({
         id: `confirm:${input.messageId}:${input.generationId}:${i}`,
         kind: "confirm",
         messageId: input.messageId,
         swipeId,
-        label: `${describeProposal(proposal, context.world, context.state)}${purchaseQuote(proposal, check.events, context.world)}`,
-        detail: "The narration says this happened. Apply it?",
-        actions: [
-          { id: "confirm", label: "Apply", style: "primary" },
-          { id: "reject", label: "No" },
-        ],
+        label: also ? `Also bought ${describeItem(proposal)}?${quote?.text ?? ""}` : `${describeProposal(proposal, context.world, context.state)}${quote?.text ?? ""}`,
+        detail: also ? "The reply may be telling your purchase again. Apply it only if this was bought too." : "The narration says this happened. Apply it?",
+        actions: [{ id: "confirm", label: "Apply", style: "primary" }, ...(quote?.limited ? [{ id: "amount", label: "Edit amount", input: { type: "money" as const, label: "Amount", value: quote.cents } }] : []), { id: "reject", label: "No" }],
         expires: "next_send",
         // Applied with the check's seed, so a purchase charges the amount its label shows.
         payload: { type: String(proposal.type), connection, proposal, seed: `${context.seed}:check` },
@@ -824,7 +908,7 @@ export class Runtime implements TurnHooks {
         swipeId,
         label: !d.payment ? `Didn't apply: ${describeProposal(d.proposal, context.world, context.state)}` : d.proposal.type === "purchase" ? `Couldn't pay for ${describeItem(d.proposal)}` : `Declined: ${describeProposal(d.proposal, context.world, context.state)}`,
         detail: d.payment ? `${d.reason}. It stays unowned, and the next reply is told so.` : `${d.reason}. Nothing changed, and the next reply is told so.`,
-        actions: [...(d.payment ? [{ id: "other", label: "Pay another way", style: "primary" as const }] : []), { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }],
+        actions: [...(d.payment ? [{ id: "other", label: "Pay another way", style: "primary" as const }] : []), ...(d.unpriced ? pricingActions(d.proposal, ctx) : []), { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }],
         expires: "next_send",
         payload: { type: String(d.proposal.type), connection, proposal: d.proposal, reason: d.reason },
       });
@@ -885,6 +969,11 @@ export class Runtime implements TurnHooks {
       if (res.ok && res.events.length > 0 && input.kind !== "renarrate" && input.kind !== "continue" && bridge.wasInterpreted(userText)) {
         stored.push({ id: `not_action:${at}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as "${label}". Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(res.events)) as JsonValue } });
       }
+    }
+    // The helper call that reads typed text failed (DESIGN §9.4): the turn ran as plain roleplay. Retry
+    // runs it again, as the swipe chip's Re-run does, and reads the text afresh.
+    if (input.kind !== "continue" && userText.trim() !== "" && bridge.wasUnread(userText)) {
+      stored.push({ id: `read_failed:${at}`, kind: "read_failed", ...base, label: "Couldn't read your action", detail: "The call that reads your message failed, so this turn ran as plain roleplay. Retry runs the turn again.", actions: [{ id: "rerun", label: "Retry", style: "primary" }], expires: "next_send", payload: {} });
     }
     this.ageNotes(input.chatId, input.messageId);
     const headState = input.core.fold(input.observed).state;
@@ -1362,21 +1451,45 @@ export function declineNote(p: JsonObject, reason: string, choice: "accept" | "r
 }
 
 /**
- * What a purchase's confirm chip adds to its label, from the check that applied it: the amount it
- * charges, and the catalog item it's priced as when that isn't the narrated name (": $4.10 (priced
- * as Milk, whole)"). Empty for anything else, or a purchase that records no history line.
+ * What a purchase's chip adds to its label, from the events that applied it: the amount it charges,
+ * the catalog item it's priced as when that isn't the narrated name, and a narrated price the
+ * charge doesn't match (": 500 bits (narrated 1,200 bits, capped at 500 bits)", ": $2.50 (priced as
+ * Latte, 16 oz; narrated $9.00, clamped to $2.50)"), with the amount and whether it was capped or
+ * clamped. Null for anything else, or a purchase that records no history line.
  */
-export function purchaseQuote(p: JsonObject, events: readonly LedgerEvent[], world: WorldDoc): string {
-  if (p.type !== "purchase") return "";
+export function purchaseQuote(p: JsonObject, events: readonly LedgerEvent[], world: WorldDoc): { text: string; cents: number; limited: boolean } | null {
+  if (p.type !== "purchase") return null;
   for (const e of events) {
-    if (e.type !== "economy.txn" || !("data" in e) || typeof e.data.memo !== "string" || !e.data.memo.startsWith("Bought ")) continue;
+    const memo = e.type === "economy.txn" && "data" in e ? e.data.memo : undefined;
+    if (!("data" in e) || typeof memo !== "string" || !memo.startsWith("Bought ")) continue;
+    // The amount its posting moved (whoever's accounts its sides are), else what left the payer's own accounts.
+    const post = events.find((x): x is PostEvent => x.type === "post" && x.memo === memo);
     const lines = Array.isArray(e.data.lines) ? e.data.lines : [];
-    const cents = lines.reduce((sum: number, l) => sum + (isRecord(l) && typeof l.amount === "number" ? Math.abs(l.amount) : 0), 0);
-    const name = e.data.memo.slice("Bought ".length).replace(/\s×\d+$/, "");
+    const cents = post ? post.lines.reduce((sum, l) => sum + Math.max(0, l.amount), 0) : lines.reduce((sum: number, l) => sum + (isRecord(l) && typeof l.amount === "number" && l.amount < 0 ? -l.amount : 0), 0);
+    const money = (minor: number): string => formatMoney(minor, world.currency);
+    const name = memo.slice("Bought ".length).replace(/\s×\d+$/, "");
     const said = typeof p.item === "string" ? p.item.trim().toLowerCase() : "";
-    return `: ${formatMoney(cents, world.currency)}${name.toLowerCase() !== said ? ` (priced as ${name})` : ""}`;
+    const limit = e.data.limited === "cap" ? "capped at" : e.data.limited === "band" ? "clamped to" : null;
+    const narrated = e.data.narrated;
+    const notes = [...(name.toLowerCase() !== said ? [`priced as ${name}`] : []), ...(limit && typeof narrated === "number" ? [`narrated ${money(narrated)}, ${limit} ${money(cents)}`] : [])];
+    return { text: `: ${money(cents)}${notes.length > 0 ? ` (${notes.join("; ")})` : ""}`, cents, limited: limit !== null };
   }
-  return "";
+  return null;
+}
+
+/**
+ * The ways to price a narrated purchase nothing priced (DESIGN §9.5): **Set price** asks for an
+ * amount in the world's currency, and **Pick item** offers catalog items, those sharing a word with
+ * it first and then what's sold where the payer is.
+ */
+function pricingActions(p: JsonObject, ctx: ReadContext): ChipAction[] {
+  const { world, state } = ctx;
+  const payer = typeof p.payer === "string" && hasOwn(state.entities, p.payer) ? p.payer : world.pov;
+  const choices = optionalQuery(ctx, "economy.item_choices")?.(ctx, describeItem(p), payer) ?? [];
+  return [
+    { id: "price", label: "Set price", style: "primary", input: { type: "money", label: `Price of ${describeItem(p)}` } },
+    ...(choices.length > 0 ? [{ id: "item", label: "Pick item", input: { type: "choice" as const, label: "Priced as", options: choices.map((o) => ({ value: o.item, label: `${o.name} · ${formatMoney(o.cents, world.currency)}` })) } }] : []),
+  ];
 }
 
 /** A one-line label for a proposal chip; ids read as names (and money in the world's currency) when the world and state are given. */

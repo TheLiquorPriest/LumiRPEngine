@@ -8,6 +8,7 @@
 import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { Band } from "../../../shared/tables";
+import type { WorldDoc } from "../../../shared/world";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { bandOfJson, numOf, objOf, sliceOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
@@ -20,6 +21,8 @@ export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 export const MARKET = `${EXTERNAL_ACCOUNT_PREFIX}market`;
 export const DEFAULT_SYMBOL = "broad_us_equity_index";
+/** The outside account corrections post against (a ✎ cash fix, a GM money edit): money they add or remove comes from or goes to it, so the books still balance. Shown as "Correction". */
+export const CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
 
 export function external(id: string): string {
   return `${EXTERNAL_ACCOUNT_PREFIX}${id}`;
@@ -212,6 +215,20 @@ export function priceOf(ctx: Pick<ReadContext, "tables" | "world" | "state">, re
     clamped = unit !== n;
   }
   return { cents: Math.round(unit * qty), unitCents: unit, band, source: item ? "catalog" : "category", clamped, name: strOf(item?.name ?? cat?.name, ref.catalog ?? categoryId), category: categoryId };
+}
+
+/**
+ * The most a narrated price may charge for something no catalog row prices (DESIGN §9.5), in the
+ * world's minor units: the economy pack's `unpricedCap` when set; otherwise the highest price the
+ * world's catalog lists (the largest band maximum among its rows, before regional scaling), or 500
+ * major units when it lists none. A price the player states is never capped.
+ */
+export function unpricedCap(world: WorldDoc): number {
+  const set = world.packs.economy?.config.unpricedCap;
+  if (typeof set === "number" && Number.isFinite(set) && set > 0) return Math.round(set);
+  let top = 0;
+  for (const row of Object.values(world.tables["economy.catalog"]?.rows ?? {})) top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
+  return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
 
 /** Federal (+ FICA) and state withholding, in percent, for a person's occupation and region. */
