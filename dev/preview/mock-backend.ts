@@ -431,6 +431,12 @@ export class MockBackend {
         );
         return;
       }
+      case "lre.lore": {
+        // The preview's "Rosie's Diner" was indexed from Town lore, whose entry has changed since.
+        const content = "Rosie's opens at six and closes at two since the new lunch place opened. The booths by the window go first; the counter is for regulars.";
+        const drift = this.draft.lore.rosies_diner?.source?.kind === "book" && this.draft.lore.rosies_diner.source.hash === "stale" ? { rosies_diner: { status: "changed" as const, content, hash: "fresh" } } : {};
+        return this.result(reqId, "lre.lore", { drift: message.id === undefined || message.id === "rosies_diner" ? drift : {} });
+      }
     }
   }
 }

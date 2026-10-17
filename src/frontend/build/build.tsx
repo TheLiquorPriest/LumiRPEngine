@@ -19,6 +19,7 @@ import { JobView } from "./jobs";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { LookupTableEditor } from "./lookup-editor";
+import { LoreEditor, LoreList } from "./lore-editor";
 import { TableEditor } from "./table-editor";
 import { TiersEditor } from "./tiers-editor";
 
@@ -90,7 +91,7 @@ export function Build() {
     case "collection":
       return (
         <WithDraft worldId={route.worldId}>
-          <CollectionView collection={route.collection} />
+          {route.collection === "lore" ? <LoreList worldId={route.worldId} /> : <CollectionView collection={route.collection} />}
         </WithDraft>
       );
     case "item":
@@ -581,7 +582,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   const send = useMemo(() => draftSend(app), [app]);
   if (!draft) return null;
   const registered = app.catalog.editors.get(props.collection);
-  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : SchemaEditor;
+  const Editor = registered ? registered.component : props.collection === "tables" ? TableEditor : props.collection === "lore" ? LoreEditor : SchemaEditor;
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 

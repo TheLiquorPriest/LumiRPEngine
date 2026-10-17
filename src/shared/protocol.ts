@@ -283,6 +283,15 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
   );
 
+/**
+ * Lore curation (DESIGN §4.2). `drift`: the draft's entries indexed from a World Info book whose
+ * book entry changed since (its current text and hash) or is gone; `id` asks about one entry.
+ */
+export type LoreRequest = Request<"lre.lore"> & { op: "drift"; worldId: WorldId; id?: string };
+
+/** A book-sourced lore entry whose World Info entry changed since it was indexed (with its text now), or is gone. */
+export type LoreDrift = { status: "changed"; content: string; hash: string } | { status: "missing" };
+
 export type FrontendToBackend =
   | HelloRequest
   | ResyncRequest
@@ -299,7 +308,8 @@ export type FrontendToBackend =
   | EditorRequest
   | WorldRequest
   | UiRequest
-  | JobRequest;
+  | JobRequest
+  | LoreRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -356,6 +366,8 @@ export interface ResultBodies {
   "lre.ui": { done: true };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
+  /** `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are left out). */
+  "lre.lore": { drift?: Record<string, LoreDrift> };
 }
 
 export type ResultMessage = {

@@ -4,9 +4,9 @@
 
 import { hashParts } from "./hash";
 import type { TopicId } from "./ids";
-import { hasOwn, safeKey } from "./json";
+import { hasOwn, isRecord, safeKey } from "./json";
 import { STEP_OUTPUTS } from "./steps";
-import type { LoreEntryDef, LoreIndex, LoreSource, StepPurpose, WorldDoc } from "./world";
+import type { LoreIndex, LoreSource, StepPurpose, WorldDoc } from "./world";
 
 /** Every helper a secret entry's audience may name, in Settings' order. */
 export const LORE_AUDIENCE = Object.keys(STEP_OUTPUTS) as StepPurpose[];
@@ -14,9 +14,13 @@ export const LORE_AUDIENCE = Object.keys(STEP_OUTPUTS) as StepPurpose[];
 /** Steps that write prose: what they read can reach the narrator, so a secret entry naming one is linted. */
 export const PROSE_STEPS: readonly StepPurpose[] = ["brief", "outline", "choices"];
 
-/** An entry's source: one written before sources existed was authored. */
-export function loreSource(entry: Pick<LoreEntryDef, "source">): LoreSource {
-  return entry.source ?? { kind: "authored" };
+/** An entry's source as stored: a missing one (every entry written before sources existed) or a malformed one counts as authored. */
+export function loreSourceOf(raw: unknown): LoreSource {
+  if (!isRecord(raw)) return { kind: "authored" };
+  if (raw.kind === "book" && typeof raw.bookId === "string" && typeof raw.entryId === "string" && typeof raw.hash === "string") return { kind: "book", bookId: raw.bookId, entryId: raw.entryId, hash: raw.hash };
+  if (raw.kind === "chat" && typeof raw.chatId === "string" && typeof raw.messageId === "string") return { kind: "chat", chatId: raw.chatId, messageId: raw.messageId };
+  if (raw.kind === "ai" && (raw.status === "pending" || raw.status === "accepted")) return { kind: "ai", status: raw.status };
+  return { kind: "authored" };
 }
 
 /** The hash a book-sourced entry keeps of its World Info entry's text; another hash now means the book changed. */

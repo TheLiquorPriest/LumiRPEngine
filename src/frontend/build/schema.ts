@@ -325,15 +325,16 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "number", key: "version", label: "Format version", step: 1 },
     { kind: "json", key: "config", label: "Config" },
   ],
+  // Build's lore form (`lore-editor.tsx`) lays these out around the aliases, topics, source and audience.
   lore: [
     { kind: "text", key: "title", label: "Title" },
     { kind: "text", key: "content", label: "Content", multiline: true },
-    { kind: "tags", key: "keys", label: "Keys" },
+    { kind: "tags", key: "keys", label: "Keywords" },
     { kind: "refs", key: "links", label: "Links (entities and places)", collections: ["entities", "places"] },
     { kind: "text", key: "group", label: "Group", optional: true, hint: "Entries sharing a group are alternatives to each other" },
     { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
-    { kind: "bool", key: "secret", label: "Secret", hint: "Hidden until the gate holds" },
-    { kind: "expr", key: "gate", label: "Gate", optional: true },
+    { kind: "bool", key: "secret", label: "Secret", hint: "Only the helpers you pick read it, until the gate holds" },
+    { kind: "expr", key: "gate", label: "Gate (revealed once it holds)", optional: true },
   ],
   classifications: [
     { kind: "text", key: "label", label: "Label" },

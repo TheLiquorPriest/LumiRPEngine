@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { blankWorld, lintWorld, migrateWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
-import { addToLoreIndex, loreSource, termSuggestions, topicSuggestions } from "../../src/shared/lore";
+import { addToLoreIndex, loreSourceOf, termSuggestions, topicSuggestions } from "../../src/shared/lore";
 import type { LintIssue } from "../../src/shared/protocol";
 import type { LoreEntryDef, WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -48,7 +48,8 @@ describe("world lore lint", () => {
   test("an entry written before sources existed loads unchanged and counts as authored", () => {
     const old = world([entry("harbor")]);
     expect(migrateWorld(old)).toBe(old);
-    expect(loreSource(old.lore.harbor ?? entry("x"))).toEqual({ kind: "authored" });
+    expect(loreSourceOf(old.lore.harbor?.source)).toEqual({ kind: "authored" });
+    expect(loreSourceOf({ kind: "book", bookId: "b1" })).toEqual({ kind: "authored" });
     expect(loreIssues(old)).toEqual([]);
   });
 });

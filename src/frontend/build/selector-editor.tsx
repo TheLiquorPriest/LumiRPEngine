@@ -52,8 +52,9 @@ export function groupOptions(doc: WorldDoc): { value: EntityId; label: string }[
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-/** Free-form tags as removable chips, with an input that suggests tags already in use. Enter or a comma adds. */
-export function TagListInput(props: { label: string; value: readonly string[]; suggestions: readonly string[]; children?: ComponentChildren; onChange(next: string[]): void }) {
+/** Free-form tags as removable chips, with an input that suggests tags already in use. Enter or a comma adds. `noun` names an item ("alias"). */
+export function TagListInput(props: { label: string; value: readonly string[]; suggestions: readonly string[]; noun?: string; children?: ComponentChildren; onChange(next: string[]): void }) {
+  const noun = props.noun ?? "tag";
   const [text, setText] = useState("");
   const list = useId();
   const add = () => {
@@ -70,7 +71,7 @@ export function TagListInput(props: { label: string; value: readonly string[]; s
       {props.value.length > 0 ? (
         <div class="lre-inline">
           {props.value.map((tag) => (
-            <button key={tag} type="button" class="lre-btn small" aria-label={`Remove tag ${tag}`} onClick={() => props.onChange(props.value.filter((t) => t !== tag))}>
+            <button key={tag} type="button" class="lre-btn small" aria-label={`Remove ${noun} ${tag}`} onClick={() => props.onChange(props.value.filter((t) => t !== tag))}>
               {tag} ✕
             </button>
           ))}
@@ -81,7 +82,7 @@ export function TagListInput(props: { label: string; value: readonly string[]; s
           class="lre-input"
           style={{ flex: 1 }}
           list={list}
-          placeholder="Add a tag"
+          placeholder={`Add ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`}
           aria-label={`Add to ${props.label}`}
           value={text}
           onInput={(event) => setText(event.currentTarget.value)}

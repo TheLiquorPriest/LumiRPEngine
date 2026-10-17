@@ -5,7 +5,7 @@
 import type { Band, ChatId, DomainId, UserId, WorldId } from "../shared/ids";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
-import { hasOwn, isRecord } from "../shared/json";
+import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef } from "../shared/world";
@@ -28,6 +28,7 @@ import { activeRecord } from "../engine/ledger/path";
 import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
+import { bookDrift } from "./lore";
 import { ACTIVE_CONNECTION, declineNote, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
@@ -275,6 +276,12 @@ export class Dispatcher {
           await this.jobs.cancel(r.jobId, userId);
           reply("lre.job", { jobId: r.jobId });
         }
+        return;
+      }
+      case "lre.lore": {
+        const world = await this.rt.worlds.working(r.worldId, userId);
+        if (r.id !== undefined && !(safeKey(r.id) && hasOwn(world.lore, r.id))) throw new RequestError("not_found", "no such lore entry");
+        reply("lre.lore", { drift: await bookDrift(this.rt.host, world, userId, r.id) });
         return;
       }
     }
