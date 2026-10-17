@@ -11,8 +11,10 @@ import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, PlaceId, StageId, TrackId, Visibility } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
-import type { Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
+import type { LoreEntryDef, Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
 import { objectiveLabel, objectiveWhen } from "../shared/world";
+import { lorePhrases } from "../shared/lore";
+import type { ExprEnv } from "./expr";
 import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { Registry } from "./registry-impl";
 import { asObject, evalExpr, fieldDef, isGone, placeOfEntity, scopeEnv, truthy } from "./scope";
@@ -220,6 +222,36 @@ export function unrevealedTruths(world: WorldDoc, state: Readonly<WorldState>): 
     for (const [sid, s] of Object.entries(t.stages)) if (s.truth && !revealed.includes(sid)) out.push(s.truth);
   }
   return out;
+}
+
+/**
+ * Reads secret lore gates against one state, building the expression scope once. A gate that is
+ * missing, blank or can't be evaluated doesn't hold: the entry stays secret (fail closed).
+ */
+export function loreGateReader(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): (entry: LoreEntryDef) => boolean {
+  let env: ExprEnv | null = null;
+  return (entry) => {
+    if (typeof entry.gate !== "string" || entry.gate.trim() === "") return false;
+    try {
+      env ??= scopeEnv({ reg, ctx: reg.context(world, state), bindings: {} });
+      return truthy(evalExpr(entry.gate, env, false));
+    } catch {
+      return false;
+    }
+  };
+}
+
+/** The text of every secret lore entry whose gate doesn't hold, as the phrases the leak check looks for (`lorePhrases`). */
+export function secretLorePhrases(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+  const open = loreGateReader(reg, world, state);
+  const out: string[] = [];
+  for (const l of Object.values(world.lore)) if (l.secret === true && typeof l.content === "string" && !open(l)) out.push(...lorePhrases(l.content));
+  return out;
+}
+
+/** Every unrevealed secret a player view must never carry: tracks' unrevealed truths and gated secret lore. */
+export function unrevealedSecrets(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+  return [...unrevealedTruths(world, state), ...secretLorePhrases(reg, world, state)];
 }
 
 /** Strings in a JSON value that contain any of `secrets` (case-insensitive): a leak check for views and slots. */

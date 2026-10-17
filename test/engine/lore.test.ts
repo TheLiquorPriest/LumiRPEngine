@@ -45,6 +45,13 @@ describe("world lore lint", () => {
     expect(loreIssues(world([entry("harbor", { audience: ["outline"] })]))).toEqual([]);
   });
 
+  test("an entry nobody can read is flagged: known_by without links, or a visibility the search doesn't know", () => {
+    expect(loreIssues(world([entry("rumor", { visibility: "known_by" })]))).toEqual([{ severity: "warning", path: "lore.rumor.visibility", code: "no_links" }]);
+    // A world file can carry a value this engine doesn't know.
+    const odd = JSON.parse(JSON.stringify({ ...entry("rumor"), visibility: "gossip" })) as LoreEntryDef;
+    expect(loreIssues(world([odd]))).toEqual([{ severity: "warning", path: "lore.rumor.visibility", code: "unknown_visibility" }]);
+  });
+
   test("an entry written before sources existed loads unchanged and counts as authored", () => {
     const old = world([entry("harbor")]);
     expect(migrateWorld(old)).toBe(old);

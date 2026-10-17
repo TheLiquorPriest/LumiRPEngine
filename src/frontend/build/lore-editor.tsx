@@ -1,8 +1,8 @@
 // Build → Lore (DESIGN §4.2): the entries, searchable by title, alias, topic, keyword and text, with
 // the lookup table a tap away; and the entry form: title and text, aliases and topics as chips,
 // keywords and links, the source (read-only; an entry indexed from a World Info book whose entry
-// changed since can take the book's new text), and secrecy: the gate, and the helpers that may read
-// the secret, with a warning for those that write prose.
+// changed since can take the book's new text), who may read it, and secrecy: the gate, and the
+// helpers that may read the secret, with a note on those whose output reaches the player.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
@@ -28,7 +28,7 @@ function go(app: App, build: BuildRoute): void {
 const specs = (keys: readonly string[]) => COLLECTION_SPECS.lore.filter((s) => keys.includes(s.key));
 const TEXT = specs(["title", "content"]);
 const MORE = specs(["keys", "links", "group", "priority"]);
-const SECRET = specs(["secret"]);
+const SECRET = specs(["visibility", "secret"]);
 const GATE = specs(["gate"]);
 
 /** The world's book-sourced entries (or just `id`) whose book entry changed or is gone: asked again whenever their sources change. */
@@ -237,7 +237,7 @@ export function LoreEditor(props: EditorProps) {
     else delete out[key];
     setValue(out);
   };
-  const banners = lint.filter((issue: LintIssue) => issue.path === path || issue.path === `${path}.id` || issue.path === `${path}.links`);
+  const banners = lint.filter((issue: LintIssue) => issue.path === path || issue.path === `${path}.id` || issue.path === `${path}.links` || issue.path === `${path}.visibility`);
   const save = () =>
     run(async () => {
       const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "put", collection: "lore", id, value });
@@ -287,14 +287,14 @@ export function LoreEditor(props: EditorProps) {
               <label key={purpose} class="lre-row">
                 <span class="k">
                   {STEP_LABEL[purpose]}
-                  {PROSE_STEPS.includes(purpose) ? <span class="sub">Writes prose</span> : null}
+                  {PROSE_STEPS.includes(purpose) ? <span class="sub">Writes for the player: never reads a secret</span> : null}
                 </span>
                 <span class="lre-check">
                   <input type="checkbox" checked={audience.includes(purpose)} onChange={() => set("audience", audience.includes(purpose) ? audience.filter((p) => p !== purpose) : LORE_AUDIENCE.filter((p) => p === purpose || audience.includes(p)))} />
                 </span>
               </label>
             ))}
-            {prose.length > 0 ? <div class="lre-banner warn">{prose.map((p) => STEP_LABEL[p]).join(", ")} write{prose.length === 1 ? "s" : ""} prose: what {prose.length === 1 ? "it reads" : "they read"} can reach the narrator, this secret included.</div> : null}
+            {prose.length > 0 ? <div class="lre-banner warn">{prose.map((p) => STEP_LABEL[p]).join(", ")} write{prose.length === 1 ? "s" : ""} what the narrator or the player sees, so {prose.length === 1 ? "it never reads" : "they never read"} this secret before its gate holds.</div> : null}
             {lintAt(lint, `${path}.audience`).map((issue, i) => (
               <span key={`${issue.code}:${i}`} class="lre-small lre-warn">
                 {issue.message}

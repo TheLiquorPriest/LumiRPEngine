@@ -1,7 +1,9 @@
-// World lore lint (DESIGN §4.2): entry ids and links; secrets (a secret entry needs a gate, and a
-// helper that writes prose in its audience is flagged, since what that step writes can reach the
-// narrator); and the lookup table: entries it names that don't exist, blank or empty terms, terms
-// not in the form lookups match, and terms that are an entry's alias but lead elsewhere.
+// World lore lint (DESIGN §4.2): entry ids and links; who may read an entry (a `known_by` entry
+// needs links, since only knowing what it links lets a helper read it); secrets (a secret entry
+// needs a gate, and a step whose output reaches the narrator or the player is flagged in its
+// audience, since the lore search never gives it the secret); and the lookup table: entries it
+// names that don't exist, blank or empty terms, terms not in the form lookups match, and terms
+// that are an entry's alias but lead elsewhere.
 
 import { hasOwn } from "../shared/json";
 import { LORE_AUDIENCE, loreTerm, PROSE_STEPS } from "../shared/lore";
@@ -20,6 +22,9 @@ export function lintLore(world: WorldDoc): LintIssue[] {
   for (const [id, l] of Object.entries(world.lore)) {
     if (l.id !== id) push("error", `lore.${id}.id`, "id_mismatch", "the id must match its key");
     for (const link of l.links) if (!hasOwn(world.entities, link) && !hasOwn(world.places, link)) push("warning", `lore.${id}.links`, "missing_ref", `"${link}" is not an entity or place`);
+    const visibility: unknown = l.visibility;
+    if (visibility !== undefined && visibility !== "public" && visibility !== "known_by") push("warning", `lore.${id}.visibility`, "unknown_visibility", `"${String(visibility)}" isn't a lore visibility: no helper reads the entry`);
+    else if (visibility === "known_by" && l.secret !== true && l.links.length === 0) push("warning", `lore.${id}.visibility`, "no_links", `"${l.title}" is known by whoever knows what it links, and it links nothing: no helper reads it`);
     if (l.secret !== true) {
       if (truths.some((t) => l.content.toLowerCase().includes(t))) push("error", `lore.${id}.content`, "secret_truth", `"${l.title}" is public but carries a secret's truth; mark it secret, with a gate, so only the helpers you pick read it`);
       continue;
@@ -29,7 +34,7 @@ export function lintLore(world: WorldDoc): LintIssue[] {
     const unknown = audience.filter((s) => !LORE_AUDIENCE.includes(s));
     if (unknown.length > 0) push("warning", `lore.${id}.audience`, "unknown_step", `no helper is called ${unknown.map((s) => `"${String(s)}"`).join(", ")}`);
     const prose = audience.filter((s) => PROSE_STEPS.includes(s));
-    if (prose.length > 0) push("warning", `lore.${id}.audience`, "prose_audience", `secret lore "${l.title}" can be read by ${prose.join(", ")}, and what those steps write can reach the narrator`);
+    if (prose.length > 0) push("warning", `lore.${id}.audience`, "prose_audience", `secret lore "${l.title}" lists ${prose.join(", ")}, which never read a secret before its gate holds: what those steps write reaches the narrator or the player`);
   }
   // A world file's table may be malformed past the migration (a term's list that isn't one).
   const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);

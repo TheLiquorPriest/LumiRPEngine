@@ -342,6 +342,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "refs", key: "links", label: "Links (entities and places)", collections: ["entities", "places"] },
     { kind: "text", key: "group", label: "Group", optional: true, hint: "Entries sharing a group are alternatives to each other" },
     { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
+    { kind: "enum", key: "visibility", label: "Who may read it (Known by: once the player character knows everything it links)", values: ["public", "known_by"], optional: true },
     { kind: "bool", key: "secret", label: "Secret", hint: "Only the helpers you pick read it, until the gate holds" },
     { kind: "expr", key: "gate", label: "Gate (revealed once it holds)", optional: true },
   ],

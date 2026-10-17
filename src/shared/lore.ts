@@ -12,8 +12,29 @@ import type { LoreIndex, LoreSource, StepPurpose, WorldDoc } from "./world";
 /** Every helper a secret entry's audience may name, in Settings' order. */
 export const LORE_AUDIENCE = Object.keys(STEP_OUTPUTS) as StepPurpose[];
 
-/** Steps that write prose: what they read can reach the narrator, so a secret entry naming one is linted. */
-export const PROSE_STEPS: readonly StepPurpose[] = ["brief", "outline", "choices"];
+/**
+ * Steps whose output reaches the narrator or the player: prose, suggestions and proposals that
+ * become chips. They never read secret lore before its gate holds (the secrecy batching rule), so
+ * a secret entry naming one in its audience is linted.
+ */
+export const PROSE_STEPS: readonly StepPurpose[] = ["brief", "outline", "choices", "extract"];
+
+/**
+ * A secret entry's text as the leak check looks for it: each sentence or clause of at least four
+ * words, without quotes or end punctuation. A player-facing line carrying one of these word for
+ * word is dropped; a paraphrase isn't caught, which is why secret lore never shares a call with a
+ * step that writes for the player.
+ */
+export function lorePhrases(content: string): string[] {
+  const out: string[] = [];
+  for (const part of content.split(/[.!?…;:\n]+|\s[—–-]\s|—/)) {
+    const phrase = part
+      .replace(/^[\s"'“”‘’()[\]*_]+|[\s"'“”‘’()[\]*_,]+$/g, "")
+      .replace(/\s+/g, " ");
+    if (phrase.length >= 16 && phrase.split(" ").length >= 4 && !out.includes(phrase)) out.push(phrase);
+  }
+  return out;
+}
 
 /** An entry's source as stored: a missing one (every entry written before sources existed) or a malformed one counts as authored. */
 export function loreSourceOf(raw: unknown): LoreSource {

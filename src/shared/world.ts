@@ -715,9 +715,10 @@ export type LoreSource =
 
 /**
  * World lore (DESIGN §4.2): what the world knows, authored in Build, indexed from World Info books
- * or text, saved from a chat, or imported with a world. It is kept in the world document and not
- * delivered to the narrator yet; the engine-managed book holds slots only. A secret entry may hold
- * the secret itself: only the helpers in its `audience` read it, and only until its `gate` holds.
+ * or text, saved from a chat, or imported with a world. It is kept in the world document and read
+ * by RPEngine's own helpers through the lore search (`engine/lore.ts`), not delivered to the
+ * narrator yet; the engine-managed book holds slots only. A secret entry may hold the secret
+ * itself: only the helpers in its `audience` read it, and only until its `gate` holds.
  */
 export interface LoreEntryDef {
   id: string;
@@ -733,16 +734,22 @@ export interface LoreEntryDef {
   topics?: string[];
   /** Absent: authored. */
   source?: LoreSource;
-  /** Entries sharing a group are alternatives to each other. */
+  /** Entries sharing a group are alternatives to each other: a search returns the best of them. */
   group?: string;
   /** Higher comes first among otherwise equal entries. */
   priority?: number;
+  /**
+   * Who may read a non-secret entry: `public` (absent), or `known_by`, read only once the POV knows
+   * every person and place it links. Any other value hides the entry from every helper.
+   */
+  visibility?: "public" | "known_by";
   /** Secret lore is gated: it is revealed only once `gate` holds, and it needs one. */
   secret?: boolean;
   gate?: Expr;
   /**
-   * The helpers that may read a secret entry before its gate holds; none when absent. Steps that
-   * write prose (`brief`, `outline`, `choices`) can pass what they read on to the narrator (linted).
+   * The helpers that may read a secret entry before its gate holds; none when absent. Steps whose
+   * output reaches the narrator or the player (`brief`, `outline`, `choices`, `extract`) never
+   * read it, even when listed (linted).
    */
   audience?: StepPurpose[];
 }
