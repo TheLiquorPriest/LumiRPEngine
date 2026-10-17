@@ -9306,5 +9306,6 @@
     "supporting": {"label": "Supporting", "band": "supporting", "order": 1},
     "background": {"label": "Background", "band": "background", "order": 2}
   },
+  "classifications": {},
   "start": {"place": "harbor_street_114", "at": "2026-09-14T06:15"}
 }

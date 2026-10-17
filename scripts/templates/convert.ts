@@ -738,6 +738,7 @@ export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
     currency: { ...tpl.currency },
     pov: "pov",
     tiers: defaultTiers(),
+    classifications: {},
     start: { place: tpl.start.place, at: tpl.start.at },
   };
 }

@@ -7374,5 +7374,6 @@
     "supporting": {"label": "Supporting", "band": "supporting", "order": 1},
     "background": {"label": "Background", "band": "background", "order": 2}
   },
+  "classifications": {},
   "start": {"place": "market_square", "at": "0412-08-25T07:30"}
 }

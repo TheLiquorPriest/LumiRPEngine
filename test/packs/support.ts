@@ -91,6 +91,7 @@ export function baseWorld(patch: Partial<WorldDoc> = {}): WorldDoc {
     lenientPricing: false,
     pov: POV,
     tiers: defaultTiers(),
+    classifications: {},
     start: { place: "home", at: "2026-10-16T08:00" },
   };
   return { ...world, ...patch };

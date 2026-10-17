@@ -7591,5 +7591,6 @@
     "supporting": {"label": "Supporting", "band": "supporting", "order": 1},
     "background": {"label": "Background", "band": "background", "order": 2}
   },
+  "classifications": {},
   "start": {"place": "entrance_hall", "at": "1934-10-26T16:40"}
 }

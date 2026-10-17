@@ -139,6 +139,7 @@ export function modernUsWorld(id: string, name: string): WorldDoc {
     lenientPricing: true,
     pov: "you",
     tiers: defaultTiers(),
+    classifications: {},
     start: { place: "apartment", at: "2026-10-16T07:30" },
   };
 }

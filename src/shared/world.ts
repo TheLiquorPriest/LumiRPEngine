@@ -153,10 +153,49 @@ export interface EntityDef {
   characterId?: string;
   visibility?: Visibility;
   tags?: string[];
+  /** Classification values by facet (`WorldDoc.classifications`); a single-valued facet holds at most one. Read live from the world. */
+  class?: Record<FacetId, FacetValueId[]>;
   /** Import from lore (DESIGN §9.7): the `bookId/entryId` entries this came from; never edited. */
   sources?: string[];
   /** What the engine filled in rather than the lore, for review (DESIGN §9.7 "assumed"): fields from a data table, and `kind` when the lore named none. */
   assumed?: string[];
+}
+
+export type FacetId = string;
+export type FacetValueId = string;
+
+/** One value of a classification facet; `parent` nests it under a broader value ("villain" under "antagonist"). */
+export interface FacetValueDef {
+  label: string;
+  parent?: FacetValueId;
+  description?: string;
+}
+
+/** A world-defined way of classifying entities (story role, disposition…), DESIGN §4.1. */
+export interface FacetDef {
+  id: FacetId;
+  label: string;
+  /** Whether an entity may hold several values of this facet. */
+  multiple: boolean;
+  values: Record<FacetValueId, FacetValueDef>;
+  order?: number;
+  description?: string;
+}
+
+/**
+ * Which entities something applies to. Every constraint given must hold; a list matches any of
+ * its values; an empty selector matches every entity. Classes and tags are read live from the
+ * world (definitional); kind follows inheritance; tier and group membership come from state.
+ */
+export interface Selector {
+  ids?: EntityId[];
+  kind?: KindId[];
+  tier?: TierId[];
+  /** Facet → accepted values; an entity's value also matches when it nests under an accepted one. */
+  class?: Record<FacetId, FacetValueId[]>;
+  /** Members of any of these groups, directly or through a group that is itself a member. */
+  memberOf?: EntityId[];
+  tag?: string[];
 }
 
 export interface PlaceDef {
@@ -530,6 +569,8 @@ export interface WorldDoc {
   suppressed: SuppressedSource[];
   /** World lore by id (DESIGN §4.2): authored data, not delivered yet. */
   lore: Record<string, LoreEntryDef>;
+  /** Classification facets by id (DESIGN §4.1); entities hold values in `class`. */
+  classifications: Record<FacetId, FacetDef>;
   /** Action seeds: a fresh seed per Re-run, or `hash(runSeed, parent path, action)` (DESIGN §4.3). */
   seedMode: "fresh" | "same_roll";
   /** Lenient worlds accept a narrated price inside its band (DESIGN §9.5). */

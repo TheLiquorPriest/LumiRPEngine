@@ -212,6 +212,7 @@ export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh")
     currency: { ...DEFAULT_CURRENCY },
     pov: POV,
     tiers: defaultTiers(),
+    classifications: {},
     start: { place: "home", at: "2026-10-16T07:00" },
   };
 }

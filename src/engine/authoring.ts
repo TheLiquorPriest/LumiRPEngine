@@ -77,6 +77,7 @@ export function blankWorld(id: WorldId, name: string): WorldDoc {
     currency: { ...DEFAULT_CURRENCY },
     pov: "you",
     tiers: defaultTiers(),
+    classifications: {},
     start: { place: "home", at: "2026-01-01T08:00" },
   };
 }
@@ -105,14 +106,15 @@ export function currencyOf(v: unknown): WorldCurrency | null {
 export function migrateWorld(doc: WorldDoc): WorldDoc {
   const currency: unknown = doc.currency;
   const lore: unknown = doc.lore;
+  const classifications: unknown = doc.classifications;
   const steps: unknown = doc.steps;
   const hasTiers = isRecord(doc.tiers);
   const tiers = hasTiers ? doc.tiers : defaultTiers();
   const retired = isRecord(steps) ? Object.entries(steps).flatMap(([id, t]) => (isRecord(t) && t.purpose === "select" ? [id] : [])) : [];
   const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
   const legacyPov = pov?.tier === "pov" && !tierOf({ tiers }, "pov");
-  if (isCurrency(currency) && isRecord(lore) && hasTiers && retired.length === 0 && !legacyPov) return doc;
-  const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, tiers };
+  if (isCurrency(currency) && isRecord(lore) && isRecord(classifications) && hasTiers && retired.length === 0 && !legacyPov) return doc;
+  const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, tiers };
   if (retired.length > 0) {
     out.steps = { ...doc.steps };
     for (const id of retired) delete out.steps[id];
