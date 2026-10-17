@@ -21,6 +21,7 @@ import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { LookupTableEditor } from "./lookup-editor";
 import { LoreEditor, LoreList } from "./lore-editor";
 import { TableEditor } from "./table-editor";
+import { RulesetEditor } from "./ruleset-editor";
 import { TiersEditor } from "./tiers-editor";
 
 const COLLECTIONS: { id: WorldCollection; label: string; hint: string }[] = [
@@ -598,7 +599,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
-function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex">): JsonObject {
+function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset">): JsonObject {
   switch (part) {
     case "calendar":
       return doc.calendar as unknown as JsonObject;
@@ -608,9 +609,6 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
       return doc.time as unknown as JsonObject;
     case "meta":
       return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, currency: { ...doc.currency } };
-    case "ruleset":
-      // Absent in a world without one; saving an empty ruleset removes it again.
-      return isRecord(doc.ruleset) ? (doc.ruleset as unknown as JsonObject) : {};
   }
 }
 
@@ -621,10 +619,11 @@ function PartView(props: { part: WorldPart }) {
   if (!draft) return null;
   if (props.part === "tiers") return <TiersEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "tiers", value })} />;
   if (props.part === "loreIndex") return <LookupTableEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "loreIndex", value })} />;
+  if (props.part === "ruleset") return <RulesetEditor />;
   return <SchemaPartView part={props.part} />;
 }
 
-function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex"> }) {
+function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset"> }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const send = useMemo(() => draftSend(app), [app]);

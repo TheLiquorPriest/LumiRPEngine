@@ -74,26 +74,15 @@ export function decodeYouView(value: unknown): YouView | null {
   };
 }
 
-export function YouPanel(props: PanelProps) {
-  const view = decodeYouView(props.view);
+/**
+ * A designed sheet's sections as cards: rows with their pool bars and XP meters, and ✎ on the rows
+ * with a fix target. Play → You shows the POV's; Build's Sheet Designer previews the same cards.
+ */
+export function SheetSectionCards(props: { sections: readonly SheetSectionView[] }) {
   const [fixing, setFixing] = useState<string | null>(null);
-  if (props.view === null || props.view === undefined) return <Empty>No character sheet yet.</Empty>;
-  if (!view) return <JsonView value={props.view} />;
   return (
-    <div class="lre-stack" data-lre-panel="sheets.you">
-      <Card title={view.name} aside={view.tier ? <span class="lre-badge accent">{view.tier}</span> : null}>
-        {view.place || view.activity ? <div class="lre-muted">{[view.activity, view.place].filter((part) => part).join(" · ")}</div> : null}
-        {view.conditions.length > 0 ? (
-          <div class="lre-inline" style={{ marginTop: "6px" }}>
-            {view.conditions.map((c) => (
-              <span key={c} class="lre-badge warn">
-                {c}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </Card>
-      {view.sections.map((section) => (
+    <>
+      {props.sections.map((section) => (
         <Card key={section.title} title={section.title}>
           {section.rows.map((row) => {
             const key = `${section.title}:${row.label}`;
@@ -125,6 +114,29 @@ export function YouPanel(props: PanelProps) {
           })}
         </Card>
       ))}
+    </>
+  );
+}
+
+export function YouPanel(props: PanelProps) {
+  const view = decodeYouView(props.view);
+  if (props.view === null || props.view === undefined) return <Empty>No character sheet yet.</Empty>;
+  if (!view) return <JsonView value={props.view} />;
+  return (
+    <div class="lre-stack" data-lre-panel="sheets.you">
+      <Card title={view.name} aside={view.tier ? <span class="lre-badge accent">{view.tier}</span> : null}>
+        {view.place || view.activity ? <div class="lre-muted">{[view.activity, view.place].filter((part) => part).join(" · ")}</div> : null}
+        {view.conditions.length > 0 ? (
+          <div class="lre-inline" style={{ marginTop: "6px" }}>
+            {view.conditions.map((c) => (
+              <span key={c} class="lre-badge warn">
+                {c}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </Card>
+      <SheetSectionCards sections={view.sections} />
     </div>
   );
 }

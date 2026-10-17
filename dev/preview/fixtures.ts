@@ -573,13 +573,28 @@ export function worldFixture(): WorldDoc {
     packs: { calendar: { version: 1, config: {} }, space: { version: 1, config: {} }, economy: { version: 1, config: { region: "us-oh" } }, story: { version: 1, config: {} } },
     pins: { generators: { "economy.wallet": 1, "gear.glovebox": 2 }, tables: { "economy.catalog": "9c1d0e7a55aa12bb", "economy.regions": "41aa88d0c3e2f1a9" } },
     kinds: {
-      person: { id: "person", label: "Person", fields: { cash: { type: "money", label: "Cash", min: 0, domain: "money", level: 2 }, energy: { type: "number", min: 0, max: 100, label: "Energy" }, mood: { type: "enum", values: ["calm", "happy", "tense"] }, job: { type: "text" } } },
+      person: {
+        id: "person",
+        label: "Person",
+        fields: {
+          cash: { type: "money", label: "Cash", min: 0, domain: "money", level: 2 },
+          energy: { type: "number", min: 0, max: 100, label: "Energy" },
+          mood: { type: "enum", values: ["calm", "happy", "tense"] },
+          job: { type: "text" },
+          xp: { type: "number", label: "XP", min: 0, default: 0 },
+          level: { type: "number", label: "Level", min: 1, default: 1 },
+          might: { type: "number", label: "Might", default: 10 },
+          might_mod: { type: "number", label: "Might mod", derived: "floor((self.might - 10) / 2)" },
+          hp_max: { type: "number", label: "Max HP", derived: "10 + self.might_mod * 2" },
+          hp: { type: "number", label: "Hit points", pool: { max: "hp_max" } },
+        },
+      },
       npc: { id: "npc", label: "NPC", extends: "person", fields: { schedule: { type: "ref", label: "Schedule" }, wariness: { type: "number", derived: "100 - energy" } } },
       vehicle: { id: "vehicle", label: "Vehicle", pack: "vehicles", fields: { fuel: { type: "number", min: 0, max: 100, domain: "vehicles", level: 2 }, owner: { type: "ref", ref: "person" } } },
     },
     relations: { roommate: { id: "roommate", label: "Roommate", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: {} } },
     entities: {
-      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "principal", fields: { cash: 4600, energy: 62, job: "Server" }, relations: [{ type: "roommate", to: "npc_dev" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant", since: "2025-06-01" } }, { type: "member_of", to: "diner_crew", fields: { role: "Server", rank: 2 } }], class: { story_role: ["lead"] } },
+      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "principal", fields: { cash: 4600, energy: 62, job: "Server", xp: 450, level: 2, might: 14, hp: 9 }, relations: [{ type: "roommate", to: "npc_dev" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant", since: "2025-06-01" } }, { type: "member_of", to: "diner_crew", fields: { role: "Server", rank: 2 } }], class: { story_role: ["lead"] } },
       npc_rosie: { id: "npc_rosie", kind: "npc", name: "Rosie Alvarez", tier: "principal", fields: { cash: 120000, mood: "calm" }, relations: [{ type: "member_of", to: "diner_crew", fields: { role: "Owner", rank: 1 } }], agent: true, class: { story_role: ["mentor"], secret: ["in_debt"] }, tags: ["early_riser"] },
       npc_dev: { id: "npc_dev", kind: "npc", name: "Dev Patel", tier: "regulars", fields: { mood: "happy" }, relations: [{ type: "owns", to: "boat1" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant" } }], agent: true, class: { story_role: ["best_friend"] }, tags: ["mechanic", "night_owl"] },
       npc_mara: { id: "npc_mara", kind: "npc", name: "Mara Kim", tier: "supporting", fields: { mood: "calm" }, relations: [{ type: "member_of", to: "diner_crew", fields: { role: "Cook", rank: 2 } }], class: { story_role: ["rival"], secret: ["informant"] }, tags: ["night_owl"] },
@@ -693,6 +708,18 @@ export function worldFixture(): WorldDoc {
       regulars: { label: "Regulars", band: "supporting", order: 1, agentDefault: true, description: "The diner's daily faces: they keep their own routines." },
       supporting: { label: "Supporting", band: "supporting", order: 2 },
       background: { label: "Background", band: "background", order: 3 },
+    },
+    ruleset: {
+      minLevels: { sheets: 3 },
+      progression: {
+        character: { label: "Level", xpField: "xp", levelField: "level", thresholds: [0, 300, 900, 2700, 6500], maxLevel: 5, kind: "person", onLevel: [{ type: "add", args: { entity: "self", field: "might", delta: "=level % 2 == 0 ? 1 : 0" } }] },
+      },
+      sheet: {
+        sections: [
+          { id: "vitals", label: "Vitals", rows: [{ pool: "hp" }, { progression: "character" }, { field: "energy" }] },
+          { id: "abilities", label: "Abilities", rows: [{ field: "might" }, { formula: "self.might_mod >= 0 ? \"+\" + self.might_mod : self.might_mod", label: "Might modifier" }, { field: "cash" }] },
+        ],
+      },
     },
     start: { place: "apartment", at: "2026-10-19T07:00" },
   });

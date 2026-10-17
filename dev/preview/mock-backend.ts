@@ -11,6 +11,13 @@ import type { WorldDoc } from "../../src/shared/world";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
 import { extractionView, freshFixture, gmFixture, pausedFixture, settingsFixture, starterMap, stateFixture, WORLDS, worldFixture } from "./fixtures";
+import { previewSheet } from "../../src/engine/authoring";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { formulaFunctions } from "../../src/engine/scope";
+import { ALL_PACKS } from "../../src/packs/index";
+
+// The real registry, so Build's formula functions and the Sheet Designer preview are the engine's own.
+const REGISTRY = createRegistry(ALL_PACKS);
 
 type Emit = (payload: unknown) => void;
 
@@ -343,6 +350,7 @@ export class MockBackend {
             return this.result(reqId, "lre.world", {
               world: structuredClone(this.world),
               lint: [],
+              functions: formulaFunctions(REGISTRY),
               packKinds: {
                 thing: { id: "thing", label: "Thing", pack: "space", fields: {} },
                 person: { id: "person", label: "Person", extends: "thing", pack: "space", fields: {} },
@@ -385,6 +393,11 @@ export class MockBackend {
           case "attach":
           case "upgrade":
             return this.result(reqId, "lre.world", {});
+          case "sheet": {
+            // As the backend does: the draft with the unsaved ruleset, read on the POV unless another entity is named.
+            const world: WorldDoc = { ...structuredClone(this.draft), ruleset: isRecord(message.ruleset) ? (message.ruleset as unknown as WorldDoc["ruleset"]) : undefined };
+            return this.result(reqId, "lre.world", { sheet: previewSheet(REGISTRY, world, message.entity) });
+          }
         }
         return;
       case "lre.editor": {
@@ -398,6 +411,8 @@ export class MockBackend {
           if (typeof message.value.spawnTier === "string") this.draft.spawnTier = message.value.spawnTier;
           else delete this.draft.spawnTier;
         }
+        // An empty ruleset is no ruleset, as the backend stores it.
+        else if (message.op === "set" && message.part === "ruleset" && isRecord(message.value) && Object.keys(message.value).length === 0) delete this.draft.ruleset;
         else if (message.op === "set") (this.draft as unknown as Record<string, JsonValue>)[message.part] = message.value;
         // As the backend does on every write: the map's places, grid and routes follow it.
         this.draft = compileMaps(this.draft);

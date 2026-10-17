@@ -2,7 +2,7 @@
 // Kept pure so the mapping from a tap to its message is tested directly.
 
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId } from "../shared/ids";
+import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId, WorldId } from "../shared/ids";
 import type { KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
 import type { EditOp } from "../shared/protocol";
@@ -117,4 +117,13 @@ export function timeMarker(chatId: ChatId, control: TimeControl, scope: TimeScop
 /** A `resolve` marker: promote or demote a domain on the running chat, optionally as a preview. */
 export function resolveMarker(chatId: ChatId, domain: DomainId, scope: ResolveScope, to: Level, preview = false): Req<"lre.marker"> {
   return preview ? { type: "lre.marker", chatId, kind: "resolve", domain, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "resolve", domain, scope, to };
+}
+
+/**
+ * The Sheet Designer's live preview (`lre.world sheet`): the ruleset as edited, saved or not, read
+ * on the draft's POV unless another entity is named. Absent parts go as absent, so a ruleset
+ * without a sheet previews as none.
+ */
+export function sheetPreviewRequest(worldId: WorldId, ruleset: JsonObject, entity?: EntityId): Req<"lre.world"> {
+  return entity === undefined ? { type: "lre.world", op: "sheet", worldId, ruleset } : { type: "lre.world", op: "sheet", worldId, ruleset, entity };
 }

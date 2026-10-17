@@ -346,8 +346,8 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   ],
 };
 
-/** The schema-driven singletons; Tiers and the lore lookup table have their own editors (`tiers-editor.tsx`, `lookup-editor.tsx`). */
-export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex">, FieldSpec[]> = {
+/** The schema-driven singletons; Tiers, Ruleset and the lore lookup table have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`). */
+export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset">, FieldSpec[]> = {
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
     { kind: "text", key: "epoch", label: "Epoch (local ISO, e.g. 2026-10-16T06:00)" },
@@ -391,11 +391,6 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex">, Field
     { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
     { kind: "levels", key: "levels", label: "Domain levels" },
     { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
-  ],
-  ruleset: [
-    { kind: "levels", key: "minLevels", label: "Level floors (the lowest level this ruleset plays each domain at)" },
-    { kind: "json", key: "progression", label: "Progression", optional: true, hint: '{"character": {"label": "Level", "xpField": "xp", "levelField": "level", "thresholds": [0, 300, 900], "onLevel": [{"type": "add", "args": {"entity": "self", "field": "skill_points", "delta": 2}}]}}' },
-    { kind: "json", key: "sheet", label: "Sheet layout", optional: true, hint: '{"sections": [{"id": "vitals", "label": "Vitals", "rows": [{"pool": "hp"}, {"progression": "character"}, {"field": "might"}, {"formula": "stat_mod(self, \'might\')", "label": "Might mod"}]}]}' },
   ],
   time: [
     { kind: "record", key: "sceneTicks", label: "Default tick per scene type (min)", keyLabel: "Scene type", item: { kind: "number", key: "", label: "Minutes", min: 0, step: 0.5 } },
