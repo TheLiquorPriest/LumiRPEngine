@@ -603,6 +603,27 @@ Without the grid system, walls and doors are drawn, not walked: travel inside a 
 
 The **map editor** (open a map from **Maps**, or **+ New**) checks the JSON as you type, against the format and against the rest of the world, and marks each problem on its line: rows of different lengths, a character the legend doesn't know, a place outside the grid, a link to a place that doesn't exist, an id another place already has. **Insert template** gives you a small grid or node map to start from, **Tidy** lays the JSON out a field per line, and a preview draws the map as Play will show it.
 
+### Rulesets and profiles
+
+A profile is a ready-made ruleset to start from; once applied, everything it added is yours to edit. Open **Build → World → Ruleset → Start from a profile…** and pick one:
+
+- **Modern**: contemporary heroes on a d20. Six abilities (10 is average) with modifiers of (score − 10) ÷ 2 rounded down; **Defense** of 10 + Dexterity + a level bonus + an equipment bonus; twelve skills with ranks (Athletics, Drive, Stealth, Computers, Investigate, Repair, Notice, Sense Motive, Treat Injury, Persuade, Bluff, Intimidate); Fortitude, Reflex and Will; **Action Points**, which **Push a skill** spends to add 1d6 to the roll and each new level refills; HP from Constitution; Reputation; and levels at 0, 1,000, 3,000, 6,000 XP and so on.
+- **Classic**: d20 fantasy of the 3.x style. Base attack and saves on good, average or poor progressions (each character's progression is a field), thirteen skills with ranks, Armor Class, HP from a hit die, and the same XP scale.
+- **Fifth**: d20 adventure of the fifth-edition style. A proficiency bonus by level (+2 to +6), skills at proficiency 0, 1 or 2 (2 is expertise, twice the bonus), two proficient saves, Armor Class, **Dodge** (attacks on you roll with disadvantage until your next turn), and hit dice: a **Short rest** spends one to heal, a **Long rest** heals fully and regains half. A well-told approach earns advantage rather than a bonus.
+- **Custom**: the least to grow from: one stat (Skill), one check (**Try something**), an HP pool whose max is a formula, a plain attack, and a progression with level 1 only.
+
+Every d20 profile has **Use a skill** and **Make a save**, with one palette option per skill or save and its exact odds; the difficulty is moderate (10) unless the action is given easy, hard, very hard or a number. In an attack a natural 1 always misses and a natural 20 is a critical (the damage dice roll twice). **Total defense** (Dodge in Fifth) lasts until your next turn, and **Rest for the night** heals. Each profile also brings Balanced checks, a Sheets 3 floor so modifiers count under any realism, a sheet for **Play → You** and combat rules; the focus stays on skills and talking your way through, and fights are there when the story needs them.
+
+**What applying does.** The picker previews the profile on your draft: the fields it adds to your character's kind (in the starters, Character), and the checks, actions, data tables and ruleset parts it adds. Anything already in the world with the same id and different content is listed with **Keep mine** (the default) or **Take the profile's**, and items that already match are counted. Everyone of that kind reads the new fields' defaults; nobody's stored values change unless a new field can't hold one (a level of 0 under a minimum of 1), and the preview lists those. **Apply to draft** writes it all at once and lint runs as usual; applying the same profile again changes nothing ("Nothing to apply"). Save or revert your own ruleset edits first.
+
+**Adapting it.** A profile is ordinary data, so you change it like anything else:
+- **Level your own way.** The XP thresholds are a column of the profile's level table (Modern levels, Classic levels, Fifth levels) or a list in **Progression**; change them, set a **Top level**, or add effects **On each level gained** (Modern refills Action Points there, Fifth adds a hit die). Custom starts at level 1 only: give it thresholds such as "0, 100, 250".
+- **XP trackers.** XP is a number field. Add it with the `award` effect from quest rewards, track stages, rules (one on `combat.end` rewards a fight) or action outcomes, or correct it with ✎ on the sheet; crossing a threshold levels up. A second progression on other fields (milestones, renown) runs beside the first.
+- **Skills and saves** are rows of the profile's skills and saves tables: add a row (its label and the modifier field it adds) and a number field of the same id for the ranks, and **Use a skill** offers it. Any action can do the same: a text parameter with a `table` offers that table's rows.
+- **Everything else** is a formula or a field: Defense or max HP, a check's bands, each character's `damage` dice, the action economy, the sheet.
+
+The profiles are original implementations of common tabletop mechanics: neutral names and numbers, no rules text.
+
 ### Checks, pools, progression and sheets
 
 These are the pieces a tabletop ruleset is built from. They work the same whatever ruleset you write.
