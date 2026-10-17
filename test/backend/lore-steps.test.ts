@@ -419,4 +419,47 @@ describe("lookup instructions and answers", () => {
     // interpret is in the secret's audience, so it can read an entry under that topic.
     expect(stepLore(world, "interpret").instructions("need")).toContain("Topics: Harbor life, The ferryman's fraud.");
   });
+
+  /** A world with `count` entries filed under the topic "Harbor" by naming it. */
+  const harbor = (count: number): WorldDoc => {
+    const world = baseWorld();
+    for (let i = 0; i < count; i++) world.lore[`note_${i}`] = { id: `note_${i}`, title: `Harbor note number ${i} about the old docks and tides`, content: "x", keys: [], links: [], topics: ["Harbor"] };
+    return world;
+  };
+  const estimate = (t: string): number => Math.ceil(t.length / 3.2);
+
+  test("a lore_list answer names entries within the round's lore tokens, and at most a dozen", () => {
+    const tight = stepLore(harbor(400), "interpret", 50);
+    const answer = tight.answer([
+      { kind: "list", text: "Harbor" },
+      { kind: "list", text: "Harbor" },
+      { kind: "list", text: "Harbor" },
+    ]);
+    const named = [...answer.matchAll(/\[note_\d+\] Harbor note number \d+ about the old docks and tides/g)].map((m) => m[0]);
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.reduce((s, line) => s + estimate(line), 0)).toBeLessThanOrEqual(50);
+    expect(estimate(answer)).toBeLessThan(200);
+    // Each list still reports what it found.
+    expect(tight.trace.queries.map((q) => q.matched)).toEqual([400, 400, 400]);
+    const roomy = stepLore(harbor(400), "interpret", 100_000).answer([{ kind: "list", text: "Harbor" }]);
+    expect([...roomy.matchAll(/\[note_\d+\]/g)]).toHaveLength(12);
+    expect(roomy).toContain("(and 388 more");
+  });
+
+  test("a call to a tool that isn't a lore tool is refused, never run as a search", () => {
+    const lore = stepLore(harbor(3), "interpret");
+    const asks = lore.asked({ content: "", finishReason: "tool_calls", tokens: 0, toolCalls: [{ name: "delete_lore", args: { query: "Harbor" }, callId: "c1" }, { name: "lore_search", args: { query: "Harbor" }, callId: "c2" }] }, "tools");
+    expect(asks?.map((a) => a.kind)).toEqual(["refused", "search"]);
+    const answer = lore.answer(asks ?? []);
+    expect(answer).toContain("delete_lore: not a lore tool");
+    expect(lore.trace.queries).toEqual([{ kind: "search", text: "Harbor", matched: 3 }]);
+    expect(lore.trace.notes.some((n) => n.includes("isn't a lore tool"))).toBe(true);
+  });
+
+  test("the model's ask is replayed as only the calls the round answered", () => {
+    const lore = stepLore(harbor(3), "interpret");
+    const reply = { content: "", finishReason: "tool_calls", tokens: 0, toolCalls: ["first", "second", "third", "fourth", "fifth"].map((query, i) => ({ name: "lore_search", args: { query }, callId: `c${i}` })) };
+    expect(lore.asked(reply, "tools")?.map((a) => a.text)).toEqual(["first", "second", "third"]);
+    expect(lore.echo(reply, "tools").split("\n")).toEqual(['lore_search {"query":"first"}', 'lore_search {"query":"second"}', 'lore_search {"query":"third"}']);
+  });
 });

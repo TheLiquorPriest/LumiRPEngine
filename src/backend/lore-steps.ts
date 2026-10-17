@@ -41,9 +41,9 @@ export interface LoreInputs {
 /** How a step's lookups reach its model. */
 export type LookupTransport = "tools" | "need";
 
-/** One thing the model asked to read. */
+/** One thing the model asked to read, or (`refused`) a call to a tool that isn't a lore tool, by its name. */
 export interface LoreAsk {
-  kind: "search" | "get" | "list";
+  kind: "search" | "get" | "list" | "refused";
   text: string;
   topic?: string;
 }
@@ -58,6 +58,8 @@ export interface TraceWithheld {
 
 /** Hits a prefetch or a search may give; the token budget usually binds first. */
 const SEARCH_LIMIT = 6;
+/** Entries one `lore_list` answer names; the round's lore tokens usually bind first. */
+const LIST_LIMIT = 12;
 /** Asks one lookup round answers; the rest of a round's asks are dropped. */
 const ROUND_ASKS = 3;
 /** How much of a query the trace keeps. */
@@ -273,6 +275,8 @@ export class StepLore {
       return calls.slice(0, ROUND_ASKS).map((c): LoreAsk => {
         if (c.name === "lore_get") return { kind: "get", text: text(c.args, "id") };
         if (c.name === "lore_list") return { kind: "list", text: text(c.args, "topic") };
+        // A tool the step never offered is refused: running it as a search would read what it didn't ask for.
+        if (c.name !== "lore_search") return { kind: "refused", text: c.name.slice(0, 64) };
         const topic = text(c.args, "topic");
         return { kind: "search", text: text(c.args, "query"), ...(topic !== "" ? { topic } : {}) };
       });
@@ -293,10 +297,26 @@ export class StepLore {
     let left = this.setting.tokens;
     const parts: string[] = [];
     for (const a of asks) {
+      if (a.kind === "refused") {
+        this.note("The model called a tool that isn't a lore tool, so it was refused.");
+        parts.push(`${a.text}: not a lore tool, so nothing was run; the lore tools are lore_search, lore_get and lore_list`);
+        continue;
+      }
       if (a.kind === "list") {
         const listed = loreList(this.reader, a.text, this.purpose, this.effects);
         this.trace.queries.push({ kind: "list", text: this.shown("list", a.text), matched: listed.length });
-        parts.push(`lore_list "${a.text}": ${listed.length === 0 ? "nothing under that topic" : listed.map((l) => `[${l.id}] ${l.title}`).join("; ")}`);
+        // A list names entries within the round's lore tokens, as a search's snippets are.
+        const lines: string[] = [];
+        for (const l of listed.slice(0, LIST_LIMIT)) {
+          const line = `[${l.id}] ${l.title}`;
+          const cost = this.reader.tokens(line);
+          if (cost > left) break;
+          lines.push(line);
+          left -= cost;
+        }
+        if (lines.length > 0) this.counted(lines);
+        const more = listed.length - lines.length;
+        parts.push(`lore_list "${a.text}": ${listed.length === 0 ? "nothing under that topic" : lines.length === 0 ? `${listed.length} under that topic, with no room left to name them` : `${lines.join("; ")}${more > 0 ? ` (and ${more} more; search under the topic to narrow it)` : ""}`}`);
         continue;
       }
       let result: LoreResult;
@@ -314,10 +334,10 @@ export class StepLore {
     return `Lore you asked for:\n${parts.join("\n")}`;
   }
 
-  /** The model's ask as the conversation's assistant turn. */
+  /** The model's ask as the conversation's assistant turn: only the calls the round answered. */
   echo(reply: QuietResult, transport: LookupTransport): string {
     if (transport === "need") return reply.content;
-    const calls = (reply.toolCalls ?? []).map((c) => `${c.name} ${JSON.stringify(c.args)}`).join("\n");
+    const calls = (reply.toolCalls ?? []).slice(0, ROUND_ASKS).map((c) => `${c.name} ${JSON.stringify(c.args)}`).join("\n");
     return [reply.content.trim(), calls].filter((s) => s !== "").join("\n");
   }
 }
