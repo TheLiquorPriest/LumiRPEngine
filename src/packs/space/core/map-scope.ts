@@ -34,7 +34,7 @@ export interface MapPlaceView {
   visited: boolean;
 }
 
-/** A thing lying at a cell of a grid, as the POV saw it there. */
+/** A thing lying at a cell of a grid, where the POV sees it. */
 export interface MapItemView {
   id: EntityId;
   name: string;
@@ -63,7 +63,7 @@ export interface MapGridView {
   pov?: { x: number; y: number };
   /** In fog, the cells shown (a cell set, `shared/grid` `hasCell`); the rest lie under fog. Absent by knowledge. */
   seen?: string;
-  /** Things lying at cells of this grid that the POV has seen there. */
+  /** Things lying at cells of this grid where the POV sees them now: in its sight on the grid it stands on with the grid system, else in its place. */
   items?: MapItemView[];
 }
 

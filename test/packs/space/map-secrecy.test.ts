@@ -216,3 +216,26 @@ describe("routes on the map", () => {
     expect(line?.modes.walk?.minutes).toBe(10);
   });
 });
+
+describe("things lying in cells", () => {
+  const items = (view: MapView) => (view.scopes.find((s) => s.id === "inn")?.grid?.items ?? []).map((i) => [i.id, i.x, i.y]);
+
+  test("with the grid system, a thing shows only while the POV has it in sight: moved out of sight, it isn't shown where it went", () => {
+    const { w, act } = play(inn("fog"));
+    expect(items(buildMapView(w.ctx))).toEqual([["lantern", 5, 3]]);
+    expect(act("step", { x: 8, y: 2 }).ok).toBe(true);
+    w.apply({ type: "set", entity: "lantern", field: "x", value: 1 });
+    w.apply({ type: "set", entity: "lantern", field: "y", value: 1 });
+    expect(items(buildMapView(w.ctx))).toEqual([]);
+    expect(act("step", { x: 3, y: 2 }).ok).toBe(true);
+    expect(items(buildMapView(w.ctx))).toEqual([["lantern", 1, 1]]);
+  });
+
+  test("without it, a thing shows only in the place the POV is in", () => {
+    const { w } = play(inn("knowledge", false));
+    expect(items(buildMapView(w.ctx))).toEqual([["lantern", 5, 3]]);
+    w.apply({ type: "set", entity: "lantern", field: "place", value: "kitchen" });
+    w.apply({ type: "set", entity: "lantern", field: "x", value: 8 });
+    expect(items(buildMapView(w.ctx))).toEqual([]);
+  });
+});

@@ -5,12 +5,12 @@
 // stand-in (an opaque id and "Somewhere") everywhere the view names it, and is never somewhere to
 // travel to. The view is built for the chat's display (DESIGN §12): its grids carry only the cells
 // the POV is shown, the cells of places it can't see as nothing in either display, and in fog the
-// cells it hasn't seen as blank ground. A grid carries the POV's cell when it stands on it; things
-// lying in cells show once the POV has seen them there.
+// cells it hasn't seen as blank ground. A grid carries the POV's cell when it stands on it; a thing
+// lying in a cell shows only where the POV sees it now, never where it once saw it.
 
 import type { JsonObject } from "../../../shared/json";
 import type { ActionId, PlaceId, TravelMode } from "../../../shared/ids";
-import { addCells, areaOf, cellIndex, gridOf, hasCell, standingGrid } from "../../../shared/grid";
+import { addCells, areaOf, cellIndex, gridOf, hasCell, sightCells, standingGrid } from "../../../shared/grid";
 import { mapSettingsOf } from "../../../shared/maps";
 import type { GridDef, MapDisplay, WorldDoc } from "../../../shared/world";
 import type { ReadContext } from "../../../engine/registry";
@@ -40,8 +40,12 @@ export interface MapView {
   travel: { to: PlaceId; label: string; mode: TravelMode; minutes: number; cents?: number; vehicle?: string; action: ActionId; params: JsonObject; disabled?: string }[];
 }
 
-/** The things lying at cells of a scope's grid that the POV has seen there: on a seen cell while cells are tracked, else in a place it has been; never on a cell it isn't shown. */
-function itemsOn(ctx: ReadContext, scope: PlaceId, grid: GridDef, seen: string | undefined, cells: CellView): MapItemView[] {
+/**
+ * The things lying at cells of a scope's grid where the POV sees them now: in its `sight` while the
+ * grid system is on (none on a grid it doesn't stand on), else in the place it is in (`here`). One
+ * it saw elsewhere, or that moved since, isn't shown where it lies now; none on a cell it isn't shown.
+ */
+function itemsOn(ctx: ReadContext, scope: PlaceId, grid: GridDef, cells: CellView, sight: ReadonlySet<number> | null, here: PlaceId | null): MapItemView[] {
   const { world, state } = ctx;
   const out: MapItemView[] = [];
   for (const id of Object.keys(state.entities).sort()) {
@@ -52,7 +56,7 @@ function itemsOn(ctx: ReadContext, scope: PlaceId, grid: GridDef, seen: string |
     if (typeof x !== "number" || typeof y !== "number") continue;
     const index = cellIndex(grid, { x, y });
     if (index === null || cells.blank.has(index) || cells.void.has(index) || kindIs(ctx.registry, world, e.kind, "person") || isGone(state, id) || !canSeeEntity(ctx.registry, world, state, world.pov, id)) continue;
-    if (seen !== undefined ? !hasCell(seen, index) : placeVisit(state, place) === null) continue;
+    if (sight !== null ? !sight.has(index) : place !== here) continue;
     out.push({ id, name: e.name, x, y });
   }
   return out;
@@ -114,6 +118,8 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
   const fields = own(state.entities, world.pov)?.fields;
   const pov = stand && typeof fields?.x === "number" && typeof fields.y === "number" && cellIndex(stand.grid, { x: fields.x, y: fields.y }) !== null ? { x: fields.x, y: fields.y } : undefined;
   const ids = [...children.values()].flat().filter(filter.drawn).sort(byShownId(filter));
+  // What the POV sees from where it stands now, while the grid system tracks sight (DESIGN §7).
+  const sight = settings.grid.movement && stand && pov ? new Set(sightCells(stand.grid, pov, settings.grid.sightRadius)) : new Set<number>();
   const trail = (id: PlaceId): MapScopeView["trail"] => [
     ...(roots.length > 0 ? [{ id: null, name: WORLD_SCOPE_NAME }] : []),
     ...placePath(world, id)
@@ -134,7 +140,8 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
     const seen = settings.grid.movement ? (cellsSeen(state, id, grid.width) ?? "") : undefined;
     const unvisited = (children.get(id) ?? []).filter((p) => filter.drawn(p) && filter.known(p) && !filter.visited(p) && !inside.has(p));
     const cells = cellsShown(ctx, grid, display, seen, unvisited);
-    scopes.push(scopeView(world, id, filter, { level, trail: trail(id), children, cells, items: itemsOn(ctx, id, grid, seen, cells), ...(pov && stand?.scope === id ? { pov } : {}), ...(cells.seen !== undefined ? { seen: cells.seen } : {}) }));
+    const inSight = settings.grid.movement ? (stand?.scope === id ? sight : new Set<number>()) : null;
+    scopes.push(scopeView(world, id, filter, { level, trail: trail(id), children, cells, items: itemsOn(ctx, id, grid, cells, inSight, here), ...(pov && stand?.scope === id ? { pov } : {}), ...(cells.seen !== undefined ? { seen: cells.seen } : {}) }));
   }
   const scope = defaultScope(world, here, children, filter);
   const shownScope = scope === null ? null : filter.shown(scope);
