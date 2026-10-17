@@ -28,7 +28,7 @@ import { activeRecord } from "../engine/ledger/path";
 import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
-import { bookDrift } from "./lore";
+import { bookDrift, saveFromChat } from "./lore";
 import { ACTIVE_CONNECTION, declineNote, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
@@ -279,6 +279,12 @@ export class Dispatcher {
         return;
       }
       case "lre.lore": {
+        if (r.op === "save") {
+          const run = await this.rt.runOf(r.chatId, userId);
+          if (!run) throw new RequestError("not_world_chat", "this chat is not attached to a world");
+          reply("lre.lore", await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, typeof r.text === "string" ? r.text : undefined));
+          return;
+        }
         const world = await this.rt.worlds.working(r.worldId, userId);
         if (r.id !== undefined && !(safeKey(r.id) && hasOwn(world.lore, r.id))) throw new RequestError("not_found", "no such lore entry");
         reply("lre.lore", { drift: await bookDrift(this.rt.host, world, userId, r.id) });

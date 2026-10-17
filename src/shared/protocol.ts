@@ -290,8 +290,10 @@ export type WorldRequest = Request<"lre.world"> &
 /**
  * Lore curation (DESIGN §4.2). `drift`: the draft's entries indexed from a World Info book whose
  * book entry changed since (its current text and hash) or is gone; `id` asks about one entry.
+ * `save`: the chat's latest reply, or `text` (an excerpt of the chat), becomes a lore entry in the
+ * draft of the chat's world, its source the message it came from.
  */
-export type LoreRequest = Request<"lre.lore"> & { op: "drift"; worldId: WorldId; id?: string };
+export type LoreRequest = Request<"lre.lore"> & ({ op: "drift"; worldId: WorldId; id?: string } | { op: "save"; chatId: ChatId; text?: string });
 
 /** A book-sourced lore entry whose World Info entry changed since it was indexed (with its text now), or is gone. */
 export type LoreDrift = { status: "changed"; content: string; hash: string } | { status: "missing" };
@@ -370,8 +372,8 @@ export interface ResultBodies {
   "lre.ui": { done: true };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
-  /** `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are left out). */
-  "lre.lore": { drift?: Record<string, LoreDrift> };
+  /** `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are left out); `save`: the world and the new entry's id. */
+  "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string };
 }
 
 export type ResultMessage = {

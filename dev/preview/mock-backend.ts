@@ -439,6 +439,13 @@ export class MockBackend {
         return;
       }
       case "lre.lore": {
+        if (message.op === "save") {
+          // As the backend does: the latest reply (or the excerpt) becomes a draft entry with a chat source.
+          const content = message.text ?? "Rosie sets down the coffee pot. “After the rush,” she says, and almost smiles.";
+          const id = `lore_saved_${Object.keys(this.draft.lore).length + 1}`;
+          this.draft.lore[id] = { id, title: "Rosie sets down the coffee pot", content, keys: [], links: [], source: { kind: "chat", chatId: message.chatId, messageId: "m-latest" } };
+          return this.result(reqId, "lre.lore", { worldId: WORLDS[0]?.id ?? "", id });
+        }
         // The preview's "Rosie's Diner" was indexed from Town lore, whose entry has changed since.
         const content = "Rosie's opens at six and closes at two since the new lunch place opened. The booths by the window go first; the counter is for regulars.";
         const drift = this.draft.lore.rosies_diner?.source?.kind === "book" && this.draft.lore.rosies_diner.source.hash === "stale" ? { rosies_diner: { status: "changed" as const, content, hash: "fresh" } } : {};

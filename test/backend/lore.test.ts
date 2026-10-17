@@ -160,3 +160,39 @@ describe("AI lore indexing", () => {
     expect(out.message).toContain(`Only the first ${IMPORT_MAX_CALLS} parts of the text`);
   });
 });
+
+describe("save to lore from a chat", () => {
+  test("the latest reply, or an excerpt, becomes a draft lore entry of the chat's world, with the message it came from; nothing is committed", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const run = await rig.rt.runOf(chatId, rig.host.userId);
+    const worldId = run?.worldId ?? "";
+    await rig.turn(chatId, "I look around the harbor.", "*The fog lifts.* Gulls circle the old lighthouse, dark for thirty years. A ferry horn sounds twice.");
+    await rig.turn(chatId, "I head home.", "The street is quiet tonight.");
+    const messages = await rig.host.chats.messages(chatId, rig.host.userId);
+    const latest = messages.at(-1);
+    const earlier = messages.find((m) => m.content.includes("Gulls circle"));
+    const save = async (text?: string) => rig.body(await rig.send({ type: "lre.lore", op: "save", chatId, ...(text === undefined ? {} : { text }) }));
+    const whole = await save();
+    expect(whole.worldId).toBe(worldId);
+    let draft = await draftOf(rig, worldId);
+    expect(draft.lore[String(whole.id)]).toEqual({ id: String(whole.id), title: "The street is quiet tonight", content: "The street is quiet tonight.", keys: [], links: [], source: { kind: "chat", chatId, messageId: latest?.id ?? "" } });
+    // An excerpt names the message that holds it, whatever its spacing and case.
+    const part = await save("gulls circle the OLD   lighthouse, dark for thirty years.");
+    draft = await draftOf(rig, worldId);
+    expect(draft.lore[String(part.id)]?.content).toBe("gulls circle the OLD   lighthouse, dark for thirty years.");
+    expect(draft.lore[String(part.id)]?.source).toEqual({ kind: "chat", chatId, messageId: earlier?.id ?? "" });
+    // Text the chat doesn't hold word for word was saved at its latest reply.
+    const pasted = await save("A note of my own.");
+    expect((await draftOf(rig, worldId)).lore[String(pasted.id)]?.source).toEqual({ kind: "chat", chatId, messageId: latest?.id ?? "" });
+    // The same title twice gets a fresh id; the head revision is untouched until a commit.
+    const again = await save();
+    expect(again.id).not.toBe(whole.id);
+    const head = rig.body(await rig.send({ type: "lre.world", op: "get", worldId })).world as WorldDoc;
+    expect(Object.keys(head.lore)).toEqual([]);
+    // A chat that plays no world has nothing to save into.
+    const plain = rig.host.createChat("Hello.");
+    const refused = await rig.send({ type: "lre.lore", op: "save", chatId: plain });
+    expect(refused.type === "lre.error" && refused.code).toBe("not_world_chat");
+  });
+});
