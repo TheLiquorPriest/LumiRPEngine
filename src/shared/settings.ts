@@ -54,6 +54,13 @@ export interface LookupLimits {
   ms: number;
 }
 
+/** Lumiverse's longest wait for a context handler: it clamps a registration's timeout to 1–120 s. */
+export const CONTEXT_HANDLER_MAX_MS = 120_000;
+/** What a turn's plan needs of the context handler's wait once the before-the-reply steps stop: the plan, its lines and the journal write. */
+export const PLAN_MARGIN_MS = 15_000;
+/** The longest before-the-reply wall clock: the rest of the host's wait, so the plan always lands (DESIGN §5.1). */
+export const PRE_REPLY_MAX_MS = CONTEXT_HANDLER_MAX_MS - PLAN_MARGIN_MS;
+
 export interface PhaseBudget {
   calls: number;
   ms: number;

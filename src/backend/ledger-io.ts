@@ -11,11 +11,12 @@ import type { ChatId, MessageId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
 import type { ChatRun, GenerationKind, HeldWrite, Journal, Marker, MarkerBody, MessageLedger, PostKind, Rec, RecStatus } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
+import { CONTEXT_HANDLER_MAX_MS, PLAN_MARGIN_MS } from "../shared/settings";
 import { validMarkerBody } from "../engine/events";
 import type { ChainMessage, FoldSnapshot, SnapshotStore } from "../engine/ledger/chain";
 import { emptyJournal, LedgerCore, type LedgerEnv } from "../engine/ledger/journal";
 import type { LedgerFold } from "../engine/ledger/fold";
-import type { HostGenerationType, HostMessage, HostPort } from "./host";
+import type { ContextHandlerInput, HostGenerationType, HostMessage, HostPort } from "./host";
 import { setAside } from "./stored-json";
 
 /** Resolves a chat's ledger environment; null when the chat is not a world chat. */
@@ -319,6 +320,10 @@ export class LedgerService {
   private readonly resets = new Map<string, string>();
   /** Per `user \0 chat`: notices about records on its messages skipped as malformed (kept for the process's life). */
   private readonly damaged = new Map<string, Set<string>>();
+  /** Each user's before-the-reply wall clock, as their settings last read. */
+  private readonly preReply = new Map<UserId, number>();
+  /** The context handler's registered timeout; 0 until attached. */
+  private contextTimeout = 0;
 
   constructor(
     private readonly host: HostPort,
@@ -370,21 +375,45 @@ export class LedgerService {
         }),
       ),
     );
-    h.registerContextHandler(async (input, signal) => {
-      await this.run(input.chatId, input.userId, async (core, observed) => {
-        core.sync(observed);
-        const pending = Object.values(core.journal.pending)
-          .filter((p) => !p.planned && (p.kind === KIND[input.generationType] || (p.kind === "renarrate" && (input.generationType === "swipe" || input.generationType === "regenerate"))))
-          .at(-1);
-        if (!pending && !input.dryRun) return;
-        if (this.hooks) await this.hooks.beforePlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending?.generationId ?? null, dryRun: input.dryRun, connectionId: input.connectionId, signal });
-        // The host gave up on the handler: no plan, so the turn commits degraded.
-        if (signal.aborted) return;
-        core.plan(pending?.generationId ?? "", observed, input.dryRun);
-        // Prose steps about the plan (brief, outline) run once it exists, inside the same handler.
-        if (this.hooks && pending && !input.dryRun) await this.hooks.afterPlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending.generationId, signal });
-      });
-    }, 60_000);
+    this.registerContext();
+  }
+
+  /**
+   * A user's before-the-reply wall clock, as their settings read. The context handler is one
+   * registration for every user, so the host waits as long as the slowest needs plus the plan's
+   * margin, within its 120 s (the settings cap the wall clock to fit).
+   */
+  preReplyBudget(userId: UserId, ms: number): void {
+    this.preReply.set(userId, ms);
+    if (this.contextTimeout > 0) this.registerContext();
+  }
+
+  /** Registers the context handler again when its timeout changes (the host replaces a registration); before any user's settings are read, it waits the host's longest. */
+  private registerContext(): void {
+    const timeout = this.preReply.size === 0 ? CONTEXT_HANDLER_MAX_MS : Math.min(CONTEXT_HANDLER_MAX_MS, Math.max(...this.preReply.values()) + PLAN_MARGIN_MS);
+    if (timeout === this.contextTimeout) return;
+    this.contextTimeout = timeout;
+    this.host.registerContextHandler((input, signal) => this.planBeforeReply(input, signal), timeout);
+  }
+
+  /** The context handler (DESIGN §5.1): the pre phase, the plan, then the plan phase. */
+  private async planBeforeReply(input: ContextHandlerInput, signal: AbortSignal): Promise<void> {
+    // Model steps stop the plan's margin before the host gives up on this call, counted from its
+    // start, so the plan lands even when the chat's queue ate into the wait.
+    const steps = AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, this.contextTimeout - PLAN_MARGIN_MS))]);
+    await this.run(input.chatId, input.userId, async (core, observed) => {
+      core.sync(observed);
+      const pending = Object.values(core.journal.pending)
+        .filter((p) => !p.planned && (p.kind === KIND[input.generationType] || (p.kind === "renarrate" && (input.generationType === "swipe" || input.generationType === "regenerate"))))
+        .at(-1);
+      if (!pending && !input.dryRun) return;
+      if (this.hooks) await this.hooks.beforePlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending?.generationId ?? null, dryRun: input.dryRun, connectionId: input.connectionId, signal: steps });
+      // The host gave up on the handler: no plan, so the turn commits degraded.
+      if (signal.aborted) return;
+      core.plan(pending?.generationId ?? "", observed, input.dryRun);
+      // Prose steps about the plan (brief, outline) run once it exists, inside the same handler.
+      if (this.hooks && pending && !input.dryRun) await this.hooks.afterPlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending.generationId, signal: steps });
+    });
   }
 
   detach(): void {

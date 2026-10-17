@@ -421,7 +421,8 @@ export class Runtime implements TurnHooks {
     this.pipeline = options.pipeline;
     this.templates = options.templates ?? {};
     this.worlds = new WorldStore(this.host, this.registry);
-    this.settings = new SettingsStore(this.host);
+    // The context handler waits as long as the users' before-the-reply wall clocks need.
+    this.settings = new SettingsStore(this.host, (userId, settings) => this.ledger.preReplyBudget(userId, settings.modelUse.budgets.pre.ms));
     this.chips = new ChipStore(this.host);
     this.planNotes = new PlanNotes(this.host);
     this.outcomeNotes = new OutcomeNotes(this.host);

@@ -8,7 +8,7 @@ import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
 import type { LorePolicy, LoreTransport, ModelUseSettings, StepConfig } from "../../shared/settings";
-import { stepLoreOf } from "../../shared/settings";
+import { PRE_REPLY_MAX_MS, stepLoreOf } from "../../shared/settings";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
@@ -55,6 +55,8 @@ export const STEP_LABEL: Record<StepPurpose, string> = {
 
 const PHASES = ["pre", "post"] as const;
 const PHASE_LABEL: Record<(typeof PHASES)[number], string> = { pre: "Before the reply", post: "After the reply" };
+/** Lumiverse waits at most 120 s for a turn's plan, so the before-the-reply steps get what planning leaves of it. */
+const WALL_CLOCK_MAX: Record<(typeof PHASES)[number], number> = { pre: PRE_REPLY_MAX_MS, post: 120_000 };
 
 export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: CallMeterView | null; patch(patch: JsonObject): void; busy: boolean }) {
   const { modelUse } = props;
@@ -69,7 +71,8 @@ export function ModelUseSection(props: { modelUse: ModelUseSettings; meter: Call
         <div key={phase}>
           <div class="lre-small lre-muted">{PHASE_LABEL[phase]}</div>
           <NumberStepper label="Calls" value={modelUse.budgets[phase].calls} min={0} max={20} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { calls } } } })} />
-          <NumberStepper label="Wall clock (ms)" value={modelUse.budgets[phase].ms} min={500} max={120000} step={500} integer disabled={props.busy} onChange={(ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { ms } } } })} />
+          <NumberStepper label="Wall clock (ms)" value={modelUse.budgets[phase].ms} min={500} max={WALL_CLOCK_MAX[phase]} step={500} integer disabled={props.busy} onChange={(ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { ms } } } })} />
+          {phase === "pre" ? <p class="lre-small lre-muted" style={{ margin: 0 }}>At most {PRE_REPLY_MAX_MS.toLocaleString("en-US")} ms: Lumiverse waits 120 s for a turn's plan, and planning needs the rest.</p> : null}
           <NumberStepper label="Lore lookups" value={modelUse.budgets[phase].lookup?.calls ?? 0} min={0} max={10} integer disabled={props.busy} onChange={(calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls, ms: modelUse.budgets[phase].lookup?.ms ?? 0 } } } } })} />
           <NumberStepper label="Lookups may start within (ms)" value={modelUse.budgets[phase].lookup?.ms ?? 0} min={0} max={120000} step={500} integer disabled={props.busy} onChange={(ms) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls: modelUse.budgets[phase].lookup?.calls ?? 0, ms } } } } })} />
         </div>

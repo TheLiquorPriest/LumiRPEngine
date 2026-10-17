@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS } from "../shared/settings";
+import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import type { HostPort } from "./host";
@@ -215,11 +215,13 @@ function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefine
 function conform(v: JsonObject, d: UserSettings): UserSettings {
   const mu = isRecord(v.modelUse) ? v.modelUse : {};
   const budgets = isRecord(mu.budgets) ? mu.budgets : {};
-  const phase = (x: unknown, b: PhaseBudget): PhaseBudget => {
+  // A phase deadline past `max` is read as `max`: the before-the-reply wall clock must leave the plan
+  // its part of the host's wait for the context handler, or the host drops the plan.
+  const phase = (x: unknown, b: PhaseBudget, max: number): PhaseBudget => {
     if (!isRecord(x)) return b;
     const l = isRecord(x.lookup) ? x.lookup : null;
     const lookup = l ? { calls: int(l.calls, 0, 32) ?? b.lookup?.calls ?? 0, ms: int(l.ms, 0, MAX_PHASE_MS) ?? b.lookup?.ms ?? 0 } : b.lookup;
-    return { calls: int(x.calls, 0, 32) ?? b.calls, ms: int(x.ms, 0, MAX_PHASE_MS) ?? b.ms, ...(lookup ? { lookup: { ...lookup } } : {}) };
+    return { calls: int(x.calls, 0, 32) ?? b.calls, ms: Math.min(max, int(x.ms, 0, MAX_PHASE_MS) ?? b.ms), ...(lookup ? { lookup: { ...lookup } } : {}) };
   };
   const rawSteps = isRecord(mu.steps) ? mu.steps : {};
   const steps: ModelUseSettings["steps"] = {};
@@ -231,7 +233,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   const modelUse: ModelUseSettings = {
     preset: oneOf(mu.preset, ["lean", "standard", "full", "custom"] as const) ?? d.modelUse.preset,
     steps,
-    budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre), post: phase(budgets.post, d.modelUse.budgets.post) },
+    budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre, PRE_REPLY_MAX_MS), post: phase(budgets.post, d.modelUse.budgets.post, MAX_PHASE_MS) },
     tokens: { sections: int(tokens.sections, 0, 100_000) ?? d.modelUse.tokens.sections },
   };
   const re = isRecord(v.realism) ? v.realism : {};
@@ -402,7 +404,11 @@ export class SettingsStore {
   private readonly settings = new Map<UserId, UserSettings>();
   private readonly learning = new Map<UserId, ExtractionLearning>();
 
-  constructor(private readonly host: HostPort) {}
+  /** `loaded` hears each user's settings as they are read or set (the context handler's timeout follows them). */
+  constructor(
+    private readonly host: HostPort,
+    private readonly loaded: (userId: UserId, settings: UserSettings) => void = () => undefined,
+  ) {}
 
   async get(userId: UserId): Promise<UserSettings> {
     const known = this.settings.get(userId);
@@ -410,6 +416,7 @@ export class SettingsStore {
     const raw = await readStoredJson(this.host, SETTINGS_PATH, userId, "settings", (r) => isRecord(r) && r.v === 1);
     const settings = normalize(raw ?? null);
     this.settings.set(userId, settings);
+    this.loaded(userId, settings);
     return settings;
   }
 
@@ -420,6 +427,7 @@ export class SettingsStore {
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(next), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
     this.settings.set(userId, next);
+    this.loaded(userId, next);
     return next;
   }
 

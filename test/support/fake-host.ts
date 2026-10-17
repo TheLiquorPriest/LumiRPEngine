@@ -83,6 +83,8 @@ export class FakeHost implements HostPort {
   private readonly handlers = new Map<HostEventName, Set<Handler>>();
   private readonly frontendHandlers = new Set<(message: unknown, userId: UserId, sessionId?: string) => void>();
   private contextHandler: ((input: ContextHandlerInput, signal: AbortSignal) => Promise<void>) | null = null;
+  /** The context handler's registered timeout (the host would give up on it after this). */
+  contextTimeoutMs = 0;
   private interceptor: ((input: InterceptorInput) => Promise<InterceptorResult | null>) | null = null;
   private readonly queue: { event: HostEventName; payload: HostEventMap[HostEventName] }[] = [];
   private readonly inFlight = new Map<string, Generation>();
@@ -156,8 +158,9 @@ export class FakeHost implements HostPort {
     return () => set.delete(h);
   }
 
-  registerContextHandler(handler: (input: ContextHandlerInput, signal: AbortSignal) => Promise<void>): void {
+  registerContextHandler(handler: (input: ContextHandlerInput, signal: AbortSignal) => Promise<void>, timeoutMs: number): void {
     this.contextHandler = handler;
+    this.contextTimeoutMs = timeoutMs;
   }
 
   registerInterceptor(handler: (input: InterceptorInput) => Promise<InterceptorResult | null>): void {

@@ -298,7 +298,7 @@ Six concepts plus one pipeline.
    - Clear the applied-plan slot.
    - Open the turn's in-flight window (P2, §4.3).
 
-2. **Context handler.** Non-required; registered timeout = the user's pre-reply budget (≤120 s); internal deadline below it.
+2. **Context handler.** Non-required. One registration serves every user, so its timeout is the slowest before-the-reply wall clock among the users whose settings are loaded, plus 15 s for the plan, within the host's 120 s; before any user's settings are read it is the full 120 s, and it is registered again when a user's settings change it (the host replaces a registration). The settings keep that wall clock at 105 s or less. The steps stop 15 s before the timeout, counted from the handler's start, so a plan lands even when the chat's queue ate into the wait.
    - **Fingerprint:** a hash of the chat id and every non-empty message as `id:contentHash`. The context handler reads the chat, skipping the staged empty reply; the interceptor reads `ctx.messages`. The two matched in every generation type I tried, including Edit-and-Send in branch mode (in the branch chat).
    - **Not a world chat:** return.
    - **Impersonate:** return.
