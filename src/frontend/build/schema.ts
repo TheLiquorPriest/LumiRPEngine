@@ -36,7 +36,8 @@ export type FieldSpec =
   | { kind: "object"; key: string; label: string; fields: FieldSpec[]; optional?: boolean }
   | { kind: "json"; key: string; label: string; optional?: boolean; hint?: string }
   | { kind: "kindFields"; key: string; label: string }
-  | { kind: "levels"; key: string; label: string }
+  /** A level per domain. `floored`: the world ruleset's floors (`ruleset.minLevels`) are shown and nothing below them can be picked. */
+  | { kind: "levels"; key: string; label: string; floored?: boolean }
   /** One of the world's tiers (`WorldDoc.tiers`), in their order. */
   | { kind: "tier"; key: string; label: string }
   /** The LOD1 agent flag: yes, no, or (unset) the entity's tier's default. */
@@ -392,7 +393,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
   ],
   realism: [
     { kind: "enum", key: "preset", label: "Preset", values: ["story", "grounded", "simulation", "custom"] },
-    { kind: "levels", key: "levels", label: "Domain levels" },
+    { kind: "levels", key: "levels", label: "Domain levels", floored: true },
     { kind: "bandCaps", key: "tierCaps", label: "Band caps" },
   ],
   time: [

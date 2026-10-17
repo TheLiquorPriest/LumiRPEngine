@@ -5,7 +5,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
-import type { Band } from "../../shared/ids";
+import type { Band, DomainId, Level } from "../../shared/ids";
 import { BANDS, DOMAINS } from "../../shared/ids";
 import { formatMoneyInput, minorUnitPlural, parseMoneyInput } from "../../shared/money";
 import { BAND_LABEL, tierOf, tiersInOrder } from "../../shared/tiers";
@@ -13,6 +13,7 @@ import type { LintIssue } from "../../shared/protocol";
 import { BUILTIN_RELATIONS, formatMoney } from "../../shared/world";
 import type { FacetValueDef, FieldDef, WorldCurrency, WorldDoc } from "../../shared/world";
 import { MoneyInput } from "../money-input";
+import { floorNote } from "../settings/realism";
 import { EffectArgsInput } from "./effect-args";
 import { ExprEditor } from "./expr-editor";
 import { ClassesInput, classesOf, FacetValuesInput, facetValuesOf } from "./facet-editor";
@@ -399,36 +400,49 @@ function KindFieldsInput(props: { value: JsonValue | undefined; kind: string; ct
   );
 }
 
-function LevelsInput(props: { label: string; value: JsonValue | undefined; onChange(value: JsonValue | undefined): void }) {
+/** A level per domain; with `floors`, the world ruleset's floors are named and the levels below them can't be picked. */
+function LevelsInput(props: { label: string; value: JsonValue | undefined; floors?: Partial<Record<DomainId, Level>>; onChange(value: JsonValue | undefined): void }) {
   const values: JsonObject = isRecord(props.value) ? (props.value as JsonObject) : {};
+  const note = props.floors ? floorNote(props.floors) : null;
   return (
     <div class="lre-field">
       <span class="label">{props.label}</span>
+      {note ? (
+        <span class="lre-small lre-muted" data-lre-floors>
+          {note} A chat never plays below those levels, whatever the defaults say.
+        </span>
+      ) : null}
       <div class="lre-tier-grid" style={{ gridTemplateColumns: "minmax(90px,1fr) minmax(64px,90px)" }}>
-        {DOMAINS.map((domain) => (
-          <>
-            <span key={`${domain}:l`}>{domain}</span>
-            <select
-              key={`${domain}:s`}
-              class="lre-input"
-              aria-label={`${domain} level`}
-              value={typeof values[domain] === "number" ? String(values[domain]) : ""}
-              onChange={(event) => {
-                const out = { ...values };
-                if (event.currentTarget.value === "") delete out[domain];
-                else out[domain] = Number(event.currentTarget.value);
-                props.onChange(Object.keys(out).length > 0 ? out : undefined);
-              }}
-            >
-              <option value="">—</option>
-              {[0, 1, 2, 3, 4].map((level) => (
-                <option key={level} value={String(level)}>
-                  {level}
-                </option>
-              ))}
-            </select>
-          </>
-        ))}
+        {DOMAINS.map((domain) => {
+          const floor = props.floors?.[domain] ?? 0;
+          return (
+            <>
+              <span key={`${domain}:l`}>
+                {domain}
+                {floor > 0 ? <span class="lre-small lre-dim"> · floor {floor}</span> : null}
+              </span>
+              <select
+                key={`${domain}:s`}
+                class="lre-input"
+                aria-label={`${domain} level`}
+                value={typeof values[domain] === "number" ? String(values[domain]) : ""}
+                onChange={(event) => {
+                  const out = { ...values };
+                  if (event.currentTarget.value === "") delete out[domain];
+                  else out[domain] = Number(event.currentTarget.value);
+                  props.onChange(Object.keys(out).length > 0 ? out : undefined);
+                }}
+              >
+                <option value="">—</option>
+                {[0, 1, 2, 3, 4].map((level) => (
+                  <option key={level} value={String(level)} disabled={level < floor}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+            </>
+          );
+        })}
       </div>
     </div>
   );
@@ -606,7 +620,7 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
     case "kindFields":
       return <KindFieldsInput value={props.value} kind={typeof props.parent.kind === "string" ? props.parent.kind : ""} ctx={ctx} path={path} onChange={props.onChange} />;
     case "levels":
-      return <LevelsInput label={spec.label} value={props.value} onChange={props.onChange} />;
+      return <LevelsInput label={spec.label} value={props.value} floors={spec.floored ? { ...ctx.doc.ruleset?.minLevels } : undefined} onChange={props.onChange} />;
     case "bandCaps":
       return <BandCapsInput label={spec.label} value={props.value} onChange={props.onChange} />;
     case "tier":

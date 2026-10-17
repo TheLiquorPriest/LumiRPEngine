@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { moved, parseThresholds, progressionFields, rowChoices, sectionId, tidyRuleset } from "../../src/frontend/build/ruleset-editor";
 import { sheetPreviewRequest } from "../../src/frontend/requests";
+import { DOMAIN_LABEL, floorNote } from "../../src/frontend/settings/realism";
 import { previewSheet } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -96,5 +97,16 @@ describe("progression editor helpers", () => {
     expect(parseThresholds("0 300\n900;2700")).toEqual([0, 300, 900, 2700]);
     expect(parseThresholds("")).toEqual([]);
     expect(parseThresholds("0, three")).toBeNull();
+  });
+});
+
+describe("realism floors", () => {
+  test("a world whose ruleset sets no floor above 0 says nothing; otherwise each floored domain is named with its level", () => {
+    expect(floorNote({})).toBeNull();
+    expect(floorNote({ sheets: 0 })).toBeNull();
+    const note = floorNote({ sheets: 3, money: 2 }) ?? "";
+    expect(note).toContain(`${DOMAIN_LABEL.sheets} 3`);
+    expect(note).toContain(`${DOMAIN_LABEL.money} 2`);
+    expect(note).not.toContain(DOMAIN_LABEL.gear);
   });
 });

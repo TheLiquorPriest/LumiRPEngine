@@ -42,33 +42,48 @@ function asLevel(value: number): Level {
   return rounded === 0 ? 0 : rounded === 1 ? 1 : rounded === 2 ? 2 : rounded === 3 ? 3 : 4;
 }
 
+/** The world ruleset's floors in words ("This world's ruleset needs Sheets & checks 3."), or null when it sets none. */
+export function floorNote(floors: Partial<Record<DomainId, Level>>): string | null {
+  const parts = DOMAINS.flatMap((domain) => {
+    const floor = floors[domain] ?? 0;
+    return floor > 0 ? [`${DOMAIN_LABEL[domain]} ${floor}`] : [];
+  });
+  if (parts.length === 0) return null;
+  const joined = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+  return `This world's ruleset needs ${joined}.`;
+}
+
 /**
  * A domain level on the host slider. The label tracks a drag while it lasts; once the gesture
  * commits (or is cancelled) it shows `value` again, the level actually in force, so a change the
- * parent previews, cancels or refuses never leaves the dragged level on screen.
+ * parent previews, cancels or refuses never leaves the dragged level on screen. `floor` is the
+ * world ruleset's: the slider starts there, since the engine never plays the domain below it.
  */
-function LevelSlider(props: { domain: DomainId; value: Level; disabled?: boolean; onCommit(level: Level): void }) {
+function LevelSlider(props: { domain: DomainId; value: Level; floor?: Level; disabled?: boolean; onCommit(level: Level): void }) {
   const [drag, setDrag] = useState<number | null>(null);
-  const shown = asLevel(drag ?? props.value);
+  const floor = props.floor ?? 0;
+  const value = asLevel(Math.max(props.value, floor));
+  const shown = asLevel(drag ?? value);
   return (
     <div class="lre-field" style={{ marginBottom: "4px" }} data-lre-domain={props.domain} role="group" aria-label={`${DOMAIN_LABEL[props.domain]} level`}>
       <div class="lre-spread">
         <span>{DOMAIN_LABEL[props.domain]}</span>
         <span class={shown === 0 ? "lre-dim" : "lre-muted"} data-lre-level-label>
           {shown} · {LEVEL_LABEL[shown]}
+          {floor > 0 ? <span class="lre-dim"> · ruleset floor {floor}</span> : null}
         </span>
       </div>
       <HostSlider
-        min={0}
+        min={floor}
         max={4}
         step={1}
         integer
-        value={props.value}
-        disabled={props.disabled}
+        value={value}
+        disabled={props.disabled || floor >= 4}
         onDrag={setDrag}
-        onCommit={(value) => {
+        onCommit={(next) => {
           setDrag(null);
-          props.onCommit(asLevel(value));
+          props.onCommit(asLevel(Math.max(next, floor)));
         }}
       />
     </div>
@@ -170,7 +185,10 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
   const [busy, run] = useBusy();
   if (!props.controls) return <Empty>Open a world chat to change its realism.</Empty>;
   const realism = props.controls.realism;
-  const levelFor = (domain: DomainId): Level => (scope === "all" ? realism.levels[domain] : realism.tierCaps[scope]?.[domain] ?? realism.levels[domain]);
+  const floorOf = (domain: DomainId): Level => realism.floors[domain] ?? 0;
+  // The level in force: the chat's (or the band's cap), never below the ruleset's floor.
+  const levelFor = (domain: DomainId): Level => asLevel(Math.max(scope === "all" ? realism.levels[domain] : realism.tierCaps[scope]?.[domain] ?? realism.levels[domain], floorOf(domain)));
+  const floors = floorNote(realism.floors);
   const resolveScope: ResolveScope = scope === "all" ? { all: true } : { tier: scope };
   const ask = (domain: DomainId, to: Level) =>
     run(async () => {
@@ -202,6 +220,11 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
           {tiersNote}Your own character is never capped.
         </p>
       ) : null}
+      {floors ? (
+        <p class="lre-small lre-muted" style={{ margin: 0 }} data-lre-floors>
+          {floors} Those sliders start there: the engine never plays a domain below its floor.
+        </p>
+      ) : null}
       {pending ? (
         <div class="lre-banner info" data-lre-migration-preview>
           <strong>
@@ -229,7 +252,7 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
         </div>
       ) : null}
       {DOMAINS.map((domain) => (
-        <LevelSlider key={`${scope}:${domain}`} domain={domain} value={levelFor(domain)} disabled={busy || pending !== null} onCommit={(to) => (to === levelFor(domain) ? undefined : ask(domain, to))} />
+        <LevelSlider key={`${scope}:${domain}`} domain={domain} value={levelFor(domain)} floor={floorOf(domain)} disabled={busy || pending !== null} onCommit={(to) => (to === levelFor(domain) ? undefined : ask(domain, to))} />
       ))}
     </div>
   );
