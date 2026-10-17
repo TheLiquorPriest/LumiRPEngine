@@ -1,0 +1,201 @@
+// A reply that tells the turn's own Buy again offers no second purchase. Names compare after
+// normalizing: lowercase, a catalog name's "Noun, qualifier" read as its noun with the qualifier's
+// words kept for overlap, a trailing "for/to/from/at/with/in/on …" phrase dropped, articles and stop
+// words dropped, plurals made singular. It is the same purchase when one name's words hold all of the
+// other's, or when the head noun matches and the shorter name shares at least 2/3 of its words; either
+// way with any stated price within ±25% of what the Buy charged, of the price the player typed for it,
+// or of its catalog row's range. The same head noun at an equal stated price is the same purchase too.
+// Anything else keeps its chip, and a purchase's confirm chip shows what it charges.
+
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import type { JsonObject } from "../../src/shared/json";
+import type { LedgerEvent } from "../../src/shared/ledger";
+import { toChain } from "../../src/backend/ledger-io";
+import { boughtAlong } from "../../src/backend/runtime";
+import { Rig } from "../support/rig";
+
+const EXTRACT_MARK = "propose concrete state changes";
+
+/** The "Bought …" lines a chat's payer history records, one per charge, with what each charged. */
+async function boughtLines(rig: Rig, chatId: string): Promise<{ memo: string; cents: number }[]> {
+  const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+  const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+  if (!state) throw new Error("no state");
+  const history = state.packs.economy?.history;
+  return (Array.isArray(history) ? history : []).flatMap((h) => {
+    if (!h || typeof h !== "object" || Array.isArray(h) || typeof h.memo !== "string" || !h.memo.startsWith("Bought ")) return [];
+    const lines = Array.isArray(h.lines) ? h.lines : [];
+    return [{ memo: h.memo, cents: lines.reduce((sum: number, l) => sum + (l && typeof l === "object" && !Array.isArray(l) && typeof l.amount === "number" ? Math.abs(l.amount) : 0), 0) }];
+  });
+}
+
+/**
+ * A typed Buy of `bought` (at `price` dollars, `qty` of them) in a fresh Port Alder chat, and a reply
+ * the extractor reads as the purchase `narrated` (none when null): the purchase chips left and the
+ * "Bought …" lines the payer's history records, one per charge. `auto` sets purchases to automatic.
+ */
+async function after(bought: string, narrated: JsonObject | null, opts: { price?: number; qty?: number; auto?: boolean } = {}) {
+  const rig = new Rig({ shipped: true });
+  const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+  const chatId = rig.host.createChat("Morning.");
+  rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+  if (opts.auto) rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { purchase: { mode: "auto" } } } }));
+  const params: JsonObject = { item: bought, ...(opts.price !== undefined ? { price: opts.price } : {}), ...(opts.qty !== undefined ? { qty: opts.qty } : {}) };
+  const proposals = narrated ? [{ type: "purchase", payer: "pov", ...narrated }] : [];
+  rig.host.quietReply = (req) => {
+    const prompt = req.messages[0]?.content ?? "";
+    if (prompt.includes("You map a player's typed input")) return JSON.stringify({ action: "buy", params, confidence: 0.9 });
+    if (prompt.includes(EXTRACT_MARK)) return JSON.stringify({ proposals });
+    return "{}";
+  };
+  await rig.turn(chatId, `I buy ${opts.qty ?? "a"} ${bought}${opts.price !== undefined ? ` for $${opts.price}` : ""}.`, "The clerk rings it up.");
+  const view = await rig.rt.view(chatId, rig.host.userId);
+  expect(rig.rt.ledger.errors).toEqual([]);
+  const lines = await boughtLines(rig, chatId);
+  const chips = view.chips.filter((c) => c.kind === "confirm" || c.kind === "decline");
+  return { chips: chips.map((c) => c.label), chipIds: chips.map((c) => c.id), memos: lines.map((l) => l.memo), lines, rig, chatId };
+}
+
+/** The purchase chips a reply that tells `narrated` (a household purchase) leaves after a typed Buy of `bought` at `price` dollars. */
+async function chipsAfter(bought: string, price: number, narrated: JsonObject) {
+  return (await after(bought, { category: "household", ...narrated }, { price })).chips;
+}
+
+describe("a narrated purchase that tells the turn's own Buy again", () => {
+  test("'leather card holder' told for a typed 'credit card holder' offers no second purchase, priced or not; a 'leather holder' at the same price neither", async () => {
+    expect(await chipsAfter("credit card holder", 12, { item: "leather card holder" })).toEqual([]);
+    expect(await chipsAfter("credit card holder", 12, { item: "leather card holder", price: 12 })).toEqual([]);
+    expect(await chipsAfter("credit card holder", 12, { item: "slim leather holder", price: 12 })).toEqual([]);
+  });
+
+  // Shaped like "decaf coffee for Danny, $4.50" after a typed $3 coffee, with an item the catalog
+  // doesn't price, so the Buy costs exactly the $3 typed (a catalogued coffee costs the catalog's price).
+  test("the same head noun at a price more than 25% off keeps its chip: a $4.50 'tin kazoo' after a typed $3 kazoo", async () => {
+    expect(await chipsAfter("kazoo", 3, { item: "tin kazoo", price: 4.5 })).toEqual(["Bought tin kazoo: $4.50"]);
+    expect(await chipsAfter("kazoo", 3, { item: "tin kazoo", price: 3.5 })).toEqual([]);
+  });
+
+  test("a different head noun keeps its chip: 'lantern oil' after a typed lantern, 'credit card reader' after a holder", async () => {
+    expect(await chipsAfter("lantern", 40, { item: "lantern oil", price: 6 })).toEqual(["Bought lantern oil: $6.00"]);
+    expect(await chipsAfter("credit card holder", 12, { item: "credit card reader", price: 12 })).toEqual(["Bought credit card reader: $12.00"]);
+  });
+
+  test("a trailing 'for …', 'to …' or 'from …' phrase on either name doesn't change the thing bought", async () => {
+    expect((await after("bus ticket", { item: "bus ticket to Boston", price: 40 }, { price: 40 })).chips).toEqual([]);
+    expect((await after("bus ticket", { item: "bus ticket to Boston" }, { price: 40 })).chips).toEqual([]);
+    expect((await after("sandwich", { item: "sandwich for lunch" })).chips).toEqual([]);
+    expect((await after("lantern from the market", { item: "lantern", price: 40 }, { price: 40 })).chips).toEqual([]);
+  });
+
+  test("a catalog name's 'Noun, qualifier' reads as the noun with its qualifier: 'whole milk' after a Buy charged as 'Milk, whole'", async () => {
+    const got = await after("milk", { item: "whole milk" });
+    expect(got.memos).toEqual(["Bought Milk, whole"]);
+    expect(got.chips).toEqual([]);
+  });
+
+  test("a plural tells the same Buy: 'coffees' after 'Coffee ×2'", async () => {
+    const got = await after("coffee", { item: "coffees" }, { qty: 2 });
+    expect(got.memos).toHaveLength(1);
+    expect(got.memos[0]).toMatch(/^Bought .*coffee.* ×2$/i);
+    expect(got.chips).toEqual([]);
+  });
+});
+
+describe("with purchases on auto, a reply that tells a catalog-matched Buy again charges it once", () => {
+  const cases: { typed: string; price?: number; narrated: JsonObject; charged: string }[] = [
+    { typed: "milk", narrated: { item: "milk" }, charged: "Bought Milk, whole" },
+    { typed: "large pizza, delivered", price: 18, narrated: { item: "pizza", price: 18 }, charged: "Bought Pizza, large 14-16 in, delivered" },
+    { typed: "sandwich for lunch", narrated: { item: "sandwich" }, charged: "Bought Bread, white sandwich loaf" },
+  ];
+  for (const c of cases) {
+    test(`'${c.narrated.item}' after a typed '${c.typed}' (charged as '${c.charged.slice("Bought ".length)}')`, async () => {
+      const priced = c.price !== undefined ? { price: c.price } : {};
+      const once = await after(c.typed, null, { ...priced, auto: true });
+      const told = await after(c.typed, c.narrated, { ...priced, auto: true });
+      expect(once.memos).toEqual([c.charged]);
+      expect(told.memos).toEqual([c.charged]);
+      expect(told.chips).toEqual([]);
+    });
+  }
+});
+
+/** A history line for a Buy recorded as `memo` that charged `cents`. */
+function bought(memo: string, cents: number): LedgerEvent {
+  return { type: "economy.txn", data: { memo, lines: [{ account: "acct_pov_cash", amount: -cents }] } } as LedgerEvent;
+}
+
+/** A narrated purchase of `item` at `dollars`, in minor units as the read gives it. */
+function purchase(item: string, dollars: number): JsonObject {
+  return { type: "purchase", item, price: Math.round(dollars * 100), payer: "pov" };
+}
+
+describe("a stated price is the Buy's when it is within ±25% of what it charged, the price the player typed, or its catalog row's range", () => {
+  test("fixed charges that differ from the typed price: the sandwich, coffee, milk and coffee ×2 cases drop; 'lantern oil' and the 'tin kazoo' keep", async () => {
+    const { rig, chatId } = await after("newspaper", null);
+    const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+    const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
+    const world = state ? core?.worldAt(state.revision) : undefined;
+    if (!state || !world) throw new Error("no state");
+    const ctx = rig.rt.registry.context(world, state);
+    // A typed $9 sandwich charged as bread at $2.43, a typed $3 coffee charged $5.38, a typed $5 milk
+    // charged $3.63, a typed $6 pair of coffees charged $10.76.
+    expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Bread, white sandwich loaf", 243)], ctx, 900)).toBe(true);
+    expect(boughtAlong(purchase("coffee", 3), [bought("Bought Coffee", 538)], ctx, 300)).toBe(true);
+    expect(boughtAlong(purchase("milk", 5), [bought("Bought Milk, whole", 363)], ctx, 500)).toBe(true);
+    expect(boughtAlong(purchase("coffees", 6), [bought("Bought Coffee ×2", 1076)], ctx, 600)).toBe(true);
+    // Without a typed price, the catalog row's range: $7.50 is inside "Milk, whole"'s; $9 is far above the bread's.
+    expect(boughtAlong(purchase("milk", 7.5), [bought("Bought Milk, whole", 363)], ctx)).toBe(true);
+    expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Bread, white sandwich loaf", 243)], ctx)).toBe(false);
+    // No catalog row, and neither the charge nor the typed price is near.
+    expect(boughtAlong(purchase("lantern oil", 6), [bought("Bought lantern", 4000)], ctx, 4000)).toBe(false);
+    expect(boughtAlong(purchase("tin kazoo", 4.5), [bought("Bought kazoo", 300)], ctx, 300)).toBe(false);
+  });
+});
+
+describe("with fixed seeds, a reply that repeats the player's typed price for a catalogued Buy charges it once", () => {
+  // Every id and seed the rig draws comes from this counter, so each Buy's catalog price is the same every run.
+  let n = 0;
+  let restore: (() => void) | null = null;
+  beforeEach(() => {
+    n = 0;
+    const spy = spyOn(crypto, "randomUUID").mockImplementation(() => `00000000-0000-4000-8000-a${String(++n).padStart(11, "0")}` as `${string}-${string}-${string}-${string}-${string}`);
+    restore = () => spy.mockRestore();
+  });
+  afterEach(() => restore?.());
+
+  const cases: { typed: string; price: number; qty?: number; narrated: string; charged: string }[] = [
+    { typed: "sandwich", price: 9, narrated: "sandwich", charged: "Bought Bread, white sandwich loaf" },
+    { typed: "coffee", price: 3, narrated: "coffee", charged: "Bought Coffee" },
+    { typed: "milk", price: 5, narrated: "milk", charged: "Bought Milk, whole" },
+    { typed: "coffee", price: 6, qty: 2, narrated: "coffees", charged: "Bought Coffee ×2" },
+  ];
+  for (const c of cases) {
+    test(`'${c.narrated}' at the typed $${c.price} after a typed '${c.typed}' (charged as '${c.charged.slice("Bought ".length)}')`, async () => {
+      const opts = { price: c.price, ...(c.qty !== undefined ? { qty: c.qty } : {}) };
+      const told = await after(c.typed, { item: c.narrated, price: c.price }, { ...opts, auto: true });
+      expect(told.memos).toEqual([c.charged]);
+      // The charge is the catalog's, more than 25% off the typed price, so only the typed price matches.
+      expect(Math.abs((told.lines[0]?.cents ?? 0) - c.price * 100)).toBeGreaterThan(0.25 * (told.lines[0]?.cents ?? 0));
+      expect(told.chips).toEqual([]);
+    });
+  }
+
+  test("in confirm mode, 'coffees' at $6 after a typed 'Coffee ×2' at $6 offers no chip", async () => {
+    const got = await after("coffee", { item: "coffees", price: 6 }, { price: 6, qty: 2 });
+    expect(got.memos).toEqual(["Bought Coffee ×2"]);
+    expect(got.chips).toEqual([]);
+  });
+});
+
+describe("a purchase's confirm chip", () => {
+  test("shows the amount it charges and the catalog item it's priced as, and Apply charges that amount", async () => {
+    const got = await after("kazoo", { item: "milk" }, { price: 3 });
+    expect(got.chips).toHaveLength(1);
+    const shown = /^Bought milk: \$(\d+\.\d{2}) \(priced as Milk, whole\)$/.exec(got.chips[0] ?? "");
+    expect(shown).not.toBeNull();
+    got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: got.chipIds[0], choice: "confirm" }));
+    const lines = await boughtLines(got.rig, got.chatId);
+    expect(lines.map((l) => l.memo)).toEqual(["Bought kazoo", "Bought Milk, whole"]);
+    expect((lines[1]?.cents ?? 0) / 100).toBe(Number(shown?.[1]));
+  });
+});

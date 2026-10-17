@@ -1,0 +1,536 @@
+// HostPort over the `spindle` global (ARCHITECTURE §7). The only backend file besides the entry
+// that touches the host API: it decodes host payloads into the port's shapes (DESIGN §3:
+// event payloads carry no userId; handlers receive it as the second argument) and maps the port's
+// calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
+
+import type { SpindleAPI, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
+import type { EntryExtensionApi } from "../spindle-augment";
+import type { JsonObject, JsonValue } from "../shared/json";
+import { isRecord } from "../shared/json";
+import type { ChatId, UserId } from "../shared/ids";
+import type { Answer, Answers } from "../engine/decide";
+import type {
+  ActivatedEntry,
+  ContextHandlerInput,
+  HostBookEntry,
+  HostBookEntryInput,
+  HostEventMap,
+  HostEventName,
+  HostGenerationType,
+  HostMessage,
+  HostPort,
+  InterceptorEntry,
+  InterceptorInput,
+  InterceptorResult,
+  SwipeAction,
+} from "./host";
+
+declare const spindle: SpindleAPI;
+
+// ---------------------------------------------------------------- decoding
+
+/** A deep copy of host data as JSON (dropping functions, undefined and non-finite numbers). */
+export function toJson(value: unknown): JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (Array.isArray(value)) return value.map(toJson);
+  if (isRecord(value)) return toJsonObject(value);
+  return null;
+}
+
+export function toJsonObject(value: unknown): JsonObject {
+  const out: JsonObject = {};
+  if (!isRecord(value)) return out;
+  for (const [k, v] of Object.entries(value)) if (v !== undefined && typeof v !== "function") out[k] = toJson(v);
+  return out;
+}
+
+function str(o: unknown, key: string): string | undefined {
+  if (!isRecord(o)) return undefined;
+  const v = o[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+function num(o: unknown, key: string): number | undefined {
+  if (!isRecord(o)) return undefined;
+  const v = o[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+const GENERATION_TYPES: Record<string, HostGenerationType> = { normal: "normal", regenerate: "regenerate", swipe: "swipe", continue: "continue", impersonate: "impersonate" };
+
+function generationType(o: unknown): HostGenerationType {
+  return GENERATION_TYPES[str(o, "generationType") ?? "normal"] ?? "normal";
+}
+
+/** A host message (`getMessages` row or event DTO). `spindle_metadata` arrives as `metadata` or inside `extra`. */
+export function decodeMessage(raw: unknown, chatId: ChatId): HostMessage | null {
+  if (!isRecord(raw)) return null;
+  const id = str(raw, "id");
+  if (!id) return null;
+  const swipes = Array.isArray(raw.swipes) ? raw.swipes.map((s) => (typeof s === "string" ? s : "")) : [];
+  const content = str(raw, "content") ?? "";
+  const swipeId = num(raw, "swipe_id") ?? 0;
+  if (swipes.length === 0) swipes.push(content);
+  const extra = isRecord(raw.extra) ? raw.extra : {};
+  const metadata = isRecord(raw.metadata) ? raw.metadata : isRecord(extra.spindle_metadata) ? extra.spindle_metadata : {};
+  const role = str(raw, "role");
+  return {
+    id,
+    chatId: str(raw, "chat_id") ?? chatId,
+    index: num(raw, "index_in_chat") ?? 0,
+    isUser: raw.is_user === true || role === "user",
+    name: str(raw, "name") ?? "",
+    content,
+    swipeId,
+    swipes,
+    metadata: toJsonObject(metadata),
+  };
+}
+
+const SWIPE_ACTIONS: Record<string, SwipeAction> = { added: "added", navigated: "navigated", updated: "updated", deleted: "deleted" };
+
+function decodeEvent<K extends HostEventName>(event: K, p: unknown): HostEventMap[K] | null;
+function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventName] | null {
+  const chatId = str(p, "chatId");
+  if (!chatId) return null;
+  switch (event) {
+    case "GENERATION_STARTED":
+    case "GENERATION_IN_PROGRESS": {
+      const generationId = str(p, "generationId");
+      if (!generationId) return null;
+      const base = {
+        generationId,
+        chatId,
+        model: str(p, "model") ?? "",
+        targetMessageId: str(p, "targetMessageId") ?? null,
+        targetSwipeId: num(p, "targetSwipeId") ?? null,
+        characterId: str(p, "characterId") ?? null,
+        characterName: str(p, "characterName") ?? null,
+      };
+      if (event === "GENERATION_IN_PROGRESS") return { ...base, contextClipStats: isRecord(p) && isRecord(p.contextClipStats) ? toJsonObject(p.contextClipStats) : null };
+      const frontendSessionId = str(p, "frontendSessionId");
+      return { ...base, generationType: generationType(p), ...(frontendSessionId ? { frontendSessionId } : {}) };
+    }
+    case "GENERATION_ENDED": {
+      const generationId = str(p, "generationId");
+      if (!generationId) return null;
+      const messageId = str(p, "messageId");
+      const error = str(p, "error");
+      const finish = str(p, "finish_reason");
+      const draft = str(p, "impersonateDraft");
+      return {
+        generationId,
+        chatId,
+        content: str(p, "content") ?? "",
+        generationType: generationType(p),
+        ...(messageId ? { messageId } : {}),
+        ...(error ? { error } : {}),
+        ...(finish ? { finish_reason: finish } : {}),
+        ...(draft !== undefined ? { impersonateDraft: draft } : {}),
+        ...(isRecord(p) && isRecord(p.usage) ? { usage: toJsonObject(p.usage) } : {}),
+      };
+    }
+    case "GENERATION_STOPPED": {
+      const generationId = str(p, "generationId");
+      return generationId ? { generationId, chatId, content: str(p, "content") ?? "" } : null;
+    }
+    case "MESSAGE_SENT":
+    case "MESSAGE_EDITED": {
+      const message = decodeMessage(isRecord(p) ? p.message : null, chatId);
+      return message ? { chatId, message } : null;
+    }
+    case "MESSAGE_SWIPED": {
+      const message = decodeMessage(isRecord(p) ? p.message : null, chatId);
+      const action = SWIPE_ACTIONS[str(p, "action") ?? ""];
+      if (!message || !action) return null;
+      const previousSwipeId = num(p, "previousSwipeId");
+      return { chatId, message, action, swipeId: num(p, "swipeId") ?? message.swipeId, ...(previousSwipeId !== undefined ? { previousSwipeId } : {}) };
+    }
+    case "MESSAGE_DELETED": {
+      const messageId = str(p, "messageId");
+      return messageId ? { chatId, messageId } : null;
+    }
+    case "WORLD_INFO_ACTIVATED": {
+      const entries: ActivatedEntry[] = [];
+      if (isRecord(p) && Array.isArray(p.entries)) {
+        for (const e of p.entries) {
+          const id = str(e, "id");
+          if (id) entries.push({ id, comment: str(e, "comment") ?? "", source: str(e, "source") ?? "", bookId: str(e, "bookId") ?? "" });
+        }
+      }
+      return { chatId, entries, stats: isRecord(p) && isRecord(p.stats) ? toJsonObject(p.stats) : {} };
+    }
+  }
+}
+
+function decodeAnswer(raw: unknown): Answer | null {
+  const type = str(raw, "type");
+  if (!isRecord(raw)) return null;
+  const probabilities: Record<string, number> = {};
+  if (isRecord(raw.probabilities)) for (const [k, v] of Object.entries(raw.probabilities)) if (typeof v === "number") probabilities[k] = v;
+  if (type === "choice") return { type, choice: str(raw, "choice") ?? "", probabilities, confidence: num(raw, "confidence") ?? 0 };
+  if (type === "score") return { type, score: num(raw, "score") ?? 0, probabilities, confidence: num(raw, "confidence") ?? 0 };
+  if (type === "noul") return { type, noul: num(raw, "noul") ?? 0.5 };
+  return null;
+}
+
+function usageTokens(raw: unknown): number {
+  if (!isRecord(raw) || !isRecord(raw.usage)) return 0;
+  const u = raw.usage;
+  const total = num(u, "total_tokens");
+  if (total !== undefined) return total;
+  return (num(u, "input_tokens") ?? num(u, "prompt_tokens") ?? 0) + (num(u, "output_tokens") ?? num(u, "completion_tokens") ?? 0);
+}
+
+function entryInput(entry: Partial<HostBookEntryInput>): WorldBookEntryCreateDTO {
+  const out: WorldBookEntryCreateDTO = {};
+  if (entry.comment !== undefined) out.comment = entry.comment;
+  if (entry.content !== undefined) out.content = entry.content;
+  if (entry.keys !== undefined) out.key = entry.keys;
+  if (entry.disabled !== undefined) out.disabled = entry.disabled;
+  if (entry.constant !== undefined) out.constant = entry.constant;
+  if (entry.position !== undefined) out.position = entry.position;
+  if (entry.depth !== undefined) out.depth = entry.depth;
+  if (entry.role !== undefined && entry.role !== null) out.role = entry.role;
+  if (entry.order !== undefined) out.order_value = entry.order;
+  if (entry.extensions !== undefined) out.extensions = entry.extensions;
+  return out;
+}
+
+/** Extension storage file mirroring system log lines (Settings → diagnostics; integration checks). */
+export const DIAGNOSTICS_LOG = "diagnostics/backend.log";
+/** Each user's own diagnostics, in their user storage: lines about their chats. */
+export const USER_DIAGNOSTICS_LOG = "diagnostics.log";
+
+/** How long a section token count may take before the estimate stands in (a tokenizer still loading takes seconds). */
+const TOKEN_COUNT_MS = 1000;
+
+/** Keeps the last log lines and writes them, debounced: system lines to extension storage, user lines to that user's storage. */
+class DiagnosticsLog {
+  private readonly lines: string[] = [];
+  private readonly users = new Map<UserId, string[]>();
+  private readonly dirty = new Set<UserId | null>();
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  add(level: string, message: string, userId?: UserId): void {
+    const line = `${new Date().toISOString()} ${level} ${message}`;
+    const list = userId ? (this.users.get(userId) ?? []) : this.lines;
+    list.push(line);
+    if (list.length > 400) list.splice(0, list.length - 400);
+    if (userId) {
+      this.users.set(userId, list);
+      if (this.users.size > 256) this.users.delete(this.users.keys().next().value ?? "");
+    }
+    this.dirty.add(userId ?? null);
+    if (this.timer) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      for (const who of this.dirty) {
+        if (who === null) void spindle.storage.write(DIAGNOSTICS_LOG, `${this.lines.join("\n")}\n`).catch(() => undefined);
+        else void spindle.userStorage.write(USER_DIAGNOSTICS_LOG, `${(this.users.get(who) ?? []).join("\n")}\n`, who).catch(() => undefined);
+      }
+      this.dirty.clear();
+    }, 1000);
+  }
+}
+
+// ---------------------------------------------------------------- the port
+
+export function createSpindleHost(): HostPort {
+  const diagnostics = new DiagnosticsLog();
+  // The host's active Loom preset (the `activeLoomPresetId` setting) has no read API: it is learned
+  // from its change events, else from the preset the chat's last reply was assembled with.
+  const activePreset = new Map<string, string>();
+  const learn = (userId: string | undefined, presetId: unknown): void => {
+    if (userId && typeof presetId === "string" && presetId !== "") activePreset.set(userId, presetId);
+  };
+  spindle.on("PRESET_CHANGED", (payload, userId) => learn(userId, isRecord(payload) ? payload.presetId : null));
+  spindle.on("SETTINGS_UPDATED", (payload, userId) => learn(userId, isRecord(payload) && payload.key === "activeLoomPresetId" ? payload.value : null));
+  return {
+    chats: {
+      async messages(chatId) {
+        const rows = await spindle.chat.getMessages(chatId);
+        const out: HostMessage[] = [];
+        for (const row of rows) {
+          const m = decodeMessage(row, chatId);
+          if (m) out.push(m);
+        }
+        return out.sort((a, b) => a.index - b.index);
+      },
+      async writeMetadata(chatId, messageId, bag) {
+        await spindle.chat.updateMessage(chatId, messageId, { metadata: bag });
+      },
+      async chatMetadata(chatId, userId) {
+        const chat = await spindle.chats.get(chatId, userId);
+        return toJsonObject(chat?.metadata);
+      },
+      async mergeChatMetadata(chatId, patch, userId) {
+        const chat = await spindle.chats.get(chatId, userId);
+        if (!chat) throw new Error(`chat ${chatId} not found`);
+        await spindle.chats.update(chatId, { metadata: { ...toJsonObject(chat.metadata), ...patch } }, userId);
+      },
+      async appendUserMessage(chatId, content, metadata, triggerGeneration) {
+        const result = await spindle.chat.appendMessage(chatId, { role: "user", content, metadata }, { triggerGeneration });
+        return result.id;
+      },
+      async active(userId) {
+        return (await spindle.chats.getActive(userId))?.id ?? null;
+      },
+    },
+    storage: {
+      async read(path, userId) {
+        if (!(await spindle.userStorage.exists(path, userId))) return null;
+        return spindle.userStorage.read(path, userId);
+      },
+      write: (path, data, userId) => spindle.userStorage.write(path, data, userId),
+      move: (from, to, userId) => spindle.userStorage.move(from, to, userId),
+      remove: (path, userId) => spindle.userStorage.delete(path, userId),
+      // The host lists files recursively under the prefix directory, relative to it (seen on a real
+      // host: "w_x/index.json" for "worlds/"); the port promises full storage paths.
+      async list(prefix, userId) {
+        const base = prefix.replace(/\/+$/, "");
+        return (await spindle.userStorage.list(prefix, userId)).map((entry) => {
+          const rel = entry.split("\\").join("/");
+          return base === "" ? rel : `${base}/${rel}`;
+        });
+      },
+    },
+    on(event, handler) {
+      return spindle.on(event, (payload: unknown, userId?: string) => {
+        const decoded = decodeEvent(event, payload);
+        if (decoded) handler(decoded, userId ?? null);
+      });
+    },
+    registerContextHandler(handler, timeoutMs) {
+      spindle.registerContextHandler(
+        async (context: unknown, signal?: AbortSignal) => {
+          const chatId = str(context, "chatId");
+          const userId = str(context, "userId");
+          if (chatId && userId) {
+            const input: ContextHandlerInput = {
+              chatId,
+              userId,
+              generationType: generationType(context),
+              dryRun: isRecord(context) && context.dryRun === true,
+              connectionId: str(context, "connectionId") ?? null,
+              personaId: str(context, "personaId") ?? null,
+            };
+            const session = str(context, "frontendSessionId");
+            if (session) input.frontendSessionId = session;
+            await handler(input, signal ?? new AbortController().signal);
+          }
+          return context;
+        },
+        100,
+        { timeoutMs },
+      );
+    },
+    registerInterceptor(handler, priority) {
+      spindle.registerWorldInfoInterceptor(async (ctx) => {
+        const userId = ctx.userId;
+        if (!userId) return undefined;
+        const input: InterceptorInput = {
+          chatId: ctx.chatId,
+          userId,
+          messages: ctx.messages.map((m) => ({ id: m.id, content: m.content, isUser: m.is_user })),
+          entries: ctx.entries.map(
+            (e): InterceptorEntry => ({
+              id: e.id,
+              bookId: e.world_book_id,
+              comment: e.comment,
+              content: e.content,
+              keys: [...e.key],
+              constant: e.constant,
+              disabled: e.disabled,
+              group: e.group_name === "" ? null : e.group_name,
+              groupOverride: e.group_override,
+              groupWeight: e.group_weight,
+              extensions: toJsonObject(e.extensions),
+            }),
+          ),
+        };
+        const result: InterceptorResult | null = await handler(input);
+        if (!result) return undefined;
+        return {
+          disabled: result.disabled,
+          enabled: result.enabled,
+          forced: result.forced,
+          mutated: result.mutated.map((m) => ({ id: m.id, ...(m.content !== undefined ? { content: m.content } : {}), ...(m.placement ? { placement: m.placement } : {}) })),
+          ...(result.disableRecursion ? { activationOverrides: { disableRecursion: true } } : {}),
+        };
+      }, priority);
+    },
+    models: {
+      async quiet(request, userId, signal) {
+        const parameters: Record<string, unknown> = { max_tokens: request.maxTokens };
+        if (request.json) parameters.response_format = { type: "json_object" };
+        // The host reads `parameters.model` as a per-request model override.
+        if (request.model) parameters.model = request.model;
+        const raw = await spindle.generate.quiet({
+          type: "quiet",
+          messages: request.messages,
+          parameters,
+          ...(request.connectionId ? { connection_id: request.connectionId } : {}),
+          userId,
+          signal,
+        });
+        return { content: str(raw, "content") ?? "", finishReason: str(raw, "finish_reason") ?? "", tokens: usageTokens(raw) };
+      },
+      async decide(request, userId, signal) {
+        // The Decision API takes text, a list or an object as state; scalars go as their text.
+        const s = request.state;
+        const state = s === null || typeof s === "number" || typeof s === "boolean" ? String(s) : s;
+        const raw = await spindle.decisions.evaluate(
+          { state, questions: request.questions, ...(request.connectionId ? { connection_id: request.connectionId } : {}), ...(request.model ? { model: request.model } : {}), userId },
+          { signal },
+        );
+        const answers: Answers = {};
+        for (const [key, value] of Object.entries(raw.answers)) {
+          const answer = decodeAnswer(value);
+          if (answer) answers[key] = answer;
+        }
+        return { answers, model: raw.model, tokens: usageTokens(raw) };
+      },
+    },
+    tokens: {
+      // One countText per text, in parallel: the host counts with the user's main model, as its prompt
+      // breakdown does (operator scope needs the userId). A tokenizer still loading can take seconds,
+      // so anything slower than TOKEN_COUNT_MS, or a failed or malformed count, is no count.
+      async count(texts, userId) {
+        const counted = Promise.all(texts.map((text) => spindle.tokens.countText(text, { userId }))).then((rows) => rows.map((r) => r.total_tokens));
+        const late = new Promise<null>((resolve) => {
+          const timer = setTimeout(() => resolve(null), TOKEN_COUNT_MS);
+          void counted.finally(() => clearTimeout(timer)).catch(() => undefined);
+        });
+        try {
+          const counts = await Promise.race([counted, late]);
+          return counts && counts.every((n) => Number.isInteger(n) && n >= 0) ? counts : null;
+        } catch {
+          return null;
+        }
+      },
+    },
+    frontend: {
+      send(message, userId, frontendSessionId) {
+        spindle.sendToFrontend(message, userId ?? undefined, frontendSessionId ? { frontendSessionId } : undefined);
+      },
+      onMessage(handler) {
+        return spindle.onFrontendMessage(handler);
+      },
+      closeDrawer: (userId: UserId) => spindle.ui.closeDrawer({ userId }),
+    },
+    books: {
+      async create(name, description, userId) {
+        const book = await spindle.world_books.create({ name, description, metadata: { lumi_rp_engine: true } }, userId);
+        return book.id;
+      },
+      async exists(bookId, userId) {
+        return (await spindle.world_books.get(bookId, userId)) !== null;
+      },
+      async name(bookId, userId) {
+        return (await spindle.world_books.get(bookId, userId))?.name ?? null;
+      },
+      async entries(bookId, userId) {
+        const out: HostBookEntry[] = [];
+        for (let offset = 0; offset < 100_000; offset += 200) {
+          const page = await spindle.world_books.entries.list(bookId, { limit: 200, offset, userId });
+          for (const e of page.data) {
+            out.push({
+              id: e.id,
+              bookId: e.world_book_id,
+              comment: e.comment,
+              content: e.content,
+              keys: [...e.key],
+              disabled: e.disabled,
+              constant: e.constant,
+              position: e.position,
+              depth: e.depth,
+              role: e.role,
+              order: e.order_value,
+              extensions: toJsonObject(e.extensions),
+            });
+          }
+          if (page.data.length < 200 || out.length >= page.total) break;
+        }
+        return out;
+      },
+      async createEntry(bookId, entry, userId) {
+        const created = await spindle.world_books.entries.create(bookId, entryInput(entry), userId);
+        return created.id;
+      },
+      async updateEntry(entryId, patch, userId) {
+        await spindle.world_books.entries.update(entryId, entryInput(patch), userId);
+      },
+      async deleteEntry(entryId, userId) {
+        await spindle.world_books.entries.delete(entryId, userId);
+      },
+      async setExtension(entryId, namespace, value, userId) {
+        const api: EntryExtensionApi = spindle.world_books.entries as unknown as EntryExtensionApi;
+        await api.setExtension(entryId, namespace, value, userId);
+      },
+    },
+    async dryRun(chatId, userId) {
+      const result = await spindle.generate.dryRun({ chatId }, userId);
+      const p = result.parameters;
+      const max = [p.max_tokens, p.maxTokens, p.max_new_tokens, p.max_output_tokens].find((v): v is number => typeof v === "number" && Number.isFinite(v));
+      return {
+        messages: result.messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) })),
+        blocks: result.breakdown.filter((b) => b.type === "block").map((b) => ({ id: b.blockId ?? null, name: b.name, content: b.content ?? "" })),
+        maxTokens: max ?? null,
+        model: result.model,
+      };
+    },
+    presets: {
+      async active(chatId, userId) {
+        // The host's order: the default connection's linked preset, else the active Loom preset.
+        const connection = (await spindle.connections.list(userId)).find((c) => c.is_default);
+        let presetId = connection?.preset_id ?? activePreset.get(userId) ?? null;
+        if (!presetId) {
+          const rows = await spindle.chat.getMessages(chatId);
+          for (let i = rows.length - 1; i >= 0 && !presetId; i--) {
+            const row = rows[i];
+            if (!row || row.is_user) continue;
+            presetId = (await spindle.generate.getBreakdown(row.id, userId))?.presetId ?? null;
+            break;
+          }
+        }
+        if (!presetId) return null;
+        const preset = await spindle.presets.get(presetId, userId);
+        return preset ? { id: preset.id, name: preset.name } : null;
+      },
+    },
+    connections: {
+      async active(userId) {
+        const c = (await spindle.connections.list(userId)).find((x) => x.is_default);
+        return c ? { id: c.id, name: c.name } : null;
+      },
+    },
+    processes: {
+      async spawn(options) {
+        const handle = await spindle.backendProcesses.spawn({ entry: options.entry, kind: options.kind, key: options.key, payload: options.payload, userId: options.userId, startupTimeoutMs: 15_000, heartbeatTimeoutMs: 15_000, replaceExisting: true });
+        return { processId: handle.processId, send: (payload: unknown) => handle.send(payload), stop: () => handle.stop() };
+      },
+      onMessage(handler) {
+        return spindle.backendProcesses.onMessage((e) => handler({ processId: e.processId, key: "", payload: e.payload }));
+      },
+      onLifecycle(handler) {
+        return spindle.backendProcesses.onLifecycle((e) => handler({ processId: e.processId, key: e.key ?? "", state: e.state, ...(e.error ? { error: e.error } : {}) }));
+      },
+    },
+    log(level, message, userId) {
+      if (level === "error") spindle.log.error(message);
+      else if (level === "warn") spindle.log.warn(message);
+      else spindle.log.info(message);
+      diagnostics.add(level, message, userId);
+    },
+    async councilWorldInfo(userId) {
+      try {
+        const s = await spindle.council.getSettings({ userId });
+        return s.councilMode && s.toolsSettings.includeWorldInfo;
+      } catch {
+        return null;
+      }
+    },
+  };
+}

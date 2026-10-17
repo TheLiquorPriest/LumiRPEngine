@@ -1,0 +1,98 @@
+// The whole backend on the fake host: runtime, dispatcher and job runner, driven over the protocol.
+
+import { isRecord } from "../../src/shared/json";
+import type { BackendToFrontend, FrontendToBackend } from "../../src/shared/protocol";
+import { PROTOCOL_VERSION } from "../../src/shared/protocol";
+import { enginePack } from "../../src/engine/engine-pack";
+import { planTurn, postTurn } from "../../src/engine/turn";
+import { Dispatcher } from "../../src/backend/dispatch";
+import { JobRunner } from "../../src/backend/jobs";
+import { toChain } from "../../src/backend/ledger-io";
+import { Runtime } from "../../src/backend/runtime";
+import { FakeHost } from "./fake-host";
+import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
+import { POV, testPack, testWorld, tieStubPack } from "./test-pack";
+
+export interface RigOptions {
+  /** Every shipped pack and the starter worlds (templates by starter id), instead of the test pack. */
+  shipped?: boolean;
+}
+
+export class Rig {
+  readonly host = new FakeHost();
+  readonly rt: Runtime;
+  readonly jobs: JobRunner;
+  readonly dispatch: Dispatcher;
+  private req = 0;
+
+  constructor(options: RigOptions = {}) {
+    this.rt = options.shipped
+      ? new Runtime({ host: this.host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS })
+      : new Runtime({ host: this.host, packs: [enginePack, testPack, tieStubPack], pipeline: { plan: planTurn, post: postTurn }, templates: { test: () => testWorld() } });
+    this.jobs = new JobRunner(this.host, this.rt.worlds, this.rt.steps, this.rt.settings, this.rt.registry);
+    this.dispatch = new Dispatcher(this.rt, this.jobs);
+    this.rt.start();
+    this.dispatch.start();
+    this.host.processes.onMessage((event) => this.jobs.onLane(event.payload));
+    this.host.idle = async () => {
+      await this.jobs.idle();
+      await this.rt.ledger.idle();
+      await this.rt.push.settle();
+    };
+  }
+
+  async cashOf(chatId: string): Promise<unknown> {
+    const core = await this.rt.ledger.core(chatId, this.host.userId);
+    return core?.fold(toChain(await this.host.chats.messages(chatId, this.host.userId))).state.entities[POV]?.fields.cash;
+  }
+
+  async moodOf(chatId: string): Promise<unknown> {
+    const core = await this.rt.ledger.core(chatId, this.host.userId);
+    return core?.fold(toChain(await this.host.chats.messages(chatId, this.host.userId))).state.entities[POV]?.fields.mood;
+  }
+
+  async send(request: Record<string, unknown>): Promise<BackendToFrontend> {
+    const reqId = `r${++this.req}`;
+    const before = this.host.sent.length;
+    await this.dispatch.handle({ lre: PROTOCOL_VERSION, reqId, ...request } as unknown as FrontendToBackend, this.host.userId);
+    await this.host.settle();
+    const reply = this.host.sent.slice(before).find((m) => (m.type === "lre.result" || m.type === "lre.error") && m.reqId === reqId);
+    if (!reply) throw new Error(`no reply to ${String(request.type)}`);
+    return reply;
+  }
+
+  body(reply: BackendToFrontend): Record<string, unknown> {
+    if (reply.type === "lre.error") throw new Error(`${reply.code}: ${reply.message}`);
+    if (reply.type !== "lre.result" || !isRecord(reply.body)) throw new Error("not a result");
+    return reply.body;
+  }
+
+  async newWorld(name = "Testville", template = "test"): Promise<string> {
+    const created = this.body(await this.send({ type: "lre.world", op: "create", name, template }));
+    const world = created.world;
+    if (!isRecord(world) || typeof world.id !== "string") throw new Error("no world");
+    return world.id;
+  }
+
+  async worldChat(): Promise<string> {
+    const worldId = await this.newWorld();
+    const chatId = this.host.createChat("Morning, Sam.");
+    this.body(await this.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    return chatId;
+  }
+
+  async turn(chatId: string, text: string, reply: string): Promise<void> {
+    this.host.sendUser(chatId, text);
+    await this.host.settle();
+    const g = await this.host.start(chatId, { type: "normal" });
+    await this.host.finish(g, reply);
+  }
+
+  latestView(chatId: string): Record<string, unknown> | null {
+    for (let i = this.host.sent.length - 1; i >= 0; i--) {
+      const m = this.host.sent[i];
+      if (m?.type === "lre.state.snapshot" && m.chatId === chatId) return JSON.parse(JSON.stringify(m.view)) as Record<string, unknown>;
+    }
+    return null;
+  }
+}
