@@ -220,7 +220,12 @@ describe("backend runtime", () => {
   test("extraction applies automatic proposals with an undo chip and stores confirm chips", async () => {
     const rig = new Rig();
     rig.host.quietReply = (req) => (req.messages[0]?.content.includes(EXTRACT_MARK) ? JSON.stringify({ proposals: [{ type: "condition", entity: POV, field: "cash", delta: 7 }, { type: "regard", from: POV, to: "dev", axis: "trust", delta: 1 }] }) : "{}");
-    const chatId = await rig.worldChat();
+    // Dev is in the room: a world that places the player (here at its start place) names only people the player can know.
+    const worldId = await rig.newWorld();
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: "dev", value: { ...testWorld().entities.dev, fields: { ...testWorld().entities.dev?.fields, place: "home" } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     // Regard is `auto` from cold start (re-measured D4); pin it to confirm to exercise confirm chips.
     rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { regard: { mode: "confirm" } } } }));
     await rig.turn(chatId, "earn", "Dev slips you seven bucks and you trust him a little more.");

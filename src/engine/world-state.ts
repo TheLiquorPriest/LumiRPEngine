@@ -3,10 +3,11 @@
 
 import type { Band, DomainId, Level, RevisionId } from "../shared/ids";
 import { BANDS, DOMAINS } from "../shared/ids";
-import { isRecord } from "../shared/json";
+import { hasOwn, isRecord } from "../shared/json";
 import { agentOf } from "../shared/tiers";
 import type { WorldDoc } from "../shared/world";
 import { completeRelations, type RelationTypes } from "./relations";
+import { placeOfEntity } from "./scope";
 import { seedObservations } from "./seen";
 import type { EntityState, TrackState, WorldState } from "./state";
 import { clampLevel, clampThreshold, clampTick, clampUnitCap } from "./time-limits";
@@ -50,6 +51,9 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
     };
   }
   completeRelations(types, world, entities);
+  // A POV the world doesn't place starts where the world says the story starts.
+  const pov = entities[world.pov];
+  if (pov && placeOfEntity({ entities }, world.pov) === null && hasOwn(world.places, world.start.place)) pov.fields.place = world.start.place;
   const tierCaps = {} as Record<Band, Partial<Record<DomainId, Level>>>;
   for (const band of BANDS) {
     const caps: unknown = world.realism.tierCaps[band];

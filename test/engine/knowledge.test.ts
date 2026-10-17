@@ -220,3 +220,18 @@ describe("discoverable places", () => {
     expect(canSeePlace(reg, w.world, w.state, "you", "vault")).toBe(false);
   });
 });
+
+describe("world.start.place", () => {
+  test("a POV the world doesn't place starts at the world's start place, which counts as visited", () => {
+    const world = modernUsWorld("s", "Riverton");
+    delete world.entities.you!.fields.place;
+    world.start.place = "cafe";
+    const s = startState(world);
+    expect(s.entities.you?.fields.place).toBe("cafe");
+    expect(placeVisit(s, "cafe")).toEqual({ first: s.clock, last: s.clock });
+    // A POV the world places keeps its own place.
+    const placed = modernUsWorld("p", "Riverton");
+    placed.start.place = "cafe";
+    expect(startState(placed).entities.you?.fields.place).toBe("apartment");
+  });
+});
