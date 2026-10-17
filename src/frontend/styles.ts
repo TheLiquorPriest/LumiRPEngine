@@ -43,6 +43,7 @@ export const CSS = `
 .lre-inline{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}
 .lre-spread{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;min-width:0}
 .lre-inline>*,.lre-spread>*{max-width:100%}
+.lre-savebar{position:sticky;bottom:0;z-index:2;display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 calc(-10px - var(--lre-gutter,0px)) 0 -10px;padding:8px calc(10px + var(--lre-gutter,0px)) 8px 10px;border-top:1px solid var(--lre-border);background:linear-gradient(var(--lumiverse-bg,transparent),var(--lumiverse-bg,transparent)),var(--lre-surface)}
 .lre-muted{color:var(--lre-muted)}.lre-dim{color:var(--lre-dim)}.lre-neg{color:var(--lre-neg)}.lre-pos{color:var(--lre-pos)}.lre-warn{color:var(--lre-warn)}
 .lre-small{font-size:12px}
 .lre-num{font-variant-numeric:tabular-nums}

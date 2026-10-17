@@ -578,7 +578,7 @@ export function SchemaEditor(props: EditorProps) {
         ))}
       {PackConfig ? <PackConfig world={props.world} config={isRecord(value.config) ? value.config : {}} lint={lintAt(draft?.lint ?? [], `${path}.config`)} onChange={(config) => setValue({ ...value, config })} /> : null}
       <SchemaFields specs={COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [] }} onChange={setValue} />
-      <div class="lre-inline" style={{ position: "sticky", bottom: 0, padding: "8px 0", background: "var(--lre-fill)" }}>
+      <div class="lre-savebar">
         <button type="button" class="lre-btn primary" disabled={busy || (!changed && !isNew)} onClick={save}>
           {isNew ? "Create" : "Save to draft"}
         </button>

@@ -303,7 +303,7 @@ export function LoreEditor(props: EditorProps) {
           </div>
         ) : null}
       </Card>
-      <div class="lre-inline" style={{ position: "sticky", bottom: 0, padding: "8px 0", background: "var(--lre-fill)" }}>
+      <div class="lre-savebar">
         <button type="button" class="lre-btn primary" disabled={busy || (!changed && !isNew)} onClick={save}>
           {isNew ? "Create" : "Save to draft"}
         </button>

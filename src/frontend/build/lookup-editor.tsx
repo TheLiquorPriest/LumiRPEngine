@@ -258,7 +258,7 @@ export function LookupTableEditor(props: { doc: WorldDoc; lint: readonly LintIss
       />
       {Object.keys(props.doc.lore).length === 0 ? <div class="lre-banner info">The world has no lore entries yet; terms and topics lead to entries.</div> : null}
       {tab === "terms" ? <TermsPanel doc={props.doc} lint={props.lint} value={value} onChange={setValue} /> : <TopicsPanel doc={props.doc} lint={props.lint} value={value} onChange={setValue} />}
-      <div class="lre-inline" style={{ position: "sticky", bottom: 0, padding: "8px 0", background: "var(--lre-fill)" }}>
+      <div class="lre-savebar">
         <button type="button" class="lre-btn primary" disabled={!changed || busy} onClick={() => run(() => props.save(loreIndexJson(value)))}>
           Save to draft
         </button>

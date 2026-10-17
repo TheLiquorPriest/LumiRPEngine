@@ -552,7 +552,7 @@ export function RulesetEditor() {
       <Card title="Sheet preview">
         <SheetPreview draft={draft} ruleset={tidy} />
       </Card>
-      <div class="lre-inline" style={{ position: "sticky", bottom: 0, padding: "8px 0", background: "var(--lre-fill)" }}>
+      <div class="lre-savebar">
         <button
           type="button"
           class="lre-btn primary"
