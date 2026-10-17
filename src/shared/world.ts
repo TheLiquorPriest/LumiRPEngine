@@ -11,6 +11,7 @@ import type {
   ActivityType,
   Band,
   BoundMode,
+  ChatId,
   CheckId,
   DomainId,
   EntityId,
@@ -23,6 +24,7 @@ import type {
   KindId,
   Level,
   MapId,
+  MessageId,
   PackId,
   PlaceId,
   ProgressionId,
@@ -671,9 +673,23 @@ export interface StepTemplateDef {
 }
 
 /**
- * World lore (DESIGN §4.2): what the world knows, authored in Build or imported with a world. It is
- * kept in the world document and not delivered to the narrator yet; the engine-managed book holds
- * slots only. Lore holds cue text only: a secret's truth lives in its track, never here (linted).
+ * Where a lore entry came from (DESIGN §4.2). An entry without one was authored in Build, as is
+ * every entry written before sources existed. A book entry keeps the hash of the World Info text it
+ * was indexed from (`bookTextHash`), so Build can tell when the book has changed since; a chat
+ * entry names the message it was saved from; an AI entry was written by an indexing job from
+ * pasted text, and is `pending` until the author accepts it.
+ */
+export type LoreSource =
+  | { kind: "authored" }
+  | { kind: "book"; bookId: string; entryId: string; hash: string }
+  | { kind: "chat"; chatId: ChatId; messageId: MessageId }
+  | { kind: "ai"; status: "pending" | "accepted" };
+
+/**
+ * World lore (DESIGN §4.2): what the world knows, authored in Build, indexed from World Info books
+ * or text, saved from a chat, or imported with a world. It is kept in the world document and not
+ * delivered to the narrator yet; the engine-managed book holds slots only. A secret entry may hold
+ * the secret itself: only the helpers in its `audience` read it, and only until its `gate` holds.
  */
 export interface LoreEntryDef {
   id: string;
@@ -683,13 +699,24 @@ export interface LoreEntryDef {
   keys: string[];
   /** Entity and place ids the entry is about (back-links). */
   links: string[];
+  /** Other names its subject goes by ("the old lighthouse"); the lookup table's terms can route them here. */
+  aliases?: string[];
+  /** Topics the entry belongs under, by label ("harbor law"); the lookup table's topics gather them. */
+  topics?: string[];
+  /** Absent: authored. */
+  source?: LoreSource;
   /** Entries sharing a group are alternatives to each other. */
   group?: string;
   /** Higher comes first among otherwise equal entries. */
   priority?: number;
-  /** Secret lore is gated: it may be shown only while `gate` holds. */
+  /** Secret lore is gated: it is revealed only once `gate` holds, and it needs one. */
   secret?: boolean;
   gate?: Expr;
+  /**
+   * The helpers that may read a secret entry before its gate holds; none when absent. Steps that
+   * write prose (`brief`, `outline`, `choices`) can pass what they read on to the narrator (linted).
+   */
+  audience?: StepPurpose[];
 }
 
 export type SuppressedSource =

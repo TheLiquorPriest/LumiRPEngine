@@ -19,6 +19,7 @@ import { buildEntitySheet } from "./ruleset";
 import type { InterpretOutput, TurnPipeline } from "./steps";
 import type { WorldState } from "./state";
 import { findLeaks, unrevealedTruths } from "./visibility";
+import { lintLore } from "./lore-lint";
 import { lintStructure } from "./world-lint";
 import { initialState } from "./world-state";
 import { authorLines, playerLines } from "./player-events";
@@ -169,15 +170,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
   for (const [id, a] of Object.entries(world.actions)) {
     if (!a.check && Object.keys(a.outcomes).some((o) => o !== "default")) warn(`actions.${id}.check`, "no_check", `"${a.label}" has outcomes other than default but no check, so only "default" ever applies`);
   }
-  // Lore holds cue text only; a secret's truth lives in its track (DESIGN §4.2, §7).
-  const truths: string[] = [];
-  for (const t of Object.values(world.tracks)) for (const s of Object.values(t.stages)) if (s.truth && s.truth.trim().length >= 12) truths.push(s.truth.trim().toLowerCase());
-  for (const [id, l] of Object.entries(world.lore)) {
-    if (l.id !== id) err(`lore.${id}.id`, "id_mismatch", "the id must match its key");
-    for (const link of l.links) if (!world.entities[link] && !world.places[link]) warn(`lore.${id}.links`, "missing_ref", `"${link}" is not an entity or place`);
-    if (truths.some((t) => l.content.toLowerCase().includes(t))) err(`lore.${id}.content`, "secret_truth", `"${l.title}" carries a secret's truth; lore holds cue text only`);
-    if (l.secret && !l.gate) warn(`lore.${id}.gate`, "no_gate", `secret lore "${l.title}" has no gate, so it can never be revealed`);
-  }
+  issues.push(...lintLore(world));
   // Section templates wrap engine values: the only macro they may hold is the engine's `{{lines}}`;
   // no escape sentinel or `<user>`-style shorthand either.
   for (const [id, s] of Object.entries(world.sections)) {
