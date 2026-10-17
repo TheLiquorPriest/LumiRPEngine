@@ -494,7 +494,8 @@ export class LedgerCore {
    * Re-read keeps): each, in fold order with the message's later live markers, is re-validated event
    * by event against `state` (the prefix after the record's events, advanced in place) and kept or
    * dropped whole. Events `undone` names stay undone: they neither validate nor apply, an entry left
-   * with none is not carried, and the refs of those that travel come back with them.
+   * with none is not carried, and the refs of those that travel come back with them. A
+   * materialization of detail the prefix already records leaves the entry (DESIGN §9.2).
    */
   private carry(state: WorldState, world: WorldDoc, entries: readonly PostEntry[], undone: readonly EventRef[], markers: readonly Marker[]): { kept: PostEntry[]; undone: EventRef[]; dropped: CarryDrop[] } {
     const off = (seq: number, index: number): boolean => undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
@@ -510,23 +511,35 @@ export class LedgerCore {
       const scratch = structuredClone(state);
       const doc = this.env.worlds(scratch.revision) ?? world;
       let failure: string | null = null;
+      // Detail the prefix already records (a ✎ cash fix's opening, when the new swipe's reply opened
+      // the same accounts) isn't recorded twice: that materialization leaves the entry, the rest is
+      // re-validated without it, so the correction still lands, and later undos move up with their events.
+      const stripped: number[] = [];
+      let recorded = "";
       for (const [i, ev] of entry.events.entries()) {
         if (off(entry.seq, i)) continue;
         const ctx = this.env.types.context(doc, scratch);
         const rejection = validateEvent(this.env.types, ev, ctx);
+        if (rejection?.code === "materialized") {
+          stripped.push(i);
+          recorded = rejection.reason;
+          continue;
+        }
         if (rejection) {
           failure = rejection.reason;
           break;
         }
         applyEvent(this.env.types, ev, scratch, ctx);
       }
+      // Left with nothing to apply, it isn't carried.
+      if (failure === null && entry.events.every((_, i) => off(entry.seq, i) || stripped.includes(i))) failure = recorded;
       if (failure !== null) {
         out.dropped.push({ seq: entry.seq, kind: entry.kind, reason: failure });
         continue;
       }
       Object.assign(state, scratch);
-      out.kept.push(structuredClone(entry));
-      out.undone.push(...undone.filter((u) => u.in === "post" && u.seq === entry.seq));
+      out.kept.push({ ...structuredClone(entry), events: entry.events.filter((_, i) => !stripped.includes(i)) });
+      out.undone.push(...undone.filter((u) => u.in === "post" && u.seq === entry.seq).map((u) => ({ ...u, index: u.index - stripped.filter((s) => s < u.index).length })));
     }
     return out;
   }
@@ -877,22 +890,32 @@ export class LedgerCore {
           return undefined;
         }
         // A post entry validates against the head's fold; one that no longer applies is not journaled.
+        // A materialization of detail the head already records (a held ✎ cash fix whose accounts the
+        // reply opened) leaves it, and the rest is checked and journaled without it.
         const state = structuredClone(out.state);
         const world = this.env.worlds(state.revision);
         if (!world) return "unknown revision";
+        const events: LedgerEvent[] = [];
+        let recorded: string | null = null;
         for (const ev of w.entry.events) {
           const ctx = this.env.types.context(world, state);
           const failure = validateEvent(this.env.types, ev, ctx);
+          if (failure?.code === "materialized") {
+            recorded = failure.reason;
+            continue;
+          }
           if (failure) return failure.reason;
           applyEvent(this.env.types, ev, state, ctx);
+          events.push(ev);
         }
+        if (events.length === 0 && recorded !== null) return recorded;
         const key = String(head.swipeId);
         let rec = ledger.swipes[key];
         if (!rec) {
           rec = this.bareRecord(contentId(activeText(head)), undefined);
           ledger.swipes[key] = rec;
         }
-        const entry: PostEntry = { ...w.entry, seq: ++j.seq, at: parent };
+        const entry: PostEntry = { ...w.entry, events, seq: ++j.seq, at: parent };
         rec.post.push(entry);
         return undefined;
       }
@@ -997,15 +1020,18 @@ export class LedgerCore {
   /**
    * After a read replaced a record's events, its remaining live entries (fixes, materialized detail,
    * a Re-narrate's narration) are re-validated after them: one that no longer applies is dropped
-   * with a Journal note rather than failing on its own path (L7).
+   * with a Journal note rather than failing on its own path (L7), and one the read already made
+   * detail for stays without that materialization, its undos moved with its events.
    */
   private keepAfterRead(rec: Rec, target: ChainMessage, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
     const live = rec.post.filter((p) => isLive(p.at, prefix.parent, turnPath(rec)));
     const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, turnPath(rec)));
     const carried = this.carry(prefix.state, prefix.world, live, rec.undone, markers);
-    if (carried.dropped.length === 0) return;
-    rec.post = rec.post.filter((p) => !carried.dropped.some((d) => d.seq === p.seq));
-    rec.dropped = [...(rec.dropped ?? []), ...carried.dropped];
+    const kept = new Map(carried.kept.map((p) => [p.seq, p]));
+    rec.post = rec.post.flatMap((p) => (carried.dropped.some((d) => d.seq === p.seq) ? [] : [kept.get(p.seq) ?? p]));
+    // A kept entry's undos come back from `carry`, moved past what it left out; every other undo stays.
+    rec.undone = [...rec.undone.filter((u) => u.in !== "post" || !kept.has(u.seq)), ...carried.undone];
+    if (carried.dropped.length > 0) rec.dropped = [...(rec.dropped ?? []), ...carried.dropped];
   }
 
   /**

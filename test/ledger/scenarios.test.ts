@@ -307,7 +307,7 @@ describe("ledger scenarios", () => {
     return [balanceOf(state, "dev"), balanceOf(state, `${EXTERNAL_ACCOUNT_PREFIX}opening`)];
   }
 
-  test("a Re-run whose reply opens the money a fix opened drops the fix with a note: the opening posts once (L46)", async () => {
+  test("a Re-run whose reply opens the money a fix opened carries the correction without the opening: it posts once (L46)", async () => {
     const h = new Harness();
     const chat = await h.newChat();
     await h.send(chat, "look around");
@@ -317,12 +317,13 @@ describe("ledger scenarios", () => {
     expect(await devMoney(h, chat)).toEqual([30, -50]);
     const g = await h.host.start(chat, { type: "swipe", messageId: head.id });
     await h.host.finish(g, OPENS_DEV);
-    expect(await devMoney(h, chat)).toEqual([50, -50]);
-    expect((await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried")).toHaveLength(1);
+    // The fix keeps setting Dev's cash to 30, now on the accounts the reply opened.
+    expect(await devMoney(h, chat)).toEqual([30, -50]);
+    expect((await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried")).toEqual([]);
     await expectAgree(h, chat);
   });
 
-  test("a Re-read whose new read opens the money a kept fix opened drops the fix with a note (L46)", async () => {
+  test("a Re-read whose new read opens the money a kept fix opened keeps the correction without the opening (L46)", async () => {
     const h = new Harness();
     const chat = await h.newChat();
     await h.send(chat, "look around");
@@ -332,12 +333,12 @@ describe("ledger scenarios", () => {
     h.host.editMessage(chat, head.id, OPENS_DEV);
     await h.host.settle();
     expect((await h.write(chat, { kind: "reread", id: "r1", messageId: head.id, swipeId: head.swipeId })).applied).toBe(true);
-    expect(await devMoney(h, chat)).toEqual([50, -50]);
-    expect((await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried")).toHaveLength(1);
+    expect(await devMoney(h, chat)).toEqual([30, -50]);
+    expect((await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried")).toEqual([]);
     await expectAgree(h, chat);
   });
 
-  test("a fix held while a reply streams is refused when it lands if the reply opened the money it opens (L46)", async () => {
+  test("a fix held while a reply streams lands without the opening the reply already made (L46)", async () => {
     const h = new Harness();
     const chat = await h.newChat();
     await h.send(chat, "look around");
@@ -346,8 +347,8 @@ describe("ledger scenarios", () => {
     const g = await h.host.start(chat, { type: "normal" });
     expect((await h.write(chat, { kind: "post", id: "held", target: "head", entry: { kind: "fix", events: devCashFix } })).pending).toBe(true);
     await h.host.finish(g, OPENS_DEV);
-    expect(await devMoney(h, chat)).toEqual([50, -50]);
-    expect((await h.core(chat)).journal.refused?.map((r) => r.write.id)).toEqual(["held"]);
+    expect(await devMoney(h, chat)).toEqual([30, -50]);
+    expect((await h.core(chat)).journal.refused).toBeUndefined();
     await expectAgree(h, chat);
   });
 

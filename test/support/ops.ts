@@ -81,16 +81,31 @@ export interface Coverage {
   groupDrops: number;
   carried: number;
   carryDrops: number;
-  openDrops: number;
+  stripped: number;
   fights: Record<"start" | "act" | "turn" | "end", number>;
 }
 
 /** A fresh count for a runner or a whole suite. */
 export function noCoverage(): Coverage {
-  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, openDrops: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
+  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, stripped: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
 }
 
 const FIGHT_EVENTS: Record<string, keyof Coverage["fights"]> = { "combat.start": "start", "combat.act": "act", "combat.turn": "turn", "combat.end": "end" };
+
+/**
+ * The indexes of the source's events a carried copy left out, or null when the copy isn't the source
+ * as it was: only a materialization of detail its new prefix already records may leave (L46).
+ */
+function strippedFrom(source: readonly LedgerEvent[], copy: readonly LedgerEvent[]): number[] | null {
+  const out: number[] = [];
+  let j = 0;
+  for (const [i, ev] of source.entries()) {
+    if (j < copy.length && hashJson(copy[j]) === hashJson(ev)) j++;
+    else if (ev.type === "materialize") out.push(i);
+    else return null;
+  }
+  return j === copy.length ? out : null;
+}
 
 const pick = <T>(items: readonly T[], x: number): T => {
   const item = items[Math.min(items.length - 1, Math.floor(x * items.length))];
@@ -634,7 +649,7 @@ export class Runner {
         continue;
       }
       const original = sourcePosts.get(p.seq);
-      if (!original || (p.kind !== "fix" && p.kind !== "materialize") || original.kind !== p.kind || hashJson(original.events) !== hashJson(p.events)) throw new InvariantError("L11", `${chat}/${messageId}: post ${p.seq} is not a copy of a source fix or materialization`);
+      if (!original || (p.kind !== "fix" && p.kind !== "materialize") || original.kind !== p.kind || strippedFrom(original.events, p.events) === null) throw new InvariantError("L11", `${chat}/${messageId}: post ${p.seq} is not a copy of a source fix or materialization`);
       if (p.at !== made.path) throw new InvariantError("L11", `${chat}/${messageId}: copy ${p.seq} is not anchored at the new parent path`);
     }
     if (made.post.some((p) => p.kind === "cont" || p.kind === "confirm")) throw new InvariantError("L11", `${chat}/${messageId}: a cont or confirm entry was copied`);
@@ -642,9 +657,9 @@ export class Runner {
 
   /**
    * L43: a Re-run carries the live fixes of the swipe it was made from (the nearest earlier one
-   * holding a record): each is on the new record with its seq, events and undos, anchored at the
-   * record's path, or listed in its `dropped`; nothing else is copied. A turn committed under a pause
-   * carries nothing.
+   * holding a record): each is on the new record with its seq, events (less a materialization the new
+   * swipe already made) and undos, anchored at the record's path, or listed in its `dropped`; nothing
+   * else is copied. A turn committed under a pause carries nothing.
    */
   private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[]): Promise<void> {
     let source: Rec | undefined;
@@ -666,12 +681,18 @@ export class Runner {
       if (!copy && !dropped) throw new InvariantError("L43", `${chat}/${messageId}: the Re-run neither carried nor dropped fix ${fix.seq}`);
       if (copy && dropped) throw new InvariantError("L43", `${chat}/${messageId}: fix ${fix.seq} was both carried and dropped`);
       if (dropped) this.coverage.carryDrops++;
-      if (dropped && fix.events.some((e) => e.type === "materialize")) this.coverage.openDrops++;
       if (!copy) continue;
       this.coverage.carried++;
-      if (copy.kind !== "fix" || hashJson(copy.events) !== hashJson(fix.events)) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} differs from its source`);
+      const stripped = copy.kind === "fix" ? strippedFrom(fix.events, copy.events) : null;
+      if (!stripped) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} differs from its source`);
+      if (stripped.length > 0) this.coverage.stripped++;
       if (copy.at !== made.path) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} is not anchored at the record's path`);
-      for (const u of sourceUndone) if (u.in === "post" && u.seq === fix.seq && !made.undone.some((m) => JSON.stringify(m) === JSON.stringify(u))) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} lost its undo`);
+      // An undo moves up with its event past what left the copy.
+      for (const u of sourceUndone) {
+        if (u.in !== "post" || u.seq !== fix.seq) continue;
+        const moved = { ...u, index: u.index - stripped.filter((s) => s < u.index).length };
+        if (!made.undone.some((m) => JSON.stringify(m) === JSON.stringify(moved))) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} lost its undo`);
+      }
     }
     if (copies.some((p) => !live.some((f) => f.seq === p.seq))) throw new InvariantError("L43", `${chat}/${messageId}: the Re-run copied an entry that isn't a live fix of its source`);
   }
@@ -823,7 +844,8 @@ export class Runner {
         }
         for (const [swipe, rec] of Object.entries(jm.ledger.swipes)) {
           claim(rec.seq, `rec:${mid}:${swipe}`);
-          for (const p of rec.post) claim(p.seq, `post:${mid}:${p.kind}:${hashJson(p.events)}`);
+          // A carried copy may leave out a materialization its new prefix already records (L46).
+          for (const p of rec.post) claim(p.seq, `post:${mid}:${p.kind}:${hashJson(p.events.filter((e) => e.type !== "materialize"))}`);
         }
       }
       if ([...seqs.keys()].some((s) => s > core.journal.seq)) throw new InvariantError("L9", `${chatId}: a seq above the counter`);
@@ -873,7 +895,7 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       coverage.groupDrops += runner.coverage.groupDrops;
       coverage.carried += runner.coverage.carried;
       coverage.carryDrops += runner.coverage.carryDrops;
-      coverage.openDrops += runner.coverage.openDrops;
+      coverage.stripped += runner.coverage.stripped;
       for (const k of ["start", "act", "turn", "end"] as const) coverage.fights[k] += runner.coverage.fights[k];
     }
     return null;
