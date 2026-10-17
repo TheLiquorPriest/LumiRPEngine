@@ -352,7 +352,7 @@ A check is the dice an action rolls (see [Checks, pools, progression and sheets]
 
 | Preset | When checks roll | Your described approach | Who settles it | Retrying a failed check |
 |---|---|---|---|---|
-| **Narrative-first** | Only risky ones (under 75% to succeed); likelier actions just succeed | The judge reads it as it picks the outcome | The story: a helper picks the outcome, with the exact odds as guidance | Needs a change |
+| **Narrative-first** | Only risky ones (under 75% to succeed); likelier actions just succeed | The judge reads it as it picks the outcome | The story: a helper picks the outcome, with the exact odds as guidance; the dice when nothing judged it | Needs a change |
 | **Balanced** | Every check, except that sure things (95% or more) pass and hopeless ones (5% or less) fail without a roll | Adds up to +2 | The roll; a roll within 2 of another result is a close call, and the narrator may add a cost or partial progress | Needs a change |
 | **Crunchy** | Every check | Doesn't count | The roll | Any time |
 
@@ -370,7 +370,7 @@ When nothing is rolled, the check passes as `success` (when the action and the c
 
 ### Your approach and the judge
 
-When the rules weigh your words, or leave the check to the story, the **Judge your approach** step reads what you wrote before the reply. It rates your approach from 0 up to the most it counts, with one line on why, and when the story decides it also gives each outcome's odds, which the engine draws from with the turn's seed. It takes one call from the before-the-reply budget, runs only for a check the rules would roll or leave to the story, and is off in the Lean preset. Its answer is kept with your turn: a Re-narrate keeps the outcome, and a Re-run reads the same judgement with a fresh draw. If it is off or fails, a rolled check rolls as the palette showed, and a check the story decides succeeds.
+When the rules weigh your words, or leave the check to the story, the **Judge your approach** step reads what you wrote before the reply. It rates your approach from 0 up to the most it counts, with one line on why, and when the story decides it also gives each outcome's odds, which the engine draws from with the turn's seed. It takes one call from the before-the-reply budget, runs only for a check the rules would roll or leave to the story, and is off in the Lean preset. It rates only words: a palette or chip action you send without typing anything isn't judged. Its call for your own action comes before the choices of NPCs with you, which get what is left of the budget. Its answer is kept with your turn: a Re-narrate keeps the outcome, and a Re-run reads the same judgement with a fresh draw. If it is off, out of calls or fails, a rolled check rolls as the palette showed, and so does a check the story decides: the dice decide, at the palette's odds, and the **Roll** chip says nothing judged your approach. Other characters' checks are never judged, so when the story decides they roll.
 
 ### What you see
 

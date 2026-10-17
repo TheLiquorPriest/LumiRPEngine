@@ -4,6 +4,8 @@
 // narrator and the roll chip are told what the policy decided.
 
 import { describe, expect, test } from "bun:test";
+import type { DecideRequest } from "../../src/backend/host";
+import type { Answers } from "../../src/engine/decide";
 import { presetAdjudication } from "../../src/shared/adjudication";
 import type { JsonObject } from "../../src/shared/json";
 import type { AdjudicationDef, WorldDoc } from "../../src/shared/world";
@@ -39,7 +41,7 @@ describe("a new chat's policy", () => {
 async function climbChat(rig: Rig, policy: AdjudicationDef, judgement: JsonObject, lore: Record<string, JsonObject> = {}, entities: Record<string, JsonObject> = {}): Promise<string> {
   const worldId = await rig.newWorld();
   const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
-  const action: JsonObject = { id: "climb", label: "Climb the wall", params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
+  const action: JsonObject = { id: "climb", label: "Climb the wall", lexicon: ["climb"], params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "actions", id: "climb", value: action }));
   for (const [id, value] of Object.entries(lore)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "lore", id, value }));
   for (const [id, value] of Object.entries(entities)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "entities", id, value }));
@@ -75,7 +77,7 @@ describe("the judge step", () => {
     expect(roll?.detail).toContain("a rope and a grappling hook");
   });
 
-  test("isn't asked when the policy doesn't weigh words, and never on Lean", async () => {
+  test("isn't asked when the policy doesn't weigh words, and never on Lean, where the dice decide what the story would", async () => {
     const crunchy = new Rig();
     await climbTurn(crunchy, await climbChat(crunchy, presetAdjudication("crunchy"), { rating: 2, reason: "" }), "I climb carefully.");
     expect(judgeCalls(crunchy)).toBe(0);
@@ -84,10 +86,10 @@ describe("the judge step", () => {
     lean.body(await lean.send({ type: "lre.settings.set", patch: { modelUse: { preset: "lean" } } }));
     await climbTurn(lean, chatId, "I climb carefully.");
     expect(judgeCalls(lean)).toBe(0);
-    // Under narrative authority with no judgement, the unrolled rule passes it.
+    // Under narrative authority nothing judged the coin flip, so it rolled rather than just succeeding.
     const roll = (await lean.rt.view(chatId, lean.host.userId)).chips.find((c) => c.kind === "roll");
-    expect(roll?.label).toBe("Climb the wall: success");
-    expect(roll?.detail).toStartWith("No roll");
+    expect(roll?.label).toMatch(/^Climb the wall: (success|failure)$/);
+    expect(roll?.detail).toMatch(/^Rolled d20 = \d+ against 11\. Odds: failure 50% · success 50%\. Nothing judged your approach, so the dice decided\.$/);
   });
 
   test("under narrative authority the judge's odds decide, and the chip says no roll was made", async () => {
@@ -99,6 +101,62 @@ describe("the judge step", () => {
     const roll = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "roll");
     expect(roll?.label).toBe("Climb the wall: failure");
     expect(roll?.detail).toMatch(/^No roll: the story decides/);
+  });
+});
+
+describe("the judge step's call", () => {
+  /** Every Decision question answered with its first choice. */
+  const firstChoice = (req: DecideRequest): Answers => {
+    const out: Answers = {};
+    for (const [key, q] of Object.entries(req.questions)) {
+      const first = Object.keys(q.type === "choice" ? q.criteria : {})[0];
+      if (first) out[key] = { type: "choice", choice: first, probabilities: { [first]: 1 }, confidence: 1 };
+    }
+    return out;
+  };
+
+  /** Standard's two calls before the reply: a climb typed under `policy`, with Jo, whose day plan is undecided (`tie`), in the room or not. */
+  async function starve(policy: AdjudicationDef, tie: boolean): Promise<{ purposes: string[]; roll: string }> {
+    const rig = new Rig();
+    const judgement = { rating: 0, reason: "a reckless leap", outcomes: { success: 0.05, failure: 0.95 } };
+    const chatId = await climbChat(rig, policy, judgement, {}, { jo: { id: "jo", kind: "person", name: "Jo Park", tier: "supporting", agent: true, fields: { place: "home", tie }, relations: [] } });
+    rig.host.quietReply = (request) => {
+      if (request.messages.some((m) => m.content.includes("Rate the approach"))) return JSON.stringify(judgement);
+      if ((request.messages[0]?.content ?? "").includes("You map a player's typed input")) return JSON.stringify({ action: "climb", params: {}, confidence: 0.95 });
+      return JSON.stringify({ proposals: [] });
+    };
+    rig.host.decideReply = firstChoice;
+    const start = rig.rt.meter.log.length;
+    await rig.turn(chatId, "I climb the wall in one reckless leap.", "You climb.");
+    const roll = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "roll");
+    return { purposes: rig.rt.meter.log.slice(start).map((c) => c.purpose), roll: `${roll?.label ?? ""} | ${roll?.detail ?? ""}` };
+  }
+
+  test("the player's own check is judged before an NPC's choice takes the last call", async () => {
+    for (const tie of [false, true]) {
+      const turn = await starve(presetAdjudication("narrative"), tie);
+      expect(turn.purposes.filter((p) => p === "judge")).toHaveLength(1);
+      expect(turn.purposes).not.toContain("npc.choose");
+      expect(turn.roll).toMatch(/^Climb the wall: (success|failure) \| No roll: the story decides, judged from your approach/);
+    }
+  });
+
+  test("an NPC's choice still gets the call the judge doesn't need", async () => {
+    const turn = await starve(presetAdjudication("crunchy"), true);
+    expect(turn.purposes).toContain("npc.choose");
+    expect(turn.purposes).not.toContain("judge");
+  });
+
+  test("a palette tap with no words of its own isn't judged; words typed with it are", async () => {
+    const rig = new Rig();
+    // Retries are free, so the second climb asks the same as the first whatever it rolled.
+    const chatId = await climbChat(rig, { ...presetAdjudication("balanced"), preset: "custom", retry: "free" }, { rating: 2, reason: "a rope and a grappling hook" });
+    await climbTurn(rig, chatId, "");
+    expect(judgeCalls(rig)).toBe(0);
+    const roll = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "roll");
+    expect(roll?.detail).not.toContain("Your approach");
+    await climbTurn(rig, chatId, "I throw the grappling hook over and walk it up the rope.");
+    expect(judgeCalls(rig)).toBe(1);
   });
 });
 

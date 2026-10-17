@@ -211,7 +211,7 @@ describe("narrative authority", () => {
 
   test("the judge's odds pick the outcome, sampled with the turn's seed", () => {
     const failing = resolveOn(reg, world, withSkill(world, 2), climb, createRng("s"), { judgement: { rating: 0, reason: "", outcomes: { failure: 1 } } }).resolution;
-    expect([failing.check, failing.outcome, failing.adjudged?.why, failing.adjudged?.judged]).toEqual([null, "failure", "story", true]);
+    expect([failing.check, failing.outcome, failing.adjudged?.why, failing.adjudged?.rolled]).toEqual([null, "failure", "story", false]);
     const split: Judgement = { rating: 1, reason: "", outcomes: { success: 0.5, failure: 0.5 } };
     const seen = new Set<string>();
     for (let i = 0; i < 24; i++) {
@@ -225,11 +225,26 @@ describe("narrative authority", () => {
     expect(story?.chance ?? 0).toBeCloseTo(0.55, 12);
   });
 
-  test("without a judgement (the judge off or failed) the unrolled rule decides", () => {
+  test("without a judgement (the judge off, out of calls or failed) the dice decide, plainly and as the palette showed", () => {
+    // A risky check nothing judged rolls, so it fails as often as the odds say.
+    const outcomes = new Set<string>();
     for (const judgement of [null, { rating: 2, reason: "no odds given" }]) {
-      const r = resolveOn(reg, world, withSkill(world, 2), climb, createRng("f"), { judgement }).resolution;
-      expect([r.check, r.outcome, r.adjudged?.judged]).toEqual([null, "success", false]);
+      for (let i = 0; i < 24; i++) {
+        const r = resolveOn(reg, world, withSkill(world, 2), climb, createRng(`f${i}`), { judgement }).resolution;
+        expect(r.check?.odds.success).toBeCloseTo(0.55, 12);
+        expect([r.adjudged?.rolled, r.adjudged?.why, r.adjudged?.approach]).toEqual([true, null, null]);
+        expect(r.events.find((e) => e.type === "engine.adjudged")).toMatchObject({ data: { rolled: true, outcome: r.outcome ?? "" } });
+        outcomes.add(r.outcome ?? "");
+      }
     }
+    expect([...outcomes].sort()).toEqual(["failure", "success"]);
+  });
+
+  test("an NPC's check, which no judge reads, rolls", () => {
+    const npc = withSkill(world, 2);
+    npc.entities.dev = { ...structuredClone(npc.entities[POV]!), name: "Dev" };
+    const r = resolveOn(reg, world, npc, { action: "climb", actor: "dev" }, createRng("npc")).resolution;
+    expect([r.actor, r.check === null, r.adjudged?.rolled]).toEqual(["dev", false, true]);
   });
 });
 

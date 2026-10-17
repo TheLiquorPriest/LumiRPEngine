@@ -242,15 +242,16 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
     const judgement = opts.judgement ?? null;
     const place = placeOfEntity(w.state, p.actor);
     let close: Adjudged["close"] = null;
-    let judged = false;
-    // The story's pick is sampled from the judge's odds; without them the unrolled rule decides, but a
-    // check that names no success has none to grant, so then its dice decide.
+    // Under narrative authority the story picks the outcome from the judge's odds. Without them (the
+    // judge off, out of calls or failed, and always for an NPC, which no judge reads) the dice decide,
+    // as the palette's odds showed: an unjudged risky check never just succeeds.
     const story = verdict.why === "story" ? judgedOutcome(judgement, outcomeChoices(p.action, Object.keys(odds)), rng.fork("judge")) : null;
-    const rolls = verdict.roll || (verdict.why === "story" && story === null && verdict.pass.length === 0);
+    const rolls = verdict.roll || (verdict.why === "story" && story === null);
     const why = rolls ? null : verdict.why;
     if (rolls) {
-      // The judged approach shifts the roll only: the verdict above read the check as the palette showed it.
-      const shift = approachShift(policy, judgement);
+      // The judged approach shifts only a roll the policy asked for (the verdict above read the check
+      // as the palette showed it); a story check the dice took over rolls plainly.
+      const shift = verdict.roll ? approachShift(policy, judgement) : null;
       const shifted = shift ? readyCheck(reg, w.ctx, checkDef, p.bindings, p.vars, shift) : ready;
       const rolling = "code" in shifted ? ready : shifted;
       const rolled = rollCheck(rolling, rng.fork("check"));
@@ -259,13 +260,12 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
       vars = { ...p.vars, roll: rollVars(rolling, rolled) };
       if (policy.authority === "hybrid") close = closeCall(rolling, rolled, rolled.outcome, policy.closeBy);
     } else {
-      judged = story !== null;
       outcome = story ?? verdict.outcome ?? passOutcome(p.action, ready, odds, verdict.pass);
       vars = { ...p.vars, roll: { natural: null, total: null, modifier: ready.modifier, dc: ready.dc, margin: null, outcome } };
     }
     if (!plainRolling(policy)) {
-      const approach = judgement && (policy.authority === "narrative" ? verdict.why === "story" : verdict.roll && policy.description.weight !== "none") ? { rating: ratingOf(policy, judgement), max: policy.description.max, reason: judgement.reason } : null;
-      adjudged = { rolled: rolls, why, chance: verdict.chance, pass: verdict.pass, authority: policy.authority, retry: policy.retry, approach, judged, close };
+      const approach = judgement && (policy.authority === "narrative" ? why === "story" : verdict.roll && policy.description.weight !== "none") ? { rating: ratingOf(policy, judgement), max: policy.description.max, reason: judgement.reason } : null;
+      adjudged = { rolled: rolls, why, chance: verdict.chance, pass: verdict.pass, authority: policy.authority, retry: policy.retry, approach, close };
       // A refused retry is no new attempt: the wait a retry rule counts runs from the failed roll.
       const tracked = policy.retry !== "free" && verdict.pass.length > 0 && verdict.why !== "retry";
       w.apply({
@@ -278,7 +278,6 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
           rolled: rolls,
           ...(why ? { why } : {}),
           ...(approach ? { rating: approach.rating, max: approach.max, reason: approach.reason.slice(0, 240) } : {}),
-          ...(judged ? { judged: true } : {}),
           ...(close ? { close: close.outcome } : {}),
           ...(tracked ? { key: tryKey(p.actor, p.action.id, p.params), place, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready) } : {}),
         },

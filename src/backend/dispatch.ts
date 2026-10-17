@@ -141,7 +141,10 @@ export class Dispatcher {
       case "lre.action": {
         await this.requireWorldChat(r.chatId, userId);
         const bridge = this.rt.bridgeOf(r.chatId);
-        let text = r.text?.trim() ?? "";
+        // Words typed with the action describe the player's approach (the judge rates them); without
+        // any, the message is only the action's label.
+        const said = r.text?.trim() ?? "";
+        let text = said;
         if (r.action === TIMELAPSE_ACTION) {
           const target = parseTarget(r.params.target);
           if (!target) throw new RequestError("bad_request", "a timelapse needs a target");
@@ -155,7 +158,7 @@ export class Dispatcher {
           text ||= `(${neutralizeMacros(action.label)})`;
           bridge?.setIntent(text, { action: r.action, params: r.params, probabilities: { [r.action]: 1 } });
         }
-        const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params: r.params, source: r.source } }, true, userId);
+        const messageId = await this.rt.host.chats.appendUserMessage(r.chatId, text, { [LEDGER_NAMESPACE]: { action: r.action, params: r.params, source: r.source, ...(said !== "" ? { described: true } : {}) } }, true, userId);
         reply("lre.action", { messageId });
         return;
       }

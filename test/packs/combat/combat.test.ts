@@ -479,4 +479,24 @@ describe("the adjudication policy", () => {
     });
     expect(lintStructure(odd, reg).some((i) => i.path === "ruleset.combat.adjudicate")).toBe(true);
   });
+
+  test("handed to Narrative-first, everyone else's attacks still roll: no judge reads them", () => {
+    const world = policyWorld((w) => {
+      w.ruleset!.adjudication = presetAdjudication("narrative");
+      w.ruleset!.combat!.adjudicate = "policy";
+      // The goblin's +3 against 20 hits on a natural 17 or better; passed unrolled, it would always hit.
+      w.entities[POV]!.fields.ac = 20;
+    });
+    const outcomes: string[] = [];
+    for (let i = 0; i < 16; i++) {
+      for (const e of plan(world, started(world).state, "end_turn", {}, `npc${i}`).events) {
+        if (e.type !== "engine.adjudged" || !("data" in e) || e.data === null || typeof e.data !== "object" || Array.isArray(e.data) || e.data.actor !== "goblin") continue;
+        expect(e.data.rolled).toBe(true);
+        outcomes.push(String(e.data.outcome));
+      }
+    }
+    expect(outcomes.length).toBe(16);
+    expect(outcomes).toContain("miss");
+    expect(outcomes).toContain("hit");
+  });
 });

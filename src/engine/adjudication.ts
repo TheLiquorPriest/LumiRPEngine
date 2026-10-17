@@ -12,7 +12,7 @@
 //              most likely passing band; an impossible check fails with `failure`, else its most
 //              likely failing band; a refused retry takes the earlier failure's outcome
 //   judgement  `judge`'s rating shifts a rolled check; under narrative authority its outcome odds
-//              are sampled with the turn's seed, and without them the unrolled rule decides
+//              are sampled with the turn's seed, and without them (or for an NPC) the dice decide
 
 import { defaultAdjudication, readAdjudication } from "../shared/adjudication";
 import { hashJson, hashParts } from "../shared/hash";
@@ -72,8 +72,6 @@ export interface Adjudged {
   retry: RetryRule;
   /** The judge's rating of the described approach, when the policy read it. */
   approach: { rating: number; max: number; reason: string } | null;
-  /** Under narrative authority: the judge picked the outcome (false: the unrolled rule did). */
-  judged: boolean;
   /** Hybrid: the outcome the same roll a few points off would have read, and by how many points (negative: lower). */
   close: { outcome: string; points: number } | null;
 }

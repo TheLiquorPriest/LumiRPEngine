@@ -223,8 +223,9 @@ export class StepBudget {
     this.lookup = new LookupBudget(lookup.calls, lookup.ms, ms, this.signal);
   }
 
-  take(): boolean {
-    if (!this.open || this.used >= this.calls || this.signal.aborted) return false;
+  /** Takes a call, leaving `keep` free for a step that ranks higher but starts later (the judge, before npc.choose). */
+  take(keep = 0): boolean {
+    if (!this.open || this.used + keep >= this.calls || this.signal.aborted) return false;
     this.used++;
     return true;
   }
