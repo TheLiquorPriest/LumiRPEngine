@@ -18,13 +18,15 @@
 //     or not at all;
 //   - a taken opening balance of an account whose holder's money is open posts the difference
 //     against the holder's outside account (the economy's `economy.reopen`);
-//   - a track at a stage the revision no longer has goes back to its start, with a Journal note.
+//   - a track at a stage the revision no longer has goes back to its start, with a Journal note;
+//   - a revision that turns the grid system on puts the POV on a cell and lets it see from there.
 
-import { placedItems } from "../shared/grid";
+import { arrivalCell, cellIndex, placedItems, standingGrid } from "../shared/grid";
 import { hashJson } from "../shared/hash";
 import type { EntityId, FieldId, RelationTypeId, RevisionId, StageId, TrackId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
 import { safeKey } from "../shared/json";
+import { mapSettingsOf } from "../shared/maps";
 import type { EntityPicks, LedgerEvent, MarkerBody, UpgradeAspect, UpgradePick, UpgradePicks } from "../shared/ledger";
 import { UPGRADE_ASPECTS } from "../shared/ledger";
 import { agentOf } from "../shared/tiers";
@@ -37,6 +39,7 @@ import type { ReadContext } from "./registry";
 import { completeRelations, counterpartOf, type RelationTypes } from "./relations";
 import { GONE_FIELD, placeOfEntity } from "./scope";
 import type { EntityState, WorldState } from "./state";
+import { observeCells } from "./seen";
 import { forget, touchedAspect, touchedField, touchedRelation } from "./touched";
 import { visibilityOf } from "./visibility";
 import { clampLevels } from "./world-state";
@@ -436,6 +439,17 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
 
   setLag(state, null);
   state.revision = plan.to;
+  // A revision that turns the grid system on puts the POV on a cell of the grid it stands on, as a
+  // chat's first state does (its own cell there, else where its place is entered), and it sees from there.
+  if (pov && mapSettingsOf(after).grid.movement) {
+    const here = placeOfEntity(state, after.pov);
+    const stand = standingGrid(after, here);
+    const { x, y } = pov.fields;
+    const onCell = stand !== null && typeof x === "number" && typeof y === "number" && cellIndex(stand.grid, { x, y }) !== null;
+    const entry = onCell || here === null ? null : arrivalCell(after, here);
+    if (entry) Object.assign(pov.fields, { x: entry.cell.x, y: entry.cell.y });
+    observeCells(state, after);
+  }
   return notes;
 }
 

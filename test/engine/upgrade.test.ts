@@ -16,6 +16,8 @@ import { touchedAspect, touchedField } from "../../src/engine/touched";
 import { definitionsLag, planUpgrade, type MarkerEnv } from "../../src/engine/upgrade";
 import { entityVisibility } from "../../src/engine/visibility";
 import { initialState } from "../../src/engine/world-state";
+import { actionOdds } from "../../src/engine/resolve";
+import { cellsSeen } from "../../src/engine/seen";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
 import { baseWorld, fold, POV } from "../packs/support";
@@ -395,6 +397,15 @@ describe("the merge on a grid", () => {
     upgrade(c);
     expect(c.state.entities.lantern?.fields).toMatchObject({ place: "taproom", x: 5, y: 3 });
     expect(c.state.entities.lantern?.fields).toEqual(initialState(c.b, c.rb, reg).entities.lantern?.fields);
+  });
+
+  test("an Upgrade that turns the grid system on puts the POV on a cell, sees from there, and can walk", () => {
+    const c = between(inn(undefined, false), inn());
+    upgrade(c);
+    const fresh = initialState(c.b, c.rb, reg);
+    expect(c.state.entities.you?.fields).toMatchObject({ x: fresh.entities.you?.fields.x, y: fresh.entities.you?.fields.y });
+    expect(cellsSeen(c.state, "inn", 12)).toBe(cellsSeen(fresh, "inn", 12));
+    expect(actionOdds(reg, c.b, c.state, { action: "step", params: { x: 4, y: 3 } }).available).toBe(true);
   });
 });
 
