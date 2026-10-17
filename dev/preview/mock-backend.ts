@@ -2,9 +2,9 @@
 // a push counter, and pushes real snapshots and deltas (computed by diffing the view), so the
 // frontend's delta/resync path runs exactly as against the real backend.
 
-import type { JsonValue } from "../../src/shared/json";
+import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, ResultBodies } from "../../src/shared/protocol";
+import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LoreDrift, ResultBodies } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
 import type { GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
@@ -88,8 +88,8 @@ export class MockBackend {
   constructor(private readonly emit: Emit, private readonly options: MockOptions) {}
 
   /** Describe a map's proposal as the backend's job makes it, with a small grid map standing in for the helper's answer. */
-  private mapProposals(input: unknown) {
-    const request = readMapRequest(this.draft, isRecord(input) ? input : {});
+  private mapProposals(input: JsonObject) {
+    const request = readMapRequest(this.draft, input);
     const answer = readMapAnswer(this.draft, request, mapTemplate("grid", request.mapId, request.scope) as unknown as JsonValue);
     return answer.map === null ? [] : [mapProposal(request, { ...answer, map: answer.map })];
   }
@@ -474,7 +474,7 @@ export class MockBackend {
         }
         // The preview's "Rosie's Diner" was indexed from Town lore, whose entry has changed since.
         const content = "Rosie's opens at six and closes at two since the new lunch place opened. The booths by the window go first; the counter is for regulars.";
-        const drift = this.draft.lore.rosies_diner?.source?.kind === "book" && this.draft.lore.rosies_diner.source.hash === "stale" ? { rosies_diner: { status: "changed" as const, content, hash: "fresh" } } : {};
+        const drift: Record<string, LoreDrift> = this.draft.lore.rosies_diner?.source?.kind === "book" && this.draft.lore.rosies_diner.source.hash === "stale" ? { rosies_diner: { status: "changed", content, hash: "fresh" } } : {};
         return this.result(reqId, "lre.lore", { drift: message.id === undefined || message.id === "rosies_diner" ? drift : {} });
       }
     }
