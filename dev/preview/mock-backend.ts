@@ -4,7 +4,7 @@
 
 import type { JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import type { DeltaOp, FrontendToBackend, JobUpdate, ResultBodies } from "../../src/shared/protocol";
+import type { DeltaOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, ResultBodies } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
 import type { StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
@@ -47,6 +47,13 @@ const REALISM_PRESETS: Record<string, Record<string, number>> = {
   simulation: { money: 4, gear: 4, vehicles: 4, castlife: 4, relationships: 4, space: 4, calendar: 4, weather: 3, sheets: 3 },
 };
 
+const PROPOSALS: JobProposal[] = [
+  { id: "p1", collection: "entities", key: "npc_okafor", value: { id: "npc_okafor", kind: "npc", name: "Mr. Okafor", tier: "supporting", fields: {}, relations: [] }, source: "Lore: “Regulars of Rosie's”", confidence: 0.92 },
+  { id: "p2", collection: "places", key: "library", value: { id: "library", name: "Maple Falls Library", parent: "maple", fields: {} }, source: "Lore: “Town map”", confidence: 0.81 },
+  { id: "p3", collection: "schedules", key: "okafor_breakfast", value: { id: "okafor_breakfast", owner: "npc_okafor", target: "place", recurrence: { every: "day" }, slots: [{ start: "07:00", end: "08:00", value: "diner" }] }, source: "Lore: “Regulars of Rosie's”", confidence: 0.64, note: "Inferred from “every morning”" },
+  { id: "p4", collection: "tracks", key: "secret_debt", value: { id: "secret_debt", kind: "secret", label: "Rosie's debt", start: "hidden", stages: { hidden: { label: "Hidden", next: [] } }, visibility: "secret" }, source: "Lore: “Rosie”", confidence: 0.41, note: "Low confidence: mentioned once" },
+];
+
 export class MockBackend {
   private view: StateView | null = null;
   private rev = 0;
@@ -54,6 +61,8 @@ export class MockBackend {
   private world: WorldDoc = worldFixture();
   private draft: WorldDoc = worldFixture();
   private jobs = 0;
+  /** Kept jobs (`lre.job list`): an import a restart cut off after its first chunk. */
+  private kept: JobSummary[] = [{ jobId: "job-kept", kind: "import_lore", worldId: WORLDS[0]?.id ?? "", status: "interrupted", progress: 0.5, message: "Interrupted by a restart. The 2 proposal(s) it made before it stopped are below; run it again for the rest.", result: { proposals: PROPOSALS.slice(0, 2) }, input: { bookIds: ["book-1"] }, at: Date.now() - 600_000 }];
   readonly log: FrontendToBackend[] = [];
 
   constructor(private readonly emit: Emit, private readonly options: MockOptions) {}
@@ -272,6 +281,11 @@ export class MockBackend {
         this.options.closeDrawer();
         return this.result(reqId, "lre.ui", { done: true });
       case "lre.job": {
+        if (message.op === "list") return this.result(reqId, "lre.job", { jobs: this.kept.filter((j) => j.worldId === message.worldId) });
+        if (message.op === "dismiss") {
+          this.kept = this.kept.filter((j) => j.jobId !== message.jobId);
+          return this.result(reqId, "lre.job", { jobId: message.jobId });
+        }
         if (message.op === "cancel") return this.result(reqId, "lre.job", { jobId: message.jobId });
         this.jobs += 1;
         const jobId = `job-${this.jobs}`;
@@ -287,12 +301,7 @@ export class MockBackend {
                 kind === "playtest"
                   ? { turns: [{ user: "I ask Rosie for a raise.", reply: "Rosie sets down the coffee pot. “After the rush,” she says.", notes: ["Check persuade: 9 vs 8 (success)", "+5 min"] }, { user: "I cover Mara's shift.", reply: "The afternoon blurs into orders and refills.", notes: ["Timelapse 6 h", "Payroll accrues"] }], lint: [{ severity: "warning", path: "rules.payday", code: "no_effect", message: "Rule payday never fired in 2 turns." }] }
                   : {
-                      proposals: [
-                        { id: "p1", collection: "entities", key: "npc_okafor", value: { id: "npc_okafor", kind: "npc", name: "Mr. Okafor", tier: "supporting", fields: {}, relations: [] }, source: "Lore: “Regulars of Rosie's”", confidence: 0.92 },
-                        { id: "p2", collection: "places", key: "library", value: { id: "library", name: "Maple Falls Library", parent: "maple", fields: {} }, source: "Lore: “Town map”", confidence: 0.81 },
-                        { id: "p3", collection: "schedules", key: "okafor_breakfast", value: { id: "okafor_breakfast", owner: "npc_okafor", target: "place", recurrence: { every: "day" }, slots: [{ start: "07:00", end: "08:00", value: "diner" }] }, source: "Lore: “Regulars of Rosie's”", confidence: 0.64, note: "Inferred from “every morning”" },
-                        { id: "p4", collection: "tracks", key: "secret_debt", value: { id: "secret_debt", kind: "secret", label: "Rosie's debt", start: "hidden", stages: { hidden: { label: "Hidden", next: [] } }, visibility: "secret" }, source: "Lore: “Rosie”", confidence: 0.41, note: "Low confidence: mentioned once" },
-                      ],
+                      proposals: PROPOSALS,
                     },
             }),
           1200,
