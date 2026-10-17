@@ -11,6 +11,7 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef, WorldDoc } from "../shared/world";
 import { previewSheet } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
+import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview } from "../shared/protocol";
@@ -369,6 +370,9 @@ export class Dispatcher {
       }
       case "sheet": {
         // The Sheet Designer's live preview: the draft with the unsaved ruleset, as a chat would start.
+        // The ruleset is the frontend's, read here before the sheet is built from it.
+        const problem = isRecord(r.ruleset) ? sheetRulesetProblem(r.ruleset) : null;
+        if (problem) throw new RequestError("bad_request", problem);
         const draft = await store.working(r.worldId, userId);
         const world = { ...draft, ruleset: isRecord(r.ruleset) ? (r.ruleset as unknown as RulesetDef) : undefined };
         const entity = typeof r.entity === "string" && hasOwn(world.entities, r.entity) ? r.entity : world.pov;

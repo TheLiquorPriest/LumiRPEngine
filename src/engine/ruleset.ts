@@ -177,3 +177,42 @@ export function buildEntitySheet(ctx: ReadContext, entity: EntityId, opts: { fix
     }),
   }));
 }
+
+/** The most a ruleset the Sheet Designer previews may hold: it is read on the backend thread at every edit. */
+export const SHEET_PREVIEW_LIMITS = Object.freeze({ sections: 32, rows: 64, thresholds: 200, formula: 1024 });
+
+const ROW_PARTS = ["field", "formula", "pool", "progression"] as const;
+
+/**
+ * Why a ruleset sent for the Sheet Designer's preview can't be read, or null: the parts the sheet
+ * reads (its sections and rows, and the progressions rows name) in the world's shapes, within
+ * `SHEET_PREVIEW_LIMITS`. Each row's cost grows with its progression's thresholds, so an unchecked
+ * ruleset could hold the backend for seconds, and a malformed one would fail inside the sheet.
+ */
+export function sheetRulesetProblem(raw: unknown): string | null {
+  if (!isRecord(raw)) return "The ruleset must be an object.";
+  const limits = SHEET_PREVIEW_LIMITS;
+  if (raw.sheet !== undefined) {
+    const sheet = raw.sheet;
+    if (!isRecord(sheet) || !Array.isArray(sheet.sections)) return "A sheet is a list of sections.";
+    if (sheet.sections.length > limits.sections) return `A sheet has at most ${limits.sections} sections.`;
+    for (const section of sheet.sections) {
+      if (!isRecord(section) || typeof section.id !== "string" || typeof section.label !== "string" || !Array.isArray(section.rows)) return "A section needs an id, a title and a list of rows.";
+      if (section.rows.length > limits.rows) return `A section has at most ${limits.rows} rows.`;
+      for (const row of section.rows) {
+        if (!isRecord(row) || ROW_PARTS.filter((k) => typeof row[k] === "string").length !== 1 || (row.label !== undefined && typeof row.label !== "string")) return "A row shows one thing: a field, a formula, a pool or a progression.";
+        if (typeof row.formula === "string" && row.formula.length > limits.formula) return `A formula is at most ${limits.formula} characters.`;
+      }
+    }
+  }
+  if (raw.progression !== undefined) {
+    if (!isRecord(raw.progression)) return "Progressions are an object by id.";
+    for (const p of Object.values(raw.progression)) {
+      if (!isRecord(p) || typeof p.xpField !== "string" || typeof p.levelField !== "string") return "A progression needs an XP field and a level field.";
+      const t = p.thresholds;
+      if (Array.isArray(t) ? t.some((x) => typeof x !== "number" || !Number.isFinite(x)) : !(isRecord(t) && typeof t.table === "string" && typeof t.column === "string")) return "Thresholds are a list of XP amounts, or a data table and column.";
+      if (Array.isArray(t) && t.length > limits.thresholds) return `A progression has at most ${limits.thresholds} thresholds.`;
+    }
+  }
+  return null;
+}
