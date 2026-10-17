@@ -10,6 +10,7 @@ import { HOST_REPO, hostTwoPass } from "../support/host-macros";
 import { decodeJournal, decodeLedger, journalPath, snapshotsPath, toChain } from "../../src/backend/ledger-io";
 import { defaultSettings, effectiveMode, mergePatch, recordOutcome, SettingsStore } from "../../src/backend/settings-store";
 import { ChipStore } from "../../src/backend/chips";
+import { JOBS_PATH } from "../../src/backend/jobs";
 import { PlanNotes } from "../../src/backend/plan-notes";
 import { CORRUPT_SUFFIX } from "../../src/backend/stored-json";
 import { proposalKnown } from "../../src/backend/runtime";
@@ -433,6 +434,39 @@ describe("background jobs", () => {
     expect(rig.jobs.start("playtest", worldId, { turns: ["look around"] }, rig.host.userId)).rejects.toThrow("at most 2 jobs");
     expect(rig.jobs.cancel(a, "user-2")).rejects.toThrow("no such job");
     await rig.jobs.cancel(a, rig.host.userId);
+  });
+
+  test("a job of a kind the runner doesn't have is refused, never run as Refine", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld("Jobs");
+    rig.host.quietReply = () => JSON.stringify({ proposals: [] });
+    expect(await rig.send({ type: "lre.job", op: "start", kind: "wipe_world", worldId, input: { instructions: "Add a diner." } })).toMatchObject({ type: "lre.error", code: "bad_request" });
+    expect(await rig.send({ type: "lre.job", op: "start", kind: "refine", worldId, input: "Add a diner." })).toMatchObject({ type: "lre.error", code: "bad_request" });
+    await rig.host.settle();
+    expect(rig.host.quietCalls).toEqual([]);
+    expect(await rig.jobs.list(worldId, rig.host.userId)).toEqual([]);
+  });
+
+  test("a job keeps only the input its kind reads, cut to what it can use; an id too long to be one is refused", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld("Jobs");
+    const long = "x".repeat(5000);
+    await rig.jobs.start("playtest", worldId, { turns: Array.from({ length: 60 }, () => long), notes: long }, rig.host.userId);
+    await rig.jobs.idle();
+    const [playtest] = await rig.jobs.list(worldId, rig.host.userId);
+    expect(playtest?.input).toEqual({ turns: Array.from({ length: 50 }, () => "x".repeat(2000)) });
+    await expect(rig.jobs.start("describe_map", worldId, { scope: "home", prose: "A room.", mapId: "m".repeat(201) }, rig.host.userId)).rejects.toThrow("at most 200 characters");
+    await expect(rig.jobs.start("import_lore", worldId, { bookIds: Array.from({ length: 65 }, (_, i) => `book${i}`) }, rig.host.userId)).rejects.toThrow("at most 64");
+    // Pasted text past what an index job reads isn't kept, and the job still says the rest wasn't read.
+    const indexing = new Rig();
+    const indexed = await indexing.newWorld("Jobs");
+    indexing.host.quietReply = () => JSON.stringify({ entries: [] });
+    indexing.body(await indexing.send({ type: "lre.job", op: "start", kind: "index_text", worldId: indexed, input: { text: "Harbor history, told again. ".repeat(200_000), extra: long } }));
+    await indexing.host.settle();
+    expect(((await indexing.host.storage.read(JOBS_PATH, indexing.host.userId)) ?? "").length).toBeLessThan(100_000);
+    const [job] = await indexing.jobs.list(indexed, indexing.host.userId);
+    expect(Object.keys(job?.input ?? {})).toEqual(["text"]);
+    expect(job?.message).toContain("Only the first 12 parts of the text");
   });
 });
 

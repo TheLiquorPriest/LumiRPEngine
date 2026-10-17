@@ -139,7 +139,7 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 
 | File | Holds |
 |---|---|
-| `userStorage/jobs.json` | `{v: 1, jobs: JobSummary[]}`: running jobs and the newest 8 ended ones, oldest first, with input and result (an import's proposals after every chunk) |
+| `userStorage/jobs.json` | `{v: 1, jobs: JobSummary[]}`: running jobs and the newest 8 ended ones, oldest first, with input (only the fields the kind reads, bounded) and result (an import's proposals after every chunk) |
 | `userStorage/call-meter.json` | `{v: 1, turns, current}`: the last 200 closed turn tallies and the current one |
 | `userStorage/lore-tools.json` | `{v: 1, refused: {[connectionId]: {at, reason}}}`: connections seen refusing the lore tools, whose `auto` lookups use the need form |
 | `userStorage/runs/<chatId>/chips.json` | Stored chips until acted on or lapsed |

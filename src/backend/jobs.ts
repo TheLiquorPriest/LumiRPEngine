@@ -18,7 +18,7 @@ import type { Registry } from "../engine/registry-impl";
 import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
 import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks, type IndexBook } from "./lore-index";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
-import { mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
+import { MAP_PROSE_MAX, mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
 import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
 import { readStoredJson } from "./stored-json";
@@ -36,6 +36,15 @@ export const JOBS_KEPT = 8;
 const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, playtest: true, check_world: true, index_book: true, index_text: true };
 const JOB_STATUSES: Record<JobSummary["status"], true> = { running: true, done: true, failed: true, cancelled: true, interrupted: true };
 const SEVERITIES: Record<LintIssue["severity"], true> = { error: true, warning: true, info: true };
+
+/** Bounds on a job's input, as it is kept and run: ids, books an import reads, Refine's request, playtest turns. */
+const ID_MAX = 200;
+const BOOKS_MAX = 64;
+const INSTRUCTIONS_MAX = 4000;
+const TURNS_MAX = 50;
+const TURN_MAX = 2000;
+/** Pasted text an index job keeps: what its calls read and a part more, so it can still say the rest wasn't read. */
+const INDEX_TEXT_MAX = (IMPORT_MAX_CALLS + 1) * INDEX_TEXT_CHUNK;
 
 function isJobKind(v: unknown): v is JobKind {
   return typeof v === "string" && hasOwn(JOB_KINDS, v);
@@ -79,6 +88,42 @@ function storedJob(raw: unknown): JobSummary | null {
 function interruptedMessage(job: JobSummary): string {
   const proposals = job.result && "proposals" in job.result ? job.result.proposals.length : 0;
   return proposals > 0 ? `Interrupted by a restart. The ${proposals} proposal(s) it made before it stopped are below; run it again for the rest.` : "Interrupted by a restart. Run it again.";
+}
+
+/**
+ * A job's input as it is kept in `jobs.json` and run: only what its kind reads, each value cut to
+ * what the job can use, so a request can't make every update rewrite more than that. An id too long
+ * to be one, or more books than an import reads, is refused rather than cut.
+ */
+function boundedInput(kind: JobKind, input: JsonObject): JsonObject {
+  const id = (v: JsonValue | undefined): string => {
+    if (typeof v !== "string") return "";
+    if (v.length > ID_MAX) throw new JobError("bad_request", `an id is at most ${ID_MAX} characters`);
+    return v;
+  };
+  const text = (v: JsonValue | undefined, max: number): string => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const strings = (v: JsonValue | undefined): string[] => (Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []);
+  switch (kind) {
+    case "import_lore": {
+      const bookIds = strings(input.bookIds).map(id);
+      if (bookIds.length > BOOKS_MAX) throw new JobError("bad_request", `pick at most ${BOOKS_MAX} lore books`);
+      return { bookIds };
+    }
+    case "refine":
+      return { instructions: text(input.instructions, INSTRUCTIONS_MAX) };
+    case "describe_map": {
+      const mapId = id(input.mapId);
+      return { scope: id(input.scope), prose: text(input.prose, MAP_PROSE_MAX), ...(mapId !== "" ? { mapId } : {}) };
+    }
+    case "playtest":
+      return { turns: strings(input.turns).slice(0, TURNS_MAX).map((t) => t.slice(0, TURN_MAX)) };
+    case "check_world":
+      return typeof input.days === "number" ? { days: input.days } : {};
+    case "index_book":
+      return { bookId: id(input.bookId) };
+    case "index_text":
+      return { text: text(input.text, INDEX_TEXT_MAX) };
+  }
 }
 
 /** A job request the runner refuses (too many running; not the user's job). */
@@ -148,16 +193,20 @@ export class JobRunner {
   static readonly CALL_MS = 120_000;
 
   async start(kind: JobKind, worldId: WorldId, input: JsonObject, userId: UserId, session?: string): Promise<string> {
+    // The request is the frontend's: a kind the runner doesn't have would otherwise run as Refine.
+    if (!isJobKind(kind)) throw new JobError("bad_request", "no such job");
+    if (!isRecord(input)) throw new JobError("bad_request", "a job's input is an object");
     if ([...this.jobs.values()].filter((j) => j.userId === userId).length >= JobRunner.MAX_PER_USER) throw new JobError("unavailable", `at most ${JobRunner.MAX_PER_USER} jobs run at once; wait for one to finish or cancel it`);
+    const bounded = boundedInput(kind, input);
     const id = `job${Date.now().toString(36)}${(++this.seq).toString(36)}`;
-    const job: Job = { id, kind, userId, worldId, input: JSON.parse(JSON.stringify(input)) as JsonObject, session, controller: new AbortController(), lane: null };
+    const job: Job = { id, kind, userId, worldId, input: bounded, session, controller: new AbortController(), lane: null };
     this.jobs.set(id, job);
     // Kept before any of its updates: they queue behind it.
     const kept = this.withKept(userId, (list) => {
       list.push({ jobId: id, kind, worldId, status: "running", progress: 0, input: job.input, at: Date.now() });
       return { value: undefined, changed: true };
     });
-    const work = this.run(job, worldId, input).catch((error: unknown) => this.update(job, { status: "failed", progress: 1, message: error instanceof Error ? error.message : String(error) }));
+    const work = this.run(job, worldId, bounded).catch((error: unknown) => this.update(job, { status: "failed", progress: 1, message: error instanceof Error ? error.message : String(error) }));
     this.running.add(work);
     void work.finally(() => this.running.delete(work));
     await kept;
@@ -324,7 +373,7 @@ export class JobRunner {
     // A call ends at its own deadline or when the job is cancelled, whichever comes first.
     const callSignal = (): AbortSignal => AbortSignal.any([signal, this.callDeadline()]);
     if (job.kind === "playtest") {
-      const turns = Array.isArray(input.turns) ? input.turns.filter((t): t is string => typeof t === "string").slice(0, 50) : [];
+      const turns = Array.isArray(input.turns) ? input.turns.filter((t): t is string => typeof t === "string") : [];
       if (turns.length === 0) throw new Error("a playtest needs at least one typed turn");
       job.lane = await this.host.processes.spawn({ entry: BACKGROUND_LANE, kind: "background", key: job.id, payload: { jobId: job.id, kind: "playtest", world: JSON.parse(JSON.stringify(world)) as JsonValue, revision, turns, runSeed: `playtest:${job.id}` }, userId: job.userId });
       return;
@@ -467,7 +516,7 @@ export class JobRunner {
     // refine: Build/Refine with AI, one call and its retry.
     const instructions = typeof input.instructions === "string" ? input.instructions.trim() : "";
     if (instructions === "") throw new Error("say what to build or change");
-    const { reply } = await this.proposalReply("refine", JobRunner.proposalReader("refine"), "request", proposalSystem("refine", world, this.registry), instructions.slice(0, 4000), config, job.userId, callSignal(), true);
+    const { reply } = await this.proposalReply("refine", JobRunner.proposalReader("refine"), "request", proposalSystem("refine", world, this.registry), instructions, config, job.userId, callSignal(), true);
     if (signal.aborted) return;
     const raw = readProposals(reply, "refine");
     const drops: DropCounts = new Map();
