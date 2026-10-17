@@ -2,9 +2,12 @@
 // Kept pure so the mapping from a tap to its message is tested directly.
 
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { ChatId, DomainId, InterruptClass, InterruptPolicy, Level } from "../shared/ids";
+import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId } from "../shared/ids";
 import type { KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope } from "../shared/ledger";
-import type { Chip, FixTarget, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
+import { parseMoneyInput } from "../shared/money";
+import type { EditOp } from "../shared/protocol";
+import type { Chip, FixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
+import type { WorldCurrency } from "../shared/world";
 import type { RequestBody } from "./registry";
 
 /** The request body of one protocol type. */
@@ -59,6 +62,51 @@ export function travelRequest(action: string, params: JsonObject, chatId: ChatId
 
 export function fixRequest(target: FixTarget, value: JsonValue, chatId: ChatId): Req<"lre.fix"> {
   return { type: "lre.fix", chatId, entity: target.entity, field: target.field, value };
+}
+
+/** A GM edit: the operations in order, applied all or none as one fix with its own Undo (DESIGN §7). */
+export function editRequest(chatId: ChatId, ops: EditOp[]): Req<"lre.edit"> {
+  return { type: "lre.edit", chatId, ops };
+}
+
+/** The GM's simulation edit of an entity: only what the form changed (tier, agent flag, each domain's override; null hands a domain back to the tier). Null when nothing changed. */
+export function entityStateOp(entity: GmEntity, tier: TierId, agent: boolean, levels: Partial<Record<DomainId, number | null>>): EditOp | null {
+  const changed: Partial<Record<DomainId, number | null>> = {};
+  for (const l of entity.levels) {
+    const to = levels[l.domain];
+    if (to !== undefined && to !== l.override) changed[l.domain] = to;
+  }
+  const levelsChanged = Object.keys(changed).length > 0;
+  if (tier === entity.tier && agent === entity.agent && !levelsChanged) return null;
+  return { op: "entity", entity: entity.id, ...(tier !== entity.tier ? { tier } : {}), ...(agent !== entity.agent ? { agent } : {}), ...(levelsChanged ? { levels: changed } : {}) };
+}
+
+/**
+ * A relation's fields from the GM's inputs, one per field its type declares: a number within the
+ * field's bounds, one of an enum's values, yes or no, else the text. An empty input leaves the
+ * field out; fields the relation holds that its type doesn't declare are kept. Null when an input
+ * doesn't fit its field.
+ */
+export function relationFields(defs: GmView["relationTypes"][number]["fields"], inputs: Readonly<Record<string, string>>, held: JsonObject = {}): JsonObject | null {
+  const fields: JsonObject = Object.fromEntries(Object.entries(held).filter(([id]) => !defs.some((d) => d.id === id)));
+  for (const def of defs) {
+    const text = (inputs[def.id] ?? "").trim();
+    if (text === "") continue;
+    if (def.type === "number") {
+      const n = Number(text);
+      if (!Number.isFinite(n) || n < (def.min ?? -Infinity) || n > (def.max ?? Infinity)) return null;
+      fields[def.id] = n;
+    } else if (def.type === "bool") fields[def.id] = text === "true";
+    else if (def.values && !def.values.includes(text)) return null;
+    else fields[def.id] = text;
+  }
+  return fields;
+}
+
+/** Money into an account, or out of it with `take`, from the amount typed; null unless it reads as an amount above zero. */
+export function adjustOp(account: EntityId, text: string, currency: WorldCurrency, take: boolean): EditOp | null {
+  const cents = parseMoneyInput(text, currency);
+  return cents !== null && cents > 0 ? { op: "adjust", account, cents: take ? -cents : cents } : null;
 }
 
 /** A `time` marker on the running chat (Play → Calendar, HUD ⏸, palette Pause/Resume). */

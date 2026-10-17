@@ -5,16 +5,15 @@
 // world's definitions, edited in Build.
 
 import { useEffect, useState } from "preact/hooks";
-import type { JsonObject, JsonValue } from "../../shared/json";
-import { isRecord } from "../../shared/json";
-import { parseMoneyInput } from "../../shared/money";
+import type { JsonValue } from "../../shared/json";
 import type { EditOp } from "../../shared/protocol";
-import type { GmEntity, GmField, GmMoney, GmView } from "../../shared/state-view";
+import type { GmEntity, GmField, GmMoney, GmRelation, GmView } from "../../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../shared/world";
 import { useApp } from "../app";
 import { Card, Empty, Row, Seg, useBusy } from "../components";
 import { parseFixValue } from "../fix-editor";
 import type { PanelProps } from "../registry";
+import { adjustOp, editRequest, entityStateOp, relationFields } from "../requests";
 
 type Section = "entities" | "places" | "tracks" | "money" | "edits";
 
@@ -65,7 +64,12 @@ function FieldRow(props: { entity: GmEntity; field: GmField; editor: Editor }) {
   const value = text === null ? null : field.type === "ref" ? (text === "" ? null : text) : field.type === "enum" ? text : parse(entity, field, text, editor.currency);
   const bounds = field.min !== undefined || field.max !== undefined ? ` (${field.min ?? "…"}–${field.max ?? "…"})` : "";
   if (text === null) {
-    return <Row k={`${field.label}${field.locked ? " 🔒" : ""}`} sub={field.derived ? "worked out" : field.extra ? "not in the kind" : undefined} v={<span class="lre-inline">{shown(field.value, field, editor)}{field.derived ? null : <button type="button" class="lre-btn small ghost" aria-label={`Edit ${field.label}`} onClick={() => setText(field.type === "bool" ? String(field.value === true) : textOf(field.value, field, editor.currency))}>✎</button>}</span>} />;
+    const label = `${field.label}${field.locked ? " 🔒" : ""}`;
+    const edit = field.derived ? null : <button type="button" class="lre-btn small ghost" aria-label={`Edit ${field.label}`} onClick={() => setText(field.type === "bool" ? String(field.value === true) : textOf(field.value, field, editor.currency))}>✎</button>;
+    const note = field.derived ? "worked out" : field.extra ? "not in the kind" : null;
+    // Free text runs long: it reads under the label, with ✎ beside it rather than wrapped below.
+    if (field.type === "text" || field.extra) return <Row k={label} sub={[shown(field.value, field, editor), note].filter((s) => s !== null).join(" · ")} v={edit} />;
+    return <Row k={label} sub={note ?? undefined} v={<span class="lre-inline">{shown(field.value, field, editor)}{edit}</span>} />;
   }
   return (
     <form
@@ -112,8 +116,7 @@ function EntityState(props: { entity: GmEntity; editor: Editor }) {
   const [tier, setTier] = useState(entity.tier);
   const [agent, setAgent] = useState(entity.agent);
   const [levels, setLevels] = useState<Record<string, number | null>>(Object.fromEntries(entity.levels.map((l) => [l.domain, l.override])));
-  const changed: Record<string, number | null> = Object.fromEntries(Object.entries(levels).filter(([d, v]) => entity.levels.find((l) => l.domain === d)?.override !== v));
-  const op: EditOp = { op: "entity", entity: entity.id, ...(tier !== entity.tier ? { tier } : {}), ...(agent !== entity.agent ? { agent } : {}), ...(Object.keys(changed).length > 0 ? { levels: changed } : {}) };
+  const op = entityStateOp(entity, tier, agent, levels);
   return (
     <Card title="Simulation">
       <label class="lre-field">
@@ -146,25 +149,30 @@ function EntityState(props: { entity: GmEntity; editor: Editor }) {
           </select>
         </label>
       ))}
-      <button type="button" class="lre-btn primary" disabled={editor.busy || Object.keys(op).length === 2} onClick={() => void editor.edit([op])}>
+      <button type="button" class="lre-btn primary" disabled={editor.busy || op === null} onClick={() => op && void editor.edit([op])}>
         Save
       </button>
     </Card>
   );
 }
 
+/** A relation's fields as the row shows them: by their labels, with a regard's current value. */
+function relationDetail(r: GmRelation, gm: GmView): string | undefined {
+  const defs = gm.relationTypes.find((t) => t.id === r.type)?.fields ?? [];
+  const parts = Object.entries(r.fields ?? {}).map(([id, v]) => `${defs.find((d) => d.id === id)?.label ?? id} ${typeof v === "string" ? v : JSON.stringify(v)}`);
+  if (r.value !== undefined) parts.push(`now ${r.value}`);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
 function Relations(props: { entity: GmEntity; editor: Editor }) {
   const { entity, editor } = props;
-  const [type, setType] = useState(editor.gm.relationTypes[0]?.id ?? "knows");
+  // Containment is Placement's (move, put), not a relation to add here.
+  const types = editor.gm.relationTypes.filter((t) => t.id !== "in");
+  const [type, setType] = useState(types[0]?.id ?? "knows");
   const [to, setTo] = useState("");
-  const [fields, setFields] = useState("");
-  let parsed: JsonObject | null = {};
-  try {
-    const raw: unknown = fields.trim() === "" ? {} : JSON.parse(fields);
-    parsed = isRecord(raw) ? (raw as JsonObject) : null;
-  } catch {
-    parsed = null;
-  }
+  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const defs = types.find((t) => t.id === type)?.fields ?? [];
+  const fields = relationFields(defs, inputs, entity.relations.find((r) => r.type === type && r.to === to)?.fields);
   return (
     <Card title="Relations">
       {entity.relations.length === 0 ? <Empty>None.</Empty> : null}
@@ -172,12 +180,14 @@ function Relations(props: { entity: GmEntity; editor: Editor }) {
         <Row
           key={`${r.type}:${r.to}`}
           k={`${editor.gm.relationTypes.find((t) => t.id === r.type)?.label ?? r.type} → ${r.toName}`}
-          sub={[r.fields ? JSON.stringify(r.fields) : "", r.value !== undefined ? `now ${r.value}` : ""].filter((s) => s !== "").join(" · ") || undefined}
+          sub={relationDetail(r, editor.gm)}
           v={
             <span class="lre-inline">
-              <button type="button" class="lre-btn small ghost" onClick={() => (setType(r.type), setTo(r.to), setFields(r.fields ? JSON.stringify(r.fields) : ""))}>
-                ✎
-              </button>
+              {r.type === "in" ? null : (
+                <button type="button" class="lre-btn small ghost" aria-label={`Edit ${r.type} ${r.toName}`} onClick={() => (setType(r.type), setTo(r.to), setInputs(Object.fromEntries(Object.entries(r.fields ?? {}).map(([id, v]) => [id, typeof v === "string" ? v : JSON.stringify(v)]))))}>
+                  ✎
+                </button>
+              )}
               <button type="button" class="lre-btn small danger" disabled={editor.busy} onClick={() => void editor.edit([{ op: "unlink", rel: r.type, from: entity.id, to: r.to }])}>
                 Remove
               </button>
@@ -185,9 +195,9 @@ function Relations(props: { entity: GmEntity; editor: Editor }) {
           }
         />
       ))}
-      <div class="lre-stack">
-        <select class="lre-input" aria-label="Relation" value={type} onChange={(event) => setType(event.currentTarget.value)}>
-          {editor.gm.relationTypes.map((t) => (
+      <div class="lre-stack" data-lre-gm-relation-form>
+        <select class="lre-input" aria-label="Relation" value={type} onChange={(event) => (setType(event.currentTarget.value), setInputs({}))}>
+          {types.map((t) => (
             <option key={t.id} value={t.id}>
               {t.label}
             </option>
@@ -201,8 +211,27 @@ function Relations(props: { entity: GmEntity; editor: Editor }) {
             </option>
           ))}
         </select>
-        <input class={parsed === null ? "lre-input invalid" : "lre-input"} aria-label="Fields (JSON)" placeholder='Fields, e.g. {"heat": 3}' value={fields} onInput={(event) => setFields(event.currentTarget.value)} />
-        <button type="button" class="lre-btn" disabled={editor.busy || to === "" || parsed === null} onClick={() => void editor.edit([{ op: "link", rel: type, from: entity.id, to, ...(parsed && Object.keys(parsed).length > 0 ? { fields: parsed } : {}) }])}>
+        {defs.map((d) => (
+          <label key={d.id} class="lre-field">
+            <span class="label">
+              {d.label}
+              {d.min !== undefined || d.max !== undefined ? ` (${d.min ?? "…"}–${d.max ?? "…"})` : ""}
+            </span>
+            {d.type === "enum" || d.type === "bool" ? (
+              <select class="lre-input" value={inputs[d.id] ?? ""} onChange={(event) => setInputs({ ...inputs, [d.id]: event.currentTarget.value })}>
+                <option value="">None</option>
+                {(d.type === "bool" ? ["true", "false"] : (d.values ?? [])).map((v) => (
+                  <option key={v} value={v}>
+                    {d.type === "bool" ? (v === "true" ? "Yes" : "No") : v}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input class={inputs[d.id] && relationFields([d], inputs) === null ? "lre-input invalid" : "lre-input"} inputMode={d.type === "number" ? "decimal" : undefined} value={inputs[d.id] ?? ""} onInput={(event) => setInputs({ ...inputs, [d.id]: event.currentTarget.value })} />
+            )}
+          </label>
+        ))}
+        <button type="button" class="lre-btn" disabled={editor.busy || to === "" || fields === null} onClick={() => fields && void editor.edit([{ op: "link", rel: type, from: entity.id, to, ...(Object.keys(fields).length > 0 ? { fields } : {}) }])}>
           Add or update
         </button>
       </div>
@@ -214,7 +243,8 @@ function Relations(props: { entity: GmEntity; editor: Editor }) {
 function Placement(props: { entity: GmEntity; editor: Editor }) {
   const { entity, editor } = props;
   const [amount, setAmount] = useState("");
-  const cents = parseMoneyInput(amount, editor.currency);
+  const add = adjustOp(entity.id, amount, editor.currency, false);
+  const take = adjustOp(entity.id, amount, editor.currency, true);
   return (
     <Card title="Placement">
       <Row k="At" v={nameOf(editor.gm, entity.place)} />
@@ -243,12 +273,12 @@ function Placement(props: { entity: GmEntity; editor: Editor }) {
       {entity.balance !== undefined ? (
         <div class="lre-stack">
           <Row k="Balance" v={formatMoney(entity.balance, editor.currency)} />
-          <input class={cents === null && amount !== "" ? "lre-input invalid" : "lre-input"} aria-label="Amount" placeholder="Amount" value={amount} onInput={(event) => setAmount(event.currentTarget.value)} />
+          <input class={add === null && amount !== "" ? "lre-input invalid" : "lre-input"} aria-label="Amount" placeholder="Amount" value={amount} onInput={(event) => setAmount(event.currentTarget.value)} />
           <div class="lre-inline">
-            <button type="button" class="lre-btn" disabled={editor.busy || !cents} onClick={() => cents && void editor.edit([{ op: "adjust", account: entity.id, cents }])}>
+            <button type="button" class="lre-btn" disabled={editor.busy || add === null} onClick={() => add && void editor.edit([add])}>
               Add
             </button>
-            <button type="button" class="lre-btn" disabled={editor.busy || !cents} onClick={() => cents && void editor.edit([{ op: "adjust", account: entity.id, cents: -cents }])}>
+            <button type="button" class="lre-btn" disabled={editor.busy || take === null} onClick={() => take && void editor.edit([take])}>
               Take
             </button>
           </div>
@@ -391,7 +421,7 @@ function Entities(props: { editor: Editor }) {
             <button key={e.id} type="button" class="lre-item" onClick={() => setOpen(e.id)}>
               <span class="grow">
                 {e.name}
-                <span class="sub"> · {editor.gm.kinds.find((k) => k.id === e.kind)?.label ?? e.kind}</span>
+                <span class="sub">{editor.gm.kinds.find((k) => k.id === e.kind)?.label ?? e.kind}</span>
               </span>
               {e.pov ? <span class="lre-badge accent">You</span> : null}
               {e.gone ? <span class="lre-badge neg">Removed</span> : null}
@@ -411,7 +441,7 @@ function Entities(props: { editor: Editor }) {
 function PersonMoney(props: { money: GmMoney; editor: Editor }) {
   const { money: m, editor } = props;
   const [amount, setAmount] = useState("");
-  const cents = parseMoneyInput(amount, editor.currency);
+  const valid = adjustOp(m.entity, amount, editor.currency, false) !== null;
   return (
     <Card title={`Money · ${m.name}`} aside={<span class="lre-badge">Money {m.level}</span>}>
       {m.band ? <Row k="Band" v={m.band} /> : null}
@@ -425,10 +455,10 @@ function PersonMoney(props: { money: GmMoney; editor: Editor }) {
           v={
             <span class="lre-inline">
               {formatMoney(a.cents, editor.currency)}
-              <button type="button" class="lre-btn small" disabled={editor.busy || !cents} onClick={() => cents && void editor.edit([{ op: "adjust", account: a.id, cents }])}>
+              <button type="button" class="lre-btn small" aria-label={`Add to ${a.name}`} disabled={editor.busy || !valid} onClick={() => { const op = adjustOp(a.id, amount, editor.currency, false); if (op) void editor.edit([op]); }}>
                 +
               </button>
-              <button type="button" class="lre-btn small" disabled={editor.busy || !cents} onClick={() => cents && void editor.edit([{ op: "adjust", account: a.id, cents: -cents }])}>
+              <button type="button" class="lre-btn small" aria-label={`Take from ${a.name}`} disabled={editor.busy || !valid} onClick={() => { const op = adjustOp(a.id, amount, editor.currency, true); if (op) void editor.edit([op]); }}>
                 −
               </button>
             </span>
@@ -540,7 +570,7 @@ export function GmPanel(props: PanelProps) {
         edit: (ops) =>
           new Promise<boolean>((resolve) =>
             run(async () => {
-              const result = await app.request({ type: "lre.edit", chatId: props.chatId, ops });
+              const result = await app.request(editRequest(props.chatId, ops));
               if (result?.pending) app.toast("Saved — it applies when the reply finishes.", "info");
               if (result) await load();
               resolve(result !== null);
