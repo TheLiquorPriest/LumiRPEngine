@@ -117,9 +117,9 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     else if (roll < 0.65) ops.push({ op: "deleteMessage", at: r() });
     else if (roll < 0.66) ops.push({ op: "branch", at: r() });
     else if (roll < 0.67) ops.push({ op: "import" });
-    else if (roll < 0.77) ops.push({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}) });
-    else if (roll < 0.785) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r() });
-    else if (roll < 0.8) ops.push({ op: "upgrade", to: r(), picks: r() });
+    else if (roll < 0.755) ops.push({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}) });
+    else if (roll < 0.77) ops.push({ op: "upgrade", to: r(), picks: r() });
+    else if (roll < 0.8) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r() });
     else if (roll < 0.82) ops.push({ op: "dryRun" });
     else if (roll < 0.84) ops.push({ op: "restart" });
     else if (roll < 0.87) ops.push({ op: "clobber", at: r(), echo: r() < 0.5 });
