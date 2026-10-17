@@ -125,11 +125,14 @@ function childOf(world: Pick<WorldDoc, "places">, scope: PlaceId | null, place: 
   return at >= 0 ? (path[at + 1] ?? null) : null;
 }
 
-function ring(ids: readonly PlaceId[], cx: number, cy: number, r: number): Map<PlaceId, { x: number; y: number }> {
-  // In id order, so the same places always sit in the same spots.
+/** Places on a ring in id order (the same places always sit in the same spots), rounded to a hundredth of the frame: whole units on the usual 100-unit node layout. */
+function ring(ids: readonly PlaceId[], frame: { width: number; height: number }): Map<PlaceId, { x: number; y: number }> {
+  const step = Math.min(frame.width, frame.height) / 100;
+  const r = Math.min(frame.width, frame.height) / 3;
+  const round = (v: number): number => Math.round(v / step) * step;
   return new Map(ids.map((id, i) => {
     const angle = (2 * Math.PI * i) / Math.max(1, ids.length);
-    return [id, { x: Math.round((cx + r * Math.cos(angle)) * 10) / 10, y: Math.round((cy + r * Math.sin(angle)) * 10) / 10 }];
+    return [id, { x: round(frame.width / 2 + r * Math.cos(angle)), y: round(frame.height / 2 + r * Math.sin(angle)) }];
   }));
 }
 
@@ -164,7 +167,7 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
     else if (placed.length > 0) frame = { width: Math.max(1, ...placed.map(([, p]) => p.x)), height: Math.max(1, ...placed.map(([, p]) => p.y)) };
     for (const [id, p] of placed) at.set(id, p);
     const rest = kids.filter((id) => !at.has(id));
-    for (const [id, p] of ring(rest, frame.width / 2, frame.height / 2, Math.min(frame.width, frame.height) / 3)) at.set(id, p);
+    for (const [id, p] of ring(rest, frame)) at.set(id, p);
   }
   const places: MapPlaceView[] = kids.map((id) => {
     const p = own(world.places, id);

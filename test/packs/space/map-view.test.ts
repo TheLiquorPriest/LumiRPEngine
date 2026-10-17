@@ -8,6 +8,8 @@ import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../../src/engine/authoring";
 import { createRegistry } from "../../../src/engine/registry-impl";
+import { paramCandidates } from "../../../src/engine/resolve";
+import { typedIntent } from "../../../src/engine/typed-intent";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
@@ -163,5 +165,18 @@ describe("map scopes", () => {
       ["square", 100, 50],
     ]);
     expect(town.routes.map((r) => `${r.from}-${r.to}`).sort()).toEqual(["home-square", "inn-square"]);
+  });
+
+  test("a place the POV can see outside the map's scope is still a travel target: on the map, in the palette and typed", () => {
+    const world = starter("mystery_manor");
+    const state = startState(world);
+    const view = buildMapView(reg.context(world, state));
+    expect(view.scope).toBe("harrowmere_hall");
+    expect(scopeOf(view, "harrowmere_hall").places.some((p) => p.id === "saltreach")).toBe(false);
+    // The map draws one scope at a time, but its travel options reach every place the POV can see.
+    expect(view.travel.some((t) => t.action === "go" && t.to === "saltreach")).toBe(true);
+    const go = reg.actions.get("go");
+    expect(go ? paramCandidates(reg, world, state, go, "to") : []).toEqual(expect.arrayContaining(["saltreach", "boathouse", "gatehouse"]));
+    expect(typedIntent(reg, world, state, "I walk to Saltreach")).toMatchObject({ action: "go", params: { to: "saltreach" } });
   });
 });
