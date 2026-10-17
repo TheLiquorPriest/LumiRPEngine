@@ -35,7 +35,7 @@ interface ChatLog {
   delivery: Delivery;
 }
 
-const ACTIVATIONS: Record<ContextGeneration["activation"], true> = { confirmed: true, unconfirmed: true, stalled: true };
+const ACTIVATIONS: Record<ContextGeneration["activation"], true> = { confirmed: true, unconfirmed: true };
 const DELIVERIES: Record<ContextGeneration["sections"][number]["delivery"], true> = { verified: true, unverified: true, unchecked: true };
 
 function strings(v: unknown): v is string[] {

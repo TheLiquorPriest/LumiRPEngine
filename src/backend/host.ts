@@ -51,7 +51,6 @@ export interface GenerationInProgressEvent {
   targetSwipeId: number | null;
   characterId: string | null;
   characterName: string | null;
-  contextClipStats: JsonObject | null;
 }
 
 export interface GenerationEndedEvent {

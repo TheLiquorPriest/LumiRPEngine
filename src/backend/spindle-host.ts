@@ -108,7 +108,7 @@ function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventNa
         characterId: str(p, "characterId") ?? null,
         characterName: str(p, "characterName") ?? null,
       };
-      if (event === "GENERATION_IN_PROGRESS") return { ...base, contextClipStats: isRecord(p) && isRecord(p.contextClipStats) ? toJsonObject(p.contextClipStats) : null };
+      if (event === "GENERATION_IN_PROGRESS") return base;
       const frontendSessionId = str(p, "frontendSessionId");
       return { ...base, generationType: generationType(p), ...(frontendSessionId ? { frontendSessionId } : {}) };
     }

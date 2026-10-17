@@ -444,7 +444,7 @@ export class FakeHost implements HostPort {
     if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: opts.type, dryRun: false, connectionId: null, personaId: null }, context.signal);
     await this.runInterceptor(chatId);
     if (this.options.wiBook) this.emit("WORLD_INFO_ACTIVATED", { chatId, entries: [], stats: {} });
-    this.emit("GENERATION_IN_PROGRESS", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator", contextClipStats: null });
+    this.emit("GENERATION_IN_PROGRESS", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator" });
     await this.settle();
     return g;
   }

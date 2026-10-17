@@ -90,9 +90,9 @@ The Upgrade takes effect from the next turn and is recorded like any other chang
 
 **Play → Context** shows what the engine put into the prompt for each generation. Step through earlier ones with **Older** and **Newer**; the last ten are kept per chat, and survive a restart.
 
-- **Sections** (Outcome, Scene, People and the rest) each show their size in your main model's tokens and a badge. **Delivered** means the test prompt build found the section in the prompt. **Not delivered** means it didn't: check where the world's book and your preset place it. **Unchecked** is normal for Outcome, Montage and Outline, which only a real turn fills. **Unverified** means the engine couldn't work out where a section lands (inside a character card, say), so it keeps its normal place. **Clipped** means it went over the section budget and was left out of that turn.
+- **Sections** (Outcome, Scene, People and the rest) each show their size in your main model's tokens and a badge. **Delivered** means the test prompt build found the section in the prompt. **Not delivered** means it didn't: check where the world's book and your preset place it. **Unchecked** is normal for Outcome, Montage and Outline, which only a real turn fills. **Clipped** means it went over the section budget and was left out of that turn.
 - **The budget bar** is the section budget spent. Sections are kept in rank order and Outcome is never left out, so a clipped section is a hint to raise **Settings → Model use → Engine budget (tokens)**, or to give the section a lower rank in the world's sections.
-- **Activation** reads **Activation confirmed** when the engine's sections went into the prompt as planned; **Worker stalled: engine sections absent** means the turn ran without them, and the turn is flagged.
-- **Warnings** say when the fixed part of the prompt is too large for the context (Lumiverse then drops the chat history), when the prompt had to be clipped, and when a damaged journal was set aside, with where the old file is.
+- **Activation** reads **Activation confirmed** once Lumiverse reports every section the engine switched on as activated, and **Not confirmed** until then or when one wasn't.
+- **Warnings** say when the world's book wasn't attached to the chat or some of its section entries were missing (both are put right for the next turn), when your preset has a setting that causes trouble, and when a damaged journal was set aside, with where the old file is.
 
 Your own World Books work as they do anywhere in Lumiverse, so the inspector doesn't list them.

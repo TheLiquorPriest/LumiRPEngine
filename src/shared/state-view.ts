@@ -405,8 +405,8 @@ export interface ContextGeneration {
   /** The generation id, or `dry:<n>` for a dry-run assembly. */
   id: string;
   at: number;
-  /** `confirmed` once `WORLD_INFO_ACTIVATED` showed every forced entry. */
-  activation: "confirmed" | "unconfirmed" | "stalled";
+  /** `confirmed` once `WORLD_INFO_ACTIVATED` showed every forced entry; `unconfirmed` until then, or when one didn't activate. */
+  activation: "confirmed" | "unconfirmed";
   /** `delivery`: found in a dry-run assembly when the inspector opened (`verified`), not found (`unverified`), or not yet checked. */
   sections: { slot: string; label: string; tokens: number; clipped: boolean; delivery: "verified" | "unverified" | "unchecked" }[];
   budget: { sections: number; used: number };

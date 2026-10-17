@@ -52,7 +52,7 @@ export function decodeContextView(value: unknown): ContextView | null {
       return {
         id: str(g.id),
         at: num(g.at),
-        activation: oneOf(g.activation, ["confirmed", "unconfirmed", "stalled"] as const, "unconfirmed"),
+        activation: oneOf(g.activation, ["confirmed", "unconfirmed"] as const, "unconfirmed"),
         sections: list(g.sections, (s) => ({ slot: str(s.slot), label: str(s.label, str(s.slot)), tokens: num(s.tokens), clipped: s.clipped === true, delivery: oneOf(s.delivery, DELIVERY, "unchecked") })),
         budget: { sections: num(budget.sections), used: num(budget.used) },
         lore: decodeLore(g.lore),
@@ -64,7 +64,6 @@ export function decodeContextView(value: unknown): ContextView | null {
 const ACTIVATION: Record<ContextView["generations"][number]["activation"], { text: string; tone: string }> = {
   confirmed: { text: "Activation confirmed", tone: "pos" },
   unconfirmed: { text: "Not confirmed", tone: "warn" },
-  stalled: { text: "Worker stalled: engine sections absent", tone: "neg" },
 };
 
 export function ContextPanel(props: PanelProps) {
