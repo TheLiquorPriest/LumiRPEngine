@@ -79,13 +79,19 @@ export interface ViewOpenRequest extends Request<"lre.view.open"> {
   entity: EntityId | null;
 }
 
-/** A ✎ fix on the head (a `post` entry of kind `fix`). */
+/** A ✎ fix on the head: one typed `set` (`EditOp`), written as a `post` entry of kind `fix`. Locked fields are refused. */
 export interface FixRequest extends Request<"lre.fix"> {
   chatId: ChatId;
   entity: EntityId;
   field: FieldId;
   value: JsonValue;
 }
+
+/**
+ * One typed edit (DESIGN §12 ✎ fixes). Each is checked against what it touches (a field's type,
+ * values and bounds) and resolved through the core effects; a submit applies all or none.
+ */
+export type EditOp = { op: "set"; entity: EntityId; field: FieldId; value: JsonValue };
 
 /** A Play change to the running chat: a realism, time or Upgrade marker. With `preview`, nothing is written. */
 export type MarkerRequest = Request<"lre.marker"> & { chatId: ChatId; preview?: true } & (

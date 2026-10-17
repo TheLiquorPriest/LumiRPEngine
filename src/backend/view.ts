@@ -6,7 +6,7 @@ import type { ChatId, EntityId, PackId, PanelId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import { bandTiers } from "../shared/tiers";
-import type { ChatRun, EventRef, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
+import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
@@ -290,41 +290,50 @@ function refKey(ref: EventRef): string {
 /**
  * What a folded record applied (DESIGN §4.3 Fold): its events, and after them its live `post`
  * entries' by `seq`, without the undone ones and those a rebased view dropped (a Keep conversion
- * applies, so it stays); a record that folded nothing (paused) applied none. The change chip and
- * the Journal list these, so an undone purchase, or one an earlier switch dropped, isn't shown as made.
+ * applies, so it stays); a record that folded nothing (paused) applied none. ✎ fixes and GM edits
+ * come apart from the rest (`fixes`, each still holding an event), since each is its own Journal
+ * line and Undo chip. The change chip and the Journal list these, so an undone purchase, or one an
+ * earlier switch dropped, isn't shown as made.
  */
-function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[] } {
+function appliedEvents(rec: Rec, fold: FoldOutput, index: number): { events: LedgerEvent[]; post: LedgerEvent[]; fixes: { seq: number; events: LedgerEvent[] }[] } {
   const result = fold.messages[index];
-  if (!result || (result.fold !== "on_path" && result.fold !== "view")) return { events: [], post: [] };
+  // A bare record folds as a plain message, and its live entries apply all the same.
+  if (!result || (result.fold !== "on_path" && result.fold !== "view" && result.fold !== "plain")) return { events: [], post: [], fixes: [] };
   const skipped = new Set(rec.undone.map(refKey));
   for (const n of fold.notes) if (n.kind === "dropped" && n.messageId === result.id && n.ref && "in" in n.ref) skipped.add(refKey(n.ref));
   const recPath = turnPath(rec);
+  const live = rec.post
+    .filter((p) => isLive(p.at, result.parentPath, recPath))
+    .sort((a, b) => a.seq - b.seq)
+    .map((p) => ({ seq: p.seq, kind: p.kind, events: p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i }))) }));
   return {
     events: rec.events.filter((_, i) => !skipped.has(refKey({ in: "events", index: i }))),
-    post: rec.post
-      .filter((p) => isLive(p.at, result.parentPath, recPath))
-      .sort((a, b) => a.seq - b.seq)
-      .flatMap((p) => p.events.filter((_, i) => !skipped.has(refKey({ in: "post", seq: p.seq, index: i })))),
+    post: live.filter((p) => p.kind !== "fix").flatMap((p) => p.events),
+    fixes: live.filter((p) => p.kind === "fix" && p.events.length > 0).map((p) => ({ seq: p.seq, events: p.events })),
   };
 }
 
 /**
- * The Journal's turn entries: what each folded turn applied, in player-facing lines (only events the POV may see, about things it has met, worded with labels, leak-checked). They
- * are `note` entries; the fold's own notes follow them.
+ * The Journal's turn entries: what each folded turn applied, in player-facing lines (only events
+ * the POV may see, about things it has met, worded with labels, leak-checked). They are `note`
+ * entries, each followed by a `fix` note per ✎ fix or GM edit the player may see; the fold's own
+ * notes follow them.
  */
 function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: LedgerCore, registry: Registry, world: WorldDoc, state: WorldState): JournalNote[] {
   const out: JournalNote[] = [];
   chain.forEach((m, i) => {
     if (m.isUser) return;
-    const folded = fold.messages[i]?.fold;
-    if (folded !== "on_path" && folded !== "view") return;
     const rec = activeRecord(m, core.journal.tombstones);
     if (!rec) return;
     const applied = appliedEvents(rec, fold, i);
     const lines = turnLines(registry, world, state, [...applied.events, ...applied.post]);
     const minutes = clockMinutes(rec.events);
-    if (minutes > 0) lines.push(`${spanText(minutes)} passed`);
+    if (minutes > 0 && fold.messages[i]?.fold !== "plain") lines.push(`${spanText(minutes)} passed`);
     if (lines.length > 0) out.push({ kind: "note", messageId: m.id, ref: null, text: lines.join(" · ") });
+    for (const fix of applied.fixes) {
+      const fixed = turnLines(registry, world, state, fix.events);
+      if (fixed.length > 0) out.push({ kind: "fix", messageId: m.id, ref: { in: "post", seq: fix.seq, index: 0 }, text: fixed.join(" · ") });
+    }
   });
   return out.slice(-JOURNAL_TURNS);
 }
@@ -429,7 +438,10 @@ export function playerDrops(registry: Registry, world: WorldDoc, state: Readonly
   };
 }
 
-/** Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep report, what changed, elapsed, overdue. */
+/** What a refused held write was, for its notice (post entries are worded by their kind). */
+const REFUSED_WHAT: Record<Exclude<HeldWrite["kind"], "post">, string> = { marker: "A settings change", keep: "Keep", discard: "Discard", reread: "A re-read", retry_read: "A re-read", undo: "An undo" };
+
+/** Chips derived from the records: Re-read edit, Retry read, Retry (empty reply), degraded, Keep report, what changed, elapsed, overdue, a correction's Undo, a refused write's notice. */
 function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepReport: readonly KeepLine[], core: LedgerCore, registry: Registry, world: WorldDoc): Chip[] {
   const chips: Chip[] = [];
   const headIndex = chain.findLastIndex((m) => !m.isUser);
@@ -452,9 +464,15 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     if (rec.seed !== "" && rec.path !== "") chips.push({ id: `swipe_option:${m.id}:${m.swipeId}`, kind: "swipe_option", messageId: m.id, label: "Swipe as…", detail: "Re-narrate keeps this turn's outcome and rewrites the prose; Re-run rolls the turn again.", actions: [{ id: "renarrate", label: "Re-narrate" }, { id: "rerun", label: "Re-run" }], expires: "next_send" });
     const state = fold.state;
     const ctx = registry.context(world, state);
-    const lines = turnLines(registry, world, state, appliedEvents(rec, fold, i).events);
+    const applied = appliedEvents(rec, fold, i);
+    const lines = turnLines(registry, world, state, applied.events);
     // One change: the label says it all; several: "N changes" with the list as detail.
     if (lines.length > 0) chips.push({ id: `change:${m.id}:${m.swipeId}`, kind: "change", messageId: m.id, label: lines.length === 1 ? (lines[0] ?? "Changed") : `${lines.length} changes`, ...(lines.length > 1 ? { detail: lines.join("\n") } : {}), actions: [], expires: "next_send" });
+    // Each ✎ fix or GM edit on the head: "Corrected …" with Undo, worded for the player (DESIGN §12).
+    for (const fix of applied.fixes) {
+      const fixed = turnLines(registry, world, state, fix.events);
+      chips.push({ id: `fix:${m.id}:${m.swipeId}:${fix.seq}`, kind: "fix", messageId: m.id, label: "Corrected", detail: fixed.length > 0 ? fixed.join(" · ") : "something you haven't come across", actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+    }
     chips.push(...overdueChips(m.id, ctx, state, world));
   });
   const lines = keepReport.filter((k) => k.status !== "converted");
@@ -482,6 +500,21 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
         { id: "keep", label: "Keep", style: "primary" },
         { id: "discard", label: "Discard", style: "danger" },
       ],
+      expires: "never",
+    });
+  }
+  // A write held during a reply that no longer applied once it finished (P2): told, never silent.
+  const headId = chain.findLast((m) => !m.isUser)?.id ?? "";
+  for (const r of core.journal.refused ?? []) {
+    const first = r.write.kind === "post" ? r.write.entry.events[0] : undefined;
+    const what = r.write.kind !== "post" ? REFUSED_WHAT[r.write.kind] : r.write.entry.kind === "fix" ? "Your correction" : r.write.entry.kind === "materialize" ? "Opened detail" : "A confirmed change";
+    chips.push({
+      id: `refused:${r.write.id}`,
+      kind: "refused",
+      messageId: r.messageId !== null && chain.some((m) => m.id === r.messageId) ? r.messageId : headId,
+      label: `${what} didn't apply after the reply`,
+      ...(first ? { detail: playerDrop(registry, world, fold.state, world.pov, first, r.reason).text } : {}),
+      actions: [{ id: "dismiss", label: "Dismiss" }],
       expires: "never",
     });
   }

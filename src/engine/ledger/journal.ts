@@ -78,6 +78,9 @@ export function emptyJournal(chatId: string): Journal {
 
 const EMPTY_LEDGER = (): MessageLedger => ({ v: 1, swipes: {}, markers: [] });
 
+/** Refused held writes whose notices are kept; older ones are let go. */
+const REFUSED_KEPT = 8;
+
 export class LedgerCore {
   constructor(
     public journal: Journal,
@@ -751,8 +754,28 @@ export class LedgerCore {
     for (const h of j.held) h.waitFor = h.waitFor.filter((w) => w !== generationId);
     const ready = j.held.filter((h) => h.waitFor.length === 0);
     j.held = j.held.filter((h) => h.waitFor.length > 0);
-    for (const h of ready) this.apply(h.write, observed);
+    // A held write that no longer applies is kept with its reason, so the player is told rather than
+    // it vanishing (the view's notice; the GM view has the reason).
+    for (const h of ready) {
+      const reason = this.apply(h.write, observed);
+      if (reason) this.refuse(h.write, reason, observed);
+    }
     this.snapshot(observed);
+  }
+
+  private refuse(write: HeldWrite, reason: string, observed: readonly ChainMessage[]): void {
+    const head = this.chain(observed).findLast((m) => !m.isUser)?.id ?? null;
+    this.journal.refused = [...(this.journal.refused ?? []), { write, reason, messageId: head }].slice(-REFUSED_KEPT);
+  }
+
+  /** The player dismissed a refused write's notice; false when there was none. */
+  dismissRefused(id: string): boolean {
+    const before = this.journal.refused ?? [];
+    const kept = before.filter((r) => r.write.id !== id);
+    if (kept.length === before.length) return false;
+    if (kept.length > 0) this.journal.refused = kept;
+    else delete this.journal.refused;
+    return true;
   }
 
   /** Restart recovery (DESIGN §5.1 step 7): every open window closes. */

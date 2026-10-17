@@ -58,6 +58,11 @@ export interface EffectScope {
   rng: Rng;
   /** How deep checks' outcomes and level-ups' `onLevel` effects have nested; past the cap they stop. */
   depth?: number;
+  /**
+   * Arguments are taken as given, never as formulas or binding names: a ✎ fix or GM edit stores
+   * what was typed ("=1+1" stays text). Effects run for its level-ups (`onLevel`) are authored and evaluate as usual.
+   */
+  literal?: boolean;
 }
 
 export interface EffectOutcome {
@@ -88,7 +93,7 @@ function clampNumber(value: number, min: number | undefined, max: number | undef
 }
 
 /** The bounds a number field's value is kept in: its min and max, and for a pool its min (default 0) and evaluated max. */
-function boundsOf(reg: Registry, w: Working, entity: EntityId, def: FieldDef | undefined): { min?: number; max?: number } {
+export function fieldBounds(reg: Registry, w: Working, entity: EntityId, def: FieldDef | undefined): { min?: number; max?: number } {
   if (!def?.pool) return { min: def?.min, max: def?.max };
   const top = poolMax(reg, w.ctx, entity, def.pool);
   const min = Math.max(def.min ?? -Infinity, def.pool.min ?? 0);
@@ -109,7 +114,7 @@ function change(reg: Registry, w: Working, entity: EntityId, field: string, delt
   const stored = own(e.fields, field);
   const cur = stored ?? def?.default ?? (def?.pool ? (poolMax(reg, w.ctx, entity, def.pool) ?? 0) : 0);
   if (typeof cur !== "number") return reject("not_numeric", `${e.name}'s ${field.replace(/_/g, " ")} is not a number`);
-  const b = boundsOf(reg, w, entity, def);
+  const b = fieldBounds(reg, w, entity, def);
   const next = clampNumber(cur + delta, b.min, b.max);
   if (next === cur) return [];
   return stored === undefined && cur !== 0 ? [{ type: "set", entity, field, value: next }] : [{ type: "add", entity, field, delta: next - cur }];
@@ -129,7 +134,7 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       let value: JsonValue = args.value ?? null;
       if (def?.derived !== undefined) return reject("derived", `${field} is derived`);
       if (def && (def.type === "number" || def.type === "money" || def.type === "duration") && typeof value === "number") {
-        const b = boundsOf(reg, w, entity, def);
+        const b = fieldBounds(reg, w, entity, def);
         value = clampNumber(value, b.min, b.max);
       }
       if (def?.type === "enum" && def.values && typeof value === "string" && !def.values.includes(value)) return reject("bad_value", `${field} must be one of ${def.values.join(", ")}`);
@@ -246,8 +251,7 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
 export function resolveEffect(reg: Registry, w: Working, spec: EffectSpec, scope: EffectScope): LedgerEvent[] | Rejection {
   if (spec.type === "check") return reject("bad_effect", "a check applies its outcomes; run it through applyEffects");
   // Arguments get their own generator: rolls there never shift the draws the effect itself makes.
-  const env = scopeEnv({ reg, ctx: w.ctx, bindings: scope.bindings, vars: scope.vars, rng: scope.rng.fork("args") });
-  const args = evalArgs(spec.args ?? {}, env, { self: w.world.pov, ...scope.bindings });
+  const args = scope.literal ? { ...spec.args } : evalArgs(spec.args ?? {}, scopeEnv({ reg, ctx: w.ctx, bindings: scope.bindings, vars: scope.vars, rng: scope.rng.fork("args") }), { self: w.world.pov, ...scope.bindings });
   const core = coreEffect(reg, w, spec.type, args, scope.rng);
   if (core) return core;
   const def = reg.effects.get(spec.type);

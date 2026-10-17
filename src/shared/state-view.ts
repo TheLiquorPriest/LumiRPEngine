@@ -112,7 +112,11 @@ export type ChipKind =
   /** The reply went against an engine fact (DESIGN §5.2 `contradiction`): Re-narrate, or It's fine. */
   | "contradiction"
   /** The call that reads typed text failed, so the turn ran as plain roleplay; Retry runs it again (DESIGN §9.4). */
-  | "read_failed";
+  | "read_failed"
+  /** A ✎ fix or GM edit on the head ("Corrected …"), with Undo (DESIGN §12). */
+  | "fix"
+  /** A write held during a reply that no longer applied when the reply finished (P2), with Dismiss. */
+  | "refused";
 
 /**
  * A value a chip action asks for before it's sent, in its `lre.chip` payload: an amount in the

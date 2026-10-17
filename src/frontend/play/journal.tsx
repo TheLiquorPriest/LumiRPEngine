@@ -15,6 +15,7 @@ const KIND_LABEL: Record<NoteKind, string> = {
   expired: "Expired",
   regenerated: "Regenerated",
   note: "Note",
+  fix: "Corrected",
 };
 
 const KIND_TONE: Record<NoteKind, string> = {
@@ -25,13 +26,18 @@ const KIND_TONE: Record<NoteKind, string> = {
   expired: "warn",
   regenerated: "accent",
   note: "accent",
+  fix: "accent",
 };
 
 type Filter = "all" | "notes" | "issues";
 
 export function JournalPanel(props: PanelProps) {
   const [filter, setFilter] = useState<Filter>("all");
-  const notes = [...props.state.journal].reverse().filter((note) => filter === "all" || (filter === "notes" ? note.kind === "note" || note.kind === "regenerated" : note.kind !== "note" && note.kind !== "regenerated"));
+  const notes = [...props.state.journal].reverse().filter((note) => {
+    // Applied lines (turns, montages, corrections) apart from what didn't apply.
+    const applied = note.kind === "note" || note.kind === "regenerated" || note.kind === "fix";
+    return filter === "all" || (filter === "notes") === applied;
+  });
   return (
     <div class="lre-stack" data-lre-panel="core.journal">
       <Seg<Filter>

@@ -320,6 +320,15 @@ export interface HeldEntry {
   waitFor: GenerationId[];
 }
 
+/** A held write that no longer applied when its window closed (P2): kept so the player is told, until they dismiss the notice. */
+export interface RefusedWrite {
+  write: HeldWrite;
+  /** The validator's reason, which may name hidden things: the GM view shows it; the player's notice words the write itself. */
+  reason: string;
+  /** The head assistant message when it was refused (its notice shows there), or null. */
+  messageId: MessageId | null;
+}
+
 export type GenerationKind = "normal" | "regenerate" | "swipe" | "continue" | "impersonate" | "renarrate";
 
 /** The shadow `pending` entry of one in-flight turn (DESIGN §5.1 step 2.3). */
@@ -384,11 +393,14 @@ export interface Journal {
   started: boolean;
   /** The chat run the journal belongs to; a journal from another run (a re-attached world) is reset. */
   run?: { worldId: WorldId; runSeed: string };
+  /** Held writes refused when their window closed, newest last (a few at most); absent when none. */
+  refused?: RefusedWrite[];
 }
 
 // ---------------------------------------------------------------- fold outputs
 
-export type NoteKind = "dropped" | "inert" | "renarrate_drop" | "tombstoned" | "expired" | "regenerated" | "note";
+/** `fix`: a ✎ fix or GM edit in the Journal (built by the view, never by a fold). */
+export type NoteKind = "dropped" | "inert" | "renarrate_drop" | "tombstoned" | "expired" | "regenerated" | "note" | "fix";
 
 /** A derived Journal note (L16: every stored entry the fold doesn't apply has one). */
 export interface JournalNote {

@@ -6,13 +6,11 @@ import type { Band, ChatId, DomainId, UserId, WorldId } from "../shared/ids";
 import { DOMAINS, pathSafe } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
+import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
-import { hashParts } from "../shared/hash";
 import type { RulesetDef } from "../shared/world";
 import { previewSheet } from "../engine/authoring";
-import { levelUps } from "../engine/effects";
-import { createRng } from "../engine/rng";
+import { resolveEdit } from "../engine/edits";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies } from "../shared/protocol";
@@ -189,23 +187,9 @@ export class Dispatcher {
       }
       case "lre.fix": {
         const { state, world } = await this.head(r.chatId, userId);
-        const w = new Working(this.rt.registry, world, state);
-        // Cash held in cash accounts is corrected by a balanced posting against the outside
-        // correction account (DESIGN §9.2), so the cash shown becomes the amount and the books still
-        // balance; any other value (and cash without a cash account) is set on its field. The cash
-        // shown before the holder's money is materialized is the authored opening amount, so the
-        // accounts open first and the correction is measured from them (the fix records both).
-        if (r.field === "cash") materializeIfNeeded(this.rt.registry, w, r.entity, "money", this.runSeedOf(r.chatId));
-        const corrected = r.field === "cash" && typeof r.value === "number" ? (optionalService(w.ctx, "economy.set_cash")?.(w.ctx, r.entity, r.value) ?? null) : null;
-        if (corrected !== null && !Array.isArray(corrected)) throw new RequestError("validation", corrected.reason);
-        const events: LedgerEvent[] = corrected ?? [{ type: "set", entity: r.entity, field: r.field, value: r.value }];
-        for (const e of events) {
-          const rejection = w.apply(e);
-          if (rejection) throw new RequestError("validation", rejection.reason);
-        }
-        // A fix to XP levels up like any other change to it (DESIGN §11); the level-ups are part of the fix.
-        levelUps(this.rt.registry, w, events, { bindings: {}, rng: createRng(hashParts(this.runSeedOf(r.chatId), "fix", r.entity, r.field, JSON.stringify(r.value))) });
-        const result = w.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: [...w.events] } }) : { pending: false };
+        const edit = resolveEdit(this.rt.registry, world, state, [{ op: "set", entity: r.entity, field: r.field, value: r.value }], { gm: false, runSeed: this.runSeedOf(r.chatId) });
+        if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
+        const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: edit.events } }) : { pending: false };
         reply("lre.fix", { pending: result.pending });
         return;
       }
@@ -426,6 +410,27 @@ export class Dispatcher {
       const w: HeldWrite = choice === "discard" ? { kind: "discard", id: this.nextId(), after: messageId } : { kind: "keep", id: this.nextId(), messageId, parentPath: "", convert: [] };
       const result = await this.write(chatId, userId, w);
       return { applied: result.applied, pending: result.pending };
+    }
+    if (kind === "fix") {
+      // Undo on a ✎ fix or GM edit (`fix:<message>:<swipe>:<seq>`): every event of its entry stops folding.
+      const seq = Number(id.split(":")[3]);
+      const core = await this.rt.ledger.core(chatId, userId);
+      const m = core?.chain(observed).find((x) => x.id === messageId);
+      const rec = m && core ? activeRecord(m, core.journal.tombstones) : null;
+      const entry = rec?.post.find((p) => p.seq === seq && p.kind === "fix");
+      if (!m || !rec || !entry || String(m.swipeId) !== swipe) throw new RequestError("not_found", "the correction is gone");
+      const refs: EventRef[] = entry.events.flatMap((_, index) => (rec.undone.some((u) => u.in === "post" && u.seq === seq && u.index === index) ? [] : [{ in: "post" as const, seq, index }]));
+      if (refs.length === 0) return { applied: false, pending: false };
+      const result = await this.write(chatId, userId, { kind: "undo", id: this.nextId(), messageId: m.id, swipeId: m.swipeId, refs });
+      return { applied: result.applied, pending: result.pending };
+    }
+    if (kind === "refused") {
+      // Dismiss on the notice of a held write that didn't apply (P2).
+      await this.rt.ledger.with(chatId, userId, (core) => {
+        core.dismissRefused(id.slice("refused:".length));
+      });
+      this.rt.push.changed(chatId, userId);
+      return { applied: true, pending: false };
     }
     if (kind === "keep" || kind === "retry" || kind === "change" || kind === "elapsed" || kind === "degraded") return { applied: false, pending: false };
     // Stored chips: one action at a time per chat. Inside the lock the chip is looked up again and

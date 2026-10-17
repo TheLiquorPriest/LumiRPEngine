@@ -40,6 +40,8 @@ const CHIP_ICON: Record<ChipKind, string> = {
   choice: "➜",
   contradiction: "≠",
   read_failed: "⚠",
+  fix: "✎",
+  refused: "⚠",
 };
 
 /** Matches the decorator scope `message:<id>:…` (dom-decorator-service scope templates). */
