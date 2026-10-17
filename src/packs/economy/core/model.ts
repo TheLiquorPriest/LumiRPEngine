@@ -219,15 +219,22 @@ export function priceOf(ctx: Pick<ReadContext, "tables" | "world" | "state">, re
 
 /**
  * The most a narrated price may charge for something no catalog row prices (DESIGN §9.5), in the
- * world's minor units: the economy pack's `unpricedCap` when set; otherwise the highest price the
- * world's catalog lists (the largest band maximum among its rows, before regional scaling), or 500
- * major units when it lists none. A price the player states is never capped.
+ * world's minor units: the economy pack's `unpricedCap` when set, else `derivedUnpricedCap`. A
+ * price the player states is never capped.
  */
 export function unpricedCap(world: WorldDoc): number {
   const set = world.packs.economy?.config.unpricedCap;
-  if (typeof set === "number" && Number.isFinite(set) && set > 0) return Math.round(set);
+  return typeof set === "number" && Number.isFinite(set) && set > 0 ? Math.round(set) : derivedUnpricedCap(world);
+}
+
+/**
+ * The cap a world gets without one set: the highest price its own price data lists (the largest
+ * band maximum among its catalog rows and category bands, before regional scaling), or 500 major
+ * units when it lists none.
+ */
+export function derivedUnpricedCap(world: WorldDoc): number {
   let top = 0;
-  for (const row of Object.values(world.tables["economy.catalog"]?.rows ?? {})) top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
+  for (const table of ["economy.catalog", "economy.categories"]) for (const row of Object.values(world.tables[table]?.rows ?? {})) top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
   return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
 

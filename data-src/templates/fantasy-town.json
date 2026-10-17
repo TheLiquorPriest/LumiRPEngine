@@ -2595,5 +2595,26 @@
       "health": {"label": "Health", "formula": "8 + brawn"},
       "composure": {"label": "Composure", "formula": "6 + floor((wits + heart) / 3)"}
     }
+  },
+  "categories": {
+    "groceries_staples": {"name": "Market staples", "basis": "Ford market stalls: a loaf for a bit, cheese and flour by the wheel and sack.", "band": {"min": 1, "typical": 4, "max": 55}},
+    "groceries_baskets": {"name": "A week's food", "basis": "Bread, pottage, cheese and small beer for one, about two days' labourer's wage.", "band": {"min": 20, "typical": 35, "max": 80}},
+    "meals_out": {"name": "Meals at the Kettle and the stalls", "basis": "A bowl of stew to a market-day feast.", "band": {"min": 2, "typical": 4, "max": 20}},
+    "coffee": {"name": "Hot drinks", "basis": "Herb tea, mulled cider and spiced milk by the cup.", "band": {"min": 1, "typical": 1, "max": 3}},
+    "alcohol": {"name": "Ale, cider and spirits", "basis": "A mug of ale to a stoppered bottle of southern brandy.", "band": {"min": 1, "typical": 2, "max": 40}},
+    "clothing": {"name": "Clothing", "basis": "Caps and hose to a good wool cloak or fine guild cloth.", "band": {"min": 10, "typical": 120, "max": 800}},
+    "electronics": {"name": "Curios and clockwork", "basis": "Pedlars' trinkets to a brass clockwork toy from the city.", "band": {"min": 4, "typical": 60, "max": 1200}},
+    "tools_hardware": {"name": "Tools and hardware", "basis": "Nails by the handful to a smith-made axe or saw.", "band": {"min": 2, "typical": 20, "max": 200}},
+    "household_goods": {"name": "Household goods", "basis": "Tallow candles and crockery to a joined chest or bedstead.", "band": {"min": 1, "typical": 10, "max": 400}},
+    "personal_care": {"name": "Soap, shaves and simples", "basis": "A cake of soap or a barber's shave to scented oil.", "band": {"min": 1, "typical": 4, "max": 30}},
+    "medical": {"name": "Healing", "basis": "A poultice from the herb-wife to a city surgeon's fee.", "band": {"min": 2, "typical": 10, "max": 200}},
+    "entertainment": {"name": "Diversions", "basis": "A ballad sheet or a seat at the travelling players.", "band": {"min": 1, "typical": 4, "max": 40}},
+    "transport": {"name": "Travel and beasts", "basis": "A ferry crossing to a riding horse.", "band": {"min": 1, "typical": 8, "max": 4800}},
+    "fuel": {"name": "Firewood, oil and fodder", "basis": "A bundle of faggots, lamp oil or a night's fodder.", "band": {"min": 1, "typical": 3, "max": 20}},
+    "vehicle_services": {"name": "Hire and wages", "basis": "Day wages and the farrier, wheelwright and carter.", "band": {"min": 2, "typical": 16, "max": 60}},
+    "lodging": {"name": "Lodging", "basis": "A bed at the Kettle or stabling for the night.", "band": {"min": 2, "typical": 8, "max": 40}},
+    "utilities": {"name": "Messengers and town dues", "basis": "A runner across town to the quarter's well and wall dues.", "band": {"min": 1, "typical": 4, "max": 30}},
+    "subscriptions": {"name": "Guild and temple dues", "basis": "A season's dues to a craft guild or the ford shrine.", "band": {"min": 5, "typical": 20, "max": 200}},
+    "gifts": {"name": "Gifts and tokens", "basis": "Ribbons and sweetmeats to a silver brooch.", "band": {"min": 2, "typical": 30, "max": 800}}
   }
 }

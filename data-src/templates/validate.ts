@@ -802,6 +802,24 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
   if (decimals === null || !Number.isInteger(decimals) || decimals < 0 || decimals > 6) err("currency.decimals must be a whole number from 0 to 6");
   for (const m of text(currency.format).matchAll(/\{([a-z]+)\}/g)) if (!["sign", "symbol", "code", "amount", "major", "minor"].includes(m[1] ?? "")) err(`currency.format: unknown placeholder {${m[1]}}`);
   for (const price of recs(t.prices)) if (!PRICE_CATEGORIES.includes(text(price.category))) err(`price ${text(price.id)}: category "${text(price.category)}" is not an economy.categories row`);
+  // A world with its own currency prices every category in it, and each of its prices sits inside its category's band.
+  const categories = rec(t.categories);
+  if (t.dataPack && Object.keys(categories).length > 0) err("categories replace the Modern US category bands; only a world with no data pack has its own");
+  if (!t.dataPack) {
+    for (const id of PRICE_CATEGORIES) {
+      const cat = rec(categories[id]);
+      const band = rec(cat.band);
+      const [min, typical, max] = [num(band.min), num(band.typical), num(band.max)];
+      if (!text(cat.name) || !text(cat.basis)) err(`categories.${id}: needs a name and a basis`);
+      if (min === null || typical === null || max === null || !Number.isInteger(min) || !Number.isInteger(typical) || !Number.isInteger(max) || min < 0 || min > typical || typical > max) err(`categories.${id}: band needs whole base units with 0 ≤ min ≤ typical ≤ max`);
+    }
+    for (const id of Object.keys(categories)) if (!PRICE_CATEGORIES.includes(id)) err(`categories.${id}: not an economy.categories row`);
+    for (const price of recs(t.prices)) {
+      const band = rec(rec(categories[text(price.category)]).band);
+      const own = rec(price.band);
+      if ((num(own.min) ?? 0) < (num(band.min) ?? 0) || (num(own.max) ?? 0) > (num(band.max) ?? Infinity)) err(`price ${text(price.id)}: band ${num(own.min)}–${num(own.max)} is outside its category ${text(price.category)}'s ${num(band.min)}–${num(band.max)}`);
+    }
+  }
 
   // ---------------------------------------------------------------- stocked containers and the world's own items
   const ownItems = recs(t.gearItems);

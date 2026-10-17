@@ -51,7 +51,8 @@ describe("Brindlemere (fantasy_town)", () => {
 
   test("the next Marketday takes ten percent off prices in the square until 15:00 and only there", () => {
     const p = new Play("fantasy_town");
-    const unit = (place: string) => priceOf(p.w.ctx, { category: "groceries_staples", place })?.unitCents ?? 0;
+    // Clothing, priced in whole bits, is dear enough for a tenth off to show.
+    const unit = (place: string) => priceOf(p.w.ctx, { category: "clothing", place })?.unitCents ?? 0;
     p.lapseTo(7 * DAY + 10 * 60); // the Marketday a week after the start, 10:00
     expect(unit("wend_mill")).toBeGreaterThan(0);
     expect(Math.abs(unit("market_square") - Math.round(unit("wend_mill") * 0.9))).toBeLessThanOrEqual(1);

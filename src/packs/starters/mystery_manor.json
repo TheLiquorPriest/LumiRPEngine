@@ -107,7 +107,7 @@
       "calendar.shifts": "113c38bc463f6b9ab542629d3905c178",
       "calendar.work": "790bee504417a877b2adc3b5d3c4368a",
       "economy.catalog": "3e419fc1ebe145e22a0badcda3ec4a76",
-      "economy.categories": "14a229f6821b5bb6d6e0673a096f7cff",
+      "economy.categories": "0e5202e0d1140576442d90298cdad64a",
       "economy.finance": "3b9bb93f4490fbf6c397c7b8ba94b946",
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
       "economy.regions": "7b976468a95de1684425c537d183bb54",
@@ -3505,7 +3505,7 @@
       "id": "economy.categories",
       "pack": "economy",
       "schema": "lre-table/economy.categories/v1",
-      "revision": "14a229f6821b5bb6d6e0673a096f7cff",
+      "revision": "0e5202e0d1140576442d90298cdad64a",
       "label": "Price categories",
       "source": {
         "dataPack": "modern-us",
@@ -3529,123 +3529,113 @@
       },
       "rows": {
         "groceries_staples": {
-          "name": "Groceries: per-item staples",
-          "basis": "BLS CPI average prices (2025) and USDA retail scans, rounded; min = store brand or sale, max = organic or premium.",
-          "item_count": 39,
-          "price_cents": {"min": 50, "typical": 400, "max": 2200}
+          "name": "Groceries",
+          "basis": "1934 shop prices: a loaf for about 4d, butter a shilling a pound, tea two shillings.",
+          "item_count": 0,
+          "price_cents": {"min": 1, "typical": 6, "max": 36}
         },
         "groceries_baskets": {
-          "name": "Groceries: weekly baskets",
-          "basis": "USDA Food Plans, cost of food at home (2025 monthly reports), converted to weekly. Individual figures are for an adult 19-50; family is two adults and two children.",
-          "notes": "Use per-item staples for single purchases and baskets for the abstract weekly grocery spend.",
-          "item_count": 6,
-          "price_cents": {"min": 6000, "typical": 18500, "max": 50000}
+          "name": "A week's housekeeping",
+          "basis": "Food for one for a week, about ten shillings.",
+          "item_count": 0,
+          "price_cents": {"min": 72, "typical": 120, "max": 240}
         },
         "meals_out": {
-          "name": "Fast food and sit-down meals",
-          "basis": "National chain menu prices and BLS CPI food-away-from-home trends (2025), rounded. Prices exclude tax and tip.",
-          "notes": "Typical tip guidance: 15-20% for table service, none or optional at counters.",
-          "item_count": 17,
-          "price_cents": {"min": 250, "typical": 1150, "max": 60000}
+          "name": "Meals out",
+          "basis": "Tea for two at a tea room to dinner at a good hotel.",
+          "item_count": 1,
+          "price_cents": {"min": 6, "typical": 18, "max": 120}
         },
-        "coffee": {
-          "name": "Coffee",
-          "basis": "Chain cafe menu prices (2025), rounded.",
-          "item_count": 8,
-          "price_cents": {"min": 100, "typical": 410, "max": 900}
-        },
+        "coffee": {"name": "Tea and coffee", "basis": "A cup at a café or station buffet.", "item_count": 0, "price_cents": {"min": 2, "typical": 3, "max": 8}},
         "alcohol": {
-          "name": "Alcohol",
-          "basis": "Retail shelf prices and bar menu prices (2025), rounded.",
-          "notes": "Legal drinking age 21 in all states.",
-          "item_count": 11,
-          "price_cents": {"min": 500, "typical": 1400, "max": 15000}
+          "name": "Beer, wine and spirits",
+          "basis": "A pint of bitter to a bottle of champagne.",
+          "item_count": 1,
+          "price_cents": {"min": 3, "typical": 6, "max": 240}
         },
         "clothing": {
-          "name": "Clothing, basics through outerwear",
-          "basis": "Big-box and mall retail prices (2025), rounded; min = discount or sale, max = premium mainstream (not designer).",
-          "item_count": 27,
-          "price_cents": {"min": 300, "typical": 4000, "max": 80000}
+          "name": "Clothing",
+          "basis": "Collars and gloves to a tailored suit or overcoat.",
+          "item_count": 0,
+          "price_cents": {"min": 12, "typical": 120, "max": 2400}
         },
         "electronics": {
-          "name": "Electronics",
-          "basis": "Retail list and street prices (2025), rounded; min = budget or older generation, max = high-end consumer.",
-          "item_count": 27,
-          "price_cents": {"min": 800, "typical": 11000, "max": 400000}
+          "name": "Wireless and electrical goods",
+          "basis": "A light bulb to a wireless set.",
+          "item_count": 0,
+          "price_cents": {"min": 6, "typical": 240, "max": 3600}
         },
         "tools_hardware": {
           "name": "Tools and hardware",
-          "basis": "Home-improvement retail prices (2025), rounded; min = house brand, max = prosumer.",
-          "item_count": 24,
-          "price_cents": {"min": 500, "typical": 2500, "max": 30000}
+          "basis": "Ironmongers' prices, a box of screws to a good spade or saw.",
+          "item_count": 0,
+          "price_cents": {"min": 2, "typical": 24, "max": 600}
         },
         "household_goods": {
           "name": "Household goods",
-          "basis": "Mass-merchant retail prices (2025), rounded.",
-          "item_count": 24,
-          "price_cents": {"min": 200, "typical": 3000, "max": 200000}
+          "basis": "A typewriter ribbon or crockery to a piece of furniture.",
+          "item_count": 1,
+          "price_cents": {"min": 2, "typical": 30, "max": 2400}
         },
         "personal_care": {
-          "name": "Personal care",
-          "basis": "Drugstore and salon prices (2025), rounded.",
-          "item_count": 16,
-          "price_cents": {"min": 200, "typical": 1650, "max": 25000}
+          "name": "Personal care and tobacco",
+          "basis": "A shave or a packet of cigarettes to a gentleman's haircut and tonic.",
+          "item_count": 1,
+          "price_cents": {"min": 2, "typical": 12, "max": 120}
         },
         "medical": {
           "name": "Medical",
-          "basis": "KFF, Healthcare Bluebook / FAIR Health typical charges and common plan copays (2025), rounded; \"uninsured\" rows are cash or billed amounts, insured patients pay copays, deductibles and coinsurance instead.",
-          "notes": "Monthly premiums and deductibles are in finance.json.",
-          "item_count": 21,
-          "price_cents": {"min": 0, "typical": 15000, "max": 600000}
+          "basis": "A bottle of medicine or a doctor's visit to a specialist's fee in guineas.",
+          "item_count": 0,
+          "price_cents": {"min": 6, "typical": 42, "max": 1260}
         },
         "entertainment": {
           "name": "Entertainment",
-          "basis": "Box-office, venue and retailer prices (2025), rounded.",
-          "item_count": 16,
-          "price_cents": {"min": 300, "typical": 1600, "max": 35000}
+          "basis": "A newspaper, a seat at the pictures or a punt for the afternoon.",
+          "item_count": 2,
+          "price_cents": {"min": 1, "typical": 9, "max": 120}
         },
         "transport": {
-          "name": "Transport (public and for-hire)",
-          "basis": "Transit agencies, TNC and taxi rate cards, DOT Air Travel Consumer Report and Amtrak fares (2025), rounded; rideshare rates vary widely by metro and surge.",
-          "item_count": 19,
-          "price_cents": {"min": 15, "typical": 500, "max": 60000}
+          "name": "Travel",
+          "basis": "A motor taxi to a first-class return to London.",
+          "item_count": 2,
+          "price_cents": {"min": 1, "typical": 12, "max": 480}
         },
         "fuel": {
-          "name": "Fuel and charging",
-          "basis": "AAA / EIA 2025 national average pump prices with state ranges, EV charging from network rate cards and EIA, marina fuel-dock quotes, rounded. Fuel prices are in cents per gallon (or per kWh for charging), so 315 means $3.15.",
-          "price_unit_note": "All prices are integer cents. Per-kWh rows are in cents per kWh.",
-          "item_count": 11,
-          "price_cents": {"min": 10, "typical": 375, "max": 3500}
+          "name": "Petrol and coal",
+          "basis": "Petrol by the gallon, coal by the hundredweight.",
+          "item_count": 1,
+          "price_cents": {"min": 6, "typical": 18, "max": 60}
         },
         "vehicle_services": {
-          "name": "Vehicle services",
-          "basis": "AAA, Consumer Reports, RepairPal and shop price sheets (2025), rounded; shop labor rates run $110-$200 per hour.",
-          "item_count": 22,
-          "price_cents": {"min": 300, "typical": 9500, "max": 140000}
+          "name": "Hire, wages and fees",
+          "basis": "A garage repair or a day's wage to a valuer's fee.",
+          "item_count": 2,
+          "price_cents": {"min": 6, "typical": 120, "max": 960}
         },
         "lodging": {
           "name": "Lodging",
-          "basis": "STR / CoStar average daily rates by segment, KOA and recreation.gov camping fees (2025), rounded; before taxes and resort fees.",
-          "item_count": 9,
-          "price_cents": {"min": 1500, "typical": 9500, "max": 150000}
+          "basis": "A room at a country inn to a London hotel.",
+          "item_count": 1,
+          "price_cents": {"min": 24, "typical": 90, "max": 480}
         },
         "utilities": {
-          "name": "Utilities and services (monthly)",
-          "basis": "EIA, FCC/Ookla, BLS CPI and major-carrier price lists (2025), rounded. Household electricity use is about 860 kWh per month nationally (EIA), so a typical bill is roughly kWh x state rate in regions.json.",
-          "item_count": 11,
-          "price_cents": {"min": 1000, "typical": 7500, "max": 40000}
+          "name": "Post, telegrams and telephone",
+          "basis": "A stamp or a telegram to a quarter's telephone account.",
+          "item_count": 2,
+          "price_cents": {"min": 1, "typical": 12, "max": 240}
         },
         "subscriptions": {
           "name": "Subscriptions",
-          "basis": "Published US list prices (late 2025), rounded; \"per year\" rows are annual fees.",
-          "item_count": 18,
-          "price_cents": {"min": 0, "typical": 1899, "max": 20000}
+          "basis": "A magazine to a year's club subscription of two guineas.",
+          "item_count": 0,
+          "price_cents": {"min": 12, "typical": 60, "max": 504}
         },
         "gifts": {
-          "name": "Gifts and occasions",
-          "basis": "Typical consumer spending from retailer and NRF survey patterns (2025), rounded.",
-          "item_count": 14,
-          "price_cents": {"min": 300, "typical": 3500, "max": 100000}
+          "name": "Gifts",
+          "basis": "Flowers or chocolates to a silver cigarette case.",
+          "item_count": 0,
+          "price_cents": {"min": 6, "typical": 60, "max": 1200}
         }
       }
     },

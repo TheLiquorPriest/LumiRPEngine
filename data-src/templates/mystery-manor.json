@@ -2809,5 +2809,26 @@
       "acuity": {"label": "Acuity", "formula": "floor((observation + knowledge) / 2)"},
       "composure": {"label": "Composure", "formula": "6 + floor((nerve + manner) / 3)"}
     }
+  },
+  "categories": {
+    "groceries_staples": {"name": "Groceries", "basis": "1934 shop prices: a loaf for about 4d, butter a shilling a pound, tea two shillings.", "band": {"min": 1, "typical": 6, "max": 36}},
+    "groceries_baskets": {"name": "A week's housekeeping", "basis": "Food for one for a week, about ten shillings.", "band": {"min": 72, "typical": 120, "max": 240}},
+    "meals_out": {"name": "Meals out", "basis": "Tea for two at a tea room to dinner at a good hotel.", "band": {"min": 6, "typical": 18, "max": 120}},
+    "coffee": {"name": "Tea and coffee", "basis": "A cup at a café or station buffet.", "band": {"min": 2, "typical": 3, "max": 8}},
+    "alcohol": {"name": "Beer, wine and spirits", "basis": "A pint of bitter to a bottle of champagne.", "band": {"min": 3, "typical": 6, "max": 240}},
+    "clothing": {"name": "Clothing", "basis": "Collars and gloves to a tailored suit or overcoat.", "band": {"min": 12, "typical": 120, "max": 2400}},
+    "electronics": {"name": "Wireless and electrical goods", "basis": "A light bulb to a wireless set.", "band": {"min": 6, "typical": 240, "max": 3600}},
+    "tools_hardware": {"name": "Tools and hardware", "basis": "Ironmongers' prices, a box of screws to a good spade or saw.", "band": {"min": 2, "typical": 24, "max": 600}},
+    "household_goods": {"name": "Household goods", "basis": "A typewriter ribbon or crockery to a piece of furniture.", "band": {"min": 2, "typical": 30, "max": 2400}},
+    "personal_care": {"name": "Personal care and tobacco", "basis": "A shave or a packet of cigarettes to a gentleman's haircut and tonic.", "band": {"min": 2, "typical": 12, "max": 120}},
+    "medical": {"name": "Medical", "basis": "A bottle of medicine or a doctor's visit to a specialist's fee in guineas.", "band": {"min": 6, "typical": 42, "max": 1260}},
+    "entertainment": {"name": "Entertainment", "basis": "A newspaper, a seat at the pictures or a punt for the afternoon.", "band": {"min": 1, "typical": 9, "max": 120}},
+    "transport": {"name": "Travel", "basis": "A motor taxi to a first-class return to London.", "band": {"min": 1, "typical": 12, "max": 480}},
+    "fuel": {"name": "Petrol and coal", "basis": "Petrol by the gallon, coal by the hundredweight.", "band": {"min": 6, "typical": 18, "max": 60}},
+    "vehicle_services": {"name": "Hire, wages and fees", "basis": "A garage repair or a day's wage to a valuer's fee.", "band": {"min": 6, "typical": 120, "max": 960}},
+    "lodging": {"name": "Lodging", "basis": "A room at a country inn to a London hotel.", "band": {"min": 24, "typical": 90, "max": 480}},
+    "utilities": {"name": "Post, telegrams and telephone", "basis": "A stamp or a telegram to a quarter's telephone account.", "band": {"min": 1, "typical": 12, "max": 240}},
+    "subscriptions": {"name": "Subscriptions", "basis": "A magazine to a year's club subscription of two guineas.", "band": {"min": 12, "typical": 60, "max": 504}},
+    "gifts": {"name": "Gifts", "basis": "Flowers or chocolates to a silver cigarette case.", "band": {"min": 6, "typical": 60, "max": 1200}}
   }
 }

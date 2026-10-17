@@ -8,6 +8,7 @@ import { splitAlongBuy } from "../../src/backend/runtime";
 import { transientFailure } from "../../src/backend/steps";
 import { migrateWorld } from "../../src/engine/authoring";
 import { matchCatalog } from "../../src/packs/economy/core/index";
+import { derivedUnpricedCap } from "../../src/packs/economy/core/model";
 import type { JsonObject } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { Rig } from "../support/rig";
@@ -15,9 +16,9 @@ import { Rig } from "../support/rig";
 const EXTRACT_MARK = "You read a narrator's roleplay reply";
 const INTERPRET_MARK = "You map a player's typed input";
 
-async function chat(): Promise<{ rig: Rig; chatId: string }> {
+async function chat(template = "modern_slice_of_life"): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
-  const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+  const worldId = await rig.newWorld("World", template);
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   return { rig, chatId };
@@ -78,6 +79,24 @@ describe("a catalog row prices an item only when it names it", () => {
     const undo = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "undo").map((c) => c.label);
     expect(undo).toEqual([expect.stringMatching(/^Bought milk: \$\d+\.\d{2} \(priced as Milk, whole\)/)]);
   });
+});
+
+describe("a world with its own currency prices a category in it", () => {
+  // A meat pie no catalog row names, priced by its category: bits in Brindlemere, pence in Harrowmere.
+  for (const [template, min, max] of [["fantasy_town", 2, 20], ["mystery_manor", 6, 120]] as const) {
+    test(`${template}: a meal by its category costs what a meal costs there, and the cap is in the same money`, async () => {
+      const { rig, chatId } = await chat(template);
+      const { world } = await folded(rig, chatId);
+      expect(derivedUnpricedCap(world)).toBeLessThan(10_000);
+      rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { purchase: { mode: "auto" } } } }));
+      script(rig, [{ item: "meat pie", category: "meals_out" }], () => JSON.stringify({ action: "buy", params: { item: "kazoo", price: 3 }, confidence: 0.9 }));
+      await rig.turn(chatId, "I buy a kazoo for 3.", "You eat a meat pie at the stall.");
+      // Priced by its category, the purchase takes the category's name; the other charge is the kazoo.
+      const pie = (await bought(rig, chatId)).find((b) => b.memo !== "Bought kazoo");
+      expect(pie?.cents).toBeGreaterThanOrEqual(min);
+      expect(pie?.cents).toBeLessThanOrEqual(max);
+    });
+  }
 });
 
 describe("one purchase per item", () => {

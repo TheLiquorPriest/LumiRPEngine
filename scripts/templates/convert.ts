@@ -542,7 +542,7 @@ function vehicleClassRow(v: TplVehicle, prices: Map<string, { min: number; typic
   return { id, row };
 }
 
-/** The world's copy of every default table, pinned by revision. Non-modern worlds swap in their own prices and vehicle classes. */
+/** The world's copy of every default table, pinned by revision. Non-modern worlds swap in their own prices, category bands and vehicle classes. */
 function worldTables(c: Ctx): { tables: Record<string, DataTable>; pins: Record<string, string> } {
   const tables: Record<string, DataTable> = structuredClone(c.env.tables);
   const tpl = c.tpl;
@@ -552,6 +552,13 @@ function worldTables(c: Ctx): { tables: Record<string, DataTable>; pins: Record<
       const rows: Record<string, TableRow> = {};
       for (const p of tpl.prices) rows[p.id.replace(/^pr_/, "")] = { name: p.name, category: p.category, unit: p.unit, price_cents: p.band };
       tables["economy.catalog"] = { ...catalog, rows };
+    }
+    // The Modern US category bands are 2025 cents: a world with its own currency prices a category in its own units.
+    const categories = tables["economy.categories"];
+    if (categories && tpl.categories) {
+      const rows: Record<string, TableRow> = {};
+      for (const [id, cat] of Object.entries(tpl.categories)) rows[id] = { name: cat.name, basis: cat.basis, item_count: (tpl.prices ?? []).filter((p) => p.category === id).length, price_cents: cat.band };
+      tables["economy.categories"] = { ...categories, rows };
     }
     // The Modern US item table has smartphones and LED bulbs: a world with its own era swaps in the template's items.
     const gear = tables["gear.items"];

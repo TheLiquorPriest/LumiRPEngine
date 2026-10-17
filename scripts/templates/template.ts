@@ -320,6 +320,8 @@ export interface Template {
   accounts: TplAccount[];
   bills?: TplBill[];
   prices?: { id: string; name: string; unit: string; category: string; band: { min: number; typical: number; max: number } }[];
+  /** Price bands for every `economy.categories` row, in the world's own base units, for a world with no data pack (replaces the Modern US bands in cents). */
+  categories?: Record<string, { name: string; basis: string; band: { min: number; typical: number; max: number } }>;
   /** Items a container's `stock` samples from, for a world with its own era (replaces the Modern US `gear.items`). */
   gearItems?: TplGearItem[];
   tracks: TplTrack[];
