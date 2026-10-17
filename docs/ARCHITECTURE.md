@@ -65,6 +65,7 @@ Engine layout (pure):
 - `engine/adjudication.ts`: the adjudication policy (DESIGN §11) as `resolve` and the palette apply it: the policy in force (`policyOf`), a check's success and chance, the verdict before anything is rolled (`verdictOf`: a refused retry, too hard, a sure thing, the timing, the authority), the judged approach's shift, a hybrid close call, the story's sampled outcome and the policy's lint. `shared/adjudication.ts` holds the presets and the reader (`readAdjudication`) that worlds, settings and markers share.
 - `engine/edits.ts`: ✎ fixes and GM edits (`resolveEdit`, `parseEditOps`): each operation becomes the events its effect records, with literal values, checked against field definitions (type, enum values, min and max, a pool's evaluated max), relation types and placement, all or none; despawn, restore and the reserved `gone` field.
 - `engine/gm-view.ts`: the GM view's world part (`buildGmWorld`): every entity, removed and spawned ones included, with its fields, relations, placement, levels and designed sheet; places; tracks with their truths; relation types.
+- `engine/lore.ts`: the lore search RPEngine's helpers read (DESIGN §5.4): `loreSearch`, `loreGet`, `loreList` and `readableLore`, ranked deterministically over the folded state and the world, with snippets cut by the caller's token counter and visibility enforced inside (a secret's audience and gate, `known_by`, the GM); `visibility.ts` adds `loreGateReader` and `unrevealedSecrets`, the leak check's list of unrevealed truths and gated secret lore.
 
 Backend layout:
 - `backend/spindle-host.ts`: `HostPort` over `spindle`.
@@ -72,13 +73,14 @@ Backend layout:
 - `backend/runtime.ts`: the composition root; turn hooks (pre, plan and post phases), the World Info interceptor (engine slots only), chip and slot handling.
 - `backend/turn-model.ts`, `backend/turn-steps.ts`: the ledger's `TurnModel` over the simulation pipeline, and the model steps around a turn.
 - `backend/book.ts`: the engine-managed lore book: slot entries, and removal of lore copies an earlier build synced into it.
-- `backend/steps.ts`: `StepPort` over `HostPort.models`, and the call meter (kept per user in `call-meter.json`).
+- `backend/steps.ts`: `StepPort` over `HostPort.models`: helper JSON calls with the step's lore and its lookup rounds, decisions with their lookup pre-pass, and the call meter (kept per user in `call-meter.json`, lookups counted apart).
 - `backend/worlds.ts`, `backend/settings-store.ts`: world storage and revisions; settings, presets and extraction learning.
 - `backend/dispatch.ts`, `backend/view.ts`, `backend/gm.ts`, `backend/push.ts`, `backend/chips.ts`: request dispatch, the state view, the GM view (built per `lre.gm` request, never pushed), state push, stored chips.
 - `backend/jobs.ts`, `backend/proposals.ts`, `backend/map-job.ts`, `src/worker/background-lane.ts`: background jobs (kept per user in `jobs.json`; a job stored as running that the process isn't running reads as interrupted) and the child lane; Import and Refine proposals; Describe a map (the prompt, the answer's checks and the repair call).
-- `shared/lore.ts`, `engine/lore-lint.ts`, `backend/lore.ts`, `backend/lore-index.ts`: world lore (DESIGN §4.2): sources, the lookup table's terms, additions and suggestions; its lint; book drift and Save to lore; the indexing jobs' prompt, reader and checks.
+- `shared/lore.ts`, `engine/lore-lint.ts`, `backend/lore.ts`, `backend/lore-index.ts`: world lore (DESIGN §4.2): sources, the steps that never read a secret (`PROSE_STEPS`), the leak check's phrases, the lookup table's terms, additions and suggestions; its lint; book drift and Save to lore; the indexing jobs' prompt, reader and checks.
+- `backend/lore-steps.ts`: a step run's lore (DESIGN §5.4): `StepLore` (the prefetch, lookup rounds as tools or the need form, the trace), the phase's `LookupBudget` (held, spent or released per round, with a time reserve), and `ToolSupport` (connections seen refusing tools, kept in `lore-tools.json`).
 - `backend/preset-lint.ts`, `backend/plan-notes.ts`: the preset lint; planned-turn lines kept by seed.
-- `backend/outcome-notes.ts`, `backend/inspector-log.ts`: the next turn's Outcome notes and the inspector's history with its delivery badges, per chat.
+- `backend/outcome-notes.ts`, `backend/inspector-log.ts`: the next turn's Outcome notes and the inspector's history with its delivery badges and each step's lore traces, per chat.
 - `backend/stored-json.ts`: reading the extension's own JSON files; a damaged one is set aside as `<path>.corrupt-<epoch ms>` with a warning, and the caller starts fresh.
 
 Space pack layout (`packs/space`): `core/travel.ts` (routes and A*), `core/map-scope.ts` (one map scope as drawn: a place's children at their cells or node positions, the routes between them, its grid; pure, shared by Play and Build), `core/view.ts` (the `space.map` view: every scope the POV can open, and travel options); `ui/map-draw.ts` (painting a scope), `ui/map.tsx` (the map stage, breadcrumbs and the place card), `ui/map-editor.tsx` and `ui/map-preview.tsx` (Build's map editor and previews), `ui/editors.tsx` (the grid and place editors); `frontend/json-text.ts` reads JSON text with the line of each value, for the map editor.
@@ -105,6 +107,7 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 |---|---|
 | `userStorage/jobs.json` | `{v: 1, jobs: JobSummary[]}`: running jobs and the newest 8 ended ones, oldest first, with input and result (an import's proposals after every chunk) |
 | `userStorage/call-meter.json` | `{v: 1, turns, current}`: the last 200 closed turn tallies and the current one |
+| `userStorage/lore-tools.json` | `{v: 1, refused: {[connectionId]: {at, reason}}}`: connections seen refusing the lore tools, whose `auto` lookups use the need form |
 | `userStorage/runs/<chatId>/chips.json` | Stored chips until acted on or lapsed |
 | `userStorage/runs/<chatId>/plans.json` | Planned-turn lines by seed (the newest 128), for Re-narrate |
 | `userStorage/runs/<chatId>/outcome-notes.json` | `OutcomeNote[]`: notes for the next turn's Outcome slot, dropped once a later message has committed and another follows |
@@ -277,7 +280,7 @@ Raw sources in `data-src/us/*.json` are never imported. `scripts/tables/build.ts
 - user storage;
 - events;
 - the context handler and interceptor;
-- quiet and decision calls;
+- quiet calls (with the tools a lore lookup offers, and the tool calls the model makes) and decision calls;
 - token counts from the host tokenizer;
 - frontend messaging and logging.
 
