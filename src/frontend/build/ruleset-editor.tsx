@@ -163,11 +163,11 @@ function RowEditor(props: { row: SheetRowDef; index: number; count: number; choi
   );
   return (
     <div class="lre-card" style={{ padding: "6px 8px" }} data-lre-sheet-row={kind}>
-      <div class="lre-spread">
-        <span class="lre-small lre-muted" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+      <div class="lre-spread" style={{ flexWrap: "nowrap" }}>
+        <span class="lre-small lre-muted" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={title}>
           {title}
         </span>
-        <span class="lre-inline">
+        <span class="lre-inline" style={{ flexWrap: "nowrap", flexShrink: 0, gap: "2px" }}>
           <button type="button" class="lre-btn small ghost" aria-label={`Move ${title} up`} disabled={props.index === 0} onClick={() => props.onMove(-1)}>
             ↑
           </button>
