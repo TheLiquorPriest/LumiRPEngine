@@ -38,7 +38,7 @@ LumiRPEngine asks for eight permissions. Here is why each one is there:
 - `context_handler`: to plan each turn (elapsed time, what your action does, what the world did in the meantime) before the reply is generated.
 - `chats`: to read your chat, its messages and swipes, so the world stays in step with every swipe, edit and branch.
 - `chat_mutation`: to save the world's record on each reply, and to add your palette, chip and map actions to the chat as messages.
-- `world_books`: to create and maintain the world's own lore book, which holds its sections, attach it to the chat, and read the books you pick for **Import from lore**.
+- `world_books`: to create and maintain the world's own lore book, which holds its sections, attach it to the chat, read the books you pick for **Import from lore** or **Index a World Info book**, and tell you when a book that lore was indexed from has changed.
 - `presets`: to read your active preset, so it can check where the world's sections will land in the prompt and warn you about settings that cause trouble.
 - `decisions`: to use Lumiverse's Decisions API for the probability questions the engine asks, such as what an NPC does on a close call.
 - `ui_panels`: for the drawer tab, the status pill and the map.

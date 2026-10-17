@@ -75,6 +75,7 @@ Backend layout:
 - `backend/worlds.ts`, `backend/settings-store.ts`: world storage and revisions; settings, presets and extraction learning.
 - `backend/dispatch.ts`, `backend/view.ts`, `backend/gm.ts`, `backend/push.ts`, `backend/chips.ts`: request dispatch, the state view, the GM view (built per `lre.gm` request, never pushed), state push, stored chips.
 - `backend/jobs.ts`, `backend/proposals.ts`, `backend/map-job.ts`, `src/worker/background-lane.ts`: background jobs (kept per user in `jobs.json`; a job stored as running that the process isn't running reads as interrupted) and the child lane; Import and Refine proposals; Describe a map (the prompt, the answer's checks and the repair call).
+- `shared/lore.ts`, `engine/lore-lint.ts`, `backend/lore.ts`, `backend/lore-index.ts`: world lore (DESIGN §4.2): sources, the lookup table's terms, additions and suggestions; its lint; book drift and Save to lore; the indexing jobs' prompt, reader and checks.
 - `backend/preset-lint.ts`, `backend/plan-notes.ts`: the preset lint; planned-turn lines kept by seed.
 - `backend/outcome-notes.ts`, `backend/inspector-log.ts`: the next turn's Outcome notes and the inspector's history with its delivery badges, per chat.
 - `backend/stored-json.ts`: reading the extension's own JSON files; a damaged one is set aside as `<path>.corrupt-<epoch ms>` with a warning, and the caller starts fresh.
@@ -85,7 +86,7 @@ Space pack layout (`packs/space`): `core/travel.ts` (routes and A*), `core/map-s
 
 ### 3.1 World document (`lre-world-v1`, `shared/world.ts`)
 
-One JSON document per revision; the revision id is its `hashJson`. Collections are keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`. Singletons: `calendar`, `realism`, `time`, `pins`, `packs`, `pov`, `start`, `seedMode`, `lenientPricing`, `suppressed`.
+One JSON document per revision; the revision id is its `hashJson`. Collections are keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `lore`, `classifications`. Singletons: `calendar`, `realism`, `time`, `pins`, `packs`, `pov`, `start`, `seedMode`, `lenientPricing`, `suppressed`, `loreIndex` (the lore lookup table: `terms` and `topics`).
 
 - **Maps** (`lre-map-v1`) are the source of truth for the places, grids and routes they draw. `migrateWorld` compiles them whenever a document is read (`shared/maps.ts`), clearing what an earlier compile made (items marked `map`, and a scope's link to a grid a map made) and making it again, so the compiled items stored in a revision or an export always match their maps. Build's editors show them read-only and `lre.editor` refuses writes to them.
 - **Formulas** are expression-language strings (`Expr`); **dice** are notation strings.
@@ -192,6 +193,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.editor` | `worldId, base`, then `put{collection, id, value}` \| `remove{collection, id}` \| `set{part, value}` | `{draft, lint}` |
 | `lre.world` | `list` \| `get` \| `create` \| `delete` \| `commit` \| `import` \| `export` \| `lint` \| `attach` \| `upgrade` | `{worlds?, world?, revision?, lint?, file?}` |
 | `lre.job` | `start{kind, worldId, input}` \| `cancel{jobId}` \| `list{worldId}` \| `dismiss{jobId}` | `{jobId}`; `list`: `{jobs}` (`JobSummary[]`, oldest first). Updates arrive as `lre.job.update {jobId, kind, status, progress, message?, result?}` |
+| `lre.lore` | `drift{worldId, id?}` \| `save{chatId, text?}` | `drift`: `{drift}`, the draft's book-sourced entries whose book entry changed (with its text and hash now) or is gone; `save`: `{worldId, id}` of the lore entry saved to the draft of the chat's world |
 
 **State push.** The backend keeps a push counter `rev` per (user, chat).
 - On `hello`, `resync` and chat open it sends `lre.state.snapshot {chatId, rev, view}`.
