@@ -62,6 +62,7 @@ Engine layout (pure):
 - `engine/events.ts`: validators and reducers for the core events (`set`, `add`, `post`, `link`, `unlink`, `spawn`, `stage`, `clock`, `materialize`, `timelapse`). The registry composes `engine/seen.ts` into the ones that move someone (a `place` set, an `in` link or unlink, a spawn), so their apply also keeps the POV's observations (`space.seen`, DESIGN §7) in both folds.
 - `engine/registry.ts`, `engine/registry-impl.ts`: the registry contract, and the builder of a frozen registry from `PackDef`s.
 - `engine/{resolve,effects,rules,tracks,schedules,simulate,time,time-limits,realism,visibility,bounds,materialize,beats,plan-day,turn,typed-intent,narration-channels,player-events,authoring,world-lint}.ts`: action resolution, effects, rules, tracks, schedules, stepping through game time, time controls and their hard maxima, realism levels, knowledge and visibility, bounds, lazy materialization, the deterministic outline, the day planner, the turn pipeline, Playtest's typed-intent matching, the narration channels, player-facing event lines, authoring tools and structural lint.
+- `engine/adjudication.ts`: the adjudication policy (DESIGN §11) as `resolve` and the palette apply it: the policy in force (`policyOf`), a check's success and chance, the verdict before anything is rolled (`verdictOf`: a refused retry, too hard, a sure thing, the timing, the authority), the judged approach's shift, a hybrid close call, the story's sampled outcome and the policy's lint. `shared/adjudication.ts` holds the presets and the reader (`readAdjudication`) that worlds, settings and markers share.
 - `engine/edits.ts`: ✎ fixes and GM edits (`resolveEdit`, `parseEditOps`): each operation becomes the events its effect records, with literal values, checked against field definitions (type, enum values, min and max, a pool's evaluated max), relation types and placement, all or none; despawn, restore and the reserved `gone` field.
 - `engine/gm-view.ts`: the GM view's world part (`buildGmWorld`): every entity, removed and spawned ones included, with its fields, relations, placement, levels and designed sheet; places; tracks with their truths; relation types.
 
@@ -93,6 +94,7 @@ One JSON document per revision; the revision id is its `hashJson`. Collections a
 - **Kinds** have single inheritance and typed fields (`FieldDef`: type, default, min/max, enum values, ref kind, list element, bands, derived formula, locked, bound, visibility, and the level contract's domain and live level).
 - **Entities** carry field values, relation instances (with `until` for use grants), a tier (one of the world's `tiers`, each mapped to a detail band whose caps apply), optional per-domain level overrides, the LOD1 `agent` flag (unset: the tier's default) and an optional Lumiverse character id.
 - **Pins** fix generator versions and table revisions (DESIGN §9.2). The document holds copies of its tables, so a running chat sees new data only through a `migrate` marker.
+- **The ruleset** (`ruleset`, optional) holds progressions, the sheet layout, level floors and the adjudication policy (`adjudication`: a preset and its values; DESIGN §11). Actions, places and tracks take `adjudicate` (marked for the `marked` timing) and checks `pass` and `auto`.
 - Levels gate processes, rendering and extraction, never the shape (D18).
 
 Storage (DESIGN §4.1): `userStorage/worlds/<worldId>/index.json` (`WorldIndex`) and `rev/<revision>.json`, written temp-then-move. Settings live in `userStorage/settings.json` (`UserSettings`).
@@ -118,7 +120,7 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 
 - **Events** are concrete. Assignment events (`set`) carry final values; accumulator events (`add`, `post`) carry deltas. Pack events are `<packId>.<name>` with a JSON body.
 - **`Rec`** follows DESIGN §4.3. `accepted` is the identity of content accepted without being read: an assistant edit or an unread Continue. It is outside every hash, so accepting text never moves a path.
-- **`post` entries and markers** carry `seq` (chat-wide, from the journal counter) and `at` (P1). Starting markers have `at: null`.
+- **`post` entries and markers** carry `seq` (chat-wide, from the journal counter) and `at` (P1). Starting markers have `at: null`. Marker bodies are `migrate{to}`, `resolve{domain, scope, to}`, `time{control, scope, to}` and `adjudicate{to}` (a whole policy), each checked by `validMarkerBody` on every path in.
 - **The journal is authoritative.** Metadata is its mirror, flushed per message once no generation is in flight, and re-asserted after clobbering.
 
 **Fold semantics** (DESIGN §4.3; both folds implement them):
@@ -151,7 +153,7 @@ While a chat is paused, new turns get no plan and commit `degraded` with no even
 
 ### 3.3 World state (`engine/state.ts`)
 
-`WorldState` is plain JSON: clock, entities (fields, relations, levels), account posting totals (the trial balance sums to 0), track stages, folded realism and time controls, materialization pins, and pack slices, among them `space.seen`, the POV's own observations. Folds compare states with `hashJson`.
+`WorldState` is plain JSON: clock, entities (fields, relations, levels), account posting totals (the trial balance sums to 0), track stages, folded realism and time controls, the adjudication policy an `adjudicate` marker set (absent in chats started before it existed), materialization pins, and pack slices, among them `space.seen`, the POV's own observations, and `engine.tries`, each action's latest attempt at a check for the retry rules (written by `engine.adjudged`). Folds compare states with `hashJson`.
 
 ### 3.4 Model steps (`engine/steps.ts`)
 
@@ -160,6 +162,7 @@ The engine asks and the backend's `StepPort` answers. Every call takes an `Abort
 Routing (D10):
 - `interpret` → helper;
 - `npc.choose` → Decision connection; on error, the helper, then engine-only;
+- `judge` → helper (a decision only: the rating, a one-line reason and, under narrative authority, outcome odds); on the Decision route a score and a choice question;
 - prompted steps (`extract`, `brief`, `outline`, …) → helper or the step's chosen connection.
 
 Prompts and schemas stay model-agnostic (D31).
@@ -187,7 +190,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.fix` | `chatId, entity, field, value` | `{pending}`; checked as a `set` against the field's definition (locked fields refused), stored as one `fix` post entry |
 | `lre.edit` | `chatId, ops`: 1–64 `EditOp`s (`set`, `add`, `link`, `unlink`, `move`, `put`, `adjust`, `stage`, `entity`, `spawn`, `despawn`, `restore`) | `{pending}`; all or none, one `fix` post entry; locked fields writable |
 | `lre.gm` | `chatId` | `GmView`, built from the head's state when asked; never part of a snapshot or delta |
-| `lre.marker` | `chatId`, then `resolve{domain, scope, to}` \| `time{control, scope, to}` \| `migrate{to, merge?}`; `preview` writes nothing | `{pending}`; with `preview`: `{preview}`, whose `upgrade` lists a migrate's definition changes with their default picks |
+| `lre.marker` | `chatId`, then `resolve{domain, scope, to}` \| `time{control, scope, to}` \| `adjudicate{to}` \| `migrate{to, merge?}`; `preview` writes nothing | `{pending}`; with `preview`: `{preview}`, whose `upgrade` lists a migrate's definition changes with their default picks |
 | `lre.keep` | `chatId`, then `keep{messageId}` \| `discard{messageId}` \| `convert{messageId, parentPath, refs}` | `{pending}` |
 | `lre.settings.get` / `.set` | `patch` (deep merge) | `{settings}` |
 | `lre.editor` | `worldId, base`, then `put{collection, id, value}` \| `remove{collection, id}` \| `set{part, value}` | `{draft, lint}` |

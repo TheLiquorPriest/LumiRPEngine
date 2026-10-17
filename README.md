@@ -9,7 +9,7 @@ You choose how deep it goes. On the lowest setting it is a light layer that trac
 ## What you get
 
 - **A world you can build.** Kinds with typed fields and derived values, entities and relationships, places, routes and grids, inventories and ownership, character sheets. A schema-driven editor for all of it, and three starter worlds to begin from: Brindlemere (a fantasy town), Harrowmere Hall (a mystery manor) and Port Alder (a modern slice-of-life town).
-- **Deterministic actions.** Move, take, give, buy, pay, drive, lend, wear, sleep, wait and more. Checks use dice with exact odds, shown before you choose, and the result is decided before the narrator writes a word.
+- **Deterministic actions.** Move, take, give, buy, pay, drive, lend, wear, sleep, wait and more. Checks use dice with exact odds, shown before you choose, and the result is decided before the narrator writes a word. How much the dice decide is up to the world and to you: every check, only risky ones or only marked ones; how much your described approach counts; and whether the roll or the story settles it.
 - **NPCs that live.** Schedules and agendas for everyone, day planning and needs for the people who matter, and encounters between NPCs, on screen and off. The AI is consulted only on close calls.
 - **Quests, puzzles, secrets and triggers.** Stages, objectives, hints and rules. Secrets stay out of what you see until they are revealed.
 - **Context control.** The engine writes the established facts into the prompt as short sections, and an inspector shows each section, its size and whether it reached the prompt. LumiRPEngine doesn't manage your lore for now: your World Info works as usual in world chats.
