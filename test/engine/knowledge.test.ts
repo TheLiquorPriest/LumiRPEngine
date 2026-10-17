@@ -5,6 +5,8 @@ import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import { calendarOf, formatClock } from "../../src/engine/calendar";
 import { buildCastView } from "../../src/packs/castlife/core/index";
+import { buildMapView } from "../../src/packs/space/core/view";
+import { proposalKnown } from "../../src/backend/runtime";
 import type { WorldDoc } from "../../src/shared/world";
 import { applyEffects } from "../../src/engine/effects";
 import { ENGINE_EVENTS } from "../../src/engine/engine-pack";
@@ -171,5 +173,50 @@ describe("Cast shows only what the POV knows", () => {
     expect(after.maya?.here).toBe(false);
     expect(after.maya?.lastSeen).toEqual({ place: "Your apartment", at: formatClock(calendarOf(w.world), w.state.clock) });
     expect([after.maya?.place, after.maya?.activity, after.maya?.timeline, after.maya?.next]).toEqual([undefined, undefined, undefined, undefined]);
+  });
+});
+
+describe("discoverable places", () => {
+  const boathouse = (world: WorldDoc): void => {
+    world.places.boathouse = { id: "boathouse", name: "The old boathouse", parent: "riverton", fields: {}, visibility: "discoverable" };
+    world.places.vault = { id: "vault", name: "The vault", parent: "riverton", fields: {}, visibility: "secret" };
+    world.routes.apt_boathouse = { id: "apt_boathouse", from: "apartment", to: "boathouse", modes: { walk: { minutes: 6 } }, bidirectional: true };
+  };
+  const shown = (w: Working, place: string) => {
+    const go = reg.actions.get("go");
+    const narrator = reg.renderers.filter((r) => r.slot === "scene").flatMap((r) => r.render(w.ctx));
+    const name = w.world.places[place]?.name ?? place;
+    return {
+      travel: (go ? paramCandidates(reg, w.world, w.state, go, "to") : []).includes(place),
+      map: buildMapView(w.ctx).places.some((p) => p.id === place),
+      narrator: narrator.some((line) => line.includes(name)),
+    };
+  };
+
+  test("stay off the travel list, the map and the narrator's exits until the POV has been there", () => {
+    const w = riverton(boathouse);
+    expect(shown(w, "boathouse")).toEqual({ travel: false, map: false, narrator: false });
+    const move = (to: string) => applyEffects(reg, w, [{ type: "move", args: { entity: "you", to } }], { bindings: {}, rng: createRng(to) });
+    move("boathouse");
+    move("apartment");
+    expect(shown(w, "boathouse")).toEqual({ travel: true, map: true, narrator: true });
+  });
+
+  test("a reply can tell the POV of one, by id or by name, but never of a secret place", () => {
+    const w = riverton(boathouse);
+    const knows = reg.proposals.get("knows");
+    if (!knows) throw new Error("no knows channel");
+    const propose = (fact: string): string => knows.validate({ fact }, w.ctx)?.code ?? "ok";
+    // Only a knows proposal may name a place the POV can't see yet, and only one that isn't secret.
+    expect(proposalKnown({ type: "knows", fact: "boathouse" }, reg, w.world, w.state)).toBe(true);
+    expect(proposalKnown({ type: "knows", fact: "vault" }, reg, w.world, w.state)).toBe(false);
+    expect(proposalKnown({ type: "location", entity: "you", place: "boathouse" }, reg, w.world, w.state)).toBe(false);
+    expect(propose("vault")).toBe("not_public");
+    expect(propose("The Vault")).toBe("not_public");
+    expect(propose("the old boathouse")).toBe("ok");
+    for (const effect of knows.toEffects({ fact: "the old boathouse" }, w.ctx)) applyEffects(reg, w, [effect], { bindings: {}, rng: createRng("heard") });
+    expect(canSeePlace(reg, w.world, w.state, "you", "boathouse")).toBe(true);
+    expect(propose("boathouse")).toBe("already_known");
+    expect(canSeePlace(reg, w.world, w.state, "you", "vault")).toBe(false);
   });
 });

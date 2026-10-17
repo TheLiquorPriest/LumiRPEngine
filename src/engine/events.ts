@@ -100,7 +100,8 @@ const postDef: EventTypeDef<PostEvent> = {
 
 const linkDef: EventTypeDef<LinkEvent> = {
   type: "link",
-  validate: (e, ctx) => (hasEntity(ctx.state, e.from) && hasEntity(ctx.state, e.to) ? null : reject("missing_entity", `link ${e.from} → ${e.to}`)),
+  // Both ends are entities, except that a `knows` link may point at a place (hearing of it, DESIGN §7).
+  validate: (e, ctx) => (hasEntity(ctx.state, e.from) && (hasEntity(ctx.state, e.to) || (e.rel === "knows" && safeKey(e.to) && hasOwn(ctx.world.places, e.to))) ? null : reject("missing_entity", `link ${e.from} → ${e.to}`)),
   apply: (e, state) => {
     const entity = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
     if (!entity) return;

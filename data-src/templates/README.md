@@ -63,7 +63,7 @@ It exits 1 on any error. It checks unique ids; every cross-reference; `[[id]]` l
 
 ### Places, routes, grid
 
-- **Places**: `id`, `name`, `parent` (hierarchy), `timeZone` (root and modern places), `sceneType`, `grid` (the place that owns the grid) or `cell` (`{x, y}` on its parent's grid), `visibility`, `tags`, `description`. A place with `visibility: "secret"` is invisible until found.
+- **Places**: `id`, `name`, `parent` (hierarchy), `timeZone` (root and modern places), `sceneType`, `grid` (the place that owns the grid) or `cell` (`{x, y}` on its parent's grid), `visibility`, `tags`, `description`. A place with `visibility: "secret"` is invisible until found; one with `visibility: "discoverable"` stays off the map, the travel list and the narrator's facts until the player has been there, is told of it (a `knows` link) or has it in `known_places`.
 - **Routes**: `from`, `to`, `bidirectional`, `modes` (`walk`, `road`, `offroad`, `water`, each `{minutes, distanceKm?, terrain?}`), and `secret: true` for routes that do not exist until opened. Containers (places with children) need no routes of their own; leaving a place reaches its parent.
 - **Grid**: `width`, `height`, `cellMeters`, `legend` (character to `terrain`, plus `blocked: true` or `blockedFor: [modes]`), `rows` (ASCII, top row first, row-major), `zones` (name to a list of `[x, y, w, h]` rectangles), `exits` (place to `[x, y]`, or `{cell, mode: "water"}`).
 

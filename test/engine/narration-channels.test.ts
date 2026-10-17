@@ -36,7 +36,7 @@ describe("narration channels", () => {
     expect(EXTRACTION_TYPES.filter((t) => t !== "time_advance" && !reg.proposals.has(t))).toEqual([]);
   });
 
-  test("knows: the player character learns a public person once; never a secret, known_by, place, track or secret lore", () => {
+  test("knows: the player character learns a public person once and hears of a known_by place; never a secret or known_by person, a public or secret place, a track or secret lore", () => {
     const w = setup();
     expect(propose(w, "knows", { who: "you", fact: "rosa" })).toBe("ok");
     expect(knowsOf(w, "rosa")).toBe(true);
@@ -48,12 +48,16 @@ describe("narration channels", () => {
     expect(propose(w, "knows", { fact: "maya" })).toBe("not_public");
     expect(propose(w, "knows", { fact: "park" })).toBe("already_known");
     w.world.places.lake!.visibility = "known_by";
-    expect(propose(w, "knows", { fact: "lake" })).toBe("not_public");
+    expect(propose(w, "knows", { fact: "lake" })).toBe("ok");
+    expect(propose(w, "knows", { fact: "lake" })).toBe("already_known");
+    w.world.places.trailhead!.visibility = "secret";
+    expect(propose(w, "knows", { fact: "trailhead" })).toBe("not_public");
     expect(propose(w, "knows", { fact: "first_week" })).toBe("not_public");
     w.world.lore.ledger = { id: "ledger", title: "The second ledger", content: "cue", keys: [], links: [], secret: true, gate: "stage.first_week == 'done'" };
     expect(propose(w, "knows", { fact: "ledger" })).toBe("not_public");
     expect(propose(w, "knows", { fact: "the moon is made of cheese" })).toBe("unknown_fact");
-    expect(knowsOf(w, "jordan") || knowsOf(w, "maya") || knowsOf(w, "lake")).toBe(false);
+    expect(knowsOf(w, "jordan") || knowsOf(w, "maya") || knowsOf(w, "trailhead")).toBe(false);
+    expect(knowsOf(w, "lake")).toBe(true);
   });
 
   test("spawn: a named character at a real place, known to the player, deduplicated, validated and capped", () => {

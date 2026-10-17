@@ -17,6 +17,7 @@ import type { LedgerEvent } from "../../../shared/ledger";
 import type { KindDef } from "../../../shared/world";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { placeOfEntity, placeWithin } from "../../../engine/scope";
+import { canSeePlace } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { closedRoutes, findPath, gridMinutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
@@ -191,7 +192,8 @@ export const spacePack: PackDef = {
         if (level >= 2) {
           const exits: string[] = [];
           for (const id of Object.keys(ctx.world.places).sort()) {
-            if (id === here) continue;
+            // The narrator hears only of exits to places the POV knows (a hidden one stays hidden).
+            if (id === here || !canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) continue;
             const plan = routeAt(ctx, here as string, id, "walk");
             if (plan && plan.legs.length === 1) exits.push(`${own(ctx.world.places, id)?.name ?? id} ${plan.minutes} min on foot`);
           }

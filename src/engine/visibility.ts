@@ -1,10 +1,11 @@
 // Knowledge and visibility (DESIGN §7). `public` is seen by everyone; `known_by` by whoever knows
 // the subject: a `knows` relation to it, or matching its `knownBy` selector (being a member of a
-// group, say); `secret` by the GM only. A visibility value or a `knownBy` selector this reader
-// doesn't understand hides its subject: everything here fails closed. Player-facing views (panels,
-// the Montage, the Journal, chips, slots) pass through these filters; secret truth reaches a player
-// view only once its stage has been revealed. The GM view shows everything as labelled,
-// unrecorded previews.
+// group, say); `secret` by the GM only. A place may also be `discoverable`: known as `known_by` is,
+// and found for good once the POV has been there (`space.seen`). A visibility value or a `knownBy`
+// selector this reader doesn't understand hides its subject: everything here fails closed.
+// Player-facing views (panels, the Montage, the Journal, chips, slots) pass through these filters;
+// secret truth reaches a player view only once its stage has been revealed. The GM view shows
+// everything as labelled, unrecorded previews.
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -16,6 +17,7 @@ import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { Registry } from "./registry-impl";
 import { asObject, evalExpr, fieldDef, isGone, placeOfEntity, scopeEnv, truthy } from "./scope";
 import { selectorMatches } from "./selector";
+import { placeVisit } from "./seen";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 
@@ -98,14 +100,20 @@ export function canSeeField(reg: Registry, world: WorldDoc, state: Readonly<Worl
   return knows(state, pov, id) || granted(reg, world, state, pov, def?.knownBy);
 }
 
-/** Places: public, known to the POV (a `knows` relation, its `knownBy`, or listed in its `known_places`), or where it is now. */
+/**
+ * Places: public; `known_by` and known to the POV (a `knows` relation, its `knownBy`, or listed in
+ * its `known_places`) or where it is now; `discoverable` the same, or anywhere it has been.
+ */
 export function canSeePlace(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, place: PlaceId): boolean {
   const def = own(world.places, place);
   if (!def) return false;
-  const v = visibilityOf(def.visibility);
+  const discoverable = def.visibility === "discoverable";
+  const v = discoverable ? "known_by" : visibilityOf(def.visibility);
   if (v !== "known_by") return v === "public";
   const known = own(state.entities, pov)?.fields.known_places;
-  return knows(state, pov, place) || placeOfEntity(state, pov) === place || (Array.isArray(known) && known.includes(place)) || granted(reg, world, state, pov, def.knownBy);
+  if (knows(state, pov, place) || placeOfEntity(state, pov) === place || (Array.isArray(known) && known.includes(place)) || granted(reg, world, state, pov, def.knownBy)) return true;
+  // `space.seen` is the world POV's own record.
+  return discoverable && pov === world.pov && placeVisit(state, place) !== null;
 }
 
 /** A `known_by` track is known to its owner, to whoever knows the owner, and to whoever matches its `knownBy`. */

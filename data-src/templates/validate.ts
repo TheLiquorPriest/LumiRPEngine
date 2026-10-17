@@ -204,7 +204,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     if (hops >= 20) err(`${where}: parent chain is a cycle`);
     if (!sceneIds.has(text(p.sceneType))) err(`${where}: unknown sceneType "${text(p.sceneType)}"`);
     if (text(p.description).length < 40) err(`${where}: description is too short`);
-    if (!VISIBILITY.includes(text(p.visibility))) err(`${where}: bad visibility`);
+    if (!VISIBILITY.includes(text(p.visibility)) && p.visibility !== "discoverable") err(`${where}: bad visibility`);
     if (text(t.dataPack) || text(cal.timeZone) !== "Etc/UTC") {
       const zone = text(p.timeZone) || text(placeById.get(text(p.parent))?.timeZone);
       if ((modern || text(cal.system) === "gregorian") && !zone && p.parent === undefined) err(`${where}: root places need a timeZone`);

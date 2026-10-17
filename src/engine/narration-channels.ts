@@ -1,8 +1,9 @@
 // The engine's own narration channels (DESIGN §7, §9.4; D4): `knows`, the player character learning
-// of a public person or thing a reply shows them, and `spawn`, a new character a reply introduces, at
-// the world's spawn tier. Both are bounded. `knows` takes public entities only: never a secret or
-// `known_by` entity, a secret place, a gated or secret lore entry, or a track. `spawn` validates its
-// kind and place, deduplicates by name and is capped per world.
+// of a public person or thing a reply shows them, or hearing of a place it didn't know, and `spawn`,
+// a new character a reply introduces, at the world's spawn tier. Both are bounded. `knows` takes
+// public entities and `known_by` or `discoverable` places the POV can't see yet, named by id or by
+// name: never a secret or `known_by` entity, a secret place, a gated or secret lore entry, or a
+// track. `spawn` validates its kind and place, deduplicates by name and is capped per world.
 
 import { hashParts } from "../shared/hash";
 import type { JsonObject } from "../shared/json";
@@ -11,6 +12,7 @@ import { spawnTierOf } from "../shared/tiers";
 import type { EffectSpec } from "../shared/world";
 import type { ProposalChannelDef, ReadContext, Rejection } from "./registry";
 import { kindIs, placeOfEntity } from "./scope";
+import { canSeePlace } from "./visibility";
 import { labelOf, own } from "./pack-kit";
 
 /** Characters a world's replies may introduce, in total. */
@@ -42,7 +44,20 @@ function knowsAlready(ctx: ReadContext, who: EntityId, id: string): boolean {
   return own(ctx.state.entities, who)?.relations.some((r) => r.type === "knows" && r.to === id) ?? false;
 }
 
-/** Why `fact` can't be learned from a reply, or null when it is a public entity the POV doesn't know yet. */
+/** A place a reply names by its name (as the POV hears it, the id is never shown): the one place with that name. */
+function placeNamed(ctx: ReadContext, fact: string): string | null {
+  const lower = fact.toLowerCase();
+  const ids = Object.keys(ctx.world.places).filter((id) => own(ctx.world.places, id)?.name.trim().toLowerCase() === lower);
+  return ids.length === 1 ? (ids[0] ?? null) : null;
+}
+
+/** The world fact a proposal's `fact` names: an entity or place id, else a place by its name, else itself. */
+function factOf(ctx: ReadContext, fact: string): string {
+  if (hasOwn(ctx.state.entities, fact) || hasOwn(ctx.world.places, fact)) return fact;
+  return placeNamed(ctx, fact) ?? fact;
+}
+
+/** Why `fact` can't be learned from a reply, or null when it is a public entity or a hidden, non-secret place the POV doesn't know yet. */
 function unlearnable(ctx: ReadContext, fact: string): Rejection | null {
   const { world, state } = ctx;
   const pov = world.pov;
@@ -53,7 +68,11 @@ function unlearnable(ctx: ReadContext, fact: string): Rejection | null {
     return knowsAlready(ctx, pov, fact) ? reject("already_known", `already knows ${labelOf(ctx, fact)}`) : null;
   }
   const place = hasOwn(world.places, fact) ? own(world.places, fact) : undefined;
-  if (place) return isPublic(place.visibility) ? reject("already_known", `${place.name} is public`) : reject("not_public", "only public facts are read from a reply");
+  if (place) {
+    // A reply can tell of a place kept to those who know it or hidden until found; a secret one only its story reveals.
+    if (place.visibility !== "known_by" && place.visibility !== "discoverable") return isPublic(place.visibility) ? reject("already_known", `${place.name} is public`) : reject("not_public", "only public facts are read from a reply");
+    return canSeePlace(ctx.registry, world, state, pov, fact) ? reject("already_known", `already knows ${place.name}`) : null;
+  }
   const lore = hasOwn(world.lore, fact) ? own(world.lore, fact) : undefined;
   if (lore && (lore.secret === true || lore.gate !== undefined)) return reject("not_public", "secret lore is learned through its gate, never from a reply");
   if (hasOwn(world.tracks, fact)) return reject("not_public", "tracks advance through their stages, never from a reply");
@@ -66,9 +85,9 @@ export const knowsChannel: ProposalChannelDef = {
   validate(p, ctx) {
     const who = text(p.who) || ctx.world.pov;
     if (who !== ctx.world.pov) return reject("not_pov", "a reply only teaches the player character");
-    return unlearnable(ctx, text(p.fact));
+    return unlearnable(ctx, factOf(ctx, text(p.fact)));
   },
-  toEffects: (p, ctx) => [{ type: "link", args: { rel: "knows", from: ctx.world.pov, to: text(p.fact) } }],
+  toEffects: (p, ctx) => [{ type: "link", args: { rel: "knows", from: ctx.world.pov, to: factOf(ctx, text(p.fact)) } }],
 };
 
 function slug(name: string): string {

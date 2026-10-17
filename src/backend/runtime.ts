@@ -122,7 +122,9 @@ function prefixSummary(reg: Registry, world: WorldDoc, state: WorldState): JsonV
 /**
  * Whether every entity and place a proposal names is one the POV may know; others never become chips
  * or changes. A value is matched as the channels read it, trimmed (and lowercased when only that
- * names something), so `" vera "` is Vera.
+ * names something), so `" vera "` is Vera. The one exception is a `knows` proposal's place: hearing
+ * of a `known_by` or `discoverable` place is how the POV comes to know it, and the channel takes no
+ * secret one.
  */
 export function proposalKnown(p: JsonObject, reg: Registry, world: WorldDoc, state: Readonly<WorldState>): boolean {
   const named = (s: string): string => {
@@ -139,7 +141,11 @@ export function proposalKnown(p: JsonObject, reg: Registry, world: WorldDoc, sta
     if (isRecord(v)) return Object.values(v).every((x) => ok(x as JsonValue, depth + 1));
     return true;
   };
-  return Object.entries(p).every(([k, v]) => k === "type" || ok(v, 0));
+  const heard = (v: JsonValue | undefined): boolean => {
+    const place = typeof v === "string" && hasOwn(world.places, v.trim()) ? world.places[v.trim()] : undefined;
+    return place?.visibility === "known_by" || place?.visibility === "discoverable";
+  };
+  return Object.entries(p).every(([k, v]) => k === "type" || (p.type === "knows" && k === "fact" && heard(v)) || ok(v, 0));
 }
 
 /**

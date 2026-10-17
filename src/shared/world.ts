@@ -40,6 +40,7 @@ import type {
   TrackId,
   TravelMode,
   Visibility,
+  PlaceVisibility,
   WorldId,
 } from "./ids";
 import type { DataTable } from "./tables";
@@ -261,8 +262,8 @@ export interface PlaceDef {
   /** Position on the parent's node map (a parent without a grid); `cell` is for grids. */
   layoutPos?: { x: number; y: number };
   fields: JsonObject;
-  visibility?: Visibility;
-  /** With `known_by`: who knows the place besides those with a `knows` relation to it; matching is knowing (DESIGN §7). */
+  visibility?: PlaceVisibility;
+  /** With `known_by` or `discoverable`: who knows the place besides those with a `knows` relation to it; matching is knowing (DESIGN §7). */
   knownBy?: Selector;
   /** Import from lore (DESIGN §9.7): the `bookId/entryId` entries this came from; never edited. */
   sources?: string[];

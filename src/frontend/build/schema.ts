@@ -45,6 +45,8 @@ export type FieldSpec =
 export const FIELD_TYPES = ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] as const;
 const BOUND_MODES = ["auto", "confirm", "never"] as const;
 const VISIBILITY = ["public", "known_by", "secret"] as const;
+/** Places may also be hidden until the POV has been there or hears of them. */
+const PLACE_VISIBILITY = ["public", "known_by", "discoverable", "secret"] as const;
 const TRAVEL_MODES = ["walk", "road", "offroad", "water"] as const;
 
 const BAND: FieldSpec = {
@@ -172,7 +174,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
       ],
     },
     { kind: "json", key: "fields", label: "Fields" },
-    { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
+    { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, optional: true },
   ],
   routes: [
     { kind: "ref", key: "from", label: "From", collection: "places" },

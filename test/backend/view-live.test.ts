@@ -245,14 +245,15 @@ describe("HUD ✎ fixes for weather and scene type", () => {
   });
 });
 
-describe("Scene → Present and the palette list only people the player may see", () => {
-  test("a secret person standing in the room is neither present nor a palette target", async () => {
+describe("the player layer lists only the people and places the player may know", () => {
+  test("a secret person standing in the room and a place not yet found stay out of Present, the palette, the map and the ✎", async () => {
     const rig = new Rig({ shipped: true });
     const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
     const here = STARTER_WORLDS.modern_slice_of_life?.("a", "Alder").entities.pov?.fields.place;
     const person = (id: string, name: string, extra: Record<string, unknown>) => ({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id, value: { id, kind: "person", name, tier: "background", fields: { place: here }, relations: [], ...extra } });
     rig.body(await rig.send(person("lurker", "The Lurker", { visibility: "secret" })));
     rig.body(await rig.send(person("visitor", "Pat Visitor", {})));
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "places", id: "smugglers_cove", value: { id: "smugglers_cove", name: "Smugglers' Cove", fields: {}, visibility: "discoverable" } }));
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const chatId = rig.host.createChat("Morning.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -263,6 +264,8 @@ describe("Scene → Present and the palette list only people the player may see"
     expect(targets).toContain("Pat Visitor");
     expect(targets).not.toContain("The Lurker");
     expect(JSON.stringify(view.panels["castlife.cast"])).not.toContain("The Lurker");
+    for (const shown of [view.hud?.fixes.place?.options, view.panels["space.map"], targets]) expect(JSON.stringify(shown)).not.toContain("Smugglers");
+    expect(view.hud?.fixes.place?.options?.some((o) => o.value === here)).toBe(true);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

@@ -23,7 +23,7 @@ import type { Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates, type Availability } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import { canSeeEntity, findLeaks, unrevealedTruths } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, unrevealedTruths } from "../engine/visibility";
 import type { StoredChip } from "./chips";
 
 /** The palette's timelapse action; its params are `{target, overrides}`. */
@@ -75,7 +75,9 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   const weather = isRecord(weatherPanel) && typeof weatherPanel.label === "string" ? weatherPanel.label : null;
   const fixes: HudView["fixes"] = {};
   if (placeId) {
-    fixes.place = { entity: pov, field: "place", type: "ref", value: placeId, options: Object.values(world.places).map((p) => ({ value: p.id, label: p.name })) };
+    // The ✎ offers the places the POV knows, and wherever it is now.
+    const options = Object.values(world.places).filter((p) => p.id === placeId || canSeePlace(ctx.registry, world, state, pov, p.id));
+    fixes.place = { entity: pov, field: "place", type: "ref", value: placeId, options: options.map((p) => ({ value: p.id, label: p.name })) };
   }
   // Cash from the economy panel is the POV's cash accounts: its ✎ posts a correction to them
   // (`lre.fix`), so it needs one. Without the panel's cash, the ✎ sets the cash field the pill shows.

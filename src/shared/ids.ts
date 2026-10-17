@@ -70,8 +70,10 @@ export type TierId = string;
 export type RealismPresetId = "story" | "grounded" | "simulation" | "custom";
 export type ModelUsePresetId = "lean" | "standard" | "full" | "custom";
 
-/** Knowledge visibility (DESIGN §7). `known_by` is resolved through `knows` relations. */
+/** Knowledge visibility (DESIGN §7). `known_by` is resolved through `knows` relations and an optional `knownBy` selector. */
 export type Visibility = "public" | "known_by" | "secret";
+/** A place's visibility: `discoverable` keeps it hidden until the POV has been there or knows of it (DESIGN §7). */
+export type PlaceVisibility = Visibility | "discoverable";
 
 export type TravelMode = "walk" | "road" | "offroad" | "water";
 
