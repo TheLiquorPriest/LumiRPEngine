@@ -568,7 +568,7 @@ export class Dispatcher {
         const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
         const reason = typeof chip.payload.reason === "string" ? chip.payload.reason : "declined";
         if (!proposal || choice === "dismiss") {
-          this.rt.setOutcomeNote(chatId, chip.id, null);
+          await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
           this.rt.push.changed(chatId, userId);
           return { applied: false, pending: false };
         }
@@ -588,7 +588,7 @@ export class Dispatcher {
           const w = new Working(this.rt.registry, world, state);
           const [outcome] = applyProposals(this.rt.registry, w, [priced], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:${choice}`, this.runSeedOf(chatId));
           if (!outcome || outcome.rejection || outcome.events.length === 0) throw new RequestError("validation", outcome?.rejection?.reason ?? "the purchase no longer applies");
-          this.rt.setOutcomeNote(chatId, chip.id, null);
+          await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
           const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
           return { applied: result.applied, pending: result.pending };
         }
