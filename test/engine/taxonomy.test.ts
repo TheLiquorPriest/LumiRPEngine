@@ -14,6 +14,7 @@ import { selectEntities } from "../../src/engine/selector";
 import { Working } from "../../src/engine/working";
 import type { EntityDef, WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS } from "../../src/packs/index";
+import { buildCastView } from "../../src/packs/castlife/core/index";
 import { baseWorld, POV, startState } from "../packs/support";
 
 const reg = createRegistry(ALL_PACKS);
@@ -71,6 +72,17 @@ describe("classifications", () => {
     expect(selectEntities(reg, w, work.state, { class: { role: ["antagonist"] }, tag: ["smuggler"] })).toEqual(["dev", "npc_fen"]);
     const bad = applyEffects(reg, work, [{ type: "spawn", args: { id: "npc_bad", kind: "person", name: "Bad", class: { role: ["nobody"] } } }], { bindings: {}, rng: createRng("t") });
     expect(bad.rejected[0]?.rejection.code).toBe("unknown_class");
+  });
+
+  test("the player's Cast carries only facets players can see; hidden facets' values and tags appear nowhere in it", () => {
+    const w = world();
+    w.classifications.mood = { id: "mood", label: "Mood", multiple: false, shown: true, values: { cheerful: { label: "Cheerful" } } };
+    w.entities.mara = { ...w.entities.mara!, class: { role: ["ally"], mood: ["cheerful"] } };
+    const view = buildCastView(reg.context(w, startState(w, reg)));
+    expect(view.facets.map((f) => f.id)).toEqual(["mood"]);
+    expect(view.people.find((p) => p.id === "mara")?.classes).toEqual({ mood: ["cheerful"] });
+    const text = JSON.stringify(view);
+    for (const hidden of ["Story role", "villain", "Villain", "antagonist", "Antagonist", "ally", "Ally", "smuggler"]) expect(text).not.toContain(hidden);
   });
 });
 

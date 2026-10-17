@@ -219,6 +219,11 @@ export interface FacetDef {
   values: Record<FacetValueId, FacetValueDef>;
   order?: number;
   description?: string;
+  /**
+   * Players can see this classification: Cast groups and filters by it. Unset or false keeps it to
+   * Build and the GM side, so a value like "Villain" never reaches the player by default.
+   */
+  shown?: boolean;
 }
 
 /**

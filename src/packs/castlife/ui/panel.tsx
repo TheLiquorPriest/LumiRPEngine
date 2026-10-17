@@ -1,9 +1,10 @@
 // Play → Cast (DESIGN §12): the people the panel lists, with today's timeline, agendas the POV knows
 // about, regard (one band per pair at Relationships 1, axes above) and their next commitment.
-// People present in the scene come first. The list can be grouped by a classification facet, by
-// group membership or by tier, and filtered by facet values (nested values included), groups and
-// tags: within one kind of chip any will do, across kinds all must hold, as in a selector. The
-// POV's own groups, with its role in each, head the panel.
+// People present in the scene come first. The list can be grouped by a classification facet players
+// can see, by group membership or by tier, and filtered by those facets' values (nested values
+// included) and by groups: within one kind of chip any will do, across kinds all must hold, as in a
+// selector. The POV's own groups, with its role in each, head the panel. Hidden facets and tags
+// never reach this view.
 
 import { useState } from "preact/hooks";
 import { withinValue } from "../../../shared/classes";
@@ -28,7 +29,6 @@ export interface CastPerson {
   next?: { at: string; label: string };
   tier: string;
   classes: Record<string, string[]>;
-  tags: string[];
   groups: { id: string; role?: string }[];
 }
 
@@ -80,7 +80,6 @@ export function decodeCastView(value: unknown): CastView | null {
             next: isRecord(p.next) ? { at: str(p.next.at), label: str(p.next.label) } : undefined,
             tier: str(p.tier),
             classes: isRecord(p.classes) ? Object.fromEntries(Object.entries(p.classes).map(([facet, values]) => [facet, strings(values)])) : {},
-            tags: strings(p.tags),
             groups: list(p.groups, (g) => (typeof g.id === "string" ? { id: g.id, role: optStr(g.role) } : null)),
           }
         : null,
@@ -94,14 +93,13 @@ export function decodeCastView(value: unknown): CastView | null {
   };
 }
 
-/** Filter chips in force: facet → values, groups, tags. */
+/** Filter chips in force: facet → values, and groups. */
 export interface CastFilters {
   classes: Record<string, string[]>;
   groups: string[];
-  tags: string[];
 }
 
-const NO_FILTERS: CastFilters = { classes: {}, groups: [], tags: [] };
+const NO_FILTERS: CastFilters = { classes: {}, groups: [] };
 
 function parentsOf(facet: CastFacet): Record<string, { parent?: string }> {
   return Object.fromEntries(facet.values.map((v) => [v.id, { parent: v.parent }]));
@@ -116,7 +114,6 @@ export function passes(person: CastPerson, filters: CastFilters, facets: readonl
     if (!(person.classes[facetId] ?? []).some((v) => accepted.some((a) => withinValue(tree, v, a)))) return false;
   }
   if (filters.groups.length > 0 && !person.groups.some((g) => filters.groups.includes(g.id))) return false;
-  if (filters.tags.length > 0 && !person.tags.some((t) => filters.tags.includes(t))) return false;
   return true;
 }
 
@@ -219,13 +216,12 @@ export function CastPanel(props: PanelProps) {
   if (!view) return <JsonView value={props.view} />;
   if (view.people.length === 0 && view.mine.length === 0) return <Empty>You don't know anyone yet.</Empty>;
   const shown = view.people.filter((p) => passes(p, filters, view.facets));
-  const filtering = Object.values(filters.classes).some((v) => v.length > 0) || filters.groups.length > 0 || filters.tags.length > 0;
+  const filtering = Object.values(filters.classes).some((v) => v.length > 0) || filters.groups.length > 0;
   const held = (facet: CastFacet): { id: string; label: string }[] => {
     // A value anyone holds, and the broader values it nests under (a broader chip takes the nested ones too).
     const tree = parentsOf(facet);
     return facet.values.filter((v) => view.people.some((p) => (p.classes[facet.id] ?? []).some((x) => withinValue(tree, x, v.id)))).map((v) => ({ id: v.id, label: v.label }));
   };
-  const tags = [...new Set(view.people.flatMap((p) => p.tags))].sort((a, b) => a.localeCompare(b));
   const card = (p: CastPerson) => {
     const pending = props.state.pending.some((mark) => mark.entity === p.id);
     return (
@@ -271,7 +267,6 @@ export function CastPanel(props: PanelProps) {
               <Chips key={f.id} label={f.label} options={held(f)} on={filters.classes[f.id] ?? []} onChange={(on) => setFilters({ ...filters, classes: { ...filters.classes, [f.id]: on } })} />
             ))}
             <Chips label="Groups" options={view.groups.map((g) => ({ id: g.id, label: g.name }))} on={filters.groups} onChange={(groups) => setFilters({ ...filters, groups })} />
-            <Chips label="Tags" options={tags.map((t) => ({ id: t, label: t }))} on={filters.tags} onChange={(on) => setFilters({ ...filters, tags: on })} />
             {filtering ? (
               <button type="button" class="lre-btn small ghost" onClick={() => setFilters(NO_FILTERS)}>
                 Clear filters ({shown.length} of {view.people.length} shown)

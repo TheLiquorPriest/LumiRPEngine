@@ -313,6 +313,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   classifications: [
     { kind: "text", key: "label", label: "Label" },
     { kind: "bool", key: "multiple", label: "Several values per entity", hint: "Off: one value each, like a story role. On: any number, like allegiances" },
+    { kind: "bool", key: "shown", label: "Players can see this classification", hint: "Off: only Build and the GM side see it; Play's Cast never groups or filters by it" },
     { kind: "number", key: "order", label: "Order (lowest first)", optional: true, step: 1 },
     { kind: "text", key: "description", label: "Description", multiline: true, optional: true },
     { kind: "facetValues", key: "values", label: "Values" },

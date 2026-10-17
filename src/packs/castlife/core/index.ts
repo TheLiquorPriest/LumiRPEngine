@@ -31,7 +31,7 @@ import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { activeSlot, allSchedules, ownerRank, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
-import { classValues, isGroup, isMemberOf, MEMBER_OF, tagsOf } from "../../../engine/selector";
+import { classValues, isGroup, isMemberOf, MEMBER_OF } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
 
@@ -418,10 +418,12 @@ export interface CastPerson {
   timeline?: { start: string; end: string; label: string; kind: "work" | "sleep" | "free" | "travel" | "other"; reasons: string[] }[];
   agenda?: { label: string; stage: string }[];
   next?: { at: string; label: string };
-  /** For grouping and filters: the person's tier, classification values by facet, tags and groups. */
+  /**
+   * For grouping and filters: the person's tier, their values of the facets players can see, and
+   * their groups. Hidden facets and tags are authoring data and never reach this view.
+   */
   tier: TierId;
   classes: Record<FacetId, FacetValueId[]>;
-  tags: string[];
   /** Every group shown that the person belongs to, directly or through a member group; `role` from a direct membership. */
   groups: { id: EntityId; role?: string }[];
 }
@@ -440,7 +442,7 @@ export interface CastView {
   level: number;
   needs: { need: string; value: number; label: string }[];
   people: CastPerson[];
-  /** The world's facets in order, each value with its parent, depth first: Cast groups and filters by them. */
+  /** The facets players can see (`shown`), in order, each value with its parent, depth first: Cast groups and filters by them. */
   facets: { id: FacetId; label: string; multiple: boolean; values: { id: FacetValueId; label: string; parent?: FacetValueId }[] }[];
   /** The tiers people are in, in the world's order. */
   tiers: { id: TierId; label: string }[];
@@ -478,7 +480,7 @@ export function buildCastView(ctx: ReadContext): CastView {
         const direct = objOf(own(ctx.state.entities, who)?.relations.find((r) => r.type === MEMBER_OF && r.to === g)?.fields);
         return { id: g, ...(typeof direct.role === "string" && direct.role !== "" ? { role: direct.role } : {}), ...(typeof direct.rank === "number" ? { rank: direct.rank } : {}), ...(typeof direct.since === "string" ? { since: direct.since } : {}) };
       });
-  const facets = facetsInOrder(ctx.world);
+  const facets = facetsInOrder(ctx.world).filter(([, f]) => f.shown === true);
   const people: CastPerson[] = [];
   for (const id of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, id);
@@ -496,7 +498,6 @@ export function buildCastView(ctx: ReadContext): CastView {
       here: place !== null && place === here,
       tier: e.tier,
       classes,
-      tags: [...tagsOf(ctx.world, ctx.state, id)],
       groups: membershipsOf(id).map((m) => ({ id: m.id, ...(m.role !== undefined ? { role: m.role } : {}) })),
     };
     if (typeof e.fields.activity === "string") p.activity = e.fields.activity.replace(/_/g, " ");
