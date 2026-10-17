@@ -286,6 +286,7 @@ export const weatherPack: PackDef = {
     // state, held for `minutes` and/or `until` a condition (an Expr) comes true.
     r.effect({
       type: "weather.set",
+      args: ["region", "state", "minutes?", "until?"],
       resolve(a, ctx) {
         const target = strOf(a.region);
         const region = own(ctx.state.entities, target) ? target : regionOf(ctx, own(ctx.world.places, target) ? target : null);
@@ -301,6 +302,7 @@ export const weatherPack: PackDef = {
     // Ends a scripted state now (a rule's `clear`): the hold lifts and the sky turns to `state`, else the season's likeliest calm state.
     r.effect({
       type: "weather.clear",
+      args: ["region", "state?"],
       resolve(a, ctx) {
         const target = strOf(a.region);
         const region = own(ctx.state.entities, target) ? target : regionOf(ctx, own(ctx.world.places, target) ? target : null);

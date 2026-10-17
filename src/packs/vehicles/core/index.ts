@@ -289,6 +289,7 @@ export const vehiclesPack: PackDef = {
 
     r.effect({
       type: "vehicles.drive",
+      args: ["vehicle", "to", "driver?", "riders?"],
       resolve(args, ctx) {
         const v = strOf(args.vehicle);
         const to = strOf(args.to);
@@ -314,6 +315,7 @@ export const vehiclesPack: PackDef = {
     });
     r.effect({
       type: "vehicles.refuel",
+      args: ["vehicle", "payer?", "pct?"],
       resolve(args, ctx) {
         const v = strOf(args.vehicle);
         const payer = strOf(args.payer) || ctx.world.pov;
@@ -333,6 +335,7 @@ export const vehiclesPack: PackDef = {
     });
     r.effect({
       type: "vehicles.service",
+      args: ["vehicle", "payer?", "repair?"],
       resolve(args, ctx) {
         const v = strOf(args.vehicle);
         const payer = strOf(args.payer) || ctx.world.pov;

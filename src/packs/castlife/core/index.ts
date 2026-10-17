@@ -595,10 +595,11 @@ export const castlifePack: PackDef = {
       return commitments(ctx, id, ctx.state.clock, ctx.state.clock + 1).length > 0;
     });
 
-    r.effect({ type: "castlife.satisfy", resolve: (a, ctx) => { const who = strOf(a.entity) || ctx.world.pov; const need = strOf(a.need); const v = needValue(ctx, who, need); return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock } }] : []; } });
-    r.effect({ type: "castlife.decide", resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
+    r.effect({ type: "castlife.satisfy", args: ["need", "entity?"], resolve: (a, ctx) => { const who = strOf(a.entity) || ctx.world.pov; const need = strOf(a.need); const v = needValue(ctx, who, need); return own(NEEDS, need) && v > 0 ? [{ type: "castlife.need", data: { entity: who, need, delta: -v, at: ctx.state.clock } }] : []; } });
+    r.effect({ type: "castlife.decide", args: ["key", "choice"], resolve: (a) => [{ type: "castlife.decision", data: { key: strOf(a.key), choice: strOf(a.choice) } }] });
     r.effect({
       type: "castlife.override",
+      args: ["who", "minutes?", "place?", "activity?"],
       resolve(a, ctx) {
         const who = strOf(a.who);
         const e = own(ctx.state.entities, who);

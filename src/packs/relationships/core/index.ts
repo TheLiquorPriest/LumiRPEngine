@@ -316,9 +316,10 @@ export const relationshipsPack: PackDef = {
     // Group regard, under the name worlds already use.
     r.formula("faction_regard", (ctx, group, to) => groupRegard(ctx, String(group ?? ""), String(to ?? "")));
 
-    r.effect({ type: "relationships.appraise", resolve: (a, ctx) => [...appraise(ctx, strOf(a.from), strOf(a.to), typeof a.appraisal === "string" ? a.appraisal : (objOf(a.appraisal) as Record<string, number>), strOf(a.why) || undefined), ...(a.mutual === true ? appraise(ctx, strOf(a.to), strOf(a.from), typeof a.appraisal === "string" ? a.appraisal : (objOf(a.appraisal) as Record<string, number>), strOf(a.why) || undefined) : [])] });
+    r.effect({ type: "relationships.appraise", args: ["from", "to", "appraisal", "why?", "mutual?"], resolve: (a, ctx) => [...appraise(ctx, strOf(a.from), strOf(a.to), typeof a.appraisal === "string" ? a.appraisal : (objOf(a.appraisal) as Record<string, number>), strOf(a.why) || undefined), ...(a.mutual === true ? appraise(ctx, strOf(a.to), strOf(a.from), typeof a.appraisal === "string" ? a.appraisal : (objOf(a.appraisal) as Record<string, number>), strOf(a.why) || undefined) : [])] });
     r.effect({
       type: "relationships.adjust",
+      args: ["from", "to", "delta", "axis?", "why?"],
       resolve(a, ctx) {
         const from = strOf(a.from);
         const to = strOf(a.to);

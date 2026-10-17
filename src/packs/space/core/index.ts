@@ -213,6 +213,7 @@ export const spacePack: PackDef = {
     });
     r.effect({
       type: "space.step",
+      args: ["x", "y", "entity?"],
       resolve: (a, ctx) => (typeof a.x === "number" && typeof a.y === "number" ? stepEvents(ctx, strOf(a.entity) || ctx.world.pov, { x: Math.round(a.x), y: Math.round(a.y) }) : { code: "bad_args", reason: "a step needs x and y" }),
     });
 
@@ -229,7 +230,7 @@ export const spacePack: PackDef = {
         return `${way} ${e.data.open === true ? "opens" : "closes"}`;
       },
     });
-    r.effect({ type: "space.set_route", resolve: (a) => [{ type: "space.route", data: { route: strOf(a.route), open: a.open !== false } }] });
+    r.effect({ type: "space.set_route", args: ["route", "open?"], resolve: (a) => [{ type: "space.route", data: { route: strOf(a.route), open: a.open !== false } }] });
     r.formula("route_open", (ctx, route) => !closedRoutes(ctx).has(String(route ?? "")));
 
     r.formula("travel_minutes", (ctx, from, to, mode) => routeAt(ctx, String(from ?? ""), String(to ?? ""), asMode(mode))?.minutes ?? 0);

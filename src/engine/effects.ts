@@ -73,6 +73,27 @@ export interface EffectOutcome {
 /** Nesting cap for effects run by effects (a check's outcomes, `onLevel`), as for a rule cascade. */
 export const NESTING_CAP = 8;
 
+/**
+ * The core effect types and the arguments each reads, `?` marking one it can do without (the
+ * authors' reference lists them; pack effects declare theirs in `EffectDef.args`).
+ */
+export const CORE_EFFECTS: Readonly<Record<string, readonly string[]>> = {
+  set: ["entity", "field", "value"],
+  add: ["entity", "field", "delta"],
+  recover: ["entity", "field", "amount?", "full?"],
+  award: ["entity", "progression", "amount"],
+  check: ["check", "actor?", "target?", "outcomes"],
+  move: ["entity", "to"],
+  link: ["rel", "from", "to", "until?", "fields?"],
+  unlink: ["rel", "from", "to"],
+  spawn: ["kind", "name", "id?", "tier?", "fields?", "relations?", "agent?", "place?", "class?", "tags?"],
+  stage: ["track", "to"],
+  post: ["lines", "memo?"],
+  signal: ["class", "text", "entity?", "visibility?"],
+  note: ["text", "visibility?"],
+  beat: ["hint"],
+};
+
 function reject(code: string, reason: string): Rejection {
   return { code, reason };
 }

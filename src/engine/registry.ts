@@ -102,6 +102,8 @@ export interface EffectContext extends ReadContext {
 /** Turns a validated effect proposal into concrete events. */
 export interface EffectDef {
   type: string;
+  /** The arguments it reads, by name, `?` marking one it can do without (the authors' reference lists them). */
+  args: readonly string[];
   resolve(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection;
 }
 

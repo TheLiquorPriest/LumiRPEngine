@@ -118,9 +118,10 @@ export const storyPack: PackDef = {
       return typeof v === "number" || typeof v === "boolean" || typeof v === "string" ? v : v !== null;
     });
 
-    r.effect({ type: "story.flag", resolve: (a) => (strOf(a.name) === "" ? reject("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }]) });
+    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => (strOf(a.name) === "" ? reject("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }]) });
     r.effect({
       type: "story.answer",
+      args: ["track", "answer", "decision?"],
       resolve(a, ctx) {
         const track = openPuzzle(ctx, strOf(a.track));
         if (!track) return reject("not_a_puzzle", `no open puzzle ${labelOf(ctx, strOf(a.track))}`);

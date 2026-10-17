@@ -1296,6 +1296,7 @@ export const economyPack: PackDef = {
 
     r.effect({
       type: "economy.buy",
+      args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?"],
       resolve(args, ctx) {
         const payer = strOf(args.payer) || ctx.world.pov;
         const qty = typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
@@ -1320,11 +1321,12 @@ export const economyPack: PackDef = {
         return out;
       },
     });
-    r.effect({ type: "economy.transfer", resolve: (a, ctx) => transfer(ctx, strOf(a.from) || ctx.world.pov, strOf(a.to), amountOf(a.cents), strOf(a.memo, "Payment"), typeof a.method === "string" ? payMethodOf(a.method) : "auto") });
-    r.effect({ type: "economy.move", resolve: (a, ctx) => move(ctx, strOf(a.from), strOf(a.to), amountOf(a.cents), strOf(a.memo, "Transfer")) });
+    r.effect({ type: "economy.transfer", args: ["to", "cents", "from?", "memo?", "method?"], resolve: (a, ctx) => transfer(ctx, strOf(a.from) || ctx.world.pov, strOf(a.to), amountOf(a.cents), strOf(a.memo, "Payment"), typeof a.method === "string" ? payMethodOf(a.method) : "auto") });
+    r.effect({ type: "economy.move", args: ["from", "to", "cents", "memo?"], resolve: (a, ctx) => move(ctx, strOf(a.from), strOf(a.to), amountOf(a.cents), strOf(a.memo, "Transfer")) });
     // Template `price_modifier`: `percent` (+25 = 25 % dearer) for a `scope` (a category, or all) at a `place`, for `minutes` or until cleared (`percent: 0` or `clear`).
     r.effect({
       type: "economy.price_modifier",
+      args: ["percent", "scope?", "place?", "minutes?", "id?", "clear?"],
       resolve(a, ctx) {
         const scope = strOf(a.scope, "all");
         const place = strOf(a.place);
@@ -1338,9 +1340,10 @@ export const economyPack: PackDef = {
       },
     });
     // Cash lost or stolen with what holds it (a wallet, a purse): lost cash goes to the outside world, stolen cash to the thief.
-    r.effect({ type: "economy.lose", resolve: (a, ctx) => loseWith(ctx, strOf(a.item), strOf(a.thief) || undefined) });
+    r.effect({ type: "economy.lose", args: ["item", "thief?"], resolve: (a, ctx) => loseWith(ctx, strOf(a.item), strOf(a.thief) || undefined) });
     r.effect({
       type: "economy.pay_card",
+      args: ["card", "from?", "cents?"],
       resolve(a, ctx) {
         const card = strOf(a.card);
         const kind = accountType(ctx.state, card);
@@ -1353,6 +1356,7 @@ export const economyPack: PackDef = {
     });
     r.effect({
       type: "economy.invest",
+      args: ["cents", "owner?", "sell?"],
       resolve(a, ctx) {
         const owner = strOf(a.owner) || ctx.world.pov;
         const account = ofType(ctx.state, owner, "brokerage")[0];

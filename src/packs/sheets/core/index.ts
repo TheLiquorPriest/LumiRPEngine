@@ -255,6 +255,7 @@ export const sheetsPack: PackDef = {
 
     r.effect({
       type: "sheets.condition",
+      args: ["condition", "who?", "label?", "mod?", "minutes?", "clear?"],
       resolve(a, ctx) {
         const who = strOf(a.who) || ctx.world.pov;
         const e = own(ctx.state.entities, who);

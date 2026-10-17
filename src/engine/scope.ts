@@ -51,40 +51,43 @@ export interface ScopeInput {
   rng?: Rng;
 }
 
-/** The engine's own formula functions, as `call` below handles them. */
-export const BUILTIN_FUNCTIONS = [
-  "field",
-  "rel",
-  "has_rel",
-  "rel_count",
-  "rel_field",
-  "stage",
-  "since",
-  "place",
-  "at",
-  "level",
-  "knows",
-  "fired",
-  "attempts",
-  "revealed",
-  "band",
-  "next_time",
-  "today_at",
-  "hours",
-  "days",
-  "holiday",
-  "count_at",
-  "table",
-  "table_step",
-  "roll",
-] as const;
+/**
+ * The engine's own formula functions, as `call` below handles them, each with its parameters
+ * (`?`: may be left out); the authors' reference lists them (`bun run reference`).
+ */
+export const BUILTIN_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
+  field: ["entity", "field"],
+  rel: ["entity", "type", "to?"],
+  has_rel: ["entity", "type", "to?"],
+  rel_count: ["entity", "type"],
+  rel_field: ["from", "type", "to", "field"],
+  stage: ["track"],
+  since: ["track"],
+  place: ["entity"],
+  at: ["entity", "place"],
+  level: ["entity", "domain"],
+  knows: ["entity", "subject"],
+  fired: ["rule"],
+  attempts: ["track"],
+  revealed: ["track", "stage?"],
+  band: ["entity", "field"],
+  next_time: ["time"],
+  today_at: ["time"],
+  hours: ["n"],
+  days: ["n"],
+  holiday: [],
+  count_at: ["place", "kind?"],
+  table: ["table", "key", "column"],
+  table_step: ["table", "value", "column"],
+  roll: ["notation"],
+};
 
 /**
  * Every function a formula outside an effect argument may call: the math built-ins, the engine's
  * and the registry's formulas, sorted (Build's expression editor offers them).
  */
 export function formulaFunctions(reg: Registry): string[] {
-  const names = new Set<string>([...MATH_FUNCTIONS, ...BUILTIN_FUNCTIONS, ...reg.formulas.keys()]);
+  const names = new Set<string>([...MATH_FUNCTIONS, ...Object.keys(BUILTIN_FUNCTIONS), ...reg.formulas.keys()]);
   for (const name of EFFECT_ONLY_FUNCTIONS) names.delete(name);
   return [...names].sort();
 }

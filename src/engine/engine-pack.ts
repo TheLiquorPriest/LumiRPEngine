@@ -308,25 +308,25 @@ export const enginePack: PackDef = {
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
     // Taxonomy (DESIGN §4.1): what a selector tests, one constraint at a time. An unknown entity is false (or "").
-    r.formula("kind_is", (ctx, e, kind) => {
-      const hit = entityArg(ctx, e);
+    r.formula("kind_is", (ctx, entity, kind) => {
+      const hit = entityArg(ctx, entity);
       return hit !== null && kindIs(ctx.registry, ctx.world, hit[1].kind, String(kind ?? ""));
     });
-    r.formula("in_class", (ctx, e, facet, value) => {
-      const hit = entityArg(ctx, e);
+    r.formula("in_class", (ctx, entity, facet, value) => {
+      const hit = entityArg(ctx, entity);
       return hit !== null && inClass(ctx.world, ctx.state, hit[0], String(facet ?? ""), [String(value ?? "")]);
     });
-    r.formula("has_tag", (ctx, e, tag) => {
-      const hit = entityArg(ctx, e);
+    r.formula("has_tag", (ctx, entity, tag) => {
+      const hit = entityArg(ctx, entity);
       return hit !== null && tagsOf(ctx.world, ctx.state, hit[0]).includes(String(tag ?? ""));
     });
-    r.formula("member_of", (ctx, e, group) => {
-      const hit = entityArg(ctx, e);
+    r.formula("member_of", (ctx, entity, group) => {
+      const hit = entityArg(ctx, entity);
       return hit !== null && isMemberOf(ctx.state, hit[0], String(group ?? ""));
     });
-    r.formula("tier_of", (ctx, e) => entityArg(ctx, e)?.[1].tier ?? "");
-    r.formula("band_of", (ctx, e) => {
-      const hit = entityArg(ctx, e);
+    r.formula("tier_of", (ctx, entity) => entityArg(ctx, entity)?.[1].tier ?? "");
+    r.formula("band_of", (ctx, entity) => {
+      const hit = entityArg(ctx, entity);
       return hit ? (tierBand(ctx.world, hit[1].tier) ?? "") : "";
     });
   },

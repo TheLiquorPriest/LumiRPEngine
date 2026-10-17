@@ -357,31 +357,31 @@ export const gearPack: PackDef = {
     r.formula("kit_complete", (ctx, kit) => kitStatus(ctx, String(kit ?? ""))?.complete ?? false);
     r.formula("lent_out", (ctx, thing) => grants(ctx.state).some((g) => g.thing === thing));
 
-    const wrap = (type: string, f: (args: Record<string, JsonValue>, ctx: ReadContext) => Events): void => r.effect({ type, resolve: (args, ctx) => f(args, ctx) });
-    wrap("gear.transfer", (a, ctx) => {
+    const wrap = (type: string, args: readonly string[], f: (args: Record<string, JsonValue>, ctx: ReadContext) => Events): void => r.effect({ type, args, resolve: (a, ctx) => f(a, ctx) });
+    wrap("gear.transfer", ["item", "to"], (a, ctx) => {
       const item = strOf(a.item);
       const to = strOf(a.to);
       const moved = transfer(ctx, item, to);
       return Array.isArray(moved) && own(ctx.state.entities, item)?.fields.owner === to ? [...moved, ...endLoans(ctx, item)] : moved;
     });
-    wrap("gear.drop", (a, ctx) => drop(ctx, strOf(a.item), strOf(a.place) || (placeOfEntity(ctx.state, strOf(a.item)) ?? "")));
-    wrap("gear.give", (a, ctx) => give(ctx, strOf(a.item), strOf(a.from), strOf(a.to)));
+    wrap("gear.drop", ["item", "place?"], (a, ctx) => drop(ctx, strOf(a.item), strOf(a.place) || (placeOfEntity(ctx.state, strOf(a.item)) ?? "")));
+    wrap("gear.give", ["item", "from", "to"], (a, ctx) => give(ctx, strOf(a.item), strOf(a.from), strOf(a.to)));
     // An NPC hands over something the world hadn't tracked yet: it comes into being, held by the recipient.
-    wrap("gear.receive", (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}` }));
-    wrap("gear.take_piece", (a, ctx) => takePiece(ctx, strOf(a.kit), strOf(a.piece), strOf(a.to)));
+    wrap("gear.receive", ["name", "to", "from?"], (a, ctx) => spawn(ctx, { name: strOf(a.name), owner: strOf(a.to), holder: strOf(a.to), salt: `give:${strOf(a.from)}:${ctx.state.clock}` }));
+    wrap("gear.take_piece", ["kit", "piece", "to"], (a, ctx) => takePiece(ctx, strOf(a.kit), strOf(a.piece), strOf(a.to)));
     // A loan's end: the time the player said (`said`: "7 tonight", "tomorrow", "for 3 hours"), else
     // `until` (a clock, from the days). A said time nothing in it reads as falls back to the days;
     // with no days either, there is no end and no loan.
-    wrap("gear.lend", (a, ctx) => {
+    wrap("gear.lend", ["item", "to", "until?", "said?"], (a, ctx) => {
       const said = strOf(a.said);
       const at = said !== "" ? clockOfPhrase(calendarOf(ctx.world), ctx.state.clock, said) : null;
       const until = at ?? numOf(a.until, NaN);
       if (said !== "" && at === null && !(until > ctx.state.clock)) return reject("bad_until", `"${said}" names no time; say how many days or until when`);
       return lend(ctx, strOf(a.item), strOf(a.to), until);
     });
-    wrap("gear.retrieve", (a, ctx) => retrieve(ctx, strOf(a.item)));
-    wrap("gear.wear", (a, ctx) => wear(ctx, strOf(a.item), strOf(a.wearer), typeof a.slot === "string" ? a.slot : undefined));
-    wrap("gear.remove", (a, ctx) => {
+    wrap("gear.retrieve", ["item"], (a, ctx) => retrieve(ctx, strOf(a.item)));
+    wrap("gear.wear", ["item", "wearer", "slot?"], (a, ctx) => wear(ctx, strOf(a.item), strOf(a.wearer), typeof a.slot === "string" ? a.slot : undefined));
+    wrap("gear.remove", ["item"], (a, ctx) => {
       const item = strOf(a.item);
       const e = own(ctx.state.entities, item);
       if (!e) return reject("missing_entity", `no item ${labelOf(ctx, item)}`);
@@ -389,6 +389,7 @@ export const gearPack: PackDef = {
     });
     r.effect({
       type: "gear.use",
+      args: ["item", "user?"],
       resolve(args, ctx) {
         const item = strOf(args.item);
         const user = strOf(args.user) || ctx.world.pov;
@@ -416,6 +417,7 @@ export const gearPack: PackDef = {
     // Losing something: it leaves its holder and the world (whereabouts unknown); cash inside goes with it.
     r.effect({
       type: "gear.lose",
+      args: ["item", "thief?"],
       resolve(args, ctx) {
         const item = strOf(args.item);
         const e = own(ctx.state.entities, item);
