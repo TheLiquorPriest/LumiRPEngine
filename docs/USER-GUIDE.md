@@ -376,10 +376,10 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Learning a fact** (New facts) · `knows` | You learn a public fact | confirm |
 | **Giving things** (Handovers) · `give` | A handover between two characters | confirm |
 | **Purchases** · `purchase` | A narrated purchase, priced from the catalog | confirm |
-| **Money transfers** (Payments) · `transfer` | Money moves between people, or between someone's own accounts | auto |
-| **Feelings toward others** (Feelings) · `regard` | Someone's feelings change | auto |
+| **Money transfers** (Payments) · `transfer` | Money moves between people, or between someone's own accounts | confirm |
+| **Feelings toward others** (Feelings) · `regard` | Someone's feelings change | confirm |
 | **Quantities** · `quantity` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
-| **New people and things** (New characters) · `spawn` | A new character or item appears (capped, and duplicates are removed) | auto |
+| **New people and things** (New characters) · `spawn` | A new character or item appears (capped, and duplicates are removed) | confirm |
 
 Beyond the mode, every field has a limit on how much a single change may be, and **the strictest rule always wins**. Fields a world marks as locked are never offered to the model. If a narrated change contradicts the engine's own outcome, the engine's outcome wins. A purchase takes in the seller's handover and the payment, so one sale is not applied three times, and a payer has to be an account.
 

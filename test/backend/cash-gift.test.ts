@@ -13,12 +13,13 @@ import { Rig } from "../support/rig";
 
 const EXTRACT_MARK = "propose concrete state changes";
 
-/** One turn in a fresh Port Alder chat whose reply the extractor reads as `proposals`; the POV's net worth after it, and the chips. */
-async function gift(proposals: JsonObject[]) {
+/** One turn in a fresh Port Alder chat whose reply the extractor reads as `proposals`; the POV's net worth after it, and the chips. `autoTransfer` pins transfer to auto (D4 starts it in confirm) for tests of the apply mechanics. */
+async function gift(proposals: JsonObject[], autoTransfer = true) {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+  if (autoTransfer) rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { transfer: { mode: "auto" } } } }));
   rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(EXTRACT_MARK) ? JSON.stringify({ proposals }) : "{}");
   await rig.turn(chatId, "I ask Danny if he can spot me for gas.", "Danny hands me $20 for gas. \"Pay me back Friday.\"");
   const core = await rig.rt.ledger.core(chatId, rig.host.userId);
@@ -28,7 +29,7 @@ async function gift(proposals: JsonObject[]) {
   const world = core?.worldAt(state.revision);
   if (!world) throw new Error("no world");
   const prompt = rig.host.quietCalls.map((c) => c.messages[0]?.content ?? "").find((m) => m.includes(EXTRACT_MARK)) ?? "";
-  return { state, world, prompt, worth: netWorth(state, "pov"), chips: view.chips.map((c) => `${c.kind}: ${c.label}`), errors: rig.rt.ledger.errors };
+  return { rig, chatId, state, world, prompt, worth: netWorth(state, "pov"), chipList: view.chips, chips: view.chips.map((c) => `${c.kind}: ${c.label}`), errors: rig.rt.ledger.errors };
 }
 
 describe("an NPC's cash gift", () => {
@@ -76,5 +77,20 @@ describe("an NPC's cash gift", () => {
     const notes = [declineNote(move, "no route", "accept", state, world), declineNote(move, "no route", "remove", state, world)];
     expect(notes.every((n) => n.includes('"Danny Okafor'))).toBe(true);
     expect(notes.some((n) => n.includes("danny"))).toBe(false);
+  });
+
+  test("with default settings a narrated transfer between people waits on a confirm chip; no money moves until Apply", async () => {
+    const none = await gift([], false);
+    const got = await gift([{ type: "transfer", from: "danny_okafor", to: "pov", amount: 20, method: "cash" }], false);
+    expect(got.worth).toBe(none.worth);
+    expect(got.chips.filter((c) => c.startsWith("undo:"))).toEqual([]);
+    const confirm = got.chipList.find((c) => c.kind === "confirm");
+    if (!confirm) throw new Error("no confirm chip");
+    got.rig.body(await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: confirm.id, choice: "confirm" }));
+    const core = await got.rig.rt.ledger.core(got.chatId, got.rig.host.userId);
+    const after = core?.fold(toChain(await got.rig.host.chats.messages(got.chatId, got.rig.host.userId))).state;
+    if (!after) throw new Error("no state");
+    expect(netWorth(after, "pov") - none.worth).toBe(2000);
+    expect(got.rig.rt.ledger.errors).toEqual([]);
   });
 });

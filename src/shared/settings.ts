@@ -55,19 +55,17 @@ export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows
 export type ExtractionType = (typeof EXTRACTION_TYPES)[number];
 
 /**
- * D4: per-type cold-start modes. A first measurement set the first three; the engine's
- * real `extract` step re-measured on the same 38 fixtures (DeepSeek v4 flash; DESIGN
- * §9.4) flipped every type at precision ≥ 0.90 to `auto`: `regard` (4/4), `transfer` (2/2) and
- * `spawn` (1/1) — small samples, so D4 learning on the player's own connection is the real gate.
- * `quantity` keeps its field bounds' mode. Learning (ExtractionLearning) moves a type from here.
+ * D4: per-type cold-start modes. These are only the start: per-connection learning
+ * (ExtractionLearning) promotes a type to `auto` at ≥ 0.90 acceptance over at least 30
+ * confirm/undo outcomes. `quantity` keeps its field bounds' mode.
  */
 export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundMode>>> = Object.freeze({
   time_advance: "auto",
   location: "auto",
   condition: "auto",
-  regard: "auto",
-  transfer: "auto",
-  spawn: "auto",
+  regard: "confirm",
+  transfer: "confirm",
+  spawn: "confirm",
   knows: "confirm",
   give: "confirm",
   purchase: "confirm",

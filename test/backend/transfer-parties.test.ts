@@ -17,6 +17,8 @@ async function turn(proposals: JsonObject[]) {
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+  // These tests exercise transfers applying; transfer starts in confirm (D4), so pin it to auto.
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { transfer: { mode: "auto" } } } }));
   rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(EXTRACT_MARK) ? JSON.stringify({ proposals }) : "{}");
   await rig.turn(chatId, "I sort out some money.", "It's done.");
   const core = await rig.rt.ledger.core(chatId, rig.host.userId);
