@@ -4,6 +4,9 @@
 // (`engine/expr`), dice are notation strings (`engine/dice`). Every collection is keyed by id.
 // Packs extend kinds, relations, actions, rules, schedules and tables; the shape itself never
 // changes with realism level (D18: levels gate processes, rendering and extraction only).
+//
+// The published JSON Schema, `schemas/lre-world-v1.schema.json`, is written by hand from these
+// types and changes with them; its test checks it against the starters and the preview world.
 
 import type { JsonObject, JsonValue } from "./json";
 import type {

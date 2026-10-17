@@ -11,7 +11,8 @@ This is the contract between the modules. Behavior is specified in [DESIGN.md](D
 | `src/shared/tiers.ts` | World tiers over the detail bands: band labels, default tiers, a tier's band, the spawn and lead tiers, tier agent defaults |
 | `src/shared/world.ts` | The world document `lre-world-v1`, and the map document `lre-map-v1` (`MapDoc`) |
 | `src/shared/lre-map-v1.schema.json` | The published JSON Schema of a map, read by Build's editor, the Describe a map prompt and outside tools |
-| `src/shared/schema-check.ts` | A small JSON Schema reader (the keywords the published schemas use) with plain-language problems at JSON paths |
+| `schemas/lre-world-v1.schema.json` | The published JSON Schema of a whole world document, written by hand from `shared/world.ts`; its `maps` refer to the map schema by `$id`. `test/shared/world-schema.test.ts` holds it to the starters and the preview world |
+| `src/shared/schema-check.ts` | A small JSON Schema reader (the keywords the published schemas use, and `$ref` to another schema by its `$id`) with plain-language problems at JSON paths |
 | `src/shared/maps.ts` | Maps: the schema check, the compiler (`compileMaps`: a map's places, grid and routes, marked as its own), the map lint, the JSON layout and the templates |
 | `src/shared/tables.ts` | Pinned data tables and the build-time mapping |
 | `src/shared/ledger.ts` | Events, `Rec`, `post` entries, markers, `MessageLedger`, `ChatRun`, the journal, fold outputs |

@@ -1,0 +1,911 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TheLiquorPriest/LumiRPEngine/blob/main/schemas/lre-world-v1.schema.json",
+  "title": "lre-world-v1",
+  "description": "A LumiRPEngine world as this engine writes it: one JSON document per revision. Collections are keyed by id. Formulas are expression-language strings and dice are notation strings. An older document is brought up to date by migrate (load does it) before it is checked against this schema.",
+  "type": "object",
+  "required": ["format", "id", "name", "engineVersion", "packs", "pins", "kinds", "relations", "entities", "places", "routes", "grids", "maps", "rules", "actions", "checks", "calendar", "schedules", "tracks", "tables", "realism", "time", "sections", "steps", "suppressed", "lore", "loreIndex", "classifications", "seedMode", "lenientPricing", "currency", "pov", "tiers", "start"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "enum": ["lre-world-v1"] },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "type": "string" },
+    "engineVersion": { "type": "string", "description": "The engine version that last wrote the document." },
+    "packs": {
+      "type": "object",
+      "description": "Enabled packs by id, each with the pack format version the world was authored against and its config.",
+      "propertyNames": { "minLength": 1 },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["version", "config"],
+        "additionalProperties": false,
+        "properties": { "version": { "type": "integer", "minimum": 1 }, "config": { "type": "object" } }
+      }
+    },
+    "pins": {
+      "type": "object",
+      "description": "Pinned generator versions and data-table revisions.",
+      "required": ["generators", "tables"],
+      "additionalProperties": false,
+      "properties": {
+        "generators": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "tables": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "kinds": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/kind" } },
+    "relations": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/relationType" } },
+    "entities": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/entity" } },
+    "places": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/place" } },
+    "routes": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/route" } },
+    "grids": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/grid" } },
+    "maps": {
+      "type": "object",
+      "description": "Maps by id (lre-map-v1): the source of truth for the places, grids and routes they compile into.",
+      "propertyNames": { "minLength": 1 },
+      "additionalProperties": { "$ref": "https://github.com/TheLiquorPriest/LumiRPEngine/blob/main/src/shared/lre-map-v1.schema.json" }
+    },
+    "rules": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/rule" } },
+    "actions": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/action" } },
+    "checks": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/check" } },
+    "calendar": { "$ref": "#/$defs/calendar" },
+    "schedules": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/schedule" } },
+    "tracks": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/track" } },
+    "tables": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/table" } },
+    "realism": { "$ref": "#/$defs/realism" },
+    "time": { "$ref": "#/$defs/time" },
+    "sections": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/section" } },
+    "steps": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/step" } },
+    "suppressed": {
+      "type": "array",
+      "description": "Sources of adopted user entries, a retired design: kept for the format; nothing reads them.",
+      "items": {
+        "anyOf": [
+          { "title": "{\"bookId\", \"entryId\"}", "type": "object", "required": ["bookId", "entryId"], "additionalProperties": false, "properties": { "bookId": { "type": "string" }, "entryId": { "type": "string" } } },
+          { "title": "{\"bookId\", \"comment\", \"contentHash\"}", "type": "object", "required": ["bookId", "comment", "contentHash"], "additionalProperties": false, "properties": { "bookId": { "type": "string" }, "comment": { "type": "string" }, "contentHash": { "type": "string" } } }
+        ]
+      }
+    },
+    "lore": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/loreEntry" } },
+    "loreIndex": { "$ref": "#/$defs/loreIndex" },
+    "mapSettings": {
+      "type": "object",
+      "description": "How the map shows the world, and the optional grid system. Absent: knowledge display, movement off, sight 3.",
+      "required": ["display", "grid"],
+      "additionalProperties": false,
+      "properties": {
+        "display": { "enum": ["knowledge", "fog"] },
+        "grid": {
+          "type": "object",
+          "required": ["movement", "sightRadius"],
+          "additionalProperties": false,
+          "properties": {
+            "movement": { "type": "boolean", "description": "The grid system: walls and doors steer the POV, things lie in cells, cells and zones trigger rules." },
+            "sightRadius": { "type": "number", "minimum": 0, "description": "Cells the POV sees around it; read as a whole number up to 32." }
+          }
+        }
+      }
+    },
+    "classifications": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/facet" } },
+    "ruleset": { "$ref": "#/$defs/ruleset" },
+    "seedMode": { "enum": ["fresh", "same_roll"], "description": "Action seeds: a fresh seed per Re-run, or the same roll for the same path and action." },
+    "lenientPricing": { "type": "boolean", "description": "Accept a narrated price inside its band." },
+    "currency": { "$ref": "#/$defs/currency" },
+    "pov": { "$ref": "#/$defs/id", "description": "The POV entity; never capped, whatever its tier." },
+    "tiers": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/tier" } },
+    "spawnTier": { "$ref": "#/$defs/id", "description": "The tier a spawned entity gets when it names none." },
+    "start": {
+      "type": "object",
+      "description": "Where and when the POV starts: a place id and an ISO local date-time.",
+      "required": ["place", "at"],
+      "additionalProperties": false,
+      "properties": { "place": { "$ref": "#/$defs/id" }, "at": { "type": "string", "minLength": 1 } }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1 },
+    "ids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+    "strings": { "type": "array", "items": { "type": "string" } },
+    "expr": { "title": "a formula", "type": "string", "description": "a formula in the expression language" },
+    "level": { "type": "integer", "minimum": 0, "maximum": 4 },
+    "domain": { "enum": ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"] },
+    "domainLevels": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "money": { "$ref": "#/$defs/level" },
+        "gear": { "$ref": "#/$defs/level" },
+        "vehicles": { "$ref": "#/$defs/level" },
+        "castlife": { "$ref": "#/$defs/level" },
+        "relationships": { "$ref": "#/$defs/level" },
+        "space": { "$ref": "#/$defs/level" },
+        "calendar": { "$ref": "#/$defs/level" },
+        "weather": { "$ref": "#/$defs/level" },
+        "sheets": { "$ref": "#/$defs/level" }
+      }
+    },
+    "band": { "enum": ["principal", "supporting", "background"] },
+    "visibility": { "enum": ["public", "known_by", "secret"] },
+    "fieldType": { "enum": ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] },
+    "stepPurpose": { "enum": ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"] },
+    "selector": {
+      "title": "a selector",
+      "type": "object",
+      "description": "Which entities something applies to: every constraint given must hold, a list matches any of its values, an empty selector matches every entity.",
+      "additionalProperties": false,
+      "properties": {
+        "ids": { "$ref": "#/$defs/ids" },
+        "kind": { "$ref": "#/$defs/ids" },
+        "tier": { "$ref": "#/$defs/ids" },
+        "class": { "type": "object", "description": "facet → accepted values", "additionalProperties": { "$ref": "#/$defs/ids" } },
+        "memberOf": { "$ref": "#/$defs/ids" },
+        "tag": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "min": { "type": "number" }, "max": { "type": "number" } }
+    },
+    "effect": {
+      "type": "object",
+      "description": "An effect: a core or pack effect type and its arguments, each a value or a \"=\" formula.",
+      "required": ["type", "args"],
+      "additionalProperties": false,
+      "properties": { "type": { "type": "string", "minLength": 1 }, "args": { "type": "object" } }
+    },
+    "effects": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+    "field": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "$ref": "#/$defs/fieldType" },
+        "label": { "type": "string" },
+        "default": {},
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "pool": {
+          "type": "object",
+          "description": "A current value under an evaluated max (hit points, mana); number fields only.",
+          "required": ["max"],
+          "additionalProperties": false,
+          "properties": {
+            "max": { "type": "string", "minLength": 1, "description": "a field of the same entity, or a formula with the entity as self" },
+            "min": { "type": "number" },
+            "recover": { "$ref": "#/$defs/expr" }
+          }
+        },
+        "values": { "$ref": "#/$defs/strings", "description": "enum values" },
+        "ref": { "$ref": "#/$defs/id", "description": "a ref field's target kind" },
+        "of": { "enum": ["number", "text", "bool", "enum", "ref", "dice", "money", "date", "duration"], "description": "a list field's element type" },
+        "bands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label"],
+            "additionalProperties": false,
+            "properties": { "label": { "type": "string" }, "min": { "type": "number" }, "max": { "type": "number" } }
+          }
+        },
+        "derived": { "$ref": "#/$defs/expr", "description": "computed from this formula and never stored" },
+        "locked": { "type": "boolean" },
+        "bound": {
+          "type": "object",
+          "required": ["mode"],
+          "additionalProperties": false,
+          "properties": { "maxDelta": { "type": "number", "minimum": 0 }, "mode": { "enum": ["auto", "confirm", "never"] } }
+        },
+        "table": { "$ref": "#/$defs/id", "description": "a text field naming a row of this table" },
+        "visibility": { "$ref": "#/$defs/visibility" },
+        "knownBy": { "$ref": "#/$defs/selector" },
+        "domain": { "$ref": "#/$defs/domain" },
+        "level": { "$ref": "#/$defs/level" }
+      }
+    },
+    "fields": { "type": "object", "additionalProperties": { "$ref": "#/$defs/field" } },
+    "kind": {
+      "type": "object",
+      "required": ["id", "label", "fields"],
+      "additionalProperties": false,
+      "properties": { "id": { "$ref": "#/$defs/id" }, "label": { "type": "string" }, "extends": { "$ref": "#/$defs/id" }, "fields": { "$ref": "#/$defs/fields" }, "pack": { "type": "string" } }
+    },
+    "relationType": {
+      "type": "object",
+      "required": ["id", "label", "from", "to", "cardinality", "symmetric", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "from": { "$ref": "#/$defs/id", "description": "a kind, or * for any" },
+        "to": { "$ref": "#/$defs/id", "description": "a kind, or * for any" },
+        "cardinality": { "enum": ["one_one", "one_many", "many_one", "many_many"] },
+        "symmetric": { "type": "boolean" },
+        "inverse": { "$ref": "#/$defs/id" },
+        "fields": { "$ref": "#/$defs/fields" },
+        "pack": { "type": "string" }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "required": ["type", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "$ref": "#/$defs/id" },
+        "to": { "$ref": "#/$defs/id" },
+        "fields": { "type": "object" },
+        "until": { "type": "number", "description": "game minutes: the end of a time-bounded relation" }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "required": ["id", "kind", "name", "tier", "fields", "relations"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "tier": { "$ref": "#/$defs/id", "description": "one of the world's tiers" },
+        "fields": { "type": "object" },
+        "relations": { "type": "array", "items": { "$ref": "#/$defs/relation" } },
+        "levels": { "$ref": "#/$defs/domainLevels" },
+        "agent": { "type": "boolean" },
+        "characterId": { "type": "string" },
+        "visibility": { "$ref": "#/$defs/visibility" },
+        "knownBy": { "$ref": "#/$defs/selector" },
+        "tags": { "$ref": "#/$defs/strings" },
+        "class": { "type": "object", "description": "facet → values", "additionalProperties": { "$ref": "#/$defs/ids" } },
+        "sources": { "$ref": "#/$defs/strings" },
+        "assumed": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+    "place": {
+      "type": "object",
+      "required": ["id", "name", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "parent": { "$ref": "#/$defs/id" },
+        "timeZone": { "type": "string" },
+        "sceneType": { "type": "string" },
+        "grid": { "$ref": "#/$defs/id" },
+        "cell": { "$ref": "#/$defs/point", "description": "position on the parent's grid" },
+        "layoutPos": { "$ref": "#/$defs/point", "description": "position on the parent's node map" },
+        "fields": { "type": "object" },
+        "visibility": { "enum": ["public", "known_by", "secret", "discoverable"] },
+        "knownBy": { "$ref": "#/$defs/selector" },
+        "sources": { "$ref": "#/$defs/strings" },
+        "map": { "$ref": "#/$defs/id", "description": "the map that compiled it" },
+        "adjudicate": { "type": "boolean" }
+      }
+    },
+    "leg": {
+      "type": "object",
+      "required": ["minutes"],
+      "additionalProperties": false,
+      "properties": { "minutes": { "type": "number", "minimum": 0 }, "distanceKm": { "type": "number", "minimum": 0 }, "terrain": { "type": "string" } }
+    },
+    "route": {
+      "type": "object",
+      "required": ["id", "from", "to", "modes", "bidirectional"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "from": { "$ref": "#/$defs/id" },
+        "to": { "$ref": "#/$defs/id" },
+        "modes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "walk": { "$ref": "#/$defs/leg" }, "road": { "$ref": "#/$defs/leg" }, "offroad": { "$ref": "#/$defs/leg" }, "water": { "$ref": "#/$defs/leg" } }
+        },
+        "bidirectional": { "type": "boolean" },
+        "map": { "$ref": "#/$defs/id" }
+      }
+    },
+    "cells": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+    "grid": {
+      "type": "object",
+      "required": ["id", "width", "height", "terrain", "blocked", "zones"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "cellMeters": { "type": "number", "exclusiveMinimum": 0 },
+        "terrain": { "$ref": "#/$defs/strings", "description": "terrain per cell, row-major" },
+        "blocked": { "$ref": "#/$defs/cells" },
+        "zones": { "type": "object", "additionalProperties": { "$ref": "#/$defs/cells" } },
+        "items": { "type": "object", "description": "thing id → the cell it starts in", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "map": { "$ref": "#/$defs/id" }
+      }
+    },
+    "trigger": {
+      "anyOf": [
+        { "title": "{\"event\": …}", "type": "object", "required": ["event"], "additionalProperties": false, "properties": { "event": { "type": "string", "minLength": 1 } } },
+        { "title": "{\"tick\": …}", "type": "object", "required": ["tick"], "additionalProperties": false, "properties": { "tick": { "enum": ["turn", "slot", "day"] } } },
+        { "title": "{\"enter\": …}", "type": "object", "required": ["enter"], "additionalProperties": false, "properties": { "enter": { "$ref": "#/$defs/id" } } },
+        { "title": "{\"at\": …}", "type": "object", "required": ["at"], "additionalProperties": false, "properties": { "at": { "$ref": "#/$defs/expr" } } },
+        { "title": "{\"zone\": …}", "type": "object", "required": ["zone"], "additionalProperties": false, "properties": { "zone": { "type": "string", "minLength": 1 }, "in": { "$ref": "#/$defs/id" }, "who": { "$ref": "#/$defs/selector" } } },
+        {
+          "title": "{\"cell\": …}",
+          "type": "object",
+          "required": ["cell", "in"],
+          "additionalProperties": false,
+          "properties": { "cell": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2, "maxItems": 2 }, "in": { "$ref": "#/$defs/id" }, "who": { "$ref": "#/$defs/selector" } }
+        }
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "required": ["id", "on", "do"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "on": { "$ref": "#/$defs/trigger" },
+        "when": { "$ref": "#/$defs/expr" },
+        "do": { "$ref": "#/$defs/effects" },
+        "once": { "type": "boolean" },
+        "cooldownMinutes": { "type": "number", "minimum": 0 },
+        "interrupt": { "type": "boolean" },
+        "beat": {
+          "type": "object",
+          "required": ["hint"],
+          "additionalProperties": false,
+          "properties": { "hint": { "type": "string" }, "weight": { "type": "number" } }
+        },
+        "pack": { "type": "string" }
+      }
+    },
+    "param": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": { "type": { "$ref": "#/$defs/fieldType" }, "label": { "type": "string" }, "ref": { "$ref": "#/$defs/id" }, "optional": { "type": "boolean" }, "of": { "$ref": "#/$defs/selector" } }
+    },
+    "check": {
+      "title": "a check",
+      "type": "object",
+      "description": "A dice expression plus outcome bands, with exact odds.",
+      "required": ["id", "dice"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "dice": { "type": "string", "minLength": 1, "description": "dice notation, e.g. 1d20 or 2d6+1" },
+        "modifier": { "$ref": "#/$defs/expr" },
+        "advantage": { "$ref": "#/$defs/expr", "description": "-1, 0 or 1" },
+        "dc": { "$ref": "#/$defs/expr" },
+        "vs": {
+          "type": "object",
+          "description": "The other side of an opposed check.",
+          "additionalProperties": false,
+          "properties": { "who": { "type": "string" }, "check": { "$ref": "#/$defs/id" }, "modifier": { "$ref": "#/$defs/expr" }, "passive": { "$ref": "#/$defs/expr" } }
+        },
+        "bands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["outcome"],
+            "additionalProperties": false,
+            "properties": { "outcome": { "type": "string", "minLength": 1 }, "min": { "type": "number" }, "max": { "type": "number" }, "natural": { "$ref": "#/$defs/span" }, "margin": { "$ref": "#/$defs/span" } }
+          }
+        },
+        "pass": { "$ref": "#/$defs/strings" },
+        "auto": { "type": "string" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["id", "label", "params", "requires", "outcomes", "duration"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "params": { "type": "object", "additionalProperties": { "$ref": "#/$defs/param" } },
+        "requires": { "type": "array", "items": { "$ref": "#/$defs/expr" } },
+        "check": { "anyOf": [{ "title": "a check id", "type": "string", "minLength": 1 }, { "$ref": "#/$defs/check" }] },
+        "outcomes": { "type": "object", "description": "effects per check outcome; default when there is no check", "additionalProperties": { "$ref": "#/$defs/effects" } },
+        "duration": { "$ref": "#/$defs/expr", "description": "minutes" },
+        "activity": {
+          "type": "object",
+          "required": ["type", "until"],
+          "additionalProperties": false,
+          "properties": { "type": { "type": "string", "minLength": 1 }, "until": { "$ref": "#/$defs/expr" } }
+        },
+        "lexicon": { "$ref": "#/$defs/strings" },
+        "observable": { "type": "string" },
+        "pack": { "type": "string" },
+        "adjudicate": { "type": "boolean" }
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "required": ["system", "epoch", "timeZone", "dayParts", "holidays"],
+      "additionalProperties": false,
+      "properties": {
+        "system": { "enum": ["gregorian", "custom"] },
+        "epoch": { "type": "string", "minLength": 1, "description": "ISO local date-time; game minutes count from here" },
+        "timeZone": { "type": "string" },
+        "dayParts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "start"],
+            "additionalProperties": false,
+            "properties": { "id": { "$ref": "#/$defs/id" }, "label": { "type": "string" }, "start": { "type": "string", "description": "HH:MM" } }
+          }
+        },
+        "holidays": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "rule", "dayOff"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "label": { "type": "string" },
+              "rule": {
+                "anyOf": [
+                  { "title": "a fixed date", "type": "object", "required": ["type", "month", "day"], "additionalProperties": false, "properties": { "type": { "enum": ["fixed"] }, "month": { "type": "integer" }, "day": { "type": "integer" } } },
+                  { "title": "an nth weekday", "type": "object", "required": ["type", "month", "weekday", "n"], "additionalProperties": false, "properties": { "type": { "enum": ["nth_weekday"] }, "month": { "type": "integer" }, "weekday": { "type": "integer" }, "n": { "type": "integer" } } },
+                  { "title": "days from another holiday", "type": "object", "required": ["type", "to", "days"], "additionalProperties": false, "properties": { "type": { "enum": ["relative"] }, "to": { "type": "string" }, "days": { "type": "integer" } } },
+                  { "title": "days from Easter", "type": "object", "required": ["type", "days"], "additionalProperties": false, "properties": { "type": { "enum": ["easter"] }, "days": { "type": "integer" } } }
+                ]
+              },
+              "dayOff": { "type": "boolean" }
+            }
+          }
+        },
+        "custom": {
+          "type": "object",
+          "description": "A custom calendar's months and weekdays.",
+          "required": ["monthLengths", "monthNames", "weekdayNames"],
+          "additionalProperties": false,
+          "properties": {
+            "monthLengths": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+            "monthNames": { "$ref": "#/$defs/strings" },
+            "weekdayNames": { "$ref": "#/$defs/strings" }
+          }
+        }
+      }
+    },
+    "weighted": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["value", "weight"],
+        "additionalProperties": false,
+        "properties": { "value": {}, "weight": { "type": "number", "minimum": 0 } }
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "required": ["id", "target", "recurrence", "slots"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "owner": { "anyOf": [{ "title": "an entity, group or kind id", "type": "string", "minLength": 1 }, { "$ref": "#/$defs/selector" }] },
+        "target": { "type": "string", "minLength": 1, "description": "the field or relation a slot's value sets" },
+        "recurrence": {
+          "type": "object",
+          "required": ["every"],
+          "additionalProperties": false,
+          "properties": {
+            "every": { "enum": ["day", "week", "month", "year"] },
+            "weekdays": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 6 } },
+            "days": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+            "except": { "$ref": "#/$defs/ids" },
+            "from": { "type": "string" },
+            "until": { "type": "string" }
+          }
+        },
+        "slots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["start", "end"],
+            "additionalProperties": false,
+            "properties": {
+              "start": { "type": "string", "description": "HH:MM" },
+              "end": { "type": "string", "description": "HH:MM" },
+              "value": {},
+              "weighted": { "$ref": "#/$defs/weighted" },
+              "given": { "type": "object", "description": "the previous slot's value → its distribution", "additionalProperties": { "$ref": "#/$defs/weighted" } }
+            }
+          }
+        },
+        "pack": { "type": "string" }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "required": ["label", "next"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "objectives": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              { "$ref": "#/$defs/expr" },
+              { "title": "{\"label\", \"when\"}", "type": "object", "required": ["label", "when"], "additionalProperties": false, "properties": { "label": { "type": "string" }, "when": { "$ref": "#/$defs/expr" } } }
+            ]
+          }
+        },
+        "next": {
+          "type": "array",
+          "items": { "type": "object", "required": ["to", "when"], "additionalProperties": false, "properties": { "to": { "$ref": "#/$defs/id" }, "when": { "$ref": "#/$defs/expr" } } }
+        },
+        "effects": { "$ref": "#/$defs/effects" },
+        "gate": { "$ref": "#/$defs/expr" },
+        "fail": { "type": "object", "required": ["when", "to"], "additionalProperties": false, "properties": { "when": { "$ref": "#/$defs/expr" }, "to": { "$ref": "#/$defs/id" } } },
+        "rewards": { "$ref": "#/$defs/effects" },
+        "cue": { "type": "string", "description": "player-facing cue text" },
+        "truth": { "type": "string", "description": "the secret truth: GM-only until revealed" },
+        "answer": {
+          "type": "object",
+          "required": ["expect", "normalize"],
+          "additionalProperties": false,
+          "properties": {
+            "expect": { "$ref": "#/$defs/strings" },
+            "normalize": { "type": "boolean" },
+            "decision": { "type": "object", "required": ["threshold"], "additionalProperties": false, "properties": { "threshold": { "type": "number", "minimum": 0, "maximum": 1 } } }
+          }
+        },
+        "hints": { "$ref": "#/$defs/strings" },
+        "priority": { "type": "number" }
+      }
+    },
+    "track": {
+      "type": "object",
+      "required": ["id", "kind", "label", "start", "stages", "visibility"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["quest", "secret", "puzzle", "agenda"] },
+        "label": { "type": "string" },
+        "owner": { "$ref": "#/$defs/id" },
+        "start": { "$ref": "#/$defs/id" },
+        "stages": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/stage" } },
+        "visibility": { "$ref": "#/$defs/visibility" },
+        "knownBy": { "$ref": "#/$defs/selector" },
+        "adjudicate": { "type": "boolean" }
+      }
+    },
+    "column": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["int", "number", "text", "bool", "band", "enum", "ref", "list", "json"] },
+        "unit": { "type": "string" },
+        "values": { "$ref": "#/$defs/strings" },
+        "ref": { "$ref": "#/$defs/id" },
+        "of": { "enum": ["int", "number", "text", "bool", "band", "enum", "ref", "json"] },
+        "optional": { "type": "boolean" },
+        "doc": { "type": "string" }
+      }
+    },
+    "table": {
+      "type": "object",
+      "required": ["id", "pack", "schema", "revision", "label", "columns", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "pack": { "type": "string" },
+        "schema": { "type": "string", "description": "lre-table/<tableId>/v<n>: the row shape version the pack reads" },
+        "revision": { "type": "string", "description": "computed from the schema, columns and rows; never authored" },
+        "label": { "type": "string" },
+        "source": {
+          "type": "object",
+          "required": ["dataPack", "file", "sourceSchema", "reflectsPeriod", "approximate", "basis"],
+          "additionalProperties": false,
+          "properties": {
+            "dataPack": { "type": "string" },
+            "file": { "type": "string" },
+            "sourceSchema": { "type": "string" },
+            "reflectsPeriod": { "type": "string" },
+            "approximate": { "type": "boolean" },
+            "basis": { "anyOf": [{ "title": "a sentence", "type": "string" }, { "title": "a sentence per aspect", "type": "object", "additionalProperties": { "type": "string" } }] }
+          }
+        },
+        "columns": { "type": "object", "additionalProperties": { "$ref": "#/$defs/column" } },
+        "rows": { "type": "object", "description": "rows keyed by stable row id", "additionalProperties": { "type": "object" } }
+      }
+    },
+    "realism": {
+      "type": "object",
+      "required": ["preset", "levels", "tierCaps"],
+      "additionalProperties": false,
+      "properties": {
+        "preset": { "enum": ["story", "grounded", "simulation", "custom"] },
+        "levels": {
+          "type": "object",
+          "required": ["money", "gear", "vehicles", "castlife", "relationships", "space", "calendar", "weather", "sheets"],
+          "additionalProperties": false,
+          "properties": {
+            "money": { "$ref": "#/$defs/level" },
+            "gear": { "$ref": "#/$defs/level" },
+            "vehicles": { "$ref": "#/$defs/level" },
+            "castlife": { "$ref": "#/$defs/level" },
+            "relationships": { "$ref": "#/$defs/level" },
+            "space": { "$ref": "#/$defs/level" },
+            "calendar": { "$ref": "#/$defs/level" },
+            "weather": { "$ref": "#/$defs/level" },
+            "sheets": { "$ref": "#/$defs/level" }
+          }
+        },
+        "tierCaps": {
+          "type": "object",
+          "description": "Caps per detail band; the POV is never capped.",
+          "required": ["principal", "supporting", "background"],
+          "additionalProperties": false,
+          "properties": { "principal": { "$ref": "#/$defs/domainLevels" }, "supporting": { "$ref": "#/$defs/domainLevels" }, "background": { "$ref": "#/$defs/domainLevels" } }
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "required": ["sceneTicks", "interrupts", "speedThrough", "montage", "unitCap"],
+      "additionalProperties": false,
+      "properties": {
+        "sceneTicks": { "type": "object", "description": "default tick per scene type, in minutes", "additionalProperties": { "type": "number", "minimum": 0 } },
+        "interrupts": {
+          "type": "object",
+          "required": ["invitation", "bill", "decline", "incident", "quest", "rule", "arrival", "overdue", "needs", "weather"],
+          "additionalProperties": false,
+          "properties": {
+            "invitation": { "$ref": "#/$defs/interruptPolicy" },
+            "bill": { "$ref": "#/$defs/interruptPolicy" },
+            "decline": { "$ref": "#/$defs/interruptPolicy" },
+            "incident": { "$ref": "#/$defs/interruptPolicy" },
+            "quest": { "$ref": "#/$defs/interruptPolicy" },
+            "rule": { "$ref": "#/$defs/interruptPolicy" },
+            "arrival": { "$ref": "#/$defs/interruptPolicy" },
+            "overdue": { "$ref": "#/$defs/interruptPolicy" },
+            "needs": { "$ref": "#/$defs/interruptPolicy" },
+            "weather": { "$ref": "#/$defs/interruptPolicy" }
+          }
+        },
+        "speedThrough": {
+          "type": "object",
+          "description": "activity → how Speed through handles it",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["mode", "thresholdMinutes"],
+            "additionalProperties": false,
+            "properties": { "mode": { "enum": ["offer", "auto"] }, "thresholdMinutes": { "type": "number", "minimum": 0 } }
+          }
+        },
+        "montage": { "enum": ["key", "day", "week"] },
+        "unitCap": {
+          "type": "object",
+          "required": ["agentDays", "events"],
+          "additionalProperties": false,
+          "properties": { "agentDays": { "type": "number", "minimum": 0 }, "events": { "type": "number", "minimum": 0 } }
+        }
+      }
+    },
+    "interruptPolicy": { "enum": ["stop", "note", "ignore"] },
+    "section": {
+      "type": "object",
+      "required": ["id", "label", "rank", "template", "position"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "rank": { "type": "number", "description": "lower ranks are kept first on the section budget" },
+        "template": { "type": "string", "description": "may hold only the {{lines}} macro" },
+        "position": {
+          "anyOf": [
+            { "title": "{\"type\": \"native\"}", "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "enum": ["native"] } } },
+            { "title": "{\"type\": \"outlet\", \"name\"}", "type": "object", "required": ["type", "name"], "additionalProperties": false, "properties": { "type": { "enum": ["outlet"] }, "name": { "type": "string", "minLength": 1 } } },
+            {
+              "title": "{\"type\": \"chat_depth\", …}",
+              "type": "object",
+              "required": ["type", "role", "depth", "direction"],
+              "additionalProperties": false,
+              "properties": { "type": { "enum": ["chat_depth"] }, "role": { "enum": ["system", "user", "assistant"] }, "depth": { "type": "integer", "minimum": 0 }, "direction": { "enum": ["from_start", "from_end"] } }
+            }
+          ]
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["id", "purpose", "template", "output", "signals"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "purpose": { "$ref": "#/$defs/stepPurpose" },
+        "template": { "type": "string" },
+        "output": { "enum": ["text", "effects", "decision"] },
+        "signals": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "loreEntry": {
+      "type": "object",
+      "required": ["id", "title", "content", "keys", "links"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "keys": { "$ref": "#/$defs/strings", "description": "keywords the entry answers to" },
+        "links": { "$ref": "#/$defs/ids", "description": "entity and place ids the entry is about" },
+        "aliases": { "$ref": "#/$defs/strings" },
+        "topics": { "$ref": "#/$defs/strings" },
+        "source": {
+          "anyOf": [
+            { "title": "{\"kind\": \"authored\"}", "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "enum": ["authored"] } } },
+            {
+              "title": "{\"kind\": \"book\", …}",
+              "type": "object",
+              "required": ["kind", "bookId", "entryId", "hash"],
+              "additionalProperties": false,
+              "properties": { "kind": { "enum": ["book"] }, "bookId": { "type": "string" }, "entryId": { "type": "string" }, "hash": { "type": "string" } }
+            },
+            { "title": "{\"kind\": \"chat\", …}", "type": "object", "required": ["kind", "chatId", "messageId"], "additionalProperties": false, "properties": { "kind": { "enum": ["chat"] }, "chatId": { "type": "string" }, "messageId": { "type": "string" } } },
+            { "title": "{\"kind\": \"ai\", …}", "type": "object", "required": ["kind", "status"], "additionalProperties": false, "properties": { "kind": { "enum": ["ai"] }, "status": { "enum": ["pending", "accepted"] } } }
+          ]
+        },
+        "group": { "type": "string" },
+        "priority": { "type": "number" },
+        "secret": { "type": "boolean" },
+        "gate": { "$ref": "#/$defs/expr" },
+        "audience": { "type": "array", "description": "the helpers that may read a secret entry before its gate holds", "items": { "$ref": "#/$defs/stepPurpose" } }
+      }
+    },
+    "loreIndex": {
+      "type": "object",
+      "required": ["terms", "topics"],
+      "additionalProperties": false,
+      "properties": {
+        "terms": { "type": "object", "description": "a lowercase term or alias → the ids of the entries it means", "additionalProperties": { "$ref": "#/$defs/ids" } },
+        "topics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["label", "entries"],
+            "additionalProperties": false,
+            "properties": { "label": { "type": "string" }, "entries": { "$ref": "#/$defs/ids" } }
+          }
+        }
+      }
+    },
+    "facet": {
+      "type": "object",
+      "required": ["id", "label", "multiple", "values"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "label": { "type": "string" },
+        "multiple": { "type": "boolean", "description": "whether an entity may hold several values" },
+        "values": {
+          "type": "object",
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["label"],
+            "additionalProperties": false,
+            "properties": { "label": { "type": "string" }, "parent": { "$ref": "#/$defs/id" }, "description": { "type": "string" } }
+          }
+        },
+        "order": { "type": "number" },
+        "description": { "type": "string" },
+        "shown": { "type": "boolean", "description": "players can see this classification" }
+      }
+    },
+    "progression": {
+      "type": "object",
+      "required": ["label", "xpField", "levelField", "thresholds"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "xpField": { "$ref": "#/$defs/id" },
+        "levelField": { "$ref": "#/$defs/id" },
+        "thresholds": {
+          "anyOf": [
+            { "title": "a list of XP per level, from level 1", "type": "array", "items": { "type": "number" } },
+            { "title": "{\"table\", \"column\"}", "type": "object", "required": ["table", "column"], "additionalProperties": false, "properties": { "table": { "$ref": "#/$defs/id" }, "column": { "type": "string", "minLength": 1 } } }
+          ]
+        },
+        "onLevel": { "$ref": "#/$defs/effects" },
+        "maxLevel": { "type": "integer", "minimum": 1 },
+        "kind": { "$ref": "#/$defs/id" }
+      }
+    },
+    "sheetRow": {
+      "anyOf": [
+        { "title": "{\"field\"}", "type": "object", "required": ["field"], "additionalProperties": false, "properties": { "field": { "$ref": "#/$defs/id" }, "label": { "type": "string" } } },
+        { "title": "{\"formula\", \"label\"}", "type": "object", "required": ["formula", "label"], "additionalProperties": false, "properties": { "formula": { "$ref": "#/$defs/expr" }, "label": { "type": "string" } } },
+        { "title": "{\"pool\"}", "type": "object", "required": ["pool"], "additionalProperties": false, "properties": { "pool": { "$ref": "#/$defs/id" }, "label": { "type": "string" } } },
+        { "title": "{\"progression\"}", "type": "object", "required": ["progression"], "additionalProperties": false, "properties": { "progression": { "$ref": "#/$defs/id" }, "label": { "type": "string" } } }
+      ]
+    },
+    "adjudication": {
+      "type": "object",
+      "description": "When checks roll and who settles them. A named preset plays as its own values; custom keeps them as edited, and a value it can't hold is clamped when read.",
+      "required": ["preset", "checks", "riskyAt", "trivialAt", "impossibleAt", "description", "authority", "closeBy", "retry", "retryAfter"],
+      "additionalProperties": false,
+      "properties": {
+        "preset": { "enum": ["narrative", "balanced", "crunchy", "custom"] },
+        "checks": { "enum": ["every", "risky", "marked", "never"] },
+        "riskyAt": { "type": "number", "description": "with risky: a check rolls only when its success chance is below this (0–1)" },
+        "trivialAt": { "anyOf": [{ "title": "a chance (0–1)", "type": "number" }, { "type": "null" }], "description": "a chance at or above it passes without a roll; null never does" },
+        "impossibleAt": { "anyOf": [{ "title": "a chance (0–1)", "type": "number" }, { "type": "null" }], "description": "a chance at or below it fails without a roll; null never does" },
+        "description": {
+          "type": "object",
+          "required": ["weight", "max", "advantageAt"],
+          "additionalProperties": false,
+          "properties": {
+            "weight": { "enum": ["none", "bonus", "advantage", "dc"] },
+            "max": { "type": "number", "description": "the judge's scale, 1–10" },
+            "advantageAt": { "type": "number" }
+          }
+        },
+        "authority": { "enum": ["mechanics", "hybrid", "narrative"] },
+        "closeBy": { "type": "number", "description": "with hybrid: points from another outcome that make a close call, 0–20" },
+        "retry": { "enum": ["free", "changed", "once"] },
+        "retryAfter": { "type": "number", "description": "with changed: game minutes before the same check may roll again, up to a week" }
+      }
+    },
+    "ruleset": {
+      "type": "object",
+      "description": "The world's tabletop ruleset; every part is optional.",
+      "additionalProperties": false,
+      "properties": {
+        "progression": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/progression" } },
+        "sheet": {
+          "type": "object",
+          "required": ["sections"],
+          "additionalProperties": false,
+          "properties": {
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "label", "rows"],
+                "additionalProperties": false,
+                "properties": { "id": { "$ref": "#/$defs/id" }, "label": { "type": "string" }, "rows": { "type": "array", "items": { "$ref": "#/$defs/sheetRow" } } }
+              }
+            }
+          }
+        },
+        "minLevels": { "$ref": "#/$defs/domainLevels", "description": "the lowest effective level each domain plays at, whatever the realism settings" },
+        "adjudication": { "$ref": "#/$defs/adjudication" },
+        "combat": { "type": "object", "description": "Combat and encounters; its parts are checked by the engine's lint." }
+      }
+    },
+    "currency": {
+      "type": "object",
+      "description": "How money displays; state keeps integer minor units. Other keys (a template's denominations and notes) are kept and not read.",
+      "required": ["code", "symbol", "minorUnit", "decimals", "format"],
+      "properties": {
+        "code": { "type": "string" },
+        "symbol": { "type": "string" },
+        "minorUnit": { "type": "string" },
+        "decimals": { "type": "integer", "minimum": 0, "maximum": 6, "description": "minor units per major unit as a power of ten" },
+        "format": { "type": "string", "minLength": 1, "description": "display template with {sign}, {symbol}, {code}, {amount}, {major} and {minor}" }
+      }
+    },
+    "tier": {
+      "type": "object",
+      "required": ["label", "band", "order"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "band": { "$ref": "#/$defs/band" },
+        "order": { "type": "number" },
+        "agentDefault": { "type": "boolean" },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}
