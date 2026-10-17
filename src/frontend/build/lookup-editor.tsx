@@ -5,18 +5,13 @@
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
-import { addToLoreIndex, loreTerm, termSuggestions, topicIdOf, topicSuggestions } from "../../shared/lore";
+import { addToLoreIndex, loreIndexJson, loreTerm, termSuggestions, topicIdOf, topicSuggestions } from "../../shared/lore";
 import type { LintIssue } from "../../shared/protocol";
 import type { LoreIndex, WorldDoc } from "../../shared/world";
 import { Card, Empty, Seg, useBusy } from "../components";
 
 /** Suggestions listed at once; the rest wait behind "Show all". */
 const SUGGESTIONS_SHOWN = 12;
-
-/** The lookup table as the `set loreIndex` request carries it. */
-function indexJson(index: LoreIndex): JsonObject {
-  return { terms: Object.fromEntries(Object.entries(index.terms).map(([term, ids]) => [term, [...ids]])), topics: Object.fromEntries(Object.entries(index.topics).map(([id, t]) => [id, { label: t.label, entries: [...t.entries] }])) };
-}
 
 function Issues(props: { lint: readonly LintIssue[]; path: string }) {
   const issues = props.lint.filter((issue) => issue.path === props.path);
@@ -264,7 +259,7 @@ export function LookupTableEditor(props: { doc: WorldDoc; lint: readonly LintIss
       {Object.keys(props.doc.lore).length === 0 ? <div class="lre-banner info">The world has no lore entries yet; terms and topics lead to entries.</div> : null}
       {tab === "terms" ? <TermsPanel doc={props.doc} lint={props.lint} value={value} onChange={setValue} /> : <TopicsPanel doc={props.doc} lint={props.lint} value={value} onChange={setValue} />}
       <div class="lre-inline" style={{ position: "sticky", bottom: 0, padding: "8px 0", background: "var(--lre-fill)" }}>
-        <button type="button" class="lre-btn primary" disabled={!changed || busy} onClick={() => run(() => props.save(indexJson(value)))}>
+        <button type="button" class="lre-btn primary" disabled={!changed || busy} onClick={() => run(() => props.save(loreIndexJson(value)))}>
           Save to draft
         </button>
         <button type="button" class="lre-btn ghost" disabled={!changed || busy} onClick={() => setValue(initial)}>

@@ -79,7 +79,8 @@ export function kindCatalog(world: WorldDoc, registry: Registry): string {
   return [...byPack].map(([pack, kinds]) => `[${pack}] ${kinds.join("; ")}`).join("\n");
 }
 
-function worldSummary(world: WorldDoc): string {
+/** The world's name, POV, entities and places (the first 60 of each), as the helper's prompts name them. */
+export function worldSummary(world: WorldDoc): string {
   const ents = Object.values(world.entities)
     .slice(0, 60)
     .map((e) => `${e.id}:${e.kind}:${e.name}`)

@@ -6,6 +6,7 @@
 // `lre.error` carrying the same `reqId`. State arrives unsolicited as snapshots and deltas.
 
 import type { JsonObject, JsonValue } from "./json";
+import type { LoreIndexAddition } from "./lore";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
@@ -165,13 +166,14 @@ export interface UiRequest extends Request<"lre.ui"> {
 
 /**
  * Background-lane jobs (DESIGN §13, §15): Import from lore, Build/Refine with AI, Describe a map,
- * Playtest, Check world. Input: `import_lore` `{bookIds}`; `refine` `{instructions}`; `describe_map`
- * `{scope, prose, mapId?}` (the place drawn, the author's description, and the map's id, by default
- * `<scope>_map`; its one proposal is the map); `playtest` `{turns: string[]}`; `check_world`
- * `{days?: number}` (1–14 simulated days, default 3). Playtest and Check world results share the
+ * Playtest, Check world, and the lore indexing jobs (§4.2). Input: `import_lore` `{bookIds}`;
+ * `refine` `{instructions}`; `describe_map` `{scope, prose, mapId?}` (the place drawn, the author's
+ * description, and the map's id, by default `<scope>_map`; its one proposal is the map); `playtest`
+ * `{turns: string[]}`; `check_world` `{days?: number}` (1–14 simulated days, default 3);
+ * `index_book` `{bookId}`; `index_text` `{text}`. Playtest and Check world results share the
  * `turns`/`lint` shape (Check world: one entry per day, with drops, failures and leaks as notes).
  */
-export type JobKind = "import_lore" | "refine" | "describe_map" | "playtest" | "check_world";
+export type JobKind = "import_lore" | "refine" | "describe_map" | "playtest" | "check_world" | "index_book" | "index_text";
 
 /**
  * `list`: the user's kept jobs for a world (running ones, and the last few that ended), oldest
@@ -191,8 +193,10 @@ export interface JobProposal {
   note?: string;
   /** The pack the proposal belongs to (an entity's kind's pack; `space` for places and routes), for grouping the review. */
   pack?: string;
-  /** Import: the title of each lore entry the value's `sources` cite, by back-link (`bookId/entryId`), for the review. */
+  /** Import: the title of each lore entry the value's `sources` cite, by back-link (`bookId/entryId`), for the review; a book index job: the book entry its lore entry comes from. */
   sourceNames?: Record<string, string>;
+  /** A lore indexing proposal: the terms and topics its entry joins in the lookup table when it is applied. */
+  index?: LoreIndexAddition;
 }
 
 export type JobResult = { proposals: JobProposal[] } | { turns: { user: string; reply: string; notes: string[] }[]; lint: LintIssue[] };

@@ -57,6 +57,13 @@ const PROPOSALS: JobProposal[] = [
   { id: "p4", collection: "tracks", key: "secret_debt", value: { id: "secret_debt", kind: "secret", label: "Rosie's debt", start: "hidden", stages: { hidden: { label: "Hidden", next: [] } }, visibility: "secret" }, source: "Lore: “Rosie”", confidence: 0.41, note: "Low confidence: mentioned once" },
 ];
 
+/** What "Index a World Info book" proposes for the preview's Town lore. */
+const LORE_PROPOSALS: JobProposal[] = [
+  { id: "l1", collection: "lore", key: "maple_falls_library", value: { id: "maple_falls_library", title: "Maple Falls Library", content: "The library on Elm Street keeps the town's newspapers back to 1902, and Mrs. Hale knows where every one is.", keys: ["library"], links: ["maple"], aliases: ["the library", "Elm Street library"], topics: ["Town places"], source: { kind: "book", bookId: "book-town", entryId: "e-library", hash: "h-library" } }, source: "e-library", confidence: 0.92, pack: "lore", index: { terms: ["maple falls library", "the library", "elm street library"], topics: [{ id: "town_places", label: "Town places" }] }, sourceNames: { "book-town/e-library": "Library" } },
+  { id: "l2", collection: "lore", key: "okafor_family", value: { id: "okafor_family", title: "The Okafor family", content: "The Okafors have run the hardware store on Main for three generations.", keys: ["Okafor"], links: ["npc_rosie"], aliases: ["the Okafors"], topics: ["Families", "Town history"], source: { kind: "book", bookId: "book-town", entryId: "e-okafor", hash: "h-okafor" } }, source: "e-okafor", confidence: 0.78, pack: "lore", note: "dropped unknown link okafor_house", index: { terms: ["the okafor family", "the okafors"], topics: [{ id: "families", label: "Families" }, { id: "town_history", label: "Town history" }] }, sourceNames: { "book-town/e-okafor": "Okafors" } },
+  { id: "l3", collection: "lore", key: "founders_day", value: { id: "founders_day", title: "Founders' Day", content: "Every June the town closes Main Street for a parade and a pie contest.", keys: [], links: [], topics: ["Town history"], source: { kind: "book", bookId: "book-town", entryId: "e-founders", hash: "h-founders" } }, source: "e-founders", confidence: 0.55, pack: "lore", index: { terms: ["founders' day"], topics: [{ id: "town_history", label: "Town history" }] }, sourceNames: { "book-town/e-founders": "Founders Day" } },
+];
+
 export class MockBackend {
   private view: StateView | null = null;
   private rev = 0;
@@ -412,7 +419,7 @@ export class MockBackend {
         this.jobs += 1;
         const jobId = `job-${this.jobs}`;
         const kind = message.kind;
-        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : PROPOSALS;
+        const proposals = kind === "describe_map" ? this.mapProposals(message.input) : kind === "index_book" || kind === "index_text" ? LORE_PROPOSALS : PROPOSALS;
         this.result(reqId, "lre.job", { jobId });
         const update = (status: JobUpdate["status"], progress: number, extra: Partial<JobUpdate> = {}) => this.emit({ lre: 1, type: "lre.job.update", jobId, kind, status, progress, ...extra });
         setTimeout(() => update("running", 0.35, { message: kind === "playtest" ? "Turn 2 of 5" : "Reading 14 entries…" }), 200);

@@ -4,6 +4,7 @@
 
 import { hashParts } from "./hash";
 import type { TopicId } from "./ids";
+import type { JsonObject } from "./json";
 import { hasOwn, isRecord, safeKey } from "./json";
 import { STEP_OUTPUTS } from "./steps";
 import type { LoreIndex, LoreSource, StepPurpose, WorldDoc } from "./world";
@@ -21,6 +22,11 @@ export function loreSourceOf(raw: unknown): LoreSource {
   if (raw.kind === "chat" && typeof raw.chatId === "string" && typeof raw.messageId === "string") return { kind: "chat", chatId: raw.chatId, messageId: raw.messageId };
   if (raw.kind === "ai" && (raw.status === "pending" || raw.status === "accepted")) return { kind: "ai", status: raw.status };
   return { kind: "authored" };
+}
+
+/** The lookup table as plain JSON: the value of a `set loreIndex` edit. */
+export function loreIndexJson(index: LoreIndex): JsonObject {
+  return { terms: Object.fromEntries(Object.entries(index.terms).map(([term, ids]) => [term, [...ids]])), topics: Object.fromEntries(Object.entries(index.topics).map(([id, t]) => [id, { label: t.label, entries: [...t.entries] }])) };
 }
 
 /** The hash a book-sourced entry keeps of its World Info entry's text; another hash now means the book changed. */

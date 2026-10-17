@@ -91,6 +91,18 @@ export function LoreList(props: { worldId: string }) {
             ›
           </span>
         </button>
+        <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })}>
+          <span class="grow">
+            <span class="title">Index a World Info book</span>
+            <span class="sub">Lore entries, aliases, topics and lookup terms from one of your books</span>
+          </span>
+        </button>
+        <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })}>
+          <span class="grow">
+            <span class="title">Index this text</span>
+            <span class="sub">The same, from text you paste</span>
+          </span>
+        </button>
       </div>
       <input class="lre-input" placeholder="Search titles, aliases, topics and text" aria-label="Search lore" value={query} onInput={(event) => setQuery(event.currentTarget.value)} />
       <div class="lre-list">

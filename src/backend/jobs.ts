@@ -1,20 +1,22 @@
-// Background jobs (DESIGN §9.6, §9.7): Import from lore and Build/Refine with AI ask the
-// helper (D10) for proposed world edits per pack, checked and deduplicated by `proposals.ts`
-// (the player reviews them and applies the ones they accept with `lre.editor put`); Playtest and
-// Check world run engine-only on the background lane, a child process (`backendProcesses`) that
-// heartbeats while it works and never blocks a turn. Each user's jobs are kept in
-// `userStorage/jobs.json` with their status, progress and result (an import's proposals as each
-// chunk is read), so Build still shows them after a reload or a restart; one that was running
-// when the extension stopped shows as interrupted, with what it had proposed by then.
+// Background jobs (DESIGN §9.6, §9.7, §4.2): Import from lore, Build/Refine with AI and the lore
+// indexing jobs ask the helper (D10) for proposed world edits, checked and deduplicated by
+// `proposals.ts` and `lore-index.ts` (the player reviews them and applies the ones they accept with
+// `lre.editor`); Playtest and Check world run engine-only on the background lane, a child process
+// (`backendProcesses`) that heartbeats while it works and never blocks a turn. Each user's jobs are
+// kept in `userStorage/jobs.json` with their status, progress and result (a model job's proposals
+// as each chunk is read), so Build still shows them after a reload or a restart; one that was
+// running when the extension stopped shows as interrupted, with what it had proposed by then.
 
 import type { UserId, WorldId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
+import { loreSourceOf } from "../shared/lore";
 import type { ErrorCode, JobKind, JobProposal, JobResult, JobSummary, JobUpdate, LintIssue, WorldCollection } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { StepConfig } from "../shared/settings";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
+import { checkIndexProposals, INDEX_TEXT_CHUNK, indexReplyProblem, indexRetry, indexSystem, readIndexProposals, textChunks, type IndexBook } from "./lore-index";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
 import { mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
 import type { SettingsStore } from "./settings-store";
@@ -31,7 +33,7 @@ export const JOBS_PATH = "jobs.json";
 /** Jobs that have ended kept per user (the newest), with their results; running ones are always kept. */
 export const JOBS_KEPT = 8;
 
-const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, playtest: true, check_world: true };
+const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, playtest: true, check_world: true, index_book: true, index_text: true };
 const JOB_STATUSES: Record<JobSummary["status"], true> = { running: true, done: true, failed: true, cancelled: true, interrupted: true };
 const SEVERITIES: Record<LintIssue["severity"], true> = { error: true, warning: true, info: true };
 
@@ -52,7 +54,8 @@ function isProposal(raw: unknown): raw is JobProposal {
   if (typeof raw.source !== "string" || typeof raw.confidence !== "number") return false;
   if (raw.note !== undefined && typeof raw.note !== "string") return false;
   if (raw.pack !== undefined && typeof raw.pack !== "string") return false;
-  return raw.sourceNames === undefined || (isRecord(raw.sourceNames) && Object.values(raw.sourceNames).every((n) => typeof n === "string"));
+  if (raw.sourceNames !== undefined && !(isRecord(raw.sourceNames) && Object.values(raw.sourceNames).every((n) => typeof n === "string"))) return false;
+  return raw.index === undefined || (isRecord(raw.index) && Array.isArray(raw.index.terms) && raw.index.terms.every((t) => typeof t === "string") && Array.isArray(raw.index.topics) && raw.index.topics.every((t) => isRecord(t) && typeof t.id === "string" && typeof t.label === "string"));
 }
 
 /** A stored result as the review reads it: entries of the wrong shape are dropped (the file comes from storage, not from us). */
@@ -97,6 +100,13 @@ interface Job {
   session: string | undefined;
   controller: AbortController;
   lane: ProcessHandle | null;
+}
+
+/** How a model job reads a helper reply: why it can't be used (null when it can), how many proposals it holds, and the reminder its one retry adds. */
+interface ReplyReader {
+  problem(reply: JsonValue | null): string | null;
+  count(reply: JsonValue | null): number;
+  retry: string;
 }
 
 /** Lane messages: progress per turn, then the result. */
@@ -279,25 +289,30 @@ export class JobRunner {
   }
 
   /**
-   * One Import/Refine helper call (DESIGN §9.7), with room for a full answer (`PROPOSAL_MAX_TOKENS`).
-   * A reply with nothing usable (`replyProblem`: empty, not proposal JSON after the steps' fence
-   * stripping and repair call, no readable proposal, or an empty list for lore) is asked once more
-   * with a reminder of the shape when `retry` allows. The retry shares the call's signal, so it ends
-   * at the same deadline, and a call that timed out or was cancelled is not asked again. Each call's
-   * outcome and time go to the user's diagnostics. Returns the reply and the calls made.
+   * One model job's helper call (DESIGN §9.7), with room for a full answer (`PROPOSAL_MAX_TOKENS`).
+   * A reply with nothing usable (the reader's `problem`: empty, not JSON of its shape after the
+   * steps' fence stripping and repair call, nothing readable, or an empty list for lore) is asked
+   * once more with a reminder of the shape when `retry` allows. The retry shares the call's signal,
+   * so it ends at the same deadline, and a call that timed out or was cancelled is not asked again.
+   * Each call's outcome and time go to the user's diagnostics. Returns the reply and the calls made.
    */
-  private async proposalReply(mode: ProposalMode, label: string, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, retry: boolean): Promise<{ reply: JsonValue | null; calls: number }> {
+  private async proposalReply(name: string, reader: ReplyReader, label: string, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, retry: boolean): Promise<{ reply: JsonValue | null; calls: number }> {
     const roomy: StepConfig = { ...(config ?? { enabled: true, signals: [] }), maxTokens: Math.max(config?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
     const ask = async (text: string, attempt: string): Promise<JsonValue | null> => {
       const t0 = performance.now();
       const reply = await this.steps.helperJson("brief", system, text, roomy, userId, signal);
-      const problem = replyProblem(reply, mode);
-      this.host.log("info", `[LumiRPEngine] ${mode} ${label} ${attempt}: ${problem ?? `${readProposals(reply, "check").length} proposal(s)`} in ${Math.round(performance.now() - t0)} ms`, userId);
+      const problem = reader.problem(reply);
+      this.host.log("info", `[LumiRPEngine] ${name} ${label} ${attempt}: ${problem ?? `${reader.count(reply)} proposal(s)`} in ${Math.round(performance.now() - t0)} ms`, userId);
       return reply;
     };
     const reply = await ask(user, "call");
-    if (replyProblem(reply, mode) === null || !retry || signal.aborted) return { reply, calls: 1 };
-    return { reply: await ask(`${user}\n\n${proposalRetry(mode)}`, "retry"), calls: 2 };
+    if (reader.problem(reply) === null || !retry || signal.aborted) return { reply, calls: 1 };
+    return { reply: await ask(`${user}\n\n${reader.retry}`, "retry"), calls: 2 };
+  }
+
+  /** The reader for Import and Refine replies. */
+  private static proposalReader(mode: ProposalMode): ReplyReader {
+    return { problem: (reply) => replyProblem(reply, mode), count: (reply) => readProposals(reply, "check").length, retry: proposalRetry(mode) };
   }
 
   private async run(job: Job, worldId: WorldId, input: JsonObject): Promise<void> {
@@ -358,7 +373,7 @@ export class JobRunner {
       for (let c = 0; c < calls; c++) {
         if (signal.aborted) return;
         const chunk = entries.slice(c * IMPORT_CHUNK, (c + 1) * IMPORT_CHUNK);
-        const { reply, calls: made } = await this.proposalReply("import", `chunk ${c + 1} of ${calls}`, system, loreChunk(chunk), config, job.userId, callSignal(), spare > 0);
+        const { reply, calls: made } = await this.proposalReply("import", JobRunner.proposalReader("import"), `chunk ${c + 1} of ${calls}`, system, loreChunk(chunk), config, job.userId, callSignal(), spare > 0);
         spare -= made - 1;
         // A proposal that cites no source stays unlinked rather than borrowing the chunk's first entry.
         raw.push(...readProposals(reply, `lore${c}`).map((p) => ({ ...p, source: p.source === `lore${c}` ? "lore" : p.source })));
@@ -399,10 +414,60 @@ export class JobRunner {
       this.update(job, { status: "done", progress: 1, result: { proposals: [mapProposal(request, { ...answer, map: answer.map })] }, ...(message ? { message } : {}) });
       return;
     }
+    if (job.kind === "index_book" || job.kind === "index_text") {
+      // Indexing reads the draft, so entries already there (applied from an earlier run) aren't proposed again.
+      const draft = await this.worlds.working(worldId, job.userId);
+      const mode = job.kind === "index_book" ? "book" : "text";
+      const notes: string[] = [];
+      let book: IndexBook | null = null;
+      let parts: string[];
+      if (mode === "book") {
+        const bookId = typeof input.bookId === "string" ? input.bookId : "";
+        if (bookId === "") throw new Error("pick a World Info book");
+        if (bookId === (await this.worlds.index(worldId, job.userId))?.loreBookId) throw new Error("that is the world's own engine book; pick one of your books");
+        const indexed = new Set(
+          Object.values(draft.lore).flatMap((l) => {
+            const s = loreSourceOf(l.source);
+            return s.kind === "book" && s.bookId === bookId ? [s.entryId] : [];
+          }),
+        );
+        const withText = (await this.host.books.entries(bookId, job.userId)).filter((e) => e.content.trim() !== "" && !e.disabled);
+        const fresh = withText.filter((e) => !indexed.has(e.id));
+        if (fresh.length === 0) throw new Error(withText.length > 0 ? "every entry of that book with text is already in the world's lore" : "that book has no entries with text");
+        if (fresh.length < withText.length) notes.push(`${withText.length - fresh.length} entr${withText.length - fresh.length === 1 ? "y" : "ies"} already in the world's lore ${withText.length - fresh.length === 1 ? "was" : "were"} skipped.`);
+        if (fresh.length > IMPORT_MAX_CALLS * IMPORT_CHUNK) notes.push(`${fresh.length - IMPORT_MAX_CALLS * IMPORT_CHUNK} entries past the first ${IMPORT_MAX_CALLS * IMPORT_CHUNK} were not read; apply these, then index the book again for the rest.`);
+        book = { bookId, entries: new Map(fresh.map((e) => [e.id, { title: entryTitle(e), content: e.content, keys: e.keys }])) };
+        parts = Array.from({ length: Math.ceil(fresh.length / IMPORT_CHUNK) }, (_, c) => loreChunk(fresh.slice(c * IMPORT_CHUNK, (c + 1) * IMPORT_CHUNK)));
+      } else {
+        const text = typeof input.text === "string" ? input.text.trim() : "";
+        if (text === "") throw new Error("paste the text to index");
+        parts = textChunks(text);
+        if (parts.length > IMPORT_MAX_CALLS) notes.push(`Only the first ${IMPORT_MAX_CALLS} parts of the text (about ${IMPORT_MAX_CALLS * INDEX_TEXT_CHUNK} characters) were read; index the rest in another pass.`);
+      }
+      const calls = Math.min(IMPORT_MAX_CALLS, parts.length);
+      // As for Import: retries spend only the calls no part needs.
+      let spare = IMPORT_MAX_CALLS - calls;
+      const reader: ReplyReader = { problem: indexReplyProblem, count: (reply) => readIndexProposals(reply, "check").length, retry: indexRetry(mode) };
+      const system = indexSystem(mode, draft);
+      const raw: JobProposal[] = [];
+      for (let c = 0; c < calls; c++) {
+        if (signal.aborted) return;
+        const { reply, calls: made } = await this.proposalReply("index", reader, `part ${c + 1} of ${calls}`, system, parts[c] ?? "", config, job.userId, callSignal(), spare > 0);
+        spare -= made - 1;
+        raw.push(...readIndexProposals(reply, `${mode}${c}`));
+        // The checked proposals so far are kept with the job, so a restart before the end loses none of them.
+        this.update(job, { status: "running", progress: Math.min(0.99, (c + 1) / calls) }, { proposals: checkIndexProposals(draft, raw, book) });
+      }
+      const drops: DropCounts = new Map();
+      const proposals = checkIndexProposals(draft, raw, book, drops);
+      const message = [...notes, dropSummary(raw.length, proposals.length, drops)].filter((m): m is string => m !== null).join(" ");
+      this.update(job, { status: "done", progress: 1, result: { proposals }, ...(message ? { message } : {}) });
+      return;
+    }
     // refine: Build/Refine with AI, one call and its retry.
     const instructions = typeof input.instructions === "string" ? input.instructions.trim() : "";
     if (instructions === "") throw new Error("say what to build or change");
-    const { reply } = await this.proposalReply("refine", "request", proposalSystem("refine", world, this.registry), instructions.slice(0, 4000), config, job.userId, callSignal(), true);
+    const { reply } = await this.proposalReply("refine", JobRunner.proposalReader("refine"), "request", proposalSystem("refine", world, this.registry), instructions.slice(0, 4000), config, job.userId, callSignal(), true);
     if (signal.aborted) return;
     const raw = readProposals(reply, "refine");
     const drops: DropCounts = new Map();

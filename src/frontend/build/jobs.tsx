@@ -1,13 +1,16 @@
-// Background-lane jobs (DESIGN §13): Import from lore, Build/Refine with AI, Playtest and Check world. A job's
-// updates arrive as `lre.job.update`; proposals are reviewed one by one and the accepted ones are
-// written to the draft as `lre.editor put` (then committed from the Build bar). The backend keeps
-// each job (`lre.job list`), so a reload or a restart shows the last run of each tool again, and a
-// job a restart cut off as interrupted, with its proposals so far and Run it again.
+// Background-lane jobs (DESIGN §13, §4.2): Import from lore, Build/Refine with AI, the lore indexing
+// jobs, Playtest and Check world. A job's updates arrive as `lre.job.update`; proposals are reviewed
+// one by one and the accepted ones are written to the draft as `lre.editor put` (an indexed entry's
+// terms and topics join the lookup table in one more write), then committed from the Build bar. The
+// backend keeps each job (`lre.job list`), so a reload or a restart shows the last run of each tool
+// again, and a job a restart cut off as interrupted, with its proposals so far and Run it again.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonObject, JsonValue } from "../../shared/json";
+import { addToLoreIndex, loreIndexJson, loreSourceOf } from "../../shared/lore";
 import type { JobKind, JobProposal, JobResult, JobSummary } from "../../shared/protocol";
+import type { LoreIndex } from "../../shared/world";
 import type { App } from "../app";
 import { useApp } from "../app";
 import type { SegOption } from "../components";
@@ -53,12 +56,25 @@ export function keptJobs(all: Readonly<Record<string, JobState>>, worldId: strin
   return next;
 }
 
-/** The draft writes for the accepted proposals, in proposal order. */
-export function proposalWrites(worldId: string, proposals: readonly JobProposal[], accepted: ReadonlySet<string>): Req<"lre.editor">[] {
-  return proposals.filter((p) => accepted.has(p.id)).map((p) => ({ type: "lre.editor", worldId, base: null, op: "put", collection: p.collection, id: p.key, value: p.value }));
+/**
+ * The draft writes for the accepted proposals, in proposal order. An entry an indexing job wrote
+ * from pasted text is accepted as it is applied. When accepted lore proposals add terms or topics,
+ * the lookup table (`index`, the draft's) takes them, merged, in one last write.
+ */
+export function proposalWrites(worldId: string, proposals: readonly JobProposal[], accepted: ReadonlySet<string>, index?: LoreIndex): Req<"lre.editor">[] {
+  const chosen = proposals.filter((p) => accepted.has(p.id));
+  const puts = chosen.map((p): Req<"lre.editor"> => {
+    const value = p.value;
+    const reviewed = p.collection === "lore" && typeof value === "object" && value !== null && !Array.isArray(value) && loreSourceOf(value.source).kind === "ai" ? { ...value, source: { kind: "ai", status: "accepted" } } : value;
+    return { type: "lre.editor", worldId, base: null, op: "put", collection: p.collection, id: p.key, value: reviewed };
+  });
+  const filed = chosen.filter((p) => p.collection === "lore" && p.index !== undefined && (p.index.terms.length > 0 || p.index.topics.length > 0));
+  if (!index || filed.length === 0) return puts;
+  const merged = filed.reduce((acc, p) => (p.index ? addToLoreIndex(acc, p.key, p.index) : acc), index);
+  return [...puts, { type: "lre.editor", worldId, base: null, op: "set", part: "loreIndex", value: loreIndexJson(merged) }];
 }
 
-const TITLE: Record<JobKind, string> = { import_lore: "Import from lore", refine: "Build / Refine with AI", describe_map: "Describe a map", playtest: "Playtest", check_world: "Check world" };
+const TITLE: Record<JobKind, string> = { import_lore: "Import from lore", refine: "Build / Refine with AI", describe_map: "Describe a map", playtest: "Playtest", check_world: "Check world", index_book: "Index a World Info book", index_text: "Index this text" };
 const CHECK_DAYS: readonly SegOption<number>[] = [1, 3, 7].map((days) => ({ value: days, label: `${days} day${days === 1 ? "" : "s"}` }));
 const STATUS_TONE: Record<JobState["status"], string> = { running: "accent", done: "pos", failed: "neg", cancelled: "", interrupted: "warn" };
 
@@ -72,8 +88,48 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
   const [scope, setScope] = useState("");
   const [mapId, setMapId] = useState("");
   useEffect(() => {
-    if (props.kind === "import_lore") void app.host.worldBooks().then(setBooks, () => setBooks([]));
+    if (props.kind === "import_lore" || props.kind === "index_book") void app.host.worldBooks().then(setBooks, () => setBooks([]));
   }, [props.kind]);
+  if (props.kind === "index_book") {
+    return (
+      <div class="lre-stack">
+        <span class="lre-small lre-muted">Pick one of your World Info books. Each entry with text becomes a lore entry to review, with aliases, topics, links and lookup terms, and keeps the book's own text; entries already in the world's lore are skipped. Nothing changes until you apply.</span>
+        {books === null ? (
+          <Empty>Loading books…</Empty>
+        ) : books.length === 0 ? (
+          <Empty>No World Info books.</Empty>
+        ) : (
+          <div class="lre-list" role="radiogroup" aria-label="World Info book">
+            {books.map((book) => (
+              <label key={book.id} class="lre-item">
+                <span class="lre-check">
+                  <input type="radio" name="lre-index-book" checked={picked[0] === book.id} onChange={() => setPicked([book.id])} />
+                </span>
+                <span class="grow">{book.name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <button type="button" class="lre-btn primary" disabled={picked.length === 0 || props.busy} onClick={() => props.onStart({ bookId: picked[0] ?? "" })}>
+          Index the book
+        </button>
+      </div>
+    );
+  }
+  if (props.kind === "index_text") {
+    return (
+      <div class="lre-stack">
+        <label class="lre-field">
+          <span class="label">Text to index</span>
+          <textarea class="lre-input" rows={8} style={{ fontFamily: "inherit" }} placeholder="Paste a setting document, a town history, character notes…" value={text} onInput={(event) => setText(event.currentTarget.value)} />
+        </label>
+        <span class="lre-small lre-muted">The helper splits it into lore entries in the text's own words, with aliases, topics, links and lookup terms. Each is marked as written by the AI, and counts as reviewed once you apply it. Nothing changes until you apply.</span>
+        <button type="button" class="lre-btn primary" disabled={!text.trim() || props.busy} onClick={() => props.onStart({ text: text.trim() })}>
+          Index the text
+        </button>
+      </div>
+    );
+  }
   if (props.kind === "import_lore") {
     return (
       <div class="lre-stack">
@@ -204,6 +260,40 @@ export function startTicked(proposals: readonly JobProposal[]): Set<string> {
   return new Set(proposals.filter((p) => p.confidence >= 0.7 && !strings(isRecord(p.value) ? p.value.assumed : undefined).includes("kind")).map((p) => p.id));
 }
 
+/** A lore proposal in the review: its title, where it came from, its aliases, topics and links, and the lookup terms it adds. */
+function LoreProposalLines(props: { p: JobProposal; bookNames: Readonly<Record<string, string>> }) {
+  const value = isRecord(props.p.value) ? props.p.value : {};
+  const source = loreSourceOf(value.source);
+  const link = source.kind === "book" ? `${source.bookId}/${source.entryId}` : "";
+  const entry = source.kind === "book" ? ((props.p.sourceNames && hasOwn(props.p.sourceNames, link) ? props.p.sourceNames[link] : undefined) ?? source.entryId) : "";
+  const lists: [string, string[]][] = [
+    ["Aliases", strings(value.aliases)],
+    ["Topics", strings(value.topics)],
+    ["Links", strings(value.links)],
+    ["Lookup terms", props.p.index?.terms ?? []],
+  ];
+  return (
+    <>
+      <span style={{ display: "block", fontWeight: 600 }}>{typeof value.title === "string" ? value.title : props.p.key}</span>
+      <span class="lre-small" style={{ display: "block" }} data-lre-proposal-from>
+        {source.kind === "book" ? `From ${hasOwn(props.bookNames, source.bookId) ? props.bookNames[source.bookId] : source.bookId}: ${entry}` : "From the pasted text, in the AI's words"}
+      </span>
+      {lists
+        .filter(([, items]) => items.length > 0)
+        .map(([label, items]) => (
+          <span key={label} class="lre-small lre-muted" style={{ display: "block" }}>
+            {label}: {items.join(", ")}
+          </span>
+        ))}
+      {props.p.note ? (
+        <span class="lre-small lre-warn" style={{ display: "block" }}>
+          {props.p.note}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 function ProposalReview(props: { app: App; worldId: string; proposals: JobProposal[] }) {
   const [accepted, setAccepted] = useState<Set<string>>(() => startTicked(props.proposals));
   const [open, setOpen] = useState<string | null>(null);
@@ -262,27 +352,33 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
                     </code>
                     <span class={p.confidence >= 0.8 ? "lre-badge pos" : p.confidence >= 0.5 ? "lre-badge warn" : "lre-badge neg"}>{Math.round(p.confidence * 100)}%</span>
                   </span>
-                  {/* A linked proposal's source is an entry id; "From lore" names its book instead. */}
-                  {from.length === 0 || p.note ? (
-                    <span class="lre-small lre-muted" style={{ display: "block" }}>
-                      {[from.length === 0 ? p.source : null, p.note].filter((part) => part).join(" — ")}
-                    </span>
-                  ) : null}
-                  {from.length > 0 ? (
-                    <span class="lre-small" style={{ display: "block" }} data-lre-proposal-from>
-                      From lore: {from.join(", ")}
-                    </span>
-                  ) : null}
-                  {assumed.includes("kind") ? (
-                    <span class="lre-small lre-warn" style={{ display: "block" }} data-lre-proposal-assumed-kind>
-                      Assumed kind: {String(value.kind)} (the lore named none)
-                    </span>
-                  ) : null}
-                  {tableFields.length > 0 ? (
-                    <span class="lre-small lre-warn" style={{ display: "block" }} data-lre-proposal-assumed>
-                      Assumed from a table: {tableFields.join(", ")}
-                    </span>
-                  ) : null}
+                  {p.collection === "lore" ? (
+                    <LoreProposalLines p={p} bookNames={bookNames} />
+                  ) : (
+                    <>
+                      {/* A linked proposal's source is an entry id; "From lore" names its book instead. */}
+                      {from.length === 0 || p.note ? (
+                        <span class="lre-small lre-muted" style={{ display: "block" }}>
+                          {[from.length === 0 ? p.source : null, p.note].filter((part) => part).join(" — ")}
+                        </span>
+                      ) : null}
+                      {from.length > 0 ? (
+                        <span class="lre-small" style={{ display: "block" }} data-lre-proposal-from>
+                          From lore: {from.join(", ")}
+                        </span>
+                      ) : null}
+                      {assumed.includes("kind") ? (
+                        <span class="lre-small lre-warn" style={{ display: "block" }} data-lre-proposal-assumed-kind>
+                          Assumed kind: {String(value.kind)} (the lore named none)
+                        </span>
+                      ) : null}
+                      {tableFields.length > 0 ? (
+                        <span class="lre-small lre-warn" style={{ display: "block" }} data-lre-proposal-assumed>
+                          Assumed from a table: {tableFields.join(", ")}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
                   <button type="button" class="lre-btn small ghost" aria-expanded={open === p.id} onClick={() => setOpen(open === p.id ? null : p.id)}>
                     {open === p.id ? "Hide value" : "Show value"}
                   </button>
@@ -302,9 +398,9 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
         onClick={() =>
           run(async () => {
             let ok = 0;
-            for (const write of proposalWrites(props.worldId, props.proposals, accepted)) {
+            for (const write of proposalWrites(props.worldId, props.proposals, accepted, props.app.drafts.get()?.doc.loreIndex)) {
               const message = await send(write);
-              if (message.type === "lre.result") ok += 1;
+              if (message.type === "lre.result" && write.op === "put") ok += 1;
             }
             props.app.toast(`Applied ${ok} of ${accepted.size} to the draft. Commit when ready.`, ok === accepted.size ? "info" : "error");
             setApplied(true);

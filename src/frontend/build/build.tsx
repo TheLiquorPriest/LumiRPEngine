@@ -378,6 +378,18 @@ function WorldOverview() {
               <span class="sub">Turn lore-book entries into entities, places and facts</span>
             </span>
           </button>
+          <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_book" })}>
+            <span class="grow">
+              <span class="title">Index a World Info book</span>
+              <span class="sub">Lore entries, aliases, topics and lookup terms from one of your books</span>
+            </span>
+          </button>
+          <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "index_text" })}>
+            <span class="grow">
+              <span class="title">Index this text</span>
+              <span class="sub">Lore entries from text you paste; review each one</span>
+            </span>
+          </button>
           <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "refine" })}>
             <span class="grow">
               <span class="title">Build / Refine with AI</span>
