@@ -131,7 +131,7 @@ function EntityState(props: { entity: GmEntity; editor: Editor }) {
       </label>
       {entity.pov ? null : (
         <label class="lre-inline">
-          <input type="checkbox" checked={agent} onChange={(event) => setAgent(event.currentTarget.checked)} /> Lives off-screen (an agent)
+          <input type="checkbox" checked={agent} onChange={(event) => setAgent(event.currentTarget.checked)} /> Lives their own day (agendas and plans)
         </label>
       )}
       {entity.levels.map((l) => (
@@ -426,7 +426,7 @@ function Entities(props: { editor: Editor }) {
               {e.pov ? <span class="lre-badge accent">You</span> : null}
               {e.gone ? <span class="lre-badge neg">Removed</span> : null}
               {e.spawned ? <span class="lre-badge">Spawned</span> : null}
-              {e.agent ? <span class="lre-badge">Agent</span> : null}
+              {e.agent ? <span class="lre-badge">Own day</span> : null}
               {e.visibility !== "public" ? <span class="lre-badge warn">{e.visibility.replace(/_/g, " ")}</span> : null}
             </button>
           ))}

@@ -1,6 +1,6 @@
 // Build → Tiers (DESIGN §9.1, §13): a world's own tiers, each in one of the three detail bands whose
 // caps limit how deeply its people are simulated. Add, rename, reorder, pick a band, say whether its
-// people are LOD1 agents by default, describe it; and choose the tier new people join.
+// people live their own day (agendas and plans) by default, describe it; and choose the tier new people join.
 
 import { useEffect, useState } from "preact/hooks";
 import type { Band, TierId } from "../../shared/ids";
@@ -111,7 +111,7 @@ export function TiersEditor(props: { doc: WorldDoc; lint: readonly LintIssue[]; 
               </select>
             </label>
             <label class="lre-row">
-              <span class="k">Its people are LOD1 agents unless they say otherwise</span>
+              <span class="k">Its people live their own day (agendas and plans) unless they say otherwise</span>
               <span class="lre-check">
                 <input type="checkbox" checked={t.agentDefault === true} onChange={(event) => edit(id, { agentDefault: event.currentTarget.checked })} />
               </span>

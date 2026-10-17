@@ -239,7 +239,7 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
               </div>
             ))
           ) : (
-            <span class="lre-muted">Nothing freezes, promotes or materializes.</span>
+            <span class="lre-muted">Nothing freezes, rises or gains detail.</span>
           )}
           <div class="lre-inline">
             <button type="button" class="lre-btn primary" disabled={busy} onClick={apply}>

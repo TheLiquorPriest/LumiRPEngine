@@ -219,7 +219,7 @@ export class Dispatcher {
       }
       case "lre.marker": {
         const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
-        if (!body) throw new RequestError("bad_request", "not a valid marker");
+        if (!body) throw new RequestError("bad_request", "not a valid settings change");
         if (body.kind === "migrate") {
           // An Upgrade target must be a revision of this chat's world.
           const run = await this.rt.runOf(r.chatId, userId);
@@ -397,7 +397,7 @@ export class Dispatcher {
       const who = "all" in scope ? "" : "tier" in scope ? ` for ${BAND_WHO[scope.tier]}` : ` for ${state.entities[scope.entity]?.name ?? scope.entity}`;
       const name = this.rt.registry.packs.find((p) => p.domain === body.domain)?.label ?? body.domain;
       if (body.to < from) lines.push({ text: `${name}${who} drops from level ${from} to ${body.to}: processes above level ${body.to} stop and their inputs freeze; detail stays stored.`, tone: "freeze" });
-      else if (body.to > from) lines.push({ text: `${name}${who} rises from level ${from} to ${body.to}: detail is materialized when first shown.`, tone: "promote" });
+      else if (body.to > from) lines.push({ text: `${name}${who} rises from level ${from} to ${body.to}: detail is filled in when first shown.`, tone: "promote" });
       else lines.push({ text: `${name}${who} stays at level ${from}.`, tone: "info" });
       if (body.to > from && body.to >= 2) lines.push({ text: `People without ${name.toLowerCase()} detail get it from the pinned tables when you open them.`, tone: "materialize" });
     } else if (body.kind === "time") {

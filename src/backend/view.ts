@@ -505,7 +505,7 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
       kind: "keep_report",
       messageId: pause.messageId,
       label: "Edited message: keep or discard later turns?",
-      detail: "Keep folds later turns over the edited text; Discard drops them.",
+      detail: "Keep replays later turns over the edited text; Discard drops them.",
       actions: [
         { id: "keep", label: "Keep", style: "primary" },
         { id: "discard", label: "Discard", style: "danger" },
