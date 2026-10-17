@@ -30,7 +30,10 @@ export interface QueryMap {}
 
 export interface Rejection {
   code: string;
+  /** Why, as the player may read it: a refusal that would name someone the POV can't see words them as "someone" (DESIGN §7). */
   reason: string;
+  /** The raw reason, naming everyone, when `reason` leaves someone out: for the GM view only. */
+  gm?: string;
 }
 
 /** Read access to the pinned tables of the world revision in force. */

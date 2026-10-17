@@ -203,7 +203,7 @@ export class Dispatcher {
         if (!ops) throw new RequestError("bad_request", "not a list of edits");
         const { state, world } = await this.head(r.chatId, userId);
         const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: true, runSeed: this.runSeedOf(r.chatId) });
-        if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
+        if ("rejection" in edit) throw new RequestError("validation", edit.rejection.gm ?? edit.rejection.reason);
         const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: edit.events } }) : { pending: false };
         reply("lre.edit", { pending: result.pending });
         return;

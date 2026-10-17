@@ -18,6 +18,7 @@ import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { kindDef, kindIs } from "./scope";
 import type { WorldState } from "./state";
+import { canSeeEntity, canSeePlace } from "./visibility";
 
 /** What relation lookups need from the registry; a fold's event types are the registry. */
 export interface RelationTypes {
@@ -80,19 +81,29 @@ function endOf(state: Readonly<WorldState>, id: EntityId): End | null {
   return e ? { id, kind: e.kind, name: e.name, relations: e.relations } : null;
 }
 
-/** Why `a → b` may not be linked with this type in this state: the kinds, or the cardinality. */
+/**
+ * Why `a → b` may not be linked with this type in this state: the kinds, or the cardinality. The
+ * reason reaches a decline chip and the narrator's Outcome, so it names only those the POV can see
+ * ("someone" for anyone else, DESIGN §7); the raw one, naming everyone, is kept for the GM view.
+ */
 function linkProblem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, def: RelationTypeDef, a: End, b: End): Rejection | null {
-  if (def.from !== "*" && !kindIs(reg, world, a.kind, def.from)) return reject("relation_kind", `“${def.label}” runs from ${kindPhrase(reg, world, def.from)}; ${a.name} is ${kindPhrase(reg, world, a.kind)}`);
-  if (def.to !== "*" && !kindIs(reg, world, b.kind, def.to)) return reject("relation_kind", `“${def.label}” runs to ${kindPhrase(reg, world, def.to)}; ${b.name} is ${kindPhrase(reg, world, b.kind)}`);
+  const worded = (code: string, say: (name: (end: Pick<End, "id" | "name">) => string) => string): Rejection => {
+    const sentence = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+    const reason = sentence(say((end) => (canSeeEntity(reg, world, state, world.pov, end.id) ? end.name : "someone")));
+    const gm = sentence(say((end) => end.name));
+    return reason === gm ? reject(code, reason) : { code, reason, gm };
+  };
+  if (def.from !== "*" && !kindIs(reg, world, a.kind, def.from)) return worded("relation_kind", (name) => `“${def.label}” runs from ${kindPhrase(reg, world, def.from)}; ${name(a)} is ${kindPhrase(reg, world, a.kind)}`);
+  if (def.to !== "*" && !kindIs(reg, world, b.kind, def.to)) return worded("relation_kind", (name) => `“${def.label}” runs to ${kindPhrase(reg, world, def.to)}; ${name(b)} is ${kindPhrase(reg, world, b.kind)}`);
   if (oneTarget(def.cardinality)) {
     const other = a.relations.find((r) => r.type === def.id && r.to !== b.id);
-    if (other) return reject("cardinality", `${a.name} is already ${inline(def)} ${own(state.entities, other.to)?.name ?? other.to}; “${def.label}” allows one at a time`);
+    if (other) return worded("cardinality", (name) => `${name(a)} is already ${inline(def)} ${name({ id: other.to, name: own(state.entities, other.to)?.name ?? other.to })}; “${def.label}” allows one at a time`);
   }
   if (oneSource(def.cardinality)) {
     const holder = Object.keys(state.entities)
       .sort()
       .find((id) => id !== a.id && own(state.entities, id)?.relations.some((r) => r.type === def.id && r.to === b.id));
-    if (holder) return reject("cardinality", `${own(state.entities, holder)?.name ?? holder} is already ${inline(def)} ${b.name}; “${def.label}” allows one at a time`);
+    if (holder) return worded("cardinality", (name) => `${name({ id: holder, name: own(state.entities, holder)?.name ?? holder })} is already ${inline(def)} ${name(b)}; “${def.label}” allows one at a time`);
   }
   return null;
 }
@@ -132,7 +143,11 @@ export function spawnLinks(reg: Registry, world: WorldDoc, state: Readonly<World
     const def = relationDef(reg, world, r.type);
     const target = r.to === entity.id ? self : endOf(state, r.to);
     if (!target) {
-      if (def && def.to !== "*") return reject("relation_kind", `“${def.label}” runs to ${kindPhrase(reg, world, def.to)}; ${own(world.places, r.to)?.name ?? r.to} isn't one`);
+      if (def && def.to !== "*") {
+        const name = own(world.places, r.to)?.name ?? r.to;
+        const reason = (place: string): string => `“${def.label}” runs to ${kindPhrase(reg, world, def.to)}; ${place} isn't one`;
+        return canSeePlace(reg, world, state, world.pov, r.to) ? reject("relation_kind", reason(name)) : { code: "relation_kind", reason: reason("that place"), gm: reason(name) };
+      }
       continue;
     }
     const problem = def ? linkProblem(reg, world, state, def, self, target) : null;
