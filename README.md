@@ -22,6 +22,16 @@ You choose how deep it goes. On the lowest setting it is a light layer that trac
 
 The full walkthrough is in the [user guide](docs/USER-GUIDE.md).
 
+## Documentation
+
+- **[User guide](docs/USER-GUIDE.md):** playing, tuning and building, every button explained.
+- **[GM guide](docs/GM-GUIDE.md):** running a chat: who sees what, the GM view and its edits, fixes and Undo, checks, realism and time in one chat, Upgrade, and the Context inspector.
+- **[Recipes](docs/RECIPES.md):** small worlds that each show one thing working, from XP and levels to a family's schedule, every one checked by a test.
+- **[Expressions](docs/EXPRESSIONS.md):** the formula language for requirements, checks, derived fields and rules.
+- **[Reference](docs/REFERENCE.md):** every kind, field, effect, formula function, action, event and lint code the engine and its packs register, generated from the code (`bun run reference`).
+- **[Studio contract](docs/STUDIO.md):** for tools that author worlds outside Lumiverse: the `lumi-rp-engine/studio` API, the file formats, the JSON Schemas (`schemas/lre-world-v1.schema.json` and the map's) and versioning.
+- **[Design](docs/DESIGN.md)** and **[Architecture](docs/ARCHITECTURE.md):** how the engine works and why, and the contract between its modules.
+
 ## Install
 
 1. In Lumiverse, open the **Extensions** tab and tap **Add Extension**.

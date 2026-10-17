@@ -25,7 +25,7 @@ This is the contract between the modules. Behavior is specified in [DESIGN.md](D
 | `src/frontend/registry.ts` | `UiPackDef`, `UiRegistry`, panel, editor, chip and proposal-preview props |
 | `src/backend/host.ts` | `HostPort`, the only door to Lumiverse, with the host's observed event payloads |
 | `src/spindle-augment.ts` | Local types where the host differs from `lumiverse-spindle-types` 0.6.49 |
-| `src/studio-api.ts` | The studio seam |
+| `src/studio-api.ts` | The studio seam ([STUDIO.md](STUDIO.md)) |
 
 Modules adapted from Warp (D1; credited in `NOTICE`):
 
@@ -67,6 +67,15 @@ Engine layout (pure):
 - `engine/edits.ts`: ✎ fixes and GM edits (`resolveEdit`, `parseEditOps`): each operation becomes the events its effect records, with literal values, checked against field definitions (type, enum values, min and max, a pool's evaluated max), relation types and placement, all or none; despawn, restore and the reserved `gone` field.
 - `engine/gm-view.ts`: the GM view's world part (`buildGmWorld`): every entity, removed and spawned ones included, with its fields, relations, placement, levels and designed sheet; places; tracks with their truths; relation types.
 - `engine/lore.ts`: the lore search RPEngine's helpers read (DESIGN §5.4): `loreSearch`, `loreGet`, `loreList` and `readableLore`, ranked deterministically over the folded state and the world, with snippets cut by the caller's token counter and visibility enforced inside (a secret's audience and gate, `known_by`, the GM); `visibility.ts` adds `loreGateReader` and `unrevealedSecrets`, the leak check's list of unrevealed truths and gated secret lore.
+- `engine/scope.ts`: the formula environment (bindings, `pov`, `here`, stages, levels, the clock, entities and places by id), the engine's own formula functions with their parameters (`BUILTIN_FUNCTIONS`), `formulaFunctions` (every function a formula may call, the expression editor's list) and the evaluation of effect arguments.
+- `engine/checks.ts`, `engine/ruleset.ts`, `engine/ruleset-lint.ts`: the one check mechanism (a check made ready from the state before the roll, its exact odds, the roll and `roll.*`); progression and the designed sheet (`buildEntitySheet`); the lint of the ruleset primitives (`roll()` outside effect arguments, table reads, checks, pools, progressions and the sheet).
+- `engine/selector.ts`, `engine/relations.ts`: selectors and the taxonomy reads behind them; relation integrity (kinds, cardinality, symmetric and inverse pairs kept two-sided) and its lint.
+- `engine/calendar.ts`: calendar arithmetic over game minutes: dates, day parts, holidays, time zones and the next time of day.
+- `engine/working.ts`: the validated working state every step that makes events appends through, so each event is validated against the state it will see on a re-fold.
+- `engine/world-state.ts`: the state a chat starts from (`initialState`): relations completed two-sided, things laid in their cells, the POV on its cell.
+- `engine/upgrade.ts`, `engine/touched.ts`: the Upgrade merge, a deterministic fold step of the `migrate` marker with the owner's picks; and the touched record of what play wrote, which sets each change's default pick.
+- `engine/engine-pack.ts`: the built-in `engine` pack: bookkeeping events (rule firings, signals, notes, rolled checks, adjudged attempts, observations), GM edits of tier, agent flag and levels, the `knows` and `spawn` channels and the taxonomy formulas.
+- `engine/pack-kit.ts`: the small pure readers pack cores share: typed values from JSON fields and table rows, optional services, labels.
 
 Backend layout:
 - `backend/spindle-host.ts`: `HostPort` over `spindle`.
@@ -83,14 +92,37 @@ Backend layout:
 - `backend/preset-lint.ts`, `backend/plan-notes.ts`: the preset lint; planned-turn lines kept by seed.
 - `backend/outcome-notes.ts`, `backend/inspector-log.ts`: the next turn's Outcome notes and the inspector's history with its delivery badges and each step's lore traces, per chat.
 - `backend/stored-json.ts`: reading the extension's own JSON files; a damaged one is set aside as `<path>.corrupt-<epoch ms>` with a warning, and the caller starts fresh.
+- `backend/main.ts`: starts the backend on the real host: every pack, the pipeline, the spindle adapter, the runtime, the dispatcher and the background lane's route.
+- `backend/start-markers.ts`: a new chat's starting markers (the revision, every domain level and band cap, every time control and the adjudication policy), written with the first record that holds events.
+- `backend/upgrade-preview.ts`: the Upgrade preview (`lre.marker` with `preview`): the plan the fold would apply, entity by entity, each change with its default pick and why.
+- `backend/chat-prefs.ts`: the player's choices for how a chat looks (`prefs.json`: the map display), kept beside the chat and out of its ledger.
 
-Space pack layout (`packs/space`): `core/travel.ts` (routes and A*), `core/map-scope.ts` (one map scope as drawn: a place's children at their cells or node positions, the routes between them, its grid; pure, shared by Play and Build), `core/view.ts` (the `space.map` view: every scope the POV can open, and travel options); `ui/map-draw.ts` (painting a scope), `ui/map.tsx` (the map stage, breadcrumbs and the place card), `ui/map-editor.tsx` and `ui/map-preview.tsx` (Build's map editor and previews), `ui/editors.tsx` (the grid and place editors); `frontend/json-text.ts` reads JSON text with the line of each value, for the map editor.
+Shared helpers (pure, beside the contract files):
+- `shared/grid.ts`: cells, A* with a hard cap, walking minutes, line of sight, and where someone stands on a grid.
+- `shared/classes.ts`: lookups over a world's classification facets and their value trees.
+- `shared/money.ts`: money as people type it in a world's currency (`parseMoneyInput`, `formatMoneyInput`), read by `frontend/money-input.tsx`, the one input every typed amount goes through.
+- `shared/macros.ts`: the host's macro hazards, and neutralizing everything the engine inserts.
+- `shared/steps.ts`: the step vocabulary: signals, template placeholders and the outputs each purpose may declare.
+
+Frontend layout:
+- `frontend/setup.tsx`, `frontend/app.ts`, `frontend/store.ts`: the entry (protocol client, UI registry, drawer, HUD, chips, palette, overlays, the `lre-state-v1` announcement), the app object every Preact tree shares, and the small observable store for UI state.
+- `frontend/protocol-client.ts`, `frontend/delta.ts`, `frontend/requests.ts`, `frontend/decode.ts`: requests and the state view (a snapshot, then copy-on-write deltas, resync on a gap), one request per interaction, and defensive readers for panel view models.
+- `frontend/ui-registry.ts`, `frontend/packs.ts`: the `UiRegistry` implementation, and every UI pack in registration order.
+- `frontend/drawer.tsx` and its sections: `frontend/play/*` (the running chat: Scene, Journal with Save to lore, Context, and the GM view with its editor), `frontend/settings/*` (model use and steps, realism, checks, Pins and upgrade with the Upgrade preview) and `frontend/build/*` (worlds, the form descriptors and the schema-driven form, the draft, Problems, jobs, and the editors for expressions, effect arguments, selectors, classifications, tiers, data tables, lore, the lookup table, and the ruleset with the Sheet Designer).
+- `frontend/hud.tsx`, `frontend/hud-float.ts`, `frontend/fix-editor.tsx`, `frontend/money-input.tsx`: the HUD pill and its geometry across layouts, the ✎ fix editor, and the money input.
+- `frontend/chips.tsx`, `frontend/palette.tsx`, `frontend/overlays.tsx`, `frontend/overlay-controller.ts`: chips under messages and their actions (one that needs a value asks for it first, through the money input for an amount), the palette and its Timelapse sheet, and the float overlays with how they open on a narrow viewport.
+- `frontend/time-controls.tsx`, `frontend/adjudication-form.tsx`: the time controls (Settings → Time for new chats, Play → Calendar for this one) and how checks are decided (Build's ruleset and Settings → Checks), each one editor for two places.
+- `frontend/components.tsx`, `frontend/styles.ts`, `frontend/format.ts`, `frontend/layout.ts`, `frontend/map-math.ts`, `frontend/host.ts`: shared UI atoms over the host's components, the one stylesheet, display formatting, responsive layout rules, pan and zoom math, and the host capabilities the UI uses.
+
+Pack layout: every pack has `core/index.ts` (its `PackDef`), and a pack with a Play panel has `ui/index.ts` (its `UiPackDef`) and `ui/panel.tsx`. Calendar, economy, gear and vehicles build their panel's view model in `core/view.ts`; the others build it in `core/index.ts`. Beyond that: economy's `core/model.ts` (accounts, balances, wealth bands, regions and pricing), `core/items.ts` (what a purchase names) and `ui/config.tsx` (the narrated-price cap); gear's `core/model.ts` (containment, loads, kits, use grants); calendar's `ui/schedule-editor.tsx` (the schedule widget); story's `ui/track-editor.tsx` (the track graph); and `packs/starters/index.ts`, the starter worlds.
+
+Space pack layout (`packs/space`): `core/travel.ts` (routes and A*), `core/map-scope.ts` (one map scope as drawn: a place's children at their cells or node positions, the routes between them, its grid; pure, shared by Play and Build), `core/view.ts` (the `space.map` view: every scope the POV can open, and travel options), `core/positions.ts` (where people and things stand on grids: arriving, stepping, things laid in cells and picked up, reach, stepping into a zone); `ui/view.ts` (the map view as the UI decodes it), `ui/map-draw.ts` (painting a scope), `ui/labels.ts` (where each place's name goes), `ui/map.tsx` (the map stage, breadcrumbs and the place card), `ui/map-editor.tsx` and `ui/map-preview.tsx` (Build's map editor and previews), `ui/editors.tsx` (the grid and place editors); `frontend/json-text.ts` reads JSON text with the line of each value, for the map editor.
 
 ## 3. Shared types
 
 ### 3.1 World document (`lre-world-v1`, `shared/world.ts`)
 
-One JSON document per revision; the revision id is its `hashJson`. Collections are keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `lore`, `classifications`. Singletons: `calendar`, `realism`, `time`, `pins`, `packs`, `pov`, `start`, `seedMode`, `lenientPricing`, `suppressed`, `loreIndex` (the lore lookup table: `terms` and `topics`).
+One JSON document per revision; the revision id is its `hashJson`. Collections are keyed by id: `packs` (each `{version, config}`), `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `lore`, `classifications`, `tiers`. Parts: `calendar`, `realism`, `time`, `pins`, `start`, `currency`, `loreIndex` (the lore lookup table: `terms` and `topics`), and the optional `ruleset` and `mapSettings`. Scalars: `format`, `id`, `name`, `engineVersion`, `pov`, `seedMode`, `lenientPricing`, the optional `spawnTier`, and `suppressed`. `schemas/lre-world-v1.schema.json` describes every part; the studio's `validate` checks the collections and parts before anything reads them.
 
 - **Maps** (`lre-map-v1`) are the source of truth for the places, grids and routes they draw. `migrateWorld` compiles them whenever a document is read (`shared/maps.ts`), clearing what an earlier compile made (items marked `map`, and a scope's link to a grid a map made) and making it again, so the compiled items stored in a revision or an export always match their maps. Build's editors show them read-only and `lre.editor` refuses writes to them.
 - **Formulas** are expression-language strings (`Expr`); **dice** are notation strings.
@@ -236,7 +268,7 @@ The engine calls a pack by name only through `optionalService`/`optionalQuery`, 
 |---|---|
 | `kind`, `relation` | Schema |
 | `event` | Event type: `validate` (null or a rejection; rebased views drop on rejection), `apply` (mutates the working state), `describe` |
-| `effect` | Effect proposal → concrete events, or a rejection |
+| `effect` | Effect proposal → concrete events, or a rejection; it declares the arguments it reads (`args`, `?` marking an optional one), which the reference lists |
 | `service(name, impl)` | Cross-pack service with defined behavior at every level (`economy.charge`, `gear.transfer`, …) |
 | `query(name, impl)`, `formula(name, fn)` | Level-independent queries; formula functions for the expression language |
 | `renderer` | Slot lines (no `{{`/`}}`) |
@@ -313,6 +345,8 @@ Event payloads are exactly those the host emits (DESIGN §14). `userId` arrives 
 | `test/packs/<pack>/*.test.ts` | Pack units and level contracts |
 | `test/loop-sim/*.test.ts` | Whole-loop scenarios |
 | `test/support/` | `fake-host.ts`, `harness.ts` (fake host + real `LedgerService` + test pack), `ops.ts` (generator, runner with invariant checks, shrinker), `test-pack.ts` |
+| `test/shared/*.test.ts` | Maps, and the world schema against the starters and the preview world |
+| `test/docs/*.test.ts` | The authors' reference equals a fresh build; every recipe in RECIPES.md loads, lints clean and plays as it says |
 | `test/boundaries.test.ts`, `test/manifest.test.ts` | Structure |
 
 Volume knobs:
@@ -321,7 +355,7 @@ Volume knobs:
 
 ## 9. Contributing
 
-The module boundaries in §2 are the contract, and `test/boundaries.test.ts` enforces them: a change that crosses a zone has to say so in the type contract first. When you add a pack, write it as a pure `core` and a `ui`, add it to `ALL_PACKS` in `src/packs/index.ts` (requirements first), give it a level contract (DESIGN §9.2), lint rules and tests, and keep cross-pack behavior behind registered services and queries (§5). Contract files in `src/shared/*` change only together with every module that reads them, and with this document.
+The module boundaries in §2 are the contract, and `test/boundaries.test.ts` enforces them: a change that crosses a zone has to say so in the type contract first. When you add a pack, write it as a pure `core` and a `ui`, add it to `ALL_PACKS` in `src/packs/index.ts` (requirements first), give it a level contract (DESIGN §9.2), lint rules and tests, and keep cross-pack behavior behind registered services and queries (§5). Contract files in `src/shared/*` change only together with every module that reads them, and with this document; a change to the world document also changes `schemas/lre-world-v1.schema.json`. After changing what a pack registers, run `bun run reference` to regenerate [REFERENCE.md](REFERENCE.md).
 
 Commit your own changes in small, reviewable steps, and run `bun run typecheck` and `bun test` before you open a pull request. `dist/` is built output: rebuild it with `bun run build` from a clean checkout, and do not edit it by hand.
 

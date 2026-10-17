@@ -157,7 +157,7 @@ When the world uses the **grid system**, you stand on a square of the grid you'r
 
 ### The GM view
 
-The **GM view** shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show the GM view** to open it, and **Hide** to put it away. Its data is fetched only while it is open, so none of it travels with what Play shows you. Looking never changes your chat; only the edits you save do.
+The **GM view** shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show the GM view** to open it, and **Hide** to put it away. Its data is fetched only while it is open, so none of it travels with what Play shows you. Looking never changes your chat; only the edits you save do. The [GM guide](GM-GUIDE.md) covers running a chat from here.
 
 It has five tabs:
 
@@ -512,6 +512,8 @@ Anything the engine inserts into the prompt, a name, a price, a number, a model'
 
 You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults, tiers, time defaults, ruleset and the lore lookup table), its **Content** lists (Entities, Places, Maps, Routes, Grids, Kinds, Classifications, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its tools. Edit an item and **Save to draft**, or **Revert**. **Check world**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build with AI**, **Refine with AI**, **Describe a map**, **Playtest** and **Attach to this chat** are tools inside a world.
 
+For the formulas you write in requirements, checks, derived fields and rules, see [EXPRESSIONS.md](EXPRESSIONS.md); for every kind, field, effect, function and lint code the packs offer, the [reference](REFERENCE.md); and for small worlds to copy from, [RECIPES.md](RECIPES.md).
+
 ### Editors and lint
 
 Every part of the world has a **schema-driven editor**. Four parts get special tools: a **map and grid** editor, a **schedule and timeline** editor, a **quest graph**, and an **expression** editor for formulas. **Maps** have an editor of their own (see [Maps](#maps)).
@@ -708,7 +710,7 @@ In **Build → New world**, pick a **Template** (**Blank**, **Fantasy town**, **
 
 ### Import and export
 
-The **Build** tab's world list gives each world an **Export** and a **Delete** button, and **Import an lre-world-v1 file…** brings one in. Worlds export in the published **`lre-world-v1`** format and import from the same; the world's own lore travels inside the file, and your World Books stay separate. A world is one document, so it can be copied, shared and read by other tools. It carries its own **currency** (a code, symbol, minor unit, number of decimals and display format), which is why a fantasy town can count in *bits* and the mystery manor in pence (*12d*); every amount in the panels and chips is written with it. Importing never changes your settings.
+The **Build** tab's world list gives each world an **Export** and a **Delete** button, and **Import an lre-world-v1 file…** brings one in. Worlds export in the published **`lre-world-v1`** format and import from the same; the world's own lore travels inside the file, and your World Books stay separate. A world is one document, so it can be copied, shared and read by other tools: its JSON Schema is `schemas/lre-world-v1.schema.json`, and [STUDIO.md](STUDIO.md) is the contract for tools that author worlds outside Lumiverse. It carries its own **currency** (a code, symbol, minor unit, number of decimals and display format), which is why a fantasy town can count in *bits* and the mystery manor in pence (*12d*); every amount in the panels and chips is written with it. Importing never changes your settings.
 
 **Imported worlds list any macros in their lore for your review.** After an import, a **Review before playing** card appears above the list of worlds if the file's lore, section templates or step templates contain macros, control characters or `<user>`, `<char>` or `<bot>` shorthands (all things Lumiverse's macro engine acts on): "“*name*” came from a file. Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play." Each row names the macro, control character or shorthand and where it is, and **Open** takes you to that lore entry, section or step; **Done reviewing** puts the card away (it is not kept, so open the Lore list and look for double braces if you come back later). The toast says how many items there are to review. Nothing is changed for you: macros in lore you write yourself are kept as written, just as in any World Book.
 

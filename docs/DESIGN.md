@@ -2,7 +2,7 @@
 
 LumiRPEngine is an extension for [Lumiverse](https://github.com/prolix-oc/Lumiverse) that keeps a real, persistent world underneath a roleplay chat: places, people, belongings, money, vehicles, schedules, quests and the calendar. The engine settles what rules should settle (prices, travel times, dice odds, who is where at 3 a.m.), and the AI model spends its effort on writing. The model proposes; the engine decides.
 
-This document is the design behind it: what the engine is made of, the rules it follows, why, and where it stops. I wrote it as a plan before I built the extension and revised it while I built and measured, so this version describes the product as it ships. Where the build departed from the original plan, §20 says so. For how to use the extension, read the [README](../README.md) and the [user guide](USER-GUIDE.md); for the module contract, read [ARCHITECTURE](ARCHITECTURE.md).
+This document is the design behind it: what the engine is made of, the rules it follows, why, and where it stops. I wrote it as a plan before I built the extension and revised it while I built and measured, so this version describes the product as it ships. Where the build departed from the original plan, §20 says so. For how to use the extension, read the [README](../README.md), the [user guide](USER-GUIDE.md) and the [GM guide](GM-GUIDE.md); for the module contract, read [ARCHITECTURE](ARCHITECTURE.md). Authors will want the [formula language](EXPRESSIONS.md), the [reference](REFERENCE.md) generated from the registry and the [recipes](RECIPES.md); a studio, the [studio contract](STUDIO.md).
 
 **Product**
 - Name: **LumiRPEngine**. Repository: <https://github.com/TheLiquorPriest/LumiRPEngine>. Manifest identifier: `lumi_rp_engine`.
@@ -158,7 +158,7 @@ Six concepts plus one pipeline.
 ## 4. Data and persistence
 
 ### 4.1 World document and storage (D2)
-- **Format:** a world is one JSON document, **`lre-world-v1`**, with a published JSON Schema and per-pack format versions.
+- **Format:** a world is one JSON document, **`lre-world-v1`**, with a published JSON Schema (`schemas/lre-world-v1.schema.json`, its maps referring to the map schema by `$id`) and per-pack format versions.
 - **Contents:** schema, entities, places, routes, grids, maps, rules, actions, checks, calendar, schedules, tracks, lore and its lookup table, classifications, enabled packs and their data tables, **pinned generator and data-table versions** (§9.2), realism defaults, tiers, the currency (code, symbol, minor unit, decimals, display format; Modern US by default), section templates, world-authored step templates, suppressed sources.
 - **Taxonomy:**
   - **Classifications** are world-defined facets (`classifications`: label, one or several values per entity, order, description, `shown`), each a tree of values with optional parents. Entities hold values per facet in `class`, and free-form `tags`. Both are definitional: read live from the world for the entities it defines, so an Upgrade reclassifies a running chat, and kept in state for spawned ones, for those an Upgrade's `keep` pick held on to and for those a revision no longer defines (§4.3, `migrate`). A facet is hidden from the player unless `shown`, so its values fail closed; tags never reach Play.
@@ -765,6 +765,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - **Check world, Playtest, Import from lore, Build/Refine with AI:** all run on the background lane. Playtest drives typed turns without a model: it finds an action's lexicon phrase as said or with filler words inside it ("walk down to" says "walk to"), and when several actions' phrases are said, the one whose required details the line fills wins (so "I walk over to Alder Market" goes to the market, not a map step with no square), then an exact phrase, then the longest. A phrase counts only where the player does it, judged in its own clause: not after a negation ("I don't want to walk to"), not in a hypothetical ("might", "whether to", "thinking about", or an "if" earlier in the sentence), not inside an idiom ("pay attention"), and only with the player as the subject. The nearest subject before the phrase decides: first person ("I", "we", "let's") acts; another pronoun ("he'll"), or a person's name followed only by an auxiliary or "to" ("Danny will walk", "ask Danny to walk"), doesn't; with no subject word the line is a command, unless an auxiliary shows someone else's ("the clerk will walk"). It fills references from names said and reports each turn as the player would see it, rather than bookkeeping. Check world's transcript is the author's view of each day: every event, worded with names like Playtest's (no ids or bookkeeping, at most 40 lines), including people the player has not met and secrets, so off-screen routines and unmet people's events can be checked. Dropped events, failures and leaks stay in the notes.
 - **Templates:** three starter worlds, each converted from a neutral template into `lre-world-v1` by `bun run templates`: **Brindlemere** (a fantasy town; Story preset, a custom 13-moon calendar), **Harrowmere Hall** (a 1934 mystery manor; Grounded preset) and **Port Alder** (a modern slice-of-life town; Simulation preset). They carry 24, 21 and 26 public lore entries. Each lints clean, runs eight days with its books balanced, and has scripted walkthrough tests: quests finish, secrets stay hidden until found, puzzles appear once found.
 - **World import/export:** `lre-world-v1`, one document with the world's lore inside; World Books are not exported.
+- **The authors' reference and recipes:** `bun run reference` writes `docs/REFERENCE.md` from what the engine and each pack register (kinds and fields, effects with the arguments they declare, formula functions, actions, events, proposals, panels, slots, tables and lint codes), and a test keeps it current; every recipe in `docs/RECIPES.md` is a world fragment a test loads, lints and plays.
 
 ## 14. Quality gates and acceptance (D15)
 
@@ -897,10 +898,10 @@ I stopped reviewing the ledger on paper once repeated review rounds kept finding
 - Warp's reasons for cutting scope are inferred from its commits; its design documents are not published.
 
 **Studio seam (fixed now, so the studio needs no breaking change later)**
-- **World format:** `lre-world-v1` with a JSON Schema and per-pack versions.
-- **`src/studio-api.ts`:** imports only pure pack `core` modules (lint-enforced) and is exported through the package `exports` map as `lumi-rp-engine/studio`. It provides load, validate, lint, check world, playtest, migrate, and the format and engine versions.
-- **`lre-state-v1` window event payload:** `{engineVersion, worldFormat, packs:{id:version}, inbound:["file","rpc:<endpoint>"]}`.
-- **Install from studio:** an explicit Settings action either imports a file or reads a studio-published `rpcPool` endpoint (no payload argument), then creates a new revision and offers Upgrade to open chats.
+- **World format:** `lre-world-v1`, with its JSON Schema (`schemas/lre-world-v1.schema.json`) and the map's (`src/shared/lre-map-v1.schema.json`), both in the package `exports`, and per-pack versions.
+- **`src/studio-api.ts`:** imports only pure pack `core` modules (lint-enforced) and is exported through the package `exports` map as `lumi-rp-engine/studio`. It provides load, validate, migrate, lint, a new world, the revision id, the export file, Playtest, Check world, the Sheet Designer's preview, the `lre-state-v1` payload, the schema reader, and the format, engine and pack versions. `docs/STUDIO.md` is its manual.
+- **`lre-state-v1` window event payload:** `{engineVersion, worldFormat, packs:{id:version}, inbound}`, announced when the frontend loads and when the pack set changes. `inbound` lists `file` today; `rpc:<endpoint>` is reserved for an endpoint a studio would publish.
+- **Install from a studio:** the player imports the studio's export file with Build's **Import an lre-world-v1 file…**, which makes a new world and lists its macros for review. Reading a studio-published `rpcPool` endpoint is not built (§21).
 
 ## 16. Host gaps and upstream follow-ups (D21)
 
@@ -1087,7 +1088,7 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 |---|---|---|
 | R4 | **The `characters` permission**, which would let the engine resolve outlets inside character-card fields (§4.2). | It is not requested; those entries stay "unverified", and the engine confirms delivery with a dry-run assembly search instead. |
 | G1–G9 | The upstream proposals (§16). | The extension ships with the caveats documented. |
-| — | Not built: command-palette commands, replacing a data table with another region's, a per-proposal edit step in Import from lore, agenda and secret-track objectives in the starter worlds (they carry narrative to-dos only). | Documented in the user guide where a user would look for them. |
+| — | Not built: command-palette commands, replacing a data table with another region's, a per-proposal edit step in Import from lore, agenda and secret-track objectives in the starter worlds (they carry narrative to-dos only), installing a world from a studio-published `rpcPool` endpoint. | Documented in the user guide where a user would look for them; a studio's world comes in as an export file. |
 | D20 | The license. | None yet; all rights reserved. |
 
 ## 22. Design history and accepted residual risks
