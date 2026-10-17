@@ -96,3 +96,26 @@ export interface TableMapping {
   from: string;
   columns: Record<string, ColumnDef>;
 }
+
+/** A table row as a choice: its id, and its `label` cell when it has one, else the id in words. */
+export interface TableChoice {
+  key: string;
+  label: string;
+}
+
+/** The rows a param naming a row of `table` may name (DESIGN §11), in row order; none without the table. */
+export function tableChoices(table: DataTable | undefined): TableChoice[] {
+  if (!table || typeof table.rows !== "object" || table.rows === null) return [];
+  return Object.entries(table.rows).map(([key, row]) => {
+    // Rows come from authored JSON: anything but a row with a text label reads as its id.
+    const label: unknown = typeof row === "object" && row !== null && !Array.isArray(row) ? row.label : undefined;
+    return { key, label: typeof label === "string" && label.trim() !== "" ? label : key.replace(/_/g, " ") };
+  });
+}
+
+/** The row a player's or a helper's words name: its id, or its label in any case; null when none does. */
+export function tableRowKey(table: DataTable | undefined, text: string): string | null {
+  const said = text.trim().toLowerCase();
+  const hit = tableChoices(table).find((c) => c.key.toLowerCase() === said || c.label.toLowerCase() === said);
+  return hit ? hit.key : null;
+}

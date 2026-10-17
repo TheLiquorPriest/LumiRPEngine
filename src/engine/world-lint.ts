@@ -75,6 +75,11 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   issues.push(...scheduleOverlaps(reg, world));
   for (const [id, a] of Object.entries(world.actions)) {
     for (const [name, p] of Object.entries(a.params)) {
+      if (p.table !== undefined) {
+        const at = `actions.${id}.params.${name}.table`;
+        if (p.type !== "text") warn(at, "types", `${a.label}'s ${p.label ?? name} isn't a text parameter, so it never names a row of ${p.table}.`);
+        else if (!own(world.tables, p.table)) err(at, "refs", `${a.label}'s ${p.label ?? name} names rows of the data table "${p.table}", which this world doesn't have.`);
+      }
       if (p.of === undefined) continue;
       if (p.type !== "ref") warn(`actions.${id}.params.${name}.of`, "selector", `${a.label}'s ${p.label ?? name} isn't a ref parameter, so its selector never applies.`);
       for (const problem of selectorProblems(reg, world, p.of)) err(`actions.${id}.params.${name}.of`, "refs", `${a.label}'s ${p.label ?? name} selector ${problem}.`);

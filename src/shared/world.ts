@@ -406,6 +406,11 @@ export interface ParamDef {
   optional?: boolean;
   /** A ref param's candidates must also match this selector: the palette offers only those, and the resolver refuses others. */
   of?: Selector;
+  /**
+   * A `text` param naming a row of this data table (a skill, a save): the palette offers one option
+   * per row, labelled by the row's `label`, and the resolver takes a row id or label and refuses others.
+   */
+  table?: TableId;
 }
 
 /**
@@ -902,6 +907,8 @@ export interface RulesetDef {
   minLevels?: Partial<Record<DomainId, Level>>;
   /** How the world's checks are decided: when they roll, what the player's words weigh, who settles them (DESIGN §11). */
   adjudication?: AdjudicationDef;
+  /** The profile the ruleset last started from (Build → Ruleset → Start from a profile), by id; nothing reads it as rules. */
+  profile?: string;
 }
 
 /** A named adjudication preset expands to concrete values; `custom` keeps them as edited. */

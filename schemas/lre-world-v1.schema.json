@@ -367,7 +367,7 @@
       "type": "object",
       "required": ["type"],
       "additionalProperties": false,
-      "properties": { "type": { "$ref": "#/$defs/fieldType" }, "label": { "type": "string" }, "ref": { "$ref": "#/$defs/id" }, "optional": { "type": "boolean" }, "of": { "$ref": "#/$defs/selector" } }
+      "properties": { "type": { "$ref": "#/$defs/fieldType" }, "label": { "type": "string" }, "ref": { "$ref": "#/$defs/id" }, "optional": { "type": "boolean" }, "of": { "$ref": "#/$defs/selector" }, "table": { "$ref": "#/$defs/id", "description": "a text param naming a row of this data table (a skill, a save)" } }
     },
     "check": {
       "title": "a check",
@@ -421,7 +421,18 @@
         "lexicon": { "$ref": "#/$defs/strings" },
         "observable": { "type": "string" },
         "pack": { "type": "string" },
-        "adjudicate": { "type": "boolean" }
+        "adjudicate": { "type": "boolean" },
+        "combat": {
+          "type": "object",
+          "description": "a combat action: offered only where the ruleset has combat, taken on its actor's turn",
+          "required": ["cost"],
+          "additionalProperties": false,
+          "properties": {
+            "cost": { "type": "object", "description": "budget id → how many it spends; empty: it's free", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "start": { "type": "boolean", "description": "it starts a fight" },
+            "role": { "enum": ["attack", "defend"], "description": "how everyone else's tactics use it" }
+          }
+        }
       }
     },
     "calendar": {
@@ -880,7 +891,8 @@
         },
         "minLevels": { "$ref": "#/$defs/domainLevels", "description": "the lowest effective level each domain plays at, whatever the realism settings" },
         "adjudication": { "$ref": "#/$defs/adjudication" },
-        "combat": { "type": "object", "description": "Combat and encounters; its parts are checked by the engine's lint." }
+        "combat": { "type": "object", "description": "Combat and encounters; its parts are checked by the engine's lint." },
+        "profile": { "type": "string", "minLength": 1, "description": "the profile the ruleset last started from (Build → Ruleset → Start from a profile)" }
       }
     },
     "currency": {

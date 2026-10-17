@@ -9,6 +9,7 @@ import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
 import type { ActionDef, MapDisplay, RetryRule, WorldDoc } from "../shared/world";
+import { tableChoices } from "../shared/tables";
 import { policyOf } from "../engine/adjudication";
 import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
 import { placeSceneType, sceneType } from "../engine/time";
@@ -16,7 +17,7 @@ import { identifiers } from "../engine/expr";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord, isLive, turnPath } from "../engine/ledger/path";
-import { optionalQuery } from "../engine/pack-kit";
+import { optionalQuery, own } from "../engine/pack-kit";
 import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
 import { presetOf } from "../engine/realism";
@@ -191,7 +192,21 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
         ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
       });
     }
-    const targets = offers.length > 0 || stats.length > 0 ? [] : refParam ? paramCandidates(registry, world, state, action, refParam) : [null];
+    // A text param naming a table row (Use a skill, Make a save): one option per row, with its odds.
+    const rowParam = refParam === undefined ? Object.entries(action.params).find(([, p]) => p.type === "text" && !p.optional && p.table !== undefined) : undefined;
+    const rows = rowParam ? tableChoices(own(world.tables, rowParam[1].table ?? "")).slice(0, 24) : [];
+    for (const row of rows) {
+      const params: JsonObject = { [rowParam?.[0] ?? ""]: row.key };
+      const odds = actionOdds(registry, world, state, { action, params });
+      options.push({
+        label: row.label,
+        params,
+        ...checkView(odds, retry),
+        ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
+        ...(odds.available ? {} : { disabled: unavailable(odds.failed) }),
+      });
+    }
+    const targets = offers.length > 0 || stats.length > 0 || rows.length > 0 ? [] : refParam ? paramCandidates(registry, world, state, action, refParam) : [null];
     // A second required ref (Drive's destination, Lend's borrower) is a nested pick.
     const secondParam = refParam ? Object.entries(action.params).find(([name, p]) => name !== refParam && p.type === "ref" && !p.optional)?.[0] : undefined;
     // Take from a kit (gear): the pieces still in a kit are its second pick, with how many are left.

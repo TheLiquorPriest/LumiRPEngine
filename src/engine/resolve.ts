@@ -9,6 +9,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { ActionDef, CheckDef, EffectSpec, Expr, WorldDoc } from "../shared/world";
+import { tableRowKey } from "../shared/tables";
 import { plainRolling } from "../shared/adjudication";
 import { approachShift, closeCall, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyFor, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
 import { checkOdds, checkOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
@@ -103,6 +104,13 @@ function prepare(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, re
       if (def.of && !selectorMatches(reg, world, state, def.of, id)) return { code: "bad_param", reason: `${target.name} can't be the ${(def.label ?? name).replace(/_/g, " ").toLowerCase()} of ${action.label}` };
       bindings[name] = id;
       params[name] = id;
+      continue;
+    }
+    // A text param naming a table row (a skill, a save) takes the row's id or its label, and keeps the id.
+    if (def.type === "text" && def.table !== undefined) {
+      const key = typeof raw === "string" ? tableRowKey(own(world.tables, def.table), raw) : null;
+      if (key === null) return { code: "bad_param", reason: `${String(raw)} isn't one of the ${(def.label ?? name).toLowerCase()}s here` };
+      params[name] = key;
       continue;
     }
     if ((def.type === "number" || def.type === "money" || def.type === "duration") && typeof raw !== "number") return { code: "bad_param", reason: `${name} must be a number` };

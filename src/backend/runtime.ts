@@ -6,6 +6,7 @@ import { hashParts } from "../shared/hash";
 import type { ChatId, ChipId, InterruptClass, MessageId, RevisionId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
+import { tableChoices } from "../shared/tables";
 import type { ChatRun, EventRef, GenerationKind, LedgerEvent, PostEvent, TimelapseTarget } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
@@ -668,7 +669,9 @@ export class Runtime implements TurnHooks {
     // Answer names the open puzzles the player can see, so a typed "I dial 1887" finds it.
     const puzzles = openPuzzleTitles(this.registry, render.world, render.state);
     const labelOf = (a: ActionDef): string => (a.pack === "story" && a.id === "answer" && puzzles.length > 0 ? `${a.label} (open: ${puzzles.join("; ")})` : a.label);
-    const catalog = [...all.map((a) => ({ id: a.id, label: labelOf(a), params: Object.keys(a.params), ...(a.lexicon ? { lexicon: a.lexicon } : {}) })), timelapseEntry];
+    // A param naming a table row lists the rows' ids, so the helper answers with one ("athletics", not "climbing").
+    const paramsOf = (a: ActionDef): string[] => Object.entries(a.params).map(([name, p]) => (p.table !== undefined ? `${name}: one of ${tableChoices(hasOwn(render.world.tables, p.table) ? render.world.tables[p.table] : undefined).map((c) => c.key).join(", ")}` : name));
+    const catalog = [...all.map((a) => ({ id: a.id, label: labelOf(a), params: paramsOf(a), ...(a.lexicon ? { lexicon: a.lexicon } : {}) })), timelapseEntry];
     let result: InterpretOutput | null;
     const lore = this.stepLore(run, at, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
     if (run.config.route?.provider === "decision") {
