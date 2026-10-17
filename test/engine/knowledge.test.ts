@@ -188,7 +188,7 @@ describe("discoverable places", () => {
     const name = w.world.places[place]?.name ?? place;
     return {
       travel: (go ? paramCandidates(reg, w.world, w.state, go, "to") : []).includes(place),
-      map: buildMapView(w.ctx).places.some((p) => p.id === place),
+      map: buildMapView(w.ctx).scopes.some((s) => s.places.some((p) => p.id === place)),
       narrator: narrator.some((line) => line.includes(name)),
     };
   };
