@@ -9,7 +9,7 @@ import { useApp, useView } from "./app";
 import { Row, useBusy } from "./components";
 import { FixEditor } from "./fix-editor";
 import { formatCents, formatMinutes, humanize } from "./format";
-import { hudMode } from "./layout";
+import { CHAT_HEAD_GUTTER, hudMode, isMobile } from "./layout";
 import { timeMarker } from "./requests";
 import { useSelect } from "./store";
 
@@ -47,7 +47,9 @@ export function Hud(props: { resize(size: HudSize): void }) {
     const target = open ? pop.current : pill.current;
     if (!target) return;
     const measure = () => {
-      const width = open ? Math.min(340, viewport.width - 24) : Math.ceil(target.scrollWidth) + 2;
+      // Centred on a phone, the details stay clear of the chat-head gutter on both sides.
+      const room = isMobile(viewport) ? Math.max(240, viewport.width - 2 * CHAT_HEAD_GUTTER) : viewport.width - 24;
+      const width = open ? Math.min(340, room) : Math.ceil(target.scrollWidth) + 2;
       const height = open ? Math.min(Math.ceil(target.scrollHeight) + 2, viewport.height - 80) : 44;
       props.resize({ width, height });
     };

@@ -64,6 +64,7 @@ textarea.lre-input{min-height:80px;resize:vertical;font-family:ui-monospace,SFMo
 select.lre-input{appearance:auto}
 .lre-input.invalid{border-color:var(--lre-neg)}
 .lre-money{display:flex;align-items:center;gap:6px;flex:1 1 8em;min-width:0}
+.lre-field>.lre-money,.lre-stack>.lre-money{flex:0 0 auto}
 .lre-money>.lre-input{flex:1 1 auto;min-width:0;font-variant-numeric:tabular-nums}
 .lre-money-affix{flex:0 0 auto;color:var(--lre-muted)}
 .lre-list{display:flex;flex-direction:column;gap:6px}
@@ -94,7 +95,7 @@ select.lre-input{appearance:auto}
 .lre-hud>button{min-height:40px;min-width:40px;padding:0 8px;border:0;background:transparent;display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;border-radius:18px;font-size:13px}
 .lre-hud>button:hover{background:var(--lre-subtle)}
 .lre-hud .sep{width:1px;height:18px;background:var(--lre-border)}
-.lre-hud-pop{width:min(340px,calc(100vw - 24px));padding:10px;border-radius:14px;border:1px solid var(--lre-border);background:var(--lre-surface);box-shadow:0 10px 30px rgba(0,0,0,.45);max-height:100%;overflow:auto}
+.lre-hud-pop{width:100%;max-width:340px;padding:10px;border-radius:14px;border:1px solid var(--lre-border);background:var(--lre-surface);box-shadow:0 10px 30px rgba(0,0,0,.45);max-height:100%;overflow:auto}
 .lre-sheet{display:flex;flex-direction:column;height:100%;background:var(--lre-surface);border:1px solid var(--lre-border);border-radius:16px 16px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.45);overflow:hidden}
 .lre-sheet.desk{border-radius:16px}
 .lre-sheet>header{display:flex;align-items:center;gap:8px;padding:8px 8px 6px 14px;border-bottom:1px solid var(--lre-border)}
