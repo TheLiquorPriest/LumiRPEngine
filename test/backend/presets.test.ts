@@ -1,13 +1,16 @@
 // Model-use preset notes state the preset's real per-turn ceiling of model steps, computed here
-// from its steps and phase budgets (DESIGN §5.3), so a budget change can't leave the note behind.
-// Each step run takes one call from its phase's budget when it starts; a disabled step never runs,
-// and puzzle.answer is on unless set. No note claims a typical count: the call meter shows each
-// turn's real one. Settings saved by a build that still managed lore load without its retired keys.
+// from its steps and phase budgets (DESIGN §5.3), so a budget change can't leave the note behind;
+// the same for lore lookups. Each step run takes one call from its phase's budget when it starts;
+// a disabled step never runs, and puzzle.answer is on unless set. No note claims a typical count:
+// the call meter shows each turn's real one. Settings saved by a build that still managed lore
+// load without its retired keys; settings saved before lore policies existed load with their
+// preset's.
 
 import { describe, expect, test } from "bun:test";
 import { defaultSettings, MODEL_USE_PRESETS, SettingsStore } from "../../src/backend/settings-store";
 import { PRESET_NOTE } from "../../src/frontend/settings/steps";
-import type { ModelUseSettings } from "../../src/shared/settings";
+import type { ModelUseSettings, StepConfig } from "../../src/shared/settings";
+import { DEFAULT_STEP_LORE, stepLoreOf } from "../../src/shared/settings";
 import type { StepPurpose } from "../../src/shared/world";
 import { FakeHost } from "../support/fake-host";
 
@@ -27,6 +30,16 @@ describe("model-use preset notes", () => {
     test(`${id}: the note's ceiling is the one its steps and budgets allow`, () => {
       const most = Number(PRESET_NOTE[id].match(/up to (\d+) model steps/)?.[1]);
       expect(most).toBe(ceiling(MODEL_USE_PRESETS[id]));
+    });
+  }
+
+  for (const id of ["lean", "standard", "full"] as const) {
+    test(`${id}: the note's lore lookups are the ones its budgets allow`, () => {
+      const { pre, post } = MODEL_USE_PRESETS[id].budgets;
+      const lookups = (pre.lookup?.calls ?? 0) + (post.lookup?.calls ?? 0);
+      const said = PRESET_NOTE[id].match(/plus up to (\d+) lore lookups/)?.[1];
+      expect(said === undefined ? 0 : Number(said)).toBe(lookups);
+      if (lookups === 0) expect(PRESET_NOTE[id]).toContain("no lore lookups");
     });
   }
 
@@ -69,5 +82,36 @@ describe("settings saved by a build that still managed lore", () => {
     const saved: unknown = JSON.parse((await host.storage.read("settings.json", user)) ?? "null");
     for (const path of [["passThroughBooks"], ["modelUse", "steps", "select"], ["modelUse", "budgets", "select"], ["modelUse", "tokens", "lore"]]) expect(at(saved, ...path)).toBeUndefined();
     expect(at(saved, "swipeDefault")).toBe("renarrate");
+  });
+});
+
+describe("settings saved before lore policies existed", () => {
+  const without = (steps: ModelUseSettings["steps"]): Record<string, Omit<StepConfig, "lore">> => Object.fromEntries(Object.entries(steps).map(([p, s]) => [p, { enabled: s.enabled, signals: [...s.signals], ...(s.route ? { route: { ...s.route } } : {}), ...(s.maxTokens !== undefined ? { maxTokens: s.maxTokens } : {}) }]));
+
+  for (const id of ["lean", "standard", "full"] as const) {
+    test(`${id}: loads with the preset's lore policies and lookups, and everything else as saved`, async () => {
+      const host = new FakeHost();
+      const preset = MODEL_USE_PRESETS[id];
+      const { pre, post } = preset.budgets;
+      const old = { ...defaultSettings(), swipeDefault: "renarrate", modelUse: { preset: id, steps: without(preset.steps), budgets: { pre: { calls: pre.calls, ms: pre.ms }, post: { calls: post.calls, ms: post.ms } }, tokens: { ...preset.tokens } } };
+      await host.storage.write("settings.json", JSON.stringify(old), host.userId);
+      const loaded = await new SettingsStore(host).get(host.userId);
+      expect(loaded.modelUse).toEqual({ preset: id, ...preset });
+      expect(loaded.swipeDefault).toBe("renarrate");
+    });
+  }
+
+  test("custom: a step keeps its own lore setting, takes Standard's where Standard has the step, and the default otherwise", async () => {
+    const host = new FakeHost();
+    const standard = MODEL_USE_PRESETS.standard;
+    const steps = { ...without(standard.steps), brief: { enabled: true, signals: ["always"] }, extract: { enabled: true, signals: ["reply"], lore: { policy: "none", tokens: 0 } } };
+    const old = { ...defaultSettings(), modelUse: { preset: "custom", steps, budgets: { pre: { calls: 3, ms: 30_000 }, post: { calls: 2, ms: 45_000, lookup: { calls: 0, ms: 0 } } }, tokens: { sections: 700 } } };
+    await host.storage.write("settings.json", JSON.stringify(old), host.userId);
+    const loaded = (await new SettingsStore(host).get(host.userId)).modelUse;
+    expect(loaded.steps.interpret?.lore).toEqual(standard.steps.interpret?.lore);
+    expect(loaded.steps.extract?.lore).toEqual({ policy: "none", tokens: 0 });
+    expect(loaded.steps.brief?.lore).toBeUndefined();
+    expect(stepLoreOf(loaded.steps.brief)).toEqual(DEFAULT_STEP_LORE);
+    expect(loaded.budgets).toEqual({ pre: { calls: 3, ms: 30_000, lookup: standard.budgets.pre.lookup }, post: { calls: 2, ms: 45_000, lookup: { calls: 0, ms: 0 } } });
   });
 });

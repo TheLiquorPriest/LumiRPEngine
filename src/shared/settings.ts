@@ -13,6 +13,30 @@ export interface StepRoute {
   model: string | null;
 }
 
+/** What a step does with the world's lore (DESIGN §5.4): nothing; a prefetch from its own inputs, at no extra call; lookups the model asks for, on the phase's lookup budget; or both. */
+export type LorePolicy = "none" | "prefetch" | "lookup" | "prefetch+lookup";
+export const LORE_POLICIES: readonly LorePolicy[] = ["none", "prefetch", "lookup", "prefetch+lookup"];
+
+/** How a step's lookups reach the model: native tool calls, the two-phase `{"need": [...]}` form, or `auto`: tools until its connection is seen refusing them. */
+export type LoreTransport = "auto" | "tools" | "need";
+export const LORE_TRANSPORTS: readonly LoreTransport[] = ["auto", "tools", "need"];
+
+export interface StepLore {
+  policy: LorePolicy;
+  /** Tokens the step's lore may take: the prefetch block, and the results of each lookup. */
+  tokens: number;
+  /** Absent: `auto`. */
+  transport?: LoreTransport;
+}
+
+/** A step no preset gives a lore setting (puzzle answers, or a step only Custom turns on): a prefetch, which costs no call. */
+export const DEFAULT_STEP_LORE: Readonly<StepLore> = Object.freeze({ policy: "prefetch", tokens: 300 });
+
+/** The step's lore setting: its own, else `DEFAULT_STEP_LORE`. */
+export function stepLoreOf(config: StepConfig | null | undefined): Readonly<StepLore> {
+  return config?.lore ?? DEFAULT_STEP_LORE;
+}
+
 export interface StepConfig {
   enabled: boolean;
   /** Signals that trigger the step (DESIGN §5.2). */
@@ -20,11 +44,21 @@ export interface StepConfig {
   route?: StepRoute;
   template?: string;
   maxTokens?: number;
+  /** The step's lore policy; a settings file without one reads with its preset's. */
+  lore?: StepLore;
+}
+
+/** Lore lookups a phase may make besides its calls: rounds, and the time from the phase's start in which one may begin. */
+export interface LookupLimits {
+  calls: number;
+  ms: number;
 }
 
 export interface PhaseBudget {
   calls: number;
   ms: number;
+  /** Absent: no lookups; a settings file without one reads with its preset's. */
+  lookup?: LookupLimits;
 }
 
 export interface ModelUseSettings {

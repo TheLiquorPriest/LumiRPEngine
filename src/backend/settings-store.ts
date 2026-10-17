@@ -7,8 +7,8 @@ import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
-import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, ModelUseSettings, PhaseBudget, RealismSettings, StepConfig, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES } from "../shared/settings";
+import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
+import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import type { HostPort } from "./host";
@@ -42,46 +42,52 @@ function capAll(level: Level): Partial<Record<DomainId, Level>> {
 const DECISION = { provider: "decision", connectionId: null, model: null } as const;
 const HELPER = { provider: "helper", connectionId: null, model: null } as const;
 
-function step(enabled: boolean, signals: string[], route: StepConfig["route"]): StepConfig {
-  return { enabled, signals, ...(route ? { route: { ...route } } : {}), maxTokens: HELPER_MAX_TOKENS };
+function step(enabled: boolean, signals: string[], route: StepConfig["route"], lore?: StepLore): StepConfig {
+  return { enabled, signals, ...(route ? { route: { ...route } } : {}), maxTokens: HELPER_MAX_TOKENS, ...(lore ? { lore: { ...lore } } : {}) };
 }
 
+const lore = (policy: LorePolicy, tokens: number): StepLore => ({ policy, tokens });
+const NO_LOOKUPS: LookupLimits = { calls: 0, ms: 0 };
+
 /**
- * Model-use presets (DESIGN §5.3). Routing per D10: `interpret` and `extract` on the helper; `npc.choose` on the Decision connection.
- * `judge` runs only when a world's adjudication policy needs it (the player's words weigh, or the story decides), never on Lean.
+ * Model-use presets (DESIGN §5.3, §5.4). Routing per D10: `interpret` and `extract` on the helper;
+ * `npc.choose` on the Decision connection. `judge` runs only when a world's adjudication policy
+ * needs it (the player's words weigh, or the story decides), never on Lean. Lore: Lean prefetches
+ * and never looks up; Standard and Full let their decision and JSON steps look lore up on a small
+ * budget per phase, apart from the phase's calls; prose steps prefetch only.
  */
 export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit<ModelUseSettings, "preset">> = {
   lean: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER),
-      extract: step(true, ["reply"], HELPER),
-      "npc.choose": step(false, [], DECISION),
-      judge: step(false, ["always"], HELPER),
+      interpret: step(true, ["classifier"], HELPER, lore("prefetch", 200)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch", 200)),
+      "npc.choose": step(false, [], DECISION, lore("prefetch", 200)),
+      judge: step(false, ["always"], HELPER, lore("prefetch", 200)),
     },
-    budgets: { pre: { calls: 1, ms: 20_000 }, post: { calls: 1, ms: 30_000 } },
+    budgets: { pre: { calls: 1, ms: 20_000, lookup: { ...NO_LOOKUPS } }, post: { calls: 1, ms: 30_000, lookup: { ...NO_LOOKUPS } } },
     tokens: { sections: 300 },
   },
   standard: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER),
-      extract: step(true, ["reply"], HELPER),
-      "npc.choose": step(true, ["tie_zone", "invitation"], DECISION),
-      judge: step(true, ["always"], HELPER),
+      interpret: step(true, ["classifier"], HELPER, lore("prefetch+lookup", 400)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 400)),
+      "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 400)),
+      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 400)),
     },
-    budgets: { pre: { calls: 2, ms: 30_000 }, post: { calls: 2, ms: 45_000 } },
+    budgets: { pre: { calls: 2, ms: 30_000, lookup: { calls: 1, ms: 15_000 } }, post: { calls: 2, ms: 45_000, lookup: { calls: 1, ms: 20_000 } } },
     tokens: { sections: 600 },
   },
   full: {
     steps: {
-      interpret: step(true, ["always"], HELPER),
-      brief: step(true, ["always"], HELPER),
-      outline: step(true, ["always"], HELPER),
-      extract: step(true, ["reply"], HELPER),
-      contradiction: step(true, ["reply"], HELPER),
-      "npc.choose": step(true, ["present", "offscreen"], DECISION),
-      judge: step(true, ["always"], HELPER),
+      interpret: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
+      brief: step(true, ["always"], HELPER, lore("prefetch", 400)),
+      outline: step(true, ["always"], HELPER, lore("prefetch", 400)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
+      contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
+      "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 600)),
+      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
     },
-    budgets: { pre: { calls: 8, ms: 60_000 }, post: { calls: 4, ms: 60_000 } },
+    budgets: { pre: { calls: 8, ms: 60_000, lookup: { calls: 3, ms: 30_000 } }, post: { calls: 4, ms: 60_000, lookup: { calls: 2, ms: 30_000 } } },
     tokens: { sections: 1000 },
   },
 };
@@ -124,18 +130,21 @@ export function mergePatch(target: JsonValue, patch: JsonValue): JsonValue {
   return out;
 }
 
-/** Fills missing parts from the defaults, so a settings file from an older build still loads; then checks every field. */
+/**
+ * Fills missing parts from the defaults, so a settings file from an older build still loads; then
+ * checks every field. What a file lacks comes from its own preset (Custom fills in from Standard),
+ * so one saved before lore settings existed reads with its preset's lore policies and lookups.
+ */
 function normalize(raw: unknown): UserSettings {
-  const base = defaultSettings();
-  if (!isRecord(raw)) return base;
-  // A file saved before the judge step lists its named preset's steps without it: that preset's own
-  // judge fills in, so a Lean player's stays off rather than taking the default preset's.
-  const mu = isRecord(raw.modelUse) ? raw.modelUse : {};
-  const named = oneOf(mu.preset, ["lean", "standard", "full"] as const);
-  const judge = named ? MODEL_USE_PRESETS[named].steps.judge : undefined;
-  if (judge && !(isRecord(mu.steps) && hasOwn(mu.steps, "judge"))) base.modelUse.steps.judge = structuredClone(judge);
-  const merged = mergePatch(JSON.parse(JSON.stringify(base)) as JsonValue, JSON.parse(JSON.stringify(raw)) as JsonValue);
-  return isRecord(merged) && merged.v === 1 ? conform(merged, base) : base;
+  if (!isRecord(raw)) return defaultSettings();
+  // What a file lacks comes from its own named preset: one saved before the judge step or lore
+  // settings existed reads with that preset's judge (a Lean player's stays off), lore policies and
+  // lookups. Standard and Custom fill in from the defaults, which are Standard's.
+  const fill = defaultSettings();
+  const preset = isRecord(raw.modelUse) ? raw.modelUse.preset : undefined;
+  if (preset === "lean" || preset === "full") fill.modelUse = { preset, ...structuredClone(MODEL_USE_PRESETS[preset]) };
+  const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, JSON.parse(JSON.stringify(raw)) as JsonValue);
+  return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
 
 // ---------------------------------------------------------------- the settings schema
@@ -175,16 +184,26 @@ function routeOf(v: unknown): StepRoute | undefined {
   return { provider, connectionId: text(v.connectionId), model: text(v.model) };
 }
 
+function loreOf(v: unknown): StepLore | undefined {
+  if (!isRecord(v)) return undefined;
+  const policy = oneOf(v.policy, LORE_POLICIES);
+  const tokens = int(v.tokens, 0, 8000);
+  const transport = oneOf(v.transport, LORE_TRANSPORTS);
+  return policy && tokens !== undefined ? { policy, tokens, ...(transport ? { transport } : {}) } : undefined;
+}
+
 function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefined {
   if (!isRecord(v)) return base;
   const route = routeOf(v.route);
   const maxTokens = int(v.maxTokens, 1, 65_536);
+  const lore = loreOf(v.lore) ?? base?.lore;
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : (base?.enabled ?? false),
     signals: Array.isArray(v.signals) ? v.signals.filter((s): s is string => typeof s === "string").slice(0, 32).map((s) => s.slice(0, 64)) : (base?.signals ?? []),
     ...(route ? { route } : {}),
     ...(typeof v.template === "string" ? { template: v.template.slice(0, 20_000) } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(lore ? { lore: { ...lore } } : {}),
   };
 }
 
@@ -196,7 +215,12 @@ function stepOf(v: unknown, base: StepConfig | undefined): StepConfig | undefine
 function conform(v: JsonObject, d: UserSettings): UserSettings {
   const mu = isRecord(v.modelUse) ? v.modelUse : {};
   const budgets = isRecord(mu.budgets) ? mu.budgets : {};
-  const phase = (x: unknown, b: PhaseBudget): PhaseBudget => (isRecord(x) ? { calls: int(x.calls, 0, 32) ?? b.calls, ms: int(x.ms, 0, MAX_PHASE_MS) ?? b.ms } : b);
+  const phase = (x: unknown, b: PhaseBudget): PhaseBudget => {
+    if (!isRecord(x)) return b;
+    const l = isRecord(x.lookup) ? x.lookup : null;
+    const lookup = l ? { calls: int(l.calls, 0, 32) ?? b.lookup?.calls ?? 0, ms: int(l.ms, 0, MAX_PHASE_MS) ?? b.lookup?.ms ?? 0 } : b.lookup;
+    return { calls: int(x.calls, 0, 32) ?? b.calls, ms: int(x.ms, 0, MAX_PHASE_MS) ?? b.ms, ...(lookup ? { lookup: { ...lookup } } : {}) };
+  };
   const rawSteps = isRecord(mu.steps) ? mu.steps : {};
   const steps: ModelUseSettings["steps"] = {};
   for (const p of STEP_PURPOSES) {
