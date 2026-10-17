@@ -2,7 +2,8 @@
 // with their token cost, clipping and delivery, the section budget, and the lore each model step
 // read (§5.4): its searches, the entries it was given with their token cost, its lookups and how
 // they reached the model. Built by the backend as `core.context`; a secret entry shows only as
-// secret, and a search that would name a secret or someone the player hasn't met is withheld.
+// secret, a search that would name a secret or someone the player hasn't met is withheld, and a
+// step that may read a secret shows its lookups without their text ("—").
 
 import { useEffect, useState } from "preact/hooks";
 import { isRecord } from "../../shared/json";

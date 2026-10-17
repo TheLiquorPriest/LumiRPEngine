@@ -382,8 +382,8 @@ export interface GmMoney {
 
 /**
  * What one model step read of the world's lore (DESIGN §5.4, §6.5). It is shown to the player, so
- * an unrevealed secret entry is named only as secret and a query carrying a secret's text is
- * withheld.
+ * an unrevealed secret entry is named only as secret, a query carrying a secret or naming someone
+ * or somewhere the POV doesn't know is withheld, and so is a lookup naming a secret entry.
  */
 export interface LoreStepTrace {
   step: StepPurpose;
@@ -391,7 +391,7 @@ export interface LoreStepTrace {
   policy: LorePolicy;
   /** How lookups reached the model: `none` when none were offered. */
   transport: "none" | "tools" | "need";
-  /** Each search: the prefetch over the step's inputs, or a lookup the model asked for. */
+  /** Each search: the prefetch over the step's inputs, or a lookup the model asked for (with no text when the step may read an unrevealed secret). */
   queries: { kind: "prefetch" | "search" | "get" | "list"; text: string; matched: number }[];
   /** The entries the step was given, in order, with their token cost. */
   entries: { title: string; tokens: number; cut: boolean; secret: boolean }[];

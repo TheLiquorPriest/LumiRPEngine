@@ -10,6 +10,7 @@ import type { Answers } from "../../src/engine/decide";
 import type { DecideRequest, QuietRequest, QuietToolCall } from "../../src/backend/host";
 import { TOOL_SUPPORT_PATH } from "../../src/backend/lore-steps";
 import { sectionTokens } from "../../src/backend/book";
+import { runDir } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
 import { Rig } from "../support/rig";
 
@@ -53,7 +54,7 @@ function decide(req: DecideRequest): Answers {
 }
 
 /** A world chat whose world has `lore`, with an open tie for Dev (with Sam) and for Kim (elsewhere). */
-async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject> = LORE, actions: Record<string, JsonObject> = {}): Promise<{ rig: Rig; chatId: string }> {
+async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject> = LORE, actions: Record<string, JsonObject> = {}, places: Record<string, JsonObject> = {}): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig();
   for (const patch of settings) rig.body(await rig.send({ type: "lre.settings.set", patch }));
   const worldId = await rig.newWorld("Harbor");
@@ -70,6 +71,7 @@ async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject>
   await put("actions", "wait", { id: "wait", label: "Wait", params: {}, requires: [], outcomes: { default: [] }, duration: "10", lexicon: ["wait"] });
   for (const [id, value] of Object.entries(lore)) await put("lore", id, value);
   for (const [id, value] of Object.entries(actions)) await put("actions", id, value);
+  for (const [id, value] of Object.entries(places)) await put("places", id, value);
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning, Sam.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -293,22 +295,86 @@ describe("secret lore stays off what the player sees", () => {
 });
 
 describe("the inspector's lore traces", () => {
+  const contextOf = async (rig: Rig, chatId: string): Promise<string> => JSON.stringify((await rig.rt.view(chatId, rig.host.userId)).panels["core.context"]);
+  const storedOf = async (rig: Rig, chatId: string): Promise<string> => (await rig.host.storage.read(`${runDir(chatId)}inspector.json`, rig.host.userId)) ?? "";
+  const lookupsOf = (context: string, step: string): { kind: string; text: string; matched: number }[] => {
+    const view = JSON.parse(context) as { generations: { lore?: { step: string; queries: { kind: string; text: string; matched: number }[] }[] }[] };
+    return view.generations.flatMap((g) => g.lore ?? []).filter((t) => t.step === step).flatMap((t) => t.queries.filter((q) => q.kind !== "prefetch"));
+  };
+
   test("each step's searches, entries with their token cost, lookups and transport reach Context, survive a restart, and never name a secret", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
-    rig.host.quietReply = (req) => (isStep(req, "interpret") && req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
+    rig.host.quietReply = (req) => ((isStep(req, "interpret") || isStep(req, "extract")) && req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     await rig.rt.inspector.settle();
-    const shown = async (r: Rig): Promise<string> => JSON.stringify((await r.rt.view(chatId, r.host.userId)).panels["core.context"]);
-    const context = await shown(rig);
+    const context = await contextOf(rig, chatId);
     expect(context).toContain('"step":"interpret","phase":"pre","policy":"prefetch+lookup","transport":"tools"');
-    expect(context).toContain('{"kind":"search","text":"timetable","matched":1}');
+    // extract can't read the secret: its lookup shows; interpret can, so its lookup shows only what it was and found.
+    expect(lookupsOf(context, "extract")).toEqual([{ kind: "search", text: "timetable", matched: 1 }]);
+    expect(lookupsOf(context, "interpret")).toEqual([{ kind: "search", text: "", matched: 1 }]);
     expect(context).toMatch(/"title":"Timetable","tokens":\d+,"cut":false,"secret":false/);
-    expect(context).toContain('"step":"extract","phase":"post"');
     // interpret read the secret (its audience): the trace says only that it was a secret.
     expect(context).toContain('"title":"A secret entry"');
     expect(context).not.toContain("The wreck");
     expect(context.toLowerCase()).not.toContain(SECRET.toLowerCase());
-    expect(await shown(new Rig({ host: rig.host }))).toBe(context);
+    expect(await contextOf(new Rig({ host: rig.host }), chatId)).toBe(context);
+  });
+
+  test("a step that may read a secret shows its model's lookups as their kind and count only, in Context and in the stored history", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const calls: QuietToolCall[] = [
+      { name: "lore_get", args: { id: "wreck" }, callId: "c1" },
+      { name: "lore_search", args: { query: "The wreck" }, callId: "c2" },
+      { name: "lore_list", args: { topic: "Wrecks" }, callId: "c3" },
+    ];
+    rig.host.quietReply = (req) => (isStep(req, "interpret") && req.tools && !asked(req) ? { content: "", toolCalls: calls } : quiet(req));
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    await rig.rt.inspector.settle();
+    const context = await contextOf(rig, chatId);
+    expect(lookupsOf(context, "interpret").map((q) => [q.kind, q.text])).toEqual([
+      ["get", ""],
+      ["search", ""],
+      ["list", ""],
+    ]);
+    expect(lookupsOf(context, "interpret")[0]?.matched).toBe(1);
+    for (const shown of [context, await storedOf(rig, chatId)]) {
+      expect(shown).not.toContain("wreck");
+      expect(shown).not.toContain("Wrecks");
+    }
+  });
+
+  test("any other step's lookup naming a secret entry or a place the POV can't see is withheld; words said this turn are not", async () => {
+    const boathouse: JsonObject = { id: "boathouse", name: "The boathouse", fields: {}, visibility: "secret" };
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE }, {}, { boathouse });
+    const calls: QuietToolCall[] = [
+      { name: "lore_search", args: { query: "the wreck" }, callId: "c1" },
+      { name: "lore_search", args: { query: "the boathouse" }, callId: "c2" },
+      { name: "lore_search", args: { query: "ferry timetable" }, callId: "c3" },
+    ];
+    rig.host.quietReply = (req) => (isStep(req, "extract") && req.tools && !asked(req) ? { content: "", toolCalls: calls } : quiet(req));
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    await rig.rt.inspector.settle();
+    const context = await contextOf(rig, chatId);
+    // "ferry" is a key of the secret entry, but the player said it.
+    expect(lookupsOf(context, "extract").map((q) => q.text)).toEqual(["(withheld: it carries a secret)", "(withheld: it carries a secret)", "ferry timetable"]);
+    for (const shown of [context, await storedOf(rig, chatId)]) {
+      expect(shown.toLowerCase()).not.toContain("wreck");
+      expect(shown.toLowerCase()).not.toContain("boathouse");
+    }
+  });
+
+  test("a history kept before lookups were withheld shows its searches without their text", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }]);
+    const trace = { step: "npc.choose", phase: "pre", policy: "prefetch+lookup", transport: "tools", queries: [{ kind: "prefetch", text: "Dev: work, rest", matched: 2 }, { kind: "get", text: "wreck", matched: 1 }], entries: [{ title: "Dev's past", tokens: 12, cut: false, secret: false }], lookups: 1, notes: [] };
+    const record = { id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, forced: [], lore: [trace] };
+    await rig.host.storage.write(`${runDir(chatId)}inspector.json`, JSON.stringify({ v: 1, records: [record], delivery: {} }), rig.host.userId);
+    const restarted = new Rig({ host: rig.host });
+    const context = await contextOf(restarted, chatId);
+    expect(lookupsOf(context, "npc.choose")).toEqual([{ kind: "get", text: "", matched: 1 }]);
+    expect(context).toContain('{"kind":"prefetch","text":"","matched":2}');
+    expect(context).toContain('"title":"Dev\'s past"');
+    expect(context).not.toContain("work, rest");
+    expect(context).not.toContain("wreck");
   });
 });

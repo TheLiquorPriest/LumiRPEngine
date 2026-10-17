@@ -294,7 +294,7 @@ export function stateFixture(chatId: string): StateView {
                 transport: "need",
                 queries: [
                   { kind: "prefetch", text: "Rosie: raise now, raise later, no raise", matched: 2 },
-                  { kind: "search", text: "(withheld: it carries a secret)", matched: 1 },
+                  { kind: "search", text: "", matched: 1 },
                 ],
                 entries: [
                   { title: "Rosie Alvarez", tokens: 58, cut: false, secret: false },

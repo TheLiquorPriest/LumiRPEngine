@@ -35,6 +35,7 @@ import type { WorldState } from "../engine/state";
 import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
+import { secretLoreNames } from "../engine/lore";
 import { playerKnows } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
@@ -80,6 +81,8 @@ interface LorePhase {
   budget: StepBudget;
   /** The user's default connection. */
   active: string;
+  /** What the player said this turn, with the reply after it: words the player has seen. */
+  said: string;
 }
 
 /** Chips a read stores for its swipe; a read that replaces it (Re-read edit, Retry read) drops them. */
@@ -562,7 +565,7 @@ export class Runtime implements TurnHooks {
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION,
     };
     // Intent and present-agent choices are independent: they run side by side.
-    const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget);
+    const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text);
     const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, settings, facts, budget, at);
     const npcRuns = runsOf(settings.modelUse, render.world, "npc.choose", facts);
     const npcRun = npcRuns[0];
@@ -602,7 +605,7 @@ export class Runtime implements TurnHooks {
     const secrets = unrevealedSecrets(this.registry, render.world, render.state);
     const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, ""), secrets);
     const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join("\n"), links: this.sceneLinks(render.world, render.state) };
-    const at = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget);
+    const at = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget, pre.text);
     const run = (r: StepRun, kind: "brief" | "outline"): Promise<string[]> => (budget.take() ? promptedText(this.steps, r, kind, vars, secrets, input.userId, budget.signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []) : Promise.resolve([]));
     const [briefs, outlines] = await Promise.all([Promise.all(briefRuns.map((r) => run(r, "brief"))), Promise.all(outlineRuns.map((r) => run(r, "outline")))]);
     const brief = briefs.flat().join(" ").trim();
@@ -805,10 +808,11 @@ export class Runtime implements TurnHooks {
   /**
    * What a phase's step lore shares (DESIGN §5.4): its budget, the user's default connection (whose
    * tool support a step on it uses) with the user's record of connections refusing tools loaded,
-   * and where its traces go. Nothing is read from the host for a world without lore.
+   * where its traces go, and what the player has seen said this turn. Nothing is read from the host
+   * for a world without lore.
    */
-  private async lorePhase(phase: "pre" | "post", key: string, userId: UserId, world: WorldDoc, state: WorldState, budget: StepBudget): Promise<LorePhase> {
-    const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION };
+  private async lorePhase(phase: "pre" | "post", key: string, userId: UserId, world: WorldDoc, state: WorldState, budget: StepBudget, said: string): Promise<LorePhase> {
+    const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION, said };
     if (Object.keys(world.lore).length === 0) return at;
     await this.toolSupport.ready(userId);
     return { ...at, active: await this.activeConnectionId(userId) };
@@ -834,9 +838,15 @@ export class Runtime implements TurnHooks {
       void this.toolSupport.refuse(userId, connection, reason).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] the lore tool record wasn't saved (${error instanceof Error ? error.message : String(error)})`, userId));
     };
     const reader = { reg: this.registry, world, state, tokens: (text: string) => this.tokenCounts.get(hashParts("lre.tokens", userId, text)) ?? sectionTokens(text) };
-    // The trace is shown to the player: it names no secret, and no one the player hasn't met.
-    const hidden = [...unrevealedSecrets(this.registry, world, state), ...Object.entries(state.entities).flatMap(([id, e]) => (povMayKnow(this.registry, world, state, id) || e.name.trim().length < 3 ? [] : [e.name]))];
-    const lore = new StepLore(run.purpose, setting, reader, at.phase, hidden, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused } });
+    // The trace is shown to the player (§6.5, §7): it names no secret, no one the player hasn't met
+    // and nowhere the POV can't see, and no lookup names a secret entry. Words the player has seen
+    // said this turn are left alone: withholding them would only show which of them are secret.
+    const said = at.said.toLowerCase();
+    const unsaid = (s: string): boolean => !said.includes(s.toLowerCase());
+    const people = Object.entries(state.entities).flatMap(([id, e]) => (povMayKnow(this.registry, world, state, id) || e.name.trim().length < 3 ? [] : [e.name]));
+    const places = Object.entries(world.places).flatMap(([id, p]) => (typeof p.name !== "string" || p.name.trim().length < 3 || canSeePlace(this.registry, world, state, world.pov, id) ? [] : [p.name]));
+    const withheld = { text: [...unrevealedSecrets(this.registry, world, state), ...people, ...places].filter(unsaid), names: secretLoreNames(this.registry, world, state).filter(unsaid) };
+    const lore = new StepLore(run.purpose, setting, reader, at.phase, withheld, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused } });
     lore.prefetch(inputs);
     lruSet(this.loreTraces, at.key, [...(this.loreTraces.get(at.key) ?? []), lore.trace], 64);
     return lore;
@@ -945,7 +955,7 @@ export class Runtime implements TurnHooks {
     const modelUse = settings.modelUse;
     // What the reply's steps search lore with: the reply and the player's message, in the POV's scene.
     const read = { text: `${text}\n${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
-    const at = await this.lorePhase("post", key, userId, context.world, context.state, budget);
+    const at = await this.lorePhase("post", key, userId, context.world, context.state, budget, read.text);
     const lore = (r: StepRun, effects = false) => this.stepLore(r, at, read, effects);
     // Each step takes its call from the budget when it starts, in priority order.
     const extractRun = runsOf(modelUse, context.world, "extract", facts).find((r) => r.template === null || r.template.output !== "effects");

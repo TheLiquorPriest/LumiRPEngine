@@ -124,6 +124,35 @@ export function readableLore(reg: Registry, world: WorldDoc, state: Readonly<Wor
     .sort();
 }
 
+/** Whether `purpose` may read a secret entry whose gate doesn't hold yet. */
+export function readsSecrets(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, purpose: LorePurpose, effects = false): boolean {
+  const open = loreGateReader(reg, world, state);
+  return Object.values(world.lore).some((entry) => entry.secret === true && !open(entry) && loreReadable(reg, world, state, entry, purpose, effects, open));
+}
+
+/**
+ * What leads to a secret entry whose gate doesn't hold yet: its id, title, aliases and keys, the
+ * lookup-table terms that lead to it, and the topics it is filed under (by the table, with their
+ * ids, or by the entry). Names shorter than lookups match are left out.
+ */
+export function secretLoreNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+  const open = loreGateReader(reg, world, state);
+  const secret = Object.entries(world.lore).filter(([, entry]) => entry.secret === true && !open(entry));
+  const ids = new Set(secret.map(([id]) => id));
+  const names = new Set<string>();
+  const add = (name: unknown): void => {
+    if (typeof name === "string" && name.trim().length >= MIN_TERM) names.add(name.trim());
+  };
+  for (const [id, entry] of secret) for (const name of [id, entry.title, ...listOf(entry.aliases), ...listOf(entry.keys), ...listOf(entry.topics)]) add(name);
+  for (const [term, leads] of Object.entries(world.loreIndex.terms)) if (listOf(leads).some((id) => ids.has(id))) add(term);
+  for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
+    if (!isRecord(topic) || !listOf(topic.entries).some((entry) => ids.has(entry))) continue;
+    add(id);
+    add(topic.label);
+  }
+  return [...names];
+}
+
 /** An entry as `Title: text`, cut at a word to fit `budget` tokens; null when not even its title and a few words fit. */
 function snippetOf(r: LoreReader, entry: LoreEntryDef, budget: number): { text: string; tokens: number; cut: boolean } | null {
   const title = (typeof entry.title === "string" ? entry.title : "").replace(/\s+/g, " ").trim();

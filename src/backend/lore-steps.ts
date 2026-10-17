@@ -8,6 +8,12 @@
 // messages, so a round's results go back in a follow-up user message. Every round is one call on
 // the phase's lookup budget, held before the model is offered it: a step that can't hold one gets
 // no tools, and answers with its prefetch only.
+//
+// The trace is shown to the player, so it carries only what the player may know (§7). A step that
+// may read an unrevealed secret writes its lookups with what that secret says: they show as their
+// kind and count only. Any other step's text is withheld when it carries a secret, or names someone
+// or somewhere the POV doesn't know; a lookup the model wrote is also withheld when it names a
+// secret entry.
 
 import type { UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -16,7 +22,7 @@ import { topicIdOf } from "../shared/lore";
 import type { StepLore as StepLoreSetting } from "../shared/settings";
 import type { LoreStepTrace } from "../shared/state-view";
 import type { StepPurpose } from "../shared/world";
-import { loreGet, loreList, loreSearch, readableLore, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
+import { loreGet, loreList, loreSearch, readableLore, readsSecrets, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
 import { findLeaks } from "../engine/visibility";
 import type { HostPort, QuietResult, QuietTool } from "./host";
 import { parseJsonReply } from "./steps";
@@ -40,12 +46,22 @@ export interface LoreAsk {
   topic?: string;
 }
 
+/** What a step's trace must not show (DESIGN §6.5); the caller leaves out what the player said this turn. */
+export interface TraceWithheld {
+  /** Text no line of the trace may carry: unrevealed secrets, and the names of people the player hasn't met and of places the POV can't see. */
+  text: readonly string[];
+  /** What leads to an unrevealed secret entry (its id, title, aliases, keys, terms and topics): no lookup the model wrote may name it. */
+  names: readonly string[];
+}
+
 /** Hits a prefetch or a search may give; the token budget usually binds first. */
 const SEARCH_LIMIT = 6;
 /** Asks one lookup round answers; the rest of a round's asks are dropped. */
 const ROUND_ASKS = 3;
 /** How much of a query the trace keeps. */
 const TRACE_CHARS = 120;
+/** What the trace shows for a query it withholds. */
+const WITHHELD = "(withheld: it carries a secret)";
 /** Topics a lookup's instructions name. */
 const TOPICS_NAMED = 12;
 /**
@@ -124,14 +140,15 @@ export class StepLore {
   private readonly counted: (texts: readonly string[]) => void;
   private readonly lookups: StepLookups | null;
   private transport: LookupTransport;
+  /** The step may read a secret whose gate doesn't hold: its model's lookups are written with what the secret says. */
+  private readonly guarded: boolean;
 
   constructor(
     readonly purpose: StepPurpose,
     readonly setting: Readonly<StepLoreSetting>,
     private readonly reader: LoreReader,
     phase: "pre" | "post",
-    /** What the trace must not show (unrevealed secrets, people the player hasn't met): a query or title carrying it is withheld. */
-    private readonly secrets: readonly string[],
+    private readonly withheld: TraceWithheld,
     options: { effects?: boolean; counted?: (texts: readonly string[]) => void; lookups?: StepLookups | null } = {},
   ) {
     this.effects = options.effects === true;
@@ -139,6 +156,7 @@ export class StepLore {
     this.lookups = setting.policy === "lookup" || setting.policy === "prefetch+lookup" ? (options.lookups ?? null) : null;
     this.transport = this.lookups?.transport ?? "tools";
     this.trace = { step: purpose, phase, policy: setting.policy, transport: "none", queries: [], entries: [], lookups: 0, notes: [] };
+    this.guarded = readsSecrets(reader.reg, reader.world, reader.state, purpose, this.effects);
   }
 
   /** The prefetch: the index searched with the step's own inputs, at no extra call. */
@@ -151,20 +169,24 @@ export class StepLore {
     if (!this.trace.notes.includes(text)) this.trace.notes.push(text);
   }
 
-  /** A query as the trace shows it: shortened, and withheld when it carries a secret's text. */
-  private shown(text: string): string {
+  /**
+   * A query as the trace shows it: shortened, and withheld when it carries what the trace must not
+   * show. A lookup the model wrote shows no text at all when the step may read a secret.
+   */
+  private shown(kind: LoreStepTrace["queries"][number]["kind"], text: string): string {
+    if (kind !== "prefetch" && this.guarded) return "";
     const shown = text.replace(/\s+/g, " ").trim();
-    if (findLeaks(shown, this.secrets).length > 0) return "(withheld: it carries a secret)";
+    if (findLeaks(shown, kind === "prefetch" ? this.withheld.text : [...this.withheld.text, ...this.withheld.names]).length > 0) return WITHHELD;
     return shown.length > TRACE_CHARS ? `${shown.slice(0, TRACE_CHARS)}…` : shown;
   }
 
   /** Records a search in the trace and keeps the hits the step hasn't been given yet. */
   private take(kind: LoreStepTrace["queries"][number]["kind"], text: string, result: LoreResult): LoreHit[] {
-    this.trace.queries.push({ kind, text: this.shown(text), matched: result.matched });
+    this.trace.queries.push({ kind, text: this.shown(kind, text), matched: result.matched });
     const fresh = result.hits.filter((h) => !this.given.has(h.id));
     for (const h of fresh) {
       this.given.set(h.id, h);
-      this.trace.entries.push({ title: h.secret ? "A secret entry" : findLeaks(h.title, this.secrets).length > 0 ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut, secret: h.secret });
+      this.trace.entries.push({ title: h.secret ? "A secret entry" : findLeaks(h.title, this.withheld.text).length > 0 ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut, secret: h.secret });
     }
     if (fresh.length > 0) this.counted(fresh.map((h) => h.snippet));
     return fresh;
@@ -268,7 +290,7 @@ export class StepLore {
     for (const a of asks) {
       if (a.kind === "list") {
         const listed = loreList(this.reader, a.text, this.purpose, this.effects);
-        this.trace.queries.push({ kind: "list", text: this.shown(a.text), matched: listed.length });
+        this.trace.queries.push({ kind: "list", text: this.shown("list", a.text), matched: listed.length });
         parts.push(`lore_list "${a.text}": ${listed.length === 0 ? "nothing under that topic" : listed.map((l) => `[${l.id}] ${l.title}`).join("; ")}`);
         continue;
       }

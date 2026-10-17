@@ -1,7 +1,9 @@
 // The inspector's history (DESIGN §6.5): the last interceptor runs per chat with their sections,
 // clipping and delivery badges, the lore each model step read (§5.4), and the last delivery check
 // by slot. Kept in `userStorage/runs/<chatId>/inspector.json` and read when the chat is first
-// viewed or generates, so the inspector shows the same history after a restart.
+// viewed or generates, so the inspector shows the same history after a restart. A history written
+// before the traces withheld a secret-reading step's lookups (`v: 1`) keeps its searches' kinds and
+// counts but not their text: there is no telling now which of them carried what.
 
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
@@ -23,6 +25,9 @@ export type Delivery = Record<string, "verified" | "unverified">;
 
 /** Interceptor runs kept per chat; the oldest go first. */
 export const INSPECTOR_RUNS = 10;
+
+/** The history's format; a `v: 1` history is read with its queries' text dropped (see above). */
+const FORMAT = 2;
 
 interface ChatLog {
   userId: UserId;
@@ -47,8 +52,8 @@ function isInspectorRecord(raw: unknown): raw is InspectorRecord {
 const TRANSPORTS: readonly LoreStepTrace["transport"][] = ["none", "tools", "need"];
 const QUERY_KINDS: readonly LoreStepTrace["queries"][number]["kind"][] = ["prefetch", "search", "get", "list"];
 
-/** A record's lore traces as stored: the well-formed ones, so a damaged trace costs only itself. */
-function loreTracesOf(raw: unknown): LoreStepTrace[] | undefined {
+/** A record's lore traces as stored: the well-formed ones, so a damaged trace costs only itself; `legacy` drops the queries' text. */
+function loreTracesOf(raw: unknown, legacy: boolean): LoreStepTrace[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: LoreStepTrace[] = [];
   for (const t of raw) {
@@ -59,7 +64,7 @@ function loreTracesOf(raw: unknown): LoreStepTrace[] | undefined {
     if (!step || !policy || !transport || (t.phase !== "pre" && t.phase !== "post")) continue;
     const queries = t.queries.flatMap((q) => {
       const kind = isRecord(q) ? QUERY_KINDS.find((k) => k === q.kind) : undefined;
-      return kind && isRecord(q) && typeof q.text === "string" && typeof q.matched === "number" ? [{ kind, text: q.text, matched: q.matched }] : [];
+      return kind && isRecord(q) && typeof q.text === "string" && typeof q.matched === "number" ? [{ kind, text: legacy ? "" : q.text, matched: q.matched }] : [];
     });
     const entries = t.entries.flatMap((e) => (isRecord(e) && typeof e.title === "string" && typeof e.tokens === "number" && typeof e.cut === "boolean" && typeof e.secret === "boolean" ? [{ title: e.title, tokens: e.tokens, cut: e.cut, secret: e.secret }] : []));
     out.push({ step, phase: t.phase, policy, transport, queries, entries, lookups: t.lookups, notes: [...t.notes] });
@@ -98,15 +103,16 @@ export class InspectorLog {
     if (known?.userId === userId) return known;
     // Another owner's log may still be being written; read this one after it.
     await this.writes.get(chatId);
-    const raw = await readStoredJson(this.host, this.path(chatId), userId, "inspector history", (r) => isRecord(r) && r.v === 1 && Array.isArray(r.records));
+    const raw = await readStoredJson(this.host, this.path(chatId), userId, "inspector history", (r) => isRecord(r) && (r.v === 1 || r.v === FORMAT) && Array.isArray(r.records));
     // Two first looks at once (a view and a generation) share the log the first one read.
     const raced = this.logs.get(chatId);
     if (raced?.userId === userId) return raced;
     const records = isRecord(raw) && Array.isArray(raw.records) ? raw.records.filter(isInspectorRecord).slice(-INSPECTOR_RUNS) : [];
+    const legacy = isRecord(raw) && raw.v !== FORMAT;
     const log: ChatLog = {
       userId,
       records: records.map(({ lore, ...r }) => {
-        const traces = loreTracesOf(lore);
+        const traces = loreTracesOf(lore, legacy);
         return traces ? { ...r, lore: traces } : r;
       }),
       delivery: isRecord(raw) ? deliveryOf(raw.delivery) : {},
@@ -137,7 +143,7 @@ export class InspectorLog {
     const path = this.path(chatId);
     const write = (this.writes.get(chatId) ?? Promise.resolve())
       .then(async () => {
-        await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: 1, records: log.records, delivery: log.delivery }), log.userId);
+        await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: FORMAT, records: log.records, delivery: log.delivery }), log.userId);
         await this.host.storage.move(`${path}.tmp`, path, log.userId);
       })
       .catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the inspector history wasn't saved (${error instanceof Error ? error.message : String(error)})`, log.userId));
