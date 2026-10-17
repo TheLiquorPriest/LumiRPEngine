@@ -46,8 +46,8 @@ function refEq(a: EventRef, b: EventRef): boolean {
   return a.in === "events" || (b.in === "post" && a.seq === b.seq);
 }
 
-/** State-dependent outputs (the rest are rebuilt from the chain without state). */
-const dependentNote = (n: JournalNote): boolean => n.kind === "dropped";
+/** State-dependent outputs (the rest are rebuilt from the chain without state): drops, and an Upgrade's notes. */
+const dependentNote = (n: JournalNote): boolean => n.kind === "dropped" || n.kind === "note";
 const dependentKeep = (k: KeepLine): boolean => k.status === "dropped" || k.status === "converted";
 
 export interface LedgerFoldOptions {
@@ -257,9 +257,10 @@ export class LedgerFold {
       if (!world) throw new FoldError(`unknown revision ${state.revision}`);
       return types.context(world, state);
     };
+    const env = { worlds: input.worlds, types };
     const marker = (mk: Marker): void => {
       if (mk.kind === "migrate" && !input.worlds(mk.to)) throw new FoldError(`unknown revision ${mk.to}`);
-      applyMarker(state, mk);
+      for (const text of applyMarker(state, mk, env)) notes.push({ kind: "note", messageId: m.id, ref: { marker: mk.seq }, text });
     };
     const { rec, recPath, liveMarkers, livePost } = f;
     const parent = f.result.parentPath;

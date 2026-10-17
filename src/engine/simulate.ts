@@ -29,6 +29,7 @@ import { allSchedules, instantEvents, scheduleInstants, type ScheduleInstant } f
 import { isGone } from "./scope";
 import { lostObservations, unobserved } from "./seen";
 import type { WorldState } from "./state";
+import { dropTouches } from "./touched";
 import { own } from "./pack-kit";
 import type { WorldDoc } from "../shared/world";
 import { stepTracks, type TrackChange } from "./tracks";
@@ -458,15 +459,22 @@ function foldOf(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, eve
  * merged through their `coarsen` hook, and adjacent clock moves joined. The result is checked:
  * when it doesn't fold from `start` to exactly the raw fold's state, the conservative pass is
  * used, and when that doesn't either, the raw events. Moving everyone once loses what the POV saw
- * on the way, so a coarse record ends with an `engine.observed` event putting that back.
+ * on the way, so a coarse record ends with an `engine.observed` event putting that back. The
+ * touched record is left out of the check: the stored record is what play applied, so a field
+ * whose deltas net to nothing over the period isn't touched by it.
  */
 export function coarsen(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, events: readonly LedgerEvent[]): LedgerEvent[] {
   const full = foldOf(reg, world, start, events);
   if (full === null) return [...events];
-  const expected = hashJson(unobserved(full));
+  const worldOnly = (s: Readonly<WorldState>): string => {
+    const copy = unobserved(s);
+    dropTouches(copy);
+    return hashJson(copy);
+  };
+  const expected = worldOnly(full);
   for (const candidate of [collapse(reg, start, events), coarsenRuns(events)]) {
     const coarse = foldOf(reg, world, start, candidate);
-    if (coarse === null || hashJson(unobserved(coarse)) !== expected) continue;
+    if (coarse === null || worldOnly(coarse) !== expected) continue;
     const lost = lostObservations(full, coarse);
     return lost ? [...candidate, { type: ENGINE_EVENTS.observed, data: lost }] : candidate;
   }

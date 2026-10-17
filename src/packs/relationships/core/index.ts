@@ -223,6 +223,11 @@ const regardEvent: EventTypeDef<PackEvent> = {
     writeRegard(state, from, to, anchor, null);
     if (mutual) writeRegard(state, to, from, e.data.back === undefined ? anchor : objOf(e.data.back), null);
   },
+  touches: (e) => {
+    const from = strOf(e.data.from);
+    const to = strOf(e.data.to);
+    return e.data.mutual === true ? [{ entity: from, rel: "regard", to }, { entity: to, rel: "regard", to: from }] : [{ entity: from, rel: "regard", to }];
+  },
   // NPC↔NPC regard in a record: the last anchor per pair stands for the period (decay runs from it).
   coarsen: {
     key: (e) => (e.data.npc === true ? (e.data.mutual === true ? `m:${[strOf(e.data.from), strOf(e.data.to)].sort().join("|")}` : `d:${strOf(e.data.from)}>${strOf(e.data.to)}`) : null),

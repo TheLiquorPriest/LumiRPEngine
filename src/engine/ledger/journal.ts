@@ -408,7 +408,7 @@ export class LedgerCore {
     const target = targetIndex >= 0 ? this.chain(observed)[targetIndex] : undefined;
     const targetRec = target ? activeRecord(target, this.journal.tombstones) : null;
     const liveTarget = (target?.ledger?.markers ?? []).filter((mk) => isLive(mk.at, parentPath, turnPath(targetRec))).sort((a, b) => a.seq - b.seq);
-    for (const mk of liveTarget) applyMarker(state, mk);
+    for (const mk of liveTarget) applyMarker(state, mk, this.env);
 
     const users: string[] = [];
     const userMessages: Record<MessageId, ContentId> = {};
@@ -424,7 +424,7 @@ export class LedgerCore {
     let seq = this.journal.seq;
     if (!this.journal.started) {
       startMarkers = this.env.startMarkers().map((body) => ({ ...body, seq: ++seq, at: null, start: true as const }));
-      for (const mk of startMarkers) applyMarker(state, mk);
+      for (const mk of startMarkers) applyMarker(state, mk, this.env);
     }
     if (p.kind === "renarrate" && target && !dryRun && this.planRenarrate(p, target, out.state, parentPath, world)) {
       Object.assign(p, {
@@ -469,7 +469,7 @@ export class LedgerCore {
     if (!source || isTombstoned(this.journal.tombstones, target.id, source) || source.path === "" || source.seed === "") return false;
     const state = structuredClone(base);
     const markers = [...(target.ledger?.markers ?? [])].filter((mk) => isLive(mk.at, parentPath, parentPath)).sort((a, b) => a.seq - b.seq);
-    for (const mk of markers) if (mk.seq <= source.markersApplied) applyMarker(state, mk);
+    for (const mk of markers) if (mk.seq <= source.markersApplied) applyMarker(state, mk, this.env);
     const pre = source.events.slice(0, source.pre);
     for (const ev of pre) {
       const ctx = this.env.types.context(world, state);
@@ -497,7 +497,7 @@ export class LedgerCore {
     const out: { kept: PostEntry[]; undone: EventRef[]; dropped: CarryDrop[] } = { kept: [], undone: [], dropped: [] };
     for (const item of later) {
       if ("marker" in item) {
-        applyMarker(state, item.marker);
+        applyMarker(state, item.marker, this.env);
         continue;
       }
       const { entry } = item;
@@ -627,7 +627,7 @@ export class LedgerCore {
     const world = this.env.worlds(out.state.revision);
     if (!world) return null;
     const state = structuredClone(out.state);
-    if (!this.journal.started) for (const body of this.env.startMarkers()) applyMarker(state, body);
+    if (!this.journal.started) for (const body of this.env.startMarkers()) applyMarker(state, body, this.env);
     return { state, world };
   }
 
@@ -651,9 +651,9 @@ export class LedgerCore {
     const target = this.chain(observed)[targetIndex];
     const parent = out.messages.length > 0 ? (out.messages[out.messages.length - 1]?.path ?? ROOT_PATH) : ROOT_PATH;
     for (const mk of [...(target?.ledger?.markers ?? [])].sort((a, b) => a.seq - b.seq)) {
-      if (mk.seq <= rec.markersApplied && isLive(mk.at, parent, turnPath(rec))) applyMarker(state, mk);
+      if (mk.seq <= rec.markersApplied && isLive(mk.at, parent, turnPath(rec))) applyMarker(state, mk, this.env);
     }
-    for (const mk of start) applyMarker(state, mk);
+    for (const mk of start) applyMarker(state, mk, this.env);
     const world = this.env.worlds(state.revision);
     if (!world) return null;
     // The planned events as the fold applies them: an undone one doesn't count (a read after an undo
@@ -711,7 +711,7 @@ export class LedgerCore {
             ...rec.post.map((e) => ({ seq: e.seq, entry: e })),
           ].sort((a, b) => a.seq - b.seq);
           for (const item of later) {
-            if ("marker" in item) applyMarker(prefix.state, item.marker);
+            if ("marker" in item) applyMarker(prefix.state, item.marker, this.env);
             else {
               const live = item.entry.events.filter((_, i) => !rec.undone.some((u) => u.in === "post" && u.seq === item.entry.seq && u.index === i));
               applyValidUnits(this.env.types, live, prefix.state, (s) => this.env.types.context(prefix.world, s));

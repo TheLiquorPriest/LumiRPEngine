@@ -12,6 +12,7 @@ import type {
   AddEvent,
   ClockEvent,
   CoreEvent,
+  EntityPicks,
   LedgerEvent,
   LinkEvent,
   MarkerBody,
@@ -22,9 +23,14 @@ import type {
   StageEvent,
   TimelapseEvent,
   UnlinkEvent,
+  UpgradePick,
+  UpgradePicks,
 } from "../shared/ledger";
+import { UPGRADE_ASPECTS } from "../shared/ledger";
 import type { EventTypeDef, ReadContext, Rejection } from "./registry";
 import type { WorldState } from "./state";
+import { touch } from "./touched";
+import { migrate, type MarkerEnv } from "./upgrade";
 
 /** Accounts outside the world: counterparties without numeric money (DESIGN §9.2). */
 export const EXTERNAL_ACCOUNT_PREFIX = "economy.external:";
@@ -55,6 +61,7 @@ const setDef: EventTypeDef<SetEvent> = {
     const entity = hasEntity(state, e.entity) ? state.entities[e.entity] : undefined;
     if (entity && safeKey(e.field)) entity.fields[e.field] = e.value;
   },
+  touches: (e) => [{ entity: e.entity, field: e.field }],
   describe: (e, ctx) => `${nameOf(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${typeof e.value === "string" || typeof e.value === "number" || typeof e.value === "boolean" ? `is now ${String(e.value)}` : "changed"}`,
 };
 
@@ -73,6 +80,7 @@ const addDef: EventTypeDef<AddEvent> = {
     const current = entity.fields[e.field];
     entity.fields[e.field] = (typeof current === "number" ? current : 0) + e.delta;
   },
+  touches: (e) => [{ entity: e.entity, field: e.field }],
   describe: (e, ctx) => `${nameOf(ctx, e.entity)}: ${e.field.replace(/_/g, " ")} ${e.delta >= 0 ? "+" : ""}${e.delta}`,
 };
 
@@ -95,6 +103,7 @@ const postDef: EventTypeDef<PostEvent> = {
   apply: (e, state) => {
     for (const line of e.lines) if (safeKey(line.account)) state.accounts[line.account] = (hasOwn(state.accounts, line.account) ? (state.accounts[line.account] ?? 0) : 0) + line.amount;
   },
+  touches: (e) => e.lines.filter((l) => !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX)).map((l) => ({ entity: l.account, aspect: "posted" })),
   describe: (e) => e.memo,
 };
 
@@ -108,6 +117,7 @@ const linkDef: EventTypeDef<LinkEvent> = {
     entity.relations = entity.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
     entity.relations.push({ type: e.rel, to: e.to, ...(e.fields ? { fields: e.fields } : {}), ...(e.until !== undefined ? { until: e.until } : {}) });
   },
+  touches: (e) => [{ entity: e.from, rel: e.rel, to: e.to }],
   describe: (e, ctx) => `${nameOf(ctx, e.from)} ${e.rel.replace(/_/g, " ")} ${nameOf(ctx, e.to)}`,
 };
 
@@ -121,6 +131,7 @@ const unlinkDef: EventTypeDef<UnlinkEvent> = {
     const entity = hasEntity(state, e.from) ? state.entities[e.from] : undefined;
     if (entity) entity.relations = entity.relations.filter((r) => !(r.type === e.rel && r.to === e.to));
   },
+  touches: (e) => [{ entity: e.from, rel: e.rel, to: e.to }],
   describe: (e, ctx) => `${nameOf(ctx, e.from)} no longer ${e.rel.replace(/_/g, " ")} ${nameOf(ctx, e.to)}`,
 };
 
@@ -143,6 +154,7 @@ const spawnDef: EventTypeDef<SpawnEvent> = {
       ...(d.tags ? { tags: [...d.tags] } : {}),
     };
   },
+  touches: (e) => [{ entity: e.entity.id, aspect: "spawned" }],
   describe: (e) => `${e.entity.name} appears`,
 };
 
@@ -295,17 +307,83 @@ function timeValue(control: (typeof TIME_CONTROLS)[number], to: unknown): JsonVa
   }
 }
 
+/** The most picks one Upgrade marker may carry: it is stored on a message, so it stays small. */
+export const UPGRADE_PICKS_MAX = 5000;
+
+function isPick(v: unknown): v is UpgradePick {
+  return v === "take" || v === "keep";
+}
+
+/**
+ * An Upgrade's picks from outside: entity, field, relation type and target keys must be safe map
+ * keys and every pick one of its values. Anything else, or more than `UPGRADE_PICKS_MAX` picks,
+ * makes the whole marker invalid, since a pick quietly dropped could take a value the owner meant
+ * to keep. Entities left with no picks are dropped.
+ */
+function validPicks(raw: unknown): UpgradePicks | null {
+  if (!isRecord(raw)) return null;
+  const out: UpgradePicks = {};
+  let count = 0;
+  for (const [id, p] of Object.entries(raw)) {
+    if (!safeKey(id) || !isRecord(p)) return null;
+    const picks: EntityPicks = {};
+    for (const [key, v] of Object.entries(p)) {
+      if (key === "entity") {
+        if (v !== "take" && v !== "keep" && v !== "remove") return null;
+        picks.entity = v;
+        count++;
+      } else if (key === "fields") {
+        if (!isRecord(v)) return null;
+        const fields: Record<string, UpgradePick> = {};
+        for (const [field, pick] of Object.entries(v)) {
+          if (!safeKey(field) || !isPick(pick)) return null;
+          fields[field] = pick;
+          count++;
+        }
+        if (Object.keys(fields).length > 0) picks.fields = fields;
+      } else if (key === "relations") {
+        if (!isRecord(v)) return null;
+        const relations: Record<string, Record<string, UpgradePick>> = {};
+        for (const [rel, targets] of Object.entries(v)) {
+          if (!safeKey(rel) || !isRecord(targets)) return null;
+          const byTarget: Record<string, UpgradePick> = {};
+          for (const [to, pick] of Object.entries(targets)) {
+            if (!safeKey(to) || !isPick(pick)) return null;
+            byTarget[to] = pick;
+            count++;
+          }
+          if (Object.keys(byTarget).length > 0) relations[rel] = byTarget;
+        }
+        if (Object.keys(relations).length > 0) picks.relations = relations;
+      } else {
+        const aspect = UPGRADE_ASPECTS.find((a) => a === key);
+        if (!aspect || !isPick(v)) return null;
+        picks[aspect] = v;
+        count++;
+      }
+      if (count > UPGRADE_PICKS_MAX) return null;
+    }
+    if (Object.keys(picks).length > 0) out[id] = picks;
+  }
+  return out;
+}
+
 /**
  * A marker body from outside (a request, a stored or imported ledger), checked and clamped; null
  * when it isn't one. Domains, bands and interrupt classes come from their fixed lists; entity,
- * scene type and activity keys must be safe map keys; levels are whole numbers 0–4.
+ * scene type and activity keys must be safe map keys; levels are whole numbers 0–4; an Upgrade's
+ * picks pass `validPicks`.
  */
 export function validMarkerBody(raw: unknown): MarkerBody | null {
   if (!isRecord(raw)) return null;
   const scope = isRecord(raw.scope) ? raw.scope : null;
   switch (raw.kind) {
-    case "migrate":
-      return typeof raw.to === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(raw.to) ? { kind: "migrate", to: raw.to } : null;
+    case "migrate": {
+      if (typeof raw.to !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(raw.to)) return null;
+      if (raw.merge === undefined) return { kind: "migrate", to: raw.to };
+      const merge = validPicks(raw.merge);
+      return merge ? { kind: "migrate", to: raw.to, merge } : null;
+    }
     case "resolve": {
       const domain = DOMAINS.find((d) => d === raw.domain);
       const to = raw.to;
@@ -372,27 +450,33 @@ function setLevel(state: WorldState, domain: DomainId, scope: Extract<MarkerBody
     if (hasOwn(state.realism.tierCaps, scope.tier)) state.realism.tierCaps[scope.tier][domain] = to;
   } else {
     const entity = hasEntity(state, scope.entity) ? state.entities[scope.entity] : undefined;
-    if (entity) entity.levels[domain] = to;
+    if (!entity) return;
+    entity.levels[domain] = to;
+    // A level set for one entity in play is a change an Upgrade keeps by default.
+    touch(state, { entity: scope.entity, aspect: "levels" });
   }
 }
 
 /**
- * Applies a marker's intent. `migrate` only records the revision; the fold switches world
- * documents. The body is re-checked here, so a marker that slipped past the write path (an old or
- * imported ledger) can never index state with an unchecked key.
+ * Applies a marker's intent and returns the Journal notes it makes. `migrate` switches the revision
+ * in force; with picks it also merges the revision's definition changes into the state, reading the
+ * revisions through `env` (`upgrade.ts`). The body is re-checked here, so a marker that slipped past
+ * the write path (an old or imported ledger) can never index state with an unchecked key.
  */
-export function applyMarker(state: WorldState, raw: MarkerBody): void {
+export function applyMarker(state: WorldState, raw: Exclude<MarkerBody, { kind: "migrate" }>): string[];
+export function applyMarker(state: WorldState, raw: MarkerBody, env: MarkerEnv): string[];
+export function applyMarker(state: WorldState, raw: MarkerBody, env?: MarkerEnv): string[] {
   const body = validMarkerBody(raw);
-  if (!body) return;
+  if (!body) return [];
   switch (body.kind) {
     case "migrate":
-      state.revision = body.to;
-      return;
+      if (!env) throw new Error("an Upgrade marker needs the world revisions to apply");
+      return migrate(state, body, env);
     case "resolve":
       setLevel(state, body.domain, body.scope, body.to);
-      return;
+      return [];
     case "time":
       setTimeControl(state, body);
-      return;
+      return [];
   }
 }

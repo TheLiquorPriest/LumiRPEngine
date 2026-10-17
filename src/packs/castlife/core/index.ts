@@ -387,6 +387,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       const v = Math.max(0, Math.min(100, needValue({ world: ctx.world, state }, strOf(e.data.entity), need, at) + numOf(e.data.delta)));
       who.fields.needs = { ...objOf(who.fields.needs), [need]: { v, t: at } };
     },
+    touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
     describe: (e) => `${strOf(e.data.need).replace(/_/g, " ")} ${numOf(e.data.delta) < 0 ? "eased" : "rose"}`,
   },
   {

@@ -72,7 +72,7 @@ describe("prototype pollution", () => {
     const state = core?.renderState(toChain(await rig.host.chats.messages(chatId, rig.host.userId)))?.state;
     if (!state) throw new Error("no state to apply the marker to");
     const before = JSON.stringify(state);
-    applyMarker(state, JSON.parse('{"kind":"resolve","domain":"money","scope":{"tier":"__proto__"},"to":4}') as MarkerBody);
+    applyMarker(state, JSON.parse('{"kind":"resolve","domain":"money","scope":{"tier":"__proto__"},"to":4}') as Extract<MarkerBody, { kind: "resolve" }>);
     expect(JSON.stringify(state)).toBe(before);
     clean();
   });

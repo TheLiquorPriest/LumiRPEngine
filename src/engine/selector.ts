@@ -1,8 +1,8 @@
 // Selectors (DESIGN §4.1): which entities a rule, schedule, visibility grant, filter or grouping
 // applies to. Classes and tags are definitional, so they are read live from the world for the
-// entities it defines (an Upgrade reclassifies a running chat) and from state for spawned ones;
-// kind follows inheritance; tier and group membership come from the folded state, where play can
-// change them.
+// entities it defines (an Upgrade reclassifies a running chat) and from state for spawned ones and
+// those whose own an Upgrade kept; kind follows inheritance; tier and group membership come from the
+// folded state, where play can change them.
 
 import type { EntityId } from "../shared/ids";
 import { withinValue } from "../shared/classes";
@@ -21,10 +21,11 @@ export const GROUP_KIND = "group";
 /** How deep group nesting is followed (a crew in a guild in a city's council). */
 const MEMBERSHIP_DEPTH = 8;
 
-/** Where an entity's classes and tags live: the world's definition, else (a spawned entity) its state. */
+/** Where an entity's classes and tags live: its state when it holds them (spawned, or kept through an Upgrade), else the world's definition. */
 function definitional(world: WorldDoc, state: Readonly<WorldState>, id: EntityId): { class?: Record<FacetId, FacetValueId[]>; tags?: string[] } | undefined {
-  if (hasOwn(world.entities, id)) return world.entities[id];
-  return hasOwn(state.entities, id) ? state.entities[id] : undefined;
+  const held = hasOwn(state.entities, id) ? state.entities[id] : undefined;
+  if (held && (held.class !== undefined || held.tags !== undefined)) return held;
+  return hasOwn(world.entities, id) ? world.entities[id] : held;
 }
 
 /** The entity's values for a facet. */

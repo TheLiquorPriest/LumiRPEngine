@@ -12,7 +12,7 @@
 // All functions here are pure: same inputs, same outputs; randomness only from the Rng passed in.
 
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { DomainId, EntityId, Level, PackId, PanelId, SlotId, TableId } from "../shared/ids";
+import type { DomainId, EntityId, FieldId, Level, PackId, PanelId, RelationTypeId, SlotId, TableId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { LintIssue } from "../shared/protocol";
 import type { ColumnDef, DataTable } from "../shared/tables";
@@ -51,6 +51,18 @@ export interface ReadContext {
   query<K extends keyof QueryMap>(name: K): QueryMap[K];
 }
 
+/**
+ * Part of an entity's definition an applied event writes (DESIGN §4.3, the touched record): one of
+ * its fields, one relation (by type and target), its tier, agent flag or level overrides, the
+ * entity itself when play created it, or an account's balance. Names only, never values.
+ */
+export type Touch =
+  | { entity: EntityId; field: FieldId }
+  | { entity: EntityId; rel: RelationTypeId; to: string }
+  | { entity: EntityId; aspect: TouchAspect };
+
+export type TouchAspect = "tier" | "agent" | "levels" | "spawned" | "posted";
+
 /** A registered event type: validation against the state before it, and its reducer. */
 export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
   type: E["type"];
@@ -66,6 +78,12 @@ export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
    * `merge` must keep the fold exact.
    */
   coarsen?: { key(event: E): string | null; merge(earlier: E, later: E): E };
+  /**
+   * What the event writes of entities' definitions, when its reducer writes any directly (fields,
+   * relations, tier, agent, levels, a new entity, a balance). The registry records it after every
+   * apply in the touched record, so an Upgrade never takes a revision's value over one play wrote.
+   */
+  touches?(event: E): Touch[];
 }
 
 /** An extra validation on an event type (`CoreRegistry.guard`). */

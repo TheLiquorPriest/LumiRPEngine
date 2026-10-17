@@ -237,6 +237,10 @@ const events: EventTypeDef<PackEvent>[] = [
         else if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 4) ent.levels[domain] = v as Level;
       }
     },
+    touches: (e) => {
+      const entity = str(e, "entity");
+      return (["tier", "agent", "levels"] as const).filter((aspect) => e.data[aspect] !== undefined).map((aspect) => ({ entity, aspect }));
+    },
     describe: (e, ctx) => {
       const parts: string[] = [];
       if (typeof e.data.tier === "string") parts.push(tierLabel(ctx.world, e.data.tier));

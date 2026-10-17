@@ -7,18 +7,14 @@
 import { hashJson, hashParts } from "../../shared/hash";
 import type { EventRef, JournalNote, KeepLine, LedgerEvent, Marker, PathHash, PostEntry, Rec } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
-import { applyEvent, applyMarker, validateEvent, type EventTypes } from "../events";
+import { applyEvent, applyMarker, validateEvent } from "../events";
 import type { ReadContext } from "../registry";
-import type { RelationTypes } from "../relations";
-import type { WorldState } from "../state";
+import type { MarkerEnv, UpgradeTypes } from "../upgrade";
 import { initialState } from "../world-state";
-import type { WorldDoc } from "../../shared/world";
 import { FoldError, type FoldInput, type FoldOutput, type MessageResult } from "./chain";
 
-/** What the fold needs from the registry: event types, relation types for the start state, read contexts. */
-export interface FoldTypes extends EventTypes, RelationTypes {
-  context(world: WorldDoc, state: Readonly<WorldState>): ReadContext;
-}
+/** What the fold needs from the registry: event types, relation types for the start state, read contexts (what an Upgrade's merge needs too). */
+export type FoldTypes = UpgradeTypes;
 
 const textHash = (text: string): string => hashParts("lre.content", text);
 
@@ -44,12 +40,14 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
     return types.context(world, state);
   };
 
-  const marker = (m: Marker): void => {
+  // An Upgrade's merge reads the revisions; what it says goes in the Journal at its marker.
+  const env: MarkerEnv = { worlds: input.worlds, types };
+  const marker = (messageId: string, m: Marker): void => {
     if (m.kind === "migrate") {
       const next = input.worlds(m.to);
       if (!next) throw new FoldError(`unknown revision ${m.to}`);
     }
-    applyMarker(state, m);
+    for (const text of applyMarker(state, m, env)) notes.push({ kind: "note", messageId, ref: { marker: m.seq }, text });
   };
 
   for (const m of input.chain) {
@@ -102,7 +100,7 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
     if (paused) {
       fold = "paused";
     } else if (!rec) {
-      for (const mk of liveMarkers) marker(mk);
+      for (const mk of liveMarkers) marker(m.id, mk);
       fold = tombstoned ? "tombstoned" : "plain";
     } else {
       const view = recPath !== null && recPath !== parent;
@@ -172,14 +170,14 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
           }
         }
       };
-      for (const mk of liveMarkers) if (mk.seq <= record.markersApplied) marker(mk);
+      for (const mk of liveMarkers) if (mk.seq <= record.markersApplied) marker(m.id, mk);
       run(record.events, (index) => ({ in: "events", index }));
       const later: ({ seq: number; marker: Marker } | { seq: number; post: PostEntry })[] = [
         ...liveMarkers.filter((mk) => mk.seq > record.markersApplied).map((mk) => ({ seq: mk.seq, marker: mk })),
         ...livePost.map((p) => ({ seq: p.seq, post: p })),
       ].sort((a, b) => a.seq - b.seq);
       for (const item of later) {
-        if ("marker" in item) marker(item.marker);
+        if ("marker" in item) marker(m.id, item.marker);
         else run(item.post.events, (index) => ({ in: "post", seq: item.post.seq, index }));
       }
       fold = recPath === null ? "plain" : view ? "view" : "on_path";

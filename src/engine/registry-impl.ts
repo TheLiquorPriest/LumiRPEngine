@@ -23,6 +23,7 @@ import type {
   TableDef,
 } from "./registry";
 import { observing } from "./seen";
+import { touching } from "./touched";
 import type { WorldState } from "./state";
 import { clampLevel } from "./time-limits";
 import { canSeeEntity } from "./visibility";
@@ -198,5 +199,7 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
       },
     });
   }
+  // Every type that writes entities' definitions keeps the touched record (an Upgrade's defaults); both folds apply these same types.
+  for (const [type, def] of events) events.set(type, touching(def));
   return Object.freeze(registry);
 }

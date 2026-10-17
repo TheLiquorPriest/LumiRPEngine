@@ -558,7 +558,7 @@ export class Runner {
       const index = chain.findIndex((m) => m.id === messageId);
       const state = structuredClone(core.fold(chain.slice(0, index)).state);
       const parent = core.fold(chain.slice(0, index)).messages.at(-1)?.path ?? ROOT_PATH;
-      for (const mk of [...(before?.markers ?? [])].sort((a, b) => a.seq - b.seq)) if (mk.seq <= source.markersApplied && isLive(mk.at, parent, parent)) applyMarker(state, mk);
+      for (const mk of [...(before?.markers ?? [])].sort((a, b) => a.seq - b.seq)) if (mk.seq <= source.markersApplied && isLive(mk.at, parent, parent)) applyMarker(state, mk, { worlds: (r) => this.h.worlds.get(r), types: this.h.registry });
       const world = this.h.worlds.get(state.revision);
       if (!world) return;
       for (const ev of source.events.slice(0, source.pre)) {

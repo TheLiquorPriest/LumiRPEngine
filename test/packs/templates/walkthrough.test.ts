@@ -10,6 +10,7 @@ import { coreEventTypes, type EventTypes } from "../../../src/engine/events";
 import type { EventTypeDef } from "../../../src/engine/registry";
 import { runRulesOnEvents } from "../../../src/engine/rules";
 import { unobserved } from "../../../src/engine/seen";
+import { dropTouches } from "../../../src/engine/touched";
 import type { WorldState } from "../../../src/engine/state";
 import { buildQuestLog } from "../../../src/packs/story/core/index";
 import { playerTrack } from "../../../src/engine/visibility";
@@ -333,7 +334,7 @@ describe("Port Alder (modern_slice_of_life)", () => {
   });
 });
 
-/** Folds events with the core event types as they were before the POV's observations (`space.seen`) were kept. */
+/** Folds events with the core event types as they were before the POV's observations (`space.seen`) and the touched record were kept. */
 function foldUnobserving(world: WorldDoc, start: Readonly<WorldState>, events: readonly LedgerEvent[]): WorldState {
   const types: EventTypes = { get: (type) => plain.get(type) ?? registry.get(type) };
   const plain = new Map<string, EventTypeDef>(coreEventTypes(() => types).map((d) => [d.type, d]));
@@ -342,7 +343,14 @@ function foldUnobserving(world: WorldDoc, start: Readonly<WorldState>, events: r
   return state;
 }
 
-describe("the POV's observations are all that keeping them changes", () => {
+/** The world itself: the state without the POV's observations and without the touched record. */
+function worldOnly(state: Readonly<WorldState>): string {
+  const copy = unobserved(state);
+  dropTouches(copy);
+  return hashJson(copy);
+}
+
+describe("the POV's observations and the touched record are all that keeping them changes", () => {
   for (const starter of Object.keys(STARTER_WORLDS)) {
     test(`${starter}: a walk and two days fold to the same world as without them`, () => {
       const p = new Play(starter);
@@ -354,7 +362,7 @@ describe("the POV's observations are all that keeping them changes", () => {
       }
       p.lapse(2 * DAY);
       expect(hashJson(fold(registry, p.world, start, p.w.events))).toBe(hashJson(p.state));
-      expect(hashJson(unobserved(foldUnobserving(p.world, start, p.w.events)))).toBe(hashJson(unobserved(p.state)));
+      expect(worldOnly(foldUnobserving(p.world, start, p.w.events))).toBe(worldOnly(p.state));
     });
   }
 });

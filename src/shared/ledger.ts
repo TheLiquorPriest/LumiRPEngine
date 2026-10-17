@@ -196,8 +196,34 @@ export type TimeScope =
   | { activity: ActivityType }
   | { interrupt: InterruptClass };
 
+/** One pick of an Upgrade's definition merge: bring the revision's value in, or keep the chat's. */
+export type UpgradePick = "take" | "keep";
+
+/** An entity-wide pick: a new entity is created (`take`) or left out (`keep`); one gone from the revision stays (`keep`) or is removed (`remove`). */
+export type EntityUpgradePick = UpgradePick | "remove";
+
+/** The definition parts an Upgrade merges besides fields and relations. */
+export const UPGRADE_ASPECTS = ["kind", "name", "tier", "agent", "levels", "class"] as const;
+export type UpgradeAspect = (typeof UPGRADE_ASPECTS)[number];
+
+/**
+ * The owner's picks for one entity in an Upgrade (DESIGN §4.3 `migrate`): intent only, the values
+ * come from the two revisions. Anything unpicked takes the default: `take` when no applied event
+ * touched it, `keep` when one did.
+ */
+export interface EntityPicks extends Partial<Record<UpgradeAspect, UpgradePick>> {
+  entity?: EntityUpgradePick;
+  fields?: Record<FieldId, UpgradePick>;
+  /** Per relation type, per target (an entity or a place). */
+  relations?: Record<RelationTypeId, Record<string, UpgradePick>>;
+}
+
+/** An Upgrade's picks by entity. */
+export type UpgradePicks = Record<EntityId, EntityPicks>;
+
 export type MarkerBody =
-  | { kind: "migrate"; to: RevisionId }
+  /** With `merge`, the revision's definition changes come into the chat as the picks say; without, only the revision switches. */
+  | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   | { kind: "resolve"; domain: DomainId; scope: ResolveScope; to: Level }
   | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue };
 

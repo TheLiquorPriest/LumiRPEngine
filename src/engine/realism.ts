@@ -54,8 +54,8 @@ export function presetOf(realism: RealismState): RealismPresetId {
 }
 
 /** The `resolve` markers that move a chat to a realism state (domain levels, then band caps). */
-export function realismMarkers(target: RealismState): MarkerBody[] {
-  const out: MarkerBody[] = [];
+export function realismMarkers(target: RealismState): Extract<MarkerBody, { kind: "resolve" }>[] {
+  const out: Extract<MarkerBody, { kind: "resolve" }>[] = [];
   for (const d of DOMAINS) out.push({ kind: "resolve", domain: d, scope: { all: true }, to: target.levels[d] });
   for (const b of BANDS) for (const d of DOMAINS) out.push({ kind: "resolve", domain: d, scope: { tier: b }, to: capOf(target.tierCaps, b, d) });
   return out;

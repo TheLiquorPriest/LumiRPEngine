@@ -191,7 +191,7 @@ export function placeOfEntity(state: { entities: Record<EntityId, EntityState> }
   return null;
 }
 
-/** The field a GM's Remove sets and Restore clears; nothing else writes it. */
+/** The field a GM's Remove sets and Restore clears; an Upgrade's `remove` pick sets it too, and nothing else writes it. */
 export const GONE_FIELD = "gone";
 
 /**

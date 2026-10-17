@@ -24,7 +24,7 @@ export function minutesBetween(from: string, to: string): number {
 }
 
 /** Levels from a document, each a whole number 0–4; unknown domains are dropped. */
-function clampLevels(levels: Partial<Record<DomainId, unknown>>): Partial<Record<DomainId, Level>> {
+export function clampLevels(levels: Partial<Record<DomainId, unknown>>): Partial<Record<DomainId, Level>> {
   const out: Partial<Record<DomainId, Level>> = {};
   for (const d of DOMAINS) if (levels[d] !== undefined) out[d] = clampLevel(levels[d]);
   return out;

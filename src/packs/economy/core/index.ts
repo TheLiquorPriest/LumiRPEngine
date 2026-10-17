@@ -216,6 +216,12 @@ declare module "../../../engine/registry" {
     "economy.reprice": (ctx: ReadContext, events: readonly LedgerEvent[], cents: number) => LedgerEvent[] | Rejection;
     /** A GM money edit: `cents` into (positive) or out of an account, posted against the outside correction account, with its history line. */
     "economy.adjust": (ctx: ReadContext, account: EntityId, cents: number) => LedgerEvent[] | Rejection;
+    /**
+     * An Upgrade's new opening balance for an account (DESIGN §4.3 `migrate`): once its holder's
+     * money is open, `cents` (the new opening less the old) moves into or out of it against the
+     * holder's outside account, with its history line. Empty before, when the opening posts the new amount itself.
+     */
+    "economy.reopen": (ctx: ReadContext, account: EntityId, cents: number) => LedgerEvent[];
   }
   interface QueryMap {
     wealth: (ctx: ReadContext, who: EntityId) => string;
@@ -1236,6 +1242,15 @@ export const economyPack: PackDef = {
         { account: CORRECTION_ACCOUNT, amount: -cents },
       ];
       return asUnit([{ type: "post", lines, memo: "Correction" }, txn("Correction", lines)]);
+    });
+    r.service("economy.reopen", (ctx, account, cents) => {
+      const owner = strOf(own(ctx.state.entities, account)?.fields.owner);
+      if (own(ctx.state.entities, account)?.kind !== "account" || !own(ctx.state.entities, owner) || !isMaterialized(ctx.state, owner, "money") || !Number.isSafeInteger(cents) || cents === 0) return [];
+      const lines: PostingLine[] = [
+        { account, amount: cents },
+        { account: external(owner), amount: -cents },
+      ];
+      return [{ type: "post", lines, memo: "Opening balance changed" }, txn("Opening balance changed", lines)];
     });
     r.query("wealth", (ctx, who) => wealthOf(ctx.state, who));
     r.query("can_afford", (ctx, who, cents) => {
