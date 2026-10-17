@@ -151,6 +151,10 @@ Open the map from the **World map** button in the input bar, **🗺 Map** in the
 
 The map shows one place at a time, with the places directly inside it (a town's streets and shops, a manor's rooms) and the routes between them. It opens where you are: on your own place when there are places inside it, otherwise on the nearest place around you that has a map or a grid, or else on the place just around yours. The **breadcrumbs** along the top lead back out, a level at a time, up to the **World** (the places at the top of the world), and a place with places inside it has **Open** on its card. **You are here** marks where you stand. The map draws the places you know and the places you're inside. Travel isn't limited to the place on screen: the palette and a typed move reach any place you know, and so does the map from any of its levels. From Space and travel level 2, a place with a grid shows its walls, doors and terrain behind its rooms, and from level 3 the square you're standing on.
 
+**Known** and **Fog**, at the map's bottom left, choose how it shows what you know, for this chat only (until you pick, the world's choice). **Known** draws a place you've heard of but never been to as a dashed ring, and its card says so. **Fog** dims the places you haven't been to and lays fog over what you haven't seen: the squares you haven't had in sight when the world uses the grid system, or else the rooms you haven't been in. Things lying on a grid's squares show as small amber diamonds where you've seen them; tap the square to see what lies there.
+
+When the world uses the **grid system**, you stand on a square of the grid you're on, and walls and doors are walked: tap a square of that grid and its card offers **Walk here** with the time it takes, going around the walls and through the doors, or says "No way there from here.". Walking into a room puts you in it. You see a few squares around you (the world sets how far), and walls block the view.
+
 ### The GM view
 
 The **GM view** shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show the GM view** to open it, and **Hide** to put it away. Its data is fetched only while it is open, so none of it travels with what Play shows you. Looking never changes your chat; only the edits you save do.
@@ -524,7 +528,7 @@ In the **expression editor**, **ƒx** opens the operators and every function a f
 
 A **map** draws the inside of one place, its `scope`: a manor's floor as rooms on a grid, or a town as places linked by routes. It is a small JSON document in the **lre-map-v1** format (its JSON Schema is `src/shared/lre-map-v1.schema.json` in the source), which you write in the map editor or describe in your own words for the AI to write (see [Describe a map](#describe-a-map)). A map makes its places (inside its scope), its grid and its routes for you, and keeps them in step with it: they show in the Places, Grids and Routes lists as the map's, read-only, with **Edit in map** to change them where they come from. Delete the map and they go with it. A place, grid or route you made yourself always wins: a map that would make one with the same id leaves yours alone, and the lint says so.
 
-A **grid map** is rows of characters, one per square, all the same length. The `legend` says what a character means: a terrain (`{"terrain": "grass"}`, with `"blocked": true` for one you can't cross), a place's area (`{"place": "kitchen"}`) or a zone (`{"zone": "cellar"}`). Without a legend entry, `#` is a wall, `.` floor, `+` a door and a space nothing. A place stands at its `at` square, or in the middle of its area.
+A **grid map** is rows of characters, one per square, all the same length. The `legend` says what a character means: a terrain (`{"terrain": "grass"}`, with `"blocked": true` for one you can't cross), a place's area (`{"place": "kitchen"}`), a zone (`{"zone": "cellar"}`) or a thing lying on that square (`{"item": "lantern"}`, which must be a thing of the world on one square only, and not inside something; add `"place"` to say which room's floor it is, otherwise the room around it). Without a legend entry, `#` is a wall, `.` floor, `+` a door and a space nothing. A place stands at its `at` square, or in the middle of its area. `cellMeters` says how many metres a square is across (80 when you leave it out), for walking times.
 
 ```json
 {
@@ -573,7 +577,15 @@ A **node map** sets its places in a frame of `size` by their `at` (leave it out 
 }
 ```
 
-Walls and doors are drawn, not walked: travel inside a place follows its routes, or, with none, a short walk between any two of its places.
+Without the grid system, walls and doors are drawn, not walked: travel inside a place follows its routes, or, with none, a short walk between any two of its places.
+
+**Map settings** are in Build's world settings. **Display** is how a new chat's map starts out, **Known** or **Fog** (players can switch it on their map). **Grid movement** turns on the **grid system**: Space and travel is at least level 3 in every chat of the world, and on a grid, people stand on squares.
+
+- Arriving at a place puts you on its square, or else on a door at the edge of the map, and you walk from there with **Walk here** on the map or the **Move on the map** action, around walls and through doors.
+- A floor plan without `links` gets walking routes through its doors, between rooms a walk joins without crossing a third room, so **Go to** the kitchen walks there in the time the walk takes. A room no door leads to gets a warning.
+- **Sight radius** (3 squares unless you change it) is how far you see; walls block it, and Fog shows only the squares you've seen.
+- A thing drawn in the legend starts on its square. To take it, wear it or use it there, you have to be on its square or next to it: rules and actions can ask the same with `reach(self, thing)`, and `on_grid(thing)` says whether it lies on a square.
+- A rule can fire when someone steps into a zone or onto a square: `{"zone": "cellar", "in": "manor"}` or `{"cell": [4, 2], "in": "manor"}` (every room's area is also a zone named after the room). It fires for you unless `who` picks others (a selector, like `{"kind": ["guard"]}`), once each time they step in, never while they stay.
 
 The **map editor** (open a map from **Maps**, or **+ New**) checks the JSON as you type, against the format and against the rest of the world, and marks each problem on its line: rows of different lengths, a character the legend doesn't know, a place outside the grid, a link to a place that doesn't exist, an id another place already has. **Insert template** gives you a small grid or node map to start from, **Tidy** lays the JSON out a field per line, and a preview draws the map as Play will show it.
 

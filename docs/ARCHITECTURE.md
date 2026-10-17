@@ -108,6 +108,7 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 | `userStorage/runs/<chatId>/chips.json` | Stored chips until acted on or lapsed |
 | `userStorage/runs/<chatId>/plans.json` | Planned-turn lines by seed (the newest 128), for Re-narrate |
 | `userStorage/runs/<chatId>/outcome-notes.json` | `OutcomeNote[]`: notes for the next turn's Outcome slot, dropped once a later message has committed and another follows |
+| `userStorage/runs/<chatId>/prefs.json` | `{v: 1, mapDisplay?}`: the player's choices for the chat that aren't part of its world, such as the map's display mode (`lre.map`) |
 | `userStorage/runs/<chatId>/inspector.json` | `{v: 1, records, delivery}`: the last 10 interceptor runs and the last delivery check by slot, read when the chat is first viewed |
 
 ### 3.2 Ledger (`shared/ledger.ts`)
@@ -190,6 +191,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.fix` | `chatId, entity, field, value` | `{pending}`; checked as a `set` against the field's definition (locked fields refused), stored as one `fix` post entry |
 | `lre.edit` | `chatId, ops`: 1–64 `EditOp`s (`set`, `add`, `link`, `unlink`, `move`, `put`, `adjust`, `stage`, `entity`, `spawn`, `despawn`, `restore`) | `{pending}`; all or none, one `fix` post entry; locked fields writable |
 | `lre.gm` | `chatId` | `GmView`, built from the head's state when asked; never part of a snapshot or delta |
+| `lre.map` | `chatId, display` (`knowledge` \| `fog`) | `{display}`; stored in the chat's `prefs.json` and sent with the next snapshot as `mapDisplay` |
 | `lre.marker` | `chatId`, then `resolve{domain, scope, to}` \| `time{control, scope, to}` \| `adjudicate{to}` \| `migrate{to, merge?}`; `preview` writes nothing | `{pending}`; with `preview`: `{preview}`, whose `upgrade` lists a migrate's definition changes with their default picks |
 | `lre.keep` | `chatId`, then `keep{messageId}` \| `discard{messageId}` \| `convert{messageId, parentPath, refs}` | `{pending}` |
 | `lre.settings.get` / `.set` | `patch` (deep merge) | `{settings}` |
