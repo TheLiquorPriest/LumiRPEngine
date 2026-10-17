@@ -59,6 +59,8 @@ Engine layout (pure):
 - `engine/events.ts`: validators and reducers for the core events (`set`, `add`, `post`, `link`, `unlink`, `spawn`, `stage`, `clock`, `materialize`, `timelapse`). The registry composes `engine/seen.ts` into the ones that move someone (a `place` set, an `in` link or unlink, a spawn), so their apply also keeps the POV's observations (`space.seen`, DESIGN §7) in both folds.
 - `engine/registry.ts`, `engine/registry-impl.ts`: the registry contract, and the builder of a frozen registry from `PackDef`s.
 - `engine/{resolve,effects,rules,tracks,schedules,simulate,time,time-limits,realism,visibility,bounds,materialize,beats,plan-day,turn,typed-intent,narration-channels,player-events,authoring,world-lint}.ts`: action resolution, effects, rules, tracks, schedules, stepping through game time, time controls and their hard maxima, realism levels, knowledge and visibility, bounds, lazy materialization, the deterministic outline, the day planner, the turn pipeline, Playtest's typed-intent matching, the narration channels, player-facing event lines, authoring tools and structural lint.
+- `engine/edits.ts`: ✎ fixes and GM edits (`resolveEdit`, `parseEditOps`): each operation becomes the events its effect records, with literal values, checked against field definitions (type, enum values, min and max, a pool's evaluated max), relation types and placement, all or none; despawn, restore and the reserved `gone` field.
+- `engine/gm-view.ts`: the GM view's world part (`buildGmWorld`): every entity, removed and spawned ones included, with its fields, relations, placement, levels and designed sheet; places; tracks with their truths; relation types.
 
 Backend layout:
 - `backend/spindle-host.ts`: `HostPort` over `spindle`.
@@ -68,7 +70,7 @@ Backend layout:
 - `backend/book.ts`: the engine-managed lore book: slot entries, and removal of lore copies an earlier build synced into it.
 - `backend/steps.ts`: `StepPort` over `HostPort.models`, and the call meter (kept per user in `call-meter.json`).
 - `backend/worlds.ts`, `backend/settings-store.ts`: world storage and revisions; settings, presets and extraction learning.
-- `backend/dispatch.ts`, `backend/view.ts`, `backend/push.ts`, `backend/chips.ts`: request dispatch, the state view, state push, stored chips.
+- `backend/dispatch.ts`, `backend/view.ts`, `backend/gm.ts`, `backend/push.ts`, `backend/chips.ts`: request dispatch, the state view, the GM view (built per `lre.gm` request, never pushed), state push, stored chips.
 - `backend/jobs.ts`, `backend/proposals.ts`, `src/worker/background-lane.ts`: background jobs (kept per user in `jobs.json`; a job stored as running that the process isn't running reads as interrupted) and the child lane; Import and Refine proposals.
 - `backend/preset-lint.ts`, `backend/plan-notes.ts`: the preset lint; planned-turn lines kept by seed.
 - `backend/outcome-notes.ts`, `backend/inspector-log.ts`: the next turn's Outcome notes and the inspector's history with its delivery badges, per chat.
@@ -105,7 +107,7 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 |---|---|
 | Chat metadata `lumi_rp_engine` | `ChatRun {v, worldId, runSeed, startedAt}` |
 | Assistant message `spindle_metadata.lumi_rp_engine` | `MessageLedger {v, swipes: {[index]: Rec}, markers}` |
-| `userStorage/runs/<chatId>/journal.json` | `Journal`: `seq`, chain snapshot, latest ledger per message, pauses, tombstones, held writes, open windows, pending turns, `started` |
+| `userStorage/runs/<chatId>/journal.json` | `Journal`: `seq`, chain snapshot, latest ledger per message, pauses, tombstones, held writes, refused writes (`refused`: the latest 8 held writes that didn't validate when their windows closed, with the reason, until dismissed), open windows, pending turns, `started` |
 
 - **Events** are concrete. Assignment events (`set`) carry final values; accumulator events (`add`, `post`) carry deltas. Pack events are `<packId>.<name>` with a JSON body.
 - **`Rec`** follows DESIGN §4.3. `accepted` is the identity of content accepted without being read: an assistant edit or an unread Continue. It is outside every hash, so accepting text never moves a path.
@@ -160,9 +162,9 @@ Prompts and schemas stay model-agnostic (D31).
 `StateView` holds:
 - status (`not_world`, `idle`, `in_flight`, `paused`);
 - HUD, scene, chips, Journal notes, the Keep report, `pending` marks and the call meter;
-- `panels`: pack view models keyed `<packId>.<panel>`, each built by the pack core's `PanelViewDef`. The GM view (`core.gm`) also carries everyone else's money, from the economy pack's `economy.people_money` query.
+- `panels`: pack view models keyed `<packId>.<panel>`, each built by the pack core's `PanelViewDef`. The GM view is not among them: `lre.gm` builds it on request (`GmView`), everyone else's money included, from the economy pack's `economy.people_money` query.
 
-Player-facing content is already filtered to the POV's knowledge; GM previews are labelled.
+Player-facing content is already filtered to the POV's knowledge; the GM view's data is fetched separately, and only once its spoiler gate is open.
 
 ## 4. Frontend ↔ backend protocol (`shared/protocol.ts`)
 
@@ -175,7 +177,9 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.action` | `chatId, action, params, source, text?` | `{messageId}` of the appended user message (with `intent`, `triggerGeneration`) |
 | `lre.chip` | `chatId, chip, choice, payload?` | `{applied, pending}` |
 | `lre.view.open` | `chatId, panel, entity` | `{materialized, pending}` |
-| `lre.fix` | `chatId, entity, field, value` | `{pending}` |
+| `lre.fix` | `chatId, entity, field, value` | `{pending}`; checked as a `set` against the field's definition (locked fields refused), stored as one `fix` post entry |
+| `lre.edit` | `chatId, ops`: 1–64 `EditOp`s (`set`, `add`, `link`, `unlink`, `move`, `put`, `adjust`, `stage`, `entity`, `spawn`, `despawn`, `restore`) | `{pending}`; all or none, one `fix` post entry; locked fields writable |
+| `lre.gm` | `chatId` | `GmView`, built from the head's state when asked; never part of a snapshot or delta |
 | `lre.marker` | `chatId`, then `resolve{domain, scope, to}` \| `time{control, scope, to}` \| `migrate{to}` | `{pending}` |
 | `lre.keep` | `chatId`, then `keep{messageId}` \| `discard{messageId}` \| `convert{messageId, parentPath, refs}` | `{pending}` |
 | `lre.settings.get` / `.set` | `patch` (deep merge) | `{settings}` |

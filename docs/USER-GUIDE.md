@@ -45,7 +45,7 @@ If the chat isn't a world chat, Play says **Not a world chat** and offers **Atta
 | **Quests** | Quests, puzzles, secrets and agendas, sorted into **Active**, **Done** and **Failed**, with stages, cues and objectives (n of m). **Show a hint** gives one at a time. Only what you know is shown. |
 | **Journal** | A running list of what changed, including the full list behind every Montage, plus notes about things the engine dropped or expired. It lists what was applied: a change you undid, or one a later switch dropped, isn't shown as made. A group of changes dropped together (a purchase and its payment) is one note, worded like its Keep report row, with "(2 linked changes)" when the group has more than one change. A turn's entry lists the same lines as its change chip, at most 8; when more exist, money, quest and signal lines are kept and routine ones (activities, other people's moves, needs) go first. Filter by **All**, **Notes & montages** or **Not applied**. |
 | **Context** | The [Context inspector](#the-context-inspector). |
-| **GM view** | Everything, including secrets, labelled as previews. See [The GM view](#the-gm-view). |
+| **GM view** | Everything, secrets and removed people included, and an editor for all of it. See [The GM view](#the-gm-view). |
 
 What you can see is always filtered to what your point-of-view character knows. Facts are public, known by particular characters, or secret, and a secret stays out of every panel, chip, choice and Journal line until the story reveals it.
 
@@ -65,6 +65,8 @@ Tap the **✎** next to a value to correct it: your place, the weather, your cas
 - **Scene type** lists the world's scene types. Your pick holds until an action, a rule or another fix sets the scene type, even when you move. **Place default** goes back to the scene type of wherever you are.
 - **Cash** amounts are typed in the world's own money: "5" is 5 bits in Brindlemere, 5d in Harrowmere and $5.00 in Port Alder, with as many decimals as the currency has. When your cash is held in cash accounts (your wallet), a cash fix doesn't overwrite a number: it moves the difference between your wallet and an outside **Correction** account, so the Money panel shows it as a correction and the books still balance. In a new chat whose accounts aren't on your books yet, the fix puts them on first, so the difference is measured from the cash you start with. Undo and swipes treat it like any other fix.
 
+Every ✎ fix is checked before it is saved: a value outside the field's range (energy above 100, cash below zero) or not among its choices is refused with the reason, and nothing changes. A saved fix shows a **Corrected** chip on the latest reply, with **Undo**. A fix you make while a reply is streaming waits for the reply to finish; if the reply changed things so the fix no longer fits, a chip says it didn't apply.
+
 ### Chips
 
 Chips are the small buttons and notes under a reply. They tell you what the engine did, and give you a chance to change it.
@@ -75,6 +77,8 @@ Chips are the small buttons and notes under a reply. They tell you what the engi
 | **Roll** | For an action with a dice check: the action and its outcome, the dice, the modifier and the total, and the exact odds ("Rolled 1d20 + 2 = 14. Odds: …"). |
 | **Apply** / **No** | The engine read a change in the story (see [Extraction modes](#extraction-modes)) that would apply, and asks "The narration says this happened. Apply it?" If you ignore it, it expires when you send your next message, and the Journal notes that. A change that couldn't apply at all (an item that doesn't exist, no price) never gets an Apply button; if the engine would have made it on its own, a **Didn't apply** chip says so. A reply that tells your own action again gets no second chip: when the turn lent something to someone, the reply handing that thing (or something inside it, like a lent truck's glovebox) to the same person is the loan itself, and when the turn bought something, the reply telling the purchase again (even in slightly different words, like "brass lantern" for "old brass lantern") is that purchase. Keys handed over with a lend do get their own chip, and so does a different thing bought or given in the same reply. |
 | **Undo** | Reverses an automatic change ("Applied automatically."). Undo covers the latest reply; for anything earlier, use Keep or Discard (see below). An automatic purchase's chip shows what it charged and the catalog item it was priced as ("Bought milk: $3.63 (priced as Milk, whole)"); when the narrated price was capped or clamped it says so and has **Edit amount**, which charges what you type instead. |
+| **Corrected** | A ✎ fix or a GM edit you saved on this reply, worded as the Journal words it ("Corrected · Rosie Alvarez's mood: happy"). **Undo** takes it back. |
+| **Your correction didn't apply after the reply** (or *A confirmed change*, *Opened detail*, …) | Something you did while a reply was streaming (a ✎ fix or GM edit, a confirmation, opening a panel) waited for the reply to finish and no longer fit by then: the turn spent the money a correction took, or removed what it changed. Nothing changed. **Dismiss** clears it; the GM view's **Edits** tab has the exact reason. |
 | **Also bought (item)?** | The reply told a purchase like the one you just made, and the engine can't tell whether it's the same one told again or another one (another colour, a price far from yours, "another" in the prose). **Apply** charges it as a second purchase; **No** drops it. A reply that only tells your purchase again gets no chip at all. |
 | **Bought (item): no price** | The reply told a purchase that nothing prices: the catalog doesn't list it and the reply gave no price. **Set price** charges the amount you type, **Pick item** prices it as a catalog item you choose (when the catalog has any close to it), and **Dismiss** drops it. |
 | **Couldn't read your action** | The helper that reads typed text as an action failed twice (a dropped connection or a provider error; the engine asks once more on its own before giving up), so your text was played as plain roleplay. **Retry** re-runs the turn and reads it again. |
@@ -147,13 +151,29 @@ Open the map from the **World map** button in the input bar, **🗺 Map** in the
 
 ### The GM view
 
-The **GM view** shows everything the engine knows, including secrets and truths you haven't discovered, as **previews**. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show GM view** to open it, and **Hide** to put it away. It is labelled "Previews — not recorded" because it is exactly that: the GM view, the inspector, audits, Dry Run and playtests never write anything to your chat. Its cards cover the secret truths, the agendas, everyone's money and the previews. Each person's preview lists how they feel right now about everyone they have a feeling for, other NPCs included ("regard → Jess Kowalczyk: 55"; decayed with time at Relationships level 4), so you can see what an off-screen encounter did.
+The **GM view** shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show the GM view** to open it, and **Hide** to put it away. Its data is fetched only while it is open, so none of it travels with what Play shows you. Looking never changes your chat; only the edits you save do.
 
-Each **Money · *name*** card shows another person's money at their own Money level, as your Money panel shows yours: their wealth band, then from level 2 their net worth and accounts, from level 3 their bills (who each one is paid to), and their latest transactions and notes (paydays, bills paid, anything declined). A person whose accounts haven't been opened yet is shown with the balances the world gives them to start with. None of this reaches your chat: their paydays and bills never appear in your chips, Journal or Montage, and their declines never stop your timelapse.
+It has five tabs:
+
+- **Entities**: every person, item, vehicle, group and account in the world, including the ones spawned during this chat and the removed ones, with a search box and a kind filter. Badges mark **You**, **Removed**, **Spawned**, **Agent** (someone who lives off-screen) and anything that isn't public. Tap one to open its form.
+- **Places**: every place, with its visibility (public, discoverable, secret and so on).
+- **Tracks**: every quest, secret and agenda, with every stage and its truth. Pick a stage to move the track there.
+- **Money**: everyone else's money (below).
+- **Edits**: the corrections in force on this version of the story, worded in full, and any change that didn't apply after a reply, with the exact reason.
+
+An entity's form shows its fields as its kind defines them: a number shows its range, a choice (a mood, a reference to someone or somewhere) gives a picker, 🔒 marks a field the AI never sees or writes, and a value worked out from others (*worked out*) is shown but not edited. Tap ✎ to change a value, or **Add** to add to a number. Below are its designed sheet (as Play → You shows yours), **Placement** (move it to a place, put it inside something or take it out; an account also has **Add** and **Take** for money), **Relations** (add or update one with its fields, each checked against its range, or **Remove** it), and **Simulation** (its tier, whether it lives off-screen, and each domain's level, or *From the tier*). **Spawn**, under the list, adds a new entity of any kind.
+
+**Remove from the world** takes an entity out of the story without deleting it: it disappears from Scene, Cast, the palette, what the narrator is told, schedules and the money processes, and its relations, and everyone's relations to it, go. Whatever it holds goes with it. **Restore** brings it back where it was, without the relations it lost (undo the removal instead to get those back too); someone who lives off-screen picks up from then, without catching up on the time they were away. Your own character can't be removed.
+
+Every change you save is checked first: a number outside its range, a choice that isn't one of its values or a relation that doesn't fit is refused with the reason, and nothing changes. A save is one correction, however many things it changes: a **Corrected** chip appears on the latest reply with **Undo**, and swipes and Re-runs treat it like a ✎ fix (see [Re-run and Re-narrate](#re-run-and-re-narrate)). Saved while a reply is streaming, it lands when the reply finishes.
+
+Kinds, classifications, tags and the world's places are the world's own definitions: the button at the bottom takes you to **Build** to edit them.
+
+Each **Money · *name*** card shows another person's money at their own Money level, as your Money panel shows yours: their wealth band, then from level 2 their net worth and accounts, from level 3 their bills (who each one is paid to), and their latest transactions and notes (paydays, bills paid, anything declined). A person whose accounts haven't been opened yet is shown with the balances the world gives them to start with. Type an amount and tap **+** or **−** beside an account to add or take it, as a correction against an outside account, so the books still balance. None of this reaches your chat: their paydays and bills never appear in your chips, Journal or Montage, and their declines never stop your timelapse.
 
 ### Detail on demand
 
-The world doesn't store every coin in every wallet. When you look at something that has no detail yet (open a trunk, check what a character is carrying, audit an account, open a Play panel such as **Money**), the engine generates it then, consistent with what is already known: a character known to be "rich" gets a balance inside the rich band. Once shown, it is recorded and never changes. Previews in the GM view and the inspector are generated from the same seed but are not recorded. If a recorded detail is removed from the story, for example by a branch, it is generated again and labelled **regenerated**, because it may come out differently.
+The world doesn't store every coin in every wallet. When you look at something that has no detail yet (open a trunk, check what a character is carrying, audit an account, open a Play panel such as **Money**), the engine generates it then, consistent with what is already known: a character known to be "rich" gets a balance inside the rich band. Once shown, it is recorded and never changes. Previews in the inspector are generated from the same seed but are not recorded, and the GM view shows what isn't generated yet as it stands (an account not opened yet shows the balance it will open with). If a recorded detail is removed from the story, for example by a branch, it is generated again and labelled **regenerated**, because it may come out differently.
 
 ## Swipes, edits and branches
 
@@ -166,7 +186,7 @@ There are two ways to retry a reply:
 - **Re-run** plays the turn again with a **fresh roll**. Your typed text keeps the reading it was given, but the engine draws new dice, so a failed check can succeed. This is the default.
 - **Re-narrate** keeps everything the engine decided (the same dice, the same outcome, the same events) and only asks for **new prose**. Use it when you like what happened but not how it was told.
 
-Which one a plain swipe uses is a setting (**Settings → Swipes**: *Re-run (new roll)* or *Re-narrate (same outcome)*). Either way, the **Swipe as…** chip on a reply has **Re-run** and **Re-narrate** buttons for a single swipe. With Re-narrate, anything you fixed by hand (✎) or any detail you opened on the original reply carries over where it still makes sense, and anything that depended on results of the original narration is dropped with a note in the Journal.
+Which one a plain swipe uses is a setting (**Settings → Swipes**: *Re-run (new roll)* or *Re-narrate (same outcome)*). Either way, the **Swipe as…** chip on a reply has **Re-run** and **Re-narrate** buttons for a single swipe. Anything you fixed by hand (✎) or changed in the GM view carries over to the new swipe either way, where it still makes sense: Re-narrate checks it against the same outcome, and Re-run against the new turn, after everything the new roll did. One that no longer fits (the new roll spent the money it corrected, or the thing it changed is gone) is dropped with a **Not carried** note in the Journal, and a correction you undid stays undone. With Re-narrate, any detail you opened on the original reply carries over too, and anything that depended on results of the original narration is dropped with a note in the Journal.
 
 ### Switching to an earlier swipe
 
@@ -197,7 +217,7 @@ When you use Lumiverse's Continue on the latest reply, the engine reads only the
 
 ### Undo, retry and what lapses
 
-- **Undo** covers the latest reply. Earlier changes go through Keep or Discard.
+- **Undo** covers the latest reply. Earlier changes go through Keep or Discard. Each ✎ fix and GM edit on the latest reply has its own **Undo**, on its **Corrected** chip.
 - **Apply / No chips** from a reply expire when you send your next message, and the Journal says so.
 - **Timelapse chips** (offers, Continue, Retry), **suggested choices** and the **contradiction** chip lapse at the next send as well.
 - An empty reply is *degraded* and shows **Retry**. The engine never regenerates on its own.
