@@ -10,7 +10,7 @@
 // Each part defaults to `take` when no applied event touched it and to `keep` when one did; a pick
 // for the part, else one for its whole entity, overrides that:
 //   - an entity new to the chat is created as a chat's first state creates it, its symmetric and
-//     inverse relations two-sided, an agent caught up to now;
+//     inverse relations two-sided, an agent caught up to now, a thing a map lays in a cell lying there;
 //   - an entity gone from the revision stays, holding the classes, tags and visibility it had,
 //     unless picked `remove`: then it leaves the world and is unlinked, as a GM's Remove does;
 //   - kind, name, tier, agent flag, level overrides, classes and tags, and each field;
@@ -20,6 +20,7 @@
 //     against the holder's outside account (the economy's `economy.reopen`);
 //   - a track at a stage the revision no longer has goes back to its start, with a Journal note.
 
+import { placedItems } from "../shared/grid";
 import { hashJson } from "../shared/hash";
 import type { EntityId, FieldId, RelationTypeId, RevisionId, StageId, TrackId } from "../shared/ids";
 import type { JsonValue } from "../shared/json";
@@ -328,6 +329,11 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
       const holder = own(state.entities, link.holder);
       if (holder) upsert(holder, link.relation);
     }
+  }
+  // Things the revision's maps lay in cells start there, as in a chat's first state, unless they start inside something.
+  for (const item of placedItems(after)) {
+    const e = created.some((d) => d.id === item.id) ? own(state.entities, item.id) : undefined;
+    if (e && !e.relations.some((r) => r.type === "in")) Object.assign(e.fields, { place: item.place, x: item.cell.x, y: item.cell.y });
   }
 
   // Changed entities: their parts, then their relations, a pair together.

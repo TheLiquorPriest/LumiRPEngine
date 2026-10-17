@@ -384,6 +384,18 @@ describe("the merge on a grid", () => {
     upgrade(still);
     expect(still.state.entities.you?.fields).toMatchObject({ x: 2, y: 2 });
   });
+
+  test("a thing a new revision's map lays in a cell arrives lying there, as in a new chat", () => {
+    const lantern = (w: WorldDoc): void => {
+      w.entities.lantern = { id: "lantern", kind: "item", name: "Lantern", tier: "background", fields: {}, relations: [] };
+      const map = w.maps.inn_ground;
+      if (map) map.legend = { ...map.legend, L: { item: "lantern" } };
+    };
+    const c = between(inn(), inn(lantern));
+    upgrade(c);
+    expect(c.state.entities.lantern?.fields).toMatchObject({ place: "taproom", x: 5, y: 3 });
+    expect(c.state.entities.lantern?.fields).toEqual(initialState(c.b, c.rb, reg).entities.lantern?.fields);
+  });
 });
 
 describe("Upgrade picks on the marker", () => {
