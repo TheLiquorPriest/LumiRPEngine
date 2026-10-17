@@ -172,7 +172,7 @@ export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<World
     modifier: usable?.modifier ?? 0,
     check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
-    verdict: usable && odds ? verdictOf(policyFor(world, state, p.action), { world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null,
+    verdict: usable && odds ? verdictOf(policyFor(world, state, p.action), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null,
   };
 }
 
@@ -238,7 +238,7 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   if (checkDef && ready) {
     const odds = checkOdds(ready);
     const policy = policyFor(w.world, w.state, p.action);
-    const verdict = verdictOf(policy, { world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
+    const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
     const judgement = opts.judgement ?? null;
     const place = placeOfEntity(w.state, p.actor);
     let close: Adjudged["close"] = null;

@@ -24,10 +24,12 @@ import { bandOutcome, checkBands, NO_BAND, type CheckReading, type CheckShift, t
 import { readEngineSlice, type TryRecord } from "./engine-pack";
 import type { Value } from "./expr";
 import { own } from "./pack-kit";
+import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { placeOfEntity } from "./scope";
 import { placeVisit } from "./seen";
 import type { WorldState } from "./state";
+import { playerTrack } from "./visibility";
 
 /** How far up the place tree a marked place counts. */
 const PARENT_DEPTH = 32;
@@ -125,9 +127,11 @@ function failOutcome(action: ActionDef, ready: ReadyCheck, odds: Readonly<Record
 
 /**
  * Whether the `marked` timing asks for a roll: the action is marked, the actor is at a marked place
- * or inside one, or a marked track is in progress (past a dormant start and not at its end).
+ * or inside one, or a marked track the POV can see is in progress (past a dormant start and not at
+ * its end). A track the POV can't see (`playerTrack`: a secret one with nothing shown yet, or one it
+ * doesn't know of) never counts, so whether the dice roll never gives it away.
  */
-export function markedFor(world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, actor: EntityId): boolean {
+export function markedFor(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, action: ActionDef, actor: EntityId): boolean {
   if (action.adjudicate === true) return true;
   let place = placeOfEntity(state, actor);
   for (let depth = 0; place !== null && depth < PARENT_DEPTH; depth++) {
@@ -143,7 +147,7 @@ export function markedFor(world: WorldDoc, state: Readonly<WorldState>, action: 
     if (!stage) continue;
     const ended = stage.next.length === 0 && !stage.fail;
     const dormant = stageId === t.start && (stage.objectives ?? []).length === 0 && stage.answer === undefined && stage.cue === undefined;
-    if (!ended && !dormant) return true;
+    if (!ended && !dormant && playerTrack(registry, world, state, world.pov, id) !== null) return true;
   }
   return false;
 }
@@ -162,6 +166,8 @@ function changedSince(policy: AdjudicationDef, world: WorldDoc, state: Readonly<
 }
 
 export interface VerdictInput {
+  /** What tells whether the POV can see a marked track. */
+  registry: Registry;
   world: WorldDoc;
   state: Readonly<WorldState>;
   action: ActionDef;
@@ -175,7 +181,7 @@ export interface VerdictInput {
 
 /** What the policy makes of a check before anything is rolled or judged (the palette shows it as is). */
 export function verdictOf(policy: AdjudicationDef, input: VerdictInput): Verdict {
-  const { world, state, action, actor, ready, odds } = input;
+  const { registry, world, state, action, actor, ready, odds } = input;
   const pass = passOutcomes(ready.check, ready.bands);
   const chance = pass.length > 0 ? pass.reduce((sum, o) => sum + (odds[o] ?? 0), 0) : null;
   const unrolled = (why: NoRoll, outcome: string | null, prior: TryRecord | null = null): Verdict => ({ roll: false, why, outcome, chance, pass, prior });
@@ -185,7 +191,7 @@ export function verdictOf(policy: AdjudicationDef, input: VerdictInput): Verdict
   }
   if (chance !== null && policy.impossibleAt !== null && chance <= policy.impossibleAt) return unrolled("impossible", failOutcome(action, ready, odds, pass));
   if (chance !== null && policy.trivialAt !== null && chance >= policy.trivialAt) return unrolled("trivial", passOutcome(action, ready, odds, pass));
-  const asked = pass.length === 0 || policy.checks === "every" || (policy.checks === "risky" && (chance === null || chance < policy.riskyAt)) || (policy.checks === "marked" && markedFor(world, state, action, actor));
+  const asked = pass.length === 0 || policy.checks === "every" || (policy.checks === "risky" && (chance === null || chance < policy.riskyAt)) || (policy.checks === "marked" && markedFor(registry, world, state, action, actor));
   if (!asked) return unrolled(policy.checks === "never" ? "never" : policy.checks === "risky" ? "safe" : "unmarked", passOutcome(action, ready, odds, pass));
   if (policy.authority === "narrative") return unrolled("story", null);
   return { roll: true, why: null, outcome: null, chance, pass, prior: null };

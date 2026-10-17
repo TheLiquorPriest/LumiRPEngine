@@ -358,7 +358,7 @@ A check is the dice an action rolls (see [Checks, pools, progression and sheets]
 
 Crunchy is how the engine has always played. **Custom** lets you set each value, and changing any value of a preset makes it Custom:
 
-- **When checks roll**: every check; only risky ones, below a chance you set; only where marked (an action marked **Its check always rolls**, a place marked **Checks roll here** and the places inside it, or a quest marked **Checks roll while it's in progress** while it is under way); or never. A check that isn't asked for succeeds.
+- **When checks roll**: every check; only risky ones, below a chance you set; only where marked (an action marked **Its check always rolls**, a place marked **Checks roll here** and the places inside it, or a quest marked **Checks roll while it's in progress** while it is under way and you can see it in your quests, so a secret quest never shows by making the dice roll); or never. A check that isn't asked for succeeds.
 - **Sure things pass without a roll** and **Hopeless tries fail without a roll**, each from a chance you set.
 - **How the player's approach counts**: not at all, as a bonus up to **The most it counts**, as advantage from a rating you set, or as a DC lower by up to the most it counts (a check without a DC takes it as a bonus). It shifts a check that rolls; the palette shows the odds before it.
 - **Who settles a check**: the roll; the roll, with close calls within the points you set; or the story.

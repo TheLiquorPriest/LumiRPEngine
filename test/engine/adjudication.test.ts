@@ -102,6 +102,25 @@ describe("when checks happen", () => {
     expect(verdict(track, underway)?.roll).toBe(false);
   });
 
+  test("marked: a track the POV can't see never makes a check roll, so the dice don't give it away", () => {
+    const world = climbWorld({ checks: "marked" });
+    world.tracks.heist!.adjudicate = true;
+    const underway = withSkill(world, 2);
+    underway.tracks.heist = { stage: "on", since: 0 };
+    const verdict = (w: WorldDoc) => actionOdds(reg, w, underway, climb).verdict;
+    expect(verdict(world)?.roll).toBe(true);
+    for (const visibility of ["secret", "known_by"] as const) {
+      const hidden = structuredClone(world);
+      hidden.tracks.heist!.visibility = visibility;
+      expect(verdict(hidden)).toMatchObject({ roll: false, why: "unmarked" });
+    }
+    // Once the POV sees it (a reached cue), it counts again.
+    const cued = structuredClone(world);
+    cued.tracks.heist!.visibility = "secret";
+    cued.tracks.heist!.stages.on!.cue = "Someone has been casing the bank.";
+    expect(verdict(cued)?.roll).toBe(true);
+  });
+
   test("the palette's verdict is what the turn does", () => {
     const world = climbWorld({ checks: "risky", riskyAt: 0.6 });
     for (const skill of [-30, 1, 2, 3, 30]) {
