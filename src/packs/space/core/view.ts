@@ -20,7 +20,7 @@ import { cellsSeen, placeVisit } from "../../../engine/seen";
 import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import { byShownId, defaultScope, hasGrid, placeChildren, placePath, scopeView, shownName, WORLD_SCOPE_NAME, type CellView, type MapItemView, type MapScopeView, type ScopeFilter } from "./map-scope";
 import { hiddenCells } from "./positions";
-import { routeAt } from "./travel";
+import { closedRoutes, routeAt } from "./travel";
 
 export type { MapGridView, MapItemView, MapPlaceView, MapRouteView, MapScopeView } from "./map-scope";
 
@@ -104,11 +104,14 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
   // are drawn, but never by their own id or name: each goes by a stand-in, outermost first.
   const standIns = new Map<PlaceId, PlaceId>();
   for (const id of path) if (!known(id)) standIns.set(id, standIn(world, standIns.size + 1));
+  const closed = closedRoutes(ctx);
   const filter: ScopeFilter = {
     known,
     drawn: (id) => inside.has(id) || known(id),
     visited: (id) => placeVisit(state, id) !== null,
     shown: (id) => standIns.get(id) ?? id,
+    // Travel skips a closed route from Space 2, where routes are first drawn, so the map does too.
+    routeOpen: (id) => !closed.has(id),
   };
   const children = placeChildren(world);
   const opens = (id: PlaceId): boolean => hasGrid(world, id) || (children.get(id) ?? []).some(filter.drawn);

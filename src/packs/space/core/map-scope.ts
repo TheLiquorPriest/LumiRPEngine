@@ -95,6 +95,8 @@ export interface ScopeFilter {
   visited(id: PlaceId): boolean;
   /** The id a drawn place goes by: its own, or an opaque stand-in for one the viewer doesn't know. */
   shown(id: PlaceId): PlaceId;
+  /** Whether a route is open now: a closed one (a secret passage not found yet, a ferry not running) isn't drawn. */
+  routeOpen(id: string): boolean;
 }
 
 /** A drawn place's name as the viewer may read it: its own when known, else `HIDDEN_PLACE_NAME`. */
@@ -229,7 +231,7 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
       const r = own(world.routes, rid);
       // A route is drawn to the place inside the scope that holds its end, so an end the viewer
       // can't see would be drawn as a way to the place around it, with the hidden way's minutes.
-      if (!r || !filter.known(r.from) || !filter.known(r.to)) continue;
+      if (!r || !filter.routeOpen(rid) || !filter.known(r.from) || !filter.known(r.to)) continue;
       const a = childOf(world, scope, r.from);
       const b = childOf(world, scope, r.to);
       if (a === null || b === null || a === b || !drawn.has(a) || !drawn.has(b)) continue;

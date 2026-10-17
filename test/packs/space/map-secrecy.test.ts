@@ -215,6 +215,19 @@ describe("routes on the map", () => {
     // The visible route says 10 minutes; the hidden one's minute never reaches the drawn line.
     expect(line?.modes.walk?.minutes).toBe(10);
   });
+
+  test("a closed route isn't drawn, and travel doesn't take it", () => {
+    const { world, state } = riverton((w) => {
+      w.packs.space!.config.closedRoutes = ["apt_park"];
+    });
+    const view = buildMapView(reg.context(world, state));
+    const town = view.scopes.find((s) => s.id === "riverton");
+    expect(town?.routes.some((r) => [r.from, r.to].sort().join() === "apartment_bldg,park")).toBe(false);
+    const walk = (v: MapView) => v.travel.find((t) => t.to === "park" && t.mode === "walk");
+    const open = riverton(() => undefined);
+    expect(walk(buildMapView(reg.context(open.world, open.state)))?.disabled).toBeUndefined();
+    expect(walk(view)?.disabled).toBe("no walking route");
+  });
 });
 
 describe("things lying in cells", () => {
