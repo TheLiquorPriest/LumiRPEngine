@@ -163,9 +163,18 @@ export class MockBackend {
           if (message.field === "cash" && typeof message.value === "number") view.hud.cash = { cents: message.value };
           const fix = Object.values(view.hud.fixes).find((f) => f?.entity === message.entity && f.field === message.field);
           if (fix) fix.value = message.value;
-          if (message.field === "in") {
+          if (message.field === "place") {
             const option = view.hud.fixes.place?.options?.find((o) => o.value === message.value);
             if (option) view.hud.place = { id: String(message.value), name: option.label };
+          }
+          if (message.field === "weather") {
+            const option = view.hud.fixes.weather?.options?.find((o) => o.value === message.value);
+            if (option) view.hud.weather = `${option.label}, 12 °C`;
+          }
+          // An empty scene type follows the place again (the diner's conversation).
+          if (message.field === "scene" && view.scene && view.controls && typeof message.value === "string") {
+            view.scene.sceneType = message.value || "conversation";
+            view.controls.time.sceneType = view.scene.sceneType;
           }
         }, 40);
         return;

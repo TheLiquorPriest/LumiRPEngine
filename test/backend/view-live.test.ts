@@ -2,8 +2,8 @@
 // fold applied, so an undone event, or one a rebased view dropped, isn't listed; the palette's picks.
 
 import { describe, expect, test } from "bun:test";
-import { paletteRequest } from "../../src/frontend/requests";
-import type { StateView } from "../../src/shared/state-view";
+import { fixRequest, paletteRequest } from "../../src/frontend/requests";
+import type { FixTarget, StateView } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 import { toChain } from "../../src/backend/ledger-io";
 import { POV } from "../support/test-pack";
@@ -200,6 +200,45 @@ describe("palette: Take from a kit", () => {
     const core = await rig.rt.ledger.core(chatId, rig.host.userId);
     const state = core?.renderState(toChain(await rig.host.chats.messages(chatId, rig.host.userId)))?.state;
     expect(Object.values(state?.entities ?? {}).some((e) => e.fields.from_kit === "pov_toolbox")).toBe(true);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+});
+
+describe("HUD ✎ fixes for weather and scene type", () => {
+  test("each has a ✎ target, and its fix shows in the pill and the details", async () => {
+    const rig = new Rig({ shipped: true });
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const view = () => rig.rt.view(chatId, rig.host.userId);
+    const fixTo = async (target: FixTarget | undefined, value: string) => {
+      if (!target) throw new Error("no fix target");
+      rig.body(await rig.send(fixRequest(target, value, chatId)));
+    };
+
+    const start = await view();
+    const weather = start.hud?.fixes.weather;
+    // Weather lives on the region over the player; the options are its climate's states.
+    expect(weather?.field).toBe("weather");
+    expect(weather?.entity).not.toBe("pov");
+    const other = weather?.options?.find((o) => o.value !== weather.value);
+    if (!other || typeof other.value !== "string") throw new Error("no other weather state");
+    await fixTo(weather, other.value);
+    const wet = await view();
+    expect(wet.hud?.weather?.startsWith(other.label)).toBe(true);
+    expect(wet.hud?.fixes.weather?.value).toBe(other.value);
+
+    // The scene type: the world's types, plus following the place.
+    const scene = wet.hud?.fixes.scene;
+    expect(scene?.options?.map((o) => o.value)).toEqual(["", "conversation", "action", "exploration", "downtime", "work"]);
+    expect(scene?.value).toBe("");
+    await fixTo(scene, "work");
+    const working = await view();
+    expect(working.scene?.sceneType).toBe("work");
+    expect(working.controls?.time.sceneType).toBe("work");
+    expect(working.hud?.fixes.scene?.value).toBe("work");
+    await fixTo(working.hud?.fixes.scene, "");
+    expect((await view()).scene?.sceneType).toBe(start.scene?.sceneType);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });

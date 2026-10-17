@@ -16,6 +16,7 @@
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId, PlaceId } from "../../../shared/ids";
+import type { FixTarget } from "../../../shared/state-view";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { KindDef } from "../../../shared/world";
 import { calendarOf, dateAt, dayPartAt } from "../../../engine/calendar";
@@ -129,6 +130,11 @@ declare module "../../../engine/registry" {
     "weather.closed_modes": (ctx: ReadContext, place: PlaceId) => string[];
     /** The weather state over a place's region, or null when weather isn't simulated there. */
     "weather.sky": (ctx: ReadContext, place: PlaceId) => string | null;
+    /**
+     * The HUD's ✎ weather fix: the `weather` field of the region over the player, with its climate's
+     * states as options; null below Weather 2 (no simulated state to correct) or without a region.
+     */
+    "weather.fix": (ctx: ReadContext) => FixTarget | null;
   }
 }
 
@@ -262,6 +268,14 @@ export const weatherPack: PackDef = {
     });
     r.query("weather.travel_factor", (ctx, place, mode) => (ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : (own(stateAt(ctx, place)?.travel ?? {}, mode) ?? 1)));
     r.query("weather.closed_modes", (ctx, place) => (ctx.levelOf(ctx.world.pov, "weather") < 4 ? [] : (stateAt(ctx, place)?.closes ?? [])));
+    // A fix is a plain `set` on the region, so it holds until the climate's own step next changes the
+    // sky (each slot keeps it with the climate's persistence); under a scripted hold, until that ends.
+    r.query("weather.fix", (ctx) => {
+      if (ctx.levelOf(ctx.world.pov, "weather") < 2) return null;
+      const region = regionOf(ctx, placeOfEntity(ctx.state, ctx.world.pov));
+      if (!region) return null;
+      return { entity: region, field: "weather", type: "text", value: strOf(own(ctx.state.entities, region)?.fields.weather, "clear"), options: climateOf(ctx, region).states.map((s) => ({ value: s.id, label: s.label })) };
+    });
     r.formula("weather", (ctx, place) => {
       const region = regionOf(ctx, typeof place === "string" && place !== "" ? place : placeOfEntity(ctx.state, ctx.world.pov));
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather, "clear") : "";

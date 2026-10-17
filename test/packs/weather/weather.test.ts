@@ -73,4 +73,32 @@ describe("weather pack", () => {
     const issues = reg.lints.flatMap((l) => (l.code === "weather.climates" ? l.check(world) : []));
     expect(issues.map((i) => i.message)).toEqual(["Climate x: month 12 is covered 0 times.", "Climate x, Most: unknown state hail."]);
   });
+
+  test("the ✎ weather fix targets the region over the player with its climate's states, from level 2", () => {
+    expect(setup(1).ctx.query("weather.fix")(setup(1).ctx)).toBeNull();
+    const w = setup(2);
+    const target = w.ctx.query("weather.fix")(w.ctx);
+    expect(target).toMatchObject({ entity: "region_riverton", field: "weather", type: "text", value: w.state.entities.region_riverton?.fields.weather });
+    expect(target?.options?.map((o) => o.value)).toEqual(CLIMATES.temperate?.states.map((s) => s.id) ?? []);
+    expect(w.apply({ type: "set", entity: "region_riverton", field: "weather", value: "fog" })).toBeNull();
+    expect(buildWeatherView(w.ctx).label).toBe("Fog");
+    expect(w.ctx.query("weather.fix")(w.ctx)?.value).toBe("fog");
+  });
+
+  test("a corrected sky holds until the climate next changes it", () => {
+    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const climate = (id: string, weights: Record<string, number>) => ({ id, label: id, persist: 1, states: [{ id: "clear", label: "Clear" }, { id: "fog", label: "Fog" }], seasons: [{ label: "All", months, weights, tempC: [5, 10] }] });
+    const corrected = (id: string) => {
+      const w = setup(2, (wd) => {
+        wd.packs.weather!.config.climates = [climate("still", { clear: 1, fog: 1 }), climate("never_fog", { clear: 1 })];
+        wd.entities.region_riverton!.fields.climate = id;
+      });
+      expect(w.apply({ type: "set", entity: "region_riverton", field: "weather", value: "fog" })).toBeNull();
+      lapse(w, 3 * 1440);
+      return w.state.entities.region_riverton?.fields.weather;
+    };
+    // A climate that keeps every state it can draw keeps the correction; one that can't hold fog replaces it.
+    expect(corrected("still")).toBe("fog");
+    expect(corrected("never_fog")).toBe("clear");
+  });
 });

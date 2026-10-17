@@ -8,7 +8,7 @@ import type { FixTarget, HudView, StateView } from "../shared/state-view";
 import { useApp, useView } from "./app";
 import { Row, useBusy } from "./components";
 import { FixEditor } from "./fix-editor";
-import { formatCents, formatMinutes } from "./format";
+import { formatCents, formatMinutes, humanize } from "./format";
 import { hudMode } from "./layout";
 import { timeMarker } from "./requests";
 import { useSelect } from "./store";
@@ -165,7 +165,7 @@ function HudDetails(props: { view: StateView; hud: HudView; popRef: { current: H
         <>
           <Row k="Time" sub={hud.clock.dayPart} v={<span class="lre-num">{clockText(hud)}</span>} />
           <Row k="Place" v={<span class="lre-inline">{hud.place?.name ?? "—"}{fixButton("place")}</span>} />
-          {view.scene ? <Row k="Scene" sub={view.scene.elapsed > 0 ? `last turn ${formatMinutes(view.scene.elapsed)}` : undefined} v={<span class="lre-inline">{view.scene.sceneType}{fixButton("scene")}</span>} /> : null}
+          {view.scene ? <Row k="Scene" sub={view.scene.elapsed > 0 ? `last turn ${formatMinutes(view.scene.elapsed)}` : undefined} v={<span class="lre-inline">{humanize(view.scene.sceneType)}{fixButton("scene")}</span>} /> : null}
           <Row k="Weather" v={<span class="lre-inline">{hud.weather ?? "—"}{fixButton("weather")}</span>} />
           <Row k="Cash" v={<span class="lre-inline lre-num">{cashText(hud.cash) ?? "—"}{fixButton("cash")}</span>} />
           {view.meter ? <Row k="This turn" v={`${view.meter.turn.calls} calls · ${(view.meter.turn.ms / 1000).toFixed(1)} s`} sub={`${view.meter.turn.tokens} tokens`} /> : null}

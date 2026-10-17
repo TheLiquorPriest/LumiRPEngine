@@ -20,13 +20,13 @@ export function stateFixture(chatId: string): StateView {
     hud: {
       clock: { minutes: 1902, label: "Tue 07:42", dayPart: "Morning", paused: false, scale: 1 },
       place: { id: "diner", name: "Rosie's Diner" },
-      weather: "🌧 Light rain 12°C",
+      weather: "Rain, 12 °C",
       cash: { cents: 4600 },
       fixes: {
-        place: { entity: "pov", field: "in", type: "ref", value: "diner", options: [{ value: "diner", label: "Rosie's Diner" }, { value: "apartment", label: "Apartment 4B" }, { value: "garage", label: "Kim's Garage" }] },
+        place: { entity: "pov", field: "place", type: "ref", value: "diner", options: [{ value: "diner", label: "Rosie's Diner" }, { value: "apartment", label: "Apartment 4B" }, { value: "garage", label: "Kim's Garage" }] },
         cash: { entity: "pov", field: "cash", type: "money", value: 4600, min: 0 },
-        weather: { entity: "world", field: "weather", type: "enum", value: "light_rain", options: [{ value: "clear", label: "Clear" }, { value: "light_rain", label: "Light rain" }, { value: "storm", label: "Storm" }] },
-        scene: { entity: "scene", field: "sceneType", type: "enum", value: "conversation", options: [{ value: "conversation", label: "Conversation" }, { value: "action", label: "Action" }, { value: "exploration", label: "Exploration" }, { value: "downtime", label: "Downtime" }] },
+        weather: { entity: "region_maple", field: "weather", type: "text", value: "rain", options: [{ value: "clear", label: "Clear" }, { value: "cloudy", label: "Overcast" }, { value: "rain", label: "Rain" }, { value: "storm", label: "A storm" }, { value: "fog", label: "Fog" }, { value: "snow", label: "Snow" }] },
+        scene: { entity: "pov", field: "scene", type: "text", value: "", options: [{ value: "", label: "Place default (Conversation)" }, { value: "conversation", label: "Conversation" }, { value: "action", label: "Action" }, { value: "exploration", label: "Exploration" }, { value: "downtime", label: "Downtime" }] },
       },
     },
     scene: {

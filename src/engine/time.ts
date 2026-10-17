@@ -26,11 +26,16 @@ export const DEFAULT_SCENE_TYPE = "conversation";
 
 // ---------------------------------------------------------------- scene, pause and elapsed time
 
-/** The scene type: the POV's `scene` field (actions, ✎ fixes), else its place's (or an ancestor's), else conversation. */
+/** The scene type: the POV's `scene` field (actions, ✎ fixes), else its place's default. */
 export function sceneType(world: WorldDoc, state: Readonly<WorldState>): SceneTypeId {
   const pov = own(state.entities, world.pov);
   const scene = pov?.fields.scene;
   if (typeof scene === "string" && scene !== "") return scene;
+  return placeSceneType(world, state);
+}
+
+/** The scene type the POV's place (or an ancestor) sets, else conversation: what a cleared `scene` field follows. */
+export function placeSceneType(world: WorldDoc, state: Readonly<WorldState>): SceneTypeId {
   let place: string | undefined = placeOfEntity(state, world.pov) ?? undefined;
   for (let guard = 0; place && guard < 32; guard++) {
     const def = own(world.places, place);

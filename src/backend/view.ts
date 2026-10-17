@@ -9,6 +9,7 @@ import type { ChatRun, EventRef, JournalNote, KeepLine, LedgerEvent, Rec } from 
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
+import { placeSceneType, sceneType } from "../engine/time";
 import { identifiers } from "../engine/expr";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
@@ -56,7 +57,7 @@ export function compactSpan(minutes: number): string {
   return rest > 0 ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonValue>, registry: Registry): HudView {
+function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonValue>, ctx: ReadContext): HudView {
   const cal = calendarOf(world);
   const pov = world.pov;
   const placeId = placeOfEntity(state, pov);
@@ -75,7 +76,18 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
     fixes.place = { entity: pov, field: "place", type: "ref", value: placeId, options: Object.values(world.places).map((p) => ({ value: p.id, label: p.name })) };
   }
   if (money >= 2 && cents !== null) fixes.cash = { entity: pov, field: "cash", type: "money", value: cents, min: 0 };
-  void registry;
+  // Weather lives on the region over the player; the weather pack knows its climate's states.
+  const weatherFix = optionalQuery(ctx, "weather.fix")?.(ctx) ?? null;
+  if (weatherFix) fixes.weather = weatherFix;
+  // The scene type lives in the POV's `scene` field, which wins over its place's default until an
+  // action, a rule or another fix sets it; "" goes back to following the place.
+  const pinned = state.entities[pov]?.fields.scene;
+  if (state.entities[pov]) {
+    const types = new Set([...Object.keys(world.time.sceneTicks), ...Object.keys(state.time.sceneTicks), ...Object.values(world.places).flatMap((p) => (p.sceneType ? [p.sceneType] : []))]);
+    if (typeof pinned === "string" && pinned !== "") types.add(pinned);
+    const label = (type: string) => `${type.charAt(0).toUpperCase()}${type.slice(1).replace(/_/g, " ")}`;
+    fixes.scene = { entity: pov, field: "scene", type: "text", value: typeof pinned === "string" ? pinned : "", options: [{ value: "", label: `Place default (${label(placeSceneType(world, state))})` }, ...[...types].map((type) => ({ value: type, label: label(type) }))] };
+  }
   return {
     clock: { minutes: state.clock, label: formatClock(cal, state.clock, offset), dayPart: dayPartAt(cal, state.clock + offset).label, paused: state.time.paused, scale: state.time.scale },
     place: place ? { id: place.id, name: place.name } : null,
@@ -94,7 +106,7 @@ function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry
     if (!kindIs(registry, world, e.kind, "person")) continue;
     present.push({ id, name: e.name, label: world.kinds[e.kind]?.label ?? e.kind });
   }
-  return { placeId, sceneType: (placeId ? world.places[placeId]?.sceneType : undefined) ?? "conversation", present, elapsed: headElapsed };
+  return { placeId, sceneType: sceneType(world, state), present, elapsed: headElapsed };
 }
 
 /** Why a palette option is off, for the player: an unmet requirement isn't spelled as its expression. */
@@ -506,7 +518,7 @@ export function buildView(input: ViewInput): StateView {
     worldId: input.run.worldId,
     revision: state.revision,
     status: core.journal.pauses.length > 0 ? "paused" : core.inFlight ? "in_flight" : "idle",
-    hud: hud(world, state, panels, registry),
+    hud: hud(world, state, panels, ctx),
     scene: sceneView,
     chips,
     journal: [...turnNotes(chain, fold, core, registry, world, state), ...drops.notes],

@@ -5,7 +5,7 @@
 import type { EntityId } from "../../shared/ids";
 import { useApp } from "../app";
 import { Card, Empty, Row, useBusy } from "../components";
-import { formatMinutes } from "../format";
+import { formatMinutes, humanize } from "../format";
 import type { PanelProps } from "../registry";
 import { cashText, clockText } from "../hud";
 
@@ -27,7 +27,7 @@ export function ScenePanel(props: PanelProps) {
       <Card title="Now">
         {hud ? <Row k="Time" sub={hud.clock.dayPart} v={<span class="lre-num">{clockText(hud)}</span>} /> : null}
         <Row k="Place" v={hud?.place?.name ?? "—"} />
-        {scene ? <Row k="Scene" v={scene.sceneType} sub={scene.elapsed > 0 ? `Last turn took ${formatMinutes(scene.elapsed)}` : "No time passed last turn"} /> : null}
+        {scene ? <Row k="Scene" v={humanize(scene.sceneType)} sub={scene.elapsed > 0 ? `Last turn took ${formatMinutes(scene.elapsed)}` : "No time passed last turn"} /> : null}
         {hud?.weather ? <Row k="Weather" v={hud.weather} /> : null}
         {hud?.cash ? <Row k="Cash" v={<span class="lre-num">{cashText(hud.cash)}</span>} /> : null}
       </Card>
