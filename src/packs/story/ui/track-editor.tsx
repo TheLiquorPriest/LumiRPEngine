@@ -7,7 +7,7 @@ import type { StageDef, TrackDef, TrackKind } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { lintAt, SchemaFields, worldIdentifiers } from "../../../frontend/build/schema-form";
 import { SelectorEditor } from "../../../frontend/build/selector-editor";
-import type { FieldSpec } from "../../../frontend/build/schema";
+import { EFFECT, type FieldSpec } from "../../../frontend/build/schema";
 import { Seg, useBusy } from "../../../frontend/components";
 import type { EditorProps } from "../../../frontend/registry";
 
@@ -164,8 +164,8 @@ function stageSpecs(stageIds: string[]): FieldSpec[] {
     },
     { kind: "list", key: "hints", label: "Hints", item: { kind: "text", key: "", label: "Hint" } },
     { kind: "number", key: "priority", label: "Planner priority (agendas)", optional: true },
-    { kind: "json", key: "effects", label: "Effects on entering", optional: true },
-    { kind: "json", key: "rewards", label: "Rewards", optional: true },
+    { kind: "list", key: "effects", label: "Effects on entering", item: EFFECT, title: "type" },
+    { kind: "list", key: "rewards", label: "Rewards", item: EFFECT, title: "type" },
     { kind: "json", key: "answer", label: "Puzzle answer", optional: true, hint: '{"expect": ["…"], "normalize": true, "decision": {"threshold": 0.8}}' },
   ];
 }
