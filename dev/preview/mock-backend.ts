@@ -16,6 +16,8 @@ import { previewSheet } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
 import { ALL_PACKS } from "../../src/packs/index";
+import { applyProfile, profileChoices, profileOf } from "../../src/shared/profiles/index";
+import { modernSheetFixture } from "./profile-fixture";
 
 // The real registry, so Build's formula functions and the Sheet Designer preview are the engine's own.
 const REGISTRY = createRegistry(ALL_PACKS);
@@ -23,8 +25,8 @@ const REGISTRY = createRegistry(ALL_PACKS);
 type Emit = (payload: unknown) => void;
 
 export interface MockOptions {
-  /** `fresh`: a new chat whose POV money no view has opened yet (the opening balances show); `combat`: a fight under way at the diner (the Encounter tab, the palette's Combat tab, the GM view's Fight). */
-  scenario: "play" | "paused" | "not_world" | "fresh" | "combat";
+  /** `fresh`: a new chat whose POV money no view has opened yet (the opening balances show); `combat`: a fight under way at the diner (the Encounter tab, the palette's Combat tab, the GM view's Fight); `sheet`: Play → You with the Modern profile's sheet. */
+  scenario: "play" | "paused" | "not_world" | "fresh" | "combat" | "sheet";
   /** A starter template id: the map is that starter's in a new chat, as the engine builds it. */
   map?: string;
   closeDrawer(): void;
@@ -219,6 +221,8 @@ export class MockBackend {
           if (this.view.palette) this.view.palette = { ...this.view.palette, entries: [...fight.entries, ...this.view.palette.entries], ...(fight.encounter ? { encounter: fight.encounter } : {}) };
           this.gm = { ...this.gm, encounter: fight.gm };
         }
+        // Play → You with the Modern profile's sheet, as the engine builds it.
+        if (this.options.scenario === "sheet") this.view.panels["sheets.you"] = modernSheetFixture();
         this.result(reqId, "lre.hello", { accepted: true });
         setTimeout(() => this.snapshot(), 50);
         return;
@@ -427,6 +431,11 @@ export class MockBackend {
         // An empty ruleset is no ruleset, as the backend stores it.
         else if (message.op === "set" && message.part === "ruleset" && isRecord(message.value) && Object.keys(message.value).length === 0) delete this.draft.ruleset;
         else if (message.op === "set") (this.draft as unknown as Record<string, JsonValue>)[message.part] = message.value;
+        // As the backend does: the profile's plan applied to the draft in one write.
+        else if (message.op === "profile") {
+          const profile = profileOf(message.profile);
+          if (profile) this.draft = applyProfile(this.draft, profile, Object.fromEntries(REGISTRY.kinds), profileChoices(message.choices));
+        }
         // As the backend does on every write: the map's places, grid and routes follow it.
         this.draft = compileMaps(this.draft);
         const stored = JSON.stringify(this.draft) !== JSON.stringify(this.world);
