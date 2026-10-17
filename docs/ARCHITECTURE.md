@@ -146,7 +146,7 @@ Prompts and schemas stay model-agnostic (D31).
 `StateView` holds:
 - status (`not_world`, `idle`, `in_flight`, `paused`);
 - HUD, scene, chips, Journal notes, the Keep report, `pending` marks and the call meter;
-- `panels`: pack view models keyed `<packId>.<panel>`, each built by the pack core's `PanelViewDef`.
+- `panels`: pack view models keyed `<packId>.<panel>`, each built by the pack core's `PanelViewDef`. The GM view (`core.gm`) also carries everyone else's money, from the economy pack's `economy.people_money` query.
 
 Player-facing content is already filtered to the POV's knowledge; GM previews are labelled.
 

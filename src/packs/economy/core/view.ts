@@ -1,11 +1,16 @@
 // The Money panel's view model (`economy.money`), shown at the POV's Money level: a band at 1;
 // cash plus one account at 2; every account with cards and bills at 3; APR, limits and dues at 4.
+// Everyone else's money, for the GM view (`economy.people_money`), follows the same levels.
 
 import type { EntityId } from "../../../shared/ids";
+import type { JsonValue } from "../../../shared/json";
+import type { GmMoney } from "../../../shared/state-view";
 import type { ReadContext } from "../../../engine/registry";
 import { calendarOf, formatClock, monthName, weekdayName } from "../../../engine/calendar";
+import { isMaterialized } from "../../../engine/materialize";
 import { numOf, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
-import { accountsOf, accountType, balance, holdingsValue, netWorth, wealthOf, type AccountType } from "./model";
+import { kindIs } from "../../../engine/scope";
+import { accountsOf, accountType, balance, holdingsValue, netWorth, wealthBand, wealthOf, type AccountType } from "./model";
 
 export interface MoneyAccount {
   id: EntityId;
@@ -50,29 +55,9 @@ export function buildMoneyView(ctx: ReadContext): MoneyView {
     if (level >= 4 && Object.keys(st).length > 0 && numOf(st.paid) < numOf(st.minimum)) a.due = { label: `Minimum due ${formatClock(cal, numOf(st.due)).split(",")[0] ?? ""}`, cents: numOf(st.minimum) - numOf(st.paid) };
     return a;
   });
-  const shownSet = new Set(shown);
   const rawHistory = sliceOf(ctx.state, "economy").history;
-  const history = Array.isArray(rawHistory) ? rawHistory : [];
-  const recent: MoneyView["recent"] = [];
-  for (let i = history.length - 1; i >= 0 && recent.length < 10; i--) {
-    const h = objOf(history[i]);
-    const lines = Array.isArray(h.lines) ? h.lines.map((l) => objOf(l)) : [];
-    for (const l of lines) {
-      const account = strOf(l.account);
-      if (!shownSet.has(account)) continue;
-      recent.push({ at: formatClock(cal, numOf(h.at)), memo: strOf(h.memo), cents: numOf(l.amount), account: own(ctx.state.entities, account)?.name ?? account });
-    }
-  }
-  const upcoming: MoneyView["upcoming"] = [];
-  if (level >= 3) {
-    const bills = own(ctx.state.entities, pov)?.fields.bills;
-    if (Array.isArray(bills)) for (const raw of bills) {
-      const b = objOf(raw);
-      const every = strOf(b.every, "month");
-      const when = every === "week" ? `every ${typeof b.day === "string" ? b.day : weekdayName(cal, numOf(b.day, 1))}` : every === "year" ? `${monthName(cal, numOf(b.month, 1))} ${numOf(b.day, 1)}` : `day ${numOf(b.day, 1)}`;
-      upcoming.push({ at: when, label: strOf(b.label, "Bill"), cents: -Math.round(numOf(b.amountCents)) });
-    }
-  }
+  const recent = recentLines(ctx, Array.isArray(rawHistory) ? rawHistory : [], new Set(shown), 10);
+  const upcoming: MoneyView["upcoming"] = level >= 3 ? billsOf(ctx, pov).map(({ payee: _payee, ...bill }) => bill) : [];
   return {
     level,
     band,
@@ -82,4 +67,73 @@ export function buildMoneyView(ctx: ReadContext): MoneyView {
     recent,
     upcoming,
   };
+}
+
+/** The newest lines of a history (entries `{at, memo, lines}`) that touch the accounts shown, newest first, at most `max`. */
+function recentLines(ctx: ReadContext, history: readonly JsonValue[], shown: ReadonlySet<EntityId>, max: number): MoneyView["recent"] {
+  const cal = calendarOf(ctx.world);
+  const out: MoneyView["recent"] = [];
+  for (let i = history.length - 1; i >= 0 && out.length < max; i--) {
+    const h = objOf(history[i]);
+    const lines = Array.isArray(h.lines) ? h.lines.map((l) => objOf(l)) : [];
+    for (const l of lines) {
+      const account = strOf(l.account);
+      if (!shown.has(account)) continue;
+      out.push({ at: formatClock(cal, numOf(h.at)), memo: strOf(h.memo), cents: numOf(l.amount), account: own(ctx.state.entities, account)?.name ?? account });
+    }
+  }
+  return out;
+}
+
+/** A person's recurring bills: when ("day 1", "every Friday", "March 3"), the label, the amount as money going out, and who is paid. */
+function billsOf(ctx: ReadContext, who: EntityId): GmMoney["bills"] {
+  const cal = calendarOf(ctx.world);
+  const bills = own(ctx.state.entities, who)?.fields.bills;
+  if (!Array.isArray(bills)) return [];
+  return bills.map((raw) => {
+    const b = objOf(raw);
+    const every = strOf(b.every, "month");
+    const at = every === "week" ? `every ${typeof b.day === "string" ? b.day : weekdayName(cal, numOf(b.day, 1))}` : every === "year" ? `${monthName(cal, numOf(b.month, 1))} ${numOf(b.day, 1)}` : `day ${numOf(b.day, 1)}`;
+    const payee = strOf(b.payee);
+    return { at, label: strOf(b.label, "Bill"), cents: -Math.round(numOf(b.amountCents)), payee: own(ctx.state.entities, payee)?.name ?? payee };
+  });
+}
+
+/**
+ * Everyone but the POV, at their own Money level, for the GM view: a band at 1; cash and one
+ * account at 2; every account and their bills from 3. Their recent lines and notes come from their
+ * own record in the economy slice. Someone whose authored accounts no money process or view has
+ * opened yet shows them with the opening amounts they will start from (`opened` false).
+ */
+export function buildPeopleMoney(ctx: ReadContext): GmMoney[] {
+  const cal = calendarOf(ctx.world);
+  const records = objOf(sliceOf(ctx.state, "economy").people);
+  const out: GmMoney[] = [];
+  for (const id of Object.keys(ctx.state.entities)) {
+    const e = own(ctx.state.entities, id);
+    if (!e || id === ctx.world.pov || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
+    const level = ctx.levelOf(id, "money");
+    if (level === 0) continue;
+    const mine = accountsOf(ctx.state, id);
+    const opened = mine.length === 0 || isMaterialized(ctx.state, id, "money");
+    const cents = (account: EntityId): number => balance(ctx.state, account) + holdingsValue(ctx.state, account) + (opened ? 0 : Math.round(numOf(own(ctx.state.entities, account)?.fields.opening)));
+    const worth = mine.reduce((sum, account) => sum + cents(account), 0);
+    const firstChecking = mine.find((account) => accountType(ctx.state, account) === "checking");
+    const shown = level >= 3 ? mine : level === 2 ? mine.filter((account) => accountType(ctx.state, account) === "cash" || account === firstChecking) : [];
+    const record = objOf(own(records, id));
+    const notes = Array.isArray(record.notes) ? record.notes.map((n) => objOf(n)) : [];
+    out.push({
+      entity: id,
+      name: e.name,
+      level,
+      band: mine.length > 0 ? wealthBand(worth) : wealthOf(ctx.state, id),
+      netWorthCents: level >= 2 && mine.length > 0 ? worth : null,
+      opened,
+      accounts: shown.map((account) => ({ id: account, name: own(ctx.state.entities, account)?.name ?? account, kind: accountType(ctx.state, account) ?? "checking", cents: cents(account) })),
+      bills: level >= 3 ? billsOf(ctx, id) : [],
+      recent: recentLines(ctx, Array.isArray(record.history) ? record.history : [], new Set(shown), 8),
+      notes: notes.reverse().map((n) => ({ at: formatClock(cal, numOf(n.at)), text: strOf(n.text) })),
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }

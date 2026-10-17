@@ -225,7 +225,9 @@ function buildGm(ctx: ReadContext): GmView {
     }
     previews.push({ title: e.name, lines });
   }
-  return { label: GM_LABEL, previews, truths, agendas };
+  // Everyone else's money, at their own Money levels, when the economy pack is loaded.
+  const money = optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [];
+  return { label: GM_LABEL, previews, truths, agendas, money };
 }
 
 export const enginePack: PackDef = {

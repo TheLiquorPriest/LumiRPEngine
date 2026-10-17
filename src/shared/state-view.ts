@@ -225,6 +225,31 @@ export interface GmView {
   previews: { title: string; lines: string[] }[];
   truths: { track: string; stage: string; truth: string }[];
   agendas: { entity: string; label: string; stage: string }[];
+  /** Everyone else's money (the economy pack's `economy.people_money`); empty without it. */
+  money: GmMoney[];
+}
+
+/** One person's money in the GM view, at their own Money level (as the Money panel shows the POV's at the POV's). */
+export interface GmMoney {
+  entity: EntityId;
+  name: string;
+  level: number;
+  /** The wealth band; null at Money 0. */
+  band: string | null;
+  /** From Money 2, for someone who holds accounts. */
+  netWorthCents: number | null;
+  /**
+   * False while their authored accounts haven't been opened yet (no money process or view has needed
+   * them): the balances shown include the authored opening amounts that opening will post.
+   */
+  opened: boolean;
+  accounts: { id: EntityId; name: string; kind: string; cents: number }[];
+  /** Their recurring bills from Money 3: when, what, how much (negative) and who is paid. */
+  bills: { at: string; label: string; cents: number; payee: string }[];
+  /** Their latest history lines on the accounts shown, newest first. */
+  recent: { at: string; memo: string; cents: number; account: string }[];
+  /** Their latest payday, bill and decline notes, newest first. */
+  notes: { at: string; text: string }[];
 }
 
 /** One interceptor run in the context inspector (`core.context`, DESIGN §6.5). */

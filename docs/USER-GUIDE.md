@@ -139,7 +139,9 @@ Open the map from the **World map** button in the input bar, **🗺 Map** in the
 
 ### The GM view
 
-The **GM view** shows everything the engine knows, including secrets and truths you haven't discovered, as **previews**. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show GM view** to open it, and **Hide** to put it away. It is labelled "Previews — not recorded" because it is exactly that: the GM view, the inspector, audits, Dry Run and playtests never write anything to your chat. Its cards cover the secret truths, the agendas and the previews. Each person's preview lists how they feel right now about everyone they have a feeling for, other NPCs included ("regard → Jess Kowalczyk: 55"; decayed with time at Relationships level 4), so you can see what an off-screen encounter did.
+The **GM view** shows everything the engine knows, including secrets and truths you haven't discovered, as **previews**. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show GM view** to open it, and **Hide** to put it away. It is labelled "Previews — not recorded" because it is exactly that: the GM view, the inspector, audits, Dry Run and playtests never write anything to your chat. Its cards cover the secret truths, the agendas, everyone's money and the previews. Each person's preview lists how they feel right now about everyone they have a feeling for, other NPCs included ("regard → Jess Kowalczyk: 55"; decayed with time at Relationships level 4), so you can see what an off-screen encounter did.
+
+Each **Money · *name*** card shows another person's money at their own Money level, as your Money panel shows yours: their wealth band, then from level 2 their net worth and accounts, from level 3 their bills (who each one is paid to), and their latest transactions and notes (paydays, bills paid, anything declined). A person whose accounts haven't been opened yet is shown with the balances the world gives them to start with. None of this reaches your chat: their paydays and bills never appear in your chips, Journal or Montage, and their declines never stop your timelapse.
 
 ### Detail on demand
 
@@ -301,6 +303,10 @@ Before you confirm, a **migration preview** lists what will happen, naming the d
 ### Mixed levels
 
 A character at a low level can still deal with one at a high level: each side records at its own level, and the low-level side's money is represented by an *external economy* account, so the books always balance.
+
+### Other people's money
+
+From Money level 3, the people in the world live on their money as you do. They are paid, they pay their bills, and every Monday they pay a week of living costs that follows their wealth band (a world can set its own amounts; the Modern US data prices them from a weekly grocery basket), so their balances go down as well as up. A bill paid to someone in the world, like your rent to your landlord, lands in that person's own account. The first morning their bills run, the engine opens their accounts with the balances the world gives them. You see all of this only in the [GM view](#the-gm-view).
 
 ## Model use
 

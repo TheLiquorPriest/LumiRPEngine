@@ -16,12 +16,14 @@
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
-import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
+import type { LedgerEvent, PackEvent, PostEvent, PostingLine } from "../../../shared/ledger";
+import type { GmMoney } from "../../../shared/state-view";
 import type { DataTable } from "../../../shared/tables";
 import type { EntityDef, KindDef } from "../../../shared/world";
 import { calendarOf, clockAt, dateAt, weekdayName, type CalDate } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
+import { isMaterialized, pinnedVersion, tablesRevision } from "../../../engine/materialize";
 import { hashParts } from "../../../shared/hash";
 import { formatMoney } from "../../../shared/world";
 import { labelOf, mutableSlice, numOf, objOf, optionalService, sliceOf, sliceRecord, strOf, own, rowOf } from "../../../engine/pack-kit";
@@ -50,7 +52,7 @@ import {
   type Price,
   type PriceRef,
 } from "./model";
-import { buildMoneyView } from "./view";
+import { buildMoneyView, buildPeopleMoney } from "./view";
 import catalog from "./tables/modern-us/catalog.json";
 import categories from "./tables/modern-us/categories.json";
 import finance from "./tables/modern-us/finance.json";
@@ -497,6 +499,18 @@ function str(e: PackEvent, k: string): string {
 }
 
 const HISTORY = 40;
+/** History lines and notes kept in each other person's money record (their money in the GM view). */
+const PERSON_HISTORY = 12;
+const PERSON_NOTES = 6;
+
+/** A person's money record, created on first use: their latest history lines and private notes. */
+function personRecord(state: WorldState, who: EntityId): { history: JsonValue[]; notes: JsonValue[] } {
+  const people = sliceRecord(state, "economy", "people");
+  const cur = objOf(own(people, who));
+  const rec = { history: Array.isArray(cur.history) ? cur.history : [], notes: Array.isArray(cur.notes) ? cur.notes : [] };
+  people[who] = rec;
+  return rec;
+}
 
 const EVENTS: EventTypeDef<PackEvent>[] = [
   {
@@ -510,15 +524,39 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
     coarsen: { key: (e) => str(e, "entity"), merge: (_a, b) => b },
   },
   {
+    // A history line goes to everyone it touches: the POV's history (the Money panel) and each other
+    // holder's own record (their money in the GM view), so another person's paydays and bills never
+    // push the POV's lines out. A line that touches nobody's account stays in the POV's.
     type: "economy.txn",
     validate: () => null,
-    apply: (e, state) => {
-      const s = mutableSlice(state, "economy");
-      const list = Array.isArray(s.history) ? s.history.slice(-(HISTORY - 1)) : [];
-      list.push({ at: state.clock, memo: str(e, "memo"), lines: Array.isArray(e.data.lines) ? e.data.lines : [] });
-      s.history = list;
+    apply: (e, state, ctx) => {
+      const lines = Array.isArray(e.data.lines) ? e.data.lines : [];
+      const entry = { at: state.clock, memo: str(e, "memo"), lines };
+      const holders = [...new Set(lines.map((l) => strOf(own(state.entities, strOf(objOf(l).account))?.fields.owner)))].filter((who) => who !== "" && own(state.entities, who));
+      const pov = ctx.world.pov;
+      if (holders.length === 0 || holders.includes(pov)) {
+        const s = mutableSlice(state, "economy");
+        s.history = [...(Array.isArray(s.history) ? s.history.slice(-(HISTORY - 1)) : []), entry];
+      }
+      for (const who of holders) {
+        if (who === pov) continue;
+        const rec = personRecord(state, who);
+        rec.history = [...rec.history.slice(-(PERSON_HISTORY - 1)), entry];
+      }
     },
     describe: (e) => str(e, "memo"),
+  },
+  {
+    // Someone else's payday, bill or decline note: kept in their own record for the GM view. It is
+    // secret, so it never becomes a player line, and it isn't a signal, so it never stops or joins
+    // the POV's timelapse.
+    type: "economy.note",
+    validate: (e, ctx) => (own(ctx.state.entities, str(e, "entity")) && str(e, "text") !== "" ? null : reject("bad_event", "a money note needs a person and its text")),
+    apply: (e, state) => {
+      const rec = personRecord(state, str(e, "entity"));
+      rec.notes = [...rec.notes.slice(-(PERSON_NOTES - 1)), { at: state.clock, class: str(e, "class"), text: str(e, "text") }];
+    },
+    describe: (e) => str(e, "text"),
   },
   {
     // A price multiplier (festival, storm, scarcity) by category and place, until a time or until replaced.
@@ -636,23 +674,66 @@ function signal(cls: "bill" | "decline", text: string, who: EntityId): LedgerEve
 }
 
 /**
- * What the recurring money processes record: transaction history only for postings that touch the
- * POV's accounts (the only history the Money panel shows) and bill or decline notes only for the
- * POV. Everyone's postings are recorded either way.
+ * What the recurring money processes record. Every posting stays, and so does every history line
+ * that touches an account in the world: lines are filed by holder (`economy.txn`), the POV's for the
+ * Money panel and everyone else's for the GM view. Payday, bill and decline notes stay signals only
+ * for the POV, where they can interrupt a timelapse and reach the Montage; for anyone else who holds
+ * accounts they become a secret `economy.note` in their own record, which is also all a declined
+ * bill of theirs leaves. Someone whose money is a band alone (no accounts) keeps no lines or notes.
  */
-function forPov(ctx: ReadContext, events: LedgerEvent[]): LedgerEvent[] {
+function noted(ctx: ReadContext, events: LedgerEvent[]): LedgerEvent[] {
   const pov = ctx.world.pov;
-  return events.filter((e) => {
-    if (e.type === "economy.txn" && "data" in e) return Array.isArray(e.data.lines) && e.data.lines.some((l) => own(ctx.state.entities, strOf(objOf(l).account))?.fields.owner === pov);
-    if (e.type === ENGINE_EVENTS.signal && "data" in e) return e.data.entity === pov;
-    return true;
+  return events.flatMap((e): LedgerEvent[] => {
+    if (!("data" in e)) return [e];
+    if (e.type === "economy.txn") return Array.isArray(e.data.lines) && e.data.lines.some((l) => own(ctx.state.entities, strOf(objOf(l).account))) ? [e] : [];
+    if (e.type === ENGINE_EVENTS.signal && typeof e.data.entity === "string" && e.data.entity !== pov) return hasLedger(ctx.state, e.data.entity) ? [{ type: "economy.note", data: { entity: e.data.entity, class: strOf(e.data.class), text: strOf(e.data.text), visibility: "secret" } }] : [];
+    if (e.type === "economy.decline" && e.data.payer !== pov) return [];
+    return [e];
   });
+}
+
+/**
+ * A process step's own view of the books: each payment it makes is posted to a copy of the
+ * balances, so the next one in the same step sees it. Two bills due the same morning can't both
+ * spend what covers only one (the fold's funds guard would drop the second).
+ */
+function runningBooks(base: ReadContext): { ctx(): ReadContext; post(events: readonly LedgerEvent[]): void } {
+  const state: WorldState = { ...base.state, accounts: { ...base.state.accounts } };
+  let current = base;
+  return {
+    ctx: () => current,
+    post(events) {
+      const posts = events.filter((e): e is PostEvent => e.type === "post");
+      if (posts.length === 0) return;
+      for (const e of posts) for (const l of e.lines) state.accounts[l.account] = (own(state.accounts, l.account) ?? 0) + l.amount;
+      current = base.registry.context(base.world, state);
+    },
+  };
 }
 
 function people(ctx: ReadContext): EntityId[] {
   return Object.keys(ctx.state.entities)
     .sort()
     .filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person"));
+}
+
+/**
+ * Opens the authored accounts of everyone the recurring money processes act for (Money 3+): in the
+ * first slot holding 09:00 that steps them at that level, their opening balances post as the same
+ * `materialize` event a view would record. Their bills and living costs then draw on the money the
+ * author gave them, not only on what payroll has paid in since the chat began.
+ */
+function openAccounts(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
+  if (!nineOclock(ctx, slot)) return [];
+  const version = pinnedVersion(ctx.world, ctx.registry, "money");
+  if (typeof version !== "number") return [];
+  const out: LedgerEvent[] = [];
+  for (const who of people(ctx)) {
+    if (ctx.levelOf(who, "money") < 3 || isMaterialized(ctx.state, who, "money")) continue;
+    const events = openingBalances(who, ctx);
+    if (events.length > 0) out.push({ type: "materialize", entity: who, domain: "money", generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events });
+  }
+  return out;
 }
 
 function payroll(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
@@ -715,10 +796,16 @@ function paysAutopayLoan(state: Readonly<WorldState>, who: EntityId, b: JsonObje
   });
 }
 
+/**
+ * Bills fall due at 09:00 on their day (Money 3+). A bill paid to someone in the world (a person,
+ * or anything holding accounts) lands in their deposit account; any other payee is an outside
+ * counterparty. Each payment sees the ones before it the same morning.
+ */
 function bills(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
   const at = nineOclock(ctx, slot);
   if (!at) return [];
   const out: LedgerEvent[] = [];
+  const books = runningBooks(ctx);
   for (const who of people(ctx)) {
     if (ctx.levelOf(who, "money") < 3) continue;
     const list = own(ctx.state.entities, who)?.fields.bills;
@@ -737,10 +824,69 @@ function bills(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
       const label = strOf(b.label, "Bill");
       const cents = Math.round(numOf(b.amountCents));
       const from = strOf(b.from);
-      const paid = charge(ctx, who, cents, label, { counterparty: strOf(b.payee, label.toLowerCase().replace(/\W+/g, "_")), ...(from ? { source: from } : { method: "account" }) });
+      const payee = strOf(b.payee);
+      const held = own(ctx.state.entities, payee);
+      const to: ChargeOptions = held && (kindIs(ctx.registry, ctx.world, held.kind, "person") || hasLedger(ctx.state, payee)) ? { payee } : { counterparty: payee || label.toLowerCase().replace(/\W+/g, "_") };
+      const paid = charge(books.ctx(), who, cents, label, { ...to, ...(from ? { source: from } : { method: "account" }) });
       if (isRejection(paid)) out.push({ type: "economy.decline", data: { payer: who, cents, memo: label, reason: paid.reason } }, signal("decline", `${label} (${formatMoney(cents, ctx.world.currency)}) was declined.`, who));
-      else out.push(...paid, signal("bill", `${label}: ${formatMoney(cents, ctx.world.currency)} paid.`, who));
+      else {
+        books.post(paid);
+        out.push(...paid, signal("bill", `${label}: ${formatMoney(cents, ctx.world.currency)} paid.`, who));
+      }
     }
+  }
+  return out;
+}
+
+/**
+ * Everyday living costs by wealth band, a week at a time, for the Modern US data: one adult's weekly
+ * grocery basket (the thrifty, moderate or liberal plan) times the share of a week's everyday
+ * spending it stands for at that band, which grows with the band (eating out, getting about,
+ * household and personal things). Housing, utilities and the like are the person's bills.
+ */
+const LIVING_COSTS: Record<string, { basket: string; times: number }> = {
+  broke: { basket: "basket_person_thrifty", times: 1 },
+  poor: { basket: "basket_person_thrifty", times: 1.5 },
+  modest: { basket: "basket_person_moderate", times: 2 },
+  comfortable: { basket: "basket_person_moderate", times: 3 },
+  rich: { basket: "basket_person_liberal", times: 4 },
+  wealthy: { basket: "basket_person_liberal", times: 8 },
+};
+
+/**
+ * A week of living costs for a wealth band: the world's own `livingCosts` (economy config: a weekly
+ * amount per band, in its minor units) when it sets them, else the Modern US default, priced from
+ * the catalog's grocery baskets at the region's cost of living. Null when neither prices the band:
+ * a world whose catalog has no baskets and that sets none charges no living costs.
+ */
+function livingCost(ctx: ReadContext, band: string): number | null {
+  const authored = objOf(objOf(ctx.world.packs.economy?.config).livingCosts);
+  if (Object.keys(authored).length > 0) {
+    const weekly = numOf(own(authored, band));
+    return weekly > 0 ? Math.round(weekly) : null;
+  }
+  const def = own(LIVING_COSTS, band);
+  const basket = def ? priceOf(ctx, { catalog: def.basket, place: null }) : null;
+  return def && basket ? Math.round(basket.cents * def.times) : null;
+}
+
+/**
+ * Living costs (Money 3+): every Monday (the calendar's weekday 1) at 09:00, each person other than
+ * the POV who holds accounts pays a week of everyday spending for their current wealth band to the
+ * outside economy. Balances that payroll fills also drain, and spending follows what they have.
+ * The POV's spending is the player's own: purchases and bills.
+ */
+function living(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
+  const at = nineOclock(ctx, slot);
+  if (!at || at.date.weekday !== 1) return [];
+  const out: LedgerEvent[] = [];
+  for (const who of people(ctx)) {
+    if (who === ctx.world.pov || ctx.levelOf(who, "money") < 3 || !hasLedger(ctx.state, who)) continue;
+    const cents = livingCost(ctx, wealthOf(ctx.state, who));
+    if (cents === null) continue;
+    const paid = charge(ctx, who, cents, "Living costs", {});
+    if (isRejection(paid)) out.push(signal("decline", `Living costs (${formatMoney(cents, ctx.world.currency)}) were declined.`, who));
+    else out.push(...paid);
   }
   return out;
 }
@@ -895,23 +1041,31 @@ function logUniform(rng: Rng, lo: number, hi: number): number {
   return Math.exp(a + (b - a) * rng.next());
 }
 
+/**
+ * The posting of an entity's authored opening balances, from its own external account; none when it
+ * holds no account with an opening amount. Materialization records it once (from Money 1, so the
+ * band a level-1 view shows reflects it), and the money processes open the accounts of the people
+ * they act for (`openAccounts`). It draws no randomness, so both record the same event.
+ */
+function openingBalances(entity: EntityId, ctx: ReadContext): LedgerEvent[] {
+  const s = ctx.state;
+  const lines: PostingLine[] = accountsOf(s, entity)
+    .filter((id) => typeof own(s.entities, id)?.fields.opening === "number" && numOf(own(s.entities, id)?.fields.opening) !== 0)
+    .map((id) => ({ account: id, amount: Math.round(numOf(own(s.entities, id)?.fields.opening)) }));
+  if (lines.length === 0) return [];
+  const total = lines.reduce((a, l) => a + l.amount, 0);
+  const all = total === 0 ? lines : [...lines, { account: external(entity), amount: -total }];
+  return all.length < 2 ? [] : [{ type: "post", lines: all, memo: "Opening balances" }];
+}
+
 function materializeMoney(entity: EntityId, ctx: ReadContext, rng: Rng): LedgerEvent[] {
   const s = ctx.state;
   const e = own(s.entities, entity);
   const level = e ? ctx.levelOf(entity, "money") : 0;
   if (!e || level < 1) return [];
-  const authored = accountsOf(s, entity);
-  const ext = external(entity);
-  if (authored.length > 0) {
-    // Authored accounts: post their opening balances once, from the owner's external account. From
-    // level 1, so the wealth band a level-1 view shows reflects them.
-    const lines: PostingLine[] = authored.filter((id) => typeof own(s.entities, id)?.fields.opening === "number" && numOf(own(s.entities, id)?.fields.opening) !== 0).map((id) => ({ account: id, amount: Math.round(numOf(own(s.entities, id)?.fields.opening)) }));
-    if (lines.length === 0) return [];
-    const total = lines.reduce((a, l) => a + l.amount, 0);
-    const all = total === 0 ? lines : [...lines, { account: ext, amount: -total }];
-    return all.length < 2 ? [] : [{ type: "post", lines: all, memo: "Opening balances" }];
-  }
+  if (accountsOf(s, entity).length > 0) return openingBalances(entity, ctx);
   if (level < 2 || !kindIs(ctx.registry, ctx.world, e.kind, "person")) return [];
+  const ext = external(entity);
   // Sample a net worth inside the current band (its level-1 representation), then split it.
   const band = bandByLabel(wealthOf(s, entity));
   const lo = Number.isFinite(band.min) ? Math.max(band.min, 0) : 0;
@@ -947,6 +1101,13 @@ function materializeMoney(entity: EntityId, ctx: ReadContext, rng: Rng): LedgerE
 }
 
 // ---------------------------------------------------------------- pack
+
+declare module "../../../engine/registry" {
+  interface QueryMap {
+    /** Every other person's money at their own Money level, for the GM view (`core.gm`). */
+    "economy.people_money": (ctx: ReadContext) => GmMoney[];
+  }
+}
 
 function amountOf(v: JsonValue | undefined): number {
   return typeof v === "number" ? Math.round(v) : NaN;
@@ -1097,10 +1258,13 @@ export const economyPack: PackDef = {
     r.action({ id: "invest", label: "Invest", pack: "economy", params: { amount: { type: "money" } }, requires: ["level.money >= 4", "amount > 0"], outcomes: { default: [{ type: "economy.invest", args: { owner: "self", cents: "=amount" } }] }, duration: "2", lexicon: ["invest", "buy stocks", "buy shares"], observable: "checks their phone" });
     r.action({ id: "sell_investments", label: "Sell investments", pack: "economy", params: { amount: { type: "money" } }, requires: ["level.money >= 4", "amount > 0"], outcomes: { default: [{ type: "economy.invest", args: { owner: "self", cents: "=amount", sell: true } }] }, duration: "2", lexicon: ["sell stocks", "sell shares", "cash out"], observable: "checks their phone" });
 
-    r.process({ id: "economy.payroll", domain: "money", minLevel: 3, step: (slot, ctx) => forPov(ctx, payroll(slot, ctx)) });
-    r.process({ id: "economy.bills", domain: "money", minLevel: 3, step: (slot, ctx) => forPov(ctx, bills(slot, ctx)) });
-    r.process({ id: "economy.cards", domain: "money", minLevel: 3, step: (slot, ctx) => forPov(ctx, cards(slot, ctx)) });
-    r.process({ id: "economy.banking", domain: "money", minLevel: 4, step: (slot, ctx) => forPov(ctx, banking(slot, ctx)) });
+    // Openings first, so every later process this slot sees the accounts' authored balances.
+    r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (slot, ctx) => openAccounts(slot, ctx) });
+    r.process({ id: "economy.payroll", domain: "money", minLevel: 3, step: (slot, ctx) => noted(ctx, payroll(slot, ctx)) });
+    r.process({ id: "economy.bills", domain: "money", minLevel: 3, step: (slot, ctx) => noted(ctx, bills(slot, ctx)) });
+    r.process({ id: "economy.cards", domain: "money", minLevel: 3, step: (slot, ctx) => noted(ctx, cards(slot, ctx)) });
+    r.process({ id: "economy.banking", domain: "money", minLevel: 4, step: (slot, ctx) => noted(ctx, banking(slot, ctx)) });
+    r.process({ id: "economy.living", domain: "money", minLevel: 3, step: (slot, ctx) => noted(ctx, living(slot, ctx)) });
     r.process({ id: "economy.markets", domain: "money", minLevel: 4, step: (slot, ctx, rng) => markets(slot, ctx, rng) });
 
     r.materializer({ domain: "money", version: 1, materialize: materializeMoney });
@@ -1122,6 +1286,7 @@ export const economyPack: PackDef = {
       },
     });
     r.view({ panel: "economy.money", build: (ctx) => buildMoneyView(ctx) as unknown as JsonValue });
+    r.query("economy.people_money", buildPeopleMoney);
 
     /**
      * Who pays a narrated purchase, and with what. The extractor may name as the payer the account

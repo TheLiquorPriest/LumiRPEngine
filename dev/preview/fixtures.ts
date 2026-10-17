@@ -221,6 +221,42 @@ export function stateFixture(chatId: string): StateView {
         previews: [{ title: "Glovebox (Civic)", lines: ["Registration and insurance card", "Half a pack of gum", "$7 in quarters"] }],
         truths: [{ track: "The surprise party", stage: "Planning", truth: "Mara and Dev are planning a surprise party for Sam on Saturday." }],
         agendas: [{ entity: "Dev Patel", label: "Fix up the jon boat", stage: "Needs a part" }],
+        money: [
+          {
+            entity: "dev",
+            name: "Dev Patel",
+            level: 4,
+            band: "modest",
+            netWorthCents: 412650,
+            opened: true,
+            accounts: [{ id: "dev_checking", name: "Dev's checking", kind: "checking", cents: 412650 }],
+            bills: [
+              { at: "day 1", label: "Rent, Unit 3", cents: -97500, payee: "Mara Lopez" },
+              { at: "day 14", label: "Mobile phone", cents: -4500, payee: "Northwind Mobile" },
+            ],
+            recent: [
+              { at: "Mon 12 Oct 2026, 11:30", memo: "Living costs", cents: -19000, account: "Dev's checking" },
+              { at: "Fri 9 Oct 2026, 11:30", memo: "Payroll: $1,060.00 gross, $204.58 withheld", cents: 85542, account: "Dev's checking" },
+              { at: "Thu 1 Oct 2026, 11:30", memo: "Rent, Unit 3", cents: -97500, account: "Dev's checking" },
+            ],
+            notes: [
+              { at: "Fri 9 Oct 2026, 11:30", text: "Payday: $855.42 net ($1,060.00 gross)." },
+              { at: "Thu 1 Oct 2026, 11:30", text: "Rent, Unit 3: $975.00 paid." },
+            ],
+          },
+          {
+            entity: "mara",
+            name: "Mara Lopez",
+            level: 2,
+            band: "modest",
+            netWorthCents: 1235000,
+            opened: false,
+            accounts: [{ id: "mara_checking", name: "Mara's checking", kind: "checking", cents: 1235000 }],
+            bills: [],
+            recent: [],
+            notes: [],
+          },
+        ],
       },
     },
     palette: {
