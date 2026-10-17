@@ -241,9 +241,9 @@ function relabel(line: string, refs: readonly Ref[], world: WorldDoc, state: Rea
   return out;
 }
 
-/** Text that must never reach a player line: unrevealed truths and gated secret lore, and hidden tracks' labels. */
-function secretsOf(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
-  const out = unrevealedSecrets(reg, world, state);
+/** Names only the GM may see: hidden tracks' labels and stage labels, and the names of people and things the POV can't see. */
+export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
+  const out: string[] = [];
   for (const [id, t] of Object.entries(world.tracks)) {
     if (trackShown(reg, world, state, pov, id)) continue;
     out.push(t.label);
@@ -348,7 +348,8 @@ function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     const text = rawLine(reg, world, state, pov, e);
     if (!text || lines.some((l) => l.text === text)) continue;
     if (player) {
-      secrets ??= secretsOf(reg, world, state, pov);
+      // Text that must never reach a player line: unrevealed truths and gated secret lore, and hidden names.
+      secrets ??= [...unrevealedSecrets(reg, world, state), ...hiddenNames(reg, world, state, pov)];
       if (findLeaks(text, secrets).length > 0) continue;
     }
     lines.push({ at: i, rank: lineRank(reg, world, state, pov, e), text });

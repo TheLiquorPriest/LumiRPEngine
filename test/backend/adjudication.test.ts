@@ -36,12 +36,13 @@ describe("a new chat's policy", () => {
 });
 
 /** A test-world chat with a coin-flip check (d20 against 11) under `policy`; the helper answers `judge` with `judgement` and reads nothing from replies. */
-async function climbChat(rig: Rig, policy: AdjudicationDef, judgement: JsonObject, lore: Record<string, JsonObject> = {}): Promise<string> {
+async function climbChat(rig: Rig, policy: AdjudicationDef, judgement: JsonObject, lore: Record<string, JsonObject> = {}, entities: Record<string, JsonObject> = {}): Promise<string> {
   const worldId = await rig.newWorld();
   const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
   const action: JsonObject = { id: "climb", label: "Climb the wall", params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "actions", id: "climb", value: action }));
   for (const [id, value] of Object.entries(lore)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "lore", id, value }));
+  for (const [id, value] of Object.entries(entities)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "entities", id, value }));
   rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "ruleset", value: { adjudication: policy as unknown as JsonObject } }));
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
   rig.host.quietReply = (request) => (request.messages.some((m) => m.content.includes("Rate the approach")) ? JSON.stringify(judgement) : JSON.stringify({ proposals: [] }));
@@ -178,5 +179,30 @@ describe("the judge step's lore", () => {
     expect(roll?.detail).toContain("Your approach: 2 of 2.");
     expect((roll?.detail ?? "").toLowerCase()).not.toContain(SECRET.toLowerCase());
     expect(JSON.stringify((await rig.rt.view(chatId, rig.host.userId)).panels["core.context"])).toContain('"step":"judge"');
+  });
+});
+
+describe("the judge step and people the POV can't see", () => {
+  const people: Record<string, JsonObject> = {
+    vex: { id: "vex", kind: "person", name: "Vex Morrow", tier: "principal", visibility: "secret", agent: true, fields: { place: "home" }, relations: [] },
+    jo: { id: "jo", kind: "person", name: "Jo Park", tier: "supporting", agent: true, fields: { place: "home" }, relations: [] },
+  };
+
+  test("a hidden person here is in neither the judge's scene nor the brief, and a reason naming them is dropped while the rating stands", async () => {
+    const rig = new Rig();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
+    const chatId = await climbChat(rig, presetAdjudication("balanced"), { rating: 1, reason: "Vex Morrow is watching from the corner, so it is risky" }, {}, people);
+    await climbTurn(rig, chatId, "I climb carefully, keeping low.");
+    const judged = rig.host.quietCalls.find((r) => r.messages.some((m) => m.content.includes("Rate the approach")));
+    expect(judged?.messages.at(-1)?.content).toContain('"present":["Jo Park"]');
+    const brief = rig.host.quietCalls.find((r) => r.messages[0]?.content.includes("You brief a roleplay narrator"));
+    expect(brief?.messages.at(-1)?.content).toContain("Present:\nJo Park\n");
+    for (const r of rig.host.quietCalls) expect(JSON.stringify(r.messages)).not.toContain("Vex Morrow");
+    const roll = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "roll");
+    expect(roll?.detail).toContain("Your approach: 1 of 2.");
+    expect(roll?.detail ?? "").not.toContain("Vex");
+    const chain = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
+    const adjudged = chain.flatMap((m) => Object.values(m.ledger?.swipes ?? {}).flatMap((r) => r.events)).find((e) => e.type === "engine.adjudged");
+    expect(adjudged).toMatchObject({ data: { rating: 1, reason: "" } });
   });
 });

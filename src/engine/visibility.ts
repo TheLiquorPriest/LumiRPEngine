@@ -254,6 +254,14 @@ export function unrevealedSecrets(reg: Registry, world: WorldDoc, state: Readonl
   return [...unrevealedTruths(world, state), ...secretLorePhrases(reg, world, state)];
 }
 
+/**
+ * The names of the places the POV can't see: free text the player reads (a model's reason, a lore
+ * trace) must not carry one. Names shorter than three characters would match almost anything.
+ */
+export function unseenPlaceNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
+  return Object.entries(world.places).flatMap(([id, p]) => (typeof p.name === "string" && p.name.trim().length >= 3 && !canSeePlace(reg, world, state, pov, id) ? [p.name] : []));
+}
+
 /** Strings in a JSON value that contain any of `secrets` (case-insensitive): a leak check for views and slots. */
 export function findLeaks(value: JsonValue | string | undefined, secrets: readonly string[]): string[] {
   const needles = secrets.map((s) => s.toLowerCase()).filter((s) => s.length > 0);

@@ -24,10 +24,10 @@ import { optionalQuery } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import type { Rng } from "../engine/rng";
-import { isGone, kindIs, placeOfEntity } from "../engine/scope";
+import { kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { EngineTurnPlan } from "../engine/turn";
-import { findLeaks } from "../engine/visibility";
+import { canSeeEntity, findLeaks } from "../engine/visibility";
 import { LookupBudget, type StepLore } from "./lore-steps";
 import { inMinorUnits, type Steps } from "./steps";
 
@@ -52,12 +52,12 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
   return out.slice(0, 40);
 }
 
-/** People at the POV's place (by name), for prompts. */
+/** People at the POV's place that it can see (by name), for prompts: a hidden or removed one is never named. */
 export function presentNames(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
   const here = placeOfEntity(state, world.pov);
   if (!here) return [];
   return Object.entries(state.entities)
-    .filter(([id, e]) => id !== world.pov && e.agent && placeOfEntity(state, id) === here && !isGone(state, id))
+    .filter(([id, e]) => id !== world.pov && e.agent && placeOfEntity(state, id) === here && canSeeEntity(registry, world, state, world.pov, id))
     .map(([, e]) => e.name);
 }
 

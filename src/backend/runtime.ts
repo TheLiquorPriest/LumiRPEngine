@@ -36,8 +36,8 @@ import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
-import { playerKnows } from "../engine/player-events";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets } from "../engine/visibility";
+import { hiddenNames, playerKnows } from "../engine/player-events";
+import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { Working } from "../engine/working";
 import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
@@ -765,8 +765,9 @@ export class Runtime implements TurnHooks {
    * it to the story, the described approach is rated (and the story's odds given) before the plan.
    * The answer rides on the intent, so a Re-run reads the same judgement and the fold never asks.
    * It reads the lore its action, target, place and the player's words find (§5.4), a secret its
-   * audience allows included, so its reason, which the roll chip and the Journal show, is dropped
-   * when it carries a secret's unrevealed text the player didn't type (§7).
+   * audience allows included, and it is told only who the POV can see. Its reason, which the roll
+   * chip and the Journal show, is dropped (the rating stands) when it carries a secret's unrevealed
+   * text the player didn't type, or names someone, a track or a place the POV can't see (§7).
    */
   private async judgeApproach(bridge: TurnBridge, text: string, render: { world: WorldDoc; state: WorldState }, settings: UserSettings, facts: SignalFacts, budget: StepBudget, at: LorePhase): Promise<void> {
     const userId = at.userId;
@@ -793,8 +794,9 @@ export class Runtime implements TurnHooks {
       return;
     }
     const typed = text.toLowerCase();
-    const leaks = findLeaks(judgement.reason, unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typed.includes(s.toLowerCase()))).length > 0;
-    if (leaks) this.host.log("info", `[LumiRPEngine] judge: the reason for ${action.id} carried an unrevealed secret; it isn't shown`, userId);
+    const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typed.includes(s.toLowerCase()));
+    const leaks = findLeaks(judgement.reason, [...secrets, ...hiddenNames(this.registry, render.world, render.state, render.world.pov), ...unseenPlaceNames(this.registry, render.world, render.state, render.world.pov)]).length > 0;
+    if (leaks) this.host.log("info", `[LumiRPEngine] judge: the reason for ${action.id} carried an unrevealed secret or a hidden name; it isn't shown`, userId);
     bridge.setIntent(text, { ...intent, judgement: leaks ? { ...judgement, reason: "" } : judgement }, bridge.wasInterpreted(text));
   }
 
@@ -844,8 +846,7 @@ export class Runtime implements TurnHooks {
     const said = at.said.toLowerCase();
     const unsaid = (s: string): boolean => !said.includes(s.toLowerCase());
     const people = Object.entries(state.entities).flatMap(([id, e]) => (povMayKnow(this.registry, world, state, id) || e.name.trim().length < 3 ? [] : [e.name]));
-    const places = Object.entries(world.places).flatMap(([id, p]) => (typeof p.name !== "string" || p.name.trim().length < 3 || canSeePlace(this.registry, world, state, world.pov, id) ? [] : [p.name]));
-    const withheld = { text: [...unrevealedSecrets(this.registry, world, state), ...people, ...places].filter(unsaid), names: secretLoreNames(this.registry, world, state).filter(unsaid) };
+    const withheld = { text: [...unrevealedSecrets(this.registry, world, state), ...people, ...unseenPlaceNames(this.registry, world, state, world.pov)].filter(unsaid), names: secretLoreNames(this.registry, world, state).filter(unsaid) };
     const lore = new StepLore(run.purpose, setting, reader, at.phase, withheld, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused } });
     lore.prefetch(inputs);
     lruSet(this.loreTraces, at.key, [...(this.loreTraces.get(at.key) ?? []), lore.trace], 64);
