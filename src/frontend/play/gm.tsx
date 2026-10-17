@@ -14,8 +14,9 @@ import { Card, Empty, Row, Tabs, tabPanel, useBusy } from "../components";
 import { parseFixValue } from "../fix-editor";
 import type { PanelProps } from "../registry";
 import { adjustOp, editRequest, entityStateOp, relationFields } from "../requests";
+import { decodeEncounterView, EncounterCard } from "../../packs/combat/ui/panel";
 
-type Section = "entities" | "places" | "tracks" | "money" | "edits";
+type Section = "entities" | "places" | "tracks" | "money" | "fight" | "edits";
 
 /** What the editor's forms share: the loaded view, the currency, and one way to send an edit. */
 interface Editor {
@@ -482,23 +483,29 @@ function Body(props: { editor: Editor }) {
   const [section, setSection] = useState<Section>("entities");
   const panelId = useId();
   const { gm } = editor;
+  // The fight under way, everyone named and HP exact (the combat pack's GM view).
+  const fight = gm.encounter === null ? null : decodeEncounterView(gm.encounter);
+  // A Fight tab left open when the fight ends falls back to Entities.
+  const shown: Section = section === "fight" && !fight ? "entities" : section;
   return (
     <div class="lre-stack">
       <Tabs<Section>
         label="GM view"
         panelId={panelId}
-        value={section}
+        value={shown}
         tabs={[
           { id: "entities", label: "Entities" },
           { id: "places", label: "Places" },
           { id: "tracks", label: "Tracks" },
           { id: "money", label: "Money" },
+          ...(fight ? [{ id: "fight" as const, label: "Fight" }] : []),
           { id: "edits", label: "Edits" },
         ]}
         onChange={setSection}
       />
-      <div class="lre-stack" {...tabPanel(panelId, section)}>
-        {section === "entities" ? <Entities editor={editor} /> : null}
+      <div class="lre-stack" {...tabPanel(panelId, shown)}>
+        {shown === "fight" && fight ? <EncounterCard view={fight} /> : null}
+        {shown === "entities" ? <Entities editor={editor} /> : null}
         {section === "places" ? (
           <Card title="Places">
             {gm.places.map((p) => (

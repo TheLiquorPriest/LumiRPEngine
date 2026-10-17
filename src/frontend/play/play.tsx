@@ -13,9 +13,9 @@ import type { PanelDef } from "../registry";
 import { useSelect } from "../store";
 import type { UiCatalog } from "../ui-registry";
 
-/** Core panels always show; a pack's panel shows once its view model is in the state. */
+/** Core panels always show; a pack's panel shows once its view model is in the state (a null one is none, as the Encounter's between fights). */
 export function visiblePanels(catalog: UiCatalog, view: StateView): PanelDef[] {
-  return catalog.panels.filter((panel) => panel.id.startsWith("core.") || view.panels[panel.id] !== undefined);
+  return catalog.panels.filter((panel) => panel.id.startsWith("core.") || (view.panels[panel.id] !== undefined && view.panels[panel.id] !== null));
 }
 
 export function Play() {

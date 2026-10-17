@@ -11,6 +11,7 @@ import type { WorldDoc } from "../../src/shared/world";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
 import { extractionView, freshFixture, gmFixture, pausedFixture, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
+import { combatFixture } from "./combat-fixture";
 import { previewSheet } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
@@ -22,8 +23,8 @@ const REGISTRY = createRegistry(ALL_PACKS);
 type Emit = (payload: unknown) => void;
 
 export interface MockOptions {
-  /** `fresh`: a new chat whose POV money no view has opened yet (the opening balances show). */
-  scenario: "play" | "paused" | "not_world" | "fresh";
+  /** `fresh`: a new chat whose POV money no view has opened yet (the opening balances show); `combat`: a fight under way at the diner (the Encounter tab, the palette's Combat tab, the GM view's Fight). */
+  scenario: "play" | "paused" | "not_world" | "fresh" | "combat";
   /** A starter template id: the map is that starter's in a new chat, as the engine builds it. */
   map?: string;
   closeDrawer(): void;
@@ -211,6 +212,13 @@ export class MockBackend {
         this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : this.options.scenario === "fresh" ? freshFixture(message.chatId) : stateFixture(message.chatId);
         if (this.options.scenario === "not_world") this.view = { ...stateFixture(message.chatId), status: "not_world", hud: null, scene: null, chips: [], panels: {}, palette: null, controls: null };
         else if (this.options.map) this.view.panels["space.map"] = starterMap(this.options.map);
+        if (this.options.scenario === "combat") {
+          const fight = combatFixture();
+          this.view.panels["combat.encounter"] = fight.panel;
+          this.view.packs.combat = 1;
+          if (this.view.palette) this.view.palette = { ...this.view.palette, entries: [...fight.entries, ...this.view.palette.entries], ...(fight.encounter ? { encounter: fight.encounter } : {}) };
+          this.gm = { ...this.gm, encounter: fight.gm };
+        }
         this.result(reqId, "lre.hello", { accepted: true });
         setTimeout(() => this.snapshot(), 50);
         return;

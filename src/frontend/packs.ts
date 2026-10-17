@@ -2,6 +2,7 @@
 // pack's `ui` registers its panels, editors and chip renderers.
 
 import calendar from "../packs/calendar/ui";
+import combat from "../packs/combat/ui";
 import castlife from "../packs/castlife/ui";
 import economy from "../packs/economy/ui";
 import gear from "../packs/gear/ui";
@@ -25,4 +26,4 @@ const core: UiPackDef = {
   },
 };
 
-export const UI_PACKS: readonly UiPackDef[] = [core, sheets, economy, vehicles, gear, castlife, calendar, story, space];
+export const UI_PACKS: readonly UiPackDef[] = [core, sheets, economy, vehicles, gear, castlife, calendar, story, space, combat];

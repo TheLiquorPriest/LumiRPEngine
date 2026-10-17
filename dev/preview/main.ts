@@ -1,5 +1,5 @@
 // Preview harness boot: a mock host plus a mock backend, then the real frontend `setup`.
-// URL: ?scenario=play|paused|not_world|fresh&drawer=open|closed&theme=dark|light (default dark)&map=ring|manor|square
+// URL: ?scenario=play|paused|not_world|fresh|combat&drawer=open|closed&theme=dark|light (default dark)&map=ring|manor|square
 
 import { setup } from "../../src/frontend/setup";
 import type { FrontendToBackend } from "../../src/shared/protocol";
@@ -14,7 +14,7 @@ const root = document.documentElement;
 for (const [name, value] of Object.entries(light ? LIGHT_THEME : DARK_THEME)) root.style.setProperty(name, value);
 root.style.colorScheme = light ? "light" : "dark";
 const scenarioParam = params.get("scenario");
-const scenario = scenarioParam === "paused" || scenarioParam === "not_world" || scenarioParam === "fresh" ? scenarioParam : "play";
+const scenario = scenarioParam === "paused" || scenarioParam === "not_world" || scenarioParam === "fresh" || scenarioParam === "combat" ? scenarioParam : "play";
 const host = createMockHost(params.get("drawer") !== "closed");
 const starter = STARTER_MAPS[params.get("map") ?? ""];
 const backend = new MockBackend((payload) => host.deliver(payload), { scenario, ...(starter ? { map: starter } : {}), closeDrawer: () => host.setDrawer(false) });
