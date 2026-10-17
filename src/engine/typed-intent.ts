@@ -197,6 +197,8 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
   for (const [id, e] of Object.entries(state.entities)) if (id !== pov && kindIs(reg, world, e.kind, "person") && !isGone(state, id)) for (const w of words(e.name)) people.add(w);
   const acts = (start: number) => playerActs(said, start, people);
   let best: { action: ActionDef; params: JsonObject; filled: boolean; skipped: number; length: number } | null = null;
+  // Numbers fill an action's number params in the order they were said: "walk over to 6, 2" is x 6, y 2.
+  const numbers = [...text.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
   for (const action of actions.values()) {
     for (const raw of action.lexicon ?? []) {
       const phrase = raw.trim().toLowerCase();
@@ -210,6 +212,7 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
       const rest = words(tokens.slice(at.end).join(" ")).join(" ");
       const params: JsonObject = {};
       let textFilled = false;
+      let nextNumber = 0;
       const ordered = Object.entries(action.params).sort(([, a], [, b]) => Number(a.optional === true) - Number(b.optional === true));
       for (const [name, def] of ordered) {
         if (def.type === "ref") {
@@ -226,8 +229,11 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
           textFilled = true;
         } else if (def.type === "money" || def.type === "number" || def.type === "duration") {
           // A typed amount is in the world's currency: "5" is 5 bits, or $5.00 (500 cents).
-          const m = /(\d+(?:\.\d+)?)/.exec(text);
-          if (m) params[name] = def.type === "money" ? Math.round(Number(m[1]) * 10 ** world.currency.decimals) : Number(m[1]);
+          const n = numbers[nextNumber];
+          if (n !== undefined) {
+            params[name] = def.type === "money" ? Math.round(n * 10 ** world.currency.decimals) : n;
+            nextNumber += 1;
+          }
         }
       }
       const filled = Object.entries(action.params).every(([name, def]) => def.optional === true || params[name] !== undefined);

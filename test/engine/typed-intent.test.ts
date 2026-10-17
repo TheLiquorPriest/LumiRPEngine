@@ -40,6 +40,13 @@ describe("typed intent (Playtest, no model)", () => {
     expect(typedIntent(reg, world, state, "I sit down to think")).toBeNull();
   });
 
+  test("numbers fill number params in the order they were said", () => {
+    const world = portAlder();
+    const state = initialState(world, "r", reg);
+    expect(typedIntent(reg, world, state, "I walk over to 6, 2")).toMatchObject({ action: "step", params: { x: 6, y: 2 } });
+    expect(typedIntent(reg, world, state, "I walk over to 3 and 9")).toMatchObject({ action: "step", params: { x: 3, y: 9 } });
+  });
+
   test("a phrase only counts when the player does it: no negation, other subject, hypothetical or idiom", () => {
     const world = portAlder();
     const state = initialState(world, "r", reg);
