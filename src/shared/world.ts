@@ -868,6 +868,13 @@ export interface CombatDef {
   end?: Expr;
   /** The POV's turn ends once none of its combat actions fits what is left (`spent`, the default), or only on End turn (`manual`). */
   endTurn?: "spent" | "manual";
+  /**
+   * Who settles a fight's checks: the dice, every time (`dice`, the default), or the world's
+   * adjudication policy like any other check (`policy`). A fight's turns have no judge and the same
+   * attack comes round every turn, so the policy's retry, timing and narrative rules would make
+   * attacks repeat a miss or always hit unless the author means them to.
+   */
+  adjudicate?: "dice" | "policy";
   /** How everyone else fights: the foe it attacks (the highest `threat`, with `self` and `target`; default the foe's HP) and when it defends (`lowHp`; default a quarter of its HP or less). */
   tactics?: { threat?: Expr; lowHp?: Expr };
   /** Others' HP as the player sees it: wound bands (the default) or exact numbers, where the HP field is visible. */

@@ -10,7 +10,7 @@ import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
 import type { ActionDef, CheckDef, EffectSpec, Expr, WorldDoc } from "../shared/world";
 import { plainRolling } from "../shared/adjudication";
-import { approachShift, closeCall, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyOf, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
+import { approachShift, closeCall, judgedOutcome, oddsSignature, outcomeChoices, passOutcome, policyFor, ratingOf, tryKey, verdictOf, type Adjudged, type Judgement, type Verdict } from "./adjudication";
 import { checkOdds, checkOf, readyCheck, rollCheck, rollVars, type CheckRoll } from "./checks";
 import { ENGINE_EVENTS } from "./engine-pack";
 import { applyEffects } from "./effects";
@@ -164,7 +164,7 @@ export function actionOdds(reg: Registry, world: WorldDoc, state: Readonly<World
     modifier: usable?.modifier ?? 0,
     check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
-    verdict: usable && odds ? verdictOf(policyOf(world, state), { world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null,
+    verdict: usable && odds ? verdictOf(policyFor(world, state, p.action), { world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null,
   };
 }
 
@@ -229,7 +229,7 @@ export function resolveAction(reg: Registry, w: Working, req: ActionRequest, rng
   let adjudged: Adjudged | null = null;
   if (checkDef && ready) {
     const odds = checkOdds(ready);
-    const policy = policyOf(w.world, w.state);
+    const policy = policyFor(w.world, w.state, p.action);
     const verdict = verdictOf(policy, { world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
     const judgement = opts.judgement ?? null;
     const place = placeOfEntity(w.state, p.actor);

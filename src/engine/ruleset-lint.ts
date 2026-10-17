@@ -310,6 +310,7 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
     else if (pov && !hpDef) err("ruleset.combat.hp", "combat", `The point of view's kind has no field ${hp}.`);
     else if (hpDef && !hpDef.pool) warn("ruleset.combat.hp", "combat", `${hp} isn't a pool, so damage has no floor and HP shows no max.`);
     if (combat.endTurn !== undefined && combat.endTurn !== "spent" && combat.endTurn !== "manual") err("ruleset.combat.endTurn", "combat", "The POV's turn ends once it's spent, or only on End turn (manual).");
+    if (combat.adjudicate !== undefined && combat.adjudicate !== "dice" && combat.adjudicate !== "policy") err("ruleset.combat.adjudicate", "combat", "A fight's checks are settled by the dice, or by the adjudication policy (policy).");
     if (combat.showHp !== undefined && combat.showHp !== "wounds" && combat.showHp !== "exact") err("ruleset.combat.showHp", "combat", "Others' HP shows as wounds or as exact numbers.");
     if (combat.wounds !== undefined && (!Array.isArray(combat.wounds) || combat.wounds.some((b) => !isRecord(b) || typeof b.label !== "string"))) err("ruleset.combat.wounds", "combat", "Wounds are bands with labels over the HP left, in percent.");
     const sites = exprSites(world);

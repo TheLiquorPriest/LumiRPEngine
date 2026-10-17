@@ -16,7 +16,7 @@ import type { ActionDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
 import { transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
-import { needsJudge, outcomeChoices, policyOf } from "../engine/adjudication";
+import { needsJudge, outcomeChoices, policyFor } from "../engine/adjudication";
 import type { EngineTurnPlan } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { parseOverrides, parseTarget } from "../engine/time";
@@ -769,7 +769,7 @@ export class Runtime implements TurnHooks {
     const action = findAction(this.registry, render.world, intent.action);
     if (!action) return;
     const shown = actionOdds(this.registry, render.world, render.state, { action, params: intent.params });
-    const policy = policyOf(render.world, render.state);
+    const policy = policyFor(render.world, render.state, action);
     if (!shown.available || !shown.verdict || !shown.odds || !needsJudge(policy, shown.verdict)) return;
     const run = runsOf(settings.modelUse, render.world, "judge", facts)[0];
     if (!run || !budget.take()) return;

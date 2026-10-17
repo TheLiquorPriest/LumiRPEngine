@@ -80,6 +80,11 @@ export function policyOf(world: WorldDoc, state: Readonly<WorldState>): Adjudica
   return state.adjudication ?? readAdjudication(world.ruleset?.adjudication) ?? defaultAdjudication();
 }
 
+/** The policy a check of this action answers to: a combat action's rolls plainly unless the world's combat hands fights to the policy (DESIGN §11). */
+export function policyFor(world: WorldDoc, state: Readonly<WorldState>, action: Pick<ActionDef, "combat">): AdjudicationDef {
+  return action.combat !== undefined && world.ruleset?.combat?.adjudicate !== "policy" ? defaultAdjudication() : policyOf(world, state);
+}
+
 /** The outcomes that count as a success: the check's `pass`, else `success` and every band listed after it; empty when it names none. */
 export function passOutcomes(check: CheckDef, bands: ReadyCheck["bands"]): string[] {
   if (Array.isArray(check.pass) && check.pass.length > 0) return [...new Set(check.pass.filter((o): o is string => typeof o === "string"))];

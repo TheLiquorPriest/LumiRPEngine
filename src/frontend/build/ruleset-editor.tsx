@@ -557,6 +557,7 @@ const COMBAT: FieldSpec = {
     { kind: "object", key: "sides", label: "Sides", optional: true, fields: [{ kind: "expr", key: "hostile", label: "Hostile, with self and other (default: a hostile relation)", optional: true }, { kind: "expr", key: "ally", label: "Fights beside, with self and other", optional: true }] },
     { kind: "expr", key: "end", label: "Over when (default: one side has no one standing)", optional: true },
     { kind: "enum", key: "endTurn", label: "The player's turn ends", values: ["spent", "manual"], optional: true },
+    { kind: "enum", key: "adjudicate", label: "Attacks and other fight checks are settled by (dice: always rolled; policy: the adjudication policy)", values: ["dice", "policy"], optional: true },
     { kind: "object", key: "tactics", label: "Everyone else's tactics", optional: true, fields: [{ kind: "expr", key: "threat", label: "A target's threat, with self and target (default its HP)", optional: true }, { kind: "expr", key: "lowHp", label: "Defends when (default a quarter of its HP or less)", optional: true }] },
     { kind: "enum", key: "showHp", label: "Others' HP shows as", values: ["wounds", "exact"], optional: true },
     { kind: "json", key: "wounds", label: "Wound bands over the HP left in percent", optional: true, hint: '[{"label": "hurt", "min": 50, "max": 100}, …]' },

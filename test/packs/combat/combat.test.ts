@@ -3,6 +3,7 @@
 // turns, replays and swipes, and what the POV may see of foes it can't see.
 
 import { describe, expect, test } from "bun:test";
+import { presetAdjudication, readAdjudication } from "../../../src/shared/adjudication";
 import { hashJson } from "../../../src/shared/hash";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { WorldDoc } from "../../../src/shared/world";
@@ -397,5 +398,85 @@ describe("lint", () => {
     expect(at("actions.strike.combat.cost.focus")).toContain("refs");
     expect(at("ruleset.minLevels.sheets")).toContain("level_floor");
     expect(lintStructure(fightWorld(), reg).filter((i) => i.severity === "error" && i.path.includes("combat"))).toEqual([]);
+  });
+});
+
+describe("the adjudication policy", () => {
+  /** The strike check names its success, so a policy's timing, retry and authority rules all reach it. */
+  function policyWorld(patch: (w: WorldDoc) => void): WorldDoc {
+    return fightWorld((w) => {
+      povFirst(w);
+      const strike = w.actions.strike!;
+      if (typeof strike.check === "object" && strike.check) strike.check = { ...strike.check, pass: ["hit"] };
+      patch(w);
+    });
+  }
+
+  test("under Balanced, the same attack after a miss rolls again", () => {
+    const world = policyWorld((w) => {
+      w.ruleset!.adjudication = presetAdjudication("balanced");
+      w.ruleset!.combat!.economy.action = { label: "Action", count: 2 };
+    });
+    let missed: Working | null = null;
+    for (let i = 0; i < 64 && !missed; i++) {
+      const w = started(world);
+      if (resolveAction(reg, w, { action: "strike", params: { target: "bandit" } }, createRng(`miss${i}`)).outcome === "miss") missed = w;
+    }
+    if (!missed) throw new Error("no seed missed");
+    const outcomes = new Set<string>();
+    for (let i = 0; i < 24; i++) {
+      const w = new Working(reg, world, missed.state);
+      const again = resolveAction(reg, w, { action: "strike", params: { target: "bandit" } }, createRng(`again${i}`));
+      expect(again.check).not.toBeNull();
+      expect(again.adjudged).toBeNull();
+      outcomes.add(again.outcome ?? "");
+    }
+    expect([...outcomes].sort()).toEqual(["hit", "miss"]);
+  });
+
+  test("under Narrative-first, everyone else's attacks roll", () => {
+    const world = policyWorld((w) => {
+      w.ruleset!.adjudication = presetAdjudication("narrative");
+      // The goblin's +3 against 20 hits on a natural 17 or better: unrolled, it would always hit.
+      w.entities[POV]!.fields.ac = 20;
+    });
+    const outcomes: string[] = [];
+    for (let i = 0; i < 16; i++) {
+      const turn = plan(world, started(world).state, "end_turn", {}, `npc${i}`);
+      expect(turn.events.some((e) => e.type === "engine.adjudged")).toBe(false);
+      for (const e of turn.events) {
+        if (e.type !== "combat.act" || !("data" in e) || e.data === null || typeof e.data !== "object" || Array.isArray(e.data)) continue;
+        if (e.data.actor === "goblin") outcomes.push(String(e.data.outcome));
+      }
+    }
+    expect(outcomes.length).toBe(16);
+    expect(outcomes).toContain("miss");
+    expect(outcomes).toContain("hit");
+  });
+
+  test("a world that hands fights to the policy gets its verdicts: never rolling takes the unrolled outcome", () => {
+    const never = readAdjudication({ preset: "custom", checks: "never" })!;
+    const dice = policyWorld((w) => {
+      w.ruleset!.adjudication = never;
+    });
+    const rolled = resolveAction(reg, started(dice), { action: "strike", params: { target: "bandit" } }, createRng("dice"));
+    expect(rolled.check).not.toBeNull();
+    expect(rolled.adjudged).toBeNull();
+    const policy = policyWorld((w) => {
+      w.ruleset!.adjudication = never;
+      w.ruleset!.combat!.adjudicate = "policy";
+    });
+    const w = started(policy);
+    expect(actionOdds(reg, policy, w.state, { action: policy.actions.strike!, params: { target: "bandit" } }).verdict?.roll).toBe(false);
+    const res = resolveAction(reg, w, { action: "strike", params: { target: "bandit" } }, createRng("policy"));
+    expect(res.check).toBeNull();
+    expect(res.adjudged?.rolled).toBe(false);
+    expect(res.adjudged?.why).toBe("never");
+    expect(res.outcome).toBe("hit");
+    const odd = policyWorld((w) => {
+      // A value the type rules out, as a hand-edited file may hold.
+      (w.ruleset!.combat as unknown as Record<string, unknown>).adjudicate = "judge";
+    });
+    expect(lintStructure(odd, reg).some((i) => i.path === "ruleset.combat.adjudicate")).toBe(true);
   });
 });
