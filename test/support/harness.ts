@@ -11,6 +11,7 @@ import { LedgerFold } from "../../src/engine/ledger/fold";
 import type { LedgerCore } from "../../src/engine/ledger/journal";
 import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
+import combatPack from "../../src/packs/combat/core/index";
 import { FakeHost } from "./fake-host";
 import { startMarkers, testModel, testPack, testWorlds } from "./test-pack";
 
@@ -26,7 +27,7 @@ export const HARNESS_SNAPSHOT_EVERY = 3;
 
 export class Harness {
   readonly host = new FakeHost();
-  readonly registry: Registry = createRegistry([testPack]);
+  readonly registry: Registry = createRegistry([testPack, combatPack]);
   readonly worlds: Map<string, WorldDoc>;
   readonly revisions: string[];
   service!: LedgerService;
@@ -35,7 +36,7 @@ export class Harness {
   renarrateNext = false;
 
   constructor(seedMode: WorldDoc["seedMode"] = "fresh") {
-    this.worlds = testWorlds(seedMode);
+    this.worlds = testWorlds(seedMode, true);
     this.revisions = [...this.worlds.keys()];
     this.boot();
   }

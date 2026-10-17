@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Harness } from "../support/harness";
-import { runSequence, sequenceFor, shrink, type Coverage, type Op } from "../support/ops";
+import { noCoverage, runSequence, sequenceFor, shrink, type Coverage, type Op } from "../support/ops";
 
 const RUNS = Number(process.env.LRE_PROPERTY_RUNS ?? "200");
 const MAX_OPS = Number(process.env.LRE_PROPERTY_OPS ?? "60");
@@ -43,7 +43,7 @@ describe("ledger property suite", () => {
     `${ONE ? `seed ${ONE}` : `${RUNS} generated sequences`} hold every invariant`,
     async () => {
       const seeds = ONE ? [ONE] : Array.from({ length: RUNS }, (_, i) => `${BASE}-${FROM + i}`);
-      const coverage: Coverage = { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0 };
+      const coverage: Coverage = noCoverage();
       for (const [i, seed] of seeds.entries()) {
         const ops = sequenceFor(seed, MAX_OPS);
         // L31: every tenth sequence runs twice and must end identically.
@@ -63,6 +63,8 @@ describe("ledger property suite", () => {
       if (!ONE && RUNS >= 100) expect(coverage.groupDrops).toBeGreaterThan(0);
       if (!ONE && RUNS >= 100) expect(coverage.carried).toBeGreaterThan(0);
       if (!ONE && RUNS >= 100) expect(coverage.carryDrops).toBeGreaterThan(0);
+      // Fights start, act, pass the turn and end (on any view, swipes and rebases included).
+      for (const k of ["start", "act", "turn", "end"] as const) if (!ONE && RUNS >= 100) expect(coverage.fights[k]).toBeGreaterThan(0);
     },
     24 * 60 * 60 * 1000,
   );

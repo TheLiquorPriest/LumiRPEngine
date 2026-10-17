@@ -29,7 +29,7 @@ import type { Harness } from "./harness";
 import { POV } from "./test-pack";
 
 export type Op =
-  | { op: "send"; text: number; reply: number; createAtEnd: boolean; rerender: boolean; money?: number; toll?: number }
+  | { op: "send"; text: number; reply: number; createAtEnd: boolean; rerender: boolean; money?: number; toll?: number; fight?: number }
   | { op: "regenerate"; at: number; reply: number; renarrate?: boolean; toll?: number }
   | { op: "continue"; at: number; reply: number; stop: boolean; rerenderPrefix: boolean }
   | { op: "editAndSend"; at: number; text: number; reply: number; branch: boolean }
@@ -62,14 +62,24 @@ const EDITS = ["Edited reply.", "A typo fixed. [found:7]", "Trimmed.", "Rewritte
 // `shop:map` / `shop:lamp` collide with `buy:map` / `buy:lamp` on other branches, so grouped drops happen often.
 const MONEY_TEXTS = ["deposit:60", "deposit:150", "pay:50", "pay:20", "pay:80", "shop:tire:90", "shop:map:25", "shop:lamp:10", "use:tire"];
 const TOLL_REPLIES = ["You pay the toll. [pay:30]", "A fee is taken. [pay:15]", "The meter eats your money. [pay:70]"];
+// A fight against the rat (start, act, end turn, end), kept apart for the same reason; the optional `fight` op field picks from these.
+const FIGHT_TEXTS = ["fight:rat", "strike:rat", "strike:rat", "end_turn", "flee"];
 
-/** How often a run exercised a funds drop, a grouped drop on a rebased view, and a Re-run carrying or dropping a fix (the suite asserts they happen). */
+/** How often a run exercised a funds drop, a grouped drop on a rebased view, a Re-run carrying or dropping a fix, and a fight's start, acts, turns and end (the suite asserts they happen). */
 export interface Coverage {
   fundsDrops: number;
   groupDrops: number;
   carried: number;
   carryDrops: number;
+  fights: Record<"start" | "act" | "turn" | "end", number>;
 }
+
+/** A fresh count for a runner or a whole suite. */
+export function noCoverage(): Coverage {
+  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
+}
+
+const FIGHT_EVENTS: Record<string, keyof Coverage["fights"]> = { "combat.start": "start", "combat.act": "act", "combat.turn": "turn", "combat.end": "end" };
 
 const pick = <T>(items: readonly T[], x: number): T => {
   const item = items[Math.min(items.length - 1, Math.floor(x * items.length))];
@@ -103,9 +113,11 @@ function gmFix(which: number, x: number): LedgerEvent[] {
 export function generate(rng: Rng, length: number, depth = 0): Op[] {
   const ops: Op[] = [];
   const r = (): number => rng.next();
+  // Fights draw from a stream of their own, so every other op is generated as before.
+  const fights = rng.fork(`fights:${depth}`);
   for (let i = 0; i < length; i++) {
     const roll = r();
-    if (roll < 0.22) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: r() < 0.2, ...(r() < 0.35 ? { money: r() } : {}), ...(r() < 0.2 ? { toll: r() } : {}) });
+    if (roll < 0.22) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: r() < 0.2, ...(r() < 0.35 ? { money: r() } : {}), ...(r() < 0.2 ? { toll: r() } : {}), ...(fights.next() < 0.3 ? { fight: fights.next() } : {}) });
     else if (roll < 0.29) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5, ...(r() < 0.3 ? { toll: r() } : {}) });
     else if (roll < 0.35) ops.push({ op: "continue", at: r(), reply: r(), stop: r() < 0.3, rerenderPrefix: r() < 0.2 });
     else if (roll < 0.38) ops.push({ op: "editAndSend", at: r(), text: r(), reply: r(), branch: r() < 0.3 });
@@ -181,7 +193,7 @@ export class Runner {
   current: ChatId = "";
   private readonly memory = new Map<ChatId, ChatMemory>();
   /** This runner's own coverage counts (no state shared across runs or test files). */
-  readonly coverage: Coverage = { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0 };
+  readonly coverage: Coverage = noCoverage();
   private ids = 0;
   /**
    * The reply streaming during an inFlight's inner operations. The host doesn't let the player edit
@@ -223,7 +235,8 @@ export class Runner {
     const chat = this.current;
     switch (op.op) {
       case "send": {
-        const text = op.money !== undefined ? pick(MONEY_TEXTS, op.money) : pick(USER_TEXTS, op.text);
+        // Money texts take precedence, so fights never thin out the postings the coverage counts.
+        const text = op.money !== undefined ? pick(MONEY_TEXTS, op.money) : op.fight !== undefined ? pick(FIGHT_TEXTS, op.fight) : pick(USER_TEXTS, op.text);
         const u = host.sendUser(chat, text);
         await host.settle();
         const g = await host.start(chat, { type: "normal", createAtEnd: op.createAtEnd });
@@ -717,6 +730,10 @@ export class Runner {
       for (const m of chain) {
         const rec = m.ledger?.swipes[String(m.swipeId)];
         if (m.isUser || !rec) continue;
+        for (const e of rec.events) {
+          const counted = Object.hasOwn(FIGHT_EVENTS, e.type) ? FIGHT_EVENTS[e.type] : undefined;
+          if (counted) this.coverage.fights[counted]++;
+        }
         const lists: { events: LedgerEvent[]; ref: (index: number) => EventRef }[] = [{ events: rec.events, ref: (index) => ({ in: "events", index }) }, ...rec.post.map((p) => ({ events: p.events, ref: (index: number): EventRef => ({ in: "post", seq: p.seq, index }) }))];
         for (const list of lists) {
           for (const [from, to] of eventUnits(list.events)) {
@@ -809,6 +826,7 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       coverage.groupDrops += runner.coverage.groupDrops;
       coverage.carried += runner.coverage.carried;
       coverage.carryDrops += runner.coverage.carryDrops;
+      for (const k of ["start", "act", "turn", "end"] as const) coverage.fights[k] += runner.coverage.fights[k];
     }
     return null;
   } catch (error) {

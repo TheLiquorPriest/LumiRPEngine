@@ -21,6 +21,7 @@ import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
 import { createRng } from "../../src/engine/rng";
 import type { WorldState } from "../../src/engine/state";
 import type { TurnModel } from "../../src/engine/ledger/journal";
+import { planTurn } from "../../src/engine/turn";
 
 export const POV = "sam";
 
@@ -166,9 +167,31 @@ export const tieStubPack: PackDef = {
   },
 };
 
-/** Revision `variant` of the test world; variant 1 starts richer and prices leniently. */
-export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh"): WorldDoc {
-  return {
+/**
+ * The fight a combat world adds: a rat at home, HP, an initiative check, Strike (an attack) and
+ * Flee (ends the fight), and combat rules with one Action a turn.
+ */
+function addCombat(world: WorldDoc): void {
+  Object.assign(world.kinds.person?.fields ?? {}, { hp: { type: "number", pool: { max: "max_hp" } }, max_hp: { type: "number", default: 6 } });
+  world.entities.rat = { id: "rat", kind: "person", name: "Rat", tier: "background", fields: { place: "home", max_hp: 3 }, relations: [] };
+  world.checks.initiative = { id: "initiative", dice: "d20" };
+  world.actions.strike = {
+    id: "strike",
+    label: "Strike",
+    params: { target: { type: "ref", ref: "person" } },
+    requires: ["is_foe(self, target)", "not is_down(target)"],
+    check: { id: "strike", dice: "d20", dc: "10", bands: [{ outcome: "miss", margin: { max: -1 } }, { outcome: "hit", margin: { min: 0 } }] },
+    outcomes: { hit: [{ type: "add", args: { entity: "target", field: "hp", delta: "=-roll('1d4')" } }], miss: [] },
+    duration: "0",
+    combat: { cost: { action: 1 }, role: "attack" },
+  };
+  world.actions.flee = { id: "flee", label: "Flee", params: {}, requires: [], outcomes: { default: [{ type: "combat.end", args: {} }] }, duration: "0", combat: { cost: {} } };
+  world.ruleset = { combat: { initiative: "initiative", economy: { action: { label: "Action" } }, hp: "hp" } };
+}
+
+/** Revision `variant` of the test world; variant 1 starts richer and prices leniently. With `combat`, it has a fight to pick. */
+export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh", combat = false): WorldDoc {
+  const world: WorldDoc = {
     format: WORLD_FORMAT,
     id: "world-test",
     name: `Test world ${variant}`,
@@ -217,23 +240,35 @@ export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh")
     classifications: {},
     start: { place: "home", at: "2026-10-16T07:00" },
   };
+  if (combat) addCombat(world);
+  return world;
 }
 
 /** Two revisions, so Upgrade (`migrate`) markers have somewhere to go. */
-export function testWorlds(seedMode: WorldDoc["seedMode"] = "fresh"): Map<string, WorldDoc> {
+export function testWorlds(seedMode: WorldDoc["seedMode"] = "fresh", combat = false): Map<string, WorldDoc> {
   const map = new Map<string, WorldDoc>();
   for (const variant of [0, 1]) {
-    const world = testWorld(variant, seedMode);
+    const world = testWorld(variant, seedMode, combat);
     map.set(hashJson(world), world);
   }
   return map;
 }
 
+/** A fight's texts, planned by the engine itself: the act, everyone else's turns, who fell and the end. */
+const FIGHT_INTENTS: Record<string, { action: string; params: Record<string, string> }> = {
+  fight: { action: "fight", params: { target: "rat" } },
+  strike: { action: "strike", params: { target: "rat" } },
+  end_turn: { action: "end_turn", params: {} },
+  flee: { action: "flee", params: {} },
+};
+
 export const testModel: TurnModel = {
-  plan({ seed, userTexts }) {
+  plan({ state, ctx, seed, kind, userTexts }) {
     const text = userTexts.at(-1) ?? "";
     const events: LedgerEvent[] = [{ type: "clock", minutes: 2, cause: "tick" }];
     const [verb, a, b] = text.split(":");
+    const fight = verb !== undefined && Object.hasOwn(FIGHT_INTENTS, verb) ? FIGHT_INTENTS[verb] : undefined;
+    if (fight) return planTurn({ registry: ctx.registry, world: ctx.world, state, runSeed: "test", seed, kind, userTexts, intent: { ...fight, probabilities: { [fight.action]: 1 } } }).events;
     if (verb === "buy" && a) events.push({ type: "test.buy", data: { item: a, price: Number(b ?? "0") || 0 } });
     else if (verb === "use" && a) events.push({ type: "test.use", data: { item: a } });
     else if (verb === "earn") events.push({ type: "add", entity: POV, field: "cash", delta: Number(a ?? "0") || 0 });
