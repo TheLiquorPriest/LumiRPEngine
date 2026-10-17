@@ -10,7 +10,8 @@
       * { box-sizing: border-box; }
       html, body { margin: 0; height: 100%; background: var(--lumiverse-bg-deep); color: var(--lumiverse-text); font: 14px/1.45 system-ui, sans-serif; overflow: hidden; }
       #app { display: flex; height: 100%; }
-      #drawer { display: flex; height: 100%; background: var(--lumiverse-bg); border-right: 1px solid var(--lumiverse-border); }
+      /* Like the host's drawer (z 9992 over float widgets at 9980), the drawer stacks above the HUD pill. */
+      #drawer { display: flex; height: 100%; background: var(--lumiverse-bg); border-right: 1px solid var(--lumiverse-border); position: relative; z-index: 55; }
       #drawer[data-open="false"] #drawer-panel { display: none; }
       #drawer-rail { width: 44px; display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 8px; border-right: 1px solid var(--lumiverse-border); }
       #drawer-rail button { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--lumiverse-border); background: transparent; color: inherit; }
