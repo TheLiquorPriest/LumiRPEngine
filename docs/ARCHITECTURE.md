@@ -56,7 +56,7 @@ Rules, all enforced by `test/boundaries.test.ts`:
 
 Engine layout (pure):
 - `engine/ledger/*`: path hashing (`path.ts`), chain types (`chain.ts`), the journal state machine (`journal.ts`), the reference fold (`reference.ts`) and the optimized fold (`fold.ts`, with cache, overlay, snapshots and re-convergence). The two folds share only `engine/events.ts` (core event validators and reducers) and pack-registered event types.
-- `engine/events.ts`: validators and reducers for the core events (`set`, `add`, `post`, `link`, `unlink`, `spawn`, `stage`, `clock`, `materialize`, `timelapse`).
+- `engine/events.ts`: validators and reducers for the core events (`set`, `add`, `post`, `link`, `unlink`, `spawn`, `stage`, `clock`, `materialize`, `timelapse`). The registry composes `engine/seen.ts` into the ones that move someone (a `place` set, an `in` link or unlink, a spawn), so their apply also keeps the POV's observations (`space.seen`, DESIGN §7) in both folds.
 - `engine/registry.ts`, `engine/registry-impl.ts`: the registry contract, and the builder of a frozen registry from `PackDef`s.
 - `engine/{resolve,effects,rules,tracks,schedules,simulate,time,time-limits,realism,visibility,bounds,materialize,beats,plan-day,turn,typed-intent,narration-channels,player-events,authoring,world-lint}.ts`: action resolution, effects, rules, tracks, schedules, stepping through game time, time controls and their hard maxima, realism levels, knowledge and visibility, bounds, lazy materialization, the deterministic outline, the day planner, the turn pipeline, Playtest's typed-intent matching, the narration channels, player-facing event lines, authoring tools and structural lint.
 
@@ -142,7 +142,7 @@ While a chat is paused, new turns get no plan and commit `degraded` with no even
 
 ### 3.3 World state (`engine/state.ts`)
 
-`WorldState` is plain JSON: clock, entities (fields, relations, levels), account posting totals (the trial balance sums to 0), track stages, folded realism and time controls, materialization pins, and pack slices. Folds compare states with `hashJson`.
+`WorldState` is plain JSON: clock, entities (fields, relations, levels), account posting totals (the trial balance sums to 0), track stages, folded realism and time controls, materialization pins, and pack slices, among them `space.seen`, the POV's own observations. Folds compare states with `hashJson`.
 
 ### 3.4 Model steps (`engine/steps.ts`)
 
