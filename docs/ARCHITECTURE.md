@@ -62,9 +62,9 @@ Engine layout (pure):
 Backend layout:
 - `backend/spindle-host.ts`: `HostPort` over `spindle`.
 - `backend/ledger-io.ts`: wires host events and the context handler to the ledger; journal file I/O, per-message write queues (read-merge-write of the whole `spindle_metadata` bag), re-assert, restart recovery.
-- `backend/runtime.ts`: the composition root; turn hooks (pre, plan and post phases), the World Info interceptor, chip and slot handling.
+- `backend/runtime.ts`: the composition root; turn hooks (pre, plan and post phases), the World Info interceptor (engine slots only), chip and slot handling.
 - `backend/turn-model.ts`, `backend/turn-steps.ts`: the ledger's `TurnModel` over the simulation pipeline, and the model steps around a turn.
-- `backend/selection.ts`, `backend/book.ts`: World Info candidates, pre-rank and selection; the engine-managed lore book.
+- `backend/book.ts`: the engine-managed lore book: slot entries, and removal of lore copies an earlier build synced into it.
 - `backend/steps.ts`: `StepPort` over `HostPort.models`, and the call meter.
 - `backend/worlds.ts`, `backend/settings-store.ts`: world storage and revisions; settings, presets and extraction learning.
 - `backend/dispatch.ts`, `backend/view.ts`, `backend/push.ts`, `backend/chips.ts`: request dispatch, the state view, state push, stored chips.
@@ -136,7 +136,7 @@ The engine asks and the backend's `StepPort` answers. Every call takes an `Abort
 
 Routing (D10):
 - `interpret` → helper;
-- `select`, `npc.choose` → Decision connection; on error, the helper, then engine-only;
+- `npc.choose` → Decision connection; on error, the helper, then engine-only;
 - prompted steps (`extract`, `brief`, `outline`, …) → helper or the step's chosen connection.
 
 Prompts and schemas stay model-agnostic (D31).

@@ -16,13 +16,13 @@ Every turn goes the same way:
 
 1. **You act.** You type, tap an action in the palette, tap the map, or tap a chip.
 2. **The engine plans.** Before the AI writes, the engine works out how much time passes, settles your action (its requirements, its dice check if it has one, its effects, how long it takes), and steps the world forward: NPCs go about their day, bills fall due, fuel burns. None of this needs the AI.
-3. **The engine chooses the lore.** It decides which of your World Info entries and which of the world's own sections go into the prompt, and writes the established facts as short lines.
+3. **The engine writes the facts.** It writes the established facts as short lines in the world's own sections (Outcome, Scene, People and so on), which go into the prompt.
 4. **The narrator writes.** The AI writes the reply, with the outcome already decided. Its instructions are to use the facts' numbers and not invent prices, balances, quantities, fuel or times.
 5. **The engine reads the reply.** It looks for changes the story implies (someone bought a coffee, moved to the kitchen, learned a public fact), checks each one against its limits, applies or asks about it, runs the people who are off screen, and saves the turn's record.
 
 The AI proposes; the engine decides. Because the decisions and the numbers belong to the engine, they stay consistent however many times you swipe, edit or branch.
 
-Where things live: the world's definition lives in LumiRPEngine's own storage, and your lore stays in your World Books. The world adds one lore book of its own, named "LumiRPEngine · *your world*", which holds the sections the engine fills in each turn. Records live on the replies themselves, so they follow swipes, branches, exports and deletions, and a backup journal in extension storage restores them if something overwrites them.
+Where things live: the world's definition lives in LumiRPEngine's own storage, and your lore stays in your World Books, which work as usual: LumiRPEngine doesn't manage World Info for now. The world adds one lore book of its own, named "LumiRPEngine · *your world*", which holds only the sections the engine fills in each turn. Records live on the replies themselves, so they follow swipes, branches, exports and deletions, and a backup journal in extension storage restores them if something overwrites them.
 
 ## Play
 
@@ -303,14 +303,14 @@ A character at a low level can still deal with one at a high level: each side re
 
 LumiRPEngine does most of its work without the AI. When it does ask a model, it uses small, focused calls, each with its own job. **Model use** presets set which steps may call a model, when, and how many calls a phase may spend.
 
-| Preset | Before the reply | Choosing lore | After the reply | Model steps beyond the narrator: most in one turn (a typical turn) | Budgets (calls before / lore / after) | Engine budget (sections + lore) |
-|---|---|---|---|---|---|---|
-| **Lean** | Reads typed text only when it looks like an action | Engine only (ranking and the budget) | Reads the reply | 2 (reading your text, reading the reply) (typical: 2) | 1 / 0 / 1 | 300 + 600 tokens |
-| **Standard** (the default) | Reads typed text when needed; asks about NPC choices on close calls and invitations | A model decides, for entries it hasn't already decided on | Reads the reply; NPC choices off screen on close calls | 5 (reading your text, two NPC choices, lore selection, reading the reply) (typical: 3) | 2 / 1 / 2 | 600 + 1,200 tokens |
-| **Full** | Reads typed text, decides NPC choices for everyone present, writes a brief and a prose outline | A model decides every turn | Reads the reply, decides off-screen NPC choices, checks for contradictions | 9 (adds the brief, the prose outline, the contradiction check, and judging a puzzle answer) (typical: 6) | 8 / 1 / 4 | 1,000 + 2,000 tokens |
-| **Custom** | Any step, any trigger, any connection and model | Same | Same | Depends on the steps you enable; the call meter shows it live | Yours | Yours |
+| Preset | Before the reply | After the reply | Model steps beyond the narrator: most in one turn | Budgets (calls before / after) | Engine budget (sections) |
+|---|---|---|---|---|---|
+| **Lean** | Reads typed text only when it looks like an action | Reads the reply | 2 (reading your text, reading the reply) | 1 / 1 | 300 tokens |
+| **Standard** (the default) | Reads typed text when needed; asks about NPC choices on close calls and invitations | Reads the reply; NPC choices off screen on close calls | 4 (reading your text, two NPC choices, reading the reply) | 2 / 2 | 600 tokens |
+| **Full** | Reads typed text, decides NPC choices for everyone present, writes a brief and a prose outline | Reads the reply, decides off-screen NPC choices, checks for contradictions | 8 (adds the brief, the prose outline, the contradiction check, and judging a puzzle answer) | 8 / 4 | 1,000 tokens |
+| **Custom** | Any step, any trigger, any connection and model | Same | Depends on the steps you enable; the call meter shows it live | Yours | Yours |
 
-The first number is the most a turn can run: each step takes one call from its phase's budget when it starts, so a phase never runs more steps than its budget allows. The typical number is what the call meter measured on an ordinary turn (no NPC at a decision, no puzzle answer to judge); most turns cost less than the first number, because a step runs only when its trigger fires. The meter counts every engine model call, not the narrator: a reply that needs a JSON repair, or a Decision call that falls back to the helper, adds one. The call meter shows what your turns really cost. **Lean** is the floor. It keeps the cost down and leaves lore selection to rules rather than a model. Standard is where a model starts deciding which lore matters.
+The number is the most a turn can run: each step takes one call from its phase's budget when it starts, so a phase never runs more steps than its budget allows. Most turns cost less, because a step runs only when its trigger fires; the call meter shows each turn's real count. The meter counts every engine model call, not the narrator: a reply that needs a JSON repair, or a Decision call that falls back to the helper, adds one. **Lean** is the floor. It keeps the cost down and leaves NPC choices to the engine's own rules rather than a model. Standard is where a model starts deciding close calls.
 
 ### The steps
 
@@ -320,7 +320,6 @@ The first number is the most a turn can run: each step takes one call from its p
 | `npc.choose` (NPC choices) | Before the reply for people who are with you; after the reply for people elsewhere | Picks what an NPC does on a close call or invitation, from a list the engine enumerates (always including "do nothing"). |
 | `puzzle.answer` (Puzzle answers) | Before the reply | Judges a free-text puzzle answer, only for puzzles whose author opted in; the answer is a probability against a threshold. It runs unless you turn it off. |
 | `brief` (Scene brief), `outline` (Prose outline) | Before the reply, once the engine has planned the turn | Write a short briefing or a prose outline for the narrator. The engine always writes a deterministic outline from its own beats; the brief and the prose outline stack on top of it in the Outline section. |
-| `select` (Select lore) | Choosing lore | Picks which lore entries matter right now. It can only choose lore; it cannot change anything in the world. It sees the brief, and the inspector's test prompt build never spends a call on it. |
 | `extract` (Extract changes) | After the reply | Reads the reply for changes. See [Extraction modes](#extraction-modes). |
 | `contradiction` (Contradiction check) | After the reply | Checks the reply against the established facts. If it finds a clash, a **The reply contradicts the facts** chip appears, and the next turn is told the correction. |
 | `choices` (Suggested choices) | After the reply | Offers next-step options as **Suggested choices** chips. |
@@ -331,7 +330,6 @@ A step runs when one of its **signals** fires (in **Settings → Steps and conne
 |---|---|
 | `typed_input`, `classifier` | The turn's text was typed rather than chosen; the typed-text check thinks it looks like an action. |
 | `reply` | A reply exists (after the reply). |
-| `uncached`, `candidates_changed`, `hit_set_changed` | Lore candidates have no decision yet; the set of candidates changed; the set of entries your text matched changed. |
 | `scene_change`, `slot_crossed`, `day_start` | You changed place; the turn crossed a part of the day; it crossed midnight. |
 | `beat` | The plan has outline beats. |
 | `agents_present`, `present`, `offscreen`, `tie_zone` | Agents are with you; a close call is open for someone with you; for someone elsewhere; for the people this phase decides for. |
@@ -344,11 +342,11 @@ Prose steps (`brief`, `outline`, `choices`) are shown only what your character c
 
 Each step runs on the **connection and model you choose for it**, in **Settings → Steps and connections**: every step has **Enabled**, a **Provider** (*Decision* or *Helper*), a **Connection**, a **Model**, **Max tokens** (with a warning below 1,500) and its **Signals**. Nothing is cut or simplified because a model is small; the defaults are cautious, and each one is a tap to change.
 
-By default, the helper call (a small JSON-producing call on your chat connection) handles `interpret`, `extract`, `contradiction` and the prose steps, and your **Decision connection** (Lumiverse's Decisions API) handles `select` and `npc.choose`. If a decision call fails, the step falls back to the helper, and then to the engine alone. A failed call is never blindly retried, and neither a repair of malformed JSON nor a decision falling back to the helper is charged against a budget. The model and connection you pick for a step are the ones its call uses.
+By default, the helper call (a small JSON-producing call on your chat connection) handles `interpret`, `extract`, `contradiction` and the prose steps, and your **Decision connection** (Lumiverse's Decisions API) handles `npc.choose`. If a decision call fails, the step falls back to the helper, and then to the engine alone. A failed call is never blindly retried, and neither a repair of malformed JSON nor a decision falling back to the helper is charged against a budget. The model and connection you pick for a step are the ones its call uses.
 
 ### Budgets, deadlines and fallbacks
 
-Budgets are a **number of calls and a time limit for each phase**: **Before the reply** (reading your text, the NPC choices for people with you, puzzle answers, the brief and the prose outline), **Lore selection**, and **After the reply** (reading the reply, off-screen NPC choices, the contradiction check, suggested choices). You set them in **Settings → Model use** under *Budgets per phase*, each with **Calls** (0 to 20) and **Wall clock (ms)**, beside the **Engine budget (tokens)** for sections and lore. Each step takes one call from its phase's budget before it starts; when a budget is spent, or its time is up, each remaining step uses its fallback: engine-only lore selection (**Calls** 0 means no model at all in that phase), number-only NPC choices, the deterministic outline, or plain roleplay plus reading the reply. Steps run by priority, and independent ones run in parallel. Lumiverse's own limits also apply: 120 seconds for the context handler, 10 seconds for the World Info interceptor, 30 seconds per decision call. Simulation itself is never cut off by a clock; it is bounded by counts (days, agents, events).
+Budgets are a **number of calls and a time limit for each phase**: **Before the reply** (reading your text, the NPC choices for people with you, puzzle answers, the brief and the prose outline) and **After the reply** (reading the reply, off-screen NPC choices, the contradiction check, suggested choices). You set them in **Settings → Model use** under *Budgets per phase*, each with **Calls** (0 to 20) and **Wall clock (ms)**, beside the **Engine budget (tokens)** for the sections. Each step takes one call from its phase's budget before it starts; when a budget is spent, or its time is up, each remaining step uses its fallback (**Calls** 0 means no model at all in that phase): number-only NPC choices, the deterministic outline, or plain roleplay plus reading the reply. Steps run by priority, and independent ones run in parallel. Lumiverse's own limits also apply: 120 seconds for the context handler, 10 seconds for the World Info interceptor, 30 seconds per decision call. Simulation itself is never cut off by a clock; it is bounded by counts (days, agents, events).
 
 ### The call meter
 
@@ -356,7 +354,7 @@ The call meter shows each turn's calls, seconds and tokens ("This turn: n calls 
 
 ### Engine tokens versus your context
 
-The engine's sections and lore are a fixed overhead in every prompt. Settings and the world checker compare the engine budget with your connection's context size. If the fixed part is larger than the context, Lumiverse drops the chat history, including your latest message, so keep the budget well inside it; the inspector flags turns where this happened.
+The engine's sections are a fixed overhead in every prompt. Settings and the world checker compare the engine budget with your connection's context size. If the fixed part is larger than the context, Lumiverse drops the chat history, including your latest message, so keep the budget well inside it; the inspector flags turns where this happened.
 
 ## Extraction modes
 
@@ -379,7 +377,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Money transfers** (Payments) · `transfer` | Money moves between people, or between someone's own accounts | confirm |
 | **Feelings toward others** (Feelings) · `regard` | Someone's feelings change | confirm |
 | **Quantities** · `quantity` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
-| **New people and things** (New characters) · `spawn` | A new character or item appears (capped, and duplicates are removed) | confirm |
+| **New people and things** (New characters) · `spawn` | A new character appears (capped, and duplicates are removed) | confirm |
 
 Beyond the mode, every field has a limit on how much a single change may be, and **the strictest rule always wins**. Fields a world marks as locked are never offered to the model. If a narrated change contradicts the engine's own outcome, the engine's outcome wins. A purchase takes in the seller's handover and the payment, so one sale is not applied three times, and a payer has to be an account.
 
@@ -398,28 +396,17 @@ You can pin any type to **Auto**, **Confirm** or **Never** in **Settings → Cha
 
 ## The Context inspector
 
-The **Context** panel in Play shows what the engine did to the prompt for each generation.
+The **Context** panel in Play shows what the engine put into the prompt for each generation: the sections it filled in (Outcome, Scene, People and so on) with their sizes and whether each was **delivered**, **not delivered** or **unchecked**. A section that was left out because it went over the section budget shows a **clipped** badge and "left out: over the section budget", and is never shown as delivered. An **Activation** card reads **Activation confirmed**, **Not confirmed** or **Worker stalled: engine sections absent**, with a **Budget used n / m tokens** bar for the section budget; **Older** and **Newer** buttons step through earlier generations; and warnings: the fixed overhead is too large for the context, the prompt had to be clipped, or a damaged journal was replaced (with where the old file is kept). Sizes are the token counts of Lumiverse's tokenizer for each section's exact text, counted for your main model. Until Lumiverse has counted a section, or if that takes more than a second, the engine uses an estimate that stays above the real count.
 
-For every candidate lore entry (filter by **All**, **Included**, **Pinned**, **Dropped** or **Unverified**) it shows whether it was:
+### Your lore in world chats
 
-- **included**: it was selected and went in;
-- **pinned**: it is always on (see below);
-- **dropped**: it was left out, with the reason (not relevant, over budget, another entry in its group won);
-- **unverified**: it was activated, but the engine couldn't confirm it landed where you placed it.
+LumiRPEngine doesn't manage World Info for now. In a world chat your own lore books work as they do anywhere else in Lumiverse: their entries activate by Lumiverse's own rules (keywords, constant entries, groups, recursion and the World Info budget), and the engine never switches one on or off. The Context panel doesn't list them.
 
-It also shows the sections the engine filled in (Outcome, Scene, People and so on) with their sizes and whether each was **delivered**, **not delivered** or **unchecked**. A section that was left out because it went over the section budget shows a **clipped** badge and "left out: over the section budget", and is never shown as delivered. Each lore candidate names its book (**World lore** for the world's own book); an **Activation** card reads **Activation confirmed**, **Not confirmed** or **Worker stalled: world lore absent**, with a **Budget used n / m tokens** bar; **Older** and **Newer** buttons step through earlier generations; and warnings: Council World Info is on, the fixed overhead is too large for the context, the prompt had to be clipped, pins alone exceeded the lore budget, or a damaged journal was replaced (with where the old file is kept). Sizes are the token counts of Lumiverse's tokenizer for each section's exact text, counted for your main model. Until Lumiverse has counted a section, or if that takes more than a second, the engine uses an estimate that stays above the real count.
-
-### How the engine treats your lore
-
-- Your entries that are **disabled** are never revived. Only entries in the world's own book can be switched on by the engine.
-- Entries you've stored as **constant and enabled** (pinned) stay on, unless you give the world or the book full engine control. They are charged to the lore budget first, so they never push out engine sections.
-- The section budget is reserved first. The Outcome section is never evicted.
-- At most one entry per inclusion group goes in.
-- **Pass-through books** use Lumiverse's normal activation. Books that hold other extensions' managed entries are a good fit.
-- Entries other extensions force are respected as pins.
-- If the worker stalls, the world's lore and sections are missing for that turn, your own lore activates normally, and the turn is flagged.
-- World lore about people you haven't met yet waits until the conversation names it; an entry linked only to strangers isn't offered earlier.
-- Only the 64 best-ranked candidates are considered each turn; your own entries past that are left out for that turn.
+- The engine switches on only the sections it fills in, in the world's own book, and keeps every other entry there switched off, even one you switch on by hand.
+- The sections share the section budget in rank order. The Outcome section is never left out.
+- World Info recursion follows your own settings, so a section's text can trigger one of your entries, as any other entry's text can.
+- If the worker stalls, the world's sections are missing for that turn, and the turn is flagged.
+- The world's own lore (Build → Lore) is kept in the world but isn't delivered to the AI yet.
 
 ### Delivery verification
 
@@ -444,23 +431,20 @@ What you can define:
 - **Rules**: "when this happens and that is true, do this", with run-once and cooldowns. A cascade stops at eight steps.
 - **Tracks**: quests, secrets (revealed by conditions only), puzzles with attempts and a hint ladder, and NPC agendas.
 - **Schedules**: calendar recurrence plus tables of fixed values or weighted choices, for shifts, timetables, routines, weather, bills, paydays and price paths.
-- **Lore**: the world's own World Book entries (see [Lore books](#lore-books)). Lore holds cue text only; the truth of a secret lives in its track, and lint refuses lore that repeats it.
+- **Lore**: what the world knows, as entries with a title, keywords and links (see [Lore books](#lore-books)). It is kept in the world but isn't delivered to the AI yet. Lore holds cue text only; the truth of a secret lives in its track, and lint refuses lore that repeats it.
 - The **calendar** (Gregorian or your own) and **realism** defaults.
 - **Section templates**: how a section's lines are wrapped when they go into the prompt. A template may use only the engine's `{{lines}}` marker; any other macro, control character or `<user>`-style shorthand in one is a lint error (`section_macro`), because it would run beside the engine's own values.
-- **Step templates**: your own wording for a model step, per purpose (interpret, select, NPC choices, contradiction, puzzle answers, brief, outline, extract, suggested choices), with an output (text, decision, or `effects` for the steps that read changes, which run after the reply only), the signals it runs on (a template's own signals replace the step's), and engine placeholders such as `{{world}}`, `{{pov}}`, `{{place}}`, `{{clock}}`, `{{scene}}`, `{{present}}`, `{{facts}}`, `{{outcome}}`, `{{beats}}`, `{{brief}}`, `{{user}}`, `{{reply}}` and `{{recent}}`. They are all player-visible: a line that would reveal an unrevealed truth is dropped before the call. A template whose output can't be used by its purpose, an unknown signal and an unknown placeholder are lint warnings. Changes a step template proposes with `effects` are checked and bounded exactly like extraction, and money in them is stated as a plain amount in the world's currency (8 for $8), which the engine converts. Which steps run at all is still your choice, in **Settings → Steps and connections**.
+- **Step templates**: your own wording for a model step, per purpose (interpret, NPC choices, contradiction, puzzle answers, brief, outline, extract, suggested choices), with an output (text, decision, or `effects` for the steps that read changes, which run after the reply only), the signals it runs on (a template's own signals replace the step's), and engine placeholders such as `{{world}}`, `{{pov}}`, `{{place}}`, `{{clock}}`, `{{scene}}`, `{{present}}`, `{{facts}}`, `{{outcome}}`, `{{beats}}`, `{{brief}}`, `{{user}}`, `{{reply}}` and `{{recent}}`. They are all player-visible: a line that would reveal an unrevealed truth is dropped before the call. A template whose output can't be used by its purpose, an unknown signal and an unknown placeholder are lint warnings. Changes a step template proposes with `effects` are checked and bounded exactly like extraction, and money in them is stated as a plain amount in the world's currency (8 for $8), which the engine converts. Which steps run at all is still your choice, in **Settings → Steps and connections**. A world made with an earlier version keeps its step templates, except those for lore selection, which no longer exists.
 
 Formulas use a small, safe expression language: numbers, comparisons and a fixed set of functions. They can't run code and they always produce a finite number.
 
-**Lint** runs as you edit and speaks plainly. It catches broken references, wrong types, cycles, unreachable quest stages, sections that are too big, labels that leak secrets, secret truth in attached books, a section template that holds a macro other than `{{lines}}`, step templates that could never run, unbalanced postings, double-booked commitments, conditions that depend on something frozen after a demotion, a Timelapse cap smaller than one time slot, and problems with the active preset (see [Troubleshooting](#troubleshooting)).
+**Lint** runs as you edit and speaks plainly. It catches broken references, wrong types, cycles, unreachable quest stages, sections that are too big, labels that leak secrets, secret truth in the world's lore, a section template that holds a macro other than `{{lines}}`, step templates that could never run, unbalanced postings, double-booked commitments, conditions that depend on something frozen after a demotion, a Timelapse cap smaller than one time slot, and problems with the active preset (see [Troubleshooting](#troubleshooting)).
 
 ### Lore books
 
-Each world has its own book, **"LumiRPEngine · *your world*"**, created for you. Its entries are stored switched off and only the engine turns them on, so a section the engine can't fill never leaks into the prompt. The entries come from the world's **Lore** list in Build: each has a title, content, keywords and **links** to the places and people it describes, and the engine keeps the book in step with the list whenever you create, import, commit or Upgrade a world. An entry can have a **group** (at most one entry of a group is chosen per turn) and a **priority** (higher comes first among equal matches). A **secret** entry is only a candidate while its **gate** formula holds. The text of an entry is kept exactly as you wrote it, macros included, as in any World Book; that is why a world from someone else is worth a look before you play it (see [Import and export](#import-and-export)).
+Each world has its own book, **"LumiRPEngine · *your world*"**, created for you. It holds only the engine's sections: their entries are stored switched off and only the engine turns them on, so a section the engine can't fill never leaks into the prompt. Lore entries an earlier version of LumiRPEngine copied into the book are removed the next time you commit or Upgrade the world, attach it to a chat, or play a turn in one of its chats.
 
-For your own entries you have two choices:
-
-- **Link**: the engine adds a back-link to a world thing and never edits your entry.
-- **Adopt**: the engine copies the entry into the world's book and turns the original off in world chats.
+The world's **Lore** list in Build stays in the world: each entry has a title, content, keywords and **links** to the places and people it describes, and can have a **group**, a **priority**, and a **secret** flag with a **gate** formula. LumiRPEngine doesn't deliver it to the AI yet, and it never edits your own lore books. The text of an entry is kept exactly as you wrote it, macros included, as in any World Book; that is why a world from someone else is worth a look before you play it (see [Import and export](#import-and-export)).
 
 Secret truth never lives in a World Book. It stays in the world and enters a section only at the moment it's revealed. Lint warns if the world's book is attached globally or to a character or persona instead of the chat.
 
@@ -486,7 +470,7 @@ You can edit your world's copy of any table in the **Data tables** editor. Each 
 
 ### Templates
 
-In **Build → New world**, pick a **Template** (**Blank**, **Fantasy town**, **Mystery manor** or **Modern slice-of-life**), give the world a name and tap **Create world**. A template is a normal world with its own cast, schedules, quests, rules, weather and belongings, plus two dozen or so World Book entries on its places, people and history, which the engine keeps in the world's own lore book; change anything you like. Its puzzles show in **Quests** once you have come across them: the study safe when you step into the study, the vestry tiles when you find the vestry floor, the township truck when the shop takes the job.
+In **Build → New world**, pick a **Template** (**Blank**, **Fantasy town**, **Mystery manor** or **Modern slice-of-life**), give the world a name and tap **Create world**. A template is a normal world with its own cast, schedules, quests, rules, weather and belongings, plus two dozen or so lore entries on its places, people and history (kept in the world; not delivered to the AI yet); change anything you like. Its puzzles show in **Quests** once you have come across them: the study safe when you step into the study, the vestry tiles when you find the vestry floor, the township truck when the shop takes the job.
 
 - **Fantasy town** is *Brindlemere*, a river-ford market town on the eve of harvest, on a made-up calendar of thirteen moons. It starts on the **Story** preset and counts money in bits, marks and crowns.
 - **Mystery manor** is *Harrowmere Hall*, a storm-bound fenland country house in October 1934, in pre-decimal money. It starts on the **Grounded** preset and has clues to find and a locked safe to open.
@@ -540,19 +524,16 @@ You opened detail or made a change while a reply was streaming. It lands right a
 Something interrupted it, and the chip says what: **Timelapse stopped: an invitation** (or a bill, a declined payment, an incident, a quest event, a world rule, someone arriving, an overdue loan, a need, a weather alert), with a **Continue** button that carries on to the original target. The Montage and the Journal say the same. A **Continue timelapse** chip means it hit the safety cap, and **Timelapse didn't run** (with **Retry**) means it couldn't be applied.
 
 **My own lore entries are missing.**
-Check the **Context** panel: they may have been dropped over budget, lost a group, or be marked disabled (the engine never revives a disabled entry). Raise the lore budget, or pin the entry by storing it as constant and enabled.
+LumiRPEngine doesn't touch your World Info for now, so your entries follow Lumiverse's own rules. Check that the book is attached to the chat, the entry is enabled and its keywords match, and Lumiverse's World Info budget leaves room for it.
 
 **I imported a world and I'm not sure what's in it.**
 A world file is someone else's content, and its lore and templates may contain Lumiverse macros (double braces such as `{{…}}`), which Lumiverse runs whenever it builds a prompt, in a World Info entry or here. LumiRPEngine keeps your own authored text exactly as written, macros included, and never lets a value it inserts (a name, a price, what a model said) form a macro. Besides double braces, Lumiverse's macro engine also acts on control characters and on the `<user>`, `<char>` and `<bot>` shorthands, so the import lists those too. After an import it lists what it found: a **Review before playing** card appears above the world list, with each item as "Review this macro before playing: …", the place it sits in (`lore.<id>.content`, `sections.<id>.template`, `steps.<id>.template`) and an **Open** button for it. Open each, delete or rewrite what you don't want, and tap **Done reviewing** before you attach the world to a chat. The card is shown only right after the import. The step templates' own placeholders (`{{pov}}`, `{{facts}}` and the like) appear in the list too; they belong to the engine and are harmless. Section templates may use only `{{lines}}`; the world checker reports any other macro, control character or shorthand in one as an error.
 
 **A step never seems to run, or the call meter shows fewer calls than I expected.**
-A step runs only when one of its signals fires and its phase's budget still has calls. Check the step's **Enabled** switch and **Signals** in **Settings → Steps and connections**, and the *Budgets per phase* in **Settings → Model use** (**Calls** 0 means no model at all in that phase). Lean has no lore-selection budget at all, so it never asks a model to choose lore.
+A step runs only when one of its signals fires and its phase's budget still has calls. Check the step's **Enabled** switch and **Signals** in **Settings → Steps and connections**, and the *Budgets per phase* in **Settings → Model use** (**Calls** 0 means no model at all in that phase). Lean has NPC choices switched off, so it never asks a model about them.
 
 **The prompt is too long, or the chat history disappeared from it.**
 The engine's fixed overhead plus your context is over the connection's limit. Pick a smaller preset (Lean), lower the budgets in **Settings → Model use**, or use a connection with a larger context.
-
-**Council World Info warning.**
-Council uses Lumiverse's normal activation, which bypasses LumiRPEngine's lore selection. Turn Council World Info off in world chats if you want the engine in control.
 
 **The map closed the drawer.**
 On a phone the map goes fullscreen, so opening it closes the drawer first. Reopen the drawer when you're done. If the drawer can't be closed, the map opens in **Play → Map** instead, with a note ("The map opened here because the drawer couldn't close.") and a **Done** button.

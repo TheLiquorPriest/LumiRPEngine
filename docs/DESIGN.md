@@ -47,7 +47,7 @@ A few terms, in plain words:
 - **Weather state.**
 - **Quest engine:** gating, puzzles, secrets and event triggers.
 - **Play:** deterministic actions during play; location grids and tracking.
-- **Context:** full World Info interception, where separate model calls and a decision model decide what reaches the AI.
+- **Context:** the engine controls what reaches the AI. For now that is its own sections: World Info lore handling is switched off, and a lore lookup of the engine's own comes in a later release (§6).
 - **Model calls:** targeted simulation calls (regular or decision-type), and outline steps fed into regular generation.
 - **A mobile-friendly UI.**
 - **Realism:** granular finance, vehicles, gear and NPC lives on a **sliding scale of granularity**, with as much as possible deterministic and taken off the main model (§9).
@@ -75,16 +75,16 @@ A few terms, in plain words:
 | D7 | **Rules are data-only:** predicates, effects and a safe formula language, so imported worlds cannot run code. |
 | D8 | **Turn-driven simulation.** Player-known results go in the Journal; a GM view sits behind a spoiler toggle (§7). |
 | D9 | **Two hooks, both non-required:** a context handler and a World Info interceptor, plus events.<br>- No prompt interceptor.<br>- No message writes while a generation is in flight.<br>- **Turn-critical simulation runs in the backend process,** inside the context handler, bounded by deterministic units (agent-days, events), never by wall clock. I first planned a separate child process for it. Measurement showed a 600 agent-day timelapse segment takes 38 ms on a child process and 2.5 ms in process, so the unit caps already bound the work and a second process would buy nothing.<br>- CPU-heavy jobs (Playtest, Check world, imports, Build with AI validation) run in one child **background** lane. |
-| D10 | **Model routing.** The helper JSON call serves `interpret` (and `extract`); the Decision connection serves `select` and `npc.choose`. On any decision error a step falls back to the helper, then to engine-only; there is no blind retry. Each step stays on the connection and model the user chose for it (D31). Basis: the Decision connection read the action alone (no params) at 0.871 top-1 with 6 of 53 calls failing; the helper read it with params at 0.889. |
-| D11 | **An engine-managed lore book per world.**<br>- Slots and world lore are stored `disabled:true, key:[]` and activated only by the engine; they fail closed.<br>- Only engine-book entries ever receive an `enabled` vote.<br>- Adopted entries are copied in; the source is suppressed.<br>- Secret truth never lives in a World Book. |
+| D10 | **Model routing.** The helper JSON call serves `interpret` (and `extract`); the Decision connection serves `npc.choose`. On any decision error a step falls back to the helper, then to engine-only; there is no blind retry. Each step stays on the connection and model the user chose for it (D31). Basis: the Decision connection read the action alone (no params) at 0.871 top-1 with 6 of 53 calls failing; the helper read it with params at 0.889. |
+| D11 | **An engine-managed lore book per world, holding slots only.**<br>- Slot entries are stored `disabled:true, key:[]` and activated only by the engine; they fail closed.<br>- Only engine-book entries ever receive a vote; every other book's entries are left to native World Info.<br>- Secret truth never lives in a World Book.<br>- Amended when lore handling was switched off: world lore is no longer synced into the book (copies an earlier build left there are removed), and adopting user entries and suppressing their sources are retired (§4.2, §6.1). |
 | D12 | **UI:** a drawer tab (Play, Build, Settings), a HUD pill, chips, an input-bar palette and a fullscreen map widget. Preact plus host components. |
-| D13 | **Model use defaults to Standard.** Models decide lore selection in the World Info interceptor, cached per relevance and hit set. Deterministic beats are the default outline. |
+| D13 | **Model use defaults to Standard.** Deterministic beats are the default outline. Amended: models no longer decide lore selection in the World Info interceptor. Lore handling is off for now (§6.1), so the interceptor makes no model call. |
 | D14 | A separate repository, `TheLiquorPriest/LumiRPEngine`. |
 | D15 | **Acceptance** is the test suite and type checks, visible checks on a reference Lumiverse instance at phone width, and my own live audit before release (§14). |
 | D16 | **One-shot delivery.** Build blocks (§17) are an internal order only; nothing is deferred. |
 | D17 | **Granular realism on a sliding scale, made as deterministic as possible.** |
 | D18 | **Domain packs and two dials** (depth per domain × entity tier). **The representation is uniform: levels gate processes, rendering and extraction targets, never the data shape.** |
-| D19 | **Pinned constants.** User entries stored `constant:true, disabled:false` stay always-on unless a world or book opts into full engine control. They are charged to the lore budget, so they never displace engine sections. This prevents silent loss of lore the user relies on. |
+| D19 | **Pinned constants (retired).** User entries stored `constant:true, disabled:false` were charged to the lore budget as pins, so they never displaced engine sections. With lore handling off the engine no longer touches user entries, and native World Info decides them (§6.1). |
 | D20 | **No license yet.** It is decided after the extension has proved itself. |
 | D21 | **Upstream proposals (G1–G9) are follow-up work** after the first release, which ships with its caveats documented (§16). |
 | D22 | **Low realism by default:** new blank worlds start on the Story preset. |
@@ -132,7 +132,7 @@ Six concepts plus one pipeline.
 | Weather | A climate schedule per region. |
 | NPC simulation | §8 plus the Cast life and Relationships packs. |
 | Quests, gating, puzzles, secrets, triggers | Tracks plus rules (§10). |
-| World Info interception | §6. |
+| Context control | The engine's sections (§6); World Info lore handling is off for now. |
 | Decision and regular model calls | Decision steps and prompted steps; prompted steps can propose effects. |
 | Outline steps | Deterministic `beats`, plus any number of prompted outline steps. |
 | Granular realism | §9. |
@@ -149,10 +149,10 @@ Six concepts plus one pipeline.
   - `src/frontend/`: Preact;
   - `src/shared/`: types and contracts both sides use;
   - `src/studio-api.ts`: the studio seam (§15).
-- `lumiverse-spindle-types` is pinned to `0.6.49`, the host's version (0.6.50 adds only `ctx.client`). One local augmentation module covers what the published types get wrong or omit: `ctx.ui.registerDomDecorator({mount, render, …}) → () => void` (the published top-level `registerDomDecorator` does not exist, and `instanceKey` filters anchors, so decorators omit it), `geometry.createResizeController(el, opts) → () => void`, float and dock `persistGeometry`, and `world_books.entries.setExtension`.
+- `lumiverse-spindle-types` is pinned to `0.6.49`, the host's version (0.6.50 adds only `ctx.client`). One local augmentation module covers what the published types get wrong or omit: `ctx.ui.registerDomDecorator({mount, render, …}) → () => void` (the published top-level `registerDomDecorator` does not exist, and `instanceKey` filters anchors, so decorators omit it), `geometry.createResizeController(el, opts) → () => void`, and float and dock `persistGeometry`.
 - The backend registers exactly **one** World Info interceptor and **one** context handler; a second registration replaces the first.
 - **`userId`:** event payloads carry none. The host passes it as the handler's second argument, and the context-handler and interceptor contexts carry it. Operator-scoped (locally imported) installs must pass it on every host call. Every per-user cache is keyed by it.
-- **Permissions.** The extension requests eight: `generation` (follow each reply, run the interceptor, make helper calls), `context_handler` (plan each turn before the reply), `chats` (read messages and swipes), `chat_mutation` (save the world's record, add palette, chip and map actions as messages), `world_books` (create the world's lore book, link or adopt entries, attach it), `presets` (read the active preset to check where sections land and to lint it), `decisions` (the Decisions API) and `ui_panels` (drawer tab, pill and map). It deliberately does **not** request `characters`: character cards stay out of its reach (§4.2).
+- **Permissions.** The extension requests eight: `generation` (follow each reply, run the interceptor, make helper calls), `context_handler` (plan each turn before the reply), `chats` (read messages and swipes), `chat_mutation` (save the world's record, add palette, chip and map actions as messages), `world_books` (create the world's lore book and its slot entries, attach it, and read the books chosen for Import from lore), `presets` (read the active preset to check where sections land and to lint it), `decisions` (the Decisions API) and `ui_panels` (drawer tab, pill and map). It deliberately does **not** request `characters`: character cards stay out of its reach (§4.2).
 - **Safe keys.** Entity, place, track, kind and field ids, marker keys, editor keys and table keys are validated. Every lookup by a data id resolves own keys only, so `__proto__`, `constructor` and `toString` name nothing.
 
 ## 4. Data and persistence
@@ -174,13 +174,8 @@ Six concepts plus one pipeline.
   - stored `disabled:true, key:[]`;
   - default positions set at creation; users may move them, including to outlets (`{{outlet::lre_scene}}`);
   - **deliverability** of marker and outlet positions is computed outside the hook from the world-book and preset APIs and cached. If it cannot be resolved, the entry keeps native placement and is labelled "unverified". Outlets inside character-card fields cannot be resolved without the `characters` permission, which the manifest does not request, so those entries are "unverified" (§21). The inspector confirms delivery by a dry-run prompt assembly and a search of its result. Outcome, Montage and Outline hold only what a real turn planned, and a dry run plans nothing, so the check leaves them "unchecked" instead of reading them as not delivered.
-- **World lore entries** (`WorldDoc.lore`: title, content, keys, links, group, priority, and an optional secret flag with a gate):
-  - stored the same way, disabled with no host keys; their selection data lives in the entry's extension data (`world_books.entries.setExtension(id, "lumi_rp_engine", {links:[…]})`);
-  - synced into the engine book on create, import, commit and Upgrade; removing a lore entry from the world removes it from the book at the next commit;
-  - secret lore is a candidate only while its gate holds, and lint rejects lore that contains a secret's truth.
-- **User entries:**
-  - **Linking** stamps back-links and never edits content.
-  - **Adopting** copies the entry into the world book. The source is recorded in **suppressed sources** (matched by id, or by book, comment and content hash) and voted off in world chats.
+- **World lore** (`WorldDoc.lore`: title, content, keys, links, group, priority, and an optional secret flag with a gate) is authored data, kept in the world document. It is not synced into the book and not delivered to the narrator for now; lint still rejects lore that contains a secret's truth. Lore entries an earlier build synced into the book are deleted (§6.4).
+- **User entries** are never linked, adopted, voted on or edited. Linking and adopting were planned and are retired with lore handling; `WorldDoc.suppressed` stays in the format and is not read.
 - **Secret truth** lives only in the world document and reaches a slot through `mutated.content` at reveal. Secret-gated entries hold cue text.
 - **Attachment:** the book is appended to the chat's `chat_world_book_ids` (read-merge through `runtimeState.write`). Lint warns about global, character or persona attachment.
 
@@ -268,7 +263,6 @@ Six concepts plus one pipeline.
    - Note `{generationId → chatId, targetMessageId?, targetSwipeId, generationType}`. `targetSwipeId` is present for every type; for Continue, `targetMessageId` is null (G1).
    - Increment the chat's **generation counter**.
    - Clear the applied-plan slot.
-   - Abort any in-flight `select` for that chat.
    - Open the turn's in-flight window (P2, §4.3).
 
 2. **Context handler.** Non-required; registered timeout = the user's pre-reply budget (≤120 s); internal deadline below it.
@@ -276,7 +270,7 @@ Six concepts plus one pipeline.
    - **Not a world chat:** return.
    - **Impersonate:** return.
    - **Continue:** the target is unknown before the reply (G1): for Continue, `GENERATION_STARTED` carries no `targetMessageId`. Capture the **head** swipe's content (length and hash), then re-render the head's current fold (its committed record, live `post` entries and markers; render only: no resolve, simulate or model calls), stored under the Continue fingerprint. The target is checked at `GENERATION_ENDED` (step 5).
-   - **Dry Run:** plan from the last committed decisions. No calls, no writes; previews are labelled. The interceptor cannot tell a dry run (G1), so the plan a dry-run context handler stores is marked dry, and when the newest plan for a fingerprint is dry, the interceptor runs no `select` and writes no slot.
+   - **Dry Run:** plan from the last committed decisions. No calls, no writes; previews are labelled. The interceptor cannot tell a dry run (G1), so the plan a dry-run context handler stores is marked dry, and when the newest plan for a fingerprint is dry, the interceptor writes no slot.
    - **Re-narrate:** render the new swipe's fold prefix (P3, §4.3), stored under the target fingerprint. No resolve, simulate or model calls; its post steps run at `GENERATION_ENDED` (step 5) and commit as a `narr` entry.
    - **Single writer:** wait for the previous post-pass up to its bound. On expiry, abort it and run its extraction inline, or close it as `degraded`. Its commit goes to the shadow first; the fold reads the overlay. Either way its window closes, and the writes only it held are journaled before this turn folds (P2).
    - **Otherwise:**
@@ -295,12 +289,12 @@ Six concepts plus one pipeline.
      5. No message writes.
    - **Simulation timeout or failure:** use the head render, record `degraded` with zero simulation events, and leave the interval on the backlog. A timelapse segment is not applied at all (§9.2).
 
-3. **World Info interceptor.** Registered at a **late priority**; internal deadline about 6 s (the host fixes 10 s).
+3. **World Info interceptor.** Registered at a **late priority**; it makes no model call (the host fixes 10 s).
    - **Not a world chat:** return `void`.
    - Capture the chat's generation counter.
    - Match a plan by fingerprint, else use the head render. The head render carries persistent sections only, never Outcome or Outline.
-   - Build candidates (§6.1), run selection (§6.2) and vote (§6.4).
-   - The in-flight `select` is aborted when the counter changes. The applied-plan slot is written **only if the counter still matches**.
+   - Fill the slots within the section budget (§6.2, §6.3) and vote on the world's own book (§6.4). Entries of other books are left to native World Info.
+   - The applied-plan slot is written **only if the counter still matches**.
 
 4. **Narrator generation.**
 
@@ -320,7 +314,7 @@ Six concepts plus one pipeline.
    - **Swipe index:** from the `GENERATION_STARTED` note, for every type. Both Edit-and-Send modes stage a blank swipe; in branch mode it is in the branch chat, where every event of the turn lands.
 
 6. **`GENERATION_STOPPED`.**
-   - Increment the generation counter, abort `select` and clear the slot. The host lets a stopped generation's interceptor run to completion, so only the counter stops its slot write (L35).
+   - Increment the generation counter and clear the slot. The host lets a stopped generation's interceptor run to completion, so only the counter stops its slot write (L35).
    - If content was saved (other than by a Continue), commit the pre-reply events as `stopped` (Retry read / Discard); otherwise drop the plan. Either way the window closes (P2).
    - **Retry read of a stopped reply.** The reply was saved unread, so a Retry read reads everything saved by then, a Continue after it included, and replaces what was read meanwhile (that Continue's suffix read, the proposals confirmed from its chips, and that read's chips). It then marks the reply read, so no change or charge lands twice and no Retry read is left; a Re-read edit of a stopped reply marks it read too.
    - **A stopped Continue.** The host saves `original + postfix + partial` onto the continued swipe without a macro re-render, then emits `GENERATION_STOPPED` with only the partial suffix and no `messageId`. Any message may also be edited meanwhile, and `updateMessage` emits `MESSAGE_EDITED` for every write, metadata-only ones included. The target is therefore found by content: among the messages whose `MESSAGE_EDITED` arrived during the Continue, the one whose swipe `targetSwipeId` (from `GENERATION_STARTED`) now ends with the partial suffix; if several do, the one whose content before the Continue (`swipeHash`, `accepted` or the chain snapshot) is a prefix of it. Every other edit made during the Continue is classified normally (§4.3). The new content becomes the target's `accepted` identity (a bare record if it has none), as for any assistant edit. On a head whose record holds events the chip is **Retry read**, which extracts only the partial suffix into a `cont` entry that takes its `seq` then; `swipeHash` then covers the text and `accepted` is cleared. Elsewhere it is Re-read edit.
@@ -331,115 +325,88 @@ Six concepts plus one pipeline.
    - **Re-run** (the default): a fresh seed, with cached probabilities re-sampled.
    - **Re-narrate:** P3 (§4.3): the same seed, `pre` events and `markersApplied`, the source's ✎ fixes and materializations re-validated against the new swipe's fold prefix, narration rendered from that prefix, and new post steps committed as a `narr` entry.
 
-9. **Activation check** on `WORLD_INFO_ACTIVATED`. It consumes the slot, writes its result into the shadow `pending` entry, and confirms activation, not delivery. It also derives pass-through evictions: the entries the vote passed through minus `entries`. `stats.evictedByBudget` does not report them.
+9. **Activation check** on `WORLD_INFO_ACTIVATED`. It consumes the slot, writes its result into the shadow `pending` entry, and confirms activation, not delivery.
 
 10. **Queued writes.** UI edits, between-turn materialization (`post`), confirmations, markers, Keep and Discard are journaled at once outside a window and held inside one (P2); each takes its `seq` and `at` when it is journaled. Journaled writes, late commits and re-asserts are flushed per message through its queue once no generation is in flight.
 
 ### 5.2 Steps
 - **Phases:**
   - `pre`: context handler.
-  - `select`: World Info interceptor; only the `select` step runs there.
   - `post`: `GENERATION_ENDED`.
-- **Engine steps:** `time`, resolve, simulate, `plan.day`, select-rank, `beats`.
+- **Engine steps:** `time`, resolve, simulate, `plan.day`, `beats`.
 - **Typed-input classifier** (deterministic, no model). It fires when the typed text matches the world's action lexicon (risky verbs, transfer and travel verbs), names a known entity as a target, or carries a structural cue (quantities, money, destinations).
-- **Decision steps** (routing per D10: `interpret` on the helper; `select` and `npc.choose` on the Decision connection; on a decision error, the helper, then engine-only; no blind retry):
-  - Built-in purposes: `interpret`, `select`, `npc.choose`, `contradiction`, and **`puzzle.answer`** (an authored opt-in per puzzle).
+- **Decision steps** (routing per D10: `interpret` on the helper; `npc.choose` on the Decision connection; on a decision error, the helper, then engine-only; no blind retry):
+  - Built-in purposes: `interpret`, `npc.choose`, `contradiction`, and **`puzzle.answer`** (an authored opt-in per puzzle).
   - The first option is the safe default.
   - Answers are probabilities, sampled with a seeded RNG. A helper yes/no without a probability is no answer.
   - On the Decision route, `interpret` asks a choice question over the available actions (and "none"); when the chosen action takes parameters, a helper call fills them (a second call, budget permitting), because the Decisions API answers questions, not parameters.
 - **Prompted steps:**
   - World step templates use the engine placeholders only: `{{world}}`, `{{pov}}`, `{{place}}`, `{{clock}}`, `{{scene}}`, `{{facts}}`, `{{present}}`, `{{outcome}}`, `{{beats}}`, `{{brief}}`, `{{user}}`, `{{reply}}`, `{{recent}}`. Host macros in a template are not evaluated, because helper calls are quiet generations that skip prompt assembly; the import lint lists any macro a template carries. Every placeholder is player-visible content.
   - Output `text` or `effects` (bounded like extraction; money amounts in an `effects` output are plain amounts in the world's currency as written, 8 for $8, and the engine converts them to minor units as it does for extraction). Built-in purposes: `brief`, `outline`, `extract`, `choices`.
-- **Where each output goes:** `brief` leads the Outline slot as "Brief: …" and joins the `select` question state; a prose `outline` adds Outline lines after the engine's beats; `contradiction` becomes a chip (Re-narrate / It's fine) plus a correction line in the next Outcome slot; `choices` become chips that send the suggestion as the player's message; `effects` templates produce proposals that go through the extraction modes and bounds, after the reply only. The narrator sees prose steps through the slots it already reads, and corrections and suggestions stay under the player's control.
+- **Where each output goes:** `brief` leads the Outline slot as "Brief: …"; a prose `outline` adds Outline lines after the engine's beats; `contradiction` becomes a chip (Re-narrate / It's fine) plus a correction line in the next Outcome slot; `choices` become chips that send the suggestion as the player's message; `effects` templates produce proposals that go through the extraction modes and bounds, after the reply only. The narrator sees prose steps through the slots it already reads, and corrections and suggestions stay under the player's control.
 - **Outline:** `beats` always renders the deterministic outline; prompted outline steps stack on top.
-- **Signals:** `typed_input`, `classifier`, `reply`, `uncached`, `candidates_changed`, `hit_set_changed`, `scene_change`, `slot_crossed`, `day_start`, `beat`, `agents_present`, `present`, `offscreen`, `tie_zone`, `invitation`, `timelapse`, `conflict`, `every_n:<k>`, `always`, `never`.
+- **Signals:** `typed_input`, `classifier`, `reply`, `scene_change`, `slot_crossed`, `day_start`, `beat`, `agents_present`, `present`, `offscreen`, `tie_zone`, `invitation`, `timelapse`, `conflict`, `every_n:<k>`, `always`, `never`. A world step template for the retired `select` purpose is dropped when its world loads.
 - **Secrecy batching rule:** questions that carry secrets never share a call with prose-producing steps.
 
 ### 5.3 Model-use presets and budgets (D3, D13, D25)
 
-| Preset | Pre-reply (context handler) | In the World Info interceptor | Post-reply | Model steps a turn: most (typical) | Engine budget (sections + lore) |
-|---|---|---|---|---|---|
-| **Lean** (floor) | `interpret` when the classifier fires | engine-only | `extract` | narrator + up to 2 (2 on a typical turn) | 300 + 600 tokens |
-| **Standard** (default) | `interpret` when the classifier fires; `npc.choose` on `tie_zone`/`invitation` | `select` for candidates without a cached decision | `extract`; off-screen `npc.choose` on `tie_zone` | narrator + up to 5 (3 typical) | 600 + 1200 tokens |
-| **Full** | `interpret`, `brief`, `npc.choose` for all present agents, prose `outline` | `select` every turn | `extract`, off-screen `npc.choose`, `contradiction` | narrator + up to 9 (6 typical) | 1000 + 2000 tokens |
-| **Custom** | Any step, signal, provider or model | Same | Same | Depends on the steps enabled; the call meter shows it | User budgets |
+| Preset | Pre-reply (context handler) | Post-reply | Model steps a turn: most | Engine budget (sections) |
+|---|---|---|---|---|
+| **Lean** (floor) | `interpret` when the classifier fires | `extract` | narrator + up to 2 | 300 tokens |
+| **Standard** (default) | `interpret` when the classifier fires; `npc.choose` on `tie_zone`/`invitation` | `extract`; off-screen `npc.choose` on `tie_zone` | narrator + up to 4 | 600 tokens |
+| **Full** | `interpret`, `brief`, `npc.choose` for all present agents, prose `outline` | `extract`, off-screen `npc.choose`, `contradiction` | narrator + up to 8 | 1000 tokens |
+| **Custom** | Any step, signal, provider or model | Same | Depends on the steps enabled; the call meter shows it | User budgets |
 
-**Measured calls per turn** (the test suite's busiest case: one typed turn that fires every signal, with the classifier, an open tie for an agent with the POV and one elsewhere, an uncached lore hit and a reply; the narrator is not counted):
+**Measured calls per turn** (the test suite's busiest case: one typed turn that fires every signal, with the classifier, an open tie for an agent with the POV and one elsewhere, and a reply; the narrator is not counted):
 
 | Preset | Calls | Which |
 |---|---|---|
 | Lean | 2 | `interpret`, `extract` |
-| Standard | 5 | `interpret`, `npc.choose` ×2 (with the POV before the plan, off-screen after the reply), `select`, `extract` |
-| Full | 8 | Standard + `brief`, prose `outline`, `contradiction` (a ninth call judges a puzzle answer when one is typed) |
-| Custom, every step on `always` | 9 | Full + `choices` (`puzzle.answer` runs only when an Answer needs judging) |
+| Standard | 4 | `interpret`, `npc.choose` ×2 (with the POV before the plan, off-screen after the reply), `extract` |
+| Full | 7 | Standard + `brief`, prose `outline`, `contradiction` (an eighth call judges a puzzle answer when one is typed) |
+| Custom, every step on `always` | 8 | Full + `choices` (`puzzle.answer` runs only when an Answer needs judging) |
 
-The most a turn can run is what the preset's steps and phase budgets allow: each step takes one call from its phase's budget when it starts, `select` is one decision a turn when its budget allows any, and a puzzle answer to judge counts (Full's 9 is the 8 of the busiest tested turn plus that). The typical count is what the call meter shows on an ordinary turn, one with no NPC at a decision and no puzzle answer to judge: Lean 2, Standard 3, Full 6. Each step is its own call; a JSON repair or a Decision-to-helper fallback adds one call that no budget is charged for.
+The most a turn can run is what the preset's steps and phase budgets allow: each step takes one call from its phase's budget when it starts, and a puzzle answer to judge counts (Full's 8 is the 7 of the busiest tested turn plus that). No typical count is given: the earlier figures were measured with the retired lore-selection step and haven't been measured again. The call meter shows each turn's real count. Each step is its own call; a JSON repair or a Decision-to-helper fallback adds one call that no budget is charged for.
 
 **Budgets**
 - Budgets are a **call count and a wall clock per phase for model steps**. Simulation is bounded only by deterministic units.
-- Defaults, as calls and time before the reply / for lore selection / after the reply: Lean 1 (20 s) / 0 / 1 (30 s); Standard 2 (30 s) / 1 (6 s) / 2 (45 s); Full 8 (60 s) / 1 (6 s) / 4 (60 s).
+- Defaults, as calls and time before / after the reply: Lean 1 (20 s) / 1 (30 s); Standard 2 (30 s) / 2 (45 s); Full 8 (60 s) / 4 (60 s).
 - Steps run by priority; independent steps run in parallel or batched.
-- At the deadline, each remaining step uses its fallback: engine-only selection, utility-only NPC choice, beats-only outline, or plain roleplay plus extraction. The post phase keeps the user's deadline, with no hidden floor: a budget of 0 ms means no post call.
-- **Host caps:** context handler 120 s; World Info interceptor 10 s (internal 6 s); decisions 30 s per call. Each Import or Refine model call has its own 120 s deadline besides cancel.
+- At the deadline, each remaining step uses its fallback: utility-only NPC choice, beats-only outline, or plain roleplay plus extraction. The post phase keeps the user's deadline, with no hidden floor: a budget of 0 ms means no post call.
+- **Host caps:** context handler 120 s; World Info interceptor 10 s; decisions 30 s per call. Each Import or Refine model call has its own 120 s deadline besides cancel.
 - **Reasoning models:** helper calls to a reasoning model need `max_tokens` of about 1,500 or more; at 160 they failed because reasoning counts toward the limit.
 - The call meter shows each turn's calls, tokens and latency in the HUD, with averages and the 95th percentile in Settings. It is kept per user.
 - **Lean** is the documented floor of D3 and does not meet "a model decides" on its own.
 
-## 6. Context control ("intercept World Info entirely")
+## 6. Context control: the engine's sections
 
-### 6.1 Candidates (in the World Info interceptor)
-- **User entries:** only entries with **`disabled === false`** from user books that are not pass-through, minus suppressed sources. Native activation drops disabled entries first; the engine never revives them.
-- **Engine-book entries** (stored disabled) are candidates; only they can receive `enabled`.
-- **Pins:**
-  - user entries that are stored `constant:true, disabled:false`;
-  - entries that an earlier interceptor already forced or re-enabled, detected by comparing against stored flags cached outside the hook.
-- **Removed:** secret-gated entries and facts the POV does not know.
-- **Pass-through books:** native. Lint defaults books that hold other extensions' managed entries to pass-through, or asks.
-- **Pre-rank** (deterministic, capped at 64):
-  - back-links to scene entities;
-  - keyword hits in the scan window over `ctx.messages`;
-  - recency.
-  - This yields the **hit set**: candidates with keyword or back-link hits.
+Lore handling is switched off for now; a lore lookup of the engine's own will replace it in a later release. In a world chat the World Info interceptor puts the engine's sections into the prompt and votes only on the world's own book. Every other book's entries, and recursion, are left to native World Info.
 
-### 6.2 Selection
-- **Standard:**
-  - Decisions are cached **per candidate**, keyed by `(candidate content hash, relevance key, in hit set, step config)`.
-    - The relevance key is the place chain, present entity ids, active track stages, the POV-known fact set and the realism levels.
-    - Step config is connection, model, template and version.
-  - `select` asks only about candidates without a cached decision under the current key, so it re-runs when the conversation produces new hits or the scene changes.
-  - The question state is the plan's scene render **plus the last N messages**.
-  - **Fallback results are never cached.** Every per-chat and per-user cache is a bounded LRU.
-- **Full:** a `brief` step, then `select` every turn; no cache.
-- **Lean and fallbacks:** engine-only selection (pre-rank plus budget).
-- **Constraints:**
-  - **The section budget is reserved first.** Outcome is never evicted.
-  - **The lore budget** takes pins first. If pins alone exceed it, pins are kept, no other lore is added, and the inspector flags it.
-  - **Groups:** at most one entry per inclusion group. Two pins in one group are resolved by the native rule (override, else weight) with the turn seed; the loser shows as "group".
-  - The native World Info budget never evicts forced entries.
+### 6.1 Retired: lore selection
+The interceptor no longer builds candidates from user books (with pins, D19), skips pass-through books, pre-ranks a hit set capped at 64, asks the `select` step with its per-candidate cache (D13), spends a lore budget, votes user entries off, suppresses adopted sources (D11), syncs world lore into the engine book, overrides recursion or warns about Council World Info. Native World Info decides user entries in world chats, Council's included. World lore stays in the world document (§4.2) and is not delivered for now.
+
+### 6.2 The section budget
+- The slots spend the **section budget** (§5.3) in rank order. **Outcome** (rank 0) is never evicted; a later slot that doesn't fit is clipped, left out for that turn and shown as clipped in the inspector.
+- The inspector's budget-used figure is the section budget spent; only an Outcome that alone exceeds the budget can take it past the total.
 
 ### 6.3 Slots and rendering
 - **Compact lines,** at most one per fact. A section costs the token count the host's tokenizer gives for its exact rendered text (header and bullets included), cached per user and text, since the host counts with each user's own main model. Until the host has counted that text for that user, or when it cannot within a second, an estimate stands in: 3.2 characters per token, plus 2 for the header, 3 for each line break and 1 for each number, which stays at or above the host tokenizers on the shipped worlds' sections. A count that is not a finite number from 0 to 4 times that padded estimate is ignored, so the estimate stands in and a bogus count cannot clip every section. Counts are fetched in the background, so the interceptor never waits on the host.
 - **Dynamic values never form a macro.** World Info content is macro-evaluated by the host, so everything the engine inserts (names, prices, model output, proposals) is neutralized: every brace becomes its fullwidth look-alike (｛ ｝), the host's escape sentinels (the C0 control characters `\x00`–`\x02`, which its evaluator turns back into braces on a second pass) are dropped, and the `<user>`, `<char>` and `<bot>` shorthands are broken with fullwidth angle brackets. Section labels and templates are covered too, and a section template may hold only `{{lines}}`. Breaking only `{{` pairs is not enough: it leaves `{{{…}}}` and escaped braces runnable by the host's lexer, and backslash escaping keeps the text literal but delivers visible backslashes. **Authored lore keeps its macros**, as in native World Info, and a world import lists every macro, sentinel and shorthand in its lore and templates for the player to review before playing.
-- **Sizing:** native context clipping sees the real size. Slots are fixed overhead and are never clipped; when the fixed prompt exceeds the context budget, the host drops all chat history, including the latest user turn. Lint and Settings check the engine budget (§5.3) against the connection's context, and each turn records `GENERATION_IN_PROGRESS.contextClipStats`, which the inspector flags. Pass-through evictions come from the activation check (§5.1 step 9), not from `WORLD_INFO_ACTIVATED.stats`.
+- **Sizing:** native context clipping sees the real size. Slots are fixed overhead and are never clipped; when the fixed prompt exceeds the context budget, the host drops all chat history, including the latest user turn. Lint and Settings check the engine budget (§5.3) against the connection's context, and each turn records `GENERATION_IN_PROGRESS.contextClipStats`, which the inspector flags.
 
 ### 6.4 The vote
 For world chats:
-- **`disabled`:**
-  - user candidates (`disabled:false`) that are neither selected nor pinned;
-  - suppressed sources;
-  - pass-through entries that collide on a group with a selected entry;
-  - every engine-book entry the interceptor did not pick this turn, so a gated secret's lore, or an unused slot that someone re-enabled in the host's UI, cannot activate natively.
-- **`enabled`:** only selected engine-book entries and filled slots.
-- **`forced`:** selected entries and filled slots.
+- **`disabled`:** every engine-book entry the interceptor did not fill this turn, so an unused slot, or a lore copy an earlier build left in the book, cannot activate natively even if someone re-enabled it in the host's UI. The host keeps a `disabled` from any interceptor in the chain, so no other interceptor can revive it.
+- **`enabled`** and **`forced`:** filled slots only.
 - **`mutated.content`:** slot texts.
 - **`mutated.placement`:** where deliverability requires it. The host accepts only `{type:'chat_depth', role, depth, direction}`; other positions cannot be overridden.
-- **`activationOverrides.disableRecursion`:** set, unless a pass-through book needs recursion.
+- **Nothing else:** no entry of another book is disabled, enabled or forced, and `activationOverrides.disableRecursion` is not set. Recursion follows the user's World Info settings, so a slot's text, like any constant's, can trigger a user entry. Slots carry no unrevealed truth (§6.3, §7), so this changes prompt content, not secrecy.
+- **Leftover lore:** a world lore entry an earlier build synced into the book is deleted the next time the book is ensured (commit, import, Upgrade, attach), or after a generation whose interceptor sees one; the hook itself reads nothing from the host.
 
 ### 6.5 Inspector and limits
-- **Inspector:** per generation, every candidate with included, pinned, dropped or unverified; the reason; and the activation confirmation. A section left out over the section budget shows a "clipped" badge with "left out: over the section budget" and is never shown as delivered; a delivery check leaves it unchecked, since it was not in the prompt. It keeps the last 10 interceptor runs per chat in memory (diagnostic data, not persisted); inspector dry runs stay out of the chat history.
-- **Council:** read `council.getSettings()`. If Council World Info is on in a world chat, warn in Settings, lint and the inspector, since Council uses native activation over user books.
-- **Other extensions' World Info interceptors:** honored for entries they force (treated as pins). The coexistence caveat is listed in Settings and the README.
-- **If the worker stalls:** world lore and slots are absent (fail-closed), user lore activates natively, and the turn is flagged.
+- **Inspector:** per generation, the engine sections with their token cost, clipping and delivery, the section budget used, and the activation confirmation. A section left out over the section budget shows a "clipped" badge with "left out: over the section budget" and is never shown as delivered; a delivery check leaves it unchecked, since it was not in the prompt. It keeps the last 10 interceptor runs per chat in memory (diagnostic data, not persisted); inspector dry runs stay out of the chat history. Its warnings cover a detached book or missing slot entries (both repaired for the next turn), the D32 preset lint and journal notices.
+- **Other extensions' World Info interceptors:** they cannot switch on an engine-book entry the engine left off; what they do to user entries is theirs. The README lists this caveat.
+- **If the worker stalls:** slots are absent (fail-closed), and the turn is flagged.
 
 ## 7. Knowledge and visibility
 - **Values:** `public`, `known_by` (through `knows`), `secret` (GM only).
@@ -586,7 +553,6 @@ Each pack ships a pure `core` (kinds, relations, level contract, services, query
 | `extract` → regard | Capped per pair per turn. |
 | `extract` → condition, quantities | Capped per field. |
 | `npc.choose` | Picks only from engine-enumerated valid actions; recorded. |
-| `select` | Chooses lore only; cannot change state. |
 | Prompted `effects` | Same validation and bounds as extraction. |
 | `puzzle.answer` | Authored opt-in per puzzle; a threshold on a probability. The puzzle is named by words from its label, or left out when exactly one is open. |
 
@@ -632,7 +598,7 @@ I then re-measured with the engine's own `extract` step as shipped (strict rules
 
 ## 10. Tracks and rules (story systems)
 - **Quest track:** stages, objectives, effects, next-stage predicates, gate, fail, rewards, visibility.
-- **Secret track:** cue, reveal stages through to the truth. Stages gate lore and update `knows`. **Advance by predicates only.**
+- **Secret track:** cue, reveal stages through to the truth. Stages update `knows`, and a stage's truth reaches a section only once revealed. **Advance by predicates only.**
 - **Puzzle track:** a solution predicate, or an answer check (exact or normalized, then `puzzle.answer` only where the author enabled it). Attempts and a hint ladder.
 - **Agenda track:** steps feed planner priorities.
 - **Rules:** triggers on events, ticks, place entry or times. Cascade cap of 8. Storylet beats.
@@ -677,7 +643,7 @@ I then re-measured with the engine's own `extract` step as shipped (strict rules
 
 | Surface | Contents |
 |---|---|
-| **Drawer tab "LumiRPEngine"** | Designed for ≥320 px.<br>- **Play:** Scene, You, Money, Garage, Gear (Owned/Worn/Carried/Stored), Cast (timelines, agendas, regard), Calendar (clock, pause, Timelapse, this chat's time controls), Quests, Journal (with Montages), Context, GM view (labelled previews).<br>- **Build:** the schema-driven editors.<br>- **Settings:** model-use preset and budgets; **realism** (per-domain sliders on the host range slider, tier caps, presets, migration preview); **time** (ticks per scene type, time scale, interrupt policy, Speed through per activity, Montage granularity, unit cap, Custom NPC calls); steps, connections, pass-through books, pins; swipe default; caveats. |
+| **Drawer tab "LumiRPEngine"** | Designed for ≥320 px.<br>- **Play:** Scene, You, Money, Garage, Gear (Owned/Worn/Carried/Stored), Cast (timelines, agendas, regard), Calendar (clock, pause, Timelapse, this chat's time controls), Quests, Journal (with Montages), Context, GM view (labelled previews).<br>- **Build:** the schema-driven editors.<br>- **Settings:** model-use preset and budgets; **realism** (per-domain sliders on the host range slider, tier caps, presets, migration preview); **time** (ticks per scene type, time scale, interrupt policy, Speed through per activity, Montage granularity, unit cap, Custom NPC calls); steps, connections, pins; swipe default; caveats. |
 | **Map** | Fullscreen float widget (`setFullscreen`, feature-detected), falling back to the drawer. Pointer Events; pan, zoom, tap-to-move or drive. On narrow viewports the drawer stacks above float widgets, even fullscreen, so opening the map closes the drawer. Phone and desktop save its size and position under separate keys, so a size saved on a phone never shrinks the desktop map (480 × 520 at most). Place names never overlap: each sits outward beside its dot, or a little further out on a leader line, on two lines, or shortened with an ellipsis (the full name shows in the place's card on tap); as a last resort a name is left off and its dot stays tappable. The names of side places stay on their own half, the map's buttons and title bar stay clear, and a tap on a name selects its place (a 40 px tap area). |
 | **HUD pill** | Time (⏸ when paused; the scale when not 1×), place, weather, cash. Docking; collapsed below 760 px; ✎ fixes. Phone and desktop save its position under separate keys, and it stays centred as its content sizes it until the player moves it. |
 | **Chips** | What changed, elapsed time, rolls and odds, prices and transactions, confirm chips (until the next send), declines, undo, Retry read, Retry (an empty reply, D32), Not an action?, Re-narrate/Re-run, overdue use grants, Timelapse offers, Continue timelapse, Retry timelapse, Keep report (one row per dropped group, convert per row, one-tap Discard, entries "made on another branch"), Re-read edit (an edited reply, or a Continue accepted unread), mode change (a type learned `auto` or went back to `confirm` on this connection, with undo; §11). Detail opened during a turn's in-flight window shows "pending" (§9.2). |
@@ -690,7 +656,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - **Lint** (live, plain language):
   - refs, types, cycles, unreachable stages;
   - oversized sections;
-  - leaky labels, secret truth in attached books or in lore;
+  - leaky labels, secret truth in lore;
   - attachment, groups;
   - unbalanced postings;
   - double-booked commitments;
@@ -727,7 +693,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - an earlier-swipe switch makes later records rebased views without a pause; switching back restores the original at any time. An earlier user-message edit pauses. Editing an assistant reply, on the head or earlier, by edit or swipe `PUT`, keeps the world and offers Re-read edit; Re-read on an earlier message rebases later records. Deleting a middle message rebases. A regenerate with an explicit `message_id` on an earlier message is a turn there, and later records become views;
 - an earlier swipe switch while a reply streams: the new record commits off-path as a rebased view with a Keep-report chip; an earlier user-message edit while it streams puts it under the pause, and an assistant edit does not; the host's macro re-render of the turn's own user message does not pause either;
 - timelapse: zero model calls under Standard, the Custom call cap, nothing applied on a simulation timeout, Speed through `offer` versus `auto`;
-- deleting a middle message keeps its markers' effect on later turns; disabled user entries stay off; other interceptors' forced entries are honored; pins versus sections; per-candidate selection caching on hit-set changes, with fallbacks not cached;
+- deleting a middle message keeps its markers' effect on later turns; in a world chat the interceptor sends nothing for user entries and no recursion override while the sections go in; an engine-book entry it didn't fill is voted off, and a lore copy an earlier build left there is removed; a world with a `select` step template loads without it;
 - marker durability (frontend echo, deleting the latest message, restart); Discard tombstones under re-assert, restart and swipe-index shifts; the shadow overlay; Edit-and-Send; Dry Run purity (previews only); background-lane failure and backlog; per-preset call counts;
 - a double-tapped chip applies once.
 
@@ -795,7 +761,7 @@ I stopped reviewing the ledger on paper once repeated review rounds kept finding
 | **L34 Previews record nothing** | Dry Run, the GM view, the inspector, audits and playtests leave the ledger and journal unchanged. |
 | **L35 No stale slot** | The applied-plan slot is written only while the generation counter matches; a stopped generation's interceptor, which the host lets finish, never writes it. |
 | **L36 Kits** | Kit completeness is derived from template plus overrides; taking a piece adds one override. |
-| **L37 Context on the fake host** | A stored-disabled user entry never activates, and a cached selection is reused only when the hit set, step config and last N messages match. |
+| **L37 Context on the fake host** | The interceptor disables, enables and forces nothing outside the world's own book and sets no recursion override; inside it, only filled slots are enabled and forced, and every other entry is disabled. |
 | **L38 Assistant edits keep the world** | Editing an assistant message, on the head or earlier, by edit or swipe `PUT`, active or inactive, never changes the fold unless Re-read edit is tapped; Re-read on an earlier message makes later records rebased views. |
 | **L39 User edits pause** | Editing an earlier user message pauses later records until Keep or Discard. |
 | **L40 No negative accounts** | No own account folds below zero on any path (a Keep conversion is the exception); a rebased view drops what it cannot cover, and its dropped notes and Keep lines agree. |
@@ -854,8 +820,7 @@ These are the places where Lumiverse itself would make LumiRPEngine simpler or s
 **Shipped caveats** (Settings and README):
 - While the extension is enabled, prompt assembly for **all users on the host** runs on the main process. On a 1,000-message chat the measured overhead was about 23 ms per prompt build (§18.5).
 - Coexistence with other message-metadata writers (G2).
-- In world chats, other extensions' World Info interceptors cannot revive entries we disable. Entries they force are honored.
-- Council World Info uses native activation.
+- In world chats, other extensions' World Info interceptors cannot switch on an engine-book entry the engine left off. The engine doesn't touch user entries.
 
 ## 17. Internal build order (D16)
 Blocks are for organization only; the extension is delivered and audited as a whole.
@@ -864,7 +829,7 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 |---|---|---|
 | **B0 Spike** (throwaway) | §18 with **synthetic** volumes. | A note of verified assumptions; misses go to the maintainer. |
 | **B1 Core** | **First, the ledger property suite** (§14: reference fold, fake host with the spike's observed event order, operation generators, named invariants). Then engine concepts; ledger (events, `post` including `cont` and `narr`, markers, path tags, journal, overlay, in-flight windows, chain snapshot, rebased views, Keep report and overlays, tombstones, Upgrade); seeds; hooks; engine-managed book and slots; beats; **realism core** (levels, tiers, presets, level contracts, services, query functions, external economy); **visibility core**; **data-table core** (pinned versions); bounds; **after the ledger gate:** classifier, `interpret`, `extract` (strict rules, dedupe, D4 per-type modes), decision routing (D10) and narrator-reply handling (D32); Play basics, HUD, chips, palette; schema builder, entity and place editors; starter world. | **Ledger gate:** the ledger counts as accepted only when the §14 property suite passes at 10,000 generated sequences plus the fixed regression seed set, with every named invariant holding. Then, at 390 px: create a kind with a derived field and band. Act by palette and by typing. Re-run rerolls a 50% check and Re-narrate repeats it. Swipe, branch, delete, Edit-and-Send and import stay consistent. Switching swipes on an earlier message rebases with no pause: a Keep-report chip lists dropped events, switching back restores the original exactly, even after detail opened, a chip confirmed, a realism change and a turn on the switched path, and one tap Discards. Switching an earlier swipe while a reply streams lands that reply as a rebased view. Detail opened while a reply streams shows "pending" and lands after the reply. An earlier user-message edit pauses on Keep/Discard; editing an assistant reply keeps the world and offers Re-read edit. Stopping a Continue raises no pause. An empty reply shows Retry. Dry Run shows slots and commits nothing. Upgrade survives a Re-run, a Re-narrate and a deletion of the latest message. |
-| **B2 Context and pipeline** | Candidates (disabled filter, pins, other interceptors); per-candidate selection cache; constraints; links, adoption and suppression; deliverability; activation check; inspector; presets, budgets, call meter; Council warning; step editor. | The inspector matches Breakdown. A dialogue topic change brings in a new hit. A model drops a linked entry. A disabled constant stays off. A card entry is selectable. Pins never displace Outcome. Call counts are measured per preset. |
+| **B2 Context and pipeline** | Slot delivery and the engine-book vote; deliverability; activation check; inspector; presets, budgets, call meter; step editor. Lore selection (candidates, pins, the selection cache, links, adoption and suppression) and the Council warning were built here and later retired (§6.1). | The inspector matches Breakdown. User lore activates natively in a world chat while the sections still go in. Call counts are measured per preset. |
 | **B3 Calendar, space and travel** | Calendar, recurrence, time zones, the per-turn tick, **time controls** (ticks per scene type, time scale, clock pause, `time` markers), **Timelapse** (targets, interrupt policy, unit cap and segments, Montage), **Speed through**, backlog; routes, modes, grids, the map. | Conversation turns advance the clock by the tick. With the conversation tick at 10 min and the scale at 2×, the next turn's elapsed chip and Scene slot show 20 min, and earlier turns keep their recorded times; changing Settings → Time afterwards leaves this chat unchanged. Pausing the clock makes two turns advance 0 and the HUD shows ⏸. A palette Timelapse of 3 days stops at a seeded invitation, with a Montage and a narrated summary; with invitations set to `note`, a Re-run runs all 3 days and lists the same events before that point, and the narrated summary adds no time. "Until next shift" ends at the shift's start. With the unit cap lowered, a long timelapse ends a segment with Continue timelapse, and continuing reaches the requested date. Going to bed offers "Timelapse to 07:00"; with Sleep on `auto`, the same action, by palette or typed, runs the night. A narrated drive adds no time beyond its route time. A narrated "next morning" makes a Timelapse chip. A recurring shift lands on the right weekdays across a timelapse. A map tap and a typed walk both make validated moves. Marine and off-road routes. All at 390 px. |
 | **B4 Gear, vehicles, sheets** | Gear, kits, use grants, overdue handling; Vehicles; sheets and checks. | Owned vs worn vs lent. A toolbox shows 44 of 45 tools after one wrench is taken. A truck burns fuel by route. Assigned-to expiry flags the vehicle overdue and the owner plans retrieval; the vehicle returns to its home base. Shown odds equal logged faces. |
 | **B5 Economy** | The ledger at every level; accounts; flows with withholding; savings transfers; cards with statements, interest, minimum payments and autopay; investments; catalogs and category bands; purchase resolution and declines; wallet cash. | Payday posts net of withholding. A narrated off-catalog purchase is priced by category. A post-hoc decline chip appears. A statement closes with interest and a minimum payment. A savings transfer posts. Investments move. Wallet cash is lost with the wallet. The books balance after a 30-day timelapse. |
@@ -878,7 +843,7 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 
 | Check | Verdict |
 |---|---|
-| 1 Correlation | Pass. `select` p95 inside the interceptor: 1.13 s (helper), 0.32 s (decisions). |
+| 1 Correlation | Pass. `select` p95 inside the interceptor: 1.13 s (helper), 0.32 s (decisions). `select` was later retired; the interceptor now makes no model call. |
 | 2 Delivery | Partial: evictions unreported, escaping visible, placement chat-depth only, history wiped when fixed overhead exceeds the budget, card outlets unverified (§5.1, §6.3, §6.4, §4.2). |
 | 3 Ledger, host side | Partial: every host-observable item passes. Engine-fold items need the engine (D34); the user-message re-render was not observed (P4, D35). |
 | 4 Model viability | Partial; **extraction precision failed** (§9.4; D4 per-type defaults). Decision-path findings: D10, D30. Empty replies: D32. The numbers are a floor (D31). |
@@ -889,9 +854,9 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 1. **Correlation.**
    - Fingerprint equality for normal, regenerate, swipe, continue and Edit-and-Send.
    - A dry run during a live generation.
-   - **Stop, then Regenerate:** no stale slot write; the in-flight `select` is aborted.
+   - **Stop, then Regenerate:** no stale slot write; the in-flight `select` is aborted (`select` since retired).
    - The `spindle.assemble` path.
-   - `select` latency inside the interceptor, p95 ≤ 6 s.
+   - `select` latency inside the interceptor, p95 ≤ 6 s (`select` since retired).
 2. **Delivery.**
    - Disable all; enable and force stored-disabled engine entries.
    - **Disabled user constants and disabled keyword entries stay off.**
@@ -961,12 +926,12 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 | Risk | Mitigation |
 |---|---|
 | Scope (Warp's larger version was cut back) | Six concepts; uniform representation; packs with level contracts; schema-driven editors; boundary lint; gates first; per-block checks. |
-| Prompt bloat | Compact renderers; per-candidate selection; reserved sections; pins on the lore budget; the inspector. |
-| Latency | Deterministic plan first; per-candidate cache; tie-zone-only NPC calls; beats by default; budgets with fallbacks; the call meter. |
+| Prompt bloat | Compact renderers; the section budget, with Outcome never evicted; the inspector. User lore follows native World Info and its budget (§6). |
+| Latency | Deterministic plan first; no model call in the World Info interceptor; tie-zone-only NPC calls; beats by default; budgets with fallbacks; the call meter. |
 | Ledger divergence | Concrete events; fold order; journaled markers and `seq`s; path tags (P1); one in-flight window per turn (P2); rebased views that never rewrite records; Keep re-validation; tombstones; chain snapshot; fingerprints; generation counter; single writer; recovery; the executable ledger property suite with a reference fold (§14). |
-| Coexistence (metadata, other interceptors, Council) | Documented caveats; G2, G5 follow-up. |
+| Coexistence (metadata, other interceptors) | Documented caveats; G2 follow-up. |
 | Host-wide worker cost | Disclosure; measured; G3 follow-up. |
-| Worker or child stall | Fail-closed engine lore; deterministic-unit bounds; backlog; separate lanes; heartbeat chunking. |
+| Worker or child stall | Fail-closed engine slots; deterministic-unit bounds; backlog; separate lanes; heartbeat chunking. |
 | Decision-provider failures (6 of 53 `decisions.evaluate` calls failed in one test window; the host never retries) | D10: the helper, then engine-only; per-step fallbacks (§5.3). |
 | Secret leakage | Visibility; public-only `knows` extraction; prompts that list only what the POV may know; predicate-only secret stages; label lint; batching rule; previews never recorded; player-worded drop lines (§7). |
 | Imported or model-supplied text forming a prompt macro | Every inserted value is neutralized (§6.3); section templates hold only `{{lines}}`; authored lore keeps its macros and an import lists them for review. |
@@ -996,7 +961,8 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 | World document without a currency | Adds `currency`; Build drafts with Commit and Discard (§4.1) | Authoring needed them |
 | Import: accept, edit or reject each proposal | Accept or reject; edit afterwards in the editors (§9.7) | Bounded like extraction |
 | Data tables: worlds can replace them with another region's | The table editor edits a table; replacement is not built (§9.7) | Not on the critical path |
-| World lore without a world-document field | `WorldDoc.lore`, an editor collection, synced into the engine book (§4.2) | The starter worlds carry lore |
+| World lore without a world-document field | `WorldDoc.lore` and an editor collection, kept in the world and not delivered for now (§4.2) | The starter worlds carry lore |
+| Models select lore in the World Info interceptor (D13), with pins (D19), adoption and suppression (D11) | Retired: lore handling is off, user books follow native World Info, and the interceptor delivers only the engine's sections (§6) | A lore lookup of the engine's own will replace World Info selection |
 | Decline after the prose: other method / remove / accept | Pay another way retries savings → card → checking → cash; Remove and Accept reword the next Outcome note (§9.5) | "Accept" reads as accepting the decline |
 | "Not an action?" undoes an interpreted Speed through | Only interpreted action resolutions get the chip (§11) | A timelapse's events are clock output |
 | A confirm chip for every confirm-mode proposal | Only proposals that would validate now get Apply (§11) | Apply always failed for unpriced items |
@@ -1028,12 +994,12 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 The design went through several rounds of independent review: paper reviews of the plan and of the host integration, a verification pass on the fixes, and adversarial reviews of the built extension, each followed by fixes that are folded into the sections above. The paper rounds kept finding problems in the ledger, so I stopped relying on them and made the ledger gate an executable property suite (§14): a reference fold, a fake host that replays the host's recorded event orders, randomized operation sequences and named invariants. An independent adversarial review at the end of the build remains part of the release process.
 
 ### Accepted residual risks
-1. User-book lore activates natively if the worker stalls (flagged).
+1. If the worker stalls, the world's sections are missing from that turn (flagged).
 2. Rare plan interleaving falls back to the head render.
 3. The host-wide worker cost remains until G3.
 4. Cross-extension metadata clobbering remains until G2.
 5. Activation is confirmed, not delivery (deliverability is resolved where possible; otherwise "unverified").
-6. Card entries whose ids change per assembly are matched by content hash; their stored flags cannot be fetched, so a card entry forced by another interceptor is treated as stored.
+6. Retired with lore handling: the engine no longer judges user entries, so a card entry forced by another interceptor no longer matters to it.
 7. A non-head Continue, a Continue on a message without a record, a stopped Continue and a Continue whose prefix the host re-rendered are accepted unread, like any assistant edit: the world stays as simulated until Re-read edit (Retry read for a stopped head Continue), so the text and the state can disagree until then.
 8. Detail first opened during a turn's in-flight window (while it streams or during its post pass) shows "pending" until the window closes; writes made then land after the turn.
 9. Before the reply, a Continue renders the head's state, since its target is known only at `GENERATION_ENDED` (until G1).

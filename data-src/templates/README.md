@@ -150,7 +150,7 @@ The modern template reads these tables from `src/packs/*/core/tables/modern-us/`
 | `weather` | `packs.weather.config.climates`, a `region` entity per climate (`climate` field) and `fields.region` on the places it covers |
 | `currency` | the world's `currency` (`code`, `symbol`, `minorUnit`, `decimals`, `format`) beside the template's denominations |
 | `prices`, `bills` | the Economy catalog (non-modern worlds swap in the template prices and add `vehicles.classes` rows) and each payer's `bills` list |
-| `lore` | `lore` (`WorldDoc.lore`): `title`, `content` (the public text), `keys`, and `links` to the place or entity the entry is about; the backend syncs it into the engine-managed book. Lore is cue text only, so no entry carries a secret's truth (linted) |
+| `lore` | `lore` (`WorldDoc.lore`): `title`, `content` (the public text), `keys`, and `links` to the place or entity the entry is about; it stays in the world document and isn't delivered to the AI yet. Lore is cue text only, so no entry carries a secret's truth (linted) |
 | tables | every pack's default tables are copied into `tables`, re-hashed, and pinned in `pins.tables`; `pins.generators` pins each materializer domain |
 
 ### Deferred
