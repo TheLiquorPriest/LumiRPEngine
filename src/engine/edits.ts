@@ -279,22 +279,26 @@ function spawnOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "spawn" }>
 /**
  * Remove: out of the world, kept in state. Its relations go, and everyone's relations to it, so no
  * one knows, holds or belongs to what isn't there; what is inside it stays inside and goes with it.
+ * Each pair is unlinked once: its own unlinks take the other side of a symmetric or inverse pair
+ * with them, so only what others still hold toward it afterwards is left to unlink.
  */
 function despawnOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejection | null {
   const e = own(w.state.entities, entity);
   if (!e) return reject("missing_entity", `no entity ${labelOf(w, entity)}`);
   if (entity === w.world.pov) return reject("pov", "the point of view can't be removed");
   if (e.fields[GONE_FIELD] === true) return reject("gone", `${e.name} is already removed`);
-  const specs: EffectSpec[] = e.relations.map((r) => ({ type: "unlink", args: { rel: r.type, from: entity, to: r.to } }));
-  // Taken out of its container, it keeps the place it was at, so Restore brings it back there.
+  // Where it is, read before its container lets go of it: taken out, it keeps that place, so Restore brings it back there.
   const where = placeOfEntity(w.state, entity);
-  if (where && typeof e.fields.place !== "string" && e.relations.some((r) => r.type === "in")) specs.push({ type: "set", args: { entity, field: "place", value: where } });
+  const contained = typeof e.fields.place !== "string" && e.relations.some((r) => r.type === "in");
+  const unlinked = run(reg, w, e.relations.map((r) => ({ type: "unlink", args: { rel: r.type, from: entity, to: r.to } })), rng.fork("own"));
+  if (unlinked) return unlinked;
+  const specs: EffectSpec[] = where && contained ? [{ type: "set", args: { entity, field: "place", value: where } }] : [];
   for (const id of Object.keys(w.state.entities).sort()) {
     if (id === entity) continue;
     for (const r of own(w.state.entities, id)?.relations ?? []) if (r.to === entity && r.type !== "in") specs.push({ type: "unlink", args: { rel: r.type, from: id, to: entity } });
   }
   specs.push({ type: "set", args: { entity, field: GONE_FIELD, value: true } });
-  return run(reg, w, specs, rng);
+  return run(reg, w, specs, rng.fork("others"));
 }
 
 function restoreOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejection | null {
