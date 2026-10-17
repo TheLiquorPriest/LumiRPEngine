@@ -127,6 +127,27 @@ describe("sure things and impossible tries", () => {
     expect(actionOdds(reg, world, withSkill(world, -7), climb).verdict?.roll).toBe(true);
   });
 
+  test("a check that names no success always rolls when its action runs; the story still decides it, else its dice", () => {
+    // Most rolls miss, so an unrolled pass by the likeliest band would be a failure.
+    const blind: CheckDef = { id: "blind", dice: "d20", modifier: "self.skill", bands: [{ outcome: "miss", max: 15 }, { outcome: "hit", min: 16 }] };
+    const blindWorld = (adjudication: Partial<AdjudicationDef>): WorldDoc => {
+      const world = climbWorld(adjudication);
+      world.actions.climb!.check = blind;
+      world.actions.climb!.outcomes = { miss: [], hit: [] };
+      return world;
+    };
+    for (const checks of ["never", "marked", "risky"] as const) {
+      const world = blindWorld({ checks });
+      expect(actionOdds(reg, world, withSkill(world, 2), climb).verdict?.roll).toBe(true);
+      expect(resolveOn(reg, world, withSkill(world, 2), climb, createRng("b")).resolution.check).not.toBeNull();
+    }
+    const story = blindWorld({ checks: "never", authority: "narrative" });
+    const told = resolveOn(reg, story, withSkill(story, 2), climb, createRng("s"), { judgement: { rating: 1, reason: "", outcomes: { hit: 1 } } }).resolution;
+    expect([told.check, told.outcome, told.adjudged?.why]).toEqual([null, "hit", "story"]);
+    const untold = resolveOn(reg, story, withSkill(story, 2), climb, createRng("s"), { judgement: null }).resolution;
+    expect([untold.check === null, untold.adjudged?.rolled, untold.adjudged?.why]).toEqual([false, true, null]);
+  });
+
   test("an unrolled check without `success` passes as its `auto` outcome, else its most likely passing band", () => {
     const world = climbWorld({ checks: "never" });
     const odd: CheckDef = { id: "odd", dice: "d20", modifier: "self.skill", bands: [{ outcome: "miss", max: 9 }, { outcome: "hit", min: 10, max: 17 }, { outcome: "crit", min: 18 }], pass: ["hit", "crit"] };

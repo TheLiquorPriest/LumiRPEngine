@@ -4,7 +4,8 @@
 // every replay read the same one.
 //
 //   policy     the chat's `adjudicate` marker, else the world ruleset's, else Crunchy (every check rolls)
-//   success    the check's `pass` outcomes, else `success` and every band listed after it
+//   success    the check's `pass` outcomes, else `success` and every band listed after it; a check
+//              that names none has no success to grant, so it rolls whenever its action runs
 //   order      a refused retry, then too hard (impossible), then a sure thing (trivial), then the
 //              timing (every, risky, marked, never), then the authority (the dice or the story)
 //   unrolled   passes with `success` (the action's or the check's), else the check's `auto`, else its
@@ -113,7 +114,7 @@ function mostLikely(odds: Readonly<Record<string, number>>, among: readonly stri
 export function passOutcome(action: ActionDef, ready: ReadyCheck, odds: Readonly<Record<string, number>>, pass: readonly string[]): string {
   if (own(action.outcomes, "success") || ready.bands.some((b) => b.outcome === "success")) return "success";
   if (typeof ready.check.auto === "string" && ready.check.auto !== "") return ready.check.auto;
-  return mostLikely(odds, pass.length > 0 ? pass : Object.keys(odds)) ?? NO_BAND;
+  return mostLikely(odds, pass) ?? NO_BAND;
 }
 
 /** The outcome a check too hard to try fails with: `failure` (the action's or the check's), else its most likely failing band. */
@@ -184,7 +185,7 @@ export function verdictOf(policy: AdjudicationDef, input: VerdictInput): Verdict
   }
   if (chance !== null && policy.impossibleAt !== null && chance <= policy.impossibleAt) return unrolled("impossible", failOutcome(action, ready, odds, pass));
   if (chance !== null && policy.trivialAt !== null && chance >= policy.trivialAt) return unrolled("trivial", passOutcome(action, ready, odds, pass));
-  const asked = policy.checks === "every" || (policy.checks === "risky" && (chance === null || chance < policy.riskyAt)) || (policy.checks === "marked" && markedFor(world, state, action, actor));
+  const asked = pass.length === 0 || policy.checks === "every" || (policy.checks === "risky" && (chance === null || chance < policy.riskyAt)) || (policy.checks === "marked" && markedFor(world, state, action, actor));
   if (!asked) return unrolled(policy.checks === "never" ? "never" : policy.checks === "risky" ? "safe" : "unmarked", passOutcome(action, ready, odds, pass));
   if (policy.authority === "narrative") return unrolled("story", null);
   return { roll: true, why: null, outcome: null, chance, pass, prior: null };
@@ -271,8 +272,8 @@ export function lintAdjudication(world: WorldDoc): LintIssue[] {
   if (policy.checks === "risky" && policy.riskyAt <= 0) issues.push({ severity: "warning", path: `${at}.riskyAt`, code: "adjudication", message: "No check's chance is below 0, so no check ever rolls." });
   const marks = Object.values(world.actions).some((a) => a.adjudicate === true) || Object.values(world.places).some((p) => p.adjudicate === true) || Object.values(world.tracks).some((t) => t.adjudicate === true);
   if (policy.checks === "marked" && !marks) issues.push({ severity: "warning", path: `${at}.checks`, code: "adjudication_unmarked", message: "Checks roll only for marked actions, places and tracks, and nothing is marked: no check will ever roll." });
-  // Risky timing, a threshold and a retry rule all read a check's success (a retry must tell a failure).
-  const readsChance = policy.checks === "risky" || policy.trivialAt !== null || policy.impossibleAt !== null || policy.retry !== "free";
+  // Every timing but `every`, a threshold and a retry rule read a check's success (a retry must tell a failure).
+  const readsChance = policy.checks !== "every" || policy.trivialAt !== null || policy.impossibleAt !== null || policy.retry !== "free";
   // Each check the world defines (by id or inline in an action), read with the bands it rolls with.
   const checks: [string, CheckDef][] = [...Object.entries(world.checks).map(([id, c]): [string, CheckDef] => [`checks.${id}`, c]), ...Object.entries(world.actions).flatMap(([id, a]): [string, CheckDef][] => (typeof a.check === "object" && a.check !== null ? [[`actions.${id}.check`, a.check]] : []))];
   for (const [path, check] of checks) {
@@ -280,7 +281,7 @@ export function lintAdjudication(world: WorldDoc): LintIssue[] {
     const known = new Set(bands.map((b) => b.outcome));
     for (const o of check.pass ?? []) if (!known.has(o)) issues.push({ severity: "warning", path: `${path}.pass`, code: "adjudication_outcome", message: `"${o}" counts as a success, but no band of this check reads it.` });
     if (typeof check.auto === "string" && check.auto !== "" && !known.has(check.auto)) issues.push({ severity: "warning", path: `${path}.auto`, code: "adjudication_outcome", message: `An unrolled check passes as "${check.auto}", which no band of this check reads.` });
-    if (readsChance && passOutcomes(check, bands).length === 0) issues.push({ severity: "info", path, code: "adjudication_success", message: "This check names no success (no success band and no pass list), so the policy can't tell its chance: it rolls whenever it is asked for, and a failed try isn't remembered." });
+    if (readsChance && passOutcomes(check, bands).length === 0) issues.push({ severity: "info", path, code: "adjudication_success", message: "This check names no success (no success band and no pass list), so the policy can't tell its chance or grant it without a roll: it rolls whenever its action runs (under narrative authority the story decides, and the dice when it can't), and a failed try isn't remembered." });
   }
   return issues;
 }

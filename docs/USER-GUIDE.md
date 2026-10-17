@@ -364,7 +364,7 @@ Crunchy is how the engine has always played. **Custom** lets you set each value,
 - **Who settles a check**: the roll; the roll, with close calls within the points you set; or the story.
 - **Retrying a failed check**: any time; after a change (the minutes you set passing, better or worse odds, another way of doing it such as another stat, tool or target, or going somewhere else; rewording the same thing isn't a change); or once per scene (until you leave and come back).
 
-A chance is a check's exact chance of success, as the palette shows it. Success is the outcomes a check lists as success, else its `success` band and every band after it. A check that names no success rolls whenever it's asked for, and a failed try at it isn't remembered.
+A chance is a check's exact chance of success, as the palette shows it. Success is the outcomes a check lists as success, else its `success` band and every band after it. A check that names no success has no success to give without a roll, so it rolls whenever its action runs, whatever the rules say about when checks happen (when the story decides, it still does, and the dice do when it can't), and a failed try at it isn't remembered.
 
 When nothing is rolled, the check passes as `success` (when the action and the check have none, as the check's **Outcome when not rolled**, else its likeliest passing band); a hopeless try fails as `failure` (else its likeliest failing band); and a retry that needs a change fails the way it failed before.
 
