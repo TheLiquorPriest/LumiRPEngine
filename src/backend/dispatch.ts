@@ -192,7 +192,10 @@ export class Dispatcher {
         const w = new Working(this.rt.registry, world, state);
         // Cash held in cash accounts is corrected by a balanced posting against the outside
         // correction account (DESIGN §9.2), so the cash shown becomes the amount and the books still
-        // balance; any other value (and cash without a cash account) is set on its field.
+        // balance; any other value (and cash without a cash account) is set on its field. The cash
+        // shown before the holder's money is materialized is the authored opening amount, so the
+        // accounts open first and the correction is measured from them (the fix records both).
+        if (r.field === "cash") materializeIfNeeded(this.rt.registry, w, r.entity, "money", this.runSeedOf(r.chatId));
         const corrected = r.field === "cash" && typeof r.value === "number" ? (optionalService(w.ctx, "economy.set_cash")?.(w.ctx, r.entity, r.value) ?? null) : null;
         if (corrected !== null && !Array.isArray(corrected)) throw new RequestError("validation", corrected.reason);
         const events: LedgerEvent[] = corrected ?? [{ type: "set", entity: r.entity, field: r.field, value: r.value }];

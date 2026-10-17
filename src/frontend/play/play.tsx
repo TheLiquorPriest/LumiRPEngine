@@ -25,11 +25,19 @@ export function Play() {
   const mapInDrawer = useUi((ui) => ui.mapInDrawer);
   const view = sync.view;
   const panelId = useId();
+  const panels = view && view.status !== "not_world" ? visiblePanels(app.catalog, view) : [];
+  const current = (mapInDrawer && panels.some((p) => p.id === "space.map") ? "space.map" : selected && panels.some((p) => p.id === selected) ? selected : panels[0]?.id) ?? null;
+  const chatId = view && view.status !== "not_world" ? view.chatId : null;
+  // Showing a pack's panel is a player-facing observation of the POV (DESIGN §9.2): it may
+  // materialize the POV's detail in that pack's domain. Until it lands (or while a reply holds the
+  // write), the panel shows the representation, so nothing waits on the answer and a refusal says
+  // nothing. Context sends its own on opening.
+  useEffect(() => {
+    if (chatId !== null && current !== null && !current.startsWith("core.")) void app.send({ type: "lre.view.open", chatId, panel: current, entity: null });
+  }, [chatId, current]);
   if (sync.chatId === null) return <Empty>Open a chat to play.</Empty>;
   if (!view) return sync.status === "closed" ? <NotWorld chatId={sync.chatId} /> : <Empty>Connecting to the engine…</Empty>;
   if (view.status === "not_world") return <NotWorld chatId={view.chatId} />;
-  const panels = visiblePanels(app.catalog, view);
-  const current = (mapInDrawer && panels.some((p) => p.id === "space.map") ? "space.map" : selected && panels.some((p) => p.id === selected) ? selected : panels[0]?.id) ?? null;
   const panel = panels.find((p) => p.id === current);
   const keep = view.chips.find((chip) => chip.kind === "keep_report");
   const select = (id: PanelId) => app.ui.update((ui) => ({ ...ui, playPanel: id, mapInDrawer: id === "space.map" ? ui.mapInDrawer : false }));

@@ -10,7 +10,7 @@ import { calendarOf, formatClock, monthName, weekdayName } from "../../../engine
 import { isMaterialized } from "../../../engine/materialize";
 import { numOf, objOf, sliceOf, strOf, own } from "../../../engine/pack-kit";
 import { kindIs } from "../../../engine/scope";
-import { accountsOf, accountType, balance, holdingsValue, netWorth, wealthBand, wealthOf, type AccountType } from "./model";
+import { accountsOf, accountType, balance, holdingsValue, wealthBand, wealthOf, type AccountType } from "./model";
 
 export interface MoneyAccount {
   id: EntityId;
@@ -34,12 +34,25 @@ export interface MoneyView {
   upcoming: { at: string; label: string; cents: number }[];
 }
 
+/**
+ * An account's balance as a view shows it. Until its holder's money is materialized, the authored
+ * opening amount it will start from is its representation (DESIGN §9.2): the materialization posts
+ * exactly that amount, so the figure doesn't jump when a view or an action opens the accounts, and a
+ * materialize write held during a generation shows the same amounts in the meantime.
+ */
+function shownCents(ctx: ReadContext, account: EntityId, opened: boolean): number {
+  return balance(ctx.state, account) + holdingsValue(ctx.state, account) + (opened ? 0 : Math.round(numOf(own(ctx.state.entities, account)?.fields.opening)));
+}
+
 export function buildMoneyView(ctx: ReadContext): MoneyView {
   const pov = ctx.world.pov;
   const level = ctx.levelOf(pov, "money");
   const cal = calendarOf(ctx.world);
-  const band = level >= 1 ? wealthOf(ctx.state, pov) : null;
   const mine = accountsOf(ctx.state, pov);
+  const opened = mine.length === 0 || isMaterialized(ctx.state, pov, "money");
+  const cents = (account: EntityId): number => shownCents(ctx, account, opened);
+  const worth = mine.reduce((sum, account) => sum + cents(account), 0);
+  const band = level >= 1 ? (mine.length > 0 ? wealthBand(worth) : wealthOf(ctx.state, pov)) : null;
   if (level === 0) return { level, band: null, netWorthCents: null, cash: null, accounts: [], recent: [], upcoming: [] };
   if (level === 1 || mine.length === 0) return { level, band, netWorthCents: null, cash: band ? { band } : null, accounts: [], recent: [], upcoming: [] };
   const firstChecking = mine.find((id) => accountType(ctx.state, id) === "checking");
@@ -48,7 +61,7 @@ export function buildMoneyView(ctx: ReadContext): MoneyView {
   const accounts: MoneyAccount[] = shown.map((id) => {
     const e = own(ctx.state.entities, id);
     const kind = accountType(ctx.state, id) ?? "checking";
-    const a: MoneyAccount = { id, name: e?.name ?? id, kind, cents: balance(ctx.state, id) + holdingsValue(ctx.state, id) };
+    const a: MoneyAccount = { id, name: e?.name ?? id, kind, cents: cents(id) };
     if (level >= 3 && kind === "card" && typeof e?.fields.limit === "number") a.limitCents = e.fields.limit;
     if (level >= 4 && typeof e?.fields.apr_pct === "number") a.aprPct = e.fields.apr_pct;
     const st = objOf(statements[id]);
@@ -61,8 +74,8 @@ export function buildMoneyView(ctx: ReadContext): MoneyView {
   return {
     level,
     band,
-    netWorthCents: netWorth(ctx.state, pov),
-    cash: { cents: mine.filter((id) => accountType(ctx.state, id) === "cash").reduce((a, id) => a + balance(ctx.state, id), 0) },
+    netWorthCents: worth,
+    cash: { cents: mine.filter((id) => accountType(ctx.state, id) === "cash").reduce((a, id) => a + cents(id), 0) },
     accounts,
     recent,
     upcoming,
@@ -116,7 +129,7 @@ export function buildPeopleMoney(ctx: ReadContext): GmMoney[] {
     if (level === 0) continue;
     const mine = accountsOf(ctx.state, id);
     const opened = mine.length === 0 || isMaterialized(ctx.state, id, "money");
-    const cents = (account: EntityId): number => balance(ctx.state, account) + holdingsValue(ctx.state, account) + (opened ? 0 : Math.round(numOf(own(ctx.state.entities, account)?.fields.opening)));
+    const cents = (account: EntityId): number => shownCents(ctx, account, opened);
     const worth = mine.reduce((sum, account) => sum + cents(account), 0);
     const firstChecking = mine.find((account) => accountType(ctx.state, account) === "checking");
     const shown = level >= 3 ? mine : level === 2 ? mine.filter((account) => accountType(ctx.state, account) === "cash" || account === firstChecking) : [];
