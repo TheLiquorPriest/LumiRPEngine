@@ -109,7 +109,7 @@ export function FacetValuesInput(props: { label: string; value: Record<FacetValu
             </label>
             <label class="lre-field">
               <span class="label">Description (optional)</span>
-              <textarea class="lre-input" rows={2} value={value.description ?? ""} onInput={(event) => edit(id, { description: event.currentTarget.value === "" ? undefined : event.currentTarget.value })} />
+              <input class="lre-input" value={value.description ?? ""} onInput={(event) => edit(id, { description: event.currentTarget.value === "" ? undefined : event.currentTarget.value })} />
             </label>
             {props.issues(`${props.path}.${id}`)}
           </section>

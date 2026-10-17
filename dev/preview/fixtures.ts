@@ -133,6 +133,9 @@ export function stateFixture(chatId: string): StateView {
               { start: "22:00", end: "24:00", label: "Sleep", kind: "sleep" },
             ],
             next: { at: "14:00", label: "Hands the shift to Mara" },
+            tier: "principal",
+            classes: { story_role: ["mentor"] },
+            groups: [{ id: "diner_crew", role: "Owner" }],
           },
           {
             id: "npc_dev",
@@ -150,8 +153,40 @@ export function stateFixture(chatId: string): StateView {
               { start: "19:30", end: "24:00", label: "Free", kind: "free", reasons: [] },
             ],
             agenda: [{ label: "Fix up the jon boat", stage: "Needs a part" }],
+            tier: "regulars",
+            classes: { story_role: ["best_friend"] },
+            groups: [{ id: "apt_4b", role: "Tenant" }],
           },
-          { id: "npc_mara", name: "Mara Kim", role: "Neighbor · coworker", here: false, activity: "Asleep", place: "Apartment 3A", regard: [{ axis: "Affection", band: "Friendly" }], next: { at: "13:30", label: "Shift at Rosie's" } },
+          { id: "npc_mara", name: "Mara Kim", role: "Neighbor · coworker", here: false, activity: "Asleep", place: "Apartment 3A", regard: [{ axis: "Affection", band: "Friendly" }], next: { at: "13:30", label: "Shift at Rosie's" }, tier: "supporting", classes: { story_role: ["rival"] }, groups: [{ id: "diner_crew", role: "Cook" }] },
+          { id: "npc_okafor", name: "Mr. Okafor", role: "Regular · retired teacher", here: true, activity: "Reading the paper", tier: "regulars", classes: {}, groups: [] },
+        ],
+        facets: [
+          {
+            id: "story_role",
+            label: "Story role",
+            multiple: false,
+            values: [
+              { id: "lead", label: "Lead" },
+              { id: "ally", label: "Ally" },
+              { id: "best_friend", label: "Best friend", parent: "ally" },
+              { id: "mentor", label: "Mentor", parent: "ally" },
+              { id: "rival", label: "Rival" },
+              { id: "love_interest", label: "Love interest" },
+            ],
+          },
+        ],
+        tiers: [
+          { id: "principal", label: "Leads" },
+          { id: "regulars", label: "Regulars" },
+          { id: "supporting", label: "Supporting" },
+        ],
+        groups: [
+          { id: "apt_4b", name: "Apartment 4B", kind: "Household" },
+          { id: "diner_crew", name: "Rosie's Diner crew", kind: "Company" },
+        ],
+        mine: [
+          { id: "apt_4b", name: "Apartment 4B", kind: "Household", role: "Tenant", since: "2025-06-01" },
+          { id: "diner_crew", name: "Rosie's Diner crew", kind: "Company", role: "Server", rank: 2 },
         ],
       },
       "calendar.calendar": {
@@ -321,7 +356,7 @@ export function stateFixture(chatId: string): StateView {
       },
     },
     controls: {
-      realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } }, bandTiers: { principal: ["Leads"], supporting: ["Regulars", "Supporting"], background: ["Background"] } },
+      realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } }, bandTiers: { principal: ["Leads"], supporting: ["Regulars", "Supporting"], background: ["Background"] }, floors: {} },
       time: {
         sceneType: "conversation",
         sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 },
@@ -452,10 +487,32 @@ export function worldFixture(): WorldDoc {
     },
     relations: { roommate: { id: "roommate", label: "Roommate", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: {} } },
     entities: {
-      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "principal", fields: { cash: 4600, energy: 62, job: "Server" }, relations: [{ type: "roommate", to: "npc_dev" }] },
-      npc_rosie: { id: "npc_rosie", kind: "npc", name: "Rosie Alvarez", tier: "principal", fields: { cash: 120000, mood: "calm" }, relations: [], agent: true },
-      npc_dev: { id: "npc_dev", kind: "npc", name: "Dev Patel", tier: "regulars", fields: { mood: "happy" }, relations: [{ type: "owns", to: "boat1" }], agent: true },
+      pov: { id: "pov", kind: "person", name: "Sam Rivera", tier: "principal", fields: { cash: 4600, energy: 62, job: "Server" }, relations: [{ type: "roommate", to: "npc_dev" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant", since: "2025-06-01" } }, { type: "member_of", to: "diner_crew", fields: { role: "Server", rank: 2 } }], class: { story_role: ["lead"] } },
+      npc_rosie: { id: "npc_rosie", kind: "npc", name: "Rosie Alvarez", tier: "principal", fields: { cash: 120000, mood: "calm" }, relations: [{ type: "member_of", to: "diner_crew", fields: { role: "Owner", rank: 1 } }], agent: true, class: { story_role: ["mentor"], secret: ["in_debt"] }, tags: ["early_riser"] },
+      npc_dev: { id: "npc_dev", kind: "npc", name: "Dev Patel", tier: "regulars", fields: { mood: "happy" }, relations: [{ type: "owns", to: "boat1" }, { type: "member_of", to: "apt_4b", fields: { role: "Tenant" } }], agent: true, class: { story_role: ["best_friend"] }, tags: ["mechanic", "night_owl"] },
+      npc_mara: { id: "npc_mara", kind: "npc", name: "Mara Kim", tier: "supporting", fields: { mood: "calm" }, relations: [{ type: "member_of", to: "diner_crew", fields: { role: "Cook", rank: 2 } }], class: { story_role: ["rival"], secret: ["informant"] }, tags: ["night_owl"] },
+      apt_4b: { id: "apt_4b", kind: "household", name: "Apartment 4B", tier: "background", fields: {}, relations: [] },
+      diner_crew: { id: "diner_crew", kind: "company", name: "Rosie's Diner crew", tier: "background", fields: {}, relations: [] },
       car1: { id: "car1", kind: "vehicle", name: "2011 Civic", tier: "supporting", fields: { fuel: 38, owner: "pov" }, relations: [] },
+    },
+    classifications: {
+      story_role: {
+        id: "story_role",
+        label: "Story role",
+        multiple: false,
+        shown: true,
+        order: 0,
+        description: "Who someone is to your story.",
+        values: { lead: { label: "Lead" }, ally: { label: "Ally" }, best_friend: { label: "Best friend", parent: "ally" }, mentor: { label: "Mentor", parent: "ally" }, rival: { label: "Rival" }, love_interest: { label: "Love interest" } },
+      },
+      secret: {
+        id: "secret",
+        label: "Hidden agenda",
+        multiple: true,
+        order: 1,
+        description: "GM-only: what players must find out for themselves.",
+        values: { in_debt: { label: "In debt", description: "Owes the wrong people." }, informant: { label: "Informant" }, police: { label: "Police informant", parent: "informant" } },
+      },
     },
     places: {
       maple: { id: "maple", name: "Maple Falls", timeZone: "America/New_York", grid: "town", fields: {} },
@@ -470,6 +527,7 @@ export function worldFixture(): WorldDoc {
     calendar: { system: "gregorian", epoch: "2026-10-19T00:00", timeZone: "America/New_York", dayParts: [{ id: "morning", label: "Morning", start: "06:00" }, { id: "afternoon", label: "Afternoon", start: "12:00" }, { id: "evening", label: "Evening", start: "18:00" }, { id: "night", label: "Night", start: "22:00" }], holidays: [{ id: "halloween", label: "Halloween", rule: { type: "fixed", month: 10, day: 31 }, dayOff: false }, { id: "thanksgiving", label: "Thanksgiving", rule: { type: "nth_weekday", month: 11, weekday: 4, n: 4 }, dayOff: true }] },
     schedules: {
       rosie_shift: { id: "rosie_shift", owner: "npc_rosie", target: "place", recurrence: { every: "week", weekdays: [1, 2, 3, 4, 5, 6], except: ["thanksgiving"] }, slots: [{ start: "05:30", end: "14:00", value: "diner" }, { start: "14:00", end: "22:00", value: "home" }, { start: "22:00", end: "05:30", value: "home" }] },
+      crew_breakfast: { id: "crew_breakfast", owner: { memberOf: ["diner_crew"], class: { story_role: ["ally"] }, tier: ["principal", "regulars"] }, target: "place", recurrence: { every: "week", weekdays: [0] }, slots: [{ start: "08:00", end: "09:00", value: "diner" }] },
       weather: { id: "weather", target: "weather", recurrence: { every: "day" }, slots: [{ start: "00:00", end: "12:00", weighted: [{ value: "clear", weight: 3 }, { value: "light_rain", weight: 2 }] }, { start: "12:00", end: "24:00", given: { clear: [{ value: "clear", weight: 4 }] }, weighted: [{ value: "clear", weight: 1 }] }] },
     },
     tracks: {

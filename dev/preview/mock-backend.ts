@@ -237,9 +237,24 @@ export class MockBackend {
               world: structuredClone(this.world),
               lint: [],
               packKinds: {
-                person: { id: "person", label: "Person", pack: "space", fields: {} },
+                thing: { id: "thing", label: "Thing", pack: "space", fields: {} },
+                person: { id: "person", label: "Person", extends: "thing", pack: "space", fields: {} },
                 container: { id: "container", label: "Container", pack: "gear", fields: { capacity_l: { type: "number" }, stock: { type: "text" } } },
                 vehicle: { id: "vehicle", label: "Vehicle", pack: "vehicles", fields: { fuel: { type: "number" } } },
+                group: { id: "group", label: "Group", extends: "thing", pack: "relationships", fields: {} },
+                faction: { id: "faction", label: "Faction", extends: "group", pack: "relationships", fields: {} },
+                family: { id: "family", label: "Family", extends: "group", pack: "relationships", fields: {} },
+                household: { id: "household", label: "Household", extends: "group", pack: "relationships", fields: {} },
+                company: { id: "company", label: "Company", extends: "group", pack: "relationships", fields: {} },
+              },
+              packRelations: {
+                in: { id: "in", label: "In", from: "*", to: "*", cardinality: "many_one", symmetric: false, fields: {}, pack: "space" },
+                member_of: { id: "member_of", label: "Member of", from: "*", to: "group", cardinality: "many_many", symmetric: false, fields: { role: { type: "text", label: "Role" }, rank: { type: "number", label: "Rank" }, since: { type: "date", label: "Since" } }, pack: "relationships" },
+                knows: { id: "knows", label: "Knows", from: "*", to: "*", cardinality: "many_many", symmetric: false, fields: {}, pack: "relationships" },
+                parent_of: { id: "parent_of", label: "Parent of", from: "person", to: "person", cardinality: "many_many", symmetric: false, inverse: "child_of", fields: {}, pack: "relationships" },
+                child_of: { id: "child_of", label: "Child of", from: "person", to: "person", cardinality: "many_many", symmetric: false, inverse: "parent_of", fields: {}, pack: "relationships" },
+                sibling_of: { id: "sibling_of", label: "Sibling of", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: {}, pack: "relationships" },
+                spouse_of: { id: "spouse_of", label: "Spouse of", from: "person", to: "person", cardinality: "many_many", symmetric: true, fields: {}, pack: "relationships" },
               },
             });
           case "lint":
