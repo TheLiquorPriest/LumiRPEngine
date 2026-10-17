@@ -4,9 +4,9 @@
 // to the backend through `send`, as a protocol request.
 
 import type { ComponentType } from "preact";
-import type { JsonValue } from "../shared/json";
+import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatId, PackId, PanelId } from "../shared/ids";
-import type { FrontendToBackend, ResultMessage, ErrorMessage, WorldCollection } from "../shared/protocol";
+import type { FrontendToBackend, ResultMessage, ErrorMessage, LintIssue, WorldCollection } from "../shared/protocol";
 import type { ChipKind, Chip, StateView } from "../shared/state-view";
 import type { WorldDoc } from "../shared/world";
 
@@ -47,6 +47,15 @@ export interface EditorDef {
   component: ComponentType<EditorProps>;
 }
 
+/** A pack's own fields for its `config`, edited in Build on the pack's entry. */
+export interface PackConfigProps {
+  world: WorldDoc;
+  /** The config as edited; the generic JSON field below edits the same object. */
+  config: JsonObject;
+  lint: readonly LintIssue[];
+  onChange(next: JsonObject): void;
+}
+
 export interface ChipProps {
   chip: Chip;
   chatId: ChatId;
@@ -56,6 +65,8 @@ export interface ChipProps {
 export interface UiRegistry {
   panel(def: PanelDef): void;
   editor(def: EditorDef): void;
+  /** Dedicated fields for the registering pack's config, shown above its config as JSON. */
+  config(component: ComponentType<PackConfigProps>): void;
   /** Overrides the default chip rendering for a kind. */
   chip(kind: ChipKind, component: ComponentType<ChipProps>): void;
 }

@@ -6,10 +6,10 @@ import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
 import { splitAlongBuy } from "../../src/backend/runtime";
 import { transientFailure } from "../../src/backend/steps";
-import { migrateWorld } from "../../src/engine/authoring";
+import { lintWorld, migrateWorld } from "../../src/engine/authoring";
 import { matchCatalog } from "../../src/packs/economy/core/index";
 import { derivedUnpricedCap } from "../../src/packs/economy/core/model";
-import type { JsonObject } from "../../src/shared/json";
+import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { Rig } from "../support/rig";
 
@@ -190,5 +190,13 @@ describe("the cap on narrated prices", () => {
     const { world } = await folded(rig, chatId);
     const migrated = migrateWorld({ ...world, packs: { ...world.packs, economy: { version: 1, config: { unpricedCapCents: 1000 } } } });
     expect(migrated.packs.economy?.config).toEqual({ unpricedCap: 1000 });
+  });
+
+  test("a cap that isn't a positive whole number of minor units is a warning on its field; a valid or unset one is not", async () => {
+    const { rig, chatId } = await chat();
+    const { world } = await folded(rig, chatId);
+    const issues = (cap: JsonValue | undefined) => lintWorld({ ...world, packs: { ...world.packs, economy: { version: 1, config: cap === undefined ? {} : { unpricedCap: cap } } } }, rig.rt.registry).filter((i) => i.path === "packs.economy.config.unpricedCap");
+    for (const bad of [0, -500, 12.5, "500"]) expect(issues(bad).map((i) => i.severity)).toEqual(["warning"]);
+    for (const good of [undefined, 1, 25_000]) expect(issues(good)).toEqual([]);
   });
 });

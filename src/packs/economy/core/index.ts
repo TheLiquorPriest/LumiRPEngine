@@ -26,6 +26,7 @@ import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
 import { isMaterialized, pinnedVersion, tablesRevision } from "../../../engine/materialize";
 import { hashParts } from "../../../shared/hash";
 import { formatMoney } from "../../../shared/world";
+import { minorUnitPlural } from "../../../shared/money";
 import { labelOf, mutableSlice, numOf, objOf, optionalService, sliceOf, sliceRecord, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, PackDef, ReadContext, Rejection, ServiceMap, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
@@ -39,6 +40,7 @@ import {
   bandByLabel,
   CORRECTION_ACCOUNT,
   DEFAULT_SYMBOL,
+  derivedUnpricedCap,
   external,
   MARKET,
   netWorth,
@@ -1461,6 +1463,17 @@ export const economyPack: PackDef = {
           if (e.fields.type === "card" && typeof e.fields.limit !== "number") issues.push({ severity: "warning" as const, code: "economy.accounts", message: `Card ${e.name} has no credit limit; every charge on it will decline.`, path: `entities.${e.id}.fields.limit` });
         }
         return issues;
+      },
+    });
+
+    r.lint({
+      code: "economy.unpriced_cap",
+      check(world) {
+        const cap = world.packs.economy?.config.unpricedCap;
+        if (cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)) return [];
+        // The engine reads a fraction rounded and anything else not above zero as unset (`unpricedCap`).
+        const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedUnpricedCap(world), world.currency)}`;
+        return [{ severity: "warning" as const, code: "economy.unpriced_cap", message: `The narrated-price cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; narrated prices are capped at ${fallback}.`, path: "packs.economy.config.unpricedCap" }];
       },
     });
   },

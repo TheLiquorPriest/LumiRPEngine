@@ -494,6 +494,8 @@ export function SchemaEditor(props: EditorProps) {
   const formDoc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);
   const path = `${props.collection}.${id}`;
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
+  // A pack's entry shows the pack's own config fields, when its ui registers them, above the JSON.
+  const PackConfig = props.collection === "packs" ? app.catalog.configs.get(id) : undefined;
   const save = () =>
     run(async () => {
       const message = await props.send({ type: "lre.editor", worldId: props.world.id, base: null, op: "put", collection: props.collection, id, value });
@@ -524,6 +526,7 @@ export function SchemaEditor(props: EditorProps) {
             {issue.message}
           </div>
         ))}
+      {PackConfig ? <PackConfig world={props.world} config={isRecord(value.config) ? value.config : {}} lint={lintAt(draft?.lint ?? [], `${path}.config`)} onChange={(config) => setValue({ ...value, config })} /> : null}
       <SchemaFields specs={COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers }} onChange={setValue} />
       <div class="lre-inline" style={{ position: "sticky", bottom: 0, padding: "8px 0", background: "var(--lre-fill)" }}>
         <button type="button" class="lre-btn primary" disabled={busy || (!changed && !isNew)} onClick={save}>

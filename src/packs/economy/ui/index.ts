@@ -1,13 +1,15 @@
-// Economy UI: the Money panel and the data-table editor (catalog, categories, occupations,
-// regions, finance tables are all `tables`).
+// Economy UI: the Money panel, and the narrated-price cap among its config fields in Build (the
+// data tables, catalog, categories, occupations, regions and finance, are all `tables`).
 
 import type { UiPackDef } from "../../../frontend/registry";
+import { EconomyConfig } from "./config";
 import { MoneyPanel } from "./panel";
 
 const economy: UiPackDef = {
   id: "economy",
   register(r) {
     r.panel({ id: "economy.money", label: "Money", order: 30, component: MoneyPanel });
+    r.config(EconomyConfig);
   },
 };
 
