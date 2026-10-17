@@ -8,6 +8,7 @@
 import { hashParts } from "../shared/hash";
 import type { JsonObject } from "../shared/json";
 import type { EntityId } from "../shared/ids";
+import { loreIsSecret } from "../shared/lore";
 import { spawnTierOf } from "../shared/tiers";
 import type { EffectSpec } from "../shared/world";
 import type { ProposalChannelDef, ReadContext, Rejection } from "./registry";
@@ -74,7 +75,7 @@ function unlearnable(ctx: ReadContext, fact: string): Rejection | null {
     return canSeePlace(ctx.registry, world, state, pov, fact) ? reject("already_known", `already knows ${place.name}`) : null;
   }
   const lore = hasOwn(world.lore, fact) ? own(world.lore, fact) : undefined;
-  if (lore && (lore.secret === true || lore.gate !== undefined)) return reject("not_public", "secret lore is learned through its gate, never from a reply");
+  if (lore && (loreIsSecret(lore) || lore.gate !== undefined)) return reject("not_public", "secret lore is learned through its gate, never from a reply");
   if (hasOwn(world.tracks, fact)) return reject("not_public", "tracks advance through their stages, never from a reply");
   return reject("unknown_fact", `no world fact ${labelOf(ctx, fact)}`);
 }

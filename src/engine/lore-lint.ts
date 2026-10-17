@@ -1,12 +1,12 @@
 // World lore lint (DESIGN §4.2): entry ids and links; who may read an entry (a `known_by` entry
-// needs links, since only knowing what it links lets a helper read it); secrets (a secret entry
-// needs a gate, and a step whose output reaches the narrator or the player is flagged in its
-// audience, since the lore search never gives it the secret); and the lookup table: entries it
-// names that don't exist, blank or empty terms, terms not in the form lookups match, and terms
-// that are an entry's alias but lead elsewhere.
+// needs links, since only knowing what it links lets a helper read it); secrets (a `secret` that
+// isn't true or false, which reads as secret; a secret entry needs a gate, and a step whose output
+// reaches the narrator or the player is flagged in its audience, since the lore search never gives
+// it the secret); and the lookup table: entries it names that don't exist, blank or empty terms,
+// terms not in the form lookups match, and terms that are an entry's alias but lead elsewhere.
 
 import { hasOwn } from "../shared/json";
-import { LORE_AUDIENCE, loreTerm, PROSE_STEPS } from "../shared/lore";
+import { LORE_AUDIENCE, loreIsSecret, loreTerm, PROSE_STEPS } from "../shared/lore";
 import type { LintIssue } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
 
@@ -24,8 +24,10 @@ export function lintLore(world: WorldDoc): LintIssue[] {
     for (const link of l.links) if (!hasOwn(world.entities, link) && !hasOwn(world.places, link)) push("warning", `lore.${id}.links`, "missing_ref", `"${link}" is not an entity or place`);
     const visibility: unknown = l.visibility;
     if (visibility !== undefined && visibility !== "public" && visibility !== "known_by") push("warning", `lore.${id}.visibility`, "unknown_visibility", `"${String(visibility)}" isn't a lore visibility: no helper reads the entry`);
-    else if (visibility === "known_by" && l.secret !== true && l.links.length === 0) push("warning", `lore.${id}.visibility`, "no_links", `"${l.title}" is known by whoever knows what it links, and it links nothing: no helper reads it`);
-    if (l.secret !== true) {
+    else if (visibility === "known_by" && !loreIsSecret(l) && l.links.length === 0) push("warning", `lore.${id}.visibility`, "no_links", `"${l.title}" is known by whoever knows what it links, and it links nothing: no helper reads it`);
+    const secret: unknown = l.secret;
+    if (secret !== undefined && typeof secret !== "boolean") push("warning", `lore.${id}.secret`, "secret_type", `"secret" is ${JSON.stringify(secret).slice(0, 40)}, not true or false: "${l.title}" reads as secret until it is one or the other`);
+    if (!loreIsSecret(l)) {
       if (truths.some((t) => l.content.toLowerCase().includes(t))) push("error", `lore.${id}.content`, "secret_truth", `"${l.title}" is public but carries a secret's truth; mark it secret, with a gate, so only the helpers you pick read it`);
       continue;
     }

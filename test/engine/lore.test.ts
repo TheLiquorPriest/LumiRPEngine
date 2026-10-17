@@ -30,6 +30,16 @@ describe("world lore lint", () => {
     expect(loreIssues(world([entry("keeper_note", { secret: true, gate: "  ", content: TRUTH })]))).toEqual([{ severity: "error", path: "lore.keeper_note.gate", code: "no_gate" }]);
   });
 
+  test("a `secret` that isn't true or false is flagged, and is linted as the secret it reads as", () => {
+    for (const value of ["true", "false", 1, null]) {
+      const odd = JSON.parse(JSON.stringify({ ...entry("keeper_note", { content: TRUTH }), secret: value })) as LoreEntryDef;
+      expect(loreIssues(world([odd]))).toEqual([
+        { severity: "warning", path: "lore.keeper_note.secret", code: "secret_type" },
+        { severity: "error", path: "lore.keeper_note.gate", code: "no_gate" },
+      ]);
+    }
+  });
+
   test("a public entry never holds a track's truth", () => {
     expect(loreIssues(world([entry("rumor", { content: `People say: ${TRUTH}` })]))).toEqual([{ severity: "error", path: "lore.rumor.content", code: "secret_truth" }]);
   });

@@ -3,7 +3,9 @@
 // only, and never calls a model. Visibility is enforced here, so no caller can widen it:
 //   - a secret entry whose gate doesn't hold reaches only the helpers in its audience, and never a
 //     step whose output reaches the narrator or the player (`PROSE_STEPS`, an `effects` template),
-//     whatever its audience says (the secrecy batching rule); once its gate holds it reads as public;
+//     whatever its audience says (the secrecy batching rule); once its gate holds it reads as public.
+//     An entry is secret unless `secret` is `false` or absent (`loreIsSecret`), so a malformed
+//     value keeps it hidden;
 //   - a `known_by` entry is read only once the POV knows every person and place it links; one with
 //     no links, a link to anything else, or a visibility this reader doesn't know stays hidden;
 //   - an AI-written entry still waiting for review is read by nobody but the GM;
@@ -13,7 +15,7 @@
 // author's priority. Ties go by id, so the same inputs always give the same hits in the same order.
 
 import { hasOwn, isRecord } from "../shared/json";
-import { loreSourceOf, PROSE_STEPS, topicIdOf } from "../shared/lore";
+import { loreIsSecret, loreSourceOf, PROSE_STEPS, topicIdOf } from "../shared/lore";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
 import { playerKnows } from "./player-events";
 import type { Registry } from "./registry-impl";
@@ -105,7 +107,7 @@ export function loreReadable(reg: Registry, world: WorldDoc, state: Readonly<Wor
   if (purpose === "gm") return true;
   const source = loreSourceOf(entry.source);
   if (source.kind === "ai" && source.status === "pending") return false;
-  if (entry.secret === true && !open(entry)) return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
+  if (loreIsSecret(entry) && !open(entry)) return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
   const v: unknown = entry.visibility;
   if (v === undefined || v === "public") return true;
   if (v !== "known_by") return false;
@@ -127,7 +129,7 @@ export function readableLore(reg: Registry, world: WorldDoc, state: Readonly<Wor
 /** Whether `purpose` may read a secret entry whose gate doesn't hold yet. */
 export function readsSecrets(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, purpose: LorePurpose, effects = false): boolean {
   const open = loreGateReader(reg, world, state);
-  return Object.values(world.lore).some((entry) => entry.secret === true && !open(entry) && loreReadable(reg, world, state, entry, purpose, effects, open));
+  return Object.values(world.lore).some((entry) => loreIsSecret(entry) && !open(entry) && loreReadable(reg, world, state, entry, purpose, effects, open));
 }
 
 /**
@@ -137,7 +139,7 @@ export function readsSecrets(reg: Registry, world: WorldDoc, state: Readonly<Wor
  */
 export function secretLoreNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
   const open = loreGateReader(reg, world, state);
-  const secret = Object.entries(world.lore).filter(([, entry]) => entry.secret === true && !open(entry));
+  const secret = Object.entries(world.lore).filter(([, entry]) => loreIsSecret(entry) && !open(entry));
   const ids = new Set(secret.map(([id]) => id));
   const names = new Set<string>();
   const add = (name: unknown): void => {
@@ -253,7 +255,7 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
     const snippet = snippetOf(r, entry, left);
     if (!snippet) break;
     left -= snippet.tokens;
-    hits.push({ id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: entry.secret === true && !open(entry), why });
+    hits.push({ id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why });
   }
   return { hits, matched: best.length };
 }
@@ -265,7 +267,7 @@ export function loreGet(r: LoreReader, id: string, purpose: LorePurpose, tokenBu
   if (!entry || !loreReadable(r.reg, r.world, r.state, entry, purpose, effects, open)) return null;
   const snippet = snippetOf(r, entry, Math.max(0, Math.floor(tokenBudget)));
   if (!snippet) return null;
-  return { id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: entry.secret === true && !open(entry), why: [] };
+  return { id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why: [] };
 }
 
 /** `lore.list`: the entries `purpose` may read under a topic (by id or label): the table's order, then those naming it, by id. */

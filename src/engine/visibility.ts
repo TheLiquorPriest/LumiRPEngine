@@ -13,7 +13,7 @@ import type { EntityId, PlaceId, StageId, TrackId, Visibility } from "../shared/
 import type { LedgerEvent } from "../shared/ledger";
 import type { LoreEntryDef, Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
 import { objectiveLabel, objectiveWhen } from "../shared/world";
-import { lorePhrases } from "../shared/lore";
+import { loreIsSecret, lorePhrases } from "../shared/lore";
 import type { ExprEnv } from "./expr";
 import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { Registry } from "./registry-impl";
@@ -245,7 +245,7 @@ export function loreGateReader(reg: Registry, world: WorldDoc, state: Readonly<W
 export function secretLorePhrases(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
   const open = loreGateReader(reg, world, state);
   const out: string[] = [];
-  for (const l of Object.values(world.lore)) if (l.secret === true && typeof l.content === "string" && !open(l)) out.push(...lorePhrases(l.content));
+  for (const l of Object.values(world.lore)) if (loreIsSecret(l) && typeof l.content === "string" && !open(l)) out.push(...lorePhrases(l.content));
   return out;
 }
 

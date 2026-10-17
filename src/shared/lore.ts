@@ -1,6 +1,7 @@
-// World lore helpers (DESIGN §4.2) shared by the lint, the backend and Build: an entry's source,
-// the helpers a secret entry may reach, the hash a book-sourced entry keeps of the World Info text
-// it was indexed from, and the lookup table's terms, additions and suggestions. Pure.
+// World lore helpers (DESIGN §4.2) shared by the lint, the backend and Build: whether an entry is
+// secret, its source, the helpers a secret entry may reach, the hash a book-sourced entry keeps of
+// the World Info text it was indexed from, and the lookup table's terms, additions and
+// suggestions. Pure.
 
 import { hashParts } from "./hash";
 import type { TopicId } from "./ids";
@@ -18,6 +19,14 @@ export const LORE_AUDIENCE = Object.keys(STEP_OUTPUTS) as StepPurpose[];
  * a secret entry naming one in its audience is linted.
  */
 export const PROSE_STEPS: readonly StepPurpose[] = ["brief", "outline", "choices", "extract"];
+
+/**
+ * Whether an entry is secret: unless `secret` is `false` or absent it is, so a value a reader
+ * doesn't understand (`"true"`, `"false"`, 1) keeps the entry hidden rather than public (linted).
+ */
+export function loreIsSecret(entry: { readonly secret?: unknown }): boolean {
+  return entry.secret !== undefined && entry.secret !== false;
+}
 
 /**
  * A secret entry's text as the leak check looks for it: each sentence or clause of at least four

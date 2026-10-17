@@ -103,6 +103,18 @@ describe("who may read an entry", () => {
     expect(loreSearch(reader(w), { terms: ["ledger"], purpose: "interpret", limit: 5, tokenBudget: 500 }).hits).toEqual([]);
   });
 
+  test("a `secret` that isn't true or false reads as secret: only its audience reads it, and the leak check knows its text", () => {
+    for (const value of ["true", "false", 1, null]) {
+      const odd = JSON.parse(JSON.stringify({ ...secret, secret: value })) as LoreEntryDef;
+      const w = riverton([odd]);
+      expect(search(w, "npc.choose").map((h) => [h.id, h.secret])).toEqual([["ledger", true]]);
+      expect(search(w, "interpret")).toEqual([]);
+      expect(findLeaks(`Maya: ${SECRET}`, unrevealedSecrets(reg, w.world, w.state))).toHaveLength(1);
+    }
+    // Only false, or no value at all, makes it public.
+    for (const open of [{ ...secret, secret: false }, { ...secret, secret: undefined }]) expect(search(riverton([open]), "interpret").map((h) => h.id)).toEqual(["ledger"]);
+  });
+
   test("known_by: only once the POV knows everything it links; no links, odd links or an odd visibility hide it", () => {
     const w = riverton([
       entry("jordan_past", { title: "Jordan's past", keys: ["jordan"], links: ["jordan"], visibility: "known_by" }),

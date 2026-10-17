@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
-import { LORE_AUDIENCE, loreSourceOf, PROSE_STEPS } from "../../shared/lore";
+import { LORE_AUDIENCE, loreIsSecret, loreSourceOf, PROSE_STEPS } from "../../shared/lore";
 import type { LintIssue, LoreDrift } from "../../shared/protocol";
 import type { LoreEntryDef, LoreSource, StepPurpose, WorldDoc } from "../../shared/world";
 import type { App, BuildRoute } from "../app";
@@ -120,7 +120,7 @@ export function LoreList(props: { worldId: string }) {
                   {(l.topics ?? []).length > 0 ? ` · ${(l.topics ?? []).join(", ")}` : ""}
                 </span>
               </span>
-              {l.secret === true ? <span class="lre-badge warn">Secret</span> : null}
+              {loreIsSecret(l) ? <span class="lre-badge warn">Secret</span> : null}
               {SOURCE_BADGE[source.kind] ? <span class="lre-badge">{source.kind === "ai" && source.status === "pending" ? "AI · to review" : SOURCE_BADGE[source.kind]}</span> : null}
               {changed ? <span class={changed.status === "changed" ? "lre-badge warn" : "lre-badge neg"}>{changed.status === "changed" ? "Book changed" : "Book entry gone"}</span> : null}
               {issues > 0 ? <span class="lre-badge warn">{issues}</span> : null}
@@ -227,7 +227,7 @@ export function LoreEditor(props: EditorProps) {
   const path = `lore.${id}`;
   const ctx = { doc: props.world, lint, path, identifiers, functions: draft?.functions ?? [] };
   const changed = JSON.stringify(value) !== JSON.stringify(stored ?? null);
-  const secret = value.secret === true;
+  const secret = loreIsSecret(value);
   const audience = strings(value.audience).filter((s): s is StepPurpose => (LORE_AUDIENCE as readonly string[]).includes(s));
   const prose = audience.filter((s) => PROSE_STEPS.includes(s));
   const topicsInUse = useMemo(() => [...new Set(Object.values(props.world.lore).flatMap((l) => l.topics ?? []))].sort((a, b) => a.localeCompare(b)), [props.world.lore]);
