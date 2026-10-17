@@ -381,6 +381,12 @@ function WorldOverview() {
               <span class="sub">Describe changes; review every proposal</span>
             </span>
           </button>
+          <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "describe_map" })}>
+            <span class="grow">
+              <span class="title">Describe a map</span>
+              <span class="sub">Write a place's inside in your words; the AI draws it as a map to review</span>
+            </span>
+          </button>
           <button type="button" class="lre-item" onClick={() => go(app, { view: "job", worldId: draft.worldId, kind: "playtest" })}>
             <span class="grow">
               <span class="title">Playtest</span>

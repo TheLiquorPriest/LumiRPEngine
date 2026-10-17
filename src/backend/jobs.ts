@@ -16,6 +16,7 @@ import type { StepConfig } from "../shared/settings";
 import type { Registry } from "../engine/registry-impl";
 import type { HostPort, ProcessEvent, ProcessHandle } from "./host";
 import { checkProposals, dropSummary, entryTitle, IMPORT_CHUNK, IMPORT_MAX_CALLS, loreChunk, PROPOSAL_MAX_TOKENS, proposalRetry, proposalSystem, readProposals, replyProblem, type DropCounts, type ProposalMode } from "./proposals";
+import { mapProposal, mapRepairText, mapRequestText, mapSystem, problemLines, readMapAnswer, readMapRequest } from "./map-job";
 import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
 import { readStoredJson } from "./stored-json";
@@ -30,7 +31,7 @@ export const JOBS_PATH = "jobs.json";
 /** Jobs that have ended kept per user (the newest), with their results; running ones are always kept. */
 export const JOBS_KEPT = 8;
 
-const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, playtest: true, check_world: true };
+const JOB_KINDS: Record<JobKind, true> = { import_lore: true, refine: true, describe_map: true, playtest: true, check_world: true };
 const JOB_STATUSES: Record<JobSummary["status"], true> = { running: true, done: true, failed: true, cancelled: true, interrupted: true };
 const SEVERITIES: Record<LintIssue["severity"], true> = { error: true, warning: true, info: true };
 
@@ -369,6 +370,33 @@ export class JobRunner {
       const proposals = review(raw, drops);
       const message = [skipped > 0 ? `${skipped} entries past the first ${calls * IMPORT_CHUNK} were not read; import them in another pass.` : null, dropSummary(raw.length, proposals.length, drops)].filter((m): m is string => m !== null).join(" ");
       this.update(job, { status: "done", progress: 1, result: { proposals }, ...(message ? { message } : {}) });
+      return;
+    }
+    if (job.kind === "describe_map") {
+      // On the draft, where the author is working: the place may be new, and the map applies there.
+      const draft = await this.worlds.working(worldId, job.userId);
+      const request = readMapRequest(draft, input);
+      const system = mapSystem();
+      const text = mapRequestText(draft, request);
+      const roomy: StepConfig = { ...(config ?? { enabled: true, signals: [] }), maxTokens: Math.max(config?.maxTokens ?? 0, PROPOSAL_MAX_TOKENS) };
+      const ask = async (user: string, attempt: string) => {
+        const t0 = performance.now();
+        const answer = readMapAnswer(draft, request, await this.steps.helperJson("brief", system, user, roomy, job.userId, callSignal()));
+        const errors = answer.problems.filter((p) => p.severity === "error").length;
+        this.host.log("info", `[LumiRPEngine] describe_map ${request.mapId} ${attempt}: ${answer.map ? `${errors} error(s), ${answer.problems.length - errors} warning(s)` : "no map"} in ${Math.round(performance.now() - t0)} ms`, job.userId);
+        return answer;
+      };
+      const first = await ask(text, "call");
+      if (signal.aborted) return;
+      const wrong = first.map === null || first.problems.some((p) => p.severity === "error");
+      // One repair call, as the other helper calls get: the problems, and the map they're in.
+      if (wrong) this.update(job, { status: "running", progress: 0.5, message: "Fixing the map's problems…" });
+      const answer = wrong ? await ask(mapRepairText(text, first), "repair") : first;
+      if (signal.aborted) return;
+      if (answer.map === null) throw new Error(`the helper's answer isn't a map${wrong ? " after the repair either" : ""}:\n${problemLines(answer.problems.slice(0, 6))}`);
+      const errors = answer.problems.some((p) => p.severity === "error");
+      const message = wrong ? (errors ? "The repair call left problems; the map's note lists them, and it starts unticked." : "The first map had problems; a repair call fixed them.") : undefined;
+      this.update(job, { status: "done", progress: 1, result: { proposals: [mapProposal(request, { ...answer, map: answer.map })] }, ...(message ? { message } : {}) });
       return;
     }
     // refine: Build/Refine with AI, one call and its retry.

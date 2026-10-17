@@ -37,6 +37,8 @@ describe("UI registry", () => {
     expect(() => buildCatalog([editor("a"), editor("b")])).toThrow("kinds");
     const chip = (id: string): UiPackDef => ({ id, register: (r) => r.chip("roll", Empty) });
     expect(() => buildCatalog([chip("a"), chip("b")])).toThrow("roll");
+    const preview = (id: string): UiPackDef => ({ id, register: (r) => r.preview("maps", Empty) });
+    expect(() => buildCatalog([preview("a"), preview("b")])).toThrow("maps");
     expect(() => buildCatalog([{ id: "a", register: () => {} }, { id: "a", register: () => {} }])).toThrow("registered twice");
   });
 });

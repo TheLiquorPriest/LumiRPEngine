@@ -5,6 +5,7 @@ import type { UiPackDef } from "../../../frontend/registry";
 import { GridEditor, PlaceEditor } from "./editors";
 import { MapPanel } from "./map";
 import { MapEditor } from "./map-editor";
+import { MapProposalPreview } from "./map-preview";
 
 const space: UiPackDef = {
   id: "space",
@@ -13,6 +14,7 @@ const space: UiPackDef = {
     r.editor({ collection: "grids", label: "Grids", component: GridEditor });
     r.editor({ collection: "places", label: "Places", component: PlaceEditor });
     r.editor({ collection: "maps", label: "Maps", component: MapEditor });
+    r.preview("maps", MapProposalPreview);
   },
 };
 

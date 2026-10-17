@@ -6,7 +6,7 @@ import type { ComponentType } from "preact";
 import type { PackId } from "../shared/ids";
 import type { WorldCollection } from "../shared/protocol";
 import type { ChipKind } from "../shared/state-view";
-import type { ChipProps, EditorDef, PackConfigProps, PanelDef, UiPackDef, UiRegistry } from "./registry";
+import type { ChipProps, EditorDef, PackConfigProps, PanelDef, PreviewProps, UiPackDef, UiRegistry } from "./registry";
 
 export interface UiCatalog {
   /** Play panels in `order`, ties by id. */
@@ -15,6 +15,8 @@ export interface UiCatalog {
   /** A pack's config fields, by pack id. */
   configs: ReadonlyMap<PackId, ComponentType<PackConfigProps>>;
   chips: ReadonlyMap<ChipKind, ComponentType<ChipProps>>;
+  /** How a job's review draws a proposed value, by collection. */
+  previews: ReadonlyMap<WorldCollection, ComponentType<PreviewProps>>;
   packs: readonly string[];
 }
 
@@ -23,6 +25,7 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
   const editors = new Map<WorldCollection, EditorDef>();
   const configs = new Map<PackId, ComponentType<PackConfigProps>>();
   const chips = new Map<ChipKind, ComponentType<ChipProps>>();
+  const previews = new Map<WorldCollection, ComponentType<PreviewProps>>();
   const ids = new Set<string>();
   for (const pack of packs) {
     if (ids.has(pack.id)) throw new Error(`UI pack ${pack.id} is registered twice`);
@@ -44,9 +47,13 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
         if (chips.has(kind)) throw new Error(`A chip renderer for ${kind} (pack ${pack.id}) is already registered`);
         chips.set(kind, component);
       },
+      preview(collection, component) {
+        if (previews.has(collection)) throw new Error(`A preview for ${collection} (pack ${pack.id}) is already registered`);
+        previews.set(collection, component);
+      },
     };
     pack.register(registry);
   }
   const ordered = [...panels.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { panels: ordered, editors, configs, chips, packs: [...ids] };
+  return { panels: ordered, editors, configs, chips, previews, packs: [...ids] };
 }

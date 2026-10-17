@@ -58,7 +58,7 @@ export function proposalWrites(worldId: string, proposals: readonly JobProposal[
   return proposals.filter((p) => accepted.has(p.id)).map((p) => ({ type: "lre.editor", worldId, base: null, op: "put", collection: p.collection, id: p.key, value: p.value }));
 }
 
-const TITLE: Record<JobKind, string> = { import_lore: "Import from lore", refine: "Build / Refine with AI", playtest: "Playtest", check_world: "Check world" };
+const TITLE: Record<JobKind, string> = { import_lore: "Import from lore", refine: "Build / Refine with AI", describe_map: "Describe a map", playtest: "Playtest", check_world: "Check world" };
 const CHECK_DAYS: readonly SegOption<number>[] = [1, 3, 7].map((days) => ({ value: days, label: `${days} day${days === 1 ? "" : "s"}` }));
 const STATUS_TONE: Record<JobState["status"], string> = { running: "accent", done: "pos", failed: "neg", cancelled: "", interrupted: "warn" };
 
@@ -68,6 +68,9 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
   const [picked, setPicked] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [days, setDays] = useState(3);
+  const draft = useSelect(app.drafts, (d) => d);
+  const [scope, setScope] = useState("");
+  const [mapId, setMapId] = useState("");
   useEffect(() => {
     if (props.kind === "import_lore") void app.host.worldBooks().then(setBooks, () => setBooks([]));
   }, [props.kind]);
@@ -93,6 +96,36 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
         )}
         <button type="button" class="lre-btn primary" disabled={picked.length === 0 || props.busy} onClick={() => props.onStart({ bookIds: picked })}>
           Import {picked.length > 0 ? `${picked.length} book${picked.length === 1 ? "" : "s"}` : ""}
+        </button>
+      </div>
+    );
+  }
+  if (props.kind === "describe_map") {
+    const places = draft ? Object.values(draft.doc.places).sort((a, b) => a.name.localeCompare(b.name)) : [];
+    const chosen = scope || draft?.doc.start.place || "";
+    return (
+      <div class="lre-stack">
+        <span class="lre-small lre-muted">Describe a place's inside in your own words: rooms and how they connect, or a town's places and the walks between them. The AI draws it as an lre-map-v1 map; you see it as a proposal with its preview before it goes into the draft.</span>
+        <label class="lre-field">
+          <span class="label">The place to draw</span>
+          <select class="lre-input" value={chosen} onChange={(event) => setScope(event.currentTarget.value)}>
+            {places.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.id})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label class="lre-field">
+          <span class="label">Map id</span>
+          <input class="lre-input" placeholder={`${chosen}_map`} value={mapId} onInput={(event) => setMapId(event.currentTarget.value.replace(/[^\w-]/g, "_"))} />
+        </label>
+        <label class="lre-field">
+          <span class="label">Describe it</span>
+          <textarea class="lre-input" rows={6} style={{ fontFamily: "inherit" }} placeholder="A narrow farmhouse: the front door opens into a hall, with the parlour on the left and the kitchen at the back; a door from the kitchen to the scullery…" value={text} onInput={(event) => setText(event.currentTarget.value)} />
+        </label>
+        <button type="button" class="lre-btn primary" disabled={!text.trim() || !chosen || props.busy} onClick={() => props.onStart({ scope: chosen, prose: text.trim(), ...(mapId.trim() ? { mapId: mapId.trim() } : {}) })}>
+          Draw the map
         </button>
       </div>
     );
@@ -177,6 +210,7 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
   const [applied, setApplied] = useState(false);
   const [busy, run] = useBusy();
   const send = useMemo(() => draftSend(props.app), [props.app]);
+  const draft = useSelect(props.app.drafts, (d) => d);
   // Import back-links (DESIGN §9.7): `sources` are `bookId/entryId`; the review names the book.
   const [bookNames, setBookNames] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -214,6 +248,8 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
             const from = [...new Set(strings(value.sources).map((link) => link.split("/")[0] ?? link))].map((id) => bookNames[id] ?? id);
             const assumed = strings(value.assumed);
             const tableFields = assumed.filter((f) => f !== "kind");
+            // A pack draws what it can of a proposed value (a map as Play will show it).
+            const Preview = props.app.catalog.previews.get(p.collection);
             return (
               <div key={p.id} class="lre-lint" data-lre-proposal={p.id}>
                 <label class="lre-check">
@@ -251,6 +287,7 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
                     {open === p.id ? "Hide value" : "Show value"}
                   </button>
                   {open === p.id ? <JsonView value={shownValue(p, bookNames)} /> : null}
+                  {Preview && draft ? <Preview world={draft.doc} collection={p.collection} id={p.key} value={p.value} /> : null}
                 </span>
               </div>
             );

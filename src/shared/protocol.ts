@@ -164,12 +164,14 @@ export interface UiRequest extends Request<"lre.ui"> {
 }
 
 /**
- * Background-lane jobs (DESIGN §13, §15): Import from lore, Build/Refine with AI, Playtest, Check world.
- * Input: `import_lore` `{bookIds}`; `refine` `{instructions}`; `playtest` `{turns: string[]}`;
- * `check_world` `{days?: number}` (1–14 simulated days, default 3). Playtest and Check world results
- * share the `turns`/`lint` shape (Check world: one entry per day, with drops, failures and leaks as notes).
+ * Background-lane jobs (DESIGN §13, §15): Import from lore, Build/Refine with AI, Describe a map,
+ * Playtest, Check world. Input: `import_lore` `{bookIds}`; `refine` `{instructions}`; `describe_map`
+ * `{scope, prose, mapId?}` (the place drawn, the author's description, and the map's id, by default
+ * `<scope>_map`; its one proposal is the map); `playtest` `{turns: string[]}`; `check_world`
+ * `{days?: number}` (1–14 simulated days, default 3). Playtest and Check world results share the
+ * `turns`/`lint` shape (Check world: one entry per day, with drops, failures and leaks as notes).
  */
-export type JobKind = "import_lore" | "refine" | "playtest" | "check_world";
+export type JobKind = "import_lore" | "refine" | "describe_map" | "playtest" | "check_world";
 
 /**
  * `list`: the user's kept jobs for a world (running ones, and the last few that ended), oldest

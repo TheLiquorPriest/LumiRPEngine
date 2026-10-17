@@ -56,6 +56,14 @@ export interface PackConfigProps {
   onChange(next: JsonObject): void;
 }
 
+/** A proposed value of a collection, drawn for a job's review (a map as Play will show it). */
+export interface PreviewProps {
+  world: WorldDoc;
+  collection: WorldCollection;
+  id: string;
+  value: JsonValue;
+}
+
 export interface ChipProps {
   chip: Chip;
   chatId: ChatId;
@@ -69,6 +77,8 @@ export interface UiRegistry {
   config(component: ComponentType<PackConfigProps>): void;
   /** Overrides the default chip rendering for a kind. */
   chip(kind: ChipKind, component: ComponentType<ChipProps>): void;
+  /** Draws a proposed value of a collection in a job's review; one per collection. */
+  preview(collection: WorldCollection, component: ComponentType<PreviewProps>): void;
 }
 
 export interface UiPackDef {

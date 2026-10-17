@@ -2,9 +2,11 @@
 // the map compiled into the draft in place of any stored version, every place shown, drawn by the
 // same stage and drawing as Play's map.
 
-import { useState } from "preact/hooks";
-import { compileMaps } from "../../../shared/maps";
+import { useMemo, useState } from "preact/hooks";
+import { compileMaps, readMap } from "../../../shared/maps";
 import type { MapDoc, WorldDoc } from "../../../shared/world";
+import { Empty } from "../../../frontend/components";
+import type { PreviewProps } from "../../../frontend/registry";
 import { scopeView, type MapScopeView } from "../core/map-scope";
 import { MapStage } from "./map";
 
@@ -14,6 +16,15 @@ const NOBODY_INSIDE: ReadonlySet<string> = new Set();
 export function previewScope(world: WorldDoc, key: string, map: MapDoc): MapScopeView {
   const doc = compileMaps({ ...world, maps: { ...world.maps, [key]: map } });
   return scopeView(doc, map.scope, { drawn: () => true, known: () => true }, { level: 4, trail: [] });
+}
+
+/** A proposed map (Describe a map) as Play will draw it, compiled into the draft. */
+export function MapProposalPreview(props: PreviewProps) {
+  const scope = useMemo(() => {
+    const { map } = readMap(props.value);
+    return map ? previewScope(props.world, props.id, map) : null;
+  }, [props.world, props.id, JSON.stringify(props.value)]);
+  return scope ? <MapPreview scope={scope} height={260} /> : <Empty>This proposal isn't a map the engine can read.</Empty>;
 }
 
 export function MapPreview(props: { scope: MapScopeView; height?: number }) {
