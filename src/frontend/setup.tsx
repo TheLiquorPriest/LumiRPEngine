@@ -14,7 +14,8 @@ import { createHost } from "./host";
 import { Hud } from "./hud";
 import type { HudSize } from "./hud";
 import { createOverlays } from "./overlays";
-import { hudCentreX, hudFloatRect } from "./layout";
+import { HudFloat } from "./hud-float";
+import { hudCentreX } from "./layout";
 import type { OverlaySet } from "./overlays";
 import { UI_PACKS } from "./packs";
 import { ProtocolClient } from "./protocol-client";
@@ -109,43 +110,42 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   });
 
   // ------------------------------------------------------------ HUD pill
-  let hud: SpindleFloatWidgetHandle | null = null;
-  let hudSize: HudSize = { width: 0, height: 0 };
-  const ensureHud = (): SpindleFloatWidgetHandle => {
-    if (hud) return hud;
-    const rect = hudFloatRect(host.viewport.get());
-    const widget = host.ui.createFloatWidget({ width: rect.width, height: rect.height, initialPosition: { x: rect.x, y: rect.y }, chromeless: true, tooltip: "World status", persistGeometry: rect.key });
-    widget.root.style.width = "100%";
-    widget.root.style.height = "100%";
-    // Where the code last put the pill: while it is still there (the player hasn't moved it), it
-    // stays centred as its content resizes it.
-    let placed = { x: rect.x, y: rect.y };
-    render(
-      <AppContext.Provider value={app}>
-        <div class="lre" style={{ width: "max-content", height: "100%" }}>
-          <Hud
-            resize={(size) => {
-              if (size.width === hudSize.width && size.height === hudSize.height) return;
-              hudSize = size;
-              widget.setSize(size.width, size.height);
-              const at = widget.getPosition();
-              if (at.x !== placed.x || at.y !== placed.y) return;
-              placed = { x: hudCentreX(host.viewport.get(), size.width), y: placed.y };
-              widget.moveTo(placed.x, placed.y);
-            }}
-          />
-        </div>
-      </AppContext.Provider>,
-      widget.root,
-    );
-    hud = widget;
-    return widget;
-  };
-  cleanups.push(() => {
-    if (!hud) return;
-    render(null, hud.root);
-    hud.destroy();
+  const hud = new HudFloat<SpindleFloatWidgetHandle>({
+    viewport: () => host.viewport.get(),
+    create(rect) {
+      const widget = host.ui.createFloatWidget({ width: rect.width, height: rect.height, initialPosition: { x: rect.x, y: rect.y }, chromeless: true, tooltip: "World status", persistGeometry: rect.key });
+      widget.root.style.width = "100%";
+      widget.root.style.height = "100%";
+      let size: HudSize = { width: 0, height: 0 };
+      // Where the code last put the pill: while it is still there (the player hasn't moved it), it
+      // stays centred as its content resizes it.
+      let placed = { x: rect.x, y: rect.y };
+      render(
+        <AppContext.Provider value={app}>
+          <div class="lre" style={{ width: "max-content", height: "100%" }}>
+            <Hud
+              resize={(next) => {
+                if (next.width === size.width && next.height === size.height) return;
+                size = next;
+                widget.setSize(next.width, next.height);
+                const at = widget.getPosition();
+                if (at.x !== placed.x || at.y !== placed.y) return;
+                placed = { x: hudCentreX(host.viewport.get(), next.width), y: placed.y };
+                widget.moveTo(placed.x, placed.y);
+              }}
+            />
+          </div>
+        </AppContext.Provider>,
+        widget.root,
+      );
+      return widget;
+    },
+    destroy(widget) {
+      render(null, widget.root);
+      widget.destroy();
+    },
   });
+  cleanups.push(() => hud.dispose());
 
   // ------------------------------------------------------------ input-bar palette
   const actions = host.ui.registerInputBarAction({ id: "lre-actions", label: "World actions…", enabled: false });
@@ -167,8 +167,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const follow = () => {
     const view = client.getState().view;
     const world = view !== null && view.status !== "not_world";
-    if (world && view.hud) ensureHud().setVisible(true);
-    else hud?.setVisible(false);
+    if (world && view.hud) hud.ensure().setVisible(true);
+    else hud.get()?.setVisible(false);
     actions.setEnabled(world && view.palette !== null);
     timelapse.setEnabled(world && view.palette?.timelapse != null);
     clock.setEnabled(world && view.hud !== null);
@@ -176,6 +176,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     mapAction.setEnabled(world && view.panels["space.map"] !== undefined);
   };
   cleanups.push(client.subscribe(follow));
+  // Crossing the phone breakpoint moves the pill to that layout's saved geometry.
+  cleanups.push(
+    host.viewport.subscribe(() => {
+      if (hud.relayout()) follow();
+    }),
+  );
 
   // ------------------------------------------------------------ chips and chat toasts
   cleanups.push(
