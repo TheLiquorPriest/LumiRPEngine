@@ -225,7 +225,7 @@ export function LoreEditor(props: EditorProps) {
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
   const lint = draft?.lint ?? [];
   const path = `lore.${id}`;
-  const ctx = { doc: props.world, lint, path, identifiers };
+  const ctx = { doc: props.world, lint, path, identifiers, functions: draft?.functions ?? [] };
   const changed = JSON.stringify(value) !== JSON.stringify(stored ?? null);
   const secret = value.secret === true;
   const audience = strings(value.audience).filter((s): s is StepPurpose => (LORE_AUDIENCE as readonly string[]).includes(s));
