@@ -7,11 +7,11 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import type { EntityId, InterruptClass, Visibility } from "../shared/ids";
-import { INTERRUPT_CLASSES } from "../shared/ids";
+import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids";
+import { DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
+import { isBand, tierBand, tierLabel, tierOf } from "../shared/tiers";
 import type { PackEvent } from "../shared/ledger";
 import type { GmView } from "../shared/state-view";
-import { tierBand } from "../shared/tiers";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
 import type { Value } from "./expr";
 import { knowsChannel, spawnChannel } from "./narration-channels";
@@ -36,6 +36,8 @@ export const ENGINE_EVENTS = {
   pause: "engine.pause",
   /** A check the `check` effect rolled, with its final values (the outcome's effects follow it). */
   check: "engine.check",
+  /** A GM edit of an entity's simulation detail: its tier, agent flag and per-entity level overrides. */
+  entity: "engine.entity",
 } as const;
 
 export interface EngineSlice {
@@ -207,6 +209,38 @@ const events: EventTypeDef<PackEvent>[] = [
     describe: (e) => {
       const total = typeof e.data.total === "number" ? ` (rolled ${e.data.total}${typeof e.data.dc === "number" ? ` against ${e.data.dc}` : ""})` : "";
       return `${str(e, "actor")}: ${str(e, "check").replace(/_/g, " ")}, ${str(e, "outcome").replace(/_/g, " ")}${total}`;
+    },
+  },
+  {
+    type: ENGINE_EVENTS.entity,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
+      const { tier, agent, levels } = e.data;
+      if (tier !== undefined && (typeof tier !== "string" || !(tierOf(ctx.world, tier) || isBand(tier)))) return { code: "bad_tier", reason: `no tier ${String(tier)}` };
+      if (agent !== undefined && typeof agent !== "boolean") return { code: "bad_event", reason: "agent is yes or no" };
+      if (levels !== undefined && !(isRecord(levels) && Object.entries(levels).every(([d, v]) => DOMAINS.some((x) => x === d) && (v === null || (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 4))))) return { code: "bad_level", reason: "a level is a whole number 0–4, or null to follow the tier" };
+      return null;
+    },
+    apply: (e, state) => {
+      const ent = own(state.entities, str(e, "entity"));
+      if (!ent) return;
+      if (typeof e.data.tier === "string") ent.tier = e.data.tier;
+      if (typeof e.data.agent === "boolean") ent.agent = e.data.agent;
+      const levels = e.data.levels;
+      if (!isRecord(levels)) return;
+      for (const domain of DOMAINS) {
+        const v = levels[domain];
+        if (v === null) delete ent.levels[domain];
+        else if (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 4) ent.levels[domain] = v as Level;
+      }
+    },
+    describe: (e, ctx) => {
+      const parts: string[] = [];
+      if (typeof e.data.tier === "string") parts.push(tierLabel(ctx.world, e.data.tier));
+      if (typeof e.data.agent === "boolean") parts.push(e.data.agent ? "lives off-screen" : "no longer lives off-screen");
+      const levels = e.data.levels;
+      if (isRecord(levels)) for (const [d, v] of Object.entries(levels)) parts.push(`${d} level ${v === null ? "from the tier" : String(v)}`);
+      return `${own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity")}: ${parts.join(", ")}`;
     },
   },
 ];

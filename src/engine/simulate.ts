@@ -26,6 +26,7 @@ import { rulesetFloor, type Registry } from "./registry-impl";
 import { createRng, type Rng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick, type RuleFiring } from "./rules";
 import { allSchedules, instantEvents, scheduleInstants, type ScheduleInstant } from "./schedules";
+import { isGone } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import type { WorldDoc } from "../shared/world";
@@ -42,10 +43,10 @@ export function processSeed(runSeed: string, process: string, entity: EntityId, 
   return hashParts(runSeed, process, entity, slotIndex);
 }
 
-/** LOD1 agents, by id. */
+/** LOD1 agents, by id; one a GM removed is out of the world and steps no more. */
 export function lod1Agents(state: Readonly<WorldState>): EntityId[] {
   return Object.keys(state.entities)
-    .filter((id) => own(state.entities, id)?.agent === true)
+    .filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id))
     .sort();
 }
 

@@ -6,7 +6,7 @@
 // `lre.error` carrying the same `reqId`. State arrives unsolicited as snapshots and deltas.
 
 import type { JsonObject, JsonValue } from "./json";
-import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, Level, MessageId, PanelId, RevisionId, WorldId } from "./ids";
+import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { SheetSectionView, StateView } from "./state-view";
@@ -88,10 +88,39 @@ export interface FixRequest extends Request<"lre.fix"> {
 }
 
 /**
- * One typed edit (DESIGN §12 ✎ fixes). Each is checked against what it touches (a field's type,
- * values and bounds) and resolved through the core effects; a submit applies all or none.
+ * One typed edit (DESIGN §7 GM edits, §12 ✎ fixes). Each is checked against what it touches (a
+ * field's type, values and bounds; a relation type's kinds and fields; a tier, a track's stages)
+ * and resolved through the core effects, so pack guards apply. A ✎ fix is one `set`; the GM editor
+ * sends any of them in order, applied all or none as one `fix` entry.
+ *  - `set`, `add`: an entity's field (an owner is `set owner`); `add` stops at the field's bounds.
+ *  - `link` adds a relation or replaces its fields; `unlink` removes it.
+ *  - `move` puts an entity at a place, out of any container; `put` puts it inside another entity
+ *    (`in`), or with `into: null` takes it out to where its container is.
+ *  - `adjust` moves money into (positive) or out of an account against `economy.external:correction`.
+ *  - `stage` sets a track's stage.
+ *  - `entity` sets an entity's tier, agent flag and per-domain level overrides (null follows the tier).
+ *  - `spawn` adds an entity; `despawn` takes one out of the world (`gone`, its relations unlinked)
+ *    and `restore` brings it back.
  */
-export type EditOp = { op: "set"; entity: EntityId; field: FieldId; value: JsonValue };
+export type EditOp =
+  | { op: "set"; entity: EntityId; field: FieldId; value: JsonValue }
+  | { op: "add"; entity: EntityId; field: FieldId; delta: number }
+  | { op: "link"; rel: RelationTypeId; from: EntityId; to: EntityId; fields?: JsonObject; until?: number }
+  | { op: "unlink"; rel: RelationTypeId; from: EntityId; to: EntityId }
+  | { op: "move"; entity: EntityId; to: PlaceId }
+  | { op: "put"; entity: EntityId; into: EntityId | null }
+  | { op: "adjust"; account: EntityId; cents: number }
+  | { op: "stage"; track: TrackId; to: StageId }
+  | { op: "entity"; entity: EntityId; tier?: TierId; agent?: boolean; levels?: Partial<Record<DomainId, number | null>> }
+  | { op: "spawn"; kind: KindId; name: string; id?: EntityId; tier?: TierId; place?: PlaceId; agent?: boolean }
+  | { op: "despawn"; entity: EntityId }
+  | { op: "restore"; entity: EntityId };
+
+/** A GM edit on the head (DESIGN §7): the operations in order, all or none, as one `post` entry of kind `fix`; locked fields are writable. */
+export interface EditRequest extends Request<"lre.edit"> {
+  chatId: ChatId;
+  ops: EditOp[];
+}
 
 /** A Play change to the running chat: a realism, time or Upgrade marker. With `preview`, nothing is written. */
 export type MarkerRequest = Request<"lre.marker"> & { chatId: ChatId; preview?: true } & (
@@ -250,6 +279,7 @@ export type FrontendToBackend =
   | ChipRequest
   | ViewOpenRequest
   | FixRequest
+  | EditRequest
   | MarkerRequest
   | KeepRequest
   | SettingsGetRequest
@@ -294,6 +324,7 @@ export interface ResultBodies {
   "lre.chip": { applied: boolean; pending: boolean };
   "lre.view.open": { materialized: boolean; pending: boolean };
   "lre.fix": { pending: boolean };
+  "lre.edit": { pending: boolean };
   "lre.marker": { pending: boolean; preview?: MarkerPreview };
   "lre.keep": { pending: boolean };
   "lre.settings.get": SettingsResult;

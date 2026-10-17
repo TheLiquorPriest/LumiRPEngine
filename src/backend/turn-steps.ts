@@ -23,7 +23,7 @@ import { optionalQuery } from "../engine/pack-kit";
 import type { ReadContext } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import type { Rng } from "../engine/rng";
-import { kindIs, placeOfEntity } from "../engine/scope";
+import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { EngineTurnPlan } from "../engine/turn";
 import { findLeaks } from "../engine/visibility";
@@ -55,7 +55,7 @@ export function presentNames(registry: Registry, world: WorldDoc, state: Readonl
   const here = placeOfEntity(state, world.pov);
   if (!here) return [];
   return Object.entries(state.entities)
-    .filter(([id, e]) => id !== world.pov && e.agent && placeOfEntity(state, id) === here)
+    .filter(([id, e]) => id !== world.pov && e.agent && placeOfEntity(state, id) === here && !isGone(state, id))
     .map(([, e]) => e.name);
 }
 

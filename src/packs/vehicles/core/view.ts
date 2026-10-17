@@ -4,7 +4,7 @@ import type { EntityId } from "../../../shared/ids";
 import type { ReadContext } from "../../../engine/registry";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { numOf, strOf, own, rowOf } from "../../../engine/pack-kit";
-import { kindIs, placeOfEntity } from "../../../engine/scope";
+import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { rangeLeft, serviceInterval } from "./index";
 
 export interface GarageVehicle {
@@ -34,7 +34,7 @@ export function buildGarageView(ctx: ReadContext): GarageView {
   const vehicles: GarageVehicle[] = [];
   for (const id of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, id);
-    if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle")) continue;
+    if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || isGone(ctx.state, id)) continue;
     const grant = Object.keys(ctx.state.entities)
       .sort()
       .map((b) => ({ b, r: own(ctx.state.entities, b)?.relations.find((x) => x.type === "uses" && x.to === id) }))

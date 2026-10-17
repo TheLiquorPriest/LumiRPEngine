@@ -191,6 +191,25 @@ export function placeOfEntity(state: { entities: Record<EntityId, EntityState> }
   return null;
 }
 
+/** The field a GM's Remove sets and Restore clears; nothing else writes it. */
+export const GONE_FIELD = "gone";
+
+/**
+ * Whether an entity is out of the world: a GM removed it (its `gone` field), or it is inside
+ * something that was. It stays in state, so Undo and Restore bring it back whole, but no player
+ * view, palette or simulation process sees it; the GM view lists it as gone.
+ */
+export function isGone(state: { entities: Record<EntityId, EntityState> }, id: EntityId): boolean {
+  let cur: EntityId | undefined = id;
+  for (let guard = 0; cur && guard < 32; guard++) {
+    const e: EntityState | undefined = own(state.entities, cur);
+    if (!e) return false;
+    if (e.fields[GONE_FIELD] === true) return true;
+    cur = e.relations.find((r) => r.type === "in")?.to;
+  }
+  return false;
+}
+
 /** Whether `place` is `ancestor` or lies inside it. */
 export function placeWithin(world: WorldDoc, place: string | null, ancestor: string): boolean {
   let id: string | undefined = place ?? undefined;

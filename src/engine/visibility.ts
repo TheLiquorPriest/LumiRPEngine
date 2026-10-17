@@ -12,7 +12,7 @@ import type { TrackKind, WorldDoc } from "../shared/world";
 import { objectiveLabel, objectiveWhen } from "../shared/world";
 import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { Registry } from "./registry-impl";
-import { asObject, evalExpr, fieldDef, scopeEnv, truthy } from "./scope";
+import { asObject, evalExpr, fieldDef, isGone, scopeEnv, truthy } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 
@@ -33,7 +33,8 @@ export function entityVisibility(world: WorldDoc, state: Readonly<WorldState>, i
 
 export function canSeeEntity(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: EntityId): boolean {
   if (id === pov) return true;
-  if (!own(state.entities, id)) return false;
+  // A removed entity is out of the world for the player; the GM view still lists it.
+  if (!own(state.entities, id) || isGone(state, id)) return false;
   const v = entityVisibility(world, state, id);
   return v === "public" || (v === "known_by" && knows(state, pov, id));
 }

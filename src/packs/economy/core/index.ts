@@ -30,7 +30,7 @@ import { minorUnitPlural } from "../../../shared/money";
 import { labelOf, mutableSlice, numOf, objOf, optionalService, sliceOf, sliceRecord, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { EffectContext, EventTypeDef, PackDef, ReadContext, Rejection, ServiceMap, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
-import { kindIs, placeOfEntity } from "../../../engine/scope";
+import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import {
   accountsOf,
@@ -214,6 +214,8 @@ declare module "../../../engine/registry" {
     "economy.set_cash": (ctx: ReadContext, holder: EntityId, cents: number) => LedgerEvent[] | Rejection | null;
     /** A purchase that applied (its events) repriced to `cents` in all: the difference moves between the two accounts its payment used. */
     "economy.reprice": (ctx: ReadContext, events: readonly LedgerEvent[], cents: number) => LedgerEvent[] | Rejection;
+    /** A GM money edit: `cents` into (positive) or out of an account, posted against the outside correction account, with its history line. */
+    "economy.adjust": (ctx: ReadContext, account: EntityId, cents: number) => LedgerEvent[] | Rejection;
   }
   interface QueryMap {
     wealth: (ctx: ReadContext, who: EntityId) => string;
@@ -772,7 +774,7 @@ function runningBooks(base: ReadContext): { ctx(): ReadContext; post(events: rea
 function people(ctx: ReadContext): EntityId[] {
   return Object.keys(ctx.state.entities)
     .sort()
-    .filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person"));
+    .filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !isGone(ctx.state, id));
 }
 
 /**
@@ -1226,6 +1228,15 @@ export const economyPack: PackDef = {
     r.service("economy.lose", loseWith);
     r.service("economy.set_cash", setCash);
     r.service("economy.reprice", reprice);
+    r.service("economy.adjust", (ctx, account, cents) => {
+      if (own(ctx.state.entities, account)?.kind !== "account") return reject("not_account", `${labelOf(ctx, account)} isn't an account`);
+      if (!Number.isSafeInteger(cents) || cents === 0) return reject("bad_amount", "an adjustment is a whole amount other than nothing");
+      const lines: PostingLine[] = [
+        { account, amount: cents },
+        { account: CORRECTION_ACCOUNT, amount: -cents },
+      ];
+      return asUnit([{ type: "post", lines, memo: "Correction" }, txn("Correction", lines)]);
+    });
     r.query("wealth", (ctx, who) => wealthOf(ctx.state, who));
     r.query("can_afford", (ctx, who, cents) => {
       const level = ctx.levelOf(who, "money");

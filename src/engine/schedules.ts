@@ -23,7 +23,7 @@ import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { createRng, type Rng } from "./rng";
 import { optionalQuery, own } from "./pack-kit";
-import { fieldDef, kindIs, placeOfEntity } from "./scope";
+import { fieldDef, isGone, kindIs, placeOfEntity } from "./scope";
 import { GROUP_KIND, membersOf, selectEntities } from "./selector";
 import type { WorldState } from "./state";
 import { initialState, minutesBetween } from "./world-state";
@@ -108,19 +108,22 @@ export function ownerRank(reg: Registry, world: WorldDoc, state: Readonly<WorldS
 /**
  * Entities a schedule applies to: the owner entity; a group's members that aren't groups
  * themselves (through member groups too); every entity of the owner kind; or what a selector
- * matches. Ownerless schedules apply to none.
+ * matches. Ownerless schedules apply to none, and a removed entity keeps no schedule.
  */
 export function scheduleOwners(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, schedule: ScheduleDef): EntityId[] {
   const owner = schedule.owner;
-  if (isRecord(owner)) return selectEntities(reg, world, state, owner);
+  if (isRecord(owner)) return selectEntities(reg, world, state, owner).filter((id) => !isGone(state, id));
   if (typeof owner !== "string" || owner === "") return [];
   const e = own(state.entities, owner);
-  if (e) return kindIs(reg, world, e.kind, GROUP_KIND) ? membersOf(reg, world, state, owner) : [owner];
+  if (e) {
+    if (kindIs(reg, world, e.kind, GROUP_KIND)) return membersOf(reg, world, state, owner).filter((id) => !isGone(state, id));
+    return isGone(state, owner) ? [] : [owner];
+  }
   return Object.keys(state.entities)
     .sort()
     .filter((id) => {
       const x = own(state.entities, id);
-      return !!x && kindIs(reg, world, x.kind, owner);
+      return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id);
     });
 }
 

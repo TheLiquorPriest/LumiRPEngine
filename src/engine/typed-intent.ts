@@ -13,7 +13,7 @@
 import type { JsonObject } from "../shared/json";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import type { Registry } from "./registry-impl";
-import { kindIs } from "./scope";
+import { isGone, kindIs } from "./scope";
 import { selectorMatches } from "./selector";
 import type { WorldState } from "./state";
 import type { InterpretOutput } from "./steps";
@@ -194,7 +194,7 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const named = new Set(words(text));
   const pov = world.pov;
   const people = new Set<string>();
-  for (const [id, e] of Object.entries(state.entities)) if (id !== pov && kindIs(reg, world, e.kind, "person")) for (const w of words(e.name)) people.add(w);
+  for (const [id, e] of Object.entries(state.entities)) if (id !== pov && kindIs(reg, world, e.kind, "person") && !isGone(state, id)) for (const w of words(e.name)) people.add(w);
   const acts = (start: number) => playerActs(said, start, people);
   let best: { action: ActionDef; params: JsonObject; filled: boolean; skipped: number; length: number } | null = null;
   for (const action of actions.values()) {

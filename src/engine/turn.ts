@@ -19,7 +19,7 @@ import type { Registry } from "./registry-impl";
 import { resolveAction, type Resolution } from "./resolve";
 import { createRng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick } from "./rules";
-import { placeOfEntity } from "./scope";
+import { isGone, placeOfEntity } from "./scope";
 import { advance, catchUp, coarsen } from "./simulate";
 import type { PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
 import { buildMontage, pauseBookkeeping, parseOverrides, parseTarget, runTimelapse, speedThrough, turnElapsed, type Montage, type TimelapseOutcome } from "./time";
@@ -49,7 +49,7 @@ export interface EngineTurnPlan extends TurnPlan {
 function onScreen(w: Working): EntityId[] {
   const here = placeOfEntity(w.state, w.world.pov);
   if (!here) return [];
-  return Object.keys(w.state.entities).filter((id) => id !== w.world.pov && own(w.state.entities, id)?.agent && placeOfEntity(w.state, id) === here);
+  return Object.keys(w.state.entities).filter((id) => id !== w.world.pov && own(w.state.entities, id)?.agent && placeOfEntity(w.state, id) === here && !isGone(w.state, id));
 }
 
 export function planTurn(input: TurnPlanInput): EngineTurnPlan {

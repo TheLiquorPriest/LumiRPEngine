@@ -10,7 +10,7 @@ import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/led
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef } from "../shared/world";
 import { previewSheet } from "../engine/authoring";
-import { resolveEdit } from "../engine/edits";
+import { parseEditOps, resolveEdit } from "../engine/edits";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
 import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies } from "../shared/protocol";
@@ -191,6 +191,17 @@ export class Dispatcher {
         if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
         const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: edit.events } }) : { pending: false };
         reply("lre.fix", { pending: result.pending });
+        return;
+      }
+      case "lre.edit": {
+        // The GM editor (DESIGN §7): every operation checked, all or none, one `fix` entry; locked fields too.
+        const ops = parseEditOps(r.ops);
+        if (!ops) throw new RequestError("bad_request", "not a list of edits");
+        const { state, world } = await this.head(r.chatId, userId);
+        const edit = resolveEdit(this.rt.registry, world, state, ops, { gm: true, runSeed: this.runSeedOf(r.chatId) });
+        if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
+        const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: edit.events } }) : { pending: false };
+        reply("lre.edit", { pending: result.pending });
         return;
       }
       case "lre.marker": {

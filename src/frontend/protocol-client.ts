@@ -56,6 +56,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.chip": true,
   "lre.view.open": true,
   "lre.fix": true,
+  "lre.edit": true,
   "lre.marker": true,
   "lre.keep": true,
   "lre.settings.get": true,

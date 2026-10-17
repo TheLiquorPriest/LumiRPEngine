@@ -12,7 +12,7 @@ import type { WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
 import type { Registry } from "./registry-impl";
-import { bandOf, fieldDef } from "./scope";
+import { bandOf, fieldDef, GONE_FIELD } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import { canSeeEntity, canSeeField, canSeePlace, eventVisible, findLeaks, knows, unrevealedTruths } from "./visibility";
@@ -250,6 +250,8 @@ function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, po
   switch (e.type) {
     case "set": {
       if (INTERNAL_FIELD.test(e.field)) return null;
+      // A GM's Remove and Restore read as such, never as a field.
+      if (e.field === GONE_FIELD) return `${name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string") return `${name(e.entity)} → ${name(e.value)}`;
       const v = valueText(reg, world, state, pov, kind, e.field, e.value);

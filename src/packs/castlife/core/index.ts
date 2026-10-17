@@ -30,7 +30,7 @@ import type { EventTypeDef, PackDef, ReadContext, SlotInfo } from "../../../engi
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { activeSlot, allSchedules, ownerRank, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
-import { kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
+import { isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
 import { classValues, isGroup, isMemberOf, MEMBER_OF } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
@@ -314,7 +314,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
   if (appraise && block.place && g.next() < ENCOUNTER_CHANCE) {
     const here = Object.keys(ctx.state.entities)
       .sort()
-      .filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place);
+      .filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place && !isGone(ctx.state, other));
     const other = here[Math.floor(g.next() * here.length)];
     if (other) {
       const known = acquainted(ctx.state, who, other);
@@ -353,7 +353,7 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
   for (const who of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, who);
     const trips = e?.fields.trips;
-    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1) continue;
+    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || isGone(ctx.state, who)) continue;
     for (const raw of trips) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
@@ -484,7 +484,7 @@ export function buildCastView(ctx: ReadContext): CastView {
   const people: CastPerson[] = [];
   for (const id of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, id);
-    if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || !shown(id)) continue;
+    if (!e || id === pov || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id) || !shown(id)) continue;
     const place = placeOfEntity(ctx.state, id);
     const classes: Record<FacetId, FacetValueId[]> = {};
     for (const [facet] of facets) {
@@ -555,7 +555,7 @@ export const castlifePack: PackDef = {
       const out: { key: string; agent: EntityId; options: string[] }[] = [];
       const decided = decisions(ctx.state);
       for (const id of Object.keys(ctx.state.entities).sort()) {
-        const plan = own(ctx.state.entities, id)?.agent ? dayPlan(ctx, id) : null;
+        const plan = own(ctx.state.entities, id)?.agent && !isGone(ctx.state, id) ? dayPlan(ctx, id) : null;
         for (const t of plan?.ties ?? []) if (t.via === "seed" && !own(decided, t.key)) out.push({ key: t.key, agent: id, options: t.options });
       }
       return out;
@@ -612,7 +612,7 @@ export const castlifePack: PackDef = {
         const here = placeOfEntity(ctx.state, pov);
         for (const id of Object.keys(ctx.state.entities).sort()) {
           const e = own(ctx.state.entities, id);
-          if (!e || id === pov || !here || placeOfEntity(ctx.state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
+          if (!e || id === pov || !here || placeOfEntity(ctx.state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
           const act = e.fields.activity;
           lines.push(`${e.name}${typeof act === "string" && act !== "idle" ? ` (${act.replace(/_/g, " ")})` : ""} is here.`);
         }

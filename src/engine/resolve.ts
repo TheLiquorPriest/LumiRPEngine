@@ -14,7 +14,7 @@ import { materializeAll } from "./materialize";
 import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
-import { evalExpr, kindIs, placeOfEntity, scopeEnv, toValue, truthy } from "./scope";
+import { evalExpr, isGone, kindIs, placeOfEntity, scopeEnv, toValue, truthy } from "./scope";
 import { selectorMatches } from "./selector";
 import type { WorldState } from "./state";
 import { Working } from "./working";
@@ -260,7 +260,7 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
   for (const id of Object.keys(state.entities).sort()) {
     if (id === actor) continue;
     const e = own(state.entities, id);
-    if (!e) continue;
+    if (!e || isGone(state, id)) continue;
     if (def.ref && !kindIs(reg, world, e.kind, def.ref)) continue;
     if (def.of && !selectorMatches(reg, world, state, def.of, id)) continue;
     if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && e.fields.owner !== actor) continue;
