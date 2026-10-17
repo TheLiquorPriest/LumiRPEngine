@@ -16,10 +16,11 @@
 
 import { hashJson } from "../../src/shared/hash";
 import type { ChatId } from "../../src/shared/ids";
-import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, Rec, Tombstone } from "../../src/shared/ledger";
+import type { EventRef, HeldWrite, LedgerEvent, Marker, MarkerBody, MessageLedger, Rec, Tombstone, UpgradePicks } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE, ROOT_PATH } from "../../src/shared/ledger";
 import { decodeLedger, toChain } from "../../src/backend/ledger-io";
 import { applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent } from "../../src/engine/events";
+import { touchedField } from "../../src/engine/touched";
 import { isLive, isTombstoned } from "../../src/engine/ledger/path";
 import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
@@ -48,7 +49,9 @@ export type Op =
   | { op: "restart" }
   | { op: "clobber"; at: number; echo: boolean }
   | { op: "excursion"; at: number; inner: Op[] }
-  | { op: "inFlight"; type: number; inner: Op[]; stop: boolean; reply: number };
+  | { op: "inFlight"; type: number; inner: Op[]; stop: boolean; reply: number }
+  /** An Upgrade with picks (the definition merge) to one of the revisions, `picks` choosing them. */
+  | { op: "upgrade"; to: number; picks: number };
 
 const USER_TEXTS = ["buy:map:30", "buy:lamp:20", "buy:rope:90", "use:map", "use:lamp", "use:rope", "earn:15", "roll", "look around"];
 const REPLIES = ["Okay.", "You find coins. [found:5]", "The lamp slips away. [lose:lamp]", "A windfall! [found:40]", "You drop the map. [lose:map]", "Nothing happens."];
@@ -115,7 +118,8 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     else if (roll < 0.66) ops.push({ op: "branch", at: r() });
     else if (roll < 0.67) ops.push({ op: "import" });
     else if (roll < 0.77) ops.push({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}) });
-    else if (roll < 0.8) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r() });
+    else if (roll < 0.785) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r() });
+    else if (roll < 0.8) ops.push({ op: "upgrade", to: r(), picks: r() });
     else if (roll < 0.82) ops.push({ op: "dryRun" });
     else if (roll < 0.84) ops.push({ op: "restart" });
     else if (roll < 0.87) ops.push({ op: "clobber", at: r(), echo: r() < 0.5 });
@@ -504,6 +508,19 @@ export class Runner {
           const rec = target ? (await this.h.core(chat)).journal.messages[target.id]?.ledger.swipes[String(target.swipeId)] : undefined;
           const fold = (await this.h.folds(chat)).optimized.messages.find((m) => m.id === g.messageId)?.fold;
           if (rec && rec.seed !== "" && fold === "on_path") throw new InvariantError("L5", "a turn whose chain changed in flight committed on-path");
+        }
+        return;
+      }
+      case "upgrade": {
+        const merge = pick<UpgradePicks>([{}, { [POV]: { fields: { cash: "take" } } }, { [POV]: { entity: "keep" } }, { [POV]: { fields: { cash: "keep", mood: "take" } }, dev: { entity: "take" } }], op.picks);
+        const before = (await this.h.folds(chat)).reference.state;
+        const result = await this.h.write(chat, { kind: "marker", id: `w${++this.ids}`, target: "head", body: { kind: "migrate", to: pick(this.h.revisions, op.to), merge } });
+        // L44: an Upgrade never takes a value play changed unless picked (here Sam's cash, which turns change).
+        const folds = await this.h.folds(chat);
+        const head = folds.reference.messages.findLast((m) => m.fold !== "user");
+        const taken = merge[POV]?.fields?.cash === "take";
+        if (result.applied && (head?.fold === "on_path" || head?.fold === "plain") && touchedField(before, POV, "cash") && !taken && folds.reference.state.entities[POV]?.fields.cash !== before.entities[POV]?.fields.cash) {
+          throw new InvariantError("L44", `${chat}: an Upgrade took Sam's cash, which play changed, without a pick`);
         }
         return;
       }
