@@ -6,6 +6,7 @@ import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { StageDef, TrackDef, TrackKind } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { lintAt, SchemaFields, worldIdentifiers } from "../../../frontend/build/schema-form";
+import { SelectorEditor } from "../../../frontend/build/selector-editor";
 import type { FieldSpec } from "../../../frontend/build/schema";
 import { Seg, useBusy } from "../../../frontend/components";
 import type { EditorProps } from "../../../frontend/registry";
@@ -227,6 +228,7 @@ export function TrackEditor(props: EditorProps) {
           </select>
         </label>
       </div>
+      {track.visibility === "known_by" ? <SelectorEditor label="Known by (besides its owner and those who know the owner)" value={track.knownBy} doc={props.world} optional onChange={(knownBy) => setTrack({ ...track, knownBy })} /> : null}
       <TrackGraph track={track} selected={selected} onSelect={setSelected} />
       {unreachable > 0 ? <span class="lre-small lre-neg">{unreachable} stage(s) can't be reached from the start.</span> : null}
       <form

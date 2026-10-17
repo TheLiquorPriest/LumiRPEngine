@@ -23,8 +23,8 @@ export type FieldSpec =
   | { kind: "tags"; key: string; label: string }
   /** Free-form labels as chips, suggesting the tags other entities already use. */
   | { kind: "tagList"; key: string; label: string }
-  /** A selector (`shared/world.ts` `Selector`): kinds, tiers, classes, tags, groups, ids. */
-  | { kind: "selector"; key: string; label: string; optional?: boolean }
+  /** A selector (`shared/world.ts` `Selector`): kinds, tiers, classes, tags, groups, ids. `when`: shown only while a sibling field holds one of these values. */
+  | { kind: "selector"; key: string; label: string; optional?: boolean; when?: { key: string; values: readonly string[] } }
   /** An entity's classification: one picker per facet, single or multiple as the facet says. */
   | { kind: "classes"; key: string; label: string }
   /** A facet's values as a tree: label, parent value, description. */
@@ -87,6 +87,7 @@ export const FIELD_DEF: FieldSpec = {
       ],
     },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
     { kind: "enum", key: "domain", label: "Realism domain", values: DOMAINS, optional: true },
     { kind: "number", key: "level", label: "Live from level", min: 0, max: 4, step: 1, optional: true },
   ],
@@ -146,6 +147,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "agent", key: "agent", label: "LOD1 agent (runs agendas and the planner)" },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
   ],
   places: [
     { kind: "text", key: "name", label: "Name" },
@@ -175,6 +177,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     },
     { kind: "json", key: "fields", label: "Fields" },
     { kind: "enum", key: "visibility", label: "Visibility", values: PLACE_VISIBILITY, optional: true },
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by", "discoverable"] } },
   ],
   routes: [
     { kind: "ref", key: "from", label: "From", collection: "places" },
@@ -303,6 +306,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "text", key: "start", label: "Start stage" },
     { kind: "json", key: "stages", label: "Stages" },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY },
+    { kind: "selector", key: "knownBy", label: "Known by (besides its owner and those who know the owner)", optional: true, when: { key: "visibility", values: ["known_by"] } },
   ],
   tables: [{ kind: "json", key: "rows", label: "Rows" }],
   sections: [

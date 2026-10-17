@@ -545,6 +545,8 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
       );
     }
     case "selector":
+      // Shown only beside the value it qualifies (Known by beside a known_by visibility).
+      if (spec.when && !spec.when.values.some((v) => v === props.parent[spec.when?.key ?? ""])) return null;
       // Selector and the class and value maps are plain JSON shapes; the casts only restate them as JSON.
       return (
         <div class="lre-field">
