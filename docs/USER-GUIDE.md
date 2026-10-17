@@ -147,7 +147,9 @@ That note goes only to the next turn and its swipes. It is saved with the chat, 
 
 ### The map
 
-Open the map from the **World map** button in the input bar, **🗺 Map** in the status pill's details or on the Scene panel, or the **Map** tab in Play. It opens as a floating widget (480 px wide, resizable, with ⤢ for fullscreen and ✕ to close); the phone and the desktop remember its size and position separately. Drag to pan, scroll or pinch to zoom, and use **+**, **−** and **Fit**. Tap a place to see how to get there: each travel option shows its mode (walk, road, off-road or water), time, vehicle and cost, or why it isn't available ("No route from here."); choose one and the move or drive is sent and the map closes. The map shows places you know, with the routes between them, and a grid with terrain if the world has one. Place names never overlap: a name sits beside its dot, or further out on a short line, on two lines, or shortened (the full name shows in the place's card when you tap it); on a crowded map a name may be left off, and its dot stays tappable. On a phone (a screen up to 600 px wide, or any touch screen), opening the map closes the drawer first and goes fullscreen; if the drawer can't close, the map opens in **Play → Map** instead.
+Open the map from the **World map** button in the input bar, **🗺 Map** in the status pill's details or on the Scene panel, or the **Map** tab in Play. It opens as a floating widget (480 px wide, resizable, with ⤢ for fullscreen and ✕ to close); the phone and the desktop remember its size and position separately. Drag to pan, scroll or pinch to zoom, and use **+**, **−** and **Fit**. Tap a place to see how to get there: each travel option shows its mode (walk, road, off-road or water), time, vehicle and cost, or why it isn't available ("No route from here."); choose one and the move or drive is sent and the map closes. Place names never overlap: a name sits beside its dot, or further out on a short line, on two lines, or shortened (the full name shows in the place's card when you tap it); on a crowded map a name may be left off, and its dot stays tappable. On a phone (a screen up to 600 px wide, or any touch screen), opening the map closes the drawer first and goes fullscreen; if the drawer can't close, the map opens in **Play → Map** instead.
+
+The map shows one place at a time, with the places directly inside it (a town's streets and shops, a manor's rooms) and the routes between them. It opens where you are: on your own place when there are places inside it, otherwise on the nearest place around you that has a map or a grid, or else on the place just around yours. The **breadcrumbs** along the top lead back out, a level at a time, up to the **World** (the places at the top of the world), and a place with places inside it has **Open** on its card. **You are here** marks where you stand. The map draws the places you know and the places you're inside. Travel isn't limited to the place on screen: the palette and a typed move reach any place you know, and so does the map from any of its levels. From Space and travel level 2, a place with a grid shows its walls, doors and terrain behind its rooms, and from level 3 the square you're standing on.
 
 ### The GM view
 
@@ -455,17 +457,18 @@ Anything the engine inserts into the prompt, a name, a price, a number, a model'
 
 ## Authoring
 
-You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults, tiers and time defaults), its **Content** lists (Entities, Places, Routes, Grids, Kinds, Classifications, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its tools. Edit an item and **Save to draft**, or **Revert**. **Check world**, **Import from lore**, **Build with AI**, **Refine with AI**, **Playtest** and **Attach to this chat** are tools inside a world.
+You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults, tiers and time defaults), its **Content** lists (Entities, Places, Maps, Routes, Grids, Kinds, Classifications, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its tools. Edit an item and **Save to draft**, or **Revert**. **Check world**, **Import from lore**, **Build with AI**, **Refine with AI**, **Describe a map**, **Playtest** and **Attach to this chat** are tools inside a world.
 
 ### Editors and lint
 
-Every part of the world has a **schema-driven editor**. Four parts get special tools: a **map and grid** editor, a **schedule and timeline** editor, a **quest graph**, and an **expression** editor for formulas.
+Every part of the world has a **schema-driven editor**. Four parts get special tools: a **map and grid** editor, a **schedule and timeline** editor, a **quest graph**, and an **expression** editor for formulas. **Maps** have an editor of their own (see [Maps](#maps)).
 
 What you can define:
 
 - **Kinds**: types of things, with single inheritance and typed fields (number, text, yes/no, choice, reference, list, dice, money, date, duration), each with a default, limits, **bands** (numbers shown as words), **derived** formulas, a lock, a limit on model-proposed changes, and a **visibility**: public, known by particular characters, or secret.
 - **Relations**: containment, ownership, use grants ("assigned to", loans, with an end time), worn or equipped, knowledge, membership, regard, routes, kinship and your own, with the kinds allowed at each end, cardinality, symmetry and an **inverse** (the relation the other side holds back). The relation picker lists the packs' relation types beside the world's own.
 - **Entities**, **places** (with hierarchy and time zones), **routes** with travel modes, and optional **grids** with terrain. Entities, places, tracks and fields each have a **visibility**. **known_by** shows the thing to whoever knows it: a `knows` relation to it, or matching its **Known by**, a [selector](#selectors) (the members of a group, people of a kind or tier, chosen ids) that the editor shows beside a known_by visibility. A place can also be **discoverable**: hidden from the player until they have been there, are told of it or have it in `known_places`. A visibility the engine doesn't recognize, or a Known by it can't read in full, hides the thing rather than showing it, and lint says so. A point-of-view character with no place of its own starts at the world's start place, and from Space 3 arriving at a place drawn on a grid puts them on its cell.
+- **Maps**: the inside of a place, drawn on a grid or as linked places, which make that place's places, grid and routes (see [Maps](#maps)).
 - **Actions**: parameters, requirements, an optional dice **check** with outcome bands (the odds shown to players are computed exactly from it), effects per outcome, a duration, and the activity it starts. A ref parameter can say **Only candidates matching** a [selector](#selectors): the palette offers only those, and typed text or a request naming anyone else is refused.
 - **Rules**: "when this happens and that is true, do this", with run-once and cooldowns. A cascade stops at eight steps.
 - **Tracks**: quests, secrets (revealed by conditions only), puzzles with attempts and a hint ladder, and NPC agendas.
@@ -477,6 +480,63 @@ What you can define:
 - **Step templates**: your own wording for a model step, per purpose (interpret, NPC choices, contradiction, puzzle answers, brief, outline, extract, suggested choices), with an output (text, decision, or `effects` for the steps that read changes, which run after the reply only), the signals it runs on (a template's own signals replace the step's), and engine placeholders such as `{{world}}`, `{{pov}}`, `{{place}}`, `{{clock}}`, `{{scene}}`, `{{present}}`, `{{facts}}`, `{{outcome}}`, `{{beats}}`, `{{brief}}`, `{{user}}`, `{{reply}}` and `{{recent}}`. They are all player-visible: a line that would reveal an unrevealed truth is dropped before the call. A template whose output can't be used by its purpose, an unknown signal and an unknown placeholder are lint warnings. Changes a step template proposes with `effects` are checked and bounded exactly like extraction, and money in them is stated as a plain amount in the world's currency (8 for $8), which the engine converts. Which steps run at all is still your choice, in **Settings → Steps and connections**. A world made with an earlier version keeps its step templates, except those for lore selection, which no longer exists.
 
 Formulas use a small, safe expression language: numbers, comparisons and a fixed set of functions. They can't run code and they always produce a finite number. `table(id, key, column)` reads a cell of one of the world's data tables, and `table_step(id, value, column)` reads the row whose number key is the largest at or below `value` (a level table keyed by XP, say). `roll(notation)` works only in an effect's arguments (a value that starts with `=`): the effect's event records the result, so a replay or a swipe sees the same number. Anywhere else a roll would change the odds you were shown and what the engine reads, so it is a lint error and reads as nothing. For classifications and groups: `kind_is(e, 'person')` (a kind or one inheriting from it), `in_class(e, 'role', 'antagonist')` (a value or one nested under it), `has_tag(e, 'smuggler')`, `member_of(e, harlows)` (directly or through a member group), `tier_of(e)` and `band_of(e)` (the band its tier belongs to).
+
+### Maps
+
+A **map** draws the inside of one place, its `scope`: a manor's floor as rooms on a grid, or a town as places linked by routes. It is a small JSON document in the **lre-map-v1** format (its JSON Schema is `src/shared/lre-map-v1.schema.json` in the source), which you write in the map editor or describe in your own words for the AI to write (see [Describe a map](#describe-a-map)). A map makes its places (inside its scope), its grid and its routes for you, and keeps them in step with it: they show in the Places, Grids and Routes lists as the map's, read-only, with **Edit in map** to change them where they come from. Delete the map and they go with it. A place, grid or route you made yourself always wins: a map that would make one with the same id leaves yours alone, and the lint says so.
+
+A **grid map** is rows of characters, one per square, all the same length. The `legend` says what a character means: a terrain (`{"terrain": "grass"}`, with `"blocked": true` for one you can't cross), a place's area (`{"place": "kitchen"}`) or a zone (`{"zone": "cellar"}`). Without a legend entry, `#` is a wall, `.` floor, `+` a door and a space nothing. A place stands at its `at` square, or in the middle of its area.
+
+```json
+{
+  "id": "manor_ground",
+  "scope": "manor",
+  "title": "Ground floor",
+  "layout": [
+    "#############",
+    "#ppppp#kkkkk#",
+    "#ppppp+kkkkk#",
+    "#ppppp#kkkkk#",
+    "###+#####+###",
+    "#hhhhhhhhhhh#",
+    "#####+#######"
+  ],
+  "legend": {
+    "p": { "place": "parlour" },
+    "k": { "place": "kitchen" },
+    "h": { "place": "hallway" }
+  },
+  "places": [
+    { "id": "parlour", "name": "Parlour" },
+    { "id": "kitchen", "name": "Kitchen" },
+    { "id": "hallway", "name": "Hallway" }
+  ]
+}
+```
+
+A **node map** sets its places in a frame of `size` by their `at` (leave it out and the place goes on a ring), and its `links` are the routes between them, each with its `minutes` and, if you like, its `modes`. Link every place on the map or none, because once a place's inside has links, travel there follows only them.
+
+```json
+{
+  "id": "old_town",
+  "scope": "town",
+  "title": "Old town",
+  "size": [100, 100],
+  "places": [
+    { "id": "square", "name": "Market square", "at": [50, 50] },
+    { "id": "inn", "name": "The Gull Inn", "at": [25, 30] },
+    { "id": "docks", "name": "Docks", "at": [80, 75] }
+  ],
+  "links": [
+    { "from": "square", "to": "inn", "minutes": 3 },
+    { "from": "square", "to": "docks", "minutes": 6 }
+  ]
+}
+```
+
+Walls and doors are drawn, not walked: travel inside a place follows its routes, or, with none, a short walk between any two of its places.
+
+The **map editor** (open a map from **Maps**, or **+ New**) checks the JSON as you type, against the format and against the rest of the world, and marks each problem on its line: rows of different lengths, a character the legend doesn't know, a place outside the grid, a link to a place that doesn't exist, an id another place already has. **Insert template** gives you a small grid or node map to start from, **Tidy** lays the JSON out a field per line, and a preview draws the map as Play will show it.
 
 ### Checks, pools, progression and sheets
 
@@ -528,6 +588,10 @@ Already have lore books? **Import from lore**, a tool inside a world, builds a s
 **Build with AI** and **Refine with AI** are tools inside a world. You can ask the AI to draft or improve parts of it, and it returns **proposals**, never direct changes: you review them as you would an import, tick the ones you want (each has a confidence badge, and proposals at 70% or more start ticked) and apply them to the draft. A change to an existing entity that leaves out its kind keeps the kind it has. Proposals are checked by the world checker as part of this, and the work happens in the background, so you can keep editing.
 
 Each tool remembers its last run, with its status and its proposals, so you can leave Build, reload or restart and come back to review them. An import saves its proposals as it reads each part of the books. A job the server or the extension stopped while it ran shows as **interrupted**: the proposals it made before it stopped are still there to review and apply, and **Run it again** starts it over with the same books or request. **Dismiss** clears a finished job; the engine keeps only the last few anyway.
+
+### Describe a map
+
+**Describe a map** draws a map from your own words. Pick the place it maps, give the map an id if you like, and describe the inside ("A small inn: the taproom at the front, the kitchen behind it through a door, and a corridor down the side to the stable yard."), then tap **Draw the map**. The AI writes an lre-map-v1 map, and the engine checks it as the map editor would; if it has problems, the AI gets one more try with the list of them. You get one proposal with a preview of the map, ticked when it came back clean and unticked, with what's still wrong, when it didn't. Applying it puts the map in your draft like any other, where the map editor can fix the rest; nothing reaches your chats until you commit. Like the other tools, it remembers its last run.
 
 ### Data tables
 

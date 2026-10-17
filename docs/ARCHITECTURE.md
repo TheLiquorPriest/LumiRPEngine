@@ -9,7 +9,10 @@ This is the contract between the modules. Behavior is specified in [DESIGN.md](D
 | `src/shared/json.ts` | `JsonValue`, `JsonObject`, the one `isRecord` guard |
 | `src/shared/ids.ts` | Id aliases; domains, levels, the three detail bands, interrupt classes, bound modes |
 | `src/shared/tiers.ts` | World tiers over the detail bands: band labels, default tiers, a tier's band, the spawn and lead tiers, tier agent defaults |
-| `src/shared/world.ts` | The world document `lre-world-v1` |
+| `src/shared/world.ts` | The world document `lre-world-v1`, and the map document `lre-map-v1` (`MapDoc`) |
+| `src/shared/lre-map-v1.schema.json` | The published JSON Schema of a map, read by Build's editor, the Describe a map prompt and outside tools |
+| `src/shared/schema-check.ts` | A small JSON Schema reader (the keywords the published schemas use) with plain-language problems at JSON paths |
+| `src/shared/maps.ts` | Maps: the schema check, the compiler (`compileMaps`: a map's places, grid and routes, marked as its own), the map lint, the JSON layout and the templates |
 | `src/shared/tables.ts` | Pinned data tables and the build-time mapping |
 | `src/shared/ledger.ts` | Events, `Rec`, `post` entries, markers, `MessageLedger`, `ChatRun`, the journal, fold outputs |
 | `src/shared/state-view.ts` | The state view the frontend renders |
@@ -18,7 +21,7 @@ This is the contract between the modules. Behavior is specified in [DESIGN.md](D
 | `src/engine/state.ts` | The folded `WorldState` |
 | `src/engine/registry.ts` | `PackDef`, `CoreRegistry` and the pure contexts packs receive |
 | `src/engine/steps.ts` | `StepPort` and the model-step shapes |
-| `src/frontend/registry.ts` | `UiPackDef`, `UiRegistry`, panel, editor and chip props |
+| `src/frontend/registry.ts` | `UiPackDef`, `UiRegistry`, panel, editor, chip and proposal-preview props |
 | `src/backend/host.ts` | `HostPort`, the only door to Lumiverse, with the host's observed event payloads |
 | `src/spindle-augment.ts` | Local types where the host differs from `lumiverse-spindle-types` 0.6.49 |
 | `src/studio-api.ts` | The studio seam |
@@ -71,17 +74,20 @@ Backend layout:
 - `backend/steps.ts`: `StepPort` over `HostPort.models`, and the call meter (kept per user in `call-meter.json`).
 - `backend/worlds.ts`, `backend/settings-store.ts`: world storage and revisions; settings, presets and extraction learning.
 - `backend/dispatch.ts`, `backend/view.ts`, `backend/gm.ts`, `backend/push.ts`, `backend/chips.ts`: request dispatch, the state view, the GM view (built per `lre.gm` request, never pushed), state push, stored chips.
-- `backend/jobs.ts`, `backend/proposals.ts`, `src/worker/background-lane.ts`: background jobs (kept per user in `jobs.json`; a job stored as running that the process isn't running reads as interrupted) and the child lane; Import and Refine proposals.
+- `backend/jobs.ts`, `backend/proposals.ts`, `backend/map-job.ts`, `src/worker/background-lane.ts`: background jobs (kept per user in `jobs.json`; a job stored as running that the process isn't running reads as interrupted) and the child lane; Import and Refine proposals; Describe a map (the prompt, the answer's checks and the repair call).
 - `backend/preset-lint.ts`, `backend/plan-notes.ts`: the preset lint; planned-turn lines kept by seed.
 - `backend/outcome-notes.ts`, `backend/inspector-log.ts`: the next turn's Outcome notes and the inspector's history with its delivery badges, per chat.
 - `backend/stored-json.ts`: reading the extension's own JSON files; a damaged one is set aside as `<path>.corrupt-<epoch ms>` with a warning, and the caller starts fresh.
+
+Space pack layout (`packs/space`): `core/travel.ts` (routes and A*), `core/map-scope.ts` (one map scope as drawn: a place's children at their cells or node positions, the routes between them, its grid; pure, shared by Play and Build), `core/view.ts` (the `space.map` view: every scope the POV can open, and travel options); `ui/map-draw.ts` (painting a scope), `ui/map.tsx` (the map stage, breadcrumbs and the place card), `ui/map-editor.tsx` and `ui/map-preview.tsx` (Build's map editor and previews), `ui/editors.tsx` (the grid and place editors); `frontend/json-text.ts` reads JSON text with the line of each value, for the map editor.
 
 ## 3. Shared types
 
 ### 3.1 World document (`lre-world-v1`, `shared/world.ts`)
 
-One JSON document per revision; the revision id is its `hashJson`. Collections are keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`. Singletons: `calendar`, `realism`, `time`, `pins`, `packs`, `pov`, `start`, `seedMode`, `lenientPricing`, `suppressed`.
+One JSON document per revision; the revision id is its `hashJson`. Collections are keyed by id: `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`. Singletons: `calendar`, `realism`, `time`, `pins`, `packs`, `pov`, `start`, `seedMode`, `lenientPricing`, `suppressed`.
 
+- **Maps** (`lre-map-v1`) are the source of truth for the places, grids and routes they draw. `migrateWorld` compiles them whenever a document is read (`shared/maps.ts`), clearing what an earlier compile made (items marked `map`, and a scope's link to a grid a map made) and making it again, so the compiled items stored in a revision or an export always match their maps. Build's editors show them read-only and `lre.editor` refuses writes to them.
 - **Formulas** are expression-language strings (`Expr`); **dice** are notation strings.
 - **Kinds** have single inheritance and typed fields (`FieldDef`: type, default, min/max, enum values, ref kind, list element, bands, derived formula, locked, bound, visibility, and the level contract's domain and live level).
 - **Entities** carry field values, relation instances (with `until` for use grants), a tier (one of the world's `tiers`, each mapped to a detail band whose caps apply), optional per-domain level overrides, the LOD1 `agent` flag (unset: the tier's default) and an optional Lumiverse character id.
