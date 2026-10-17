@@ -1,12 +1,16 @@
 // The schedule/timeline special widget (DESIGN §13): recurrence plus a slot table on a 24-hour bar.
-// Slots are fixed values, weighted distributions or distributions given the previous slot.
+// Slots are fixed values, weighted distributions or distributions given the previous slot. The owner
+// is an entity, a group, a kind or a selector (the most specific one wins a field, DESIGN §8).
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { JsonValue } from "../../../shared/json";
+import { isRecord } from "../../../shared/json";
 import type { Recurrence, ScheduleDef, ScheduleSlot } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
+import { kindIs, SelectorEditor, selectorOf } from "../../../frontend/build/selector-editor";
 import { Seg, useBusy } from "../../../frontend/components";
 import type { EditorProps } from "../../../frontend/registry";
+import { useSelect } from "../../../frontend/store";
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -82,6 +86,7 @@ function JsonField(props: { label: string; value: JsonValue | undefined; onChang
 
 export function ScheduleEditor(props: EditorProps) {
   const app = useApp();
+  const draft = useSelect(app.drafts, (d) => d);
   const isNew = props.id?.startsWith("new:") ?? false;
   const id = isNew ? (props.id ?? "").slice(4) : props.id;
   const stored = id ? props.world.schedules[id] : undefined;
@@ -91,27 +96,49 @@ export function ScheduleEditor(props: EditorProps) {
   const [busy, run] = useBusy();
   useEffect(() => setSchedule(stored ? structuredClone(stored) : blank), [JSON.stringify(stored)]);
   const problems = useMemo(() => slotProblems(schedule.slots), [schedule.slots]);
+  // Owners and selectors see the packs' kinds too (groups among them); the world's own win.
+  const doc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);
   if (!id) return <span class="lre-muted">Choose a schedule.</span>;
   const rec = schedule.recurrence;
   const setRec = (next: Recurrence) => setSchedule({ ...schedule, recurrence: next });
   const slot = schedule.slots[selected];
   const setSlot = (next: ScheduleSlot) => setSchedule({ ...schedule, slots: schedule.slots.map((s, i) => (i === selected ? next : s)) });
   const changed = JSON.stringify(schedule) !== JSON.stringify(stored ?? null);
-  const owners = [...Object.keys(props.world.entities), ...Object.keys(props.world.kinds)];
+  const owners = [
+    ...Object.values(doc.entities).map((e) => ({ value: e.id, label: `${e.name}${kindIs(doc, e.kind, "group") ? " (group: its members)" : ""}` })),
+    ...Object.entries(doc.kinds).map(([kid, k]) => ({ value: kid, label: `${k.label} (every one of this kind)` })),
+  ];
+  const bySelector = isRecord(schedule.owner);
   return (
     <div class="lre-stack" data-lre-editor="schedules">
       <div class="lre-h2">
         <code>{id}</code>
       </div>
-      <label class="lre-field">
-        <span class="label">Owner (entity or kind; empty for a world process)</span>
-        <input class="lre-input" list="lre-schedule-owners" value={schedule.owner ?? ""} onChange={(event) => setSchedule({ ...schedule, owner: event.currentTarget.value || undefined })} />
-        <datalist id="lre-schedule-owners">
-          {owners.map((o) => (
-            <option key={o} value={o} />
-          ))}
-        </datalist>
-      </label>
+      <div class="lre-field">
+        <span class="label">Owner</span>
+        <Seg<"id" | "selector">
+          label="Owner"
+          value={bySelector ? "selector" : "id"}
+          options={[
+            { value: "id", label: "An entity, group or kind" },
+            { value: "selector", label: "A selector" },
+          ]}
+          onChange={(mode) => setSchedule({ ...schedule, owner: mode === "selector" ? {} : undefined })}
+        />
+        {bySelector ? (
+          <SelectorEditor label="Applies to" value={selectorOf(schedule.owner)} doc={doc} onChange={(owner) => setSchedule({ ...schedule, owner: owner ?? {} })} />
+        ) : (
+          <>
+            <input class="lre-input" list="lre-schedule-owners" aria-label="Owner id" placeholder="Empty for a world process (weather, prices)" value={typeof schedule.owner === "string" ? schedule.owner : ""} onChange={(event) => setSchedule({ ...schedule, owner: event.currentTarget.value || undefined })} />
+            <datalist id="lre-schedule-owners">
+              {owners.map((o) => (
+                <option key={o.value} value={o.value} label={o.label} />
+              ))}
+            </datalist>
+          </>
+        )}
+        <span class="lre-small lre-muted">When schedules set the same field of the same entity, the most specific owner wins: the entity's own, then a group's, then its kind's, then a selector's.</span>
+      </div>
       <label class="lre-field">
         <span class="label">Sets (place, activity, weather, price…)</span>
         <input class="lre-input" value={schedule.target} onChange={(event) => setSchedule({ ...schedule, target: event.currentTarget.value })} />

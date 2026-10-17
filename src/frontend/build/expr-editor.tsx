@@ -7,7 +7,7 @@ import type { LintIssue } from "../../shared/protocol";
 
 const OPERATORS = ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "and", "or", "not", "(", ")", "?", ":"];
 /** Query and formula names the engine and packs register (DESIGN §9.2 level contract). */
-const FUNCTIONS = ["min(", "max(", "abs(", "round(", "floor(", "clamp(", "roll(", "wealth(", "can_afford(", "has_item(", "fuel_ok(", "regard_band(", "knows(", "stage(", "at(", "now()"];
+const FUNCTIONS = ["min(", "max(", "abs(", "round(", "floor(", "clamp(", "roll(", "wealth(", "can_afford(", "has_item(", "fuel_ok(", "regard_band(", "knows(", "stage(", "at(", "now()", "kind_is(", "in_class(", "has_tag(", "member_of(", "tier_of(", "band_of("];
 
 export interface Balance {
   ok: boolean;

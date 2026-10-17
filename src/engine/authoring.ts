@@ -296,7 +296,7 @@ export function checkWorldDay(registry: Registry, pipeline: TurnPipeline, world:
  * authored values. Null when the world designs no sheet; nothing is recorded.
  */
 export function previewSheet(registry: Registry, world: WorldDoc, entity: EntityId = world.pov): SheetSectionView[] | null {
-  return buildEntitySheet(registry.context(world, initialState(world, "preview")), entity);
+  return buildEntitySheet(registry.context(world, initialState(world, "preview", registry)), entity);
 }
 
 /** Stamps the engine version the document was last written by. */

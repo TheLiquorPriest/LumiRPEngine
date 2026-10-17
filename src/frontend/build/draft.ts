@@ -10,7 +10,7 @@ import type { Send } from "../registry";
 export async function loadDraft(app: App, worldId: WorldId): Promise<Draft | null> {
   const [got, world] = await Promise.all([app.request({ type: "lre.editor", worldId, base: null, op: "get" }), app.request({ type: "lre.world", op: "get", worldId })]);
   if (!got) return null;
-  const draft: Draft = { worldId, base: got.base, doc: got.draft, lint: got.lint, dirty: got.stored, packKinds: world?.packKinds ?? {} };
+  const draft: Draft = { worldId, base: got.base, doc: got.draft, lint: got.lint, dirty: got.stored, packKinds: world?.packKinds ?? {}, packRelations: world?.packRelations ?? {} };
   app.drafts.set(draft);
   return draft;
 }

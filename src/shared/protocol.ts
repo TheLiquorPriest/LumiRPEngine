@@ -10,7 +10,7 @@ import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, 
 import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { SheetSectionView, StateView } from "./state-view";
-import type { KindDef, WorldDoc, WorldIndex } from "./world";
+import type { KindDef, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -200,7 +200,8 @@ export type WorldCollection =
   | "sections"
   | "steps"
   | "packs"
-  | "lore";
+  | "lore"
+  | "classifications";
 
 /** Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is optional: an empty one removes it. */
 export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset";
@@ -294,13 +295,14 @@ export interface ResultBodies {
   /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head. */
   "lre.editor": { draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean };
   /**
-   * `get` also carries `packKinds`: every kind the registered packs define (label, extends,
-   * fields), for Build's kind pickers and typed field forms (a world kind with the same id wins);
-   * and `functions`: every function a formula may call outside an effect's arguments (the math
-   * built-ins, the engine's and the packs' formulas), for the expression editor. `sheet` answers
-   * the `sheet` preview: the sections, or null when the ruleset designs no sheet.
+   * `get` also carries `packKinds` and `packRelations`: every kind (label, extends, fields) and
+   * relation type the registered packs define, for Build's kind and relation pickers and typed
+   * field forms (a world kind or relation type with the same id wins); and `functions`: every
+   * function a formula may call outside an effect's arguments (the math built-ins, the engine's and
+   * the packs' formulas), for the expression editor. `sheet` answers the `sheet` preview: the
+   * sections, or null when the ruleset designs no sheet.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; functions?: string[]; sheet?: SheetSectionView[] | null };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null };
   "lre.ui": { done: true };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };

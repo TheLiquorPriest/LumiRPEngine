@@ -65,6 +65,7 @@ export const WORLD_COLLECTIONS: Record<WorldCollection, true> = {
   steps: true,
   packs: true,
   lore: true,
+  classifications: true,
 };
 
 /** Loaded revisions kept across chats; an open chat pins the ones its ledger references, so eviction never breaks a fold. */

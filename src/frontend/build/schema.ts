@@ -21,6 +21,14 @@ export type FieldSpec =
   | { kind: "expr"; key: string; label: string; optional?: boolean }
   | { kind: "dice"; key: string; label: string; optional?: boolean }
   | { kind: "tags"; key: string; label: string }
+  /** Free-form labels as chips, suggesting the tags other entities already use. */
+  | { kind: "tagList"; key: string; label: string }
+  /** A selector (`shared/world.ts` `Selector`): kinds, tiers, classes, tags, groups, ids. */
+  | { kind: "selector"; key: string; label: string; optional?: boolean }
+  /** An entity's classification: one picker per facet, single or multiple as the facet says. */
+  | { kind: "classes"; key: string; label: string }
+  /** A facet's values as a tree: label, parent value, description. */
+  | { kind: "facetValues"; key: string; label: string }
   | { kind: "list"; key: string; label: string; item: FieldSpec; title?: string }
   | { kind: "record"; key: string; label: string; item: FieldSpec; keyLabel: string; keys?: readonly string[] }
   | { kind: "object"; key: string; label: string; fields: FieldSpec[]; optional?: boolean }
@@ -104,13 +112,16 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "ref", key: "from", label: "From kind", collection: "kinds", any: true },
     { kind: "ref", key: "to", label: "To kind", collection: "kinds", any: true },
     { kind: "enum", key: "cardinality", label: "Cardinality", values: ["one_one", "one_many", "many_one", "many_many"] },
-    { kind: "bool", key: "symmetric", label: "Symmetric" },
+    { kind: "bool", key: "symmetric", label: "Symmetric", hint: "Both sides hold it (siblings); the engine keeps the other side" },
+    { kind: "ref", key: "inverse", label: "Inverse (what the other side holds back)", collection: "relations", optional: true },
     { kind: "record", key: "fields", label: "Fields", item: FIELD_DEF, keyLabel: "Field id" },
   ],
   entities: [
     { kind: "text", key: "name", label: "Name" },
     { kind: "ref", key: "kind", label: "Kind", collection: "kinds" },
     { kind: "tier", key: "tier", label: "Tier" },
+    { kind: "classes", key: "class", label: "Classification" },
+    { kind: "tagList", key: "tags", label: "Tags" },
     { kind: "kindFields", key: "fields", label: "Fields" },
     {
       kind: "list",
@@ -133,7 +144,6 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "agent", key: "agent", label: "LOD1 agent (runs agendas and the planner)" },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
-    { kind: "tags", key: "tags", label: "Tags" },
   ],
   places: [
     { kind: "text", key: "name", label: "Name" },
@@ -218,6 +228,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
           { kind: "text", key: "label", label: "Label", optional: true },
           { kind: "ref", key: "ref", label: "Ref kind", collection: "kinds", optional: true },
           { kind: "bool", key: "optional", label: "Optional" },
+          { kind: "selector", key: "of", label: "Only candidates matching", optional: true },
         ],
       },
     },
@@ -259,7 +270,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     },
   ],
   schedules: [
-    { kind: "text", key: "owner", label: "Owner (entity or kind)", optional: true },
+    { kind: "json", key: "owner", label: "Owner", optional: true, hint: '"entity, group or kind id" · {"kind": [...], "class": {...}, "memberOf": [...]} (a selector)' },
     { kind: "text", key: "target", label: "Sets" },
     { kind: "json", key: "recurrence", label: "Recurrence" },
     { kind: "json", key: "slots", label: "Slots" },
@@ -298,6 +309,13 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
     { kind: "bool", key: "secret", label: "Secret", hint: "Hidden until the gate holds" },
     { kind: "expr", key: "gate", label: "Gate", optional: true },
+  ],
+  classifications: [
+    { kind: "text", key: "label", label: "Label" },
+    { kind: "bool", key: "multiple", label: "Several values per entity", hint: "Off: one value each, like a story role. On: any number, like allegiances" },
+    { kind: "number", key: "order", label: "Order (lowest first)", optional: true, step: 1 },
+    { kind: "text", key: "description", label: "Description", multiline: true, optional: true },
+    { kind: "facetValues", key: "values", label: "Values" },
   ],
 };
 
@@ -431,5 +449,7 @@ export function newItem(collection: WorldCollection, id: string, world: Pick<Wor
       return { version: 1, config: {} };
     case "lore":
       return { id, title: id, content: "", keys: [], links: [] };
+    case "classifications":
+      return { id, label: id.replace(/_/g, " "), multiple: false, values: {} };
   }
 }

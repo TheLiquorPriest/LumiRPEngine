@@ -1,8 +1,12 @@
-// Play → Cast (DESIGN §12): everyone the POV knows, with today's timeline, agendas the POV knows
+// Play → Cast (DESIGN §12): the people the panel lists, with today's timeline, agendas the POV knows
 // about, regard (one band per pair at Relationships 1, axes above) and their next commitment.
-// People present in the scene come first.
+// People present in the scene come first. The list can be grouped by a classification facet, by
+// group membership or by tier, and filtered by facet values (nested values included), groups and
+// tags: within one kind of chip any will do, across kinds all must hold, as in a selector. The
+// POV's own groups, with its role in each, head the panel.
 
 import { useState } from "preact/hooks";
+import { withinValue } from "../../../shared/classes";
 import { isRecord } from "../../../shared/json";
 import { Card, Empty, JsonView, Row } from "../../../frontend/components";
 import { list, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
@@ -22,11 +26,39 @@ export interface CastPerson {
   timeline: { start: string; end: string; label: string; kind: SlotKind; reasons: string[] }[];
   agenda: { label: string; stage: string }[];
   next?: { at: string; label: string };
+  tier: string;
+  classes: Record<string, string[]>;
+  tags: string[];
+  groups: { id: string; role?: string }[];
+}
+
+export interface CastFacet {
+  id: string;
+  label: string;
+  multiple: boolean;
+  values: { id: string; label: string; parent?: string }[];
+}
+
+export interface CastGroup {
+  id: string;
+  name: string;
+  kind: string;
+  role?: string;
+  rank?: number;
+  since?: string;
 }
 
 export interface CastView {
   level: number;
   people: CastPerson[];
+  facets: CastFacet[];
+  tiers: { id: string; label: string }[];
+  groups: CastGroup[];
+  mine: CastGroup[];
+}
+
+function decodeGroup(g: Record<string, unknown>): CastGroup | null {
+  return typeof g.id === "string" ? { id: g.id, name: str(g.name, g.id), kind: str(g.kind), role: optStr(g.role), rank: optNum(g.rank), since: optStr(g.since) } : null;
 }
 
 export function decodeCastView(value: unknown): CastView | null {
@@ -46,10 +78,70 @@ export function decodeCastView(value: unknown): CastView | null {
             timeline: list(p.timeline, (s) => ({ start: str(s.start), end: str(s.end), label: str(s.label), kind: oneOf(s.kind, SLOT_KINDS, "other"), reasons: strings(s.reasons) })),
             agenda: list(p.agenda, (a) => ({ label: str(a.label), stage: str(a.stage) })),
             next: isRecord(p.next) ? { at: str(p.next.at), label: str(p.next.label) } : undefined,
+            tier: str(p.tier),
+            classes: isRecord(p.classes) ? Object.fromEntries(Object.entries(p.classes).map(([facet, values]) => [facet, strings(values)])) : {},
+            tags: strings(p.tags),
+            groups: list(p.groups, (g) => (typeof g.id === "string" ? { id: g.id, role: optStr(g.role) } : null)),
           }
         : null,
     ),
+    facets: list(value.facets, (f) =>
+      typeof f.id === "string" ? { id: f.id, label: str(f.label, f.id), multiple: f.multiple === true, values: list(f.values, (v) => (typeof v.id === "string" ? { id: v.id, label: str(v.label, v.id), parent: optStr(v.parent) } : null)) } : null,
+    ),
+    tiers: list(value.tiers, (t) => (typeof t.id === "string" ? { id: t.id, label: str(t.label, t.id) } : null)),
+    groups: list(value.groups, decodeGroup),
+    mine: list(value.mine, decodeGroup),
   };
+}
+
+/** Filter chips in force: facet → values, groups, tags. */
+export interface CastFilters {
+  classes: Record<string, string[]>;
+  groups: string[];
+  tags: string[];
+}
+
+const NO_FILTERS: CastFilters = { classes: {}, groups: [], tags: [] };
+
+function parentsOf(facet: CastFacet): Record<string, { parent?: string }> {
+  return Object.fromEntries(facet.values.map((v) => [v.id, { parent: v.parent }]));
+}
+
+/** Whether a person passes the chips: each kind of chip must hold, any chip of a kind will do; a facet chip takes nested values too. */
+export function passes(person: CastPerson, filters: CastFilters, facets: readonly CastFacet[]): boolean {
+  for (const [facetId, accepted] of Object.entries(filters.classes)) {
+    if (accepted.length === 0) continue;
+    const facet = facets.find((f) => f.id === facetId);
+    const tree = facet ? parentsOf(facet) : {};
+    if (!(person.classes[facetId] ?? []).some((v) => accepted.some((a) => withinValue(tree, v, a)))) return false;
+  }
+  if (filters.groups.length > 0 && !person.groups.some((g) => filters.groups.includes(g.id))) return false;
+  if (filters.tags.length > 0 && !person.tags.some((t) => filters.tags.includes(t))) return false;
+  return true;
+}
+
+/** "none", "tier", "groups" or `facet:<id>`. */
+export type GroupBy = string;
+
+/** People in sections, in the facet's, the groups' or the tiers' order; someone in several groups or values appears in each; empty sections are left out. */
+export function castSections(view: CastView, people: readonly CastPerson[], by: GroupBy): { key: string; label: string; people: CastPerson[] }[] {
+  const ordered = [...people].sort((a, b) => Number(b.here) - Number(a.here));
+  const sections = (keys: { key: string; label: string }[], of: (p: CastPerson) => string[], none: string): { key: string; label: string; people: CastPerson[] }[] => {
+    const out = [...keys, { key: "", label: none }].map((k) => ({ ...k, people: ordered.filter((p) => (k.key === "" ? of(p).length === 0 : of(p).includes(k.key))) }));
+    return out.filter((s) => s.people.length > 0);
+  };
+  if (by === "tier") return sections(view.tiers.map((t) => ({ key: t.id, label: t.label })), (p) => (p.tier ? [p.tier] : []), "No tier");
+  if (by === "groups") return sections(view.groups.map((g) => ({ key: g.id, label: g.name })), (p) => p.groups.map((g) => g.id), "In no group");
+  const facet = by.startsWith("facet:") ? view.facets.find((f) => f.id === by.slice(6)) : undefined;
+  if (facet) {
+    const label = (id: string): string => {
+      const parts: string[] = [];
+      for (let v = facet.values.find((x) => x.id === id), guard = 0; v && guard < 16; v = facet.values.find((x) => x.id === v?.parent), guard++) parts.unshift(v.label);
+      return parts.join(" › ") || id;
+    };
+    return sections(facet.values.map((v) => ({ key: v.id, label: label(v.id) })), (p) => p.classes[facet.id] ?? [], `No ${facet.label.toLowerCase()}`);
+  }
+  return [{ key: "", label: "", people: ordered }];
 }
 
 /** `HH:MM` → minutes after midnight; unparsable times sort to 0. */
@@ -101,30 +193,105 @@ function Timeline(props: { slots: CastPerson["timeline"] }) {
   );
 }
 
+/** One row of filter chips; a chip is pressed while it filters. */
+function Chips(props: { label: string; options: readonly { id: string; label: string }[]; on: readonly string[]; onChange(next: string[]): void }) {
+  if (props.options.length === 0) return null;
+  return (
+    <div class="lre-inline" role="group" aria-label={props.label}>
+      <span class="lre-small lre-muted">{props.label}</span>
+      {props.options.map((o) => {
+        const pressed = props.on.includes(o.id);
+        return (
+          <button key={o.id} type="button" class={pressed ? "lre-btn small primary" : "lre-btn small"} aria-pressed={pressed} onClick={() => props.onChange(pressed ? props.on.filter((x) => x !== o.id) : [...props.on, o.id])}>
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function CastPanel(props: PanelProps) {
+  const [by, setBy] = useState<GroupBy>("none");
+  const [filters, setFilters] = useState<CastFilters>(NO_FILTERS);
   const view = decodeCastView(props.view);
   if (props.view === null || props.view === undefined) return <Empty>No cast yet.</Empty>;
   if (!view) return <JsonView value={props.view} />;
-  if (view.people.length === 0) return <Empty>You don't know anyone yet.</Empty>;
-  const people = [...view.people].sort((a, b) => Number(b.here) - Number(a.here));
+  if (view.people.length === 0 && view.mine.length === 0) return <Empty>You don't know anyone yet.</Empty>;
+  const shown = view.people.filter((p) => passes(p, filters, view.facets));
+  const filtering = Object.values(filters.classes).some((v) => v.length > 0) || filters.groups.length > 0 || filters.tags.length > 0;
+  const held = (facet: CastFacet): { id: string; label: string }[] => {
+    // A value anyone holds, and the broader values it nests under (a broader chip takes the nested ones too).
+    const tree = parentsOf(facet);
+    return facet.values.filter((v) => view.people.some((p) => (p.classes[facet.id] ?? []).some((x) => withinValue(tree, x, v.id)))).map((v) => ({ id: v.id, label: v.label }));
+  };
+  const tags = [...new Set(view.people.flatMap((p) => p.tags))].sort((a, b) => a.localeCompare(b));
+  const card = (p: CastPerson) => {
+    const pending = props.state.pending.some((mark) => mark.entity === p.id);
+    return (
+      <Card key={p.id} title={p.name} aside={<span class="lre-inline">{p.here ? <span class="lre-badge pos">here</span> : null}{pending ? <span class="lre-badge warn">pending</span> : null}</span>}>
+        <div class="lre-muted lre-small">{[p.role, p.activity, p.place].filter((part) => part).join(" · ")}</div>
+        {p.timeline.length > 0 ? <Timeline slots={p.timeline} /> : null}
+        {p.regard.map((r) => (
+          <Row key={r.axis} k={r.axis} v={r.value !== undefined ? `${r.band} (${r.value})` : r.band} />
+        ))}
+        {p.agenda.map((a) => (
+          <Row key={a.label} k={a.label} v={a.stage} sub="agenda" />
+        ))}
+        {p.next ? <Row k="Next" v={p.next.at} sub={p.next.label} /> : null}
+      </Card>
+    );
+  };
   return (
     <div class="lre-stack" data-lre-panel="castlife.cast">
-      {people.map((p) => {
-        const pending = props.state.pending.some((mark) => mark.entity === p.id);
-        return (
-          <Card key={p.id} title={p.name} aside={<span class="lre-inline">{p.here ? <span class="lre-badge pos">here</span> : null}{pending ? <span class="lre-badge warn">pending</span> : null}</span>}>
-            <div class="lre-muted lre-small">{[p.role, p.activity, p.place].filter((part) => part).join(" · ")}</div>
-            {p.timeline.length > 0 ? <Timeline slots={p.timeline} /> : null}
-            {p.regard.map((r) => (
-              <Row key={r.axis} k={r.axis} v={r.value !== undefined ? `${r.band} (${r.value})` : r.band} />
+      {view.mine.length > 0 ? (
+        <Card title="Your groups">
+          {view.mine.map((g) => (
+            <Row key={g.id} k={g.name} v={g.role ?? "member"} sub={[g.kind, g.since ? `since ${g.since}` : ""].filter((part) => part).join(" · ")} />
+          ))}
+        </Card>
+      ) : null}
+      {view.people.length > 0 ? (
+        <>
+          <label class="lre-field">
+            <span class="label">Group by</span>
+            <select class="lre-input" value={by} onChange={(event) => setBy(event.currentTarget.value)}>
+              <option value="none">None</option>
+              {view.facets.map((f) => (
+                <option key={f.id} value={`facet:${f.id}`}>
+                  {f.label}
+                </option>
+              ))}
+              {view.groups.length > 0 ? <option value="groups">Groups</option> : null}
+              <option value="tier">Tier</option>
+            </select>
+          </label>
+          <div class="lre-stack" data-lre-cast-filters>
+            {view.facets.map((f) => (
+              <Chips key={f.id} label={f.label} options={held(f)} on={filters.classes[f.id] ?? []} onChange={(on) => setFilters({ ...filters, classes: { ...filters.classes, [f.id]: on } })} />
             ))}
-            {p.agenda.map((a) => (
-              <Row key={a.label} k={a.label} v={a.stage} sub="agenda" />
-            ))}
-            {p.next ? <Row k="Next" v={p.next.at} sub={p.next.label} /> : null}
-          </Card>
-        );
-      })}
+            <Chips label="Groups" options={view.groups.map((g) => ({ id: g.id, label: g.name }))} on={filters.groups} onChange={(groups) => setFilters({ ...filters, groups })} />
+            <Chips label="Tags" options={tags.map((t) => ({ id: t, label: t }))} on={filters.tags} onChange={(on) => setFilters({ ...filters, tags: on })} />
+            {filtering ? (
+              <button type="button" class="lre-btn small ghost" onClick={() => setFilters(NO_FILTERS)}>
+                Clear filters ({shown.length} of {view.people.length} shown)
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+      {shown.length === 0 && view.people.length > 0 ? <Empty>No one matches these filters.</Empty> : null}
+      {castSections(view, shown, by).map((s) => (
+        <section key={s.key || "rest"} class="lre-stack" data-lre-cast-section={s.key}>
+          {s.label ? (
+            <div class="lre-h">
+              <span>{s.label}</span>
+              <span class="lre-badge">{s.people.length}</span>
+            </div>
+          ) : null}
+          {s.people.map(card)}
+        </section>
+      ))}
     </div>
   );
 }

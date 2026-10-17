@@ -11,10 +11,12 @@ import { formatMoneyInput, minorUnitPlural, parseMoneyInput } from "../../shared
 import { BAND_LABEL, tierOf, tiersInOrder } from "../../shared/tiers";
 import type { LintIssue } from "../../shared/protocol";
 import { BUILTIN_RELATIONS, formatMoney } from "../../shared/world";
-import type { FieldDef, WorldCurrency, WorldDoc } from "../../shared/world";
+import type { FacetValueDef, FieldDef, WorldCurrency, WorldDoc } from "../../shared/world";
 import { MoneyInput } from "../money-input";
 import { ExprEditor } from "./expr-editor";
+import { ClassesInput, classesOf, FacetValuesInput, facetValuesOf } from "./facet-editor";
 import type { FieldSpec, RefCollection } from "./schema";
+import { kindIs, SelectorEditor, selectorOf, TagListInput, worldTags } from "./selector-editor";
 
 export interface FormCtx {
   doc: WorldDoc;
@@ -28,12 +30,12 @@ export function lintAt(lint: readonly LintIssue[], path: string): LintIssue[] {
   return lint.filter((issue) => issue.path === path || issue.path.startsWith(`${path}.`));
 }
 
-/** Pickable ids of a collection with display labels; relations include the built-in types. */
+/** Pickable ids of a collection with display labels; relations include the built-in types. A pack's kinds and relation types say so. */
 export function refOptions(doc: WorldDoc, collection: RefCollection): { value: string; label: string }[] {
   const source: Record<string, unknown> = doc[collection];
   const options = Object.entries(source).map(([id, entry]) => {
     const label = isRecord(entry) ? (typeof entry.name === "string" ? entry.name : typeof entry.label === "string" ? entry.label : id) : id;
-    const pack = collection === "kinds" && isRecord(entry) && typeof entry.pack === "string" ? `, ${entry.pack} pack` : "";
+    const pack = (collection === "kinds" || collection === "relations") && isRecord(entry) && typeof entry.pack === "string" ? `, ${entry.pack} pack` : "";
     return { value: id, label: label === id && pack === "" ? id : `${label} (${id}${pack})` };
   });
   if (collection === "relations") for (const id of BUILTIN_RELATIONS) if (!(id in source)) options.push({ value: id, label: `${id} (built-in)` });
@@ -47,16 +49,6 @@ export function kindFields(doc: WorldDoc, kindId: string): Record<string, FieldD
   const out: Record<string, FieldDef> = {};
   for (const id of chain.reverse()) Object.assign(out, doc.kinds[id]?.fields ?? {});
   return out;
-}
-
-/** True when `kindId` is `ancestor` or inherits from it. */
-function kindIs(doc: WorldDoc, kindId: string, ancestor: string): boolean {
-  const seen: string[] = [];
-  for (let id: string | undefined = kindId; id && !seen.includes(id); id = doc.kinds[id]?.extends) {
-    if (id === ancestor) return true;
-    seen.push(id);
-  }
-  return false;
 }
 
 function Issues(props: { issues: readonly LintIssue[] }) {
@@ -544,6 +536,31 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
         />
       );
     }
+    case "tagList": {
+      const tags = Array.isArray(props.value) ? props.value.filter((t): t is string => typeof t === "string") : [];
+      return (
+        <TagListInput label={spec.label} value={tags} suggestions={worldTags(ctx.doc)} onChange={(next) => props.onChange(next.length > 0 ? next : undefined)}>
+          <Issues issues={issues} />
+        </TagListInput>
+      );
+    }
+    case "selector":
+      // Selector and the class and value maps are plain JSON shapes; the casts only restate them as JSON.
+      return (
+        <div class="lre-field">
+          <SelectorEditor label={spec.label} value={selectorOf(props.value)} doc={ctx.doc} optional={spec.optional} onChange={(next) => props.onChange(next === undefined ? undefined : (next as unknown as JsonValue))} />
+          <Issues issues={issues} />
+        </div>
+      );
+    case "classes":
+      return (
+        <div class="lre-field">
+          <ClassesInput label={spec.label} value={classesOf(props.value)} doc={ctx.doc} onChange={(next) => props.onChange(next)} />
+          <Issues issues={issues} />
+        </div>
+      );
+    case "facetValues":
+      return <FacetValuesInput label={spec.label} value={facetValuesOf(props.value)} path={path} issues={(at) => <Issues issues={lintAt(ctx.lint, at)} />} onChange={(next: Record<string, FacetValueDef>) => props.onChange(next as unknown as JsonValue)} />;
     case "refs": {
       const ids = Array.isArray(props.value) ? props.value.filter((v): v is string => typeof v === "string") : [];
       const options = spec.collections.flatMap((collection) => refOptions(ctx.doc, collection));

@@ -8,7 +8,7 @@ import type { SpindleComponentsHelper } from "lumiverse-spindle-types";
 import type { ChatId, PanelId, RevisionId, WorldId } from "../shared/ids";
 import type { JobKind, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
-import type { KindDef, WorldDoc } from "../shared/world";
+import type { KindDef, RelationTypeDef, WorldDoc } from "../shared/world";
 import type { Viewport } from "./layout";
 import type { ProtocolClient, SyncState } from "./protocol-client";
 import type { RequestBody, Send } from "./registry";
@@ -71,6 +71,8 @@ export interface Draft {
   dirty: boolean;
   /** Kinds the registered packs define (`lre.world get`), for kind pickers and typed field forms; world kinds win. */
   packKinds: Record<string, KindDef>;
+  /** Relation types the registered packs define (`lre.world get`), for relation pickers; world relation types win. */
+  packRelations: Record<string, RelationTypeDef>;
 }
 
 export interface Overlays {

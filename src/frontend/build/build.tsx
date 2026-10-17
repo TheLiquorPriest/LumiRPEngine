@@ -27,6 +27,7 @@ const COLLECTIONS: { id: WorldCollection; label: string; hint: string }[] = [
   { id: "routes", label: "Routes", hint: "Travel between places" },
   { id: "grids", label: "Grids", hint: "Maps inside places" },
   { id: "kinds", label: "Kinds", hint: "Types and their fields" },
+  { id: "classifications", label: "Classifications", hint: "Story roles, allegiances: your own facets" },
   { id: "relations", label: "Relations", hint: "How entities connect" },
   { id: "actions", label: "Actions", hint: "What the player can do" },
   { id: "checks", label: "Checks", hint: "Dice and outcome bands" },
@@ -490,8 +491,8 @@ export function SchemaEditor(props: EditorProps) {
   const [busy, run] = useBusy();
   useEffect(() => setValue(initial), [JSON.stringify(stored)]);
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
-  // Pickers and kind-typed fields see the packs' kinds too (DESIGN §13); the world's own kinds win.
-  const formDoc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);
+  // Pickers and kind-typed fields see the packs' kinds and relation types too (DESIGN §13); the world's own win.
+  const formDoc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds }, relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const path = `${props.collection}.${id}`;
   const changed = JSON.stringify(value) !== JSON.stringify(isRecord(stored) ? stored : null);
   // A pack's entry shows the pack's own config fields, when its ui registers them, above the JSON.

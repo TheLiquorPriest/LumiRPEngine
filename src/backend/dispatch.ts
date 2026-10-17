@@ -281,7 +281,7 @@ export class Dispatcher {
       case "list":
         return { worlds: await store.list(userId) };
       case "get":
-        return { ...(await store.get(r.worldId, userId, r.revision)), packKinds: Object.fromEntries(this.rt.registry.kinds), functions: formulaFunctions(this.rt.registry) };
+        return { ...(await store.get(r.worldId, userId, r.revision)), packKinds: Object.fromEntries(this.rt.registry.kinds), packRelations: Object.fromEntries(this.rt.registry.relations), functions: formulaFunctions(this.rt.registry) };
       case "create": {
         const template = r.template && hasOwn(this.rt.templates, r.template) ? this.rt.templates[r.template] : undefined;
         if (r.template && !template) throw new RequestError("not_found", `unknown template ${r.template}`);
