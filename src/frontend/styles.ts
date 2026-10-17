@@ -169,9 +169,9 @@ select.lre-input{appearance:auto}
 .lre-progress>span{display:block;height:100%;background:var(--lre-accent);transition:width .3s}
 .lre-host-slot{min-height:40px}
 .lre-tier-wrap{container-type:inline-size}
-.lre-tier-grid{display:grid;grid-template-columns:minmax(0,1fr) repeat(3,52px);gap:4px;align-items:center;font-size:12px}
+.lre-tier-grid{display:grid;grid-template-columns:minmax(0,1fr) repeat(3,72px);gap:4px;align-items:center;font-size:12px}
 .lre-tier-grid [role=columnheader],.lre-tier-grid [role=rowheader]{min-width:0;overflow-wrap:break-word;hyphens:auto}
-@container (max-width:240px){.lre-tier-grid{grid-template-columns:repeat(3,minmax(40px,1fr))}.lre-tier-grid [role=row]>[role=columnheader]:first-child,.lre-tier-grid [role=rowheader]{grid-column:1/-1}.lre-tier-grid [role=rowheader]{padding-top:4px}}
+@container (max-width:319px){.lre-tier-grid{grid-template-columns:repeat(3,minmax(40px,1fr))}.lre-tier-grid [role=row]>[role=columnheader]:first-child,.lre-tier-grid [role=rowheader]{grid-column:1/-1}.lre-tier-grid [role=rowheader]{padding-top:4px}}
 .lre-tier-grid select{min-height:40px;width:100%;min-width:40px;padding-left:4px;padding-right:4px}
 .lre-check{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:40px;min-height:40px;cursor:pointer}
 .lre-check>input{width:22px;height:22px;margin:0;cursor:pointer}
