@@ -253,7 +253,8 @@ export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<Worl
   return out;
 }
 
-function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent): string | null {
+/** An event's line, worded for `pov` when it is a player's (`player`), else for the GM or the author. */
+function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent, player: boolean): string | null {
   const name = (id: string): string => nameOf(world, state, pov, id);
   switch (e.type) {
     case "set": {
@@ -289,7 +290,7 @@ function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, po
       const def = reg.get(e.type);
       if (!def) return null;
       try {
-        const line = def.describe(e, reg.context(world, state));
+        const line = def.describe(e, reg.context(world, state), player ? pov : undefined);
         return line ? relabel(line, refsOf(world, state, e), world, state, pov) : null;
       } catch {
         // A describer that can't word this event against this state is skipped.
@@ -345,7 +346,7 @@ function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     if (BOOKKEEPING.has(e.type)) continue;
     if (player && !playerEventVisible(reg, world, state, pov, e)) continue;
     if (player && e.type === "set" && !canSeeField(reg, world, state, pov, e.entity, e.field)) continue;
-    const text = rawLine(reg, world, state, pov, e);
+    const text = rawLine(reg, world, state, pov, e, player);
     if (!text || lines.some((l) => l.text === text)) continue;
     if (player) {
       // Text that must never reach a player line: unrevealed truths and gated secret lore, and hidden names.

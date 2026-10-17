@@ -3,8 +3,10 @@
 
 import { describe, expect, test } from "bun:test";
 import { hasCell } from "../../../src/shared/grid";
+import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { WorldDoc } from "../../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../../src/engine/authoring";
+import { authorLines, playerLines } from "../../../src/engine/player-events";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
@@ -227,6 +229,16 @@ describe("routes on the map", () => {
     const open = riverton(() => undefined);
     expect(walk(buildMapView(reg.context(open.world, open.state)))?.disabled).toBeUndefined();
     expect(walk(view)?.disabled).toBe("no walking route");
+  });
+
+  test("opening or closing a way to a place the POV can't see says somewhere; the author's line names it", () => {
+    const { world, state } = riverton((w) => {
+      w.places.vault = { id: "vault", name: "The vault", parent: "riverton", fields: {}, visibility: "secret" };
+      w.routes.apt_vault = { id: "apt_vault", from: "apartment_bldg", to: "vault", modes: { walk: { minutes: 3 } }, bidirectional: true };
+    });
+    const opened: LedgerEvent[] = [{ type: "space.route", data: { route: "apt_vault", open: true } }];
+    expect(playerLines(reg, world, state, "you", opened)).toEqual(["The way from Elm Street Apartments to somewhere opens"]);
+    expect(authorLines(reg, world, state, opened, 8)).toEqual(["The way from Elm Street Apartments to The vault opens"]);
   });
 });
 

@@ -226,10 +226,15 @@ export const spacePack: PackDef = {
       apply: (e, state) => {
         sliceRecord(state, "space", "routes")[strOf(e.data.route)] = e.data.open === true;
       },
-      describe: (e, ctx) => {
+      describe: (e, ctx, viewer) => {
         const r = own(ctx.world.routes, strOf(e.data.route));
-        const way = r ? `The way from ${own(ctx.world.places, r.from)?.name ?? r.from} to ${own(ctx.world.places, r.to)?.name ?? r.to}` : "A route";
-        return `${way} ${e.data.open === true ? "opens" : "closes"}`;
+        const verb = e.data.open === true ? "opens" : "closes";
+        if (!r) return `A route ${verb}`;
+        // A player's line never names an end its POV can't see: that end is somewhere, and a way
+        // with no end it can see is just a way. The GM's and the author's lines name both.
+        const shown = (id: string): boolean => viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, id);
+        const end = (id: string): string => (shown(id) ? (own(ctx.world.places, id)?.name ?? id) : "somewhere");
+        return shown(r.from) || shown(r.to) ? `The way from ${end(r.from)} to ${end(r.to)} ${verb}` : `A way ${verb}`;
       },
     });
     r.effect({ type: "space.set_route", args: ["route", "open?"], resolve: (a) => [{ type: "space.route", data: { route: strOf(a.route), open: a.open !== false } }] });

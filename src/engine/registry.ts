@@ -73,8 +73,12 @@ export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
   validate(event: E, ctx: ReadContext): Rejection | null;
   /** Applies the event to the working state. Must be total for any event `validate` accepted. */
   apply(event: E, state: WorldState, ctx: ReadContext): void;
-  /** Player-facing one-line description, filtered by visibility by the caller. */
-  describe(event: E, ctx: ReadContext): string;
+  /**
+   * One-line description, filtered by visibility by the caller. `viewer` is the POV a player's line
+   * is worded for, so a describer can leave out what it can't see; it is absent for the GM's and
+   * the author's lines, which name everything.
+   */
+  describe(event: E, ctx: ReadContext, viewer?: EntityId): string;
   /**
    * Record coarsening (DESIGN §4.3, L21): events of this type with the same non-null key, in one
    * timelapse or catch-up record, merge into one concrete event at the last one's position.
