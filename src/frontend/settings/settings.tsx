@@ -7,7 +7,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { BoundMode } from "../../shared/ids";
-import type { ExtractionModeView, SettingsResult } from "../../shared/protocol";
+import type { ExtractionModeView, SettingsResult, UpgradePreview } from "../../shared/protocol";
 import { EXTRACTION_TYPES } from "../../shared/settings";
 import type { ExtractionType } from "../../shared/settings";
 import type { WorldDoc, WorldIndex } from "../../shared/world";
@@ -17,6 +17,7 @@ import { humanize } from "../format";
 import { settingsTimePatch, TimeControlsEditor } from "../time-controls";
 import { OverrideWorldSwitch, RealismSeed, RealismThisChat } from "./realism";
 import { ModelUseSection, StepsSection } from "./steps";
+import { UpgradePanel } from "./upgrade";
 
 type SectionId = "model" | "realism" | "time" | "extraction" | "steps" | "pins" | "swipes" | "caveats";
 
@@ -104,6 +105,7 @@ function PinsSection() {
   const view = useView();
   const [world, setWorld] = useState<WorldDoc | null>(null);
   const [index, setIndex] = useState<WorldIndex | null>(null);
+  const [preview, setPreview] = useState<UpgradePreview | null>(null);
   const [busy, run] = useBusy();
   const worldId = view?.worldId ?? null;
   useEffect(() => {
@@ -112,26 +114,34 @@ function PinsSection() {
     void app.request({ type: "lre.world", op: "list" }).then((result) => setIndex(result?.worlds?.find((w) => w.id === worldId) ?? null));
   }, [worldId, view?.revision]);
   if (!view || !worldId) return <Empty>Open a world chat to see its pins.</Empty>;
-  const behind = index !== null && view.revision !== null && index.head !== view.revision;
+  const lagging = view.definitionsFrom;
+  // An earlier Upgrade that didn't bring the definitions in leaves them to bring in, even at the head.
+  const behind = index !== null && view.revision !== null && (index.head !== view.revision || lagging !== undefined);
   return (
     <div class="lre-stack">
       <Row k="World" v={index?.name ?? world?.name ?? worldId} />
-      <Row k="This chat's revision" v={<code>{view.revision?.slice(0, 8) ?? "—"}</code>} sub={behind ? "A newer revision exists." : "Up to date."} tone={behind ? "warn" : undefined} />
-      {behind && index ? (
+      <Row k="This chat's revision" v={<code>{view.revision?.slice(0, 8) ?? "—"}</code>} sub={index !== null && index.head !== view.revision ? "A newer revision exists." : lagging ? "Up to date, but its people, things and accounts aren't." : "Up to date."} tone={behind ? "warn" : undefined} />
+      {lagging ? (
+        <div class="lre-banner warn" data-lre-definitions-lag>
+          People, things and accounts in this chat still follow revision {lagging.slice(0, 8)}: an earlier Upgrade didn't bring their changes in. Upgrade to review them and bring them in.
+        </div>
+      ) : null}
+      {behind && index && !preview ? (
         <button
           type="button"
           class="lre-btn primary"
           disabled={busy}
           onClick={() =>
             run(async () => {
-              const ok = await app.host.confirm("Upgrade world", "Upgrade this chat to the latest world revision? New tables and generators apply from here on; earlier turns keep what they showed.", "warning", "Upgrade");
-              if (ok) await app.request({ type: "lre.world", op: "upgrade", chatId: view.chatId, to: index.head });
+              const result = await app.request({ type: "lre.marker", chatId: view.chatId, kind: "migrate", to: index.head, preview: true });
+              if (result?.preview?.upgrade) setPreview(result.preview.upgrade);
             })
           }
         >
           Upgrade to the latest revision
         </button>
       ) : null}
+      {preview ? <UpgradePanel chatId={view.chatId} preview={preview} onDone={() => setPreview(null)} /> : null}
       {world ? (
         <>
           <div class="lre-h">Generators</div>

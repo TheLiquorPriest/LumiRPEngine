@@ -4,7 +4,7 @@
 import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
-import type { ExtractionModeView } from "../../src/shared/protocol";
+import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
@@ -556,11 +556,37 @@ export function pausedFixture(chatId: string): StateView {
 }
 
 export const WORLDS: WorldIndex[] = [
-  { id: "w-maple", name: "Maple Falls", head: "a1b2c3d4e5f60718293a4b5c6d7e8f90", loreBookId: "book-engine", revisions: ["0f0f", "a1b2c3d4e5f60718293a4b5c6d7e8f90"] },
+  { id: "w-maple", name: "Maple Falls", head: "c3d4e5f60718293a4b5c6d7e8f90a1b2", loreBookId: "book-engine", revisions: ["0f0f", "a1b2c3d4e5f60718293a4b5c6d7e8f90", "c3d4e5f60718293a4b5c6d7e8f90a1b2"] },
   { id: "w-manor", name: "Blackwood Manor", head: "77aa", loreBookId: null, revisions: ["77aa"] },
   // Wrapping and escaping checks: a very long name, an unbroken token and markup that must render as text.
   { id: "w-long", name: "The Exceptionally Long-Named Port Alder Lakeshore Simulation World With Ferries, Fishing Boats And A Lighthouse <b>bold?</b> & Co. Supercalifragilisticexpialidociousharborfront", head: "88bb", loreBookId: null, revisions: ["88bb"] },
 ];
+
+/** What upgrading the preview chat to Maple Falls' head would bring in (DESIGN §4.3 `migrate`). */
+export const UPGRADE_PREVIEW: UpgradePreview = {
+  from: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  to: "c3d4e5f60718293a4b5c6d7e8f90a1b2",
+  entities: [
+    { entity: "rosa", name: "Rosa Vance", kind: "Character", status: "new", changes: [{ id: "rosa:entity", label: "Add to the chat", from: "not in the chat", to: "Character, at Rosie's Diner", pick: "take", options: ["take", "keep"], why: "new", targets: [{ entity: "rosa", part: "entity" }] }] },
+    { entity: "scooter", name: "Dev's scooter", kind: "Vehicle", status: "new", changes: [{ id: "scooter:entity", label: "Add to the chat", from: "not in the chat", to: "Vehicle, at 114 Harbor Street", pick: "take", options: ["take", "keep"], why: "new", targets: [{ entity: "scooter", part: "entity" }] }] },
+    {
+      entity: "dev",
+      name: "Dev Okafor",
+      kind: "Character",
+      status: "changed",
+      changes: [
+        { id: "dev:field:appointments", label: "Appointments", from: "none", to: '1 × [{"at":20000,"minutes":60,"place":"clinic","label":"Dentist"}]', pick: "take", options: ["take", "keep"], why: "unchanged", targets: [{ entity: "dev", part: "field", field: "appointments" }] },
+        { id: "dev:field:home", label: "Home", from: "114 Harbor Street", to: "Lakeview Apartments", pick: "take", options: ["take", "keep"], why: "unchanged", targets: [{ entity: "dev", part: "field", field: "home" }] },
+        { id: "dev:field:employer", label: "Employer", from: "Alder Automotive", to: "Alder Harbor Marina", pick: "take", options: ["take", "keep"], why: "unchanged", targets: [{ entity: "dev", part: "field", field: "employer" }] },
+        { id: "dev:field:mood", label: "Mood", from: "cheerful", to: "worried", pick: "keep", options: ["take", "keep"], why: "changed in play", targets: [{ entity: "dev", part: "field", field: "mood" }] },
+        { id: "dev:rel:member_of:guild", label: "Member of: Harbor Guild", from: "not linked", to: "linked", pick: "take", options: ["take", "keep"], why: "unchanged", targets: [{ entity: "dev", part: "relation", rel: "member_of", to: "guild" }] },
+      ],
+    },
+    { entity: "acct_pov_checking", name: "Checking", kind: "Account", status: "changed", changes: [{ id: "acct_pov_checking:field:opening", label: "Opening balance", from: "$1,842.17", to: "$2,400.00", pick: "keep", options: ["take", "keep"], why: "changed in play", targets: [{ entity: "acct_pov_checking", part: "field", field: "opening" }] }] },
+    { entity: "old_boat", name: "The old skiff", kind: "Vehicle", status: "removed", changes: [{ id: "old_boat:entity", label: "Stay in the chat", from: "in the chat", to: "out of the world", pick: "keep", options: ["keep", "remove"], why: "removed", targets: [{ entity: "old_boat", part: "entity" }] }] },
+  ],
+  tracks: ["Raise the barn: back to Rumours; this revision has no stage “Old idea”"],
+};
 
 export function worldFixture(): WorldDoc {
   const terrain: string[] = [];

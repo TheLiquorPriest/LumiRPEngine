@@ -10,7 +10,7 @@ import type { GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
-import { extractionView, freshFixture, gmFixture, pausedFixture, settingsFixture, starterMap, stateFixture, WORLDS, worldFixture } from "./fixtures";
+import { extractionView, freshFixture, gmFixture, pausedFixture, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { previewSheet } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { formulaFunctions } from "../../src/engine/scope";
@@ -303,6 +303,10 @@ export class MockBackend {
         }, 40);
         return;
       case "lre.marker":
+        if (message.kind === "migrate" && message.preview) {
+          this.result(reqId, "lre.marker", { pending: false, preview: { lines: [{ text: `The chat moves to revision ${message.to.slice(0, 8)} of Maple Falls from the next turn.`, tone: "info" }], upgrade: structuredClone(UPGRADE_PREVIEW) } });
+          return;
+        }
         if (message.kind === "resolve" && message.preview) {
           const current = this.view?.controls?.realism.levels[message.domain] ?? 0;
           const lines: { text: string; tone: "freeze" | "promote" | "materialize" | "info" }[] =

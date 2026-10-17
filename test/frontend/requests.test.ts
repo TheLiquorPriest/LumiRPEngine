@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { adjustOp, chipIntent, convertRequest, editRequest, entityStateOp, fixRequest, paletteRequest, relationFields, resolveMarker, timelapseRequest, timeMarker, travelRequest } from "../../src/frontend/requests";
+import { adjustOp, chipIntent, convertRequest, editRequest, entityStateOp, fixRequest, paletteRequest, relationFields, resolveMarker, timelapseRequest, timeMarker, travelRequest, upgradeRequest } from "../../src/frontend/requests";
+import type { UpgradePreview } from "../../src/shared/protocol";
 import type { Chip, GmEntity, PaletteEntry, TimelapseView } from "../../src/shared/state-view";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { INTERRUPT_CLASSES } from "../../src/shared/ids";
@@ -184,5 +185,41 @@ describe("GM edits", () => {
     expect(adjustOp("dev_checking", "$1,000", DEFAULT_CURRENCY, true)).toEqual({ op: "adjust", account: "dev_checking", cents: -100000 });
     expect(adjustOp("dev_checking", "0", DEFAULT_CURRENCY, false)).toBeNull();
     expect(adjustOp("dev_checking", "a lot", DEFAULT_CURRENCY, false)).toBeNull();
+  });
+});
+
+describe("an Upgrade's picks", () => {
+  const preview: UpgradePreview = {
+    from: "r1",
+    to: "r2",
+    tracks: [],
+    entities: [
+      { entity: "kid", name: "Kit", kind: "Person", status: "new", changes: [{ id: "kid:entity", label: "New", from: "", to: "", pick: "take", options: ["take", "keep"], why: "new", targets: [{ entity: "kid", part: "entity" }] }] },
+      {
+        entity: "dev",
+        name: "Dev",
+        kind: "Person",
+        status: "changed",
+        changes: [
+          { id: "dev:field:home", label: "Home", from: "", to: "", pick: "take", options: ["take", "keep"], why: "unchanged", targets: [{ entity: "dev", part: "field", field: "home" }] },
+          { id: "dev:field:mood", label: "Mood", from: "", to: "", pick: "keep", options: ["take", "keep"], why: "changed in play", targets: [{ entity: "dev", part: "field", field: "mood" }] },
+          { id: "dev:rel:sibling_of:sam", label: "Sibling", from: "", to: "", pick: "keep", options: ["take", "keep"], why: "changed in play", targets: [{ entity: "dev", part: "relation", rel: "sibling_of", to: "sam" }, { entity: "sam", part: "relation", rel: "sibling_of", to: "dev" }] },
+          { id: "dev:tier", label: "Tier", from: "", to: "", pick: "take", options: ["take", "keep"], why: "unchanged", targets: [{ entity: "dev", part: "tier" }] },
+        ],
+      },
+      { entity: "jo", name: "Jo", kind: "Person", status: "removed", changes: [{ id: "jo:entity", label: "Gone", from: "", to: "", pick: "keep", options: ["keep", "remove"], why: "removed", targets: [{ entity: "jo", part: "entity" }] }] },
+    ],
+  };
+
+  test("send only what differs from the defaults, at every target, and an Upgrade with none still merges", () => {
+    expect(upgradeRequest("c1", preview, {})).toEqual({ type: "lre.world", op: "upgrade", chatId: "c1", to: "r2", merge: {} });
+    const req = upgradeRequest("c1", preview, { "kid:entity": "keep", "dev:field:home": "take", "dev:field:mood": "take", "dev:rel:sibling_of:sam": "take", "dev:tier": "keep", "jo:entity": "remove" });
+    expect(req).toEqual({
+      type: "lre.world",
+      op: "upgrade",
+      chatId: "c1",
+      to: "r2",
+      merge: { kid: { entity: "keep" }, dev: { fields: { mood: "take" }, relations: { sibling_of: { sam: "take" } }, tier: "keep" }, sam: { relations: { sibling_of: { dev: "take" } } }, jo: { entity: "remove" } },
+    });
   });
 });

@@ -66,10 +66,10 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
     const whole: UpgradeTarget[] = [{ entity: d.id, part: "entity" }];
     if (d.status === "new") {
       const place = typeof d.def.fields.place === "string" ? nameOf(d.def.fields.place) : undefined;
-      row.changes.push({ id: `${d.id}:entity`, label: "New in this revision", from: "not in the chat", to: place ? `${kind}, at ${place}` : kind, pick: "take", options: ["take", "keep"], why: "new", targets: whole });
+      row.changes.push({ id: `${d.id}:entity`, label: "Add to the chat", from: "not in the chat", to: place ? `${kind}, at ${place}` : kind, pick: "take", options: ["take", "keep"], why: "new", targets: whole });
     } else if (d.status === "removed") {
       const removal: EntityUpgradePick[] = ["keep", "remove"];
-      row.changes.push({ id: `${d.id}:entity`, label: "Gone from this revision", from: "in the chat", to: "out of the world", pick: "keep", options: removal, why: "removed", targets: whole });
+      row.changes.push({ id: `${d.id}:entity`, label: "Stay in the chat", from: "in the chat", to: "out of the world", pick: "keep", options: removal, why: "removed", targets: whole });
     } else {
       for (const aspect of UPGRADE_ASPECTS) {
         const diff: PartDiff | undefined = d.aspects[aspect];

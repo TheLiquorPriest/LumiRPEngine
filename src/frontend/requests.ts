@@ -3,9 +3,9 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatId, DomainId, EntityId, InterruptClass, InterruptPolicy, Level, TierId, WorldId } from "../shared/ids";
-import type { KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope } from "../shared/ledger";
+import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseTarget, TimeScope, UpgradePicks } from "../shared/ledger";
 import { parseMoneyInput } from "../shared/money";
-import type { EditOp } from "../shared/protocol";
+import type { EditOp, UpgradePreview } from "../shared/protocol";
 import type { Chip, FixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
 import type { WorldCurrency } from "../shared/world";
 import type { RequestBody } from "./registry";
@@ -24,6 +24,30 @@ export type Req<K extends RequestBody["type"]> = Extract<RequestBody, { type: K 
 export interface ChipIntent {
   request: Req<"lre.chip"> | null;
   regenerate: boolean;
+}
+
+/**
+ * An Upgrade with the owner's picks (DESIGN §4.3 `migrate`): only the changes whose choice differs
+ * from the default travel, written at every target (both sides of a relation pair); the fold works
+ * the defaults out itself. Even with no picks the Upgrade brings the definition changes in.
+ */
+export function upgradeRequest(chatId: ChatId, preview: UpgradePreview, choices: Readonly<Record<string, EntityUpgradePick>>): Req<"lre.world"> {
+  const merge: UpgradePicks = {};
+  for (const row of preview.entities) {
+    for (const change of row.changes) {
+      const choice = choices[change.id] ?? change.pick;
+      if (choice === change.pick) continue;
+      for (const t of change.targets) {
+        const picks = (merge[t.entity] ??= {});
+        if (t.part === "entity") picks.entity = choice;
+        else if (choice === "remove") continue;
+        else if (t.part === "field") (picks.fields ??= {})[t.field] = choice;
+        else if (t.part === "relation") ((picks.relations ??= {})[t.rel] ??= {})[t.to] = choice;
+        else picks[t.part] = choice;
+      }
+    }
+  }
+  return { type: "lre.world", op: "upgrade", chatId, to: preview.to, merge };
 }
 
 export function chipIntent(chip: Chip, choice: string, chatId: ChatId, payload?: JsonObject): ChipIntent {
