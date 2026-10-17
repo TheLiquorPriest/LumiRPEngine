@@ -15,6 +15,7 @@ import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
 import type { Value } from "./expr";
 import { knowsChannel, spawnChannel } from "./narration-channels";
 import { kindIs } from "./scope";
+import { restoreObservations } from "./seen";
 import { inClass, isMemberOf, tagsOf } from "./selector";
 import type { EntityState, WorldState } from "./state";
 import { own } from "./pack-kit";
@@ -37,6 +38,8 @@ export const ENGINE_EVENTS = {
   check: "engine.check",
   /** A GM edit of an entity's simulation detail: its tier, agent flag and per-entity level overrides. */
   entity: "engine.entity",
+  /** What a coarsened record's fold would get wrong of the POV's observations (`engine/seen`), at its end. */
+  observed: "engine.observed",
 } as const;
 
 export interface EngineSlice {
@@ -242,6 +245,12 @@ const events: EventTypeDef<PackEvent>[] = [
       if (isRecord(levels)) for (const [d, v] of Object.entries(levels)) parts.push(`${d} level ${v === null ? "from the tier" : String(v)}`);
       return `${own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity")}: ${parts.join(", ")}`;
     },
+  },
+  {
+    type: ENGINE_EVENTS.observed,
+    validate: (e) => (Object.values(e.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" }),
+    apply: (e, state) => restoreObservations(state, e.data),
+    describe: () => "what you saw meanwhile",
   },
 ];
 

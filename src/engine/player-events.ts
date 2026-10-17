@@ -29,6 +29,7 @@ const BOOKKEEPING = new Set<string>([
   ENGINE_EVENTS.attempt,
   ENGINE_EVENTS.pause,
   ENGINE_EVENTS.beat,
+  ENGINE_EVENTS.observed,
   "castlife.decision",
   "castlife.override",
   "economy.price",

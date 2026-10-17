@@ -6,9 +6,18 @@ import type { TravelOption } from "../../../src/packs/vehicles/core/index";
 import { balance, holdingsValue, priceOf } from "../../../src/packs/economy/core/model";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { commitments } from "../../../src/packs/castlife/core/index";
+import { coreEventTypes, type EventTypes } from "../../../src/engine/events";
+import type { EventTypeDef } from "../../../src/engine/registry";
 import { runRulesOnEvents } from "../../../src/engine/rules";
+import { unobserved } from "../../../src/engine/seen";
+import type { WorldState } from "../../../src/engine/state";
 import { buildQuestLog } from "../../../src/packs/story/core/index";
 import { playerTrack } from "../../../src/engine/visibility";
+import { hashJson } from "../../../src/shared/hash";
+import type { LedgerEvent } from "../../../src/shared/ledger";
+import type { WorldDoc } from "../../../src/shared/world";
+import { STARTER_WORLDS } from "../../../src/packs/starters/index";
+import { fold, startState } from "../support";
 import { Play, registry } from "./play";
 
 const DAY = 1440;
@@ -322,4 +331,30 @@ describe("Port Alder (modern_slice_of_life)", () => {
     expect(p.flag("ferry_running")).toBe(true);
     expect(p.eval("route_open('rt_marina_gull')")).toBe(true);
   });
+});
+
+/** Folds events with the core event types as they were before the POV's observations (`space.seen`) were kept. */
+function foldUnobserving(world: WorldDoc, start: Readonly<WorldState>, events: readonly LedgerEvent[]): WorldState {
+  const types: EventTypes = { get: (type) => plain.get(type) ?? registry.get(type) };
+  const plain = new Map<string, EventTypeDef>(coreEventTypes(() => types).map((d) => [d.type, d]));
+  const state = structuredClone(start) as WorldState;
+  for (const e of events) types.get(e.type)?.apply(e, state, registry.context(world, state));
+  return state;
+}
+
+describe("the POV's observations are all that keeping them changes", () => {
+  for (const starter of Object.keys(STARTER_WORLDS)) {
+    test(`${starter}: a walk and two days fold to the same world as without them`, () => {
+      const p = new Play(starter);
+      const start = startState(p.world);
+      const here = p.state.entities[p.world.pov]?.fields.place;
+      for (const place of Object.values(p.world.places).filter((x) => x.visibility !== "secret" && x.id !== here).slice(0, 3)) {
+        p.at(p.world.pov, place.id);
+        p.lapse(90);
+      }
+      p.lapse(2 * DAY);
+      expect(hashJson(fold(registry, p.world, start, p.w.events))).toBe(hashJson(p.state));
+      expect(hashJson(unobserved(foldUnobserving(p.world, start, p.w.events)))).toBe(hashJson(unobserved(p.state)));
+    });
+  }
 });

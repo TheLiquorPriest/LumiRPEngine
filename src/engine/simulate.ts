@@ -27,6 +27,7 @@ import { createRng, type Rng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick, type RuleFiring } from "./rules";
 import { allSchedules, instantEvents, scheduleInstants, type ScheduleInstant } from "./schedules";
 import { isGone } from "./scope";
+import { lostObservations, unobserved } from "./seen";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import type { WorldDoc } from "../shared/world";
@@ -444,10 +445,10 @@ function collapse(reg: Registry, start: Readonly<WorldState>, events: readonly L
   return merged.filter((e) => !(e.type === "add" && e.delta === 0) && !(e.type === "clock" && e.minutes === 0));
 }
 
-function foldHash(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, events: readonly LedgerEvent[]): string | null {
+function foldOf(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, events: readonly LedgerEvent[]): WorldState | null {
   const w = new Working(reg, world, start);
   const applied = w.applyAll(events);
-  return applied.length === events.length ? hashJson(w.state) : null;
+  return applied.length === events.length ? w.state : null;
 }
 
 /**
@@ -456,11 +457,18 @@ function foldHash(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, e
  * signals (arrivals, needs, weather, overdue, invitations) at their latest, pack accumulators
  * merged through their `coarsen` hook, and adjacent clock moves joined. The result is checked:
  * when it doesn't fold from `start` to exactly the raw fold's state, the conservative pass is
- * used, and when that doesn't either, the raw events.
+ * used, and when that doesn't either, the raw events. Moving everyone once loses what the POV saw
+ * on the way, so a coarse record ends with an `engine.observed` event putting that back.
  */
 export function coarsen(reg: Registry, world: WorldDoc, start: Readonly<WorldState>, events: readonly LedgerEvent[]): LedgerEvent[] {
-  const expected = foldHash(reg, world, start, events);
-  if (expected === null) return [...events];
-  for (const candidate of [collapse(reg, start, events), coarsenRuns(events)]) if (foldHash(reg, world, start, candidate) === expected) return candidate;
+  const full = foldOf(reg, world, start, events);
+  if (full === null) return [...events];
+  const expected = hashJson(unobserved(full));
+  for (const candidate of [collapse(reg, start, events), coarsenRuns(events)]) {
+    const coarse = foldOf(reg, world, start, candidate);
+    if (coarse === null || hashJson(unobserved(coarse)) !== expected) continue;
+    const lost = lostObservations(full, coarse);
+    return lost ? [...candidate, { type: ENGINE_EVENTS.observed, data: lost }] : candidate;
+  }
   return [...events];
 }

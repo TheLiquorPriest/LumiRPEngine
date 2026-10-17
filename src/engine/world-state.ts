@@ -7,6 +7,7 @@ import { isRecord } from "../shared/json";
 import { agentOf } from "../shared/tiers";
 import type { WorldDoc } from "../shared/world";
 import { completeRelations, type RelationTypes } from "./relations";
+import { seedObservations } from "./seen";
 import type { EntityState, TrackState, WorldState } from "./state";
 import { clampLevel, clampThreshold, clampTick, clampUnitCap } from "./time-limits";
 
@@ -56,7 +57,7 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
   }
   const tracks: Record<string, TrackState> = {};
   for (const [id, t] of Object.entries(world.tracks)) tracks[id] = { stage: t.start, since: 0 };
-  return {
+  const state: WorldState = {
     revision,
     clock: minutesBetween(world.calendar.epoch, world.start.at),
     entities,
@@ -76,4 +77,6 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
     materialized: {},
     packs: {},
   };
+  seedObservations(world, state);
+  return state;
 }

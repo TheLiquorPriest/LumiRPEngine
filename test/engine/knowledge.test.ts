@@ -2,15 +2,22 @@
 // relations, `knownBy` selectors and its own observations (`space.seen`).
 
 import { describe, expect, test } from "bun:test";
+import { hashJson } from "../../src/shared/hash";
 import type { WorldDoc } from "../../src/shared/world";
+import { applyEffects } from "../../src/engine/effects";
+import { ENGINE_EVENTS } from "../../src/engine/engine-pack";
 import { paramCandidates } from "../../src/engine/resolve";
 import { createRegistry } from "../../src/engine/registry-impl";
+import { createRng } from "../../src/engine/rng";
+import { lastSighting, placeVisit } from "../../src/engine/seen";
+import { ALL_NOTE, coarsen } from "../../src/engine/simulate";
+import { runTimelapse } from "../../src/engine/time";
 import { canSeeEntity, canSeeField, canSeePlace, eventVisible, playerTrack } from "../../src/engine/visibility";
 import { lintStructure } from "../../src/engine/world-lint";
 import { Working } from "../../src/engine/working";
 import { ALL_PACKS } from "../../src/packs/index";
 import { modernUsWorld } from "../packs/riverton";
-import { startState } from "../packs/support";
+import { fold, startState } from "../packs/support";
 
 const reg = createRegistry(ALL_PACKS);
 
@@ -81,5 +88,61 @@ describe("knownBy selectors", () => {
     expect(canSeeEntity(reg, w.world, w.state, "you", "rosa")).toBe(false);
     expect(eventVisible(reg, w.world, w.state, "you", { type: "engine.signal", data: { class: "quest", text: "A sign", visibility: "discoverable" } })).toBe(false);
     expect(lintStructure(w.world, reg).some((i) => i.path === "entities.rosa.visibility" && i.severity === "error")).toBe(true);
+  });
+});
+
+
+describe("space.seen: where the POV has been and whom it saw", () => {
+  const move = (w: Working, entity: string, to: string) => applyEffects(reg, w, [{ type: "move", args: { entity, to } }], { bindings: {}, rng: createRng(`${entity}:${to}`) });
+
+  test("a move records the places left and reached, and who parted and who met, at that clock", () => {
+    const w = riverton();
+    const t0 = w.state.clock;
+    // The start counts as a visit, to the place and the places around it.
+    expect(placeVisit(w.state, "apartment")).toEqual({ first: t0, last: t0 });
+    expect(placeVisit(w.state, "riverton")).toEqual({ first: t0, last: t0 });
+    expect(placeVisit(w.state, "cafe")).toBeNull();
+    w.apply({ type: "clock", minutes: 30, cause: "advance" });
+    move(w, "you", "cafe");
+    expect(placeVisit(w.state, "apartment")).toEqual({ first: t0, last: t0 + 30 });
+    expect(placeVisit(w.state, "cafe")).toEqual({ first: t0 + 30, last: t0 + 30 });
+    // Maya stayed behind; the secret and the unknown person were never seen.
+    expect(lastSighting(w.state, "maya")).toEqual({ place: "apartment", at: t0 + 30 });
+    expect(lastSighting(w.state, "lurker")).toBeNull();
+    expect(lastSighting(w.state, "stranger")).toBeNull();
+    move(w, "jordan", "cafe");
+    w.apply({ type: "spawn", entity: { id: "npc_ellie", kind: "person", name: "Ellie", tier: "background", fields: { place: "cafe" }, relations: [] } });
+    w.apply({ type: "clock", minutes: 15, cause: "advance" });
+    move(w, "jordan", "office");
+    expect(lastSighting(w.state, "jordan")).toEqual({ place: "cafe", at: t0 + 45 });
+    expect(lastSighting(w.state, "npc_ellie")).toEqual({ place: "cafe", at: t0 + 30 });
+    // Replaying the events rebuilds the same record.
+    expect(hashJson(fold(reg, w.world, startState(w.world), w.events))).toBe(hashJson(w.state));
+  });
+
+  test("a coarsened Timelapse keeps what the POV saw on the way, and still folds exactly", () => {
+    const w = riverton();
+    const s0 = structuredClone(w.state);
+    const out = runTimelapse(reg, w, { type: "duration", minutes: 2 * 1440 }, { runSeed: "seen", overrides: ALL_NOTE });
+    if ("code" in out) throw new Error(out.reason);
+    const coarse = coarsen(reg, w.world, s0, w.events);
+    expect(coarse.length).toBeLessThan(w.events.length);
+    expect(coarse.some((e) => e.type === ENGINE_EVENTS.observed)).toBe(true);
+    const folded = fold(reg, w.world, s0, coarse);
+    expect(hashJson(folded)).toBe(hashJson(w.state));
+    expect(lastSighting(folded, "maya")).toEqual(lastSighting(w.state, "maya"));
+  });
+
+  test("from Space 3, the POV arriving at a place with a cell stands on it; others keep theirs", () => {
+    const w = riverton((world) => {
+      world.realism.levels.space = 3;
+      world.places.cafe!.cell = { x: 3, y: 4 };
+      world.entities.you!.fields.x = 9;
+      world.entities.you!.fields.y = 9;
+    });
+    move(w, "you", "cafe");
+    expect([w.state.entities.you?.fields.x, w.state.entities.you?.fields.y]).toEqual([3, 4]);
+    move(w, "rosa", "cafe");
+    expect(w.state.entities.rosa?.fields.x).toBeUndefined();
   });
 });

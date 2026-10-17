@@ -22,8 +22,10 @@ import type {
   ServiceMap,
   TableDef,
 } from "./registry";
+import { observing } from "./seen";
 import type { WorldState } from "./state";
 import { clampLevel } from "./time-limits";
+import { canSeeEntity } from "./visibility";
 
 export interface Registry extends EventTypes {
   readonly packs: readonly PackDef[];
@@ -139,7 +141,8 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
     },
   };
 
-  for (const def of coreEventTypes(() => registry)) once(events, def.type, def, "event type");
+  // Moving events also keep the POV's observations (`space.seen`); both folds apply these same types.
+  for (const def of coreEventTypes(() => registry)) once(events, def.type, observing(def, canSeeEntity), "event type");
 
   const seen = new Set<string>();
   for (const pack of packs) {
