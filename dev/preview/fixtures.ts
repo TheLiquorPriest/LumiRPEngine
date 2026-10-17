@@ -65,8 +65,6 @@ export function stateFixture(chatId: string): StateView {
       { kind: "note", messageId: "m2", ref: null, text: "Montage (Mon 22:00 → Tue 07:00): slept 8 h; payroll $612.40 to Checking; rent autopay $850.00." },
       { kind: "dropped", messageId: "m3", ref: { in: "post", seq: 14, index: 0 }, text: "Paid Mara $15 — dropped: you no longer had the cash on this branch." },
       { kind: "inert", messageId: "m3", ref: { marker: 9 }, text: "Realism change made on another branch (Money → Detailed)." },
-      { kind: "expired", messageId: "m1", ref: null, text: "Confirm expired at send: Dev learns about the surprise party." },
-      { kind: "regenerated", messageId: "m2", ref: null, text: "Glovebox contents regenerated from the same seed (source entry missing)." },
     ],
     keepReport: [],
     pending: [{ panel: "castlife.cast", entity: "npc_mara" }],

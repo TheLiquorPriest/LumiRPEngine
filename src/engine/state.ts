@@ -59,7 +59,7 @@ export interface WorldState {
   time: TimeState;
   /** The adjudication policy an `adjudicate` marker set (DESIGN §11); absent, the world's ruleset decides. */
   adjudication?: AdjudicationDef;
-  /** First materialization per `<entityId>:<domain>`, with its pins (L24, L25). */
+  /** First materialization per `<entityId>:<domain>`, with its pins (L24). */
   materialized: Record<string, { generatorVersion: number; tablesRevision: string }>;
   /** Pack-owned state slices, keyed by pack id. */
   packs: Record<PackId, JsonObject>;

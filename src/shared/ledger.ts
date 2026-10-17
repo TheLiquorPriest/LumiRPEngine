@@ -433,7 +433,7 @@ export interface Journal {
 // ---------------------------------------------------------------- fold outputs
 
 /** `fix`: a ✎ fix or GM edit in the Journal (built by the view, never by a fold); `not_carried`: an entry a swipe or a Re-read dropped (`Rec.dropped`). */
-export type NoteKind = "dropped" | "inert" | "not_carried" | "tombstoned" | "expired" | "regenerated" | "note" | "fix";
+export type NoteKind = "dropped" | "inert" | "not_carried" | "tombstoned" | "note" | "fix";
 
 /** A derived Journal note (L16: every stored entry the fold doesn't apply has one). */
 export interface JournalNote {

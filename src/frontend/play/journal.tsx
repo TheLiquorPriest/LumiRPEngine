@@ -1,6 +1,6 @@
 // Play → Journal: every derived note (L16), Montage lines included, newest first, filterable by
-// kind. Notes explain what the fold didn't apply and why (dropped, made on another branch,
-// tombstoned, expired confirms, regenerated detail). Save to lore (DESIGN §4.2) keeps the latest
+// kind. Notes explain what the fold didn't apply and why (dropped, made on another branch, not
+// carried over by a swipe or a Re-read, discarded). Save to lore (DESIGN §4.2) keeps the latest
 // reply, or an excerpt of the chat, as a lore entry in the world's draft and opens its form.
 
 import { useRef, useState } from "preact/hooks";
@@ -15,8 +15,6 @@ const KIND_LABEL: Record<NoteKind, string> = {
   inert: "Other branch",
   not_carried: "Not carried",
   tombstoned: "Discarded",
-  expired: "Expired",
-  regenerated: "Regenerated",
   note: "Note",
   fix: "Corrected",
 };
@@ -26,8 +24,6 @@ const KIND_TONE: Record<NoteKind, string> = {
   inert: "",
   not_carried: "warn",
   tombstoned: "neg",
-  expired: "warn",
-  regenerated: "accent",
   note: "accent",
   fix: "accent",
 };
@@ -86,7 +82,7 @@ export function JournalPanel(props: PanelProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const notes = [...props.state.journal].reverse().filter((note) => {
     // Applied lines (turns, montages, corrections) apart from what didn't apply.
-    const applied = note.kind === "note" || note.kind === "regenerated" || note.kind === "fix";
+    const applied = note.kind === "note" || note.kind === "fix";
     return filter === "all" || (filter === "notes") === applied;
   });
   return (
