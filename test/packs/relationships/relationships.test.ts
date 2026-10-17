@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../../src/shared/world";
-import type { GmView } from "../../../src/shared/state-view";
+import { buildGmWorld } from "../../../src/engine/gm-view";
 import { applyEffects } from "../../../src/engine/effects";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { createRng } from "../../../src/engine/rng";
@@ -58,9 +58,9 @@ describe("relationships", () => {
     const w = setup(4);
     w.state.entities.maya!.agent = true;
     appraise(w, "maya", "jordan", "help");
-    const gm = reg.views.find((v) => v.panel === "core.gm")?.build(w.ctx) as unknown as GmView;
-    const maya = gm.previews.find((p) => p.title === w.state.entities.maya?.name);
-    expect(maya?.lines.some((l) => l.startsWith(`regard → ${w.state.entities.jordan?.name}:`))).toBe(true);
+    const gm = buildGmWorld(reg, w.world, w.state);
+    const maya = gm.entities.find((e) => e.id === "maya");
+    expect(maya?.relations.some((r) => r.type === "regard" && r.to === "jordan" && typeof r.value === "number")).toBe(true);
     const ev = w.events.find((e) => e.type === "relationships.regard");
     expect(ev ? reg.get(ev.type)?.describe(ev, w.ctx) : "").toBe(`${w.state.entities.maya?.name} → ${w.state.entities.jordan?.name}: warmth +5, trust +5, respect +3`);
     appraise(w, "maya", "you", "help");

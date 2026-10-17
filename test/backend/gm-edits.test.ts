@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/shared/json";
 import type { EditOp } from "../../src/shared/protocol";
+import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
 import { paramCandidates } from "../../src/engine/resolve";
@@ -202,5 +203,27 @@ describe("GM edits", () => {
       const reply = await rig.send({ type: "lre.edit", chatId, ops });
       expect(reply.type === "lre.error" ? reply.code : "accepted").toBe("bad_request");
     }
+  });
+});
+
+describe("GM view", () => {
+  test("loads on request with everything, removed and secret entities included, and is never pushed with the state", async () => {
+    const rig = new Rig();
+    const chatId = await chat(rig);
+    await edit(rig, chatId, { op: "despawn", entity: "dev" }, { op: "set", entity: "chest", field: "visibility", value: "secret" }, { op: "link", rel: "rival", from: POV, to: "dev", fields: { heat: 2 } });
+    expect(Object.keys((await rig.rt.view(chatId, rig.host.userId)).panels)).not.toContain("core.gm");
+    expect(rig.host.sent.some((m) => (m.type === "lre.state.snapshot" && "core.gm" in m.view.panels) || (m.type === "lre.state.delta" && m.ops.some((op) => op.path.includes("core.gm"))))).toBe(false);
+    const gm = rig.body(await rig.send({ type: "lre.gm", chatId })) as unknown as GmView;
+    const entity = (id: string) => gm.entities.find((e) => e.id === id);
+    expect(entity("dev")).toMatchObject({ gone: true, agent: true });
+    expect(entity("chest")?.visibility).toBe("secret");
+    expect(entity("coin")?.holder).toBe("chest");
+    expect(entity(POV)?.fields.find((f) => f.id === "grit")).toMatchObject({ type: "number", min: 1, max: 5 });
+    expect(entity(POV)?.fields.find((f) => f.id === "secret")?.locked).toBe(true);
+    expect(gm.places.map((p) => p.id).sort()).toEqual(["cellar", "home"]);
+    expect(gm.tracks.find((t) => t.id === "feud")?.stages.map((s) => s.id)).toEqual(["simmer", "boil"]);
+    expect(gm.relationTypes.some((r) => r.id === "rival" && r.fields.some((f) => f.id === "heat" && f.max === 10))).toBe(true);
+    // The edit is listed in full, the removed entity named, though the player's Journal can't name it.
+    expect(gm.edits[0]?.lines.some((l) => l.includes("Dev is gone"))).toBe(true);
   });
 });

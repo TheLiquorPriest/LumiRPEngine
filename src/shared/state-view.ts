@@ -258,15 +258,82 @@ export interface StateView {
   currency: WorldCurrency | null;
 }
 
-/** The `core.gm` panel (DESIGN §7, §9.2): everything, secrets included, as labelled previews that record nothing. */
-export interface GmView {
-  /** "Preview — not recorded". */
+/** A field on the GM view's entity form: as the entity's kind defines it (when it does) and as stored. */
+export interface GmField {
+  id: FieldId;
   label: string;
-  previews: { title: string; lines: string[] }[];
-  truths: { track: string; stage: string; truth: string }[];
-  agendas: { entity: string; label: string; stage: string }[];
+  type: FieldType;
+  /** Stored, else the definition's default, else null; a derived field's value as read now. */
+  value: JsonValue;
+  /** `enum` values. */
+  values?: string[];
+  /** The bounds an edit is held to (a pool's evaluated max included). */
+  min?: number;
+  max?: number;
+  /** A `ref` field's kind, when its definition names one. */
+  ref?: string;
+  /** Worked out from other values: shown, never edited. */
+  derived?: true;
+  /** Never offered to a model; the GM edits it like any other. */
+  locked?: true;
+  /** A value the kind doesn't declare (a pack's bookkeeping, an authored extra), edited as JSON. */
+  extra?: true;
+}
+
+/** One relation an entity holds, with its fields; a regard's current value where the relationships pack reads one. */
+export interface GmRelation {
+  type: string;
+  to: EntityId;
+  toName: string;
+  fields?: JsonObject;
+  until?: number;
+  value?: number;
+}
+
+/** Everything about one entity, secrets included (DESIGN §7). */
+export interface GmEntity {
+  id: EntityId;
+  name: string;
+  kind: string;
+  tier: string;
+  agent: boolean;
+  pov: boolean;
+  /** Removed by a GM, or inside something that was: out of the world until restored. */
+  gone: boolean;
+  /** Not in the world document: spawned while this chat ran. */
+  spawned: boolean;
+  visibility: string;
+  place: PlaceId | null;
+  /** What holds it (`in`), if anything. */
+  holder: EntityId | null;
+  /** The posting total on it, for an account (minor units). */
+  balance?: number;
+  fields: GmField[];
+  relations: GmRelation[];
+  /** Each domain's effective level, and the override set on the entity (null: its tier decides). */
+  levels: { domain: DomainId; level: number; override: number | null }[];
+  /** The world ruleset's designed sheet read on this entity; null when the world designs none. */
+  sheet: SheetSectionView[] | null;
+}
+
+/**
+ * The GM view (DESIGN §7): everything as it stands, secrets and removed entities included, with
+ * what the editor needs to change it. Loaded on request (`lre.gm`), never part of a state push.
+ */
+export interface GmView {
+  entities: GmEntity[];
+  kinds: { id: string; label: string }[];
+  tiers: { id: string; label: string }[];
+  domains: { id: DomainId; label: string }[];
+  places: { id: PlaceId; name: string; visibility: string; parent: PlaceId | null }[];
+  tracks: { id: string; label: string; kind: string; visibility: string; owner: string | null; stage: string; stages: { id: string; label: string; truth?: string }[] }[];
+  relationTypes: { id: string; label: string; from: string; to: string; fields: { id: string; label: string; type: FieldType; min?: number; max?: number; values?: string[] }[] }[];
   /** Everyone else's money (the economy pack's `economy.people_money`); empty without it. */
   money: GmMoney[];
+  /** The ✎ fixes and GM edits in force on this chat's path, newest first, worded in full. */
+  edits: { messageId: string; seq: number; lines: string[] }[];
+  /** Writes held during a reply that didn't apply when it finished, with the validator's reason. */
+  refused: { id: string; reason: string }[];
 }
 
 /** One person's money in the GM view, at their own Money level (as the Money panel shows the POV's at the POV's). */

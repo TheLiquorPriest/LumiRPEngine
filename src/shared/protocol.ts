@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from "./json";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EventRef, PathHash, ResolveScope, TimeControl, TimeScope } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
-import type { SheetSectionView, StateView } from "./state-view";
+import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { KindDef, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
@@ -120,6 +120,11 @@ export type EditOp =
 export interface EditRequest extends Request<"lre.edit"> {
   chatId: ChatId;
   ops: EditOp[];
+}
+
+/** The GM view's data (DESIGN §7), asked for when the GM view opens: never in a state push. */
+export interface GmRequest extends Request<"lre.gm"> {
+  chatId: ChatId;
 }
 
 /** A Play change to the running chat: a realism, time or Upgrade marker. With `preview`, nothing is written. */
@@ -280,6 +285,7 @@ export type FrontendToBackend =
   | ViewOpenRequest
   | FixRequest
   | EditRequest
+  | GmRequest
   | MarkerRequest
   | KeepRequest
   | SettingsGetRequest
@@ -325,6 +331,7 @@ export interface ResultBodies {
   "lre.view.open": { materialized: boolean; pending: boolean };
   "lre.fix": { pending: boolean };
   "lre.edit": { pending: boolean };
+  "lre.gm": GmView;
   "lre.marker": { pending: boolean; preview?: MarkerPreview };
   "lre.keep": { pending: boolean };
   "lre.settings.get": SettingsResult;

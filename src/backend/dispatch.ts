@@ -32,6 +32,7 @@ import { ACTIVE_CONNECTION, declineNote, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals } from "./turn-model";
 import { TIMELAPSE_ACTION } from "./view";
+import { buildGmView } from "./gm";
 import { newChatRun, WorldError } from "./worlds";
 
 export class RequestError extends Error {
@@ -202,6 +203,15 @@ export class Dispatcher {
         if ("rejection" in edit) throw new RequestError("validation", edit.rejection.reason);
         const result = edit.events.length > 0 ? await this.write(r.chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "fix", events: edit.events } }) : { pending: false };
         reply("lre.edit", { pending: result.pending });
+        return;
+      }
+      case "lre.gm": {
+        // Asked for when the GM view opens: everything, secrets included, never in a state push.
+        await this.requireWorldChat(r.chatId, userId);
+        const core = await this.rt.ledger.core(r.chatId, userId);
+        const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry) : null;
+        if (!view) throw new RequestError("unavailable", "the chat's world revision is not loaded");
+        reply("lre.gm", view);
         return;
       }
       case "lre.marker": {

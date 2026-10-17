@@ -101,7 +101,7 @@ function shapeProblem(reg: Registry, w: Working, type: FieldType, def: FieldDef,
 export function valueProblem(reg: Registry, w: Working, entity: EntityId, def: FieldDef, value: JsonValue): string | null {
   const shape = shapeProblem(reg, w, def.type, def, value);
   if (shape || typeof value !== "number" || (def.type !== "number" && def.type !== "money" && def.type !== "duration")) return shape;
-  const { min, max } = fieldBounds(reg, w, entity, def);
+  const { min, max } = fieldBounds(reg, w.ctx, entity, def);
   const show = (n: number): string => (def.type === "money" ? formatMoney(n, w.world.currency) : String(n));
   if ((min === undefined || value >= min) && (max === undefined || value <= max)) return null;
   if (min !== undefined && max !== undefined) return `must be between ${show(min)} and ${show(max)}`;

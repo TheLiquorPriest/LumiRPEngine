@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { boundProposal, combineBounds, strictest } from "../../src/engine/bounds";
-import { enginePack } from "../../src/engine/engine-pack";
+import { buildGmWorld } from "../../src/engine/gm-view";
 import { isMaterialized, materializeIfNeeded, pinnedVersion, previewMaterialization } from "../../src/engine/materialize";
 import type { PackDef } from "../../src/engine/registry";
 import { canSeeEntity, canSeeField, eventVisible, findLeaks, playerTrack } from "../../src/engine/visibility";
@@ -29,14 +29,15 @@ describe("visibility", () => {
     expect(findLeaks({ a: ["Works for the RIVAL!"] }, ["works for the rival"])).toEqual(["Works for the RIVAL!"]);
   });
 
-  test("the GM view is labelled as an unrecorded preview", () => {
+  test("the GM view sees everything: secret people and every track's truths; it is no panel the state pushes", () => {
     const world = baseWorld();
     world.tracks.t = { id: "t", kind: "secret", label: "T", start: "a", visibility: "secret", stages: { a: { label: "A", truth: "the truth", next: [] } } };
+    world.entities.ghost = { id: "ghost", kind: "person", name: "Ghost", tier: "background", fields: {}, relations: [], visibility: "secret" };
     const reg = registryOf();
-    const view = reg.views.find((v) => v.panel === "core.gm")?.build(reg.context(world, startState(world)));
-    expect(JSON.stringify(view)).toContain("Preview — not recorded");
-    expect(JSON.stringify(view)).toContain("the truth");
-    void enginePack;
+    const view = buildGmWorld(reg, world, startState(world));
+    expect(view.tracks.find((t) => t.id === "t")?.stages.map((s) => s.truth)).toEqual(["the truth"]);
+    expect(view.entities.find((e) => e.id === "ghost")?.visibility).toBe("secret");
+    expect(reg.views.some((v) => v.panel === "core.gm")).toBe(false);
   });
 
   test("a quest waiting on a bare start stage is dormant; once it moves on, and when done, it shows", () => {

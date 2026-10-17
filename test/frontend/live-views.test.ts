@@ -3,7 +3,6 @@
 
 import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
-import { decodeGmView } from "../../src/frontend/play/gm";
 import { decodeCalendarView } from "../../src/packs/calendar/ui/panel";
 import { decodeCastView } from "../../src/packs/castlife/ui/panel";
 import { decodeMoneyView } from "../../src/packs/economy/ui/panel";
@@ -15,7 +14,6 @@ import { STARTER_WORLDS } from "../../src/packs/starters/index";
 import { Play, registry } from "../packs/templates/play";
 
 const DECODERS: Record<string, (value: unknown) => unknown> = {
-  "core.gm": decodeGmView,
   "calendar.calendar": decodeCalendarView,
   "castlife.cast": decodeCastView,
   "economy.money": decodeMoneyView,

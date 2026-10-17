@@ -15,9 +15,6 @@ import { fold, startState } from "../packs/support";
 
 export const reg = createRegistry(ALL_PACKS);
 
-/** Panels only the GM sees: excluded from the player surface. */
-const GM_PANELS = new Set(["core.gm"]);
-
 export class Session {
   state: WorldState;
   readonly events: LedgerEvent[] = [];
@@ -42,10 +39,10 @@ export class Session {
   }
 }
 
-/** Everything the player can see: every panel view (not the GM's) and every narrator slot. */
+/** Everything the player can see: every panel view and every narrator slot (the GM view is asked for, never a panel). */
 export function playerSurface(world: WorldDoc, state: Readonly<WorldState>): JsonValue[] {
   const ctx = reg.context(world, state);
-  const views: JsonValue[] = reg.views.filter((v) => !GM_PANELS.has(v.panel)).map((v) => v.build(ctx));
+  const views: JsonValue[] = reg.views.map((v) => v.build(ctx));
   const slots: JsonValue[] = reg.renderers.map((r) => r.render(ctx));
   return [...views, ...slots];
 }

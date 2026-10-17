@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { GmView } from "../../../src/shared/state-view";
 import type { WorldDoc } from "../../../src/shared/world";
+import { buildGmWorld } from "../../../src/engine/gm-view";
 import { materializeAll } from "../../../src/engine/materialize";
 import { playerLines } from "../../../src/engine/player-events";
 import { createRegistry } from "../../../src/engine/registry-impl";
@@ -35,10 +36,8 @@ function lapse(w: Working, days: number, overrides: Record<string, "stop" | "not
   return out;
 }
 
-function gm(w: Working): GmView {
-  const view = reg.views.find((v) => v.panel === "core.gm");
-  if (!view) throw new Error("no GM view");
-  return view.build(reg.context(w.world, w.state)) as unknown as GmView;
+function gm(w: Working): Pick<GmView, "money"> {
+  return buildGmWorld(reg, w.world, w.state);
 }
 
 /** Each account's postings over the run, in and out. */

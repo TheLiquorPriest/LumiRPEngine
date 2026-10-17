@@ -1,9 +1,9 @@
 // The built-in `engine` pack: bookkeeping events the runtime records (rule firings, interrupt
 // signals, agent catch-up cursors, recorded choices, puzzle attempts, reveals, the paused scene,
-// checks rolled by the `check` effect), the GM view, the engine's narration channels (`knows`,
-// `spawn`) and the taxonomy formulas (`kind_is`, `in_class`, `has_tag`, `member_of`, `tier_of`,
-// `band_of`). Every registry is built with it first: `createRegistry([enginePack, ...packs])`. Its
-// state lives in `state.packs.engine`.
+// checks rolled by the `check` effect), GM edits of an entity's tier, agent flag and levels, the
+// engine's narration channels (`knows`, `spawn`) and the taxonomy formulas (`kind_is`, `in_class`,
+// `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built with it first:
+// `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -11,14 +11,13 @@ import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids"
 import { DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
 import { isBand, tierBand, tierLabel, tierOf } from "../shared/tiers";
 import type { PackEvent } from "../shared/ledger";
-import type { GmView } from "../shared/state-view";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
 import type { Value } from "./expr";
 import { knowsChannel, spawnChannel } from "./narration-channels";
 import { kindIs } from "./scope";
 import { inClass, isMemberOf, tagsOf } from "./selector";
 import type { EntityState, WorldState } from "./state";
-import { optionalQuery, own } from "./pack-kit";
+import { own } from "./pack-kit";
 
 export const ENGINE_PACK = "engine";
 
@@ -245,49 +244,12 @@ const events: EventTypeDef<PackEvent>[] = [
   },
 ];
 
-// ---------------------------------------------------------------- GM view (labelled previews)
-
-export const GM_LABEL = "Preview — not recorded";
-
-function buildGm(ctx: ReadContext): GmView {
-  const truths: GmView["truths"] = [];
-  const agendas: GmView["agendas"] = [];
-  for (const id of Object.keys(ctx.world.tracks).sort()) {
-    const t = own(ctx.world.tracks, id);
-    if (!t) continue;
-    const stage = own(ctx.state.tracks, id)?.stage ?? t.start;
-    for (const [sid, s] of Object.entries(t.stages)) if (s.truth) truths.push({ track: t.label, stage: sid === stage ? `${s.label} (current)` : s.label, truth: s.truth });
-    if (t.kind === "agenda") agendas.push({ entity: t.owner ? (own(ctx.state.entities, t.owner)?.name ?? t.owner) : "", label: t.label, stage: own(t.stages, stage)?.label ?? stage });
-  }
-  const previews: GmView["previews"] = [];
-  for (const id of Object.keys(ctx.state.entities).sort()) {
-    const e = own(ctx.state.entities, id);
-    if (!e || !e.agent) continue;
-    const lines = Object.entries(e.fields)
-      .filter(([, v]) => v === null || typeof v !== "object")
-      .map(([k, v]) => `${k}: ${String(v)}`);
-    // Current regard (decayed at level 4) toward everyone the agent has one for: NPC↔NPC included.
-    const regard = optionalQuery(ctx, "regard");
-    if (regard) {
-      for (const r of e.relations) {
-        if (r.type !== "regard" || !own(ctx.state.entities, r.to)) continue;
-        lines.push(`regard → ${own(ctx.state.entities, r.to)?.name ?? r.to}: ${Math.round(regard(ctx, id, r.to) * 10) / 10}`);
-      }
-    }
-    previews.push({ title: e.name, lines });
-  }
-  // Everyone else's money, at their own Money levels, when the economy pack is loaded.
-  const money = optionalQuery(ctx, "economy.people_money")?.(ctx) ?? [];
-  return { label: GM_LABEL, previews, truths, agendas, money };
-}
-
 /** A formula argument naming an entity in the state, with that entity; null otherwise. */
 function entityArg(ctx: ReadContext, v: Value | undefined): [EntityId, EntityState] | null {
   const id = typeof v === "string" ? v : "";
   const e = own(ctx.state.entities, id);
   return e ? [id, e] : null;
 }
-
 export const enginePack: PackDef = {
   id: ENGINE_PACK,
   label: "Engine",
@@ -298,7 +260,6 @@ export const enginePack: PackDef = {
     for (const def of events) r.event(def);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
-    r.view({ panel: "core.gm", build: (ctx) => buildGm(ctx) as unknown as JsonValue });
     // Taxonomy (DESIGN §4.1): what a selector tests, one constraint at a time. An unknown entity is false (or "").
     r.formula("kind_is", (ctx, e, kind) => {
       const hit = entityArg(ctx, e);

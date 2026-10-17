@@ -39,7 +39,7 @@ import { calendarOf, slotIndexAt } from "./calendar";
 import { checkOf, readyCheck, rollCheck, rollVars } from "./checks";
 import { ENGINE_EVENTS } from "./engine-pack";
 import type { EnvVars, Value } from "./expr";
-import type { Rejection } from "./registry";
+import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
 import { linkEvents, spawnLinks, unlinkEvents } from "./relations";
@@ -93,9 +93,9 @@ function clampNumber(value: number, min: number | undefined, max: number | undef
 }
 
 /** The bounds a number field's value is kept in: its min and max, and for a pool its min (default 0) and evaluated max. */
-export function fieldBounds(reg: Registry, w: Working, entity: EntityId, def: FieldDef | undefined): { min?: number; max?: number } {
-  if (!def?.pool) return { min: def?.min, max: def?.max };
-  const top = poolMax(reg, w.ctx, entity, def.pool);
+export function fieldBounds(reg: Registry, ctx: ReadContext, entity: EntityId, def: FieldDef | undefined): { min?: number; max?: number } {
+  if (!def?.pool) return { ...(def?.min !== undefined ? { min: def.min } : {}), ...(def?.max !== undefined ? { max: def.max } : {}) };
+  const top = poolMax(reg, ctx, entity, def.pool);
   const min = Math.max(def.min ?? -Infinity, def.pool.min ?? 0);
   const max = Math.min(def.max ?? Infinity, top ?? Infinity);
   return { ...(Number.isFinite(min) ? { min } : {}), ...(Number.isFinite(max) ? { max } : {}) };
@@ -114,7 +114,7 @@ function change(reg: Registry, w: Working, entity: EntityId, field: string, delt
   const stored = own(e.fields, field);
   const cur = stored ?? def?.default ?? (def?.pool ? (poolMax(reg, w.ctx, entity, def.pool) ?? 0) : 0);
   if (typeof cur !== "number") return reject("not_numeric", `${e.name}'s ${field.replace(/_/g, " ")} is not a number`);
-  const b = fieldBounds(reg, w, entity, def);
+  const b = fieldBounds(reg, w.ctx, entity, def);
   const next = clampNumber(cur + delta, b.min, b.max);
   if (next === cur) return [];
   return stored === undefined && cur !== 0 ? [{ type: "set", entity, field, value: next }] : [{ type: "add", entity, field, delta: next - cur }];
@@ -134,7 +134,7 @@ function coreEffect(reg: Registry, w: Working, type: string, args: Record<string
       let value: JsonValue = args.value ?? null;
       if (def?.derived !== undefined) return reject("derived", `${field} is derived`);
       if (def && (def.type === "number" || def.type === "money" || def.type === "duration") && typeof value === "number") {
-        const b = fieldBounds(reg, w, entity, def);
+        const b = fieldBounds(reg, w.ctx, entity, def);
         value = clampNumber(value, b.min, b.max);
       }
       if (def?.type === "enum" && def.values && typeof value === "string" && !def.values.includes(value)) return reject("bad_value", `${field} must be one of ${def.values.join(", ")}`);
