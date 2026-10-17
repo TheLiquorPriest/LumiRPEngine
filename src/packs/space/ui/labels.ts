@@ -81,10 +81,10 @@ export function labelPadding(width: number, height: number): number {
   return Math.round(Math.max(56, Math.min(width, height) * 0.2));
 }
 
-/** The map's own controls, which labels avoid: the title bar along the top and the zoom buttons. */
-export function controlBoxes(width: number, height: number): Box[] {
+/** The map's own controls, which labels avoid: the bars along the top (`top` px tall) and the zoom buttons. */
+export function controlBoxes(width: number, height: number, top = 52): Box[] {
   return [
-    { x: 0, y: 0, w: width, h: 52 },
+    { x: 0, y: 0, w: width, h: top },
     { x: width - 56, y: height - 150, w: 56, h: 150 },
   ];
 }

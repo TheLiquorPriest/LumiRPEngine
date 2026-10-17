@@ -97,7 +97,7 @@ describe("space: routes", () => {
     const world = modernUsWorld("w", "R");
     world.entities.you!.fields.place = "garage";
     const view = buildMapView(reg.context(world, startState(world)));
-    expect(view.places.some((p) => p.id === "maya_flat")).toBe(false); // known_by, not known yet
+    expect(view.scopes.some((s) => s.places.some((p) => p.id === "maya_flat"))).toBe(false); // known_by, not known yet
     expect(view.travel.some((t) => t.action === "go" && t.to === "cafe")).toBe(true);
     expect(view.travel.some((t) => t.action === "drive" && t.to === "lake" && t.params.vehicle === "truck")).toBe(true);
   });

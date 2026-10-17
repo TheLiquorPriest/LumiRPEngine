@@ -114,6 +114,14 @@ select.lre-input{appearance:auto}
 .lre-map .bar :focus-visible,.lre-map .zoom :focus-visible{outline-color:#fff}
 .lre-map .dock{position:absolute;left:8px;right:8px;bottom:8px;padding:10px;border-radius:14px;background:color-mix(in srgb,var(--lre-surface) 94%,transparent);border:1px solid var(--lre-border);display:flex;flex-direction:column;gap:8px;max-height:55%;overflow:auto}
 .lre-map .zoom{position:absolute;right:8px;bottom:8px;display:flex;flex-direction:column;gap:6px}
+.lre-map .crumbs{position:absolute;top:8px;left:8px;right:8px;display:flex;align-items:center;gap:4px;overflow-x:auto;scrollbar-width:none;white-space:nowrap;color:#fff}
+.lre-map .crumbs::-webkit-scrollbar{display:none}
+.lre-overlay-root .lre-map .crumbs{top:56px}
+.lre-map .crumb{display:inline-flex;align-items:center;gap:4px;flex:none}
+.lre-map .crumb .lre-btn{background:rgba(0,0,0,.5);color:#fff;border-color:transparent;border-radius:20px}
+.lre-map .crumb.current{min-height:40px;padding:0 12px;border-radius:20px;background:rgba(0,0,0,.65);font-weight:600}
+.lre-map .crumb.current .lre-muted{color:rgba(255,255,255,.7);font-weight:400}
+.lre-map .crumbs :focus-visible{outline-color:#fff}
 .lre-toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;z-index:2147483000;display:flex;flex-direction:column;gap:6px;width:min(420px,calc(100vw - 24px));pointer-events:none}
 .lre-toast{pointer-events:auto;padding:10px 12px;border-radius:12px;background:var(--lre-surface);border:1px solid var(--lre-border);box-shadow:0 8px 24px rgba(0,0,0,.45);display:flex;gap:8px;align-items:center}
 .lre-toast>span{min-width:0;overflow-wrap:anywhere}

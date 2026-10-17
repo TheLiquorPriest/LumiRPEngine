@@ -3,10 +3,15 @@
 
 import { INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../../src/shared/ids";
+import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView } from "../../src/shared/protocol";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import type { StateView } from "../../src/shared/state-view";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { initialState } from "../../src/engine/world-state";
+import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
+import { buildMapView } from "../../src/packs/space/core/view";
 
 const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, ["invitation", "decline", "incident", "quest", "arrival"].includes(cls) ? "stop" : cls === "bill" ? "note" : "ignore"])) as Record<InterruptClass, InterruptPolicy>;
 
@@ -211,20 +216,30 @@ export function stateFixture(chatId: string): StateView {
       },
       "space.map": {
         level: 3,
-        scope: { id: "maple", name: "Maple Falls", width: 1000, height: 700 },
         here: "diner",
-        places: [
-          { id: "apartment", name: "Apartment 4B", x: 120, y: 140, known: true },
-          { id: "diner", name: "Rosie's Diner", x: 470, y: 260, known: true },
-          { id: "garage", name: "Kim's Garage", x: 760, y: 140, known: true },
-          { id: "shell", name: "Shell Route 9", x: 820, y: 520, known: true },
-          { id: "lake", name: "Maple Lake", x: 260, y: 560, known: false },
-        ],
-        routes: [
-          { from: "apartment", to: "diner", modes: { walk: { minutes: 18 }, road: { minutes: 5 } } },
-          { from: "diner", to: "garage", modes: { walk: { minutes: 22 }, road: { minutes: 6 } } },
-          { from: "garage", to: "shell", modes: { road: { minutes: 8 } } },
-          { from: "diner", to: "lake", modes: { road: { minutes: 14 }, offroad: { minutes: 20 } } },
+        path: ["maple", "diner"],
+        scope: "maple",
+        scopes: [
+          { id: null, name: "World", trail: [], frame: { width: 100, height: 100 }, places: [{ id: "maple", name: "Maple Falls", x: 83.3, y: 50, known: true }], routes: [] },
+          {
+            id: "maple",
+            name: "Maple Falls",
+            trail: [{ id: null, name: "World" }],
+            frame: { width: 1000, height: 700 },
+            places: [
+              { id: "apartment", name: "Apartment 4B", x: 120, y: 140, known: true },
+              { id: "diner", name: "Rosie's Diner", x: 470, y: 260, known: true },
+              { id: "garage", name: "Kim's Garage", x: 760, y: 140, known: true },
+              { id: "shell", name: "Shell Route 9", x: 820, y: 520, known: true },
+              { id: "lake", name: "Maple Lake", x: 260, y: 560, known: false },
+            ],
+            routes: [
+              { from: "apartment", to: "diner", modes: { walk: { minutes: 18 }, road: { minutes: 5 } } },
+              { from: "diner", to: "garage", modes: { walk: { minutes: 22 }, road: { minutes: 6 } } },
+              { from: "garage", to: "shell", modes: { road: { minutes: 8 } } },
+              { from: "diner", to: "lake", modes: { road: { minutes: 14 }, offroad: { minutes: 20 } } },
+            ],
+          },
         ],
         travel: [
           { to: "apartment", label: "Walk home", mode: "walk", minutes: 18, action: "space.walk", params: { to: "apartment" } },
@@ -375,44 +390,19 @@ export function stateFixture(chatId: string): StateView {
   };
 }
 
+/** Starter maps, as each starter's space view builds them for a new chat (`?map=…`). */
+export const STARTER_MAPS: Record<string, string> = { ring: "modern_slice_of_life", manor: "mystery_manor", square: "fantasy_town" };
+
 /**
- * The Port Alder starter's map as its space view builds it: sixteen places with no grid cells, on a
- * ring in id order (`?map=ring`), for checking label placement.
+ * A starter world's map in a new chat, built by the engine itself: Port Alder's town on a ring
+ * (`?map=ring`, for checking label placement), Harrowmere's hall on its ground floor (`?map=manor`),
+ * Brindlemere's market square (`?map=square`).
  */
-export function portAlderRingMap(): StateView["panels"][string] {
-  const ring: [string, string, number, number][] = [
-    ["alder_automotive", "Alder Automotive", 83, 50],
-    ["alder_harbor_marina", "Alder Harbor Marina", 81, 63],
-    ["alder_market", "Alder Market", 74, 74],
-    ["bluebird_coffee", "Bluebird Coffee", 63, 81],
-    ["chicago_il", "Chicago, Illinois", 50, 83],
-    ["community_clinic", "Alder Community Clinic", 37, 81],
-    ["dune_trails", "Shoreline Dunes Trail System", 26, 74],
-    ["gull_island", "Gull Island State Park", 19, 63],
-    ["harbor_street_114", "114 Harbor Street", 17, 50],
-    ["lakefront_park", "Lakefront Park", 19, 37],
-    ["lakeshore_county", "Lakeshore County", 26, 26],
-    ["lakeshore_school", "Lakeshore Consolidated School", 37, 19],
-    ["port_alder", "Port Alder", 50, 17],
-    ["rusty_anchor", "The Rusty Anchor", 63, 19],
-    ["shoreline_fuel", "Shoreline Fuel", 74, 26],
-    ["township_hall", "Alder Township Hall", 81, 37],
-  ];
-  return {
-    level: 3,
-    scope: { id: "port_alder", name: "Port Alder", width: 100, height: 100 },
-    here: "harbor_street_114",
-    places: ring.map(([id, name, x, y]) => ({ id, name, x, y, known: true })),
-    routes: [
-      { from: "harbor_street_114", to: "alder_automotive", modes: { walk: { minutes: 23 }, road: { minutes: 6 } } },
-      { from: "harbor_street_114", to: "bluebird_coffee", modes: { walk: { minutes: 9 } } },
-      { from: "alder_harbor_marina", to: "gull_island", modes: { water: { minutes: 25 } } },
-    ],
-    travel: [
-      { to: "alder_automotive", label: "Walk to Alder Automotive", mode: "walk", minutes: 23, action: "go", params: { to: "alder_automotive" } },
-      { to: "bluebird_coffee", label: "Walk to Bluebird Coffee", mode: "walk", minutes: 9, action: "go", params: { to: "bluebird_coffee" } },
-    ],
-  };
+export function starterMap(template: string): JsonValue {
+  const make = STARTER_WORLDS[template];
+  if (!make) return null;
+  const world = make("preview", template);
+  return buildMapView(createRegistry(ALL_PACKS).context(world, initialState(world, "preview"))) as unknown as JsonValue;
 }
 
 /**

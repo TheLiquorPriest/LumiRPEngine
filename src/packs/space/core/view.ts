@@ -1,5 +1,7 @@
-// The map panel's view model (`space.map`): the POV's surroundings (the top place above it), known
-// places with positions, routes, and travel options as ready-to-send actions.
+// The map panel's view model (`space.map`): every scope the POV can open (map-scope.ts), each drawn
+// as its own frame; the scope the map opens on (the one around the POV); and travel options as
+// ready-to-send actions. A scope lists a place the POV can see (`canSeePlace`), and the places the
+// POV is inside even when it can't.
 
 import type { JsonObject } from "../../../shared/json";
 import type { ActionId, PlaceId, TravelMode } from "../../../shared/ids";
@@ -7,75 +9,58 @@ import type { ReadContext } from "../../../engine/registry";
 import { optionalQuery, own } from "../../../engine/pack-kit";
 import { placeOfEntity } from "../../../engine/scope";
 import { canSeePlace } from "../../../engine/visibility";
+import { defaultScope, hasGrid, placeChildren, placePath, scopeView, WORLD_SCOPE_NAME, type MapScopeView, type ScopeFilter } from "./map-scope";
 import { routeAt } from "./travel";
+
+export type { MapGridView, MapPlaceView, MapRouteView, MapScopeView } from "./map-scope";
 
 export interface MapView {
   level: number;
-  scope: { id: PlaceId | null; name: string; width: number; height: number };
   here: PlaceId | null;
-  places: { id: PlaceId; name: string; x: number; y: number; kind?: string; known: boolean }[];
-  routes: { from: PlaceId; to: PlaceId; modes: Partial<Record<TravelMode, { minutes: number; distanceKm?: number }>> }[];
+  /** The POV's place and the places around it, outermost first. */
+  path: PlaceId[];
+  /** The scope the map opens on: the place whose map the POV stands in, or null for the world. */
+  scope: PlaceId | null;
+  /** Every scope the POV can open: the world, and each place it can see with places inside it or a grid. */
+  scopes: MapScopeView[];
   travel: { to: PlaceId; label: string; mode: TravelMode; minutes: number; cents?: number; vehicle?: string; action: ActionId; params: JsonObject; disabled?: string }[];
-  grid?: { width: number; height: number; cellMeters?: number; terrain: string[]; blocked: number[]; pov?: { x: number; y: number } };
-}
-
-function topOf(ctx: ReadContext, place: PlaceId | null): PlaceId | null {
-  let cur = place;
-  for (let guard = 0; cur && guard < 32; guard++) {
-    const parent = own(ctx.world.places, cur)?.parent;
-    if (!parent) return cur;
-    cur = parent;
-  }
-  return cur;
 }
 
 export function buildMapView(ctx: ReadContext): MapView {
-  const level = ctx.levelOf(ctx.world.pov, "space");
-  const here = placeOfEntity(ctx.state, ctx.world.pov);
-  const top = topOf(ctx, here);
-  const topDef = top ? own(ctx.world.places, top) : undefined;
-  const grid = topDef?.grid ? own(ctx.world.grids, topDef.grid) : undefined;
-  const width = grid?.width ?? 100;
-  const height = grid?.height ?? 100;
-  const ids = Object.keys(ctx.world.places)
-    .sort()
-    .filter((id) => canSeePlace(ctx.world, ctx.state, ctx.world.pov, id));
-  const places: MapView["places"] = ids.map((id, i) => {
-    const p = own(ctx.world.places, id);
-    // Places without a cell sit on a circle, in id order: stable across turns.
-    const angle = (2 * Math.PI * i) / Math.max(1, ids.length);
-    const x = p?.cell?.x ?? Math.round(width / 2 + (width / 3) * Math.cos(angle));
-    const y = p?.cell?.y ?? Math.round(height / 2 + (height / 3) * Math.sin(angle));
-    return { id, name: p?.name ?? id, x, y, ...(p?.sceneType ? { kind: p.sceneType } : {}), known: true };
-  });
-  const visible = new Set(ids);
-  const routes: MapView["routes"] =
-    level >= 2
-      ? Object.values(ctx.world.routes)
-          .filter((r) => visible.has(r.from) && visible.has(r.to))
-          .map((r) => ({ from: r.from, to: r.to, modes: Object.fromEntries(Object.entries(r.modes).map(([m, leg]) => [m, { minutes: leg.minutes, ...(leg.distanceKm !== undefined ? { distanceKm: leg.distanceKm } : {}) }])) }))
-      : [];
+  const { world, state } = ctx;
+  const level = ctx.levelOf(world.pov, "space");
+  const here = placeOfEntity(state, world.pov);
+  const path = placePath(world, here);
+  const inside = new Set(path);
+  const filter: ScopeFilter = { known: (id) => canSeePlace(world, state, world.pov, id), drawn: (id) => inside.has(id) || canSeePlace(world, state, world.pov, id) };
+  const children = placeChildren(world);
+  const opens = (id: PlaceId): boolean => hasGrid(world, id) || (children.get(id) ?? []).some(filter.drawn);
+  const roots = (children.get(null) ?? []).filter(filter.drawn);
+  const pov = own(state.entities, world.pov);
+  const at = typeof pov?.fields.x === "number" && typeof pov.fields.y === "number" ? { x: pov.fields.x, y: pov.fields.y } : undefined;
+  const ids = [...children.values()].flat().filter(filter.drawn).sort();
+  const trail = (id: PlaceId): MapScopeView["trail"] => [
+    ...(roots.length > 0 ? [{ id: null, name: WORLD_SCOPE_NAME }] : []),
+    ...placePath(world, id)
+      .slice(0, -1)
+      .filter(filter.drawn)
+      .map((p) => ({ id: p, name: own(world.places, p)?.name ?? p })),
+  ];
+  const scopes: MapScopeView[] = [];
+  if (roots.length > 0) scopes.push(scopeView(world, null, filter, { level, trail: [], children, here }));
+  for (const id of ids) if (opens(id)) scopes.push(scopeView(world, id, filter, { level, trail: trail(id), children, here, ...(at ? { pov: at } : {}) }));
+  const scope = defaultScope(world, here, children, filter);
+  const drawn = new Set(ids);
   const travel: MapView["travel"] = [];
   if (here && level >= 1) {
     for (const id of ids) {
       if (id === here) continue;
       const plan = routeAt(ctx, here, id, "walk");
-      const name = own(ctx.world.places, id)?.name ?? id;
+      const name = own(world.places, id)?.name ?? id;
       travel.push({ to: id, label: `Walk to ${name}`, mode: "walk", minutes: plan?.minutes ?? 0, action: "go", params: { to: id }, ...(plan ? {} : { disabled: "no walking route" }) });
     }
     const vehicles = optionalQuery(ctx, "vehicles.travel_options");
-    if (vehicles) for (const o of vehicles(ctx, here)) travel.push(o);
+    if (vehicles) for (const o of vehicles(ctx, here)) if (drawn.has(o.to)) travel.push(o);
   }
-  const pov = own(ctx.state.entities, ctx.world.pov);
-  return {
-    level,
-    scope: { id: top, name: topDef?.name ?? "", width, height },
-    here,
-    places,
-    routes,
-    travel,
-    ...(grid && level >= 3
-      ? { grid: { width: grid.width, height: grid.height, ...(grid.cellMeters !== undefined ? { cellMeters: grid.cellMeters } : {}), terrain: grid.terrain, blocked: grid.blocked, ...(typeof pov?.fields.x === "number" && typeof pov.fields.y === "number" ? { pov: { x: pov.fields.x, y: pov.fields.y } } : {}) } }
-      : {}),
-  };
+  return { level, here, path, scope: scope === null || scopes.some((s) => s.id === scope) ? scope : null, scopes, travel };
 }

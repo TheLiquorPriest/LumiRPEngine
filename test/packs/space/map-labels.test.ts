@@ -1,13 +1,14 @@
-// Map labels for the Port Alder starter, whose places have no grid cells and sit on a ring: at phone
-// and desktop widths no two labels overlap, no label covers a dot or the map's buttons, every label
-// stays on the canvas, and every place keeps a label. Pure geometry; text is measured at a fixed
-// per-character width a little wider than the real 13 px system font.
+// Map labels for the Port Alder starter, whose map opens on the town: its places have no grid cells
+// and sit on a ring. At phone and desktop widths no two labels overlap, no label covers a dot or the
+// map's buttons, every label stays on the canvas, and every place keeps a label. Pure geometry;
+// text is measured at a fixed per-character width a little wider than the real 13 px system font.
 import { describe, expect, test } from "bun:test";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { fit, toScreen } from "../../../src/frontend/map-math";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { buildMapView } from "../../../src/packs/space/core/view";
 import { controlBoxes, labelAt, labelPadding, placeLabels, shorten, type Box, type LabelItem } from "../../../src/packs/space/ui/labels";
+import { placePoint, scopeBounds } from "../../../src/packs/space/ui/map-draw";
 import { startState } from "../support";
 
 const reg = createRegistry(ALL_PACKS);
@@ -18,10 +19,10 @@ function portAlderItems(width: number, height: number): LabelItem[] {
   if (!make) throw new Error("no Port Alder starter");
   const world = make("pa", "Port Alder");
   const view = buildMapView(reg.context(world, startState(world)));
-  const xs = view.places.map((p) => p.x);
-  const ys = view.places.map((p) => p.y);
-  const t = fit({ minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) }, width, height, labelPadding(width, height));
-  return view.places.map((p) => ({ id: p.id, ...toScreen(t, p), r: p.id === view.here ? 9 : 7, text: p.name }));
+  const scope = view.scopes.find((s) => s.id === view.scope);
+  if (!scope) throw new Error("no scope to open on");
+  const t = fit(scopeBounds(scope), width, height, labelPadding(width, height));
+  return scope.places.map((p) => ({ id: p.id, ...toScreen(t, placePoint(scope, p)), r: p.id === view.here ? 9 : 7, text: p.name }));
 }
 
 const hit = (a: Box, b: Box): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
