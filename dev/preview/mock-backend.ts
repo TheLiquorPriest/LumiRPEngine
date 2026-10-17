@@ -446,12 +446,13 @@ export class MockBackend {
       case "lre.ui":
         this.options.closeDrawer();
         return this.result(reqId, "lre.ui", { done: true });
-      case "lre.map":
+      case "lre.map": {
         this.result(reqId, "lre.map", { display: message.display });
-        this.mutate((view) => {
-          view.mapDisplay = message.display;
-        });
+        // The backend builds the map for the chat's display, so a pick rebuilds it.
+        const map = this.options.map;
+        if (map) this.mutate((view) => void (view.panels["space.map"] = starterMap(map, message.display)));
         return;
+      }
       case "lre.job": {
         if (message.op === "list") return this.result(reqId, "lre.job", { jobs: this.kept.filter((j) => j.worldId === message.worldId) });
         if (message.op === "dismiss") {

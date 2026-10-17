@@ -210,7 +210,7 @@ Prompts and schemas stay model-agnostic (D31).
 `StateView` holds:
 - status (`not_world`, `idle`, `in_flight`, `paused`);
 - HUD, scene, chips, Journal notes, the Keep report, `pending` marks and the call meter;
-- `panels`: pack view models keyed `<packId>.<panel>`, each built by the pack core's `PanelViewDef`. The GM view is not among them: `lre.gm` builds it on request (`GmView`), everyone else's money included, from the economy pack's `economy.people_money` query.
+- `panels`: pack view models keyed `<packId>.<panel>`, each built by the pack core's `PanelViewDef` for the chat's `ViewPrefs` (the map's display, from `prefs.json`), so a display's hidden cells never leave the backend. The GM view is not among them: `lre.gm` builds it on request (`GmView`), everyone else's money included, from the economy pack's `economy.people_money` query.
 
 Player-facing content is already filtered to the POV's knowledge; the GM view's data is fetched separately, and only once its spoiler gate is open.
 
@@ -228,7 +228,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.fix` | `chatId, entity, field, value` | `{pending}`; checked as a `set` against the field's definition (locked fields refused), stored as one `fix` post entry |
 | `lre.edit` | `chatId, ops`: 1–64 `EditOp`s (`set`, `add`, `link`, `unlink`, `move`, `put`, `adjust`, `stage`, `entity`, `spawn`, `despawn`, `restore`) | `{pending}`; all or none, one `fix` post entry; locked fields writable |
 | `lre.gm` | `chatId` | `GmView`, built from the head's state when asked; never part of a snapshot or delta |
-| `lre.map` | `chatId, display` (`knowledge` \| `fog`) | `{display}`; stored in the chat's `prefs.json` and sent with the next snapshot as `mapDisplay` |
+| `lre.map` | `chatId, display` (`knowledge` \| `fog`) | `{display}`; stored in the chat's `prefs.json`, and the next snapshot's `space.map` panel is built for it |
 | `lre.marker` | `chatId`, then `resolve{domain, scope, to}` \| `time{control, scope, to}` \| `adjudicate{to}` \| `migrate{to, merge?}`; `preview` writes nothing | `{pending}`; with `preview`: `{preview}`, whose `upgrade` lists a migrate's definition changes with their default picks |
 | `lre.keep` | `chatId`, then `keep{messageId}` \| `discard{messageId}` \| `convert{messageId, parentPath, refs}` | `{pending}` |
 | `lre.settings.get` / `.set` | `patch` (deep merge) | `{settings}` |

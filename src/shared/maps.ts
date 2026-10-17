@@ -21,8 +21,11 @@ export const MAP_FORMAT = "lre-map-v1";
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.
 export const MAP_SCHEMA = schemaJson as unknown as Schema;
 
+/** The terrain of a cell where nothing is: a layout's blank, and on the player's map every cell of a place it can't see. */
+export const VOID_TERRAIN = "void";
+
 /** Layout characters a legend needn't list. */
-export const DEFAULT_LEGEND: Readonly<Record<string, MapCellDef>> = { "#": "wall", ".": "floor", "+": "door", " ": { terrain: "void", blocked: true } };
+export const DEFAULT_LEGEND: Readonly<Record<string, MapCellDef>> = { "#": "wall", ".": "floor", "+": "door", " ": { terrain: VOID_TERRAIN, blocked: true } };
 
 export interface MapProblem {
   severity: "error" | "warning";

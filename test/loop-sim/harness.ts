@@ -42,7 +42,7 @@ export class Session {
 /** Everything the player can see: every panel view and every narrator slot (the GM view is asked for, never a panel). */
 export function playerSurface(world: WorldDoc, state: Readonly<WorldState>): JsonValue[] {
   const ctx = reg.context(world, state);
-  const views: JsonValue[] = reg.views.map((v) => v.build(ctx));
+  const views: JsonValue[] = reg.views.map((v) => v.build(ctx, { mapDisplay: null }));
   const slots: JsonValue[] = reg.renderers.map((r) => r.render(ctx));
   return [...views, ...slots];
 }

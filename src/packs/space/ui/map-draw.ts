@@ -1,9 +1,9 @@
 // Drawing one map scope on a canvas (DESIGN §12): the grid behind its places (terrain, walls,
 // doors, each place's area tinted), the routes, the places' dots and their names, and the things
 // lying in cells. The display mode decides how what the POV knows only in part is drawn: by
-// knowledge, a place only heard of is a dashed ring; in fog, places never visited and cells never
-// seen lie under fog. Play's map and Build's map preview both draw through here, so a map looks the
-// same while it's being written.
+// knowledge, a place only heard of is a dashed ring; in fog, places never visited are dimmed and
+// the cells the view leaves out of `seen` lie under fog. Play's map and Build's map preview both
+// draw through here, so a map looks the same while it's being written.
 
 import type { Bounds, Point, Transform } from "../../../frontend/map-math";
 import { toScreen } from "../../../frontend/map-math";
@@ -91,12 +91,9 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
   scope.places.forEach((place, i) => {
     for (const cell of grid.areas[place.id] ?? []) tint.set(cell, AREA_TINTS[i % AREA_TINTS.length] ?? AREA_TINTS[0] ?? "");
   });
-  // In fog, what the POV hasn't seen: the cells never in its sight while the grid system tracks
-  // them, else the areas of the rooms it hasn't been in.
+  // In fog, the cells the view didn't show (never seen, or a room not yet been in) lie under fog.
   const fog = opts.display === "fog";
-  const seen = grid.seen;
-  const fogged = new Set<number>();
-  if (fog && seen === undefined) for (const place of scope.places) if (unvisited(place, opts)) for (const cell of grid.areas[place.id] ?? []) fogged.add(cell);
+  const seen = grid.seen ?? "";
   for (let y = 0; y < grid.height; y += 1) {
     for (let x = 0; x < grid.width; x += 1) {
       const p = toScreen(t, { x: x * unit, y: y * unit });
@@ -109,7 +106,7 @@ function paintGrid(g: CanvasRenderingContext2D, scope: MapScopeView, t: Transfor
         g.fillStyle = area;
         g.fillRect(p.x, p.y, Math.ceil(size), Math.ceil(size));
       }
-      if (fog && (seen !== undefined ? !hasCell(seen, index) : fogged.has(index))) {
+      if (fog && !hasCell(seen, index)) {
         g.fillStyle = FOG;
         g.fillRect(p.x, p.y, Math.ceil(size), Math.ceil(size));
       }

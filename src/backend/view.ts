@@ -1,6 +1,7 @@
 // The state view (ARCHITECTURE §4; DESIGN §12): everything the frontend renders for one chat,
-// computed from the fold. Pack panels come from the registry's views (POV-filtered by the packs);
-// chips are the stored ones plus those derived from records (Re-read edit, Retry, Keep report).
+// computed from the fold. Pack panels come from the registry's views (POV-filtered by the packs),
+// drawn as the player chose to see the chat (the map's display); chips are the stored ones plus
+// those derived from records (Re-read edit, Retry, Keep report).
 
 import type { ChatId, EntityId, PackId, PanelId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -34,7 +35,7 @@ import type { StoredChip } from "./chips";
 export const TIMELAPSE_ACTION = "timelapse";
 
 export function notWorldView(chatId: ChatId): StateView {
-  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null, mapDisplay: null };
+  return { v: 1, chatId, worldId: null, revision: null, status: "not_world", hud: null, scene: null, chips: [], journal: [], keepReport: [], pending: [], panels: {}, palette: null, controls: null, meter: null, packs: {}, currency: null };
 }
 
 const GROUPS: Record<string, PaletteEntry["group"]> = { buy: "buy", purchase: "buy", pay: "pay", transfer: "transfer", drive: "drive", lend: "lend" };
@@ -559,7 +560,7 @@ export interface ViewInput {
   world: (revision: string) => WorldDoc | undefined;
   stored: readonly StoredChip[];
   meter: CallMeterView | null;
-  /** How the player chose to see the chat's map (`ChatPrefs`); null or absent follows the world. */
+  /** How the player chose to see the chat's map (`ChatPrefs`); null or absent follows the world. The map panel is built for it. */
   mapDisplay?: MapDisplay | null;
 }
 
@@ -572,9 +573,10 @@ export function buildView(input: ViewInput): StateView {
   if (!world) return notWorldView(input.chatId);
   const ctx = registry.context(world, state);
   const panels: Record<PanelId, JsonValue> = {};
+  const prefs = { mapDisplay: input.mapDisplay ?? null };
   for (const view of registry.views) {
     try {
-      panels[view.panel] = view.build(ctx);
+      panels[view.panel] = view.build(ctx, prefs);
     } catch (error) {
       panels[view.panel] = { error: error instanceof Error ? error.message : String(error) };
     }
@@ -616,7 +618,6 @@ export function buildView(input: ViewInput): StateView {
     meter: input.meter,
     packs,
     currency: world.currency,
-    mapDisplay: input.mapDisplay ?? null,
   };
 }
 

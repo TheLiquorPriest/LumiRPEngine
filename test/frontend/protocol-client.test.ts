@@ -74,7 +74,6 @@ function view(chatId: string, minutes: number): StateView {
     meter: null,
     currency: null,
     packs: {},
-    mapDisplay: null,
   };
 }
 

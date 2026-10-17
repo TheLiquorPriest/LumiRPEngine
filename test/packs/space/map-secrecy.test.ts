@@ -2,6 +2,7 @@
 // one it stands inside, and the POV never walks into one.
 
 import { describe, expect, test } from "bun:test";
+import { hasCell } from "../../../src/shared/grid";
 import type { WorldDoc } from "../../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../../src/engine/authoring";
 import { createRegistry } from "../../../src/engine/registry-impl";
@@ -13,7 +14,7 @@ import { Working } from "../../../src/engine/working";
 import { initialState } from "../../../src/engine/world-state";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { HIDDEN_PLACE_NAME } from "../../../src/packs/space/core/map-scope";
-import { buildMapView } from "../../../src/packs/space/core/view";
+import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
 import { startState } from "../support";
 
@@ -31,9 +32,12 @@ const LAYOUT = [
   "#####+##########",
 ];
 
-function inn(display: "knowledge" | "fog" = "knowledge"): WorldDoc {
+const VAULT_CELL = 2 * 16 + 13;
+const TRAPDOOR_CELL = 5 * 16 + 13;
+
+function inn(display: "knowledge" | "fog" = "knowledge", movement = true): WorldDoc {
   const w = blankWorld("w_inn", "Inn");
-  w.mapSettings = { display, grid: { movement: true, sightRadius: 3 } };
+  w.mapSettings = { display, grid: { movement, sightRadius: 3 } };
   w.places = {
     town: { id: "town", name: "Saltmarsh", fields: {} },
     inn: { id: "inn", name: "The Gull", parent: "town", fields: {} },
@@ -147,5 +151,55 @@ describe("a place the POV can't see", () => {
     expect(view.scopes.find((s) => s.id === "inn")?.places.find((p) => p.id === view.here)).toMatchObject({ name: HIDDEN_PLACE_NAME, known: false, visited: true });
     expect(act("step", { x: 11, y: 2 }).ok).toBe(true);
     expect(w.state.entities.you?.fields.place).toBe("inn");
+  });
+});
+
+describe("the map's display, applied before the view leaves the engine", () => {
+  const gridOf = (view: MapView) => {
+    const grid = view.scopes.find((s) => s.id === "inn")?.grid;
+    if (!grid) throw new Error("no grid");
+    return grid;
+  };
+
+  test("in fog, the cells the POV hasn't seen go out blank: no terrain, no wall, no area", () => {
+    const world = inn("fog");
+    const grid = gridOf(buildMapView(reg.context(world, initialState(world, "seed", reg))));
+    expect(hasCell(grid.seen ?? "", TRAPDOOR_CELL)).toBe(false);
+    expect([grid.terrain[TRAPDOOR_CELL], grid.blocked.includes(TRAPDOOR_CELL)]).toEqual(["", false]);
+    expect(Object.values(grid.areas).flat().every((cell) => hasCell(grid.seen ?? "", cell))).toBe(true);
+    expect(JSON.stringify(grid)).not.toContain("trapdoor");
+    // What it has seen keeps its walls: the taproom's wall above the POV.
+    expect([hasCell(grid.seen ?? "", 3), grid.terrain[3], grid.blocked.includes(3)]).toEqual([true, "wall", true]);
+  });
+
+  test("in either display, a room the POV can't see is nothing: void and walled, never floor", () => {
+    for (const display of ["knowledge", "fog"] as const) {
+      const world = inn(display);
+      const view = buildMapView(reg.context(world, initialState(world, "seed", reg)));
+      const grid = gridOf(view);
+      expect([grid.terrain[VAULT_CELL], grid.blocked.includes(VAULT_CELL)]).toEqual(["void", true]);
+      expect(JSON.stringify(view)).not.toContain('"vault"');
+    }
+  });
+
+  test("the chat's pick decides, and Fog and Known send different maps", () => {
+    const world = inn("knowledge");
+    const ctx = reg.context(world, initialState(world, "seed", reg));
+    const fog = buildMapView(ctx, "fog");
+    const known = buildMapView(ctx, "knowledge");
+    expect([fog.display, known.display, buildMapView(ctx).display]).toEqual(["fog", "knowledge", "knowledge"]);
+    expect(gridOf(fog).terrain).not.toEqual(gridOf(known).terrain);
+    expect(gridOf(known).seen).toBeUndefined();
+    expect(gridOf(known).terrain[TRAPDOOR_CELL]).toBe("trapdoor_to_vault");
+  });
+
+  test("without the grid system, fog blanks the rooms the POV knows of and hasn't been in", () => {
+    const world = inn("fog", false);
+    const grid = gridOf(buildMapView(reg.context(world, initialState(world, "seed", reg))));
+    const kitchen = 2 * 16 + 8;
+    const taproom = 2 * 16 + 3;
+    expect([grid.terrain[kitchen], hasCell(grid.seen ?? "", kitchen), grid.areas.kitchen]).toEqual(["", false, []]);
+    expect([grid.terrain[taproom], hasCell(grid.seen ?? "", taproom)]).toEqual(["floor", true]);
+    expect(grid.terrain[VAULT_CELL]).toBe("void");
   });
 });

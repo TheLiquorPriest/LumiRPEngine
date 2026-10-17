@@ -7,6 +7,7 @@
 
 import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import { isRecord } from "../../../shared/json";
+import { VOID_TERRAIN } from "../../../shared/maps";
 import type { MapDoc, WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
 
@@ -48,21 +49,28 @@ export interface MapRouteView {
   modes: Partial<Record<TravelMode, { minutes: number; distanceKm?: number }>>;
 }
 
+/** A scope's grid as the viewer may see it: the cells it isn't shown go out blank, those of places it can't see as nothing. */
 export interface MapGridView {
   width: number;
   height: number;
   cellMeters?: number;
-  /** Terrain per cell, row-major. */
+  /** Terrain per cell, row-major: "" for a cell the display hides, `void` for one of a place the viewer can't see. */
   terrain: string[];
   blocked: number[];
-  /** The cells of each drawn place's area: the grid's zones named after places in the scope. */
+  /** The cells of each drawn place's area: the grid's zones named after places in the scope, as far as they are shown. */
   areas: Record<PlaceId, number[]>;
   /** The POV's own cell, when it stands on this grid (Space 3 and up). */
   pov?: { x: number; y: number };
-  /** While the grid system is on, the cells the POV has seen (a cell set, `shared/grid` `hasCell`); absent when cells aren't tracked. */
+  /** In fog, the cells shown (a cell set, `shared/grid` `hasCell`); the rest lie under fog. Absent by knowledge. */
   seen?: string;
   /** Things lying at cells of this grid that the POV has seen there. */
   items?: MapItemView[];
+}
+
+/** Which cells of a scope's grid the viewer isn't shown: blank ones (in fog, never seen) and void ones (of places it can't see). */
+export interface CellView {
+  blank: ReadonlySet<number>;
+  void: ReadonlySet<number>;
 }
 
 export interface MapScopeView {
@@ -176,9 +184,11 @@ function ring(ids: readonly PlaceId[], frame: { width: number; height: number })
  * One scope as the map draws it: its drawn children at their positions, the routes between them,
  * and its grid. On a grid a child sits at its cell's centre, and children without a cell (another
  * floor, a cellar) sit in a row below the grid. Elsewhere a child sits at its node-map position
- * (`layoutPos`, in the node map's `size` when it gives one), and the rest lie on a ring.
+ * (`layoutPos`, in the node map's `size` when it gives one), and the rest lie on a ring. The grid
+ * goes out as `cells` lets the viewer see it: a blank cell as open ground with nothing on it, a
+ * void one as nothing at all, so neither carries its terrain or its place's area.
  */
-export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; pov?: { x: number; y: number }; seen?: string; items?: MapItemView[] }): MapScopeView {
+export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; pov?: { x: number; y: number }; seen?: string; items?: MapItemView[]; cells?: CellView }): MapScopeView {
   const kids = ((opts.children ?? placeChildren(world)).get(scope) ?? []).filter(filter.drawn).sort(byShownId(filter));
   const def = scope === null ? undefined : own(world.places, scope);
   const grid = def?.grid ? own(world.grids, def.grid) : undefined;
@@ -232,16 +242,30 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
       routes.set(key, out);
     }
   }
-  const areas: Record<PlaceId, number[]> = {};
-  if (grid) for (const id of kids) if (own(grid.zones, id)) areas[filter.shown(id)] = [...(own(grid.zones, id) ?? [])];
+  let shown: MapGridView | undefined;
+  if (grid && opts.level >= 2) {
+    const cells = opts.cells;
+    const unshown = (i: number): boolean => cells !== undefined && (cells.blank.has(i) || cells.void.has(i));
+    const areas: Record<PlaceId, number[]> = {};
+    for (const id of kids) if (own(grid.zones, id)) areas[filter.shown(id)] = (own(grid.zones, id) ?? []).filter((i) => !unshown(i));
+    shown = {
+      width: grid.width,
+      height: grid.height,
+      ...(grid.cellMeters !== undefined ? { cellMeters: grid.cellMeters } : {}),
+      terrain: cells ? grid.terrain.map((t, i) => (cells.void.has(i) ? VOID_TERRAIN : cells.blank.has(i) ? "" : t)) : grid.terrain,
+      blocked: cells ? [...grid.blocked.filter((i) => !unshown(i)), ...cells.void].sort((a, b) => a - b) : grid.blocked,
+      areas,
+      ...(opts.pov && opts.level >= 3 ? { pov: opts.pov } : {}),
+      ...(opts.seen !== undefined ? { seen: opts.seen } : {}),
+      ...(opts.items && opts.items.length > 0 ? { items: opts.items } : {}),
+    };
+  }
   return {
     id: scope === null ? null : filter.shown(scope),
     name: scope === null ? WORLD_SCOPE_NAME : shownName(world, filter, scope),
     trail: opts.trail,
     frame,
-    ...(grid && opts.level >= 2
-      ? { grid: { width: grid.width, height: grid.height, ...(grid.cellMeters !== undefined ? { cellMeters: grid.cellMeters } : {}), terrain: grid.terrain, blocked: grid.blocked, areas, ...(opts.pov && opts.level >= 3 ? { pov: opts.pov } : {}), ...(opts.seen !== undefined ? { seen: opts.seen } : {}), ...(opts.items && opts.items.length > 0 ? { items: opts.items } : {}) } }
-      : {}),
+    ...(shown ? { grid: shown } : {}),
     places,
     routes: [...routes.values()],
   };

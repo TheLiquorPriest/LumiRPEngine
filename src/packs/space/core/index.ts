@@ -299,7 +299,7 @@ export const spacePack: PackDef = {
       },
     });
 
-    r.view({ panel: "space.map", build: (ctx) => buildMapView(ctx) as unknown as JsonValue });
+    r.view({ panel: "space.map", build: (ctx, prefs) => buildMapView(ctx, prefs.mapDisplay) as unknown as JsonValue });
 
     r.proposal({
       type: "location",

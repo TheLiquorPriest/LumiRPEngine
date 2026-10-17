@@ -16,7 +16,7 @@ import type { DomainId, EntityId, FieldId, Level, PackId, PanelId, RelationTypeI
 import type { LedgerEvent } from "../shared/ledger";
 import type { LintIssue } from "../shared/protocol";
 import type { ColumnDef, DataTable } from "../shared/tables";
-import type { ActionDef, EffectSpec, FieldType, KindDef, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
+import type { ActionDef, EffectSpec, FieldType, KindDef, MapDisplay, RelationTypeDef, RuleDef, ScheduleDef, WorldDoc } from "../shared/world";
 import type { Value } from "./expr";
 import type { Registry } from "./registry-impl";
 import type { Rng } from "./rng";
@@ -168,10 +168,16 @@ export interface LintRule {
   check(world: WorldDoc): LintIssue[];
 }
 
+/** How the player chose to see a chat (kept beside it, never in its ledger): what a panel is drawn for. */
+export interface ViewPrefs {
+  /** The map's display the player picked for this chat; null follows the world's `mapSettings.display`. */
+  mapDisplay: MapDisplay | null;
+}
+
 /** Builds a pack panel's view model (pure; the frontend renders it). */
 export interface PanelViewDef {
   panel: PanelId;
-  build(ctx: ReadContext): JsonValue;
+  build(ctx: ReadContext, prefs: ViewPrefs): JsonValue;
 }
 
 export interface CoreRegistry {

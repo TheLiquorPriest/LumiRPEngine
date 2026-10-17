@@ -4,7 +4,8 @@
 // see its exact travel options, tap one to move or drive (`lre.action` from the map). With the grid
 // system on, tap a cell of the grid you stand on to walk there (`step`), or one with things lying
 // in it to see them. Known shows what the POV knows, places only heard of dashed; Fog fogs what it
-// hasn't seen; the choice is the chat's (`lre.map`). Rendered in the fullscreen float widget, or in
+// hasn't seen; the choice is the chat's (`lre.map`), and the backend builds the view for it, so
+// what the display hides never reaches the page. Rendered in the fullscreen float widget, or in
 // the drawer when the drawer could not be closed.
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -192,7 +193,7 @@ export function MapPanel(props: PanelProps) {
   const view = useMemo(() => decodeMapView(props.view), [props.view]);
   if (!view) return props.view === undefined || props.view === null ? <Empty>No map for this world yet.</Empty> : <JsonView value={props.view} />;
   if (view.scopes.length === 0) return <Empty>No places on the map yet.</Empty>;
-  return <MapCanvas view={view} chatId={props.chatId} chosen={props.state.mapDisplay ?? null} />;
+  return <MapCanvas view={view} chatId={props.chatId} />;
 }
 
 /** Walking to a cell from the POV's, as the step action will judge it: its minutes, or why not. */
@@ -202,7 +203,7 @@ function walkPlan(grid: NonNullable<MapScopeView["grid"]>, from: Cell, to: Cell)
   return path ? { minutes: gridMinutes(grid, path) } : { minutes: 0, disabled: "No way there from here." };
 }
 
-function MapCanvas(props: { view: MapView; chatId: string; chosen: MapDisplay | null }) {
+function MapCanvas(props: { view: MapView; chatId: string }) {
   const app = useApp();
   const { view } = props;
   // The scope the player opened; it follows the POV when the POV's own scope changes.
@@ -229,7 +230,7 @@ function MapCanvas(props: { view: MapView; chatId: string; chosen: MapDisplay | 
     if (el) el.scrollLeft = el.scrollWidth;
   }, [scope?.id]);
   if (!scope) return <Empty>No places on the map yet.</Empty>;
-  const display = props.chosen ?? view.display;
+  const display = view.display;
   const grid = scope.grid;
   // With the grid system on, the grid the POV stands on is walked: a tapped cell is somewhere to go.
   const walkable = view.movement && grid?.pov !== undefined;

@@ -7,7 +7,7 @@ import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
-import type { WorldDoc, WorldIndex } from "../../src/shared/world";
+import type { MapDisplay, WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
 import { presetAdjudication } from "../../src/shared/adjudication";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
@@ -408,7 +408,6 @@ export function stateFixture(chatId: string): StateView {
     meter: { turn: { calls: 3, tokens: 2140, ms: 6200, lookups: 1 }, average: { calls: 2.4, tokens: 1890, ms: 5100, lookups: 0.4 }, p95: { calls: 5, tokens: 3900, ms: 11800, lookups: 2 } },
     currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
     packs: { calendar: 1, space: 1, economy: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, sheets: 1, story: 1, weather: 1 },
-    mapDisplay: null,
   };
 }
 
@@ -595,14 +594,14 @@ export function gmFixture(): GmView {
 /**
  * A starter world's map in a new chat, built by the engine itself: Port Alder's town on a ring
  * (`?map=ring`, for checking label placement), Harrowmere's hall on its ground floor (`?map=manor`),
- * Brindlemere's market square (`?map=square`).
+ * Brindlemere's market square (`?map=square`); in `display` when the chat picked one.
  */
-export function starterMap(template: string): JsonValue {
+export function starterMap(template: string, display: MapDisplay | null = null): JsonValue {
   const make = template === "grid_inn" ? gridInn : STARTER_WORLDS[template];
   if (!make) return null;
   const world = make("preview", template);
   const registry = createRegistry(ALL_PACKS);
-  return buildMapView(registry.context(world, initialState(world, "preview", registry))) as unknown as JsonValue;
+  return buildMapView(registry.context(world, initialState(world, "preview", registry)), display) as unknown as JsonValue;
 }
 
 /**

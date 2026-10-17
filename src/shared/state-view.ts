@@ -24,7 +24,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
-import type { AdjudicationDef, FieldType, MapDisplay, StepPurpose, WorldCurrency } from "./world";
+import type { AdjudicationDef, FieldType, StepPurpose, WorldCurrency } from "./world";
 import type { LorePolicy } from "./settings";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
@@ -273,8 +273,6 @@ export interface StateView {
   packs: Record<PackId, number>;
   /** The attached revision's money display; format amounts with `formatMoney` from `shared/world`. */
   currency: WorldCurrency | null;
-  /** How the player chose to see the map in this chat; null follows the world's default (the `space.map` panel's `display`). Presentation, kept beside the chat, never in its ledger. */
-  mapDisplay: MapDisplay | null;
 }
 
 /** A field on the GM view's entity form: as the entity's kind defines it (when it does) and as stored. */
