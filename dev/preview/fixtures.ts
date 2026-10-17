@@ -293,7 +293,7 @@ export function stateFixture(chatId: string): StateView {
                 policy: "prefetch+lookup",
                 transport: "need",
                 queries: [
-                  { kind: "prefetch", text: "Rosie: raise now, raise later, no raise", matched: 2 },
+                  { kind: "prefetch", text: "Rosie's choice", matched: 2 },
                   { kind: "search", text: "", matched: 1 },
                 ],
                 entries: [

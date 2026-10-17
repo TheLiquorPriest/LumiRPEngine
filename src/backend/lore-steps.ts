@@ -34,6 +34,8 @@ export interface LoreInputs {
   text: string;
   /** The people and places it is about. */
   links: string[];
+  /** What the trace shows instead of `text`, when the text is private (an NPC's options). */
+  shown?: string;
 }
 
 /** How a step's lookups reach its model. */
@@ -162,7 +164,7 @@ export class StepLore {
   /** The prefetch: the index searched with the step's own inputs, at no extra call. */
   prefetch(inputs: LoreInputs): void {
     if (this.setting.policy !== "prefetch" && this.setting.policy !== "prefetch+lookup") return;
-    this.take("prefetch", inputs.text, loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: this.setting.tokens }));
+    this.take("prefetch", inputs.shown ?? inputs.text, loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: this.setting.tokens }));
   }
 
   private note(text: string): void {

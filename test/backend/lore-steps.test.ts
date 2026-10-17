@@ -364,6 +364,23 @@ describe("the inspector's lore traces", () => {
     }
   });
 
+  test("an NPC's choice shows in the trace as whose choice it is, never the options its prefetch searched with", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }]);
+    await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
+    await rig.rt.inspector.settle();
+    const context = await contextOf(rig, chatId);
+    const view = JSON.parse(context) as { generations: { lore?: { step: string; queries: { kind: string; text: string }[] }[] }[] };
+    const prefetched = view.generations.flatMap((g) => g.lore ?? []).filter((t) => t.step === "npc.choose").flatMap((t) => t.queries.filter((q) => q.kind === "prefetch").map((q) => q.text));
+    // Dev is here with Sam; Kim is elsewhere, and Sam has never met them.
+    expect(prefetched).toEqual(["Dev's choice", "An NPC's choice"]);
+    for (const shown of [context, await storedOf(rig, chatId)]) {
+      expect(shown).not.toContain("work, rest");
+      expect(shown).not.toContain("Kim");
+    }
+    // The decision itself still weighs the options.
+    expect(JSON.stringify(rig.host.decideCalls.map((r) => r.state))).toContain('"work","rest"');
+  });
+
   test("a history kept before lookups were withheld shows its searches without their text", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }]);
     const trace = { step: "npc.choose", phase: "pre", policy: "prefetch+lookup", transport: "tools", queries: [{ kind: "prefetch", text: "Dev: work, rest", matched: 2 }, { kind: "get", text: "wreck", matched: 1 }], entries: [{ title: "Dev's past", tokens: 12, cut: false, secret: false }], lookups: 1, notes: [] };

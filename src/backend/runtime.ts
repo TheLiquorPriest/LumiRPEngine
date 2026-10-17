@@ -569,7 +569,7 @@ export class Runtime implements TurnHooks {
     const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, settings, facts, budget, at);
     const npcRuns = runsOf(settings.modelUse, render.world, "npc.choose", facts);
     const npcRun = npcRuns[0];
-    const npcTask = npcRun && ties.present.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.present, render.state))) : Promise.resolve([]);
+    const npcTask = npcRun && ties.present.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.present, render.world, render.state))) : Promise.resolve([]);
     const [, decisions] = await Promise.all([intentTask, npcTask]);
     bridge.setDecisions(text, decisions);
     this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId });
@@ -872,11 +872,18 @@ export class Runtime implements TurnHooks {
     return lines.join("\n");
   }
 
-  /** What `npc.choose` searches lore with: the agents, their options and where they are. */
-  private tieInputs(ties: readonly Tie[], state: WorldState): LoreInputs {
+  /**
+   * What `npc.choose` searches lore with: the agents, their options and where they are. Its trace
+   * shows only whose choice it is, by name where the POV knows them: the options are their private
+   * plans (§7).
+   */
+  private tieInputs(ties: readonly Tie[], world: WorldDoc, state: WorldState): LoreInputs {
     const links = ties.flatMap((t) => [t.agent, ...[placeOfEntity(state, t.agent)].filter((p): p is string => typeof p === "string")]);
     const text = ties.map((t) => `${state.entities[t.agent]?.name ?? t.agent}: ${t.options.map((o) => o.replace(/[_:.-]+/g, " ")).join(", ")}`).join("\n");
-    return { text, links: [...new Set(links)] };
+    const known = [...new Set(ties.filter((t) => povMayKnow(this.registry, world, state, t.agent)).map((t) => state.entities[t.agent]?.name ?? t.agent))];
+    const last = known.at(-1);
+    const shown = last === undefined ? "An NPC's choice" : known.length === 1 ? `${last}'s choice` : `${known.slice(0, -1).join(", ")} and ${last}'s choices`;
+    return { text, links: [...new Set(links)], shown };
   }
 
   /**
@@ -965,7 +972,7 @@ export class Runtime implements TurnHooks {
       : Promise.resolve([]);
     const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, "effects")).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
     const npcRun = runsOf(modelUse, context.world, "npc.choose", facts)[0];
-    const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.offscreen, context.state))) : Promise.resolve([]);
+    const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.offscreen, context.world, context.state))) : Promise.resolve([]);
     const contradictionRun = runsOf(modelUse, context.world, "contradiction", facts).find((r) => r.template === null || r.template.output === "decision");
     const told = [...(plan ? planLines(plan, context.world, this.registry).outcome : []), ...factLines(this.registry, context.world, context.state, secrets)];
     const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text, userId, budget.signal, lore(contradictionRun)) : Promise.resolve(null);
