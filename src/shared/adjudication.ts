@@ -80,8 +80,9 @@ export function plainRolling(p: AdjudicationDef): boolean {
   return p.checks === "every" && p.trivialAt === null && p.impossibleAt === null && p.description.weight === "none" && p.authority === "mechanics" && p.retry === "free";
 }
 
-function share(v: unknown, fallback: number): number {
-  return typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
+/** A threshold: null switches it off; a missing or unreadable one is the fallback's. */
+function threshold(v: unknown, fallback: number | null): number | null {
+  return v === null ? null : typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
 }
 
 function whole(v: unknown, [lo, hi]: readonly [number, number], fallback: number): number {
@@ -108,9 +109,9 @@ export function readAdjudication(raw: unknown): AdjudicationDef | null {
   return {
     preset,
     checks: oneOf(raw.checks, CHECK_TIMINGS, base.checks),
-    riskyAt: share(raw.riskyAt, base.riskyAt),
-    trivialAt: raw.trivialAt === null ? null : share(raw.trivialAt, base.trivialAt ?? 1),
-    impossibleAt: raw.impossibleAt === null ? null : share(raw.impossibleAt, base.impossibleAt ?? 0),
+    riskyAt: threshold(raw.riskyAt, base.riskyAt) ?? base.riskyAt,
+    trivialAt: threshold(raw.trivialAt, base.trivialAt),
+    impossibleAt: threshold(raw.impossibleAt, base.impossibleAt),
     description: { weight: oneOf(d.weight, DESCRIPTION_WEIGHTS, base.description.weight), max, advantageAt: whole(d.advantageAt, [1, max], Math.min(max, base.description.advantageAt)) },
     authority: oneOf(raw.authority, CHECK_AUTHORITIES, base.authority),
     closeBy: whole(raw.closeBy, ADJUDICATION_BOUNDS.closeBy, base.closeBy),

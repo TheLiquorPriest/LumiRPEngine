@@ -1,9 +1,11 @@
-// Build → World → Ruleset (DESIGN §11, §13): the level floors, the progressions and the Sheet
-// Designer, saved together as the `ruleset` part. The designer previews the sheet live through
-// `lre.world sheet`, on the POV as a chat would start, with the ruleset as edited (saved or not).
-// Keys this editor doesn't know are kept as they are, so other ruleset parts survive a save.
+// Build → World → Ruleset (DESIGN §11, §13): how checks are decided (the adjudication policy), the
+// level floors, the progressions and the Sheet Designer, saved together as the `ruleset` part. The
+// designer previews the sheet live through `lre.world sheet`, on the POV as a chat would start, with
+// the ruleset as edited (saved or not). Keys this editor doesn't know are kept as they are, so other
+// ruleset parts survive a save.
 
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { presetAdjudication, readAdjudication } from "../../shared/adjudication";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
@@ -11,7 +13,8 @@ import type { SheetSectionView } from "../../shared/state-view";
 import type { FieldDef, ProgressionDef, RulesetDef, SheetLayoutDef, SheetRowDef, SheetSectionDef, WorldDoc } from "../../shared/world";
 import { SheetSectionCards } from "../../packs/sheets/ui/panel";
 import { useApp } from "../app";
-import { Card, Empty, Seg, useBusy } from "../components";
+import { AdjudicationForm } from "../adjudication-form";
+import { Card, Empty, HostSwitch, Seg, useBusy } from "../components";
 import type { Draft } from "../app";
 import { sheetPreviewRequest } from "../requests";
 import { useSelect } from "../store";
@@ -526,6 +529,19 @@ export function RulesetEditor() {
   return (
     <div class="lre-stack" data-lre-editor="part:ruleset">
       <div class="lre-h2">Ruleset</div>
+      <Card title="How checks are decided">
+        <div class="lre-stack" data-lre-adjudication="world">
+          <HostSwitch label="This world sets how its checks are decided" checked={value.adjudication !== undefined} disabled={busy} onChange={(on) => update("adjudication", on ? (presetAdjudication("crunchy") as unknown as JsonObject) : undefined)} />
+          {value.adjudication === undefined ? (
+            <p class="lre-small lre-muted" style={{ margin: 0 }}>
+              Not set: every check rolls and the roll settles it, unless a player's own settings decide otherwise for their new chats.
+            </p>
+          ) : (
+            <AdjudicationForm value={readAdjudication(value.adjudication) ?? presetAdjudication("crunchy")} disabled={busy} onChange={(next) => update("adjudication", next as unknown as JsonObject)} />
+          )}
+          <Issues issues={draft.lint.filter((i) => i.code.startsWith("adjudication"))} />
+        </div>
+      </Card>
       <FieldInput spec={{ kind: "levels", key: "minLevels", label: "Level floors (the lowest level this ruleset plays each domain at)" }} value={json.minLevels} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("minLevels", next)} />
       <Card title="Progression">
         <ProgressionEditor value={progression} doc={formDoc} ctx={ctx} onChange={(next) => setValue({ ...value, progression: next })} />

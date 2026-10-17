@@ -158,6 +158,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "ref", key: "parent", label: "Inside", collection: "places", optional: true },
     { kind: "text", key: "timeZone", label: "Time zone (IANA)", optional: true, hint: "Inherited from the parent when empty" },
     { kind: "text", key: "sceneType", label: "Default scene type", optional: true },
+    { kind: "bool", key: "adjudicate", label: "Checks roll here", hint: "Marked for a world whose checks roll only where marked: here and in the places inside it" },
     { kind: "ref", key: "grid", label: "Grid", collection: "grids", optional: true },
     {
       kind: "object",
@@ -276,6 +277,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     },
     { kind: "tags", key: "lexicon", label: "Verbs and phrases" },
     { kind: "text", key: "observable", label: "Observable label", optional: true },
+    { kind: "bool", key: "adjudicate", label: "Its check always rolls", hint: "Marked for a world whose checks roll only where marked" },
   ],
   checks: [
     { kind: "dice", key: "dice", label: "Dice" },
@@ -296,6 +298,8 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
         ],
       },
     },
+    { kind: "tags", key: "pass", label: "Outcomes that count as success (empty: success and every band after it)" },
+    { kind: "text", key: "auto", label: "Outcome when not rolled", optional: true, hint: "Used when neither the action nor the check has a success outcome" },
   ],
   schedules: [
     { kind: "json", key: "owner", label: "Owner", optional: true, hint: '"entity, group or kind id" · {"kind": [...], "class": {...}, "memberOf": [...]} (a selector)' },
@@ -311,6 +315,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "stages", label: "Stages" },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY },
     { kind: "selector", key: "knownBy", label: "Known by (besides its owner and those who know the owner)", optional: true, when: { key: "visibility", values: ["known_by"] } },
+    { kind: "bool", key: "adjudicate", label: "Checks roll while it's in progress", hint: "Marked for a world whose checks roll only where marked" },
   ],
   tables: [{ kind: "json", key: "rows", label: "Rows" }],
   sections: [
@@ -320,7 +325,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
   ],
   steps: [
-    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"] },
+    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"] },
     { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "enum", key: "output", label: "Output", values: ["text", "effects", "decision"] },
     { kind: "tags", key: "signals", label: "Signals" },

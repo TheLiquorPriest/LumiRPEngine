@@ -9,6 +9,7 @@ import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
+import { presetAdjudication } from "../../src/shared/adjudication";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
@@ -279,6 +280,17 @@ export function stateFixture(chatId: string): StateView {
           options: [
             { label: "Rosie Alvarez", params: { target: "npc_rosie" }, detail: "2d6+1 vs 8", minutes: 5, odds: [{ outcome: "success", p: 0.583 }, { outcome: "partial", p: 0.278 }, { outcome: "fail", p: 0.139 }] },
             { label: "Dev Patel", params: { target: "npc_dev" }, detail: "2d6+2 vs 8", minutes: 5, odds: [{ outcome: "success", p: 0.722 }, { outcome: "partial", p: 0.194 }, { outcome: "fail", p: 0.084 }] },
+            { label: "Mia Chen", params: { target: "npc_mia" }, detail: "No roll needed", minutes: 5 },
+          ],
+        },
+        {
+          action: "story.pick_lock",
+          label: "Pick the office lock",
+          group: "action",
+          options: [
+            { label: "With a hairpin", params: { tool: "hairpin" }, detail: "Retry needs a change", minutes: 15 },
+            { label: "With the lock picks", params: { tool: "picks" }, detail: "The story decides (odds 35%)", minutes: 15, odds: [{ outcome: "failure", p: 0.65 }, { outcome: "success", p: 0.35 }] },
+            { label: "Kick the door in", params: { tool: "boot" }, detail: "Too hard to try", minutes: 1 },
           ],
         },
         { action: "castlife.ask_raise", label: "Ask for a raise", group: "action", options: [{ label: "Rosie Alvarez", params: { target: "npc_rosie" }, minutes: 10, odds: [{ outcome: "yes", p: 0.41 }, { outcome: "later", p: 0.39 }, { outcome: "no", p: 0.2 }] }] },
@@ -333,6 +345,7 @@ export function stateFixture(chatId: string): StateView {
     },
     controls: {
       realism: { preset: "story", levels: { money: 3, gear: 3, vehicles: 3, castlife: 3, relationships: 2, space: 3, calendar: 3, weather: 2, sheets: 2 }, tierCaps: { principal: {}, supporting: {}, background: { money: 1, castlife: 1 } }, bandTiers: { principal: ["Leads"], supporting: ["Regulars", "Supporting"], background: ["Background"] }, floors: { sheets: 3 } },
+      adjudication: presetAdjudication("balanced"),
       time: {
         sceneType: "conversation",
         sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 },
@@ -736,6 +749,7 @@ export function worldFixture(): WorldDoc {
       background: { label: "Background", band: "background", order: 3 },
     },
     ruleset: {
+      adjudication: { ...presetAdjudication("balanced"), preset: "custom", checks: "risky", riskyAt: 0.8, description: { weight: "dc", max: 3, advantageAt: 2 } },
       minLevels: { sheets: 3 },
       progression: {
         character: { label: "Level", xpField: "xp", levelField: "level", thresholds: [0, 300, 900, 2700, 6500], maxLevel: 5, kind: "person", onLevel: [{ type: "add", args: { entity: "self", field: "might", delta: "=level % 2 == 0 ? 1 : 0" } }] },
@@ -767,6 +781,8 @@ export function settingsFixture(): UserSettings {
     realism: { preset: "story", levels: { money: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, space: 2, calendar: 2, weather: 1, sheets: 1 }, tierCaps: { principal: {}, supporting: {}, background: {} } },
     time: { sceneTicks: { conversation: 2, action: 0.5, exploration: 10, downtime: 30 }, scale: 1, interrupts, speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } }, montage: "key", unitCap: { agentDays: 600, events: 5000 }, npcCallsPerTimelapse: 0 },
     overrideWorldDefaults: false,
+    adjudication: presetAdjudication("crunchy"),
+    overrideWorldAdjudication: false,
     extraction: { regard: { mode: "never" } },
     swipeDefault: "rerun",
   };

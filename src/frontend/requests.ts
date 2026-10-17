@@ -7,7 +7,7 @@ import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseT
 import { parseMoneyInput } from "../shared/money";
 import type { EditOp, UpgradePreview } from "../shared/protocol";
 import type { Chip, FixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
-import type { WorldCurrency } from "../shared/world";
+import type { AdjudicationDef, WorldCurrency } from "../shared/world";
 import type { RequestBody } from "./registry";
 
 /** The request body of one protocol type. */
@@ -141,6 +141,11 @@ export function timeMarker(chatId: ChatId, control: TimeControl, scope: TimeScop
 /** A `resolve` marker: promote or demote a domain on the running chat, optionally as a preview. */
 export function resolveMarker(chatId: ChatId, domain: DomainId, scope: ResolveScope, to: Level, preview = false): Req<"lre.marker"> {
   return preview ? { type: "lre.marker", chatId, kind: "resolve", domain, scope, to, preview: true } : { type: "lre.marker", chatId, kind: "resolve", domain, scope, to };
+}
+
+/** An `adjudicate` marker: how checks are decided in the running chat from the next turn (Settings → Checks → This chat). */
+export function adjudicateMarker(chatId: ChatId, to: AdjudicationDef): Req<"lre.marker"> {
+  return { type: "lre.marker", chatId, kind: "adjudicate", to };
 }
 
 /**

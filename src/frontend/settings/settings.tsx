@@ -1,7 +1,8 @@
-// Settings (DESIGN §12): model use and budgets, realism (new chats and this chat), time, per-type
-// extraction modes with D4 learning, steps and connections, pins and Upgrade, the swipe default
-// and caveats. Realism and time settings seed new chats behind a world's own defaults (or instead of
-// them, with "Use my settings" on); running-chat changes are markers.
+// Settings (DESIGN §12): model use and budgets, realism (new chats and this chat), how checks are
+// decided (new chats and this chat), time, per-type extraction modes with D4 learning, steps and
+// connections, pins and Upgrade, the swipe default and caveats. Realism, time and check settings
+// seed new chats behind a world's own defaults (or instead of them, with "Use my settings" on);
+// running-chat changes are markers.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -10,16 +11,17 @@ import type { BoundMode } from "../../shared/ids";
 import type { ExtractionModeView, SettingsResult, UpgradePreview } from "../../shared/protocol";
 import { EXTRACTION_TYPES } from "../../shared/settings";
 import type { ExtractionType } from "../../shared/settings";
-import type { WorldDoc, WorldIndex } from "../../shared/world";
+import type { AdjudicationPresetId, WorldDoc, WorldIndex } from "../../shared/world";
 import { useApp, useView } from "../app";
 import { Empty, Row, Seg, useBusy } from "../components";
 import { humanize } from "../format";
 import { settingsTimePatch, TimeControlsEditor } from "../time-controls";
+import { AdjudicationSeed, AdjudicationThisChat } from "./adjudication";
 import { OverrideWorldSwitch, RealismSeed, RealismThisChat } from "./realism";
 import { ModelUseSection, StepsSection } from "./steps";
 import { UpgradePanel } from "./upgrade";
 
-type SectionId = "model" | "realism" | "time" | "extraction" | "steps" | "pins" | "swipes" | "caveats";
+type SectionId = "model" | "realism" | "checks" | "time" | "extraction" | "steps" | "pins" | "swipes" | "caveats";
 
 function Fold(props: { id: SectionId; title: string; summary?: string; open: SectionId | null; setOpen(id: SectionId | null): void; children: ComponentChildren }) {
   const expanded = props.open === props.id;
@@ -160,6 +162,8 @@ const STATIC_CAVEATS = [
   "Undo covers the latest reply; earlier changes go through Keep or Discard.",
 ];
 
+const PRESET_LABEL: Record<AdjudicationPresetId, string> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
+
 export function Settings() {
   const app = useApp();
   const view = useView();
@@ -167,6 +171,7 @@ export function Settings() {
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<SectionId | null>("model");
   const [realismScope, setRealismScope] = useState<"seed" | "chat">("seed");
+  const [checksScope, setChecksScope] = useState<"seed" | "chat">("seed");
   const [busy, run] = useBusy();
   useEffect(() => {
     void app.request({ type: "lre.settings.get" }).then((result) => {
@@ -199,6 +204,20 @@ export function Settings() {
             onChange={(next) => setRealismScope(next)}
           />
           {realismScope === "seed" ? <RealismSeed realism={settings.realism} overrideWorld={settings.overrideWorldDefaults} patch={patch} busy={busy} /> : <RealismThisChat chatId={view?.chatId ?? ""} controls={view?.status === "not_world" ? null : view?.controls ?? null} />}
+        </div>
+      </Fold>
+      <Fold id="checks" title="Checks" summary={settings.overrideWorldAdjudication ? `${PRESET_LABEL[settings.adjudication.preset]} for new chats` : `World rules, then ${PRESET_LABEL[settings.adjudication.preset]}`} {...fold}>
+        <div class="lre-stack">
+          <Seg<"seed" | "chat">
+            label="Checks scope"
+            value={checksScope}
+            options={[
+              { value: "seed", label: "New chats" },
+              { value: "chat", label: "This chat" },
+            ]}
+            onChange={(next) => setChecksScope(next)}
+          />
+          {checksScope === "seed" ? <AdjudicationSeed settings={settings} busy={busy} patch={patch} /> : <AdjudicationThisChat chatId={view?.chatId ?? ""} controls={view?.status === "not_world" ? null : (view?.controls ?? null)} />}
         </div>
       </Fold>
       <Fold id="time" title="Time" summary={`${settings.time.scale}× · montage ${settings.time.montage}`} {...fold}>

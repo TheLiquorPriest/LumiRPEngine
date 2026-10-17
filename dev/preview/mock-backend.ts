@@ -327,6 +327,7 @@ export class MockBackend {
             view.hud.clock.scale = message.to;
           }
           if (message.kind === "resolve" && view.controls && "all" in message.scope) view.controls.realism.levels[message.domain] = message.to;
+          if (message.kind === "adjudicate" && view.controls) view.controls.adjudication = message.to;
         }, 40);
         return;
       case "lre.view.open":
