@@ -4,9 +4,10 @@
 // POV is inside even when it can't, each marked known and visited; one it can't see goes by a
 // stand-in (an opaque id and "Somewhere") everywhere the view names it, and is never somewhere to
 // travel to. The view is built for the chat's display (DESIGN §12): its grids carry only the cells
-// the POV is shown, the cells of places it can't see as nothing in either display, and in fog the
-// cells it hasn't seen as blank ground. A grid carries the POV's cell when it stands on it; a thing
-// lying in a cell shows only where the POV sees it now, never where it once saw it.
+// the POV is shown, the cells of places it can't see as nothing, and in fog the cells it hasn't
+// seen as blank ground, a hidden place's among them, so fog never outlines one. A grid carries the
+// POV's cell when it stands on it; a thing lying in a cell shows only where the POV sees it now,
+// never where it once saw it.
 
 import type { JsonObject } from "../../../shared/json";
 import type { ActionId, PlaceId, TravelMode } from "../../../shared/ids";
@@ -64,9 +65,10 @@ function itemsOn(ctx: ReadContext, scope: PlaceId, grid: GridDef, cells: CellVie
 
 /**
  * The cells of a scope's grid the POV isn't shown, and in fog the ones it is (`seen`). The cells of
- * places it can't see are void in either display (`hiddenCells`). In fog the cells it hasn't seen
- * go out blank: those never in its sight while the grid system tracks them (`seen`, its record),
- * else the areas of the rooms it knows of and hasn't been in (`unvisited`).
+ * places it can't see are void (`hiddenCells`). In fog the cells it hasn't seen go out blank: those
+ * never in its sight while the grid system tracks them (`seen`, its record), else the areas of the
+ * rooms it knows of and hasn't been in (`unvisited`) and of the rooms it can't see and hasn't been
+ * in. A cell both blank and void goes out blank, so a hidden room under fog is just fog.
  */
 function cellsShown(ctx: ReadContext, grid: GridDef, display: MapDisplay, seen: string | undefined, unvisited: readonly PlaceId[]): CellView & { seen?: string } {
   const voided = hiddenCells(ctx, grid);
@@ -77,6 +79,7 @@ function cellsShown(ctx: ReadContext, grid: GridDef, display: MapDisplay, seen: 
     for (let i = 0; i < size; i++) if (!hasCell(seen, i)) blank.add(i);
   } else {
     for (const id of unvisited) for (const cell of areaOf(grid, id)) blank.add(cell);
+    for (const [zone, cells] of Object.entries(grid.zones)) if (placeVisit(ctx.state, zone) === null) for (const cell of cells) if (voided.has(cell)) blank.add(cell);
   }
   const shown: number[] = [];
   for (let i = 0; i < size; i++) if (!blank.has(i) && !voided.has(i)) shown.push(i);

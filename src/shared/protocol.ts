@@ -216,11 +216,14 @@ export interface UiRequest extends Request<"lre.ui"> {
   op: "close_drawer";
 }
 
-/** How Play's map shows this chat (DESIGN §12): what the POV knows, or fog of war. Presentation, kept beside the chat rather than in its ledger, so it never changes the world. */
-export interface MapDisplayRequest extends Request<"lre.map"> {
-  chatId: ChatId;
-  display: MapDisplay;
-}
+/**
+ * Play's map (DESIGN §12). `display` (the default op): how the map shows this chat, what the POV
+ * knows or fog of war; presentation, kept beside the chat rather than in its ledger, so it never
+ * changes the world. `walk`: what Walk here to a cell of the grid the POV stands on takes, judged
+ * as the step action is, on the real ground: the page's grid is cut to the display, so it can't
+ * path-find under fog.
+ */
+export type MapRequest = Request<"lre.map"> & { chatId: ChatId } & ({ op?: "display"; display: MapDisplay } | { op: "walk"; x: number; y: number });
 
 /**
  * Background-lane jobs (DESIGN §13, §15): Import from lore, Build/Refine with AI, Describe a map,
@@ -375,7 +378,7 @@ export type FrontendToBackend =
   | EditorRequest
   | WorldRequest
   | UiRequest
-  | MapDisplayRequest
+  | MapRequest
   | JobRequest
   | LoreRequest;
 
@@ -432,7 +435,7 @@ export interface ResultBodies {
    */
   "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null };
   "lre.ui": { done: true };
-  "lre.map": { display: MapDisplay };
+  "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /** `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are left out); `save`: the world and the new entry's id. */

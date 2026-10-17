@@ -11,7 +11,7 @@ import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, PlaceId, StageId, TrackId, Visibility } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
-import type { LoreEntryDef, Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
+import type { LoreEntryDef, PlaceDef, Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
 import { objectiveLabel, objectiveWhen } from "../shared/world";
 import { loreIsSecret, lorePhrases } from "../shared/lore";
 import type { ExprEnv } from "./expr";
@@ -103,12 +103,10 @@ export function canSeeField(reg: Registry, world: WorldDoc, state: Readonly<Worl
 }
 
 /**
- * Places: public; `known_by` and known to the POV (a `knows` relation, its `knownBy`, or listed in
- * its `known_places`) or where it is now; `discoverable` the same, or anywhere it has been.
+ * A place on its own: public; `known_by` and known to the POV (a `knows` relation, its `knownBy`, or
+ * listed in its `known_places`) or where it is now; `discoverable` the same, or anywhere it has been.
  */
-export function canSeePlace(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, place: PlaceId): boolean {
-  const def = own(world.places, place);
-  if (!def) return false;
+function placeSeen(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, place: PlaceId, def: PlaceDef): boolean {
   const discoverable = def.visibility === "discoverable";
   const v = discoverable ? "known_by" : visibilityOf(def.visibility);
   if (v !== "known_by") return v === "public";
@@ -116,6 +114,40 @@ export function canSeePlace(reg: Registry, world: WorldDoc, state: Readonly<Worl
   if (knows(state, pov, place) || placeOfEntity(state, pov) === place || (Array.isArray(known) && known.includes(place)) || granted(reg, world, state, pov, def.knownBy)) return true;
   // `space.seen` is the world POV's own record.
   return discoverable && pov === world.pov && placeVisit(state, place) !== null;
+}
+
+/** How many places up a parent chain is followed; a longer chain (a loop) hides the place. */
+const PLACE_DEPTH = 32;
+
+/**
+ * Places the POV may see: one it sees on its own (`placeSeen`) inside places it sees too. A room of
+ * a place it can't see is as hidden as that place, so nothing names it or offers a way there; when
+ * the POV stands in it, it goes by `HIDDEN_PLACE_NAME` like the place around it.
+ */
+export function canSeePlace(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, place: PlaceId): boolean {
+  let id: PlaceId | undefined = place;
+  let def = own(world.places, place);
+  if (!def) return false;
+  for (let depth = 0; id !== undefined && def; depth++) {
+    if (depth >= PLACE_DEPTH || !placeSeen(reg, world, state, pov, id, def)) return false;
+    id = def.parent;
+    def = id === undefined ? undefined : own(world.places, id);
+  }
+  return true;
+}
+
+/** What every player surface calls a place the POV can't see, even the one it stands in: never its name. */
+export const HIDDEN_PLACE_NAME = "Somewhere";
+
+/**
+ * The POV's place as every player surface names it (the map, the HUD and its ✎, Scene, the sheet,
+ * and the facts the narrator and the helpers read): its id and name when the POV may see it, else
+ * `HIDDEN_PLACE_NAME` with no id. Null when the POV isn't anywhere.
+ */
+export function povPlace(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): { id: PlaceId | null; name: string } | null {
+  const here = placeOfEntity(state, world.pov);
+  if (here === null) return null;
+  return canSeePlace(reg, world, state, world.pov, here) ? { id: here, name: own(world.places, here)?.name ?? here } : { id: null, name: HIDDEN_PLACE_NAME };
 }
 
 /** A `known_by` track is known to its owner, to whoever knows the owner, and to whoever matches its `knownBy`. */

@@ -27,7 +27,7 @@ import { actionOdds, paramCandidates, type Availability } from "../engine/resolv
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
-import { canSeeEntity, canSeePlace, findLeaks, unrevealedTruths } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, povPlace, unrevealedTruths } from "../engine/visibility";
 import { combatEntries, paletteEncounter } from "../packs/combat/core/index";
 import type { StoredChip } from "./chips";
 
@@ -68,7 +68,9 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   const cal = calendarOf(world);
   const pov = world.pov;
   const placeId = placeOfEntity(state, pov);
-  const place = placeId ? world.places[placeId] : undefined;
+  // The pill and the ✎ name the POV's place as every player surface does: one it can't see is
+  // "Somewhere", with no id.
+  const shown = povPlace(ctx.registry, world, state);
   const offset = placeOffset(world, state.clock, placeId);
   const money = ctx.levelOf(pov, "money");
   const economy = panels["economy.money"];
@@ -80,9 +82,9 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   const weather = isRecord(weatherPanel) && typeof weatherPanel.label === "string" ? weatherPanel.label : null;
   const fixes: HudView["fixes"] = {};
   if (placeId) {
-    // The ✎ offers the places the POV knows, and wherever it is now.
-    const options = Object.values(world.places).filter((p) => p.id === placeId || canSeePlace(ctx.registry, world, state, pov, p.id));
-    fixes.place = { entity: pov, field: "place", type: "ref", value: placeId, options: options.map((p) => ({ value: p.id, label: p.name })) };
+    // The ✎ offers the places the POV may see; a hidden one, even where it stands, is never offered.
+    const options = Object.values(world.places).filter((p) => canSeePlace(ctx.registry, world, state, pov, p.id));
+    fixes.place = { entity: pov, field: "place", type: "ref", value: shown?.id ?? null, options: options.map((p) => ({ value: p.id, label: p.name })) };
   }
   // Cash from the economy panel is the POV's cash accounts: its ✎ posts a correction to them
   // (`lre.fix`), so it needs one. Without the panel's cash, the ✎ sets the cash field the pill shows.
@@ -102,7 +104,7 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   }
   return {
     clock: { minutes: state.clock, label: formatClock(cal, state.clock, offset), dayPart: dayPartAt(cal, state.clock + offset).label, paused: state.time.paused, scale: state.time.scale },
-    place: place ? { id: place.id, name: place.name } : null,
+    place: shown,
     weather,
     cash: money === 0 ? null : money === 1 ? (band ? { band } : panelCash && typeof panelCash.band === "string" ? { band: panelCash.band } : null) : cents === null ? null : { cents },
     fixes,
@@ -119,7 +121,7 @@ function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry
     if (!kindIs(registry, world, e.kind, "person") || !canSeeEntity(registry, world, state, world.pov, id)) continue;
     present.push({ id, name: e.name, label: world.kinds[e.kind]?.label ?? e.kind });
   }
-  return { placeId, sceneType: sceneType(world, state), present, elapsed: headElapsed };
+  return { placeId: povPlace(registry, world, state)?.id ?? null, sceneType: sceneType(world, state), present, elapsed: headElapsed };
 }
 
 /** Why a palette option is off, for the player: an unmet requirement isn't spelled as its expression. */

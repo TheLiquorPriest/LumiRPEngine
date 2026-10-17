@@ -37,7 +37,7 @@ import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
 import { hiddenNames, playerKnows } from "../engine/player-events";
-import { canSeeEntity, canSeePlace, findLeaks, playerTrack, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
+import { canSeeEntity, canSeePlace, findLeaks, playerTrack, povPlace, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { Working } from "../engine/working";
 import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
@@ -636,12 +636,11 @@ export class Runtime implements TurnHooks {
 
   /** The engine placeholders a step template may use (DESIGN §5.2), all player-visible after `safeVars`. */
   private stepVars(world: WorldDoc, state: WorldState, plan: EngineTurnPlan | undefined, user: string, reply: string): Record<string, string> {
-    const place = placeOfEntity(state, world.pov);
     const facts = factLines(this.registry, world, state, []);
     return {
       world: world.name,
       pov: state.entities[world.pov]?.name ?? world.pov,
-      place: place ? (world.places[place]?.name ?? place) : "",
+      place: povPlace(this.registry, world, state)?.name ?? "",
       clock: formatClock(calendarOf(world), state.clock),
       scene: facts.slice(0, 8).join("\n"),
       facts: facts.join("\n"),
@@ -798,8 +797,8 @@ export class Runtime implements TurnHooks {
     const run = runsOf(settings.modelUse, render.world, "judge", facts)[0];
     if (!run || !budget.take()) return;
     const story = verdict.why === "story" ? Object.fromEntries(outcomeChoices(action, Object.keys(odds)).map((o) => [o, odds[o] ?? 0])) : null;
-    const place = placeOfEntity(render.state, render.world.pov);
-    const placeName = place ? (render.world.places[place]?.name ?? place) : null;
+    // The judge hears where the POV is as the player may know it: its reason is shown to the player.
+    const placeName = povPlace(this.registry, render.world, render.state)?.name ?? null;
     const scene = { you: render.state.entities[render.world.pov]?.name ?? render.world.pov, place: placeName, present: presentNames(this.registry, render.world, render.state) };
     const targets = Object.values(intent.params).filter((v): v is string => typeof v === "string" && (hasOwn(render.state.entities, v) || hasOwn(render.world.places, v)));
     const names = targets.map((id) => render.state.entities[id]?.name ?? render.world.places[id]?.name ?? id);

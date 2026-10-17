@@ -26,12 +26,11 @@ import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { GRID_SPACE_FLOOR } from "../../../engine/registry-impl";
 import { placeOfEntity, placeWithin } from "../../../engine/scope";
 import { observeCells } from "../../../engine/seen";
-import { canSeePlace, knownBySelector } from "../../../engine/visibility";
+import { canSeePlace, HIDDEN_PLACE_NAME, knownBySelector, povPlace } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
 import { closedRoutes, nominalRoute, routeAt, type TravelPlan } from "./travel";
-import { HIDDEN_PLACE_NAME } from "./map-scope";
 import { buildMapView } from "./view";
 
 export type TravelService = (ctx: ReadContext, entity: EntityId, to: PlaceId, mode: TravelMode) => { plan: TravelPlan; events: LedgerEvent[] } | Rejection;
@@ -291,11 +290,11 @@ export const spacePack: PackDef = {
         const here = placeOfEntity(ctx.state, ctx.world.pov);
         const place = here ? own(ctx.world.places, here) : undefined;
         if (!place) return [];
-        // The narrator hears where the POV is only as the POV may know it, as the map draws it: a
-        // place it can't see is somewhere unnamed, and a place around it that it can't see is left out.
+        // The narrator hears where the POV is as every player surface names it (`povPlace`), and of
+        // the place around it only when the POV can see that too.
         const sees = (id: PlaceId): boolean => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id);
         const parent = place.parent && sees(place.parent) ? own(ctx.world.places, place.parent)?.name : undefined;
-        const lines = [`Place: ${here && sees(here) ? place.name : HIDDEN_PLACE_NAME}${parent ? ` (in ${parent})` : ""}.`];
+        const lines = [`Place: ${povPlace(ctx.registry, ctx.world, ctx.state)?.name ?? HIDDEN_PLACE_NAME}${parent ? ` (in ${parent})` : ""}.`];
         if (level >= 2) {
           const exits: string[] = [];
           for (const id of Object.keys(ctx.world.places).sort()) {
@@ -321,8 +320,10 @@ export const spacePack: PackDef = {
         if (!own(ctx.state.entities, entity)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place)) return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
         const from = placeOfEntity(ctx.state, entity);
-        // A narrated move across a gap no route spans (off an island with no boat leg back) didn't happen.
-        if (from && !reachable(ctx, from, place)) return { code: "declined", reason: `There's no way from ${own(ctx.world.places, from)?.name ?? from} to ${own(ctx.world.places, place)?.name ?? place}.` };
+        // A narrated move across a gap no route spans (off an island with no boat leg back) didn't
+        // happen. The reason reaches the player: a place the POV can't see is somewhere.
+        const named = (id: PlaceId): string => (canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? (own(ctx.world.places, id)?.name ?? id) : "somewhere");
+        if (from && !reachable(ctx, from, place)) return { code: "declined", reason: `There's no way from ${named(from)} to ${named(place)}.` };
         return null;
       },
       toEffects: (p, ctx) => [{ type: "move", args: { entity: typeof p.entity === "string" ? p.entity : ctx.world.pov, to: typeof p.place === "string" ? p.place : "" } }],

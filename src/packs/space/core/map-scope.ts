@@ -10,12 +10,10 @@ import { isRecord } from "../../../shared/json";
 import { VOID_TERRAIN } from "../../../shared/maps";
 import type { MapDoc, WorldDoc } from "../../../shared/world";
 import { own } from "../../../engine/pack-kit";
+import { HIDDEN_PLACE_NAME } from "../../../engine/visibility";
 
 /** What the breadcrumbs call the outermost scope, the world's top-level places. */
 export const WORLD_SCOPE_NAME = "World";
-
-/** What the map calls a place the viewer is inside but may not know (a secret one): never its name. */
-export const HIDDEN_PLACE_NAME = "Somewhere";
 
 /** The node layout's extent when no place in it has a position of its own. */
 const NODE_FRAME = 100;
@@ -188,7 +186,9 @@ function ring(ids: readonly PlaceId[], frame: { width: number; height: number })
  * floor, a cellar) sit in a row below the grid. Elsewhere a child sits at its node-map position
  * (`layoutPos`, in the node map's `size` when it gives one), and the rest lie on a ring. The grid
  * goes out as `cells` lets the viewer see it: a blank cell as open ground with nothing on it, a
- * void one as nothing at all, so neither carries its terrain or its place's area.
+ * void one as nothing at all, so neither carries its terrain or its place's area. A cell both
+ * blank and void (in fog, an unseen cell of a place the viewer can't see) goes out blank, exactly
+ * as any other unseen cell, so fog never outlines a hidden room.
  */
 export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | "maps">, scope: PlaceId | null, filter: ScopeFilter, opts: { level: number; trail: MapScopeView["trail"]; children?: ReadonlyMap<PlaceId | null, readonly PlaceId[]>; pov?: { x: number; y: number }; seen?: string; items?: MapItemView[]; cells?: CellView }): MapScopeView {
   const kids = ((opts.children ?? placeChildren(world)).get(scope) ?? []).filter(filter.drawn).sort(byShownId(filter));
@@ -256,8 +256,8 @@ export function scopeView(world: Pick<WorldDoc, "places" | "routes" | "grids" | 
       width: grid.width,
       height: grid.height,
       ...(grid.cellMeters !== undefined ? { cellMeters: grid.cellMeters } : {}),
-      terrain: cells ? grid.terrain.map((t, i) => (cells.void.has(i) ? VOID_TERRAIN : cells.blank.has(i) ? "" : t)) : grid.terrain,
-      blocked: cells ? [...grid.blocked.filter((i) => !unshown(i)), ...cells.void].sort((a, b) => a - b) : grid.blocked,
+      terrain: cells ? grid.terrain.map((t, i) => (cells.blank.has(i) ? "" : cells.void.has(i) ? VOID_TERRAIN : t)) : grid.terrain,
+      blocked: cells ? [...grid.blocked.filter((i) => !unshown(i)), ...[...cells.void].filter((i) => !cells.blank.has(i))].sort((a, b) => a - b) : grid.blocked,
       areas,
       ...(opts.pov && opts.level >= 3 ? { pov: opts.pov } : {}),
       ...(opts.seen !== undefined ? { seen: opts.seen } : {}),

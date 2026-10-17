@@ -24,6 +24,7 @@ import { optionalService } from "../engine/pack-kit";
 import { parseOverrides, parseTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
+import { actionOdds } from "../engine/resolve";
 import { Working } from "../engine/working";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { activeRecord } from "../engine/ledger/path";
@@ -274,9 +275,18 @@ export class Dispatcher {
         return;
       }
       case "lre.map": {
+        await this.requireWorldChat(r.chatId, userId);
+        if (r.op === "walk") {
+          // Walk here, judged as the step will be on the real ground: under fog the page's grid
+          // lacks the walls it hasn't seen, so it can't tell the way or its minutes.
+          if (!Number.isInteger(r.x) || !Number.isInteger(r.y)) throw new RequestError("bad_request", "a cell is two whole numbers");
+          const { state, world } = await this.head(r.chatId, userId);
+          const odds = actionOdds(this.rt.registry, world, state, { action: "step", params: { x: r.x, y: r.y } });
+          reply("lre.map", { walk: odds.available ? { minutes: odds.duration } : { minutes: 0, disabled: odds.failed && odds.failed.code !== "requirement" ? odds.failed.reason : "No way there from here." } });
+          return;
+        }
         // How the map shows this chat: presentation, kept beside the chat, never in its ledger.
         if (r.display !== "knowledge" && r.display !== "fog") throw new RequestError("bad_request", "the map shows what you know (knowledge) or fog");
-        await this.requireWorldChat(r.chatId, userId);
         await this.rt.chatPrefs.setMapDisplay(r.chatId, userId, r.display);
         this.rt.push.changed(r.chatId, userId);
         reply("lre.map", { display: r.display });

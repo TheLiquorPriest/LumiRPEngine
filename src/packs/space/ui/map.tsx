@@ -9,7 +9,7 @@
 // the drawer when the drawer could not be closed.
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { findPath, gridMinutes, type Cell } from "../../../shared/grid";
+import type { Cell } from "../../../shared/grid";
 import type { MapDisplay } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { Empty, JsonView, Seg, useBusy } from "../../../frontend/components";
@@ -196,13 +196,6 @@ export function MapPanel(props: PanelProps) {
   return <MapCanvas view={view} chatId={props.chatId} />;
 }
 
-/** Walking to a cell from the POV's, as the step action will judge it: its minutes, or why not. */
-function walkPlan(grid: NonNullable<MapScopeView["grid"]>, from: Cell, to: Cell): { minutes: number; disabled?: string } {
-  if (from.x === to.x && from.y === to.y) return { minutes: 0, disabled: "You're here." };
-  const path = findPath(grid, from, to);
-  return path ? { minutes: gridMinutes(grid, path) } : { minutes: 0, disabled: "No way there from here." };
-}
-
 function MapCanvas(props: { view: MapView; chatId: string }) {
   const app = useApp();
   const { view } = props;
@@ -229,14 +222,38 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
     const el = crumbs.current;
     if (el) el.scrollLeft = el.scrollWidth;
   }, [scope?.id]);
-  if (!scope) return <Empty>No places on the map yet.</Empty>;
-  const display = view.display;
-  const grid = scope.grid;
+  const grid = scope?.grid;
   // With the grid system on, the grid the POV stands on is walked: a tapped cell is somewhere to go.
   const walkable = view.movement && grid?.pov !== undefined;
+  const pov = grid?.pov;
+  // Walk here's way and minutes come from the backend, judged on the real ground as the step will
+  // be: this grid is cut to the display, and under fog it lacks the walls the POV hasn't seen.
+  const [walk, setWalk] = useState<{ minutes: number; disabled?: string } | null>(null);
+  useEffect(() => {
+    setWalk(null);
+    if (!cell || !walkable || !pov) return;
+    if (cell.x === pov.x && cell.y === pov.y) {
+      setWalk({ minutes: 0, disabled: "You're here." });
+      return;
+    }
+    let live = true;
+    const unknown = { minutes: 0, disabled: "No way there from here." };
+    app.request({ type: "lre.map", op: "walk", chatId: props.chatId, x: cell.x, y: cell.y }).then(
+      (result) => {
+        if (live) setWalk(result?.walk ?? unknown);
+      },
+      () => {
+        if (live) setWalk(unknown);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [cell?.x, cell?.y, walkable, pov?.x, pov?.y, props.chatId]);
+  if (!scope) return <Empty>No places on the map yet.</Empty>;
+  const display = view.display;
   const lying = (c: Cell | null) => (c && grid?.items ? grid.items.filter((i) => i.x === c.x && i.y === c.y) : []);
   const things = lying(cell);
-  const walk = cell && walkable && grid?.pov ? walkPlan(grid, grid.pov, cell) : null;
   const open = (id: string | null) => {
     setOpened(id);
     setSelected(null);
@@ -302,13 +319,13 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
             </button>
           </div>
           {things.length > 0 ? <span class="lre-muted">{things.length === 1 ? "It lies here." : "They lie here."}</span> : null}
-          {walk ? (
+          {cell && walkable ? (
             <button
               type="button"
               class="lre-item"
               data-lre-map-walk
-              disabled={busy || walk.disabled !== undefined}
-              title={walk.disabled}
+              disabled={busy || walk === null || walk.disabled !== undefined}
+              title={walk?.disabled}
               onClick={() =>
                 run(async () => {
                   const result = await app.request(travelRequest("step", { x: cell.x, y: cell.y }, props.chatId));
@@ -322,7 +339,7 @@ function MapCanvas(props: { view: MapView; chatId: string }) {
               <span aria-hidden="true">{MODE_ICON.walk}</span>
               <span class="grow">
                 <span class="title">Walk here</span>
-                <span class="sub">{walk.disabled ?? formatMinutes(walk.minutes)}</span>
+                <span class="sub">{walk === null ? "…" : (walk.disabled ?? formatMinutes(walk.minutes))}</span>
               </span>
             </button>
           ) : null}

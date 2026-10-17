@@ -8,15 +8,14 @@ import type { WorldDoc } from "../../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../../src/engine/authoring";
 import { authorLines, playerLines } from "../../../src/engine/player-events";
 import { createRegistry } from "../../../src/engine/registry-impl";
-import { resolveAction } from "../../../src/engine/resolve";
+import { paramCandidates, resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runRulesOnEvents } from "../../../src/engine/rules";
 import type { WorldState } from "../../../src/engine/state";
-import { canSeePlace } from "../../../src/engine/visibility";
+import { canSeePlace, HIDDEN_PLACE_NAME } from "../../../src/engine/visibility";
 import { Working } from "../../../src/engine/working";
 import { initialState } from "../../../src/engine/world-state";
 import { ALL_PACKS } from "../../../src/packs/index";
-import { HIDDEN_PLACE_NAME } from "../../../src/packs/space/core/map-scope";
 import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
 import { startState } from "../support";
@@ -120,26 +119,40 @@ describe("a place the POV can't see", () => {
     expect(w.state.entities.you?.fields.place).toBe("inn");
   });
 
-  test("standing in a place inside it: the map draws it as somewhere, by an id that isn't its own, and offers no way there", () => {
+  test("standing in a room inside it: both go by stand-ins, by ids that aren't their own, and neither is somewhere to go", () => {
     const { world, state } = riverton((w) => {
       w.places.safehouse = { id: "safehouse", name: "Resistance safehouse", parent: "riverton", fields: {}, visibility: "secret" };
       w.places.cellar_room = { id: "cellar_room", name: "Cellar room", parent: "safehouse", fields: {} };
       w.entities.you!.fields.place = "cellar_room";
     });
-    expect(canSeePlace(reg, world, state, "you", "safehouse")).toBe(false);
+    // The room is public on its own, but a room of a place the POV can't see is as hidden as it.
+    expect([canSeePlace(reg, world, state, "you", "safehouse"), canSeePlace(reg, world, state, "you", "cellar_room")]).toEqual([false, false]);
     const view = buildMapView(reg.context(world, state));
     const text = JSON.stringify(view);
-    expect(text).not.toContain("safehouse");
-    expect(text).not.toContain("Resistance");
+    for (const hidden of ["safehouse", "Resistance", "cellar_room", "Cellar room"]) expect(text).not.toContain(hidden);
     const [, standIn, here] = view.path;
-    expect([view.path.length, here, view.here]).toEqual([3, "cellar_room", "cellar_room"]);
+    expect([view.path.length, view.here]).toEqual([3, here]);
     const town = view.scopes.find((s) => s.id === "riverton");
     expect(town?.places.find((p) => p.id === standIn)).toMatchObject({ name: HIDDEN_PLACE_NAME, known: false });
-    // It opens, under the same stand-in, on the room the POV is in; its breadcrumbs lead out to the town.
+    // It opens, under the same stand-in, on the room the POV is in, a stand-in too; its breadcrumbs lead out to the town.
     const inside = view.scopes.find((s) => s.id === standIn);
-    expect([inside?.name, inside?.places.map((p) => p.id), inside?.trail.map((c) => c.id)]).toEqual([HIDDEN_PLACE_NAME, ["cellar_room"], [null, "riverton"]]);
+    expect([inside?.name, inside?.places.map((p) => [p.id, p.name]), inside?.trail.map((c) => c.id)]).toEqual([HIDDEN_PLACE_NAME, [[here, HIDDEN_PLACE_NAME]], [null, "riverton"]]);
     expect(view.scope).toBe(standIn ?? "");
-    expect(view.travel.some((t) => t.to === standIn)).toBe(false);
+    expect(view.travel.some((t) => t.to === standIn || t.to === here)).toBe(false);
+  });
+
+  test("a public room inside it is offered from nowhere outside it: not on the map, not in the palette's Go to", () => {
+    const { world, state } = riverton((w) => {
+      w.places.safehouse = { id: "safehouse", name: "Resistance safehouse", parent: "riverton", fields: {}, visibility: "secret" };
+      w.places.cellar_room = { id: "cellar_room", name: "Cellar room", parent: "safehouse", fields: {} };
+    });
+    state.realism.levels.space = 2;
+    const view = buildMapView(reg.context(world, state));
+    expect(view.travel.some((t) => t.to === "cellar_room")).toBe(false);
+    expect(JSON.stringify(view)).not.toContain("Cellar room");
+    const go = reg.actions.get("go");
+    if (!go) throw new Error("no go action");
+    expect(paramCandidates(reg, world, state, go, "to")).not.toContain("cellar_room");
   });
 
   test("standing in it: the POV's place goes by the stand-in, and the POV can walk out", () => {
@@ -175,12 +188,13 @@ describe("the map's display, applied before the view leaves the engine", () => {
     expect([hasCell(grid.seen ?? "", 3), grid.terrain[3], grid.blocked.includes(3)]).toEqual([true, "wall", true]);
   });
 
-  test("in either display, a room the POV can't see is nothing: void and walled, never floor", () => {
+  test("a room the POV can't see: by knowledge nothing at all, void and walled; in fog, unseen, exactly what any unseen cell is", () => {
     for (const display of ["knowledge", "fog"] as const) {
       const world = inn(display);
       const view = buildMapView(reg.context(world, initialState(world, "seed", reg)));
       const grid = gridOf(view);
-      expect([grid.terrain[VAULT_CELL], grid.blocked.includes(VAULT_CELL)]).toEqual(["void", true]);
+      // Fog never outlines a hidden room: its unseen cells go out as the unseen trapdoor's do.
+      expect([grid.terrain[VAULT_CELL], grid.blocked.includes(VAULT_CELL)]).toEqual(display === "knowledge" ? ["void", true] : [grid.terrain[TRAPDOOR_CELL], grid.blocked.includes(TRAPDOOR_CELL)]);
       expect(JSON.stringify(view)).not.toContain('"vault"');
     }
   });
@@ -196,14 +210,14 @@ describe("the map's display, applied before the view leaves the engine", () => {
     expect(gridOf(known).terrain[TRAPDOOR_CELL]).toBe("trapdoor_to_vault");
   });
 
-  test("without the grid system, fog blanks the rooms the POV knows of and hasn't been in", () => {
+  test("without the grid system, fog blanks the rooms the POV hasn't been in, known or hidden", () => {
     const world = inn("fog", false);
     const grid = gridOf(buildMapView(reg.context(world, initialState(world, "seed", reg))));
     const kitchen = 2 * 16 + 8;
     const taproom = 2 * 16 + 3;
     expect([grid.terrain[kitchen], hasCell(grid.seen ?? "", kitchen), grid.areas.kitchen]).toEqual(["", false, []]);
     expect([grid.terrain[taproom], hasCell(grid.seen ?? "", taproom)]).toEqual(["floor", true]);
-    expect(grid.terrain[VAULT_CELL]).toBe("void");
+    expect([grid.terrain[VAULT_CELL], grid.blocked.includes(VAULT_CELL), hasCell(grid.seen ?? "", VAULT_CELL)]).toEqual(["", false, false]);
   });
 });
 
@@ -288,7 +302,7 @@ describe("the narrator's place line", () => {
       w.places.cellar_room = { id: "cellar_room", name: "Cellar room", parent: "safehouse", fields: {} };
       w.entities.you!.fields.place = "cellar_room";
     });
-    expect(place(world, state)).toEqual(["Place: Cellar room."]);
+    expect(place(world, state)).toEqual([`Place: ${HIDDEN_PLACE_NAME}.`]);
     state.entities.you!.fields.place = "safehouse";
     expect(place(world, state)).toEqual([`Place: ${HIDDEN_PLACE_NAME} (in Riverton).`]);
   });

@@ -27,7 +27,7 @@ import type { Rng } from "../engine/rng";
 import { kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import type { EngineTurnPlan } from "../engine/turn";
-import { canSeeEntity, findLeaks } from "../engine/visibility";
+import { canSeeEntity, findLeaks, povPlace } from "../engine/visibility";
 import { LookupBudget, type StepLore } from "./lore-steps";
 import { inMinorUnits, type Steps } from "./steps";
 
@@ -38,8 +38,9 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
   const ctx = registry.context(world, state);
   const out: string[] = [];
   const pov = state.entities[world.pov];
-  const place = placeOfEntity(state, world.pov);
-  out.push(`${pov?.name ?? world.pov} is at ${place ? (world.places[place]?.name ?? place) : "an unknown place"}; it is ${formatClock(calendarOf(world), state.clock)}.`);
+  // Where the POV is, as every player surface names it: a place it can't see is somewhere unnamed.
+  const place = povPlace(registry, world, state);
+  out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
   for (const r of registry.renderers) {
     if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline") continue;
     try {

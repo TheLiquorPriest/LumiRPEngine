@@ -70,7 +70,8 @@ export interface SheetSectionView {
 
 export interface HudView {
   clock: ClockView;
-  place: { id: PlaceId; name: string } | null;
+  /** The POV's place: its id and name, or no id and "Somewhere" when the POV can't see it (DESIGN §7). */
+  place: { id: PlaceId | null; name: string } | null;
   weather: string | null;
   /** Cash shown at the POV's Money level: a band at level 1, cents from level 2. */
   cash: { band: string } | { cents: number } | null;
@@ -79,6 +80,7 @@ export interface HudView {
 }
 
 export interface SceneView {
+  /** The POV's place, or null when it is nowhere or somewhere it can't see. */
   placeId: PlaceId | null;
   sceneType: string;
   present: { id: EntityId; name: string; label: string }[];

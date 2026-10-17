@@ -11,7 +11,7 @@ import { createRegistry } from "../../../src/engine/registry-impl";
 import { paramCandidates } from "../../../src/engine/resolve";
 import { typedIntent } from "../../../src/engine/typed-intent";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
-import { HIDDEN_PLACE_NAME } from "../../../src/packs/space/core/map-scope";
+import { HIDDEN_PLACE_NAME } from "../../../src/engine/visibility";
 import { buildMapView, type MapView } from "../../../src/packs/space/core/view";
 import { modernUsWorld } from "../riverton";
 import { startState } from "../support";
@@ -116,7 +116,7 @@ describe("map scopes", () => {
     expect(marina.grid?.width).toBe(18);
   });
 
-  test("known follows what the POV can see: a place known to others is left off until the POV knows it; one the POV is inside shows as somewhere", () => {
+  test("known follows what the POV can see: a place known to others is left off until the POV knows it; one the POV is inside shows as somewhere, and so does its room", () => {
     const world = modernUsWorld("w", "R");
     world.places.maya_kitchen = { id: "maya_kitchen", name: "Maya's kitchen", parent: "maya_flat", fields: {} };
     const state = startState(world);
@@ -132,7 +132,9 @@ describe("map scopes", () => {
     expect(JSON.stringify(inside)).not.toContain("Maya's flat");
     const flat = town(inside).find((p) => !p.known);
     expect(flat?.name).toBe(HIDDEN_PLACE_NAME);
-    expect(scopeOf(inside, flat?.id ?? null).places.find((p) => p.id === "maya_kitchen")?.known).toBe(true);
+    // The kitchen the POV stands in is as hidden as the flat around it: a stand-in too.
+    expect(JSON.stringify(inside)).not.toContain("Maya's kitchen");
+    expect(scopeOf(inside, flat?.id ?? null).places.map((p) => [p.id === inside.here, p.name, p.known])).toEqual([[true, HIDDEN_PLACE_NAME, false]]);
     expect(inside.scope).toBe(flat?.id ?? "");
   });
 

@@ -9,6 +9,8 @@ import type { UserSettings } from "../../src/shared/settings";
 import type { GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { compileMaps, mapLint, mapTemplate } from "../../src/shared/maps";
+import { findPath, gridMinutes } from "../../src/shared/grid";
+import { decodeMapView } from "../../src/packs/space/ui/view";
 import { mapProposal, readMapAnswer, readMapRequest } from "../../src/backend/map-job";
 import { extractionView, freshFixture, gmFixture, pausedFixture, settingsFixture, starterMap, stateFixture, UPGRADE_PREVIEW, WORLDS, worldFixture } from "./fixtures";
 import { combatFixture } from "./combat-fixture";
@@ -447,9 +449,15 @@ export class MockBackend {
         this.options.closeDrawer();
         return this.result(reqId, "lre.ui", { done: true });
       case "lre.map": {
+        const map = this.options.map;
+        if (message.op === "walk") {
+          // No engine here: the preview walks the grid it draws, where the backend walks the real ground.
+          const grid = map ? decodeMapView(starterMap(map, "knowledge"))?.scopes.find((s) => s.grid?.pov)?.grid : undefined;
+          const path = grid?.pov ? findPath(grid, grid.pov, { x: message.x, y: message.y }) : null;
+          return this.result(reqId, "lre.map", { walk: grid && path ? { minutes: gridMinutes(grid, path) } : { minutes: 0, disabled: "No way there from here." } });
+        }
         this.result(reqId, "lre.map", { display: message.display });
         // The backend builds the map for the chat's display, so a pick rebuilds it.
-        const map = this.options.map;
         if (map) this.mutate((view) => void (view.panels["space.map"] = starterMap(map, message.display)));
         return;
       }

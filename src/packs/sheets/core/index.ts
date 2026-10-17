@@ -21,7 +21,8 @@ import { createEnv, evalNumber } from "../../../engine/expr";
 import { labelOf, numOf, objOf, strOf, own } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { buildEntitySheet } from "../../../engine/ruleset";
-import { bandOf, kindIs, placeOfEntity } from "../../../engine/scope";
+import { bandOf, kindIs } from "../../../engine/scope";
+import { povPlace } from "../../../engine/visibility";
 
 export interface StatDef {
   id: string;
@@ -217,13 +218,13 @@ export function buildSheetView(ctx: ReadContext): SheetView {
         return { label: s.label, value: level >= 3 ? `${v} (${mod >= 0 ? "+" : ""}${mod})` : String(v), detail: word, fix: { entity: pov, field: s.id, type: "number" as const, value: v, min: s.min, max: s.max } };
       });
   const derived = level >= 3 && !designed ? Object.entries(derivedOf(ctx)).map(([id, d]) => ({ label: d.label, value: String(derivedValue(ctx, pov, id)) })) : [];
-  const place = placeOfEntity(ctx.state, pov);
+  const place = povPlace(ctx.registry, ctx.world, ctx.state);
   const activity = strOf(e?.fields.activity);
   return {
     level,
     name: e?.name ?? pov,
     tier: e ? tierLabel(ctx.world, e.tier) : "",
-    ...(place ? { place: own(ctx.world.places, place)?.name ?? place } : {}),
+    ...(place ? { place: place.name } : {}),
     ...(activity !== "" ? { activity } : {}),
     conditions: activeConditions(ctx, pov).map((c) => c.label),
     sections: designed ?? [...(stats.length > 0 ? [{ title: "Stats", rows: stats }] : []), ...(derived.length > 0 ? [{ title: "Derived", rows: derived }] : [])],
