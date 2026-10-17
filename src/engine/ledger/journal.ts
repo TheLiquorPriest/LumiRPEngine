@@ -23,7 +23,7 @@ import type {
   PostEntry,
   Rec,
   RecStatus,
-  RenarrateDrop,
+  CarryDrop,
 } from "../../shared/ledger";
 import { ROOT_PATH } from "../../shared/ledger";
 import type { WorldDoc } from "../../shared/world";
@@ -458,9 +458,9 @@ export class LedgerCore {
 
   /**
    * P3: a Re-narrate copies its source's seed, `pre` and `markersApplied`, and its live fixes and
-   * materializations (keeping their `seq`s, with the new parent path as `at`), each re-validated in
-   * fold order; a copy that fails is dropped and reported. False when it can't reproduce the source
-   * (no source record, or a `pre` event no longer validates): the turn is then a Re-run.
+   * materializations (keeping their `seq`s and their undos, with the new parent path as `at`), each
+   * re-validated in fold order; a copy that fails is dropped and reported. False when it can't
+   * reproduce the source (no source record, or a `pre` event no longer validates): the turn is then a Re-run.
    */
   private planRenarrate(p: PendingTurn, target: ChainMessage, base: WorldState, parentPath: PathHash, world: WorldDoc): boolean {
     if (!p.renarrateOf) return false;
@@ -478,18 +478,36 @@ export class LedgerCore {
     }
     const sourceTurn = turnPath(source);
     const candidates = source.post.filter((e) => (e.kind === "fix" || e.kind === "materialize") && isLive(e.at, parentPath, sourceTurn));
-    const later: ({ seq: number; marker: Marker } | { seq: number; entry: PostEntry })[] = [...markers.filter((mk) => mk.seq > source.markersApplied).map((mk) => ({ seq: mk.seq, marker: mk })), ...candidates.map((e) => ({ seq: e.seq, entry: e }))].sort((a, b) => a.seq - b.seq);
-    const copies: PostEntry[] = [];
-    const dropped: RenarrateDrop[] = [];
+    const carried = this.carry(state, world, candidates, source.undone, markers.filter((mk) => mk.seq > source.markersApplied));
+    const copies = carried.kept.map((e) => ({ ...e, at: parentPath }));
+    Object.assign(p, { seed: source.seed, markersApplied: source.markersApplied, events: structuredClone(pre), copies, undone: carried.undone, dropped: carried.dropped, startMarkers: [] } satisfies Partial<PendingTurn>);
+    return true;
+  }
+
+  /**
+   * Carries post entries onto a record's prefix (a Re-narrate's copies, a Re-run's fixes, what a
+   * Re-read keeps): each, in fold order with the message's later live markers, is re-validated event
+   * by event against `state` (the prefix after the record's events, advanced in place) and kept or
+   * dropped whole. Events `undone` names stay undone: they neither validate nor apply, an entry left
+   * with none is not carried, and the refs of those that travel come back with them.
+   */
+  private carry(state: WorldState, world: WorldDoc, entries: readonly PostEntry[], undone: readonly EventRef[], markers: readonly Marker[]): { kept: PostEntry[]; undone: EventRef[]; dropped: CarryDrop[] } {
+    const off = (seq: number, index: number): boolean => undone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
+    const later: ({ seq: number; marker: Marker } | { seq: number; entry: PostEntry })[] = [...markers.map((mk) => ({ seq: mk.seq, marker: mk })), ...entries.map((e) => ({ seq: e.seq, entry: e }))].sort((a, b) => a.seq - b.seq);
+    const out: { kept: PostEntry[]; undone: EventRef[]; dropped: CarryDrop[] } = { kept: [], undone: [], dropped: [] };
     for (const item of later) {
       if ("marker" in item) {
         applyMarker(state, item.marker);
         continue;
       }
+      const { entry } = item;
+      if (entry.events.every((_, i) => off(entry.seq, i))) continue;
       const scratch = structuredClone(state);
+      const doc = this.env.worlds(scratch.revision) ?? world;
       let failure: string | null = null;
-      for (const ev of item.entry.events) {
-        const ctx = this.env.types.context(world, scratch);
+      for (const [i, ev] of entry.events.entries()) {
+        if (off(entry.seq, i)) continue;
+        const ctx = this.env.types.context(doc, scratch);
         const rejection = validateEvent(this.env.types, ev, ctx);
         if (rejection) {
           failure = rejection.reason;
@@ -497,15 +515,37 @@ export class LedgerCore {
         }
         applyEvent(this.env.types, ev, scratch, ctx);
       }
-      if (failure) {
-        dropped.push({ seq: item.entry.seq, kind: item.entry.kind, reason: failure });
+      if (failure !== null) {
+        out.dropped.push({ seq: entry.seq, kind: entry.kind, reason: failure });
         continue;
       }
       Object.assign(state, scratch);
-      copies.push({ ...structuredClone(item.entry), at: parentPath });
+      out.kept.push(structuredClone(entry));
+      out.undone.push(...undone.filter((u) => u.in === "post" && u.seq === entry.seq));
     }
-    Object.assign(p, { seed: source.seed, markersApplied: source.markersApplied, events: structuredClone(pre), copies, dropped, startMarkers: [] } satisfies Partial<PendingTurn>);
-    return true;
+    return out;
+  }
+
+  /**
+   * A Re-run carries the live ✎ fixes and GM edits of the swipe it was made from (the nearest
+   * earlier swipe holding a record) as P3 carries a Re-narrate's: same `seq`s and undos, anchored at
+   * the new record's path, each re-validated after the new turn's events. One that no longer applies
+   * is dropped with a Journal note.
+   */
+  private carryFixes(rec: Rec, target: ChainMessage | undefined, swipeId: number, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
+    if (!target) return;
+    let source: Rec | undefined;
+    for (let s = swipeId - 1; s >= 0 && !source; s--) {
+      const candidate = target.ledger?.swipes[String(s)];
+      if (candidate && !isTombstoned(this.journal.tombstones, target.id, candidate)) source = candidate;
+    }
+    const fixes = source ? source.post.filter((e) => e.kind === "fix" && isLive(e.at, prefix.parent, turnPath(source))) : [];
+    if (!source || fixes.length === 0) return;
+    const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, rec.path));
+    const carried = this.carry(prefix.state, prefix.world, fixes, source.undone, markers);
+    rec.post = carried.kept.map((e) => ({ ...e, at: rec.path }));
+    rec.undone = carried.undone;
+    if (carried.dropped.length > 0) rec.dropped = carried.dropped;
   }
 
   /**
@@ -604,8 +644,8 @@ export class LedgerCore {
     return prefix ? { ...prefix, seed: p.seed, pre: [...p.events] } : null;
   }
 
-  /** State the turn's post steps validate against: its fold prefix (P2), plus a planned first turn's starting markers when given. */
-  private prefixState(observed: readonly ChainMessage[], targetIndex: number, rec: Pick<Rec, "markersApplied" | "events" | "pre" | "path" | "undone">, start: readonly Marker[] = []): { state: WorldState; world: WorldDoc } | null {
+  /** State the turn's post steps validate against: its fold prefix (P2), plus a planned first turn's starting markers when given; and the target's parent path. */
+  private prefixState(observed: readonly ChainMessage[], targetIndex: number, rec: Pick<Rec, "markersApplied" | "events" | "pre" | "path" | "undone">, start: readonly Marker[] = []): { state: WorldState; world: WorldDoc; parent: PathHash } | null {
     const out = this.fold(observed.slice(0, targetIndex));
     const state = structuredClone(out.state);
     const target = this.chain(observed)[targetIndex];
@@ -620,7 +660,7 @@ export class LedgerCore {
     // must not lean on what was undone; property seed rc-0d464a0-8843, L7).
     const planned = rec.events.slice(0, rec.pre).filter((_, i) => !rec.undone.some((u) => u.in === "events" && u.index === i));
     applyValidUnits(this.env.types, planned, state, (s) => this.env.types.context(world, s));
-    return { state, world };
+    return { state, world, parent };
   }
 
   /** Reads `text` against `state`, keeping each unit (an event, or a group) that validates in sequence. */
@@ -657,9 +697,10 @@ export class LedgerCore {
       intents: {},
     };
     if (p.copies) {
-      // P3: the copies keep their seqs; the new narration's post-step events are one `narr` entry,
-      // read against the same prefix the narration rendered from, taking its seq at commit.
+      // P3: the copies keep their seqs and undos; the new narration's post-step events are one `narr`
+      // entry, read against the same prefix the narration rendered from, taking its seq at commit.
       rec.post = structuredClone(p.copies);
+      rec.undone = structuredClone(p.undone ?? []);
       if (p.dropped && p.dropped.length > 0) rec.dropped = structuredClone(p.dropped);
       if (readReply && content !== "" && !paused) {
         const prefix = this.prefixState(observed, index, rec);
@@ -671,15 +712,21 @@ export class LedgerCore {
           ].sort((a, b) => a.seq - b.seq);
           for (const item of later) {
             if ("marker" in item) applyMarker(prefix.state, item.marker);
-            else applyValidUnits(this.env.types, item.entry.events, prefix.state, (s) => this.env.types.context(prefix.world, s));
+            else {
+              const live = item.entry.events.filter((_, i) => !rec.undone.some((u) => u.in === "post" && u.seq === item.entry.seq && u.index === i));
+              applyValidUnits(this.env.types, live, prefix.state, (s) => this.env.types.context(prefix.world, s));
+            }
           }
           const events = this.read(prefix.state, prefix.world, `${p.seed}:narr`, content);
           if (events.length > 0) rec.post.push({ seq: ++this.journal.seq, at: rec.path, kind: "narr", events });
         }
       }
-    } else if (readReply && content !== "" && !paused) {
-      const prefix = this.prefixState(observed, index, rec);
-      if (prefix) rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
+    } else if (!paused) {
+      // A Re-run reads its reply on its fold prefix, then carries its source's fixes after it.
+      const rerun = p.kind === "swipe" || p.kind === "regenerate";
+      const prefix = (readReply && content !== "") || rerun ? this.prefixState(observed, index, rec) : null;
+      if (prefix && readReply && content !== "") rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
+      if (prefix && rerun) this.carryFixes(rec, this.chain(observed)[index], swipeId, prefix);
     }
     const ledger = this.ledgerFor(messageId, observed[index]);
     ledger.swipes[String(swipeId)] = rec;
@@ -909,6 +956,7 @@ export class LedgerCore {
           if (!prefix) return "unknown revision";
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, `${rec.seed}:read`, text)];
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
+          this.keepAfterRead(rec, m, prefix);
           rec.undone = plannedUndos(rec);
           rec.status = "ok";
           rec.swipeHash = contentId(text);
@@ -930,6 +978,7 @@ export class LedgerCore {
           // detail are not the read's, so they stay. Its new chips offer anything still narrated. A
           // stopped reply is now read, so it no longer offers a Retry read.
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
+          this.keepAfterRead(rec, m, prefix);
           rec.undone = plannedUndos(rec);
           if (rec.status === "stopped") rec.status = "ok";
         }
@@ -938,6 +987,20 @@ export class LedgerCore {
         return undefined;
       }
     }
+  }
+
+  /**
+   * After a read replaced a record's events, its remaining live entries (fixes, materialized detail,
+   * a Re-narrate's narration) are re-validated after them: one that no longer applies is dropped
+   * with a Journal note rather than failing on its own path (L7).
+   */
+  private keepAfterRead(rec: Rec, target: ChainMessage, prefix: { state: WorldState; world: WorldDoc; parent: PathHash }): void {
+    const live = rec.post.filter((p) => isLive(p.at, prefix.parent, turnPath(rec)));
+    const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, turnPath(rec)));
+    const carried = this.carry(prefix.state, prefix.world, live, rec.undone, markers);
+    if (carried.dropped.length === 0) return;
+    rec.post = rec.post.filter((p) => !carried.dropped.some((d) => d.seq === p.seq));
+    rec.dropped = [...(rec.dropped ?? []), ...carried.dropped];
   }
 
   /**

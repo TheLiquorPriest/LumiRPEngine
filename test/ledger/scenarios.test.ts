@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
+import type { LedgerEvent } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { Harness } from "../support/harness";
 import { balanceOf, POV } from "../support/test-pack";
@@ -231,6 +232,36 @@ describe("ledger scenarios", () => {
     }
     return { seeds, cash: amounts };
   }
+
+  test("a Re-run carries the swipe's fixes, undos included; one that no longer applies is dropped with a note (L43)", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "buy:lamp:20", "Bought.");
+    const head = h.host.head(chat);
+    if (!head) throw new Error("no head");
+    const fix = (id: string, events: LedgerEvent[]) => h.write(chat, { kind: "post", id, target: "head", entry: { kind: "fix", events } });
+    await fix("mood", [{ type: "set", entity: POV, field: "mood", value: "calm" }]);
+    await fix("detail", [{ type: "set", entity: POV, field: "detail", value: "scar" }]);
+    await fix("lamp", [{ type: "test.lose", data: { item: "lamp" } }]);
+    // An undone fix stays undone on the new swipe.
+    const rec = (await h.core(chat)).journal.messages[head.id]?.ledger.swipes["0"];
+    const detail = rec?.post.find((p) => p.events.some((e) => e.type === "set" && e.field === "detail"));
+    if (!detail) throw new Error("no detail fix");
+    expect((await h.write(chat, { kind: "undo", id: "u1", messageId: head.id, swipeId: 0, refs: [{ in: "post", seq: detail.seq, index: 0 }] })).applied).toBe(true);
+    // The Re-run's own reply loses the lamp, so taking it away no longer applies.
+    const g = await h.host.start(chat, { type: "swipe", messageId: head.id });
+    await h.host.finish(g, "The lamp slips away. [lose:lamp]");
+    const after = (await h.folds(chat)).optimized;
+    expect(after.state.entities[POV]?.fields).toMatchObject({ mood: "calm" });
+    expect(after.state.entities[POV]?.fields.detail).toBeUndefined();
+    expect(after.notes.filter((n) => n.kind === "not_carried").map((n) => n.text)).toEqual(["no lamp to lose"]);
+    await expectAgree(h, chat);
+    // Swiping back finds the original swipe with its own fixes.
+    h.host.navigate(chat, head.id, 0);
+    await h.host.settle();
+    expect((await h.folds(chat)).optimized.notes.filter((n) => n.kind === "not_carried")).toEqual([]);
+    await expectAgree(h, chat);
+  });
 
   test("a Re-run records a fresh seed and a 50% roll lands near half (L12)", async () => {
     const h = new Harness();

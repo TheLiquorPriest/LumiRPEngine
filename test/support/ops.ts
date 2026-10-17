@@ -9,9 +9,10 @@
 // notes, L17 tombstones kept, L18 metadata mirrors the journal and survives clobbering and restart,
 // L20 starting markers after every operation; L2 switch-and-back (excursion), L3 no pause on a switch
 // or removal, L5 off-path commit, L6 P4 re-render, L8 held writes, L13/L14 Continue, L15 stopped
-// Continue, L19 deletion, L34 dry run, L38 assistant edits, L39 user-edit pause per operation;
-// L31 determinism in properties.test.ts. L4 is the classification these exercise; L10 and L12 are in
-// scenarios.test.ts and reference.test.ts. Pack-dependent invariants arrive with the packs.
+// Continue, L19 deletion, L34 dry run, L38 assistant edits, L39 user-edit pause, L43 a Re-run
+// carries its fixes, per operation; L31 determinism in properties.test.ts. L4 is the classification
+// these exercise; L10 and L12 are in scenarios.test.ts and reference.test.ts. Pack-dependent
+// invariants arrive with the packs.
 
 import { hashJson } from "../../src/shared/hash";
 import type { ChatId } from "../../src/shared/ids";
@@ -39,7 +40,10 @@ export type Op =
   | { op: "deleteMessage"; at: number }
   | { op: "branch"; at: number }
   | { op: "import" }
-  | { op: "write"; kind: number; a: number; b: number }
+  /** `gm`: a GM-style fix instead (a money correction, a relation added or removed, a grouped edit), picked by its value. */
+  | { op: "write"; kind: number; a: number; b: number; gm?: number }
+  /** A GM-style fix on the head, then a Re-run of the head with any reply (L43). */
+  | { op: "fixRerun"; gm: number; a: number; reply: number }
   | { op: "dryRun" }
   | { op: "restart" }
   | { op: "clobber"; at: number; echo: boolean }
@@ -55,10 +59,12 @@ const EDITS = ["Edited reply.", "A typo fixed. [found:7]", "Trimmed.", "Rewritte
 const MONEY_TEXTS = ["deposit:60", "deposit:150", "pay:50", "pay:20", "pay:80", "shop:tire:90", "shop:map:25", "shop:lamp:10", "use:tire"];
 const TOLL_REPLIES = ["You pay the toll. [pay:30]", "A fee is taken. [pay:15]", "The meter eats your money. [pay:70]"];
 
-/** How often a run exercised a funds drop and a grouped drop on a rebased view (the suite asserts both happen). */
+/** How often a run exercised a funds drop, a grouped drop on a rebased view, and a Re-run carrying or dropping a fix (the suite asserts they happen). */
 export interface Coverage {
   fundsDrops: number;
   groupDrops: number;
+  carried: number;
+  carryDrops: number;
 }
 
 const pick = <T>(items: readonly T[], x: number): T => {
@@ -66,6 +72,27 @@ const pick = <T>(items: readonly T[], x: number): T => {
   if (item === undefined) throw new Error("pick from an empty list");
   return item;
 };
+
+/**
+ * A GM-style fix: a money correction out of Sam's account (a poorer branch can't cover it), an item
+ * taken away (a branch whose reply lost it already can't), a `knows` link or unlink (an unlink
+ * fails where the link isn't), or a grouped edit of an unlink and a mood.
+ */
+function gmFix(which: number, x: number): LedgerEvent[] {
+  const link: LedgerEvent = { type: "link", rel: "knows", from: POV, to: "dev" };
+  const unlink: LedgerEvent = { type: "unlink", rel: "knows", from: POV, to: "dev" };
+  if (which < 0.3) {
+    const amount = pick([20, 60, 120], x);
+    return [{ type: "post", lines: [{ account: POV, amount: -amount }, { account: `${EXTERNAL_ACCOUNT_PREFIX}correction`, amount }], memo: "Correction" }];
+  }
+  if (which < 0.55) return [{ type: "test.lose", data: { item: pick(["lamp", "map", "rope"], x) } }];
+  if (which < 0.7) return [link];
+  if (which < 0.85) return [unlink];
+  return [
+    { ...unlink, group: "edit:pair" },
+    { type: "set", entity: POV, field: "mood", value: pick(["calm", "tense"], x), group: "edit:pair" },
+  ];
+}
 
 // ------------------------------------------------------------------ generation
 
@@ -87,7 +114,8 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     else if (roll < 0.65) ops.push({ op: "deleteMessage", at: r() });
     else if (roll < 0.66) ops.push({ op: "branch", at: r() });
     else if (roll < 0.67) ops.push({ op: "import" });
-    else if (roll < 0.8) ops.push({ op: "write", kind: r(), a: r(), b: r() });
+    else if (roll < 0.77) ops.push({ op: "write", kind: r(), a: r(), b: r(), ...(r() < 0.3 ? { gm: r() } : {}) });
+    else if (roll < 0.8) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r() });
     else if (roll < 0.82) ops.push({ op: "dryRun" });
     else if (roll < 0.84) ops.push({ op: "restart" });
     else if (roll < 0.87) ops.push({ op: "clobber", at: r(), echo: r() < 0.5 });
@@ -115,7 +143,7 @@ function generateInner(rng: Rng, length: number): Op[] {
   const ops: Op[] = [];
   for (let i = 0; i < length; i++) {
     const roll = rng.next();
-    if (roll < 0.4) ops.push({ op: "write", kind: rng.next(), a: rng.next(), b: rng.next() });
+    if (roll < 0.4) ops.push({ op: "write", kind: rng.next(), a: rng.next(), b: rng.next(), ...(rng.next() < 0.3 ? { gm: rng.next() } : {}) });
     else if (roll < 0.55) ops.push({ op: "navigate", at: rng.next() * 0.8, swipe: rng.next() });
     else if (roll < 0.7) ops.push({ op: "editAssistant", at: rng.next() * 0.8, text: rng.next() });
     else if (roll < 0.8) ops.push({ op: "editUser", at: rng.next(), text: rng.next() });
@@ -148,7 +176,7 @@ export class Runner {
   current: ChatId = "";
   private readonly memory = new Map<ChatId, ChatMemory>();
   /** This runner's own coverage counts (no state shared across runs or test files). */
-  readonly coverage: Coverage = { fundsDrops: 0, groupDrops: 0 };
+  readonly coverage: Coverage = { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0 };
   private ids = 0;
   /**
    * The reply streaming during an inFlight's inner operations. The host doesn't let the player edit
@@ -210,6 +238,7 @@ export class Runner {
         await host.finish(g, op.toll !== undefined ? pick(TOLL_REPLIES, op.toll) : pick(REPLIES, op.reply));
         this.h.renarrateNext = false;
         if (op.renarrate) await this.checkRenarrate(chat, target.id, g.swipeId, before, tombstones);
+        else await this.checkRerun(chat, target.id, g.swipeId, before, tombstones);
         return;
       }
       case "continue": {
@@ -370,6 +399,18 @@ export class Runner {
         await this.h.write(chat, w);
         return;
       }
+      case "fixRerun": {
+        const head = this.assistants().at(-1);
+        if (!head || this.assistants().length < 2) return;
+        await this.h.write(chat, { kind: "post", id: `w${++this.ids}`, target: "head", entry: { kind: "fix", events: gmFix(op.gm, op.a) } });
+        const core = await this.h.core(chat);
+        const before = structuredClone(core.journal.messages[head.id]?.ledger);
+        const tombstones = structuredClone(core.journal.tombstones);
+        const g = await host.start(chat, { type: "swipe", messageId: head.id });
+        await host.finish(g, pick([...REPLIES, ...TOLL_REPLIES], op.reply));
+        await this.checkRerun(chat, head.id, g.swipeId, before, tombstones);
+        return;
+      }
       case "dryRun": {
         // L34: a preview records nothing.
         const core = await this.h.core(chat);
@@ -422,6 +463,7 @@ export class Runner {
       case "inFlight": {
         const type = op.type < 0.6 ? "normal" : op.type < 0.85 ? "swipe" : "continue";
         let g: Generation;
+        let before: { ledger: MessageLedger | undefined; tombstones: Tombstone[] } | null = null;
         if (type === "normal") {
           host.sendUser(chat, pick(USER_TEXTS, op.reply));
           await host.settle();
@@ -429,6 +471,8 @@ export class Runner {
         } else {
           const head = this.assistants().at(-1);
           if (!head) return;
+          const core = await this.h.core(chat);
+          if (type === "swipe") before = { ledger: structuredClone(core.journal.messages[head.id]?.ledger), tombstones: structuredClone(core.journal.tombstones) };
           g = await host.start(chat, { type, messageId: head.id });
         }
         // L5: the chain the plan saw, as the reference fold hashes it (L1 checks that hash independently).
@@ -453,6 +497,7 @@ export class Runner {
         const changed = type !== "continue" && (await parentOfTarget()) !== planned;
         if (op.stop) await host.stop(g, pick(REPLIES, op.reply).slice(0, 6));
         else await host.finish(g, pick(REPLIES, op.reply));
+        if (before && g.messageId && g.swipeId !== undefined) await this.checkRerun(chat, g.messageId, g.swipeId, before.ledger, before.tombstones);
         if (changed) {
           // An unplanned turn (under a pause) holds nothing made on the old chain; it commits where it lands.
           const target = this.messages().find((m) => m.id === g.messageId);
@@ -537,8 +582,44 @@ export class Runner {
     if (made.post.some((p) => p.kind === "cont" || p.kind === "confirm")) throw new InvariantError("L11", `${chat}/${messageId}: a cont or confirm entry was copied`);
   }
 
+  /**
+   * L43: a Re-run carries the live fixes of the swipe it was made from (the nearest earlier one
+   * holding a record): each is on the new record with its seq, events and undos, anchored at the
+   * record's path, or listed in its `dropped`; nothing else is copied. A turn committed under a pause
+   * carries nothing.
+   */
+  private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[]): Promise<void> {
+    let source: Rec | undefined;
+    for (let s = swipeId - 1; s >= 0 && !source; s--) {
+      const rec = before?.swipes[String(s)];
+      if (rec && !isTombstoned(tombstones, messageId, rec)) source = rec;
+    }
+    const core = await this.h.core(chat);
+    const made = core.journal.messages[messageId]?.ledger.swipes[String(swipeId)];
+    const parent = (await this.h.folds(chat)).reference.messages.find((m) => m.id === messageId)?.parentPath;
+    if (!source || !made || parent === undefined || core.journal.pauses.length > 0) return;
+    const sourceUndone = source.undone;
+    const off = (seq: number, index: number): boolean => sourceUndone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
+    const live = source.post.filter((p) => p.kind === "fix" && isLive(p.at, parent, source.path !== "" ? source.path : null) && !p.events.every((_, i) => off(p.seq, i)));
+    const copies = made.post.filter((p) => p.seq < made.seq);
+    for (const fix of live) {
+      const copy = copies.find((p) => p.seq === fix.seq);
+      const dropped = made.dropped?.some((d) => d.seq === fix.seq) === true;
+      if (!copy && !dropped) throw new InvariantError("L43", `${chat}/${messageId}: the Re-run neither carried nor dropped fix ${fix.seq}`);
+      if (copy && dropped) throw new InvariantError("L43", `${chat}/${messageId}: fix ${fix.seq} was both carried and dropped`);
+      if (dropped) this.coverage.carryDrops++;
+      if (!copy) continue;
+      this.coverage.carried++;
+      if (copy.kind !== "fix" || hashJson(copy.events) !== hashJson(fix.events)) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} differs from its source`);
+      if (copy.at !== made.path) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} is not anchored at the record's path`);
+      for (const u of sourceUndone) if (u.in === "post" && u.seq === fix.seq && !made.undone.some((m) => JSON.stringify(m) === JSON.stringify(u))) throw new InvariantError("L43", `${chat}/${messageId}: copy ${fix.seq} lost its undo`);
+    }
+    if (copies.some((p) => !live.some((f) => f.seq === p.seq))) throw new InvariantError("L43", `${chat}/${messageId}: the Re-run copied an entry that isn't a live fix of its source`);
+  }
+
   private async writeFor(op: Extract<Op, { op: "write" }>): Promise<HeldWrite | null> {
     const id = `w${++this.ids}`;
+    if (op.gm !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: gmFix(op.gm, op.a) } };
     const all = this.messages();
     const k = op.kind;
     if (k < 0.15) return { kind: "post", id, target: "head", entry: { kind: "materialize", events: [{ type: "materialize", entity: POV, domain: "gear", generatorVersion: 1, tablesRevision: "t", events: [{ type: "set", entity: POV, field: "detail", value: `detail-${Math.floor(op.a * 5)}` }] }] } };
@@ -707,6 +788,8 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
     if (coverage) {
       coverage.fundsDrops += runner.coverage.fundsDrops;
       coverage.groupDrops += runner.coverage.groupDrops;
+      coverage.carried += runner.coverage.carried;
+      coverage.carryDrops += runner.coverage.carryDrops;
     }
     return null;
   } catch (error) {

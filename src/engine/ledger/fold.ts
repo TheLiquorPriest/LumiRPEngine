@@ -387,7 +387,7 @@ export class LedgerFold {
         notes.push({ kind: "inert", messageId: m.id, ref: { in: "post", seq: p.seq, index: 0 }, text: "made on another branch" });
         keep.push({ messageId: m.id, parentPath: parent, ref: { in: "post", seq: p.seq, index: 0 }, status: "inert", text: "made on another branch" });
       }
-      for (const d of rec.dropped ?? []) notes.push({ kind: "renarrate_drop", messageId: m.id, ref: { in: "post", seq: d.seq, index: 0 }, text: d.reason });
+      for (const d of rec.dropped ?? []) notes.push({ kind: "not_carried", messageId: m.id, ref: { in: "post", seq: d.seq, index: 0 }, text: d.reason });
     }
     const view = recPath !== null && recPath !== parent;
     const fold: MessageResult["fold"] = paused ? "paused" : !rec ? (tombstoned ? "tombstoned" : "plain") : recPath === null ? "plain" : view ? "view" : "on_path";

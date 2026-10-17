@@ -222,8 +222,8 @@ export interface KeepOverlay {
   convert: EventRef[];
 }
 
-/** A Re-narrate copy that failed re-validation against the new swipe's prefix (P3). */
-export interface RenarrateDrop {
+/** A post entry that failed re-validation when carried onto a swipe (P3: a Re-narrate's copies, a Re-run's fixes) or kept past a Re-read. */
+export interface CarryDrop {
   seq: number;
   kind: PostKind;
   reason: string;
@@ -249,8 +249,8 @@ export interface Rec {
   status: RecStatus;
   undone: EventRef[];
   intents: Record<string, IntentCacheEntry>;
-  /** Re-narrate copies dropped at planning; the folds report them as `renarrate_drop` notes. Outside every hash. */
-  dropped?: RenarrateDrop[];
+  /** Entries dropped when carried onto this swipe or past a Re-read; the folds report them as `not_carried` notes. Outside every hash. */
+  dropped?: CarryDrop[];
   /** Content accepted without being read: an assistant edit or an unread Continue (DESIGN §4.3). Outside every hash. */
   accepted?: ContentId;
   diag?: string;
@@ -363,8 +363,10 @@ export interface PendingTurn {
   renarrateOf?: { messageId: MessageId; swipeId: number };
   /** Re-narrate: the source's live fixes and materializations, re-validated, with their `seq`s and the new parent path as `at` (P3). */
   copies?: PostEntry[];
+  /** Re-narrate: the source's undos of the copies' events, which stay undone. */
+  undone?: EventRef[];
   /** Re-narrate: copies that failed re-validation (P3). */
-  dropped?: RenarrateDrop[];
+  dropped?: CarryDrop[];
   /** Set when the applied-plan slot held this plan (DESIGN §5.1 step 5, `ok`). */
   slotHeld: boolean;
 }
@@ -399,8 +401,8 @@ export interface Journal {
 
 // ---------------------------------------------------------------- fold outputs
 
-/** `fix`: a ✎ fix or GM edit in the Journal (built by the view, never by a fold). */
-export type NoteKind = "dropped" | "inert" | "renarrate_drop" | "tombstoned" | "expired" | "regenerated" | "note" | "fix";
+/** `fix`: a ✎ fix or GM edit in the Journal (built by the view, never by a fold); `not_carried`: an entry a swipe or a Re-read dropped (`Rec.dropped`). */
+export type NoteKind = "dropped" | "inert" | "not_carried" | "tombstoned" | "expired" | "regenerated" | "note" | "fix";
 
 /** A derived Journal note (L16: every stored entry the fold doesn't apply has one). */
 export interface JournalNote {

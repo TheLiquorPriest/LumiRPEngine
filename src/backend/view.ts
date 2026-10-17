@@ -412,7 +412,7 @@ export function playerDrops(registry: Registry, world: WorldDoc, state: Readonly
   const journal: JournalNote[] = [];
   const groups = new Map<string, { at: number; text: string; n: number }>();
   for (const n of notes) {
-    if (n.kind !== "dropped" && n.kind !== "renarrate_drop") {
+    if (n.kind !== "dropped" && n.kind !== "not_carried") {
       journal.push(n);
       continue;
     }

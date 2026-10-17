@@ -94,7 +94,8 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
         notes.push({ kind: "inert", messageId: m.id, ref: { in: "post", seq: p.seq, index: 0 }, text: "made on another branch" });
         keepReport.push({ messageId: m.id, parentPath: parent, ref: { in: "post", seq: p.seq, index: 0 }, status: "inert", text: "made on another branch" });
       }
-      for (const d of rec.dropped ?? []) notes.push({ kind: "renarrate_drop", messageId: m.id, ref: { in: "post", seq: d.seq, index: 0 }, text: d.reason });
+      // Entries a swipe didn't carry over (a Re-narrate's or Re-run's copies) or a Re-read dropped.
+      for (const d of rec.dropped ?? []) notes.push({ kind: "not_carried", messageId: m.id, ref: { in: "post", seq: d.seq, index: 0 }, text: d.reason });
     }
 
     let fold: MessageResult["fold"];

@@ -229,6 +229,7 @@ function isPendingTurn(p: unknown): boolean {
   if (p.continueHead !== undefined && typeof p.continueHead !== "string") return false;
   if (p.captured !== undefined && !isContent(p.captured)) return false;
   if (p.renarrateOf !== undefined && !(isRecord(p.renarrateOf) && typeof p.renarrateOf.messageId === "string" && isInt(p.renarrateOf.swipeId))) return false;
+  if (p.undone !== undefined && !isRefs(p.undone)) return false;
   return [p.copies, p.dropped].every((list) => list === undefined || (Array.isArray(list) && list.every(isRecord)));
 }
 

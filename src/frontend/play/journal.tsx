@@ -10,7 +10,7 @@ import type { PanelProps } from "../registry";
 const KIND_LABEL: Record<NoteKind, string> = {
   dropped: "Dropped",
   inert: "Other branch",
-  renarrate_drop: "Re-narrate",
+  not_carried: "Not carried",
   tombstoned: "Discarded",
   expired: "Expired",
   regenerated: "Regenerated",
@@ -21,7 +21,7 @@ const KIND_LABEL: Record<NoteKind, string> = {
 const KIND_TONE: Record<NoteKind, string> = {
   dropped: "neg",
   inert: "",
-  renarrate_drop: "warn",
+  not_carried: "warn",
   tombstoned: "neg",
   expired: "warn",
   regenerated: "accent",

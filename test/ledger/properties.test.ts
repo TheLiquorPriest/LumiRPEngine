@@ -43,7 +43,7 @@ describe("ledger property suite", () => {
     `${ONE ? `seed ${ONE}` : `${RUNS} generated sequences`} hold every invariant`,
     async () => {
       const seeds = ONE ? [ONE] : Array.from({ length: RUNS }, (_, i) => `${BASE}-${FROM + i}`);
-      const coverage: Coverage = { fundsDrops: 0, groupDrops: 0 };
+      const coverage: Coverage = { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0 };
       for (const [i, seed] of seeds.entries()) {
         const ops = sequenceFor(seed, MAX_OPS);
         // L31: every tenth sequence runs twice and must end identically.
@@ -58,8 +58,11 @@ describe("ledger property suite", () => {
       }
       // L40/L41 coverage: the generated runs do rebase a payment, and a grouped purchase, onto a branch
       // that can't cover it (counted by this test's own runners; deterministic for the fixed base).
+      // L43 coverage: Re-runs do carry fixes forward, and drop ones that no longer apply.
       if (!ONE && RUNS >= 100) expect(coverage.fundsDrops).toBeGreaterThan(0);
       if (!ONE && RUNS >= 100) expect(coverage.groupDrops).toBeGreaterThan(0);
+      if (!ONE && RUNS >= 100) expect(coverage.carried).toBeGreaterThan(0);
+      if (!ONE && RUNS >= 100) expect(coverage.carryDrops).toBeGreaterThan(0);
     },
     24 * 60 * 60 * 1000,
   );
