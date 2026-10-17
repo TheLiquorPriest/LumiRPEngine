@@ -10,6 +10,7 @@ import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/stat
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
 import { presetAdjudication } from "../../src/shared/adjudication";
+import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
@@ -361,11 +362,48 @@ export function stateFixture(chatId: string): StateView {
     meter: { turn: { calls: 3, tokens: 2140, ms: 6200 }, average: { calls: 2.4, tokens: 1890, ms: 5100 }, p95: { calls: 5, tokens: 3900, ms: 11800 } },
     currency: { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" },
     packs: { calendar: 1, space: 1, economy: 1, gear: 1, vehicles: 1, castlife: 1, relationships: 1, sheets: 1, story: 1, weather: 1 },
+    mapDisplay: null,
   };
 }
 
-/** Starter maps, as each starter's space view builds them for a new chat (`?map=…`). */
-export const STARTER_MAPS: Record<string, string> = { ring: "modern_slice_of_life", manor: "mystery_manor", square: "fantasy_town" };
+/** Starter maps, as each starter's space view builds them for a new chat (`?map=…`); `grid` is the grid system's inn. */
+export const STARTER_MAPS: Record<string, string> = { ring: "modern_slice_of_life", manor: "mystery_manor", square: "fantasy_town", grid: "grid_inn" };
+
+/**
+ * A small inn with the grid system on (`?map=grid`): a taproom, a kitchen and a hall behind doors, a
+ * lantern lying in the taproom, and a market and docks in town that the POV has only heard of.
+ */
+function gridInn(): WorldDoc {
+  const w = blankWorld("preview", "Grid inn");
+  w.realism.levels.space = 3;
+  w.mapSettings = { display: "knowledge", grid: { movement: true, sightRadius: 3 } };
+  w.places = {
+    town: { id: "town", name: "Saltmarsh", fields: {} },
+    inn: { id: "inn", name: "The Gull Inn", parent: "town", fields: {} },
+    market: { id: "market", name: "Fish market", parent: "town", fields: {} },
+    docks: { id: "docks", name: "Docks", parent: "town", fields: {} },
+  };
+  w.entities.lantern = { id: "lantern", kind: "item", name: "Brass lantern", tier: "background", fields: {}, relations: [] };
+  w.maps = {
+    inn_ground: {
+      id: "inn_ground",
+      scope: "inn",
+      title: "Ground floor",
+      cellMeters: 2,
+      layout: ["############", "#ttttt#kkkk#", "#tLttt+kkkk#", "#ttttt#kkkk#", "##+#########", "#hhhhhhhhhh#", "#####+######"],
+      legend: { t: { place: "taproom" }, k: { place: "kitchen" }, h: { place: "hall" }, L: { item: "lantern" } },
+      places: [
+        { id: "taproom", name: "Taproom" },
+        { id: "kitchen", name: "Kitchen" },
+        { id: "hall", name: "Back hall" },
+      ],
+    },
+  };
+  w.start = { place: "taproom", at: w.start.at };
+  w.entities.you!.fields.place = "taproom";
+  return migrateWorld(w);
+}
+
 /** Effective levels per domain in `DOMAINS` order, with the overrides set on the entity. */
 function gmLevels(levels: number[], overrides: Partial<Record<DomainId, number>> = {}): GmEntity["levels"] {
   return DOMAINS.map((domain, i) => ({ domain, level: overrides[domain] ?? levels[i] ?? 0, override: overrides[domain] ?? null }));
@@ -513,7 +551,7 @@ export function gmFixture(): GmView {
  * Brindlemere's market square (`?map=square`).
  */
 export function starterMap(template: string): JsonValue {
-  const make = STARTER_WORLDS[template];
+  const make = template === "grid_inn" ? gridInn : STARTER_WORLDS[template];
   if (!make) return null;
   const world = make("preview", template);
   const registry = createRegistry(ALL_PACKS);

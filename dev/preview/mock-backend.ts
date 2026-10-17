@@ -429,6 +429,12 @@ export class MockBackend {
       case "lre.ui":
         this.options.closeDrawer();
         return this.result(reqId, "lre.ui", { done: true });
+      case "lre.map":
+        this.result(reqId, "lre.map", { display: message.display });
+        this.mutate((view) => {
+          view.mapDisplay = message.display;
+        });
+        return;
       case "lre.job": {
         if (message.op === "list") return this.result(reqId, "lre.job", { jobs: this.kept.filter((j) => j.worldId === message.worldId) });
         if (message.op === "dismiss") {
