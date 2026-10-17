@@ -261,7 +261,7 @@ export function startTicked(proposals: readonly JobProposal[]): Set<string> {
 }
 
 /** A lore proposal in the review: its title, where it came from, its aliases, topics and links, and the lookup terms it adds. */
-function LoreProposalLines(props: { p: JobProposal; bookNames: Readonly<Record<string, string>> }) {
+function LoreProposalLines(props: { p: JobProposal; bookNames: Readonly<Record<string, string>>; names: Readonly<Record<string, string>> }) {
   const value = isRecord(props.p.value) ? props.p.value : {};
   const source = loreSourceOf(value.source);
   const link = source.kind === "book" ? `${source.bookId}/${source.entryId}` : "";
@@ -269,7 +269,7 @@ function LoreProposalLines(props: { p: JobProposal; bookNames: Readonly<Record<s
   const lists: [string, string[]][] = [
     ["Aliases", strings(value.aliases)],
     ["Topics", strings(value.topics)],
-    ["Links", strings(value.links)],
+    ["Links", strings(value.links).map((id) => (hasOwn(props.names, id) ? (props.names[id] ?? id) : id))],
     ["Lookup terms", props.p.index?.terms ?? []],
   ];
   return (
@@ -301,6 +301,9 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
   const [busy, run] = useBusy();
   const send = useMemo(() => draftSend(props.app), [props.app]);
   const draft = useSelect(props.app.drafts, (d) => d);
+  // Lore proposals name the people and places they link by the draft's names.
+  const doc = draft?.doc;
+  const names = useMemo(() => Object.fromEntries([...Object.values(doc?.entities ?? {}), ...Object.values(doc?.places ?? {})].map((e) => [e.id, e.name])), [doc]);
   // Import back-links (DESIGN §9.7): `sources` are `bookId/entryId`; the review names the book.
   const [bookNames, setBookNames] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -353,7 +356,7 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
                     <span class={p.confidence >= 0.8 ? "lre-badge pos" : p.confidence >= 0.5 ? "lre-badge warn" : "lre-badge neg"}>{Math.round(p.confidence * 100)}%</span>
                   </span>
                   {p.collection === "lore" ? (
-                    <LoreProposalLines p={p} bookNames={bookNames} />
+                    <LoreProposalLines p={p} bookNames={bookNames} names={names} />
                   ) : (
                     <>
                       {/* A linked proposal's source is an entry id; "From lore" names its book instead. */}

@@ -134,7 +134,7 @@ function TermsPanel(props: { doc: WorldDoc; lint: readonly LintIssue[]; value: L
             ) : null}
             {(all ? suggestions : suggestions.slice(0, SUGGESTIONS_SHOWN)).map((s) => (
               <div key={`${s.term}:${s.entry}`} class="lre-spread">
-                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                <span style={{ flex: "1 1 0", minWidth: 0, overflowWrap: "anywhere" }}>
                   <code>{s.term}</code> → {titleOf(s.entry)} <span class="lre-small lre-muted">· {s.from}</span>
                 </span>
                 <button type="button" class="lre-btn small" aria-label={`Add ${s.term} for ${titleOf(s.entry)}`} onClick={() => adopt([s])}>
@@ -221,7 +221,7 @@ function TopicsPanel(props: { doc: WorldDoc; lint: readonly LintIssue[]; value: 
             ) : null}
             {suggestions.map((s) => (
               <div key={s.id} class="lre-spread">
-                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                <span style={{ flex: "1 1 0", minWidth: 0, overflowWrap: "anywhere" }}>
                   {s.label} <span class="lre-small lre-muted">· {s.entries.length} entr{s.entries.length === 1 ? "y" : "ies"}</span>
                 </span>
                 <button type="button" class="lre-btn small" aria-label={`File entries under ${s.label}`} onClick={() => adopt([s])}>
