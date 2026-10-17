@@ -4,11 +4,11 @@
 
 import type { JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import type { DeltaOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, ResultBodies } from "../../src/shared/protocol";
+import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, ResultBodies } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
-import type { StateView } from "../../src/shared/state-view";
+import type { GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
-import { extractionView, freshFixture, pausedFixture, settingsFixture, starterMap, stateFixture, WORLDS, worldFixture } from "./fixtures";
+import { extractionView, freshFixture, gmFixture, pausedFixture, settingsFixture, starterMap, stateFixture, WORLDS, worldFixture } from "./fixtures";
 
 type Emit = (payload: unknown) => void;
 
@@ -62,6 +62,9 @@ export class MockBackend {
   private world: WorldDoc = worldFixture();
   private draft: WorldDoc = worldFixture();
   private jobs = 0;
+  private gm: GmView = gmFixture();
+  /** The GM view as it was before each GM edit, by the edit's Undo chip. */
+  private readonly beforeEdit = new Map<string, GmView>();
   /** Kept jobs (`lre.job list`): an import a restart cut off after its first chunk. */
   private kept: JobSummary[] = [{ jobId: "job-kept", kind: "import_lore", worldId: WORLDS[0]?.id ?? "", status: "interrupted", progress: 0.5, message: "Interrupted by a restart. The 2 proposal(s) it made before it stopped are below; run it again for the rest.", result: { proposals: PROPOSALS.slice(0, 2) }, input: { bookIds: ["book-1"] }, at: Date.now() - 600_000 }];
   readonly log: FrontendToBackend[] = [];
@@ -105,6 +108,74 @@ export class MockBackend {
     setTimeout(() => this.emit({ lre: 1, type: "lre.error", reqId, code, message }), 30);
   }
 
+  /** Applies a GM edit to the GM view and words it for the Journal; a string is why it was refused (nothing applied). */
+  private applyEdit(ops: EditOp[]): string[] | string {
+    const gm = structuredClone(this.gm);
+    const find = (id: string) => gm.entities.find((e) => e.id === id);
+    const name = (id: string | null) => (id === null ? "nowhere" : (find(id)?.name ?? gm.places.find((p) => p.id === id)?.name ?? id));
+    const lines: string[] = [];
+    for (const op of ops) {
+      if (op.op === "spawn") {
+        const id = op.id ?? `${op.kind}:${gm.entities.length}`;
+        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, fields: [], relations: [], levels: [], sheet: null });
+        lines.push(`${op.name} is here`);
+        continue;
+      }
+      if (op.op === "stage") {
+        const track = gm.tracks.find((t) => t.id === op.track);
+        if (!track) return `There's no track ${op.track}.`;
+        track.stage = op.to;
+        lines.push(`${track.label}: ${track.stages.find((s) => s.id === op.to)?.label ?? op.to}`);
+        continue;
+      }
+      const id = op.op === "link" || op.op === "unlink" ? op.from : op.op === "adjust" ? op.account : op.entity;
+      const entity = find(id);
+      if (!entity) return `${id} isn't in the world.`;
+      switch (op.op) {
+        case "set":
+        case "add": {
+          const field = entity.fields.find((f) => f.id === op.field);
+          if (!field || field.derived) return `${entity.name} has no ${op.field} to change.`;
+          const value = op.op === "set" ? op.value : Math.min(field.max ?? Infinity, Math.max(field.min ?? -Infinity, (typeof field.value === "number" ? field.value : 0) + op.delta));
+          if (typeof value === "number" && (value < (field.min ?? -Infinity) || value > (field.max ?? Infinity))) return `${entity.name}'s ${field.label.toLowerCase()} must be between ${field.min ?? "…"} and ${field.max ?? "…"}.`;
+          field.value = value;
+          lines.push(`${entity.name}'s ${field.label.toLowerCase()}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+          break;
+        }
+        case "link":
+        case "unlink":
+          entity.relations = entity.relations.filter((r) => !(r.type === op.rel && r.to === op.to));
+          if (op.op === "link") entity.relations.push({ type: op.rel, to: op.to, toName: name(op.to), ...(op.fields ? { fields: op.fields } : {}) });
+          lines.push(`${entity.name} ${op.op === "link" ? "now" : "no longer"}: ${op.rel.replace(/_/g, " ")} ${name(op.to)}`);
+          break;
+        case "move":
+        case "put":
+          entity.holder = op.op === "put" ? op.into : null;
+          if (op.op === "move") entity.place = op.to;
+          lines.push(op.op === "move" ? `${entity.name} is at ${name(op.to)}` : op.into === null ? `${entity.name} was taken out` : `${entity.name} is in ${name(op.into)}`);
+          break;
+        case "adjust":
+          entity.balance = (entity.balance ?? 0) + op.cents;
+          for (const m of gm.money) for (const a of m.accounts) if (a.id === op.account) a.cents += op.cents;
+          lines.push(`${entity.name}: correction ${op.cents > 0 ? "+" : ""}${(op.cents / 100).toFixed(2)}`);
+          break;
+        case "entity":
+          if (op.tier !== undefined) entity.tier = op.tier;
+          if (op.agent !== undefined) entity.agent = op.agent;
+          for (const l of entity.levels) if (op.levels && l.domain in op.levels) l.override = op.levels[l.domain] ?? null;
+          lines.push(`${entity.name}'s simulation changed`);
+          break;
+        case "despawn":
+        case "restore":
+          entity.gone = op.op === "despawn";
+          lines.push(`${entity.name} is ${entity.gone ? "gone" : "back"}`);
+          break;
+      }
+    }
+    this.gm = gm;
+    return lines;
+  }
+
   receive(message: FrontendToBackend): void {
     this.log.push(message);
     const reqId = message.reqId;
@@ -127,9 +198,12 @@ export class MockBackend {
       case "lre.chip": {
         const chip = this.view?.chips.find((c) => c.id === message.chip);
         if (!chip) return this.error(reqId, "not_found", "That chip has expired.");
+        const undone = chip.kind === "fix" ? this.beforeEdit.get(chip.id) : undefined;
+        if (undone) this.gm = undone;
         this.result(reqId, "lre.chip", { applied: true, pending: false });
         this.mutate((view) => {
           view.chips = view.chips.filter((c) => c.id !== message.chip);
+          if (chip.kind === "fix") view.journal = view.journal.filter((n) => !(n.kind === "fix" && n.text === chip.detail));
           if (chip.kind === "confirm" && message.choice === "confirm") view.journal.push({ kind: "note", messageId: chip.messageId, ref: null, text: `Confirmed: ${chip.label}` });
           if (chip.kind === "keep_report" && (message.choice === "keep" || message.choice === "discard")) {
             view.status = "idle";
@@ -166,6 +240,23 @@ export class MockBackend {
           view.journal.push({ kind: "note", messageId: "m5", ref: null, text: `Action: ${message.action} ${JSON.stringify(message.params)}` });
         }, 900);
         return;
+      case "lre.gm":
+        return this.result(reqId, "lre.gm", structuredClone(this.gm));
+      case "lre.edit": {
+        const before = structuredClone(this.gm);
+        const lines = this.applyEdit(message.ops);
+        if (typeof lines === "string") return this.error(reqId, "validation", lines);
+        const seq = (before.edits[0]?.seq ?? 0) + 1;
+        const chip = `fix:m4:0:${seq}`;
+        this.gm.edits.unshift({ messageId: "m4", seq, lines });
+        this.beforeEdit.set(chip, before);
+        this.result(reqId, "lre.edit", { pending: false });
+        this.mutate((view) => {
+          view.chips.push({ id: chip, kind: "fix", messageId: "m4", label: "Corrected", detail: lines.join(" · "), actions: [{ id: "undo", label: "Undo", style: "danger" }], expires: "next_send" });
+          view.journal.push({ kind: "fix", messageId: "m4", ref: { in: "post", seq, index: 0 }, text: lines.join(" · ") });
+        }, 40);
+        return;
+      }
       case "lre.fix":
         this.result(reqId, "lre.fix", { pending: false });
         this.mutate((view) => {

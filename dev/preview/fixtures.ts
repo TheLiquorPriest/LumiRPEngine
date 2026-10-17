@@ -1,12 +1,12 @@
 // Preview fixtures: a modern slice-of-life world in play. Shapes follow the contracts
 // (`StateView`, `WorldDoc`, `UserSettings`) and the panel view models of the UI packs.
 
-import { INTERRUPT_CLASSES } from "../../src/shared/ids";
-import type { InterruptClass, InterruptPolicy } from "../../src/shared/ids";
+import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
+import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView } from "../../src/shared/protocol";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
-import type { StateView } from "../../src/shared/state-view";
+import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc, WorldIndex } from "../../src/shared/world";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { initialState } from "../../src/engine/world-state";
@@ -268,47 +268,6 @@ export function stateFixture(chatId: string): StateView {
           },
         ],
       },
-      "core.gm": {
-        previews: [{ title: "Glovebox (Civic)", lines: ["Registration and insurance card", "Half a pack of gum", "$7 in quarters"] }],
-        truths: [{ track: "The surprise party", stage: "Planning", truth: "Mara and Dev are planning a surprise party for Sam on Saturday." }],
-        agendas: [{ entity: "Dev Patel", label: "Fix up the jon boat", stage: "Needs a part" }],
-        money: [
-          {
-            entity: "dev",
-            name: "Dev Patel",
-            level: 4,
-            band: "modest",
-            netWorthCents: 412650,
-            opened: true,
-            accounts: [{ id: "dev_checking", name: "Dev's checking", kind: "checking", cents: 412650 }],
-            bills: [
-              { at: "day 1", label: "Rent, Unit 3", cents: -97500, payee: "Mara Lopez" },
-              { at: "day 14", label: "Mobile phone", cents: -4500, payee: "Northwind Mobile" },
-            ],
-            recent: [
-              { at: "Mon 12 Oct 2026, 11:30", memo: "Living costs", cents: -19000, account: "Dev's checking" },
-              { at: "Fri 9 Oct 2026, 11:30", memo: "Payroll: $1,060.00 gross, $204.58 withheld", cents: 85542, account: "Dev's checking" },
-              { at: "Thu 1 Oct 2026, 11:30", memo: "Rent, Unit 3", cents: -97500, account: "Dev's checking" },
-            ],
-            notes: [
-              { at: "Fri 9 Oct 2026, 11:30", text: "Payday: $855.42 net ($1,060.00 gross)." },
-              { at: "Thu 1 Oct 2026, 11:30", text: "Rent, Unit 3: $975.00 paid." },
-            ],
-          },
-          {
-            entity: "mara",
-            name: "Mara Lopez",
-            level: 2,
-            band: "modest",
-            netWorthCents: 1235000,
-            opened: false,
-            accounts: [{ id: "mara_checking", name: "Mara's checking", kind: "checking", cents: 1235000 }],
-            bills: [],
-            recent: [],
-            notes: [],
-          },
-        ],
-      },
     },
     palette: {
       entries: [
@@ -393,6 +352,146 @@ export function stateFixture(chatId: string): StateView {
 
 /** Starter maps, as each starter's space view builds them for a new chat (`?map=…`). */
 export const STARTER_MAPS: Record<string, string> = { ring: "modern_slice_of_life", manor: "mystery_manor", square: "fantasy_town" };
+/** Effective levels per domain in `DOMAINS` order, with the overrides set on the entity. */
+function gmLevels(levels: number[], overrides: Partial<Record<DomainId, number>> = {}): GmEntity["levels"] {
+  return DOMAINS.map((domain, i) => ({ domain, level: overrides[domain] ?? levels[i] ?? 0, override: overrides[domain] ?? null }));
+}
+
+function personFields(cash: number, energy: number, mood: string, job: string): GmField[] {
+  return [
+    { id: "cash", label: "Cash", type: "money", value: cash, min: 0 },
+    { id: "energy", label: "Energy", type: "number", value: energy, min: 0, max: 100 },
+    { id: "mood", label: "Mood", type: "enum", value: mood, values: ["calm", "happy", "tense"] },
+    { id: "job", label: "Job", type: "text", value: job },
+  ];
+}
+
+function npcFields(cash: number, energy: number, mood: string, job: string, motive: string): GmField[] {
+  return [
+    ...personFields(cash, energy, mood, job),
+    { id: "wariness", label: "wariness", type: "number", value: 100 - energy, derived: true },
+    { id: "motive", label: "Motive", type: "text", value: motive, locked: true },
+  ];
+}
+
+const LEADS = [3, 3, 3, 3, 3, 3, 3, 2, 3];
+const SUPPORTING = [2, 2, 2, 2, 2, 2, 3, 2, 2];
+const BACKGROUND = [1, 1, 1, 1, 1, 1, 3, 2, 1];
+
+/** The GM view (`lre.gm`): everyone, the secret and the removed included, and every track's truths. */
+export function gmFixture(): GmView {
+  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), sheet: null, ...rest });
+  return {
+    entities: [
+      entity("pov", "Sam Rivera", "person", "principal", "diner", {
+        pov: true,
+        fields: personFields(4600, 62, "calm", "Server at Rosie's"),
+        relations: [
+          { type: "knows", to: "npc_rosie", toName: "Rosie Alvarez" },
+          { type: "knows", to: "npc_dev", toName: "Dev Patel" },
+          { type: "member_of", to: "diner_crew", toName: "Rosie's crew", fields: { role: "server", rank: 3 } },
+          { type: "owns", to: "civic", toName: "Honda Civic" },
+        ],
+        sheet: [
+          { title: "Vitals", rows: [{ label: "Stamina", value: "6 / 10", pool: { current: 6, min: 0, max: 10 } }, { label: "Level", value: "2", detail: "340 XP, 600 for level 3", progress: { level: 2, xp: 340, from: 200, next: 600 } }] },
+          { title: "Skills", rows: [{ label: "Barista", value: "+3" }, { label: "Persuade", value: "+1", detail: "from Charm" }] },
+        ],
+      }),
+      entity("npc_rosie", "Rosie Alvarez", "npc", "principal", "diner", {
+        agent: true,
+        fields: [...npcFields(128500, 70, "tense", "Owner", "Wants to sell the diner before winter"), { id: "last_raise", label: "last_raise", type: "text", value: "two years ago", extra: true }],
+        relations: [
+          { type: "regard", to: "pov", toName: "Sam Rivera", fields: { warmth: 20, trust: 35, respect: 40 }, value: 32 },
+          { type: "member_of", to: "diner_crew", toName: "Rosie's crew", fields: { role: "owner", rank: 1 } },
+          { type: "knows", to: "npc_dev", toName: "Dev Patel" },
+        ],
+        sheet: [{ title: "Vitals", rows: [{ label: "Stamina", value: "8 / 10", pool: { current: 8, min: 0, max: 10 } }] }],
+      }),
+      entity("npc_dev", "Dev Patel", "npc", "supporting", "diner", {
+        agent: true,
+        fields: npcFields(2000, 35, "happy", "Mechanic", "Owes Kim's Garage for the jon boat parts"),
+        relations: [
+          { type: "knows", to: "pov", toName: "Sam Rivera" },
+          { type: "regard", to: "npc_mara", toName: "Mara Lopez", fields: { warmth: 60, trust: 50, respect: 45 }, value: 55 },
+        ],
+        levels: gmLevels(SUPPORTING, { money: 4 }),
+      }),
+      entity("npc_mara", "Mara Lopez", "npc", "supporting", "apartment", { fields: npcFields(0, 80, "calm", "Landlord", "Planning Sam's surprise party"), relations: [{ type: "knows", to: "pov", toName: "Sam Rivera" }] }),
+      entity("npc_teo", "Teo Brandt", "npc", "background", "diner", { spawned: true, fields: npcFields(1200, 50, "calm", "Delivery driver", "") }),
+      entity("npc_vic", "Vic Moreau", "npc", "background", "garage", { gone: true, fields: npcFields(800, 40, "tense", "Tow driver", "") }),
+      entity("npc_haskell", "Mr. Haskell", "npc", "supporting", null, { agent: true, visibility: "secret", fields: npcFields(0, 60, "calm", "Developer", "Buying up Main Street through a shell company") }),
+      entity("diner_crew", "Rosie's crew", "group", "background", "diner"),
+      entity("civic", "Honda Civic", "vehicle", "background", "apartment", { fields: [{ id: "fuel", label: "fuel", type: "number", value: 38, min: 0, max: 100 }, { id: "owner", label: "owner", type: "ref", value: "pov", ref: "person" }] }),
+      entity("glovebox", "Glovebox", "container", "background", "apartment", { holder: "civic", visibility: "discoverable", fields: [{ id: "capacity_l", label: "capacity_l", type: "number", value: 4 }, { id: "stock", label: "stock", type: "text", value: "Registration, gum, $7 in quarters" }] }),
+      entity("drill", "Cordless drill", "thing", "background", "diner", { holder: "npc_dev" }),
+      entity("dev_checking", "Dev's checking", "account", "background", null, { balance: 412650, fields: [{ id: "owner", label: "Owner", type: "ref", value: "npc_dev", ref: "person" }] }),
+    ],
+    kinds: [
+      { id: "person", label: "Person" },
+      { id: "npc", label: "NPC" },
+      { id: "group", label: "Group" },
+      { id: "vehicle", label: "Vehicle" },
+      { id: "container", label: "Container" },
+      { id: "thing", label: "Thing" },
+      { id: "account", label: "Account" },
+    ],
+    tiers: [
+      { id: "principal", label: "Leads" },
+      { id: "supporting", label: "Supporting cast" },
+      { id: "background", label: "Background" },
+    ],
+    domains: DOMAINS.map((id) => ({ id, label: id === "castlife" ? "Cast life" : `${id.charAt(0).toUpperCase()}${id.slice(1)}` })),
+    places: [
+      { id: "diner", name: "Rosie's Diner", visibility: "public", parent: null },
+      { id: "back_office", name: "Rosie's back office", visibility: "secret", parent: "diner" },
+      { id: "apartment", name: "Apartment 4B", visibility: "public", parent: null },
+      { id: "garage", name: "Kim's Garage", visibility: "public", parent: null },
+      { id: "quarry", name: "The old quarry", visibility: "discoverable", parent: null },
+    ],
+    tracks: [
+      { id: "q_raise", label: "Ask for a raise", kind: "quest", visibility: "public", owner: null, stage: "case", stages: [{ id: "idea", label: "Thinking about it" }, { id: "case", label: "Build the case", truth: "Rosie gave the last raise to whoever covered the holiday shifts." }, { id: "ask", label: "Ask Rosie" }, { id: "raise", label: "Got the raise" }] },
+      { id: "party", label: "The surprise party", kind: "secret", visibility: "secret", owner: null, stage: "planning", stages: [{ id: "planning", label: "Planning", truth: "Mara and Dev are planning a surprise party for Sam on Saturday." }, { id: "revealed", label: "Revealed" }] },
+      { id: "boat", label: "Fix up the jon boat", kind: "agenda", visibility: "hidden", owner: "Dev Patel", stage: "part", stages: [{ id: "part", label: "Needs a part" }, { id: "water", label: "On the water" }] },
+    ],
+    relationTypes: [
+      { id: "in", label: "In", from: "*", to: "*", fields: [] },
+      { id: "knows", label: "Knows", from: "*", to: "*", fields: [] },
+      { id: "member_of", label: "Member of", from: "*", to: "group", fields: [{ id: "role", label: "Role", type: "text" }, { id: "rank", label: "Rank", type: "number", min: 1, max: 10 }] },
+      { id: "owns", label: "Owns", from: "person", to: "*", fields: [] },
+      { id: "regard", label: "Regard", from: "person", to: "person", fields: ["warmth", "trust", "respect"].map((id) => ({ id, label: id, type: "number" as const, min: -100, max: 100 })) },
+    ],
+    money: [
+      {
+        entity: "npc_dev",
+        name: "Dev Patel",
+        level: 4,
+        band: "modest",
+        netWorthCents: 412650,
+        opened: true,
+        accounts: [{ id: "dev_checking", name: "Dev's checking", kind: "checking", cents: 412650 }],
+        bills: [
+          { at: "day 1", label: "Rent, Unit 3", cents: -97500, payee: "Mara Lopez" },
+          { at: "day 14", label: "Mobile phone", cents: -4500, payee: "Northwind Mobile" },
+        ],
+        recent: [
+          { at: "Mon 12 Oct 2026, 11:30", memo: "Living costs", cents: -19000, account: "Dev's checking" },
+          { at: "Fri 9 Oct 2026, 11:30", memo: "Payroll: $1,060.00 gross, $204.58 withheld", cents: 85542, account: "Dev's checking" },
+          { at: "Thu 1 Oct 2026, 11:30", memo: "Rent, Unit 3", cents: -97500, account: "Dev's checking" },
+        ],
+        notes: [
+          { at: "Fri 9 Oct 2026, 11:30", text: "Payday: $855.42 net ($1,060.00 gross)." },
+          { at: "Thu 1 Oct 2026, 11:30", text: "Rent, Unit 3: $975.00 paid." },
+        ],
+      },
+      { entity: "npc_mara", name: "Mara Lopez", level: 2, band: "modest", netWorthCents: 1235000, opened: false, accounts: [{ id: "mara_checking", name: "Mara's checking", kind: "checking", cents: 1235000 }], bills: [], recent: [], notes: [] },
+    ],
+    edits: [
+      { messageId: "m4", seq: 12, lines: ["Rosie Alvarez's mood: tense"] },
+      { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"] },
+    ],
+    refused: [{ id: "w-17", reason: "Dev Patel's energy must be between 0 and 100." }],
+  };
+}
 
 /**
  * A starter world's map in a new chat, built by the engine itself: Port Alder's town on a ring
