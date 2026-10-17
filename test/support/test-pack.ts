@@ -208,6 +208,7 @@ export function testWorld(variant = 0, seedMode: WorldDoc["seedMode"] = "fresh")
     steps: {},
     suppressed: [],
     lore: {},
+    loreIndex: { terms: {}, topics: {} },
     seedMode,
     lenientPricing: variant === 1,
     currency: { ...DEFAULT_CURRENCY },

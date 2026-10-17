@@ -7,8 +7,8 @@ import { useApp } from "../app";
 import { Card, Empty, Seg, useBusy } from "../components";
 
 const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
-/** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part. */
-const PARTS: readonly WorldPart[] = ["calendar", "realism", "time", "ruleset"];
+/** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part; `loreIndex.terms.ferry` → the lookup table. */
+const PARTS: readonly WorldPart[] = ["calendar", "realism", "time", "ruleset", "loreIndex"];
 
 /** The editor an issue path opens: `entities.npc_dev.fields.cash` → entities / npc_dev. */
 export function issueTarget(path: string): { collection: WorldCollection; id: string } | null {

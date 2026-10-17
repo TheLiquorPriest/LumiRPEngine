@@ -7557,6 +7557,7 @@
       "links": []
     }
   },
+  "loreIndex": {"terms": {}, "topics": {}},
   "seedMode": "fresh",
   "lenientPricing": false,
   "currency": {

@@ -77,6 +77,7 @@ export function blankWorld(id: WorldId, name: string): WorldDoc {
     steps: {},
     suppressed: [],
     lore: {},
+    loreIndex: { terms: {}, topics: {} },
     seedMode: "fresh",
     lenientPricing: false,
     currency: { ...DEFAULT_CURRENCY },
@@ -102,19 +103,23 @@ export function currencyOf(v: unknown): WorldCurrency | null {
 
 /**
  * Brings an older `lre-world-v1` document up to this engine: documents written before `currency`,
- * `lore`, `classifications`, `maps` or `tiers` existed (and templates without them) get Modern US
- * money, no lore, no classifications, no maps and the three default tiers, whose ids are the band
- * ids their entities already name; a POV still on the legacy `pov` tier moves to the lead tier (the
- * POV is `pov`, never capped whatever its tier); step templates for the retired `select` purpose
- * are dropped; and the economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor
- * units; a set `unpricedCap` wins). A world without a `ruleset` keeps none: every part of one is
- * optional, and nothing reads a missing one. Last, the maps compile into the places, grids and
- * routes they own (`compileMaps`). Revisions are immutable, so this runs whenever one is read.
- * Returns the same object when nothing changes.
+ * `lore`, `loreIndex`, `classifications`, `maps` or `tiers` existed (and templates without them) get
+ * Modern US money, no lore, an empty lookup table (a malformed one keeps its well-formed half), no
+ * classifications, no maps and the three default tiers, whose ids are the band ids their entities
+ * already name; a POV still on the legacy `pov` tier moves to the lead tier (the POV is `pov`, never
+ * capped whatever its tier); step templates for the retired `select` purpose are dropped; and the
+ * economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor units; a set
+ * `unpricedCap` wins). A world without a `ruleset` keeps none: every part of one is optional, and
+ * nothing reads a missing one. Lore entries need nothing: their new fields are optional, and one
+ * without a source was authored. Last, the maps compile into the places, grids and routes they own
+ * (`compileMaps`). Revisions are immutable, so this runs whenever one is read. Returns the same
+ * object when nothing changes.
  */
 export function migrateWorld(doc: WorldDoc): WorldDoc {
   const currency: unknown = doc.currency;
   const lore: unknown = doc.lore;
+  const loreIndex: unknown = doc.loreIndex;
+  const indexed = isRecord(loreIndex) && isRecord(loreIndex.terms) && isRecord(loreIndex.topics);
   const classifications: unknown = doc.classifications;
   const maps: unknown = doc.maps;
   const steps: unknown = doc.steps;
@@ -126,8 +131,9 @@ export function migrateWorld(doc: WorldDoc): WorldDoc {
   const economy: unknown = isRecord(doc.packs) ? doc.packs.economy : undefined;
   const config = isRecord(economy) && isRecord(economy.config) ? economy.config : null;
   const oldCap = config !== null && "unpricedCapCents" in config;
-  if (isCurrency(currency) && isRecord(lore) && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && !legacyPov && !oldCap) return compileMaps(doc);
+  if (isCurrency(currency) && isRecord(lore) && indexed && isRecord(classifications) && isRecord(maps) && hasTiers && retired.length === 0 && !legacyPov && !oldCap) return compileMaps(doc);
   const out: WorldDoc = { ...doc, currency: isCurrency(currency) ? currency : { ...DEFAULT_CURRENCY }, lore: isRecord(lore) ? doc.lore : {}, classifications: isRecord(classifications) ? doc.classifications : {}, maps: isRecord(maps) ? doc.maps : {}, tiers };
+  if (!indexed) out.loreIndex = { terms: isRecord(loreIndex) && isRecord(loreIndex.terms) ? doc.loreIndex.terms : {}, topics: isRecord(loreIndex) && isRecord(loreIndex.topics) ? doc.loreIndex.topics : {} };
   if (retired.length > 0) {
     out.steps = { ...doc.steps };
     for (const id of retired) delete out.steps[id];

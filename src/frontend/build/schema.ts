@@ -345,8 +345,8 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   ],
 };
 
-/** The schema-driven singletons; Tiers has its own editor (`tiers-editor.tsx`). */
-export const PART_SPECS: Record<Exclude<WorldPart, "tiers">, FieldSpec[]> = {
+/** The schema-driven singletons; Tiers and the lore lookup table have their own editors (`tiers-editor.tsx`, `lookup-editor.tsx`). */
+export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex">, FieldSpec[]> = {
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
     { kind: "text", key: "epoch", label: "Epoch (local ISO, e.g. 2026-10-16T06:00)" },

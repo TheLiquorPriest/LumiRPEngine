@@ -42,6 +42,7 @@ export function modernUsWorld(id: string, name: string): WorldDoc {
     name,
     currency: { ...DEFAULT_CURRENCY },
     lore: {},
+    loreIndex: { terms: {}, topics: {} },
     engineVersion: "0.1.0",
     packs: Object.fromEntries(ALL_PACKS.filter((p) => p.id !== "engine").map((p) => [p.id, { version: p.version, config: {} }])),
     pins,

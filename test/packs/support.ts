@@ -24,6 +24,7 @@ export function baseWorld(patch: Partial<WorldDoc> = {}): WorldDoc {
     name: "Sim test world",
     currency: { ...DEFAULT_CURRENCY },
     lore: {},
+    loreIndex: { terms: {}, topics: {} },
     engineVersion: "0.0.0",
     packs: {},
     pins: { generators: {}, tables: {} },

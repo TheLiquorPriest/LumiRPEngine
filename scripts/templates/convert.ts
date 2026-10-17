@@ -741,6 +741,7 @@ export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
     steps: {},
     suppressed: [],
     lore: loreEntries(c, entities),
+    loreIndex: { terms: {}, topics: {} },
     seedMode: "fresh",
     lenientPricing: false,
     currency: { ...tpl.currency },

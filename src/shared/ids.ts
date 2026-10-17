@@ -25,6 +25,8 @@ export type ProgressionId = string;
 export type GeneratorId = string;
 export type SlotId = string;
 export type StepTemplateId = string;
+/** A topic in a world's lore lookup table (`WorldDoc.loreIndex.topics`). */
+export type TopicId = string;
 export type PackId = string;
 export type SceneTypeId = string;
 export type ChatId = string;

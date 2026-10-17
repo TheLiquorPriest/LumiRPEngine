@@ -35,7 +35,7 @@ const pipeline = { plan: planTurn, post: postTurn };
 
 const COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"] as const;
 /** Collections documents written before them lack; `migrate` adds them empty, so they're checked only when present. */
-const LATER_COLLECTIONS = ["classifications"] as const;
+const LATER_COLLECTIONS = ["classifications", "loreIndex"] as const;
 const SINGLETONS = ["pins", "calendar", "realism", "time", "start", "currency"] as const;
 
 /** Shape checks for an untrusted document: every collection and singleton part present. */

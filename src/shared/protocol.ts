@@ -246,8 +246,11 @@ export type WorldCollection =
   | "lore"
   | "classifications";
 
-/** Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is optional: an empty one removes it. */
-export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset";
+/**
+ * Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is
+ * optional: an empty one removes it; `loreIndex` is the lore lookup table `{terms, topics}`, whole.
+ */
+export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex";
 
 /**
  * Build-draft operations. `get` returns the stored draft (or a fresh copy of the head when there is

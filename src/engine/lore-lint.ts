@@ -1,9 +1,10 @@
-// World lore lint (DESIGN §4.2): entry ids and links, and secrets: a secret entry needs a gate, and
-// a helper that writes prose in its audience is flagged, since what that step writes can reach the
-// narrator.
+// World lore lint (DESIGN §4.2): entry ids and links; secrets (a secret entry needs a gate, and a
+// helper that writes prose in its audience is flagged, since what that step writes can reach the
+// narrator); and the lookup table: entries it names that don't exist, blank or empty terms, terms
+// not in the form lookups match, and terms that are an entry's alias but lead elsewhere.
 
 import { hasOwn } from "../shared/json";
-import { LORE_AUDIENCE, PROSE_STEPS } from "../shared/lore";
+import { LORE_AUDIENCE, loreTerm, PROSE_STEPS } from "../shared/lore";
 import type { LintIssue } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
 
@@ -29,6 +30,31 @@ export function lintLore(world: WorldDoc): LintIssue[] {
     if (unknown.length > 0) push("warning", `lore.${id}.audience`, "unknown_step", `no helper is called ${unknown.map((s) => `"${String(s)}"`).join(", ")}`);
     const prose = audience.filter((s) => PROSE_STEPS.includes(s));
     if (prose.length > 0) push("warning", `lore.${id}.audience`, "prose_audience", `secret lore "${l.title}" can be read by ${prose.join(", ")}, and what those steps write can reach the narrator`);
+  }
+  // A world file's table may be malformed past the migration (a term's list that isn't one).
+  const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  const aliases = new Map<string, string[]>();
+  for (const [id, l] of Object.entries(world.lore)) {
+    for (const alias of Array.isArray(l.aliases) ? l.aliases : []) {
+      const term = loreTerm(alias);
+      if (term !== "") aliases.set(term, [...(aliases.get(term) ?? []), id]);
+    }
+  }
+  for (const [term, raw] of Object.entries(world.loreIndex.terms)) {
+    const path = `loreIndex.terms.${term}`;
+    const entries = ids(raw);
+    const matched = loreTerm(term);
+    if (matched === "") push("warning", path, "empty_term", "a blank term matches nothing");
+    else if (matched !== term) push("warning", path, "term_case", `lookups match this term as "${matched}"`);
+    if (entries.length === 0) push("warning", path, "empty_term", `"${term}" leads to no entry`);
+    for (const id of entries) if (!hasOwn(world.lore, id)) push("warning", path, "missing_ref", `"${id}" is not a lore entry`);
+    const elsewhere = [...new Set(aliases.get(matched) ?? [])].filter((id) => !entries.includes(id));
+    if (elsewhere.length > 0) push("warning", path, "alias_elsewhere", `"${term}" is an alias of ${elsewhere.map((id) => `"${world.lore[id]?.title ?? id}"`).join(", ")}, but the term doesn't lead there`);
+  }
+  for (const [id, topic] of Object.entries(world.loreIndex.topics)) {
+    const path = `loreIndex.topics.${id}`;
+    if (typeof topic.label !== "string" || topic.label.trim() === "") push("warning", path, "topic_label", "the topic needs a label");
+    for (const entry of ids(topic.entries)) if (!hasOwn(world.lore, entry)) push("warning", path, "missing_ref", `"${entry}" is not a lore entry`);
   }
   return issues;
 }

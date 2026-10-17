@@ -302,6 +302,15 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     else doc.ruleset = value as RulesetDef;
     return;
   }
+  // The lookup table whole, as its editor sends it: keys that could reach a prototype are dropped,
+  // and lists keep their strings (lint reports the rest).
+  if (part === "loreIndex") {
+    const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+    const terms = isRecord(value.terms) ? Object.fromEntries(Object.entries(value.terms).flatMap(([term, entries]) => (safeKey(term) ? [[term, ids(entries)]] : []))) : {};
+    const topics = isRecord(value.topics) ? Object.fromEntries(Object.entries(value.topics).flatMap(([id, t]) => (safeKey(id) && isRecord(t) ? [[id, { label: typeof t.label === "string" ? t.label : id, entries: ids(t.entries) }]] : []))) : {};
+    doc.loreIndex = { terms, topics };
+    return;
+  }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.
   Object.assign(doc, { [part]: value });
 }

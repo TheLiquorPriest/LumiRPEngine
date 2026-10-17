@@ -1,10 +1,11 @@
-// World lore lint (DESIGN §4.2): a secret entry may hold the secret but needs a gate; a helper that
-// writes prose in its audience is flagged; a public entry never holds a track's truth.
+// World lore (DESIGN §4.2): a secret entry may hold the secret but needs a gate; a helper that
+// writes prose in its audience is flagged; a public entry never holds a track's truth. The lookup
+// table: its migration, its lint, additions and suggestions.
 
 import { describe, expect, test } from "bun:test";
 import { blankWorld, lintWorld, migrateWorld } from "../../src/engine/authoring";
 import { createRegistry } from "../../src/engine/registry-impl";
-import { loreSource } from "../../src/shared/lore";
+import { addToLoreIndex, loreSource, termSuggestions, topicSuggestions } from "../../src/shared/lore";
 import type { LintIssue } from "../../src/shared/protocol";
 import type { LoreEntryDef, WorldDoc } from "../../src/shared/world";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -49,5 +50,65 @@ describe("world lore lint", () => {
     expect(migrateWorld(old)).toBe(old);
     expect(loreSource(old.lore.harbor ?? entry("x"))).toEqual({ kind: "authored" });
     expect(loreIssues(old)).toEqual([]);
+  });
+});
+
+describe("the lore lookup table", () => {
+  const lighthouse = entry("lighthouse", { title: "Breakwater Lighthouse", aliases: ["The Old Lighthouse"], topics: ["Harbor"] });
+  const ferry = entry("ferry", { title: "The Ferry", keys: ["boat"], topics: ["harbor", "Travel"] });
+
+  test("documents written before it get an empty table; a malformed one keeps its well-formed half", () => {
+    // Stored documents are JSON; these are written as an older engine (or a hand edit) left them.
+    const old = JSON.parse(JSON.stringify({ ...world([lighthouse]), loreIndex: undefined })) as WorldDoc;
+    const migrated = migrateWorld(old);
+    expect(migrated.loreIndex).toEqual({ terms: {}, topics: {} });
+    expect(migrated.lore).toEqual(old.lore);
+    const half = JSON.parse(JSON.stringify({ ...world([lighthouse]), loreIndex: { terms: { lamp: ["lighthouse"] }, topics: null } })) as WorldDoc;
+    expect(migrateWorld(half).loreIndex).toEqual({ terms: { lamp: ["lighthouse"] }, topics: {} });
+  });
+
+  test("lint: unknown entries, blank and empty terms, terms not as lookups match them, and an alias that leads elsewhere", () => {
+    const w = world([lighthouse, ferry]);
+    w.loreIndex = { terms: { "the old lighthouse": ["ferry"], boat: ["ferry", "ghost_ship"], "  ": ["ferry"], Ferry: ["ferry"], dock: [] }, topics: { harbor: { label: "Harbor", entries: ["lighthouse", "pier"] }, misc: { label: " ", entries: [] } } };
+    expect(lintWorld(w, registry).filter((i) => i.path.startsWith("loreIndex.")).map((i) => [i.path, i.code])).toEqual([
+      ["loreIndex.terms.the old lighthouse", "alias_elsewhere"],
+      ["loreIndex.terms.boat", "missing_ref"],
+      ["loreIndex.terms.  ", "empty_term"],
+      ["loreIndex.terms.Ferry", "term_case"],
+      ["loreIndex.terms.dock", "empty_term"],
+      ["loreIndex.topics.harbor", "missing_ref"],
+      ["loreIndex.topics.misc", "topic_label"],
+    ]);
+    // The alias's own entry among others is fine.
+    w.loreIndex = { terms: { "the old lighthouse": ["ferry", "lighthouse"] }, topics: {} };
+    expect(lintWorld(w, registry).filter((i) => i.path.startsWith("loreIndex."))).toEqual([]);
+  });
+
+  test("additions file an entry without removing or repeating anything; prototype keys are skipped", () => {
+    const start = { terms: { lamp: ["ferry"] }, topics: { harbor: { label: "The harbor", entries: ["ferry"] } } };
+    const next = addToLoreIndex(start, "lighthouse", { terms: ["Lamp", "  The OLD  lighthouse ", "__proto__"], topics: [{ id: "harbor", label: "Harbor" }, { id: "lights", label: "Lights" }, { id: "constructor", label: "x" }] });
+    expect(next).toEqual({ terms: { lamp: ["ferry", "lighthouse"], "the old lighthouse": ["lighthouse"] }, topics: { harbor: { label: "The harbor", entries: ["ferry", "lighthouse"] }, lights: { label: "Lights", entries: ["lighthouse"] } } });
+    expect(addToLoreIndex(next, "lighthouse", { terms: ["lamp"], topics: [{ id: "lights", label: "Lights" }] })).toEqual(next);
+    expect(start.terms.lamp).toEqual(["ferry"]);
+  });
+
+  test("suggestions come from titles, aliases and keywords, and from the topics entries name, until the table has them", () => {
+    const w = world([lighthouse, ferry]);
+    expect(termSuggestions(w).map((s) => [s.term, s.entry, s.from])).toEqual([
+      ["breakwater lighthouse", "lighthouse", "title"],
+      ["the old lighthouse", "lighthouse", "alias"],
+      ["the ferry", "ferry", "title"],
+      ["boat", "ferry", "keyword"],
+    ]);
+    expect(topicSuggestions(w)).toEqual([
+      { id: "harbor", label: "Harbor", entries: ["lighthouse", "ferry"] },
+      { id: "travel", label: "Travel", entries: ["ferry"] },
+    ]);
+    w.loreIndex = { terms: { "the old lighthouse": ["lighthouse"], boat: ["ferry"] }, topics: { harbor: { label: "Harbor and docks", entries: ["lighthouse"] } } };
+    expect(termSuggestions(w).map((s) => s.term)).toEqual(["breakwater lighthouse", "the ferry"]);
+    expect(topicSuggestions(w)).toEqual([
+      { id: "harbor", label: "Harbor and docks", entries: ["ferry"] },
+      { id: "travel", label: "Travel", entries: ["ferry"] },
+    ]);
   });
 });

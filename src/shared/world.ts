@@ -39,6 +39,7 @@ import type {
   StepTemplateId,
   TableId,
   TierId,
+  TopicId,
   TrackId,
   TravelMode,
   Visibility,
@@ -719,6 +720,24 @@ export interface LoreEntryDef {
   audience?: StepPurpose[];
 }
 
+/** A topic in the lore lookup table: its label and its entries, in reading order. */
+export interface LoreTopic {
+  label: string;
+  entries: string[];
+}
+
+/**
+ * The world's lore lookup table (DESIGN §4.2): the curated routing RPEngine's own lore searches
+ * follow, whether the author or an indexing job wrote it. Entry aliases and topics feed its
+ * suggestions; the table is what a lookup reads.
+ */
+export interface LoreIndex {
+  /** A lowercase term or alias → the ids of the entries it means. */
+  terms: Record<string, string[]>;
+  /** The table of contents by topic id. */
+  topics: Record<TopicId, LoreTopic>;
+}
+
 export type SuppressedSource =
   | { bookId: string; entryId: string }
   | { bookId: string; comment: string; contentHash: string };
@@ -805,6 +824,8 @@ export interface WorldDoc {
   suppressed: SuppressedSource[];
   /** World lore by id (DESIGN §4.2): authored data, not delivered yet. */
   lore: Record<string, LoreEntryDef>;
+  /** The lore lookup table (DESIGN §4.2); empty in documents written before it existed. */
+  loreIndex: LoreIndex;
   /** Classification facets by id (DESIGN §4.1); entities hold values in `class`. */
   classifications: Record<FacetId, FacetDef>;
   /** The world's tabletop ruleset (DESIGN §11); absent in worlds that have none. */

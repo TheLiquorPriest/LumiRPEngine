@@ -18,6 +18,7 @@ import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
 import { JobView } from "./jobs";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
+import { LookupTableEditor } from "./lookup-editor";
 import { TableEditor } from "./table-editor";
 import { TiersEditor } from "./tiers-editor";
 
@@ -49,6 +50,7 @@ const PARTS: { id: WorldPart; label: string }[] = [
   { id: "tiers", label: "Tiers" },
   { id: "time", label: "Time defaults" },
   { id: "ruleset", label: "Ruleset" },
+  { id: "loreIndex", label: "Lore lookup table" },
 ];
 
 const TEMPLATES: { id: string | null; label: string }[] = [
@@ -583,7 +585,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
-function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers">): JsonObject {
+function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex">): JsonObject {
   switch (part) {
     case "calendar":
       return doc.calendar as unknown as JsonObject;
@@ -605,10 +607,11 @@ function PartView(props: { part: WorldPart }) {
   const send = useMemo(() => draftSend(app), [app]);
   if (!draft) return null;
   if (props.part === "tiers") return <TiersEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "tiers", value })} />;
+  if (props.part === "loreIndex") return <LookupTableEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "loreIndex", value })} />;
   return <SchemaPartView part={props.part} />;
 }
 
-function SchemaPartView(props: { part: Exclude<WorldPart, "tiers"> }) {
+function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex"> }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const send = useMemo(() => draftSend(app), [app]);
