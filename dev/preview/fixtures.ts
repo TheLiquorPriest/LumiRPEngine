@@ -380,6 +380,41 @@ export function portAlderRingMap(): StateView["panels"][string] {
   };
 }
 
+/**
+ * A new chat before anything opened the POV's money: Money (level 4) and the HUD cash show the
+ * authored opening balances, which is what opening the panel posts, so the figures don't move.
+ */
+export function freshFixture(chatId: string): StateView {
+  const view = stateFixture(chatId);
+  view.chips = [];
+  view.journal = [];
+  view.pending = [];
+  if (view.hud) {
+    view.hud.cash = { cents: 8500 };
+    if (view.hud.fixes.cash) view.hud.fixes.cash.value = 8500;
+  }
+  view.panels["economy.money"] = {
+    level: 4,
+    band: "broke",
+    netWorthCents: -972623,
+    cash: { cents: 8500 },
+    accounts: [
+      { id: "acct_pov_cash", name: "Your wallet cash", kind: "cash", cents: 8500 },
+      { id: "acct_pov_checking", name: "Your checking account", kind: "checking", cents: 184217, aprPct: 0.1 },
+      { id: "acct_pov_savings", name: "Your savings account", kind: "savings", cents: 326000, aprPct: 3.8 },
+      { id: "acct_pov_card", name: "Your credit card", kind: "card", cents: -63840, limitCents: 450000, aprPct: 22 },
+      { id: "acct_pov_auto_loan", name: "Your auto loan", kind: "loan", cents: -1740000, aprPct: 9.4 },
+      { id: "acct_pov_brokerage", name: "Your index-fund account", kind: "brokerage", cents: 312500 },
+    ],
+    recent: [],
+    upcoming: [
+      { at: "day 1", label: "Rent", cents: -145000 },
+      { at: "every Friday", label: "Payday", cents: 98000 },
+    ],
+  };
+  return view;
+}
+
 /** The same chat after a user-message edit: paused on Keep / Discard. */
 export function pausedFixture(chatId: string): StateView {
   const view = stateFixture(chatId);

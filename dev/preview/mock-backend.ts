@@ -8,12 +8,13 @@ import type { DeltaOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, Re
 import type { UserSettings } from "../../src/shared/settings";
 import type { StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
-import { extractionView, pausedFixture, portAlderRingMap, settingsFixture, stateFixture, WORLDS, worldFixture } from "./fixtures";
+import { extractionView, freshFixture, pausedFixture, portAlderRingMap, settingsFixture, stateFixture, WORLDS, worldFixture } from "./fixtures";
 
 type Emit = (payload: unknown) => void;
 
 export interface MockOptions {
-  scenario: "play" | "paused" | "not_world";
+  /** `fresh`: a new chat whose POV money no view has opened yet (the opening balances show). */
+  scenario: "play" | "paused" | "not_world" | "fresh";
   /** `ring`: the map is the Port Alder starter's (places on a ring). */
   map?: "ring";
   closeDrawer(): void;
@@ -113,7 +114,7 @@ export class MockBackend {
           this.result(reqId, "lre.hello", { accepted: true });
           return;
         }
-        this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : stateFixture(message.chatId);
+        this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : this.options.scenario === "fresh" ? freshFixture(message.chatId) : stateFixture(message.chatId);
         if (this.options.scenario === "not_world") this.view = { ...stateFixture(message.chatId), status: "not_world", hud: null, scene: null, chips: [], panels: {}, palette: null, controls: null };
         else if (this.options.map === "ring") this.view.panels["space.map"] = portAlderRingMap();
         this.result(reqId, "lre.hello", { accepted: true });
@@ -211,7 +212,9 @@ export class MockBackend {
         }, 40);
         return;
       case "lre.view.open":
-        this.result(reqId, "lre.view.open", { materialized: true, pending: false });
+        // Opening a pack panel materializes the POV's detail there; for money that posts the opening
+        // balances the panel already shows, so the view doesn't change.
+        this.result(reqId, "lre.view.open", { materialized: message.panel !== "core.context", pending: false });
         return;
       case "lre.settings.get":
         this.result(reqId, "lre.settings.get", { settings: structuredClone(this.settings), extraction: extractionView(this.settings), caveats: [{ code: "preset_json_ledger", message: "Your active preset “Default” has an enabled block “Caravan Ledger” that asks the narrator for JSON; replies will carry it. Turn it off in the preset if you don't want it." }] });
@@ -275,7 +278,9 @@ export class MockBackend {
         }
         else if (message.op === "set") (this.draft as unknown as Record<string, JsonValue>)[message.part] = message.value;
         const stored = JSON.stringify(this.draft) !== JSON.stringify(this.world);
-        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: WORLDS[0]?.head ?? null, stored, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }] });
+        const cap = this.draft.packs.economy?.config.unpricedCap;
+        const capLint = cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0) ? [] : [{ severity: "warning" as const, path: "packs.economy.config.unpricedCap", code: "economy.unpriced_cap", message: "The narrated-price cap should be a whole number of cents above zero; narrated prices are capped at the default, $14.00." }];
+        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: WORLDS[0]?.head ?? null, stored, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }, ...capLint] });
       }
       case "lre.ui":
         this.options.closeDrawer();
