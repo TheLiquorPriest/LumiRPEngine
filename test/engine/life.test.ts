@@ -338,6 +338,21 @@ describe("life states: People and an Upgrade", () => {
     for (const id of ["rosa", "vic"]) expect(agentCursor(b, state, id)).toBeGreaterThanOrEqual(completedSlot(b, state));
   });
 
+  test("a field a schedule sets reads no more in the Journal than someone's place and activity do", () => {
+    const journal = (dies: boolean): string[] => {
+      const w = riverton(1, (wd) => {
+        wd.realism.levels.castlife = 2;
+        wd.schedules.jordan_status = { id: "jordan_status", owner: "jordan", target: "status", recurrence: { every: "day" }, slots: [{ start: "08:00", end: "17:30", value: "on_shift" }] };
+      });
+      w.apply({ type: "link", rel: "knows", from: YOU, to: "jordan" });
+      if (dies) life(w, { entity: "jordan", to: "dead" });
+      const from = w.events.length;
+      lapse(w, 10 * 60);
+      return playerLines(reg, w.world, w.state, YOU, w.events.slice(from)).filter((l) => l.includes("Jordan"));
+    };
+    expect(journal(true)).toEqual(journal(false));
+  });
+
   test("someone else's routine reads the same in the Journal whether or not they died unseen", () => {
     const journal = (dies: boolean): string[] => {
       const w = riverton(1, (wd) => {
