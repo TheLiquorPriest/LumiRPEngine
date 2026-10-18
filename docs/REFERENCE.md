@@ -781,7 +781,7 @@ Extends `container`.
 
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
-| `class` | Class | text |  |  |  |  |  |
+| `class` | Vehicle class | text |  |  |  |  |  |
 | `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |
 | `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto, ±30 a turn |
 | `home` | Home base | ref |  |  |  |  | live from vehicles 3 |

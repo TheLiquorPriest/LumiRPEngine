@@ -67,7 +67,8 @@ export const VEHICLE: KindDef = {
   extends: "container",
   pack: "vehicles",
   fields: {
-    class: { type: "text", label: "Class" },
+    // Named for the vehicle, so Build doesn't read it as one of the world's own classifications.
+    class: { type: "text", label: "Vehicle class" },
     status: { type: "enum", label: "Status", values: ["ok", "needs_service", "broken"], default: "ok", domain: "vehicles", level: 1, bound: { mode: "confirm" } },
     fuel_pct: { type: "number", label: "Fuel %", min: 0, max: 100, domain: "vehicles", level: 2, bound: { mode: "auto", maxDelta: 30 } },
     odometer_mi: { type: "number", label: "Odometer (mi)", min: 0, domain: "vehicles", level: 3, locked: true },
