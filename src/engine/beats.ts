@@ -17,7 +17,7 @@ import { asObject, placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
 import { own } from "./pack-kit";
 import type { TimelapseOutcome } from "./time";
-import { canSeeEntity, playerTrack, signalVisible } from "./visibility";
+import { canSeeEntity, canSeeField, playerTrack, signalVisible } from "./visibility";
 
 export interface BeatInput {
   resolution?: Resolution | null;
@@ -82,7 +82,8 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
     for (const id of Object.keys(state.entities).sort()) {
       const e = own(state.entities, id);
       if (!e || id === pov || !e.agent || placeOfEntity(state, id) !== here || !canSeeEntity(reg, world, state, pov, id)) continue;
-      const act = e.fields.activity;
+      // What they are doing is a field: told only when the POV may see it.
+      const act = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
       if (typeof act === "string" && act !== "" && act !== "idle") lines.push(`${e.name} is ${act.replace(/_/g, " ")}.`);
     }
   }

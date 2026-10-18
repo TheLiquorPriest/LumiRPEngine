@@ -16,6 +16,7 @@ import { objectiveLabel, objectiveWhen } from "../shared/world";
 import { loreIsSecret, lorePhrases } from "../shared/lore";
 import type { ExprEnv } from "./expr";
 import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
+import type { Touch } from "./registry";
 import type { Registry } from "./registry-impl";
 import { asObject, evalExpr, fieldDef, isGone, placeOfEntity, scopeEnv, truthy } from "./scope";
 import { selectorMatches } from "./selector";
@@ -161,7 +162,24 @@ export function signalVisible(reg: Registry, world: WorldDoc, state: Readonly<Wo
   return s.entity === undefined || canSeeEntity(reg, world, state, pov, s.entity);
 }
 
-/** Whether a player at `pov` may see an event (its description, its effect in a Montage). */
+/**
+ * Whether the POV may see every field a pack event writes, as its type declares them (`touches`:
+ * `space.pos` x and y, `castlife.need` the needs): a line about a field it can't see would carry
+ * the field's value or its change. Touches that can't be read fail closed.
+ */
+function packFieldsSeen(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent): boolean {
+  const touches = reg.get(e.type)?.touches;
+  if (!touches) return true;
+  let written: Touch[];
+  try {
+    written = touches(e);
+  } catch {
+    return false;
+  }
+  return written.every((t) => !("field" in t) || canSeeField(reg, world, state, pov, t.entity, t.field));
+}
+
+/** Whether a player at `pov` may see an event (its description, its effect in a Montage), every field it writes included. */
 export function eventVisible(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent): boolean {
   switch (e.type) {
     case "set":
@@ -184,6 +202,7 @@ export function eventVisible(reg: Registry, world: WorldDoc, state: Readonly<Wor
     case "materialize":
       return canSeeEntity(reg, world, state, pov, e.entity);
     default: {
+      if (!packFieldsSeen(reg, world, state, pov, e)) return false;
       const s = signalOf(e);
       if (s) return signalVisible(reg, world, state, pov, s);
       const data = asObject("data" in e ? e.data : undefined);

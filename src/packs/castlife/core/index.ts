@@ -643,7 +643,8 @@ export const castlifePack: PackDef = {
           if (!e || id === pov || !here || placeOfEntity(ctx.state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
           // The narrator is told only who the POV can see: a secret or unknown person stays out of the prose.
           if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) continue;
-          const act = e.fields.activity;
+          // What they are doing is a field: told only when the POV may see it.
+          const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
           lines.push(`${e.name}${typeof act === "string" && act !== "idle" ? ` (${act.replace(/_/g, " ")})` : ""} is here.`);
         }
         if (ctx.levelOf(pov, "castlife") >= 4) {

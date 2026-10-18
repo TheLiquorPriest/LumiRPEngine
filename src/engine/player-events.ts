@@ -1,8 +1,9 @@
 // Player-facing event lines (DESIGN §7, D8): what a chip, the Journal or a Montage may
 // say about an event. An event shows only when the POV may see it and everything it refers to:
-// its own visibility (`eventVisible`), every entity it names (visible and met), every place
-// (visible) and every track (public, or revealed). Bookkeeping events and off-screen NPC↔NPC
-// events never show. Lines use names and labels, never ids, and never carry unrevealed truth.
+// its own visibility (`eventVisible`, every field it writes included), every entity it names
+// (visible and met), every place (visible) and every track (public, or revealed). Bookkeeping
+// events and off-screen NPC↔NPC events never show. Lines use names and labels, never ids, and
+// never carry unrevealed truth.
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -15,7 +16,7 @@ import type { Registry } from "./registry-impl";
 import { bandOf, fieldDef, GONE_FIELD } from "./scope";
 import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
-import { canSeeEntity, canSeeField, canSeePlace, eventVisible, findLeaks, knows, trackKnown, unrevealedSecrets, visibilityOf } from "./visibility";
+import { canSeeEntity, canSeePlace, eventVisible, findLeaks, knows, trackKnown, unrevealedSecrets, visibilityOf } from "./visibility";
 
 /** Event types that are engine or pack bookkeeping: never player-facing lines. */
 const BOOKKEEPING = new Set<string>([
@@ -358,7 +359,6 @@ function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
     if (e.type === "set" && lastSet.get(`${e.entity}\u0000${e.field}`) !== i) continue;
     if (BOOKKEEPING.has(e.type)) continue;
     if (player && !playerEventVisible(reg, world, state, pov, e)) continue;
-    if (player && e.type === "set" && !canSeeField(reg, world, state, pov, e.entity, e.field)) continue;
     const banded = ctx && hpLine ? hpLine(ctx, e) : undefined;
     const text = banded === undefined ? rawLine(reg, world, state, pov, e, player) : banded;
     if (!text || lines.some((l) => l.text === text)) continue;

@@ -3,7 +3,9 @@
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { createRegistry } from "../../src/engine/registry-impl";
+import { outline } from "../../src/engine/beats";
 import { metBy, playerDrop, playerLine, playerLines, UNSEEN_DROP } from "../../src/engine/player-events";
+import { createRng } from "../../src/engine/rng";
 import { buildGarageView } from "../../src/packs/vehicles/core/view";
 import type { WorldState } from "../../src/engine/state";
 import type { WorldDoc } from "../../src/shared/world";
@@ -125,5 +127,41 @@ describe("player-facing event lines", () => {
     expect(unmet.text).not.toMatch(/Maya|maya|\$/);
     expect(playerDrop(reg, world, state, "you", { type: "stage", track: "tips", to: "noticed" }, `stage ${TRUTH}`).text).toBe(UNSEEN_DROP);
     expect(playerDrop(reg, world, state, "you", null, "marker 12 made on another branch").text).toBe(UNSEEN_DROP);
+  });
+});
+
+describe("fields the POV can't see", () => {
+  /** Maya, met and here with the POV, and the POV, both of a kind whose debt, activity and needs are secret; savings are public. */
+  function insider(): { world: WorldDoc; state: WorldState } {
+    const world = modernUsWorld("pe", "R");
+    world.kinds.insider = { id: "insider", label: "Insider", extends: "person", fields: { debt: { type: "number", visibility: "secret" }, savings: { type: "number" }, activity: { type: "text", visibility: "secret" }, needs: { type: "list", visibility: "secret" } } };
+    world.entities.you!.kind = "insider";
+    world.entities.maya!.kind = "insider";
+    world.entities.maya!.fields = { ...world.entities.maya!.fields, place: "apartment", debt: 40, savings: 10, activity: "counting_the_take" };
+    return { world, state: startState(world) };
+  }
+
+  test("no change to one reads in a chip or the Journal: a set, an add, or a pack event that writes it; a public field's does", () => {
+    const { world, state } = insider();
+    const hunger: LedgerEvent = { type: "castlife.need", data: { entity: "you", need: "hunger", delta: 20 } };
+    const hidden: LedgerEvent[] = [{ type: "add", entity: "maya", field: "debt", delta: 5 }, { type: "set", entity: "maya", field: "debt", value: 3 }, { type: "set", entity: "maya", field: "activity", value: "counting_the_take" }, hunger];
+    expect(playerLines(reg, world, state, "you", hidden)).toEqual([]);
+    for (const e of hidden) expect(playerDrop(reg, world, state, "you", e, "raw").text).toBe(UNSEEN_DROP);
+    expect(playerLines(reg, world, state, "you", [{ type: "add", entity: "maya", field: "savings", delta: 5 }])).toEqual(["Maya Chen: savings +5"]);
+    // The needs a castlife event writes read once the field is public.
+    world.kinds.insider!.fields.needs = { type: "list" };
+    expect(playerLines(reg, world, state, "you", [hunger])).toEqual(["hunger rose"]);
+  });
+
+  test("the narrator isn't told one: the people line and the outline leave a secret activity out", () => {
+    const { world, state } = insider();
+    const people = reg.renderers.filter((r) => r.slot === "people").flatMap((r) => r.render(reg.context(world, state)));
+    expect(people).toContain("Maya Chen is here.");
+    const beats = outline(reg, world, state, { events: [] }, createRng("beats"));
+    for (const said of [...people, ...beats]) expect(said).not.toContain("counting");
+    // A public activity is told.
+    world.kinds.insider!.fields.activity = { type: "text" };
+    expect(reg.renderers.filter((r) => r.slot === "people").flatMap((r) => r.render(reg.context(world, state)))).toContain("Maya Chen (counting the take) is here.");
+    expect(outline(reg, world, state, { events: [] }, createRng("beats"))).toContain("Maya Chen is counting the take.");
   });
 });
