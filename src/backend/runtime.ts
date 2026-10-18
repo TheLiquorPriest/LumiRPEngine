@@ -1794,12 +1794,13 @@ const NO_VALUE: Record<string, true> = { "": true, none: true, null: true, nil: 
 
 /**
  * Words of the message the turn won't play (a queued action's, or what no action reads) as its chip
- * may offer them (DESIGN §5.2), or null. They must read as an action to the typed-input classifier
- * (`lexicon` holds the actions' phrases), and not one that only lets time pass, which is `then`'s. A
- * placeholder for nothing ("none", "N/A") is none, and neither is the message or its first action
- * said again ("I walk to Bluebird Coffee" after "I walk to Bluebird Coffee to buy a latte"), whose
- * chip would play it twice. Words carrying an unrevealed secret (`secrets`, less the player's own
- * words), or naming anything hidden, are dropped on their own while the actions still play.
+ * may offer them (DESIGN §5.2), or null. Whether they are an action is the read's call, not a word
+ * list's, so only junk is kept off: a placeholder for nothing ("none", "N/A"); the message or its
+ * first action said again ("I walk to Bluebird Coffee" after "I walk to Bluebird Coffee to buy a
+ * latte"), whose chip would play it twice; words that only let time pass, which is `then`'s
+ * (`lexicon` holds the actions' phrases); and words carrying an unrevealed secret (`secrets`, less
+ * the player's own words) or naming anything hidden, which are dropped on their own while the
+ * actions still play.
  */
 function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, next: string, text: string, lexicon: readonly string[], secrets: readonly string[]): string | null {
   // Compared as words, without the player's own "I" or "we": "I walk to the cafe." is "walk to the cafe".
@@ -1811,7 +1812,7 @@ function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
       .replace(/^(?:i|we)\s+/, "");
   const said = words(next);
   if (hasOwn(NO_VALUE, said) || words(text).startsWith(said)) return null;
-  if (!classifyTyped(next, world, [...lexicon, ...TIMELAPSE_LEXICON]) || onlyPassesTime(next, world, lexicon, TIMELAPSE_LEXICON)) return null;
+  if (onlyPassesTime(next, world, lexicon, TIMELAPSE_LEXICON)) return null;
   return findLeaks(next, secrets).length > 0 || chipNamesHidden(reg, world, state, next) ? null : next;
 }
 

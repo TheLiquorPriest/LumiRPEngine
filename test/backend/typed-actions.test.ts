@@ -228,7 +228,7 @@ describe("a second action in the same message", () => {
     }
   });
 
-  test("a placeholder, the message or its first action said again, or words that aren't an action are never offered", async () => {
+  test("a placeholder, or the message or its first action said again, is never offered; any other words are, whatever their verb", async () => {
     const { rig, chatId } = await chat();
     const offered: Record<string, string | undefined> = {};
     for (const [typed, next] of [
@@ -236,14 +236,27 @@ describe("a second action in the same message", () => {
       ["I walk to Bluebird Coffee to buy a mocha.", "N/A"],
       ["I walk to Bluebird Coffee to buy a scone.", "I walk to Bluebird Coffee"],
       ["I walk to Bluebird Coffee to buy a cookie.", "I walk to Bluebird Coffee to buy a cookie"],
-      ["I walk to Bluebird Coffee and smile at the barista.", "I smile at the barista"],
       ["I walk to Bluebird Coffee to buy a muffin.", "I buy a muffin"],
+      ["I walk to the corner store to grab some milk.", "Grab some milk"],
+      ["I walk to Bluebird Coffee to get a latte.", "get a latte"],
+      ["I walk to the market to pick up groceries.", "pick up groceries"],
+      ["I walk to Bluebird Coffee and smile at the barista.", "I smile at the barista"],
     ] as const) {
       reading(rig, walkThenBuy(next));
       await rig.turn(chatId, typed, "The cafe is quiet.");
       offered[next] = (await replyChips(rig, chatId)).find((c) => c.kind === "choice")?.label;
     }
-    expect(offered).toEqual({ none: undefined, "N/A": undefined, "I walk to Bluebird Coffee": undefined, "I walk to Bluebird Coffee to buy a cookie": undefined, "I smile at the barista": undefined, "I buy a muffin": "I buy a muffin" });
+    expect(offered).toEqual({
+      none: undefined,
+      "N/A": undefined,
+      "I walk to Bluebird Coffee": undefined,
+      "I walk to Bluebird Coffee to buy a cookie": undefined,
+      "I buy a muffin": "I buy a muffin",
+      "Grab some milk": "Grab some milk",
+      "get a latte": "get a latte",
+      "pick up groceries": "pick up groceries",
+      "I smile at the barista": "I smile at the barista",
+    });
   });
 
   test("when the first action names nothing in the world, nothing after it is offered", async () => {
