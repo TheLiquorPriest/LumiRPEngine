@@ -773,12 +773,13 @@ export class LedgerCore {
   /**
    * What a turn's post steps will read against when it commits on `messageId` (its fold prefix
    * plus `pre`), so the backend can run `extract` first. Null when the reply won't be read (no
-   * pending turn, or a pause before it).
+   * pending turn, a pause before it, or its own swipe deleted while it streamed, which leaves the
+   * commit nothing to record it on).
    */
   commitContext(generationId: GenerationId, messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; pre: LedgerEvent[] } | null {
     const p = this.journal.pending[generationId];
     const index = observed.findIndex((m) => m.id === messageId);
-    if (!p || index < 0 || this.pausedWithin(observed.slice(0, index))) return null;
+    if (!p || index < 0 || p.swipeId === GONE_SWIPE || this.pausedWithin(observed.slice(0, index))) return null;
     const at = this.plannedPrefix(p, observed, index);
     const prefix = this.prefixState(at.out, this.chain(observed.slice(index, index + 1))[0], { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: at.path, undone: [] }, this.journal.started ? [] : p.startMarkers);
     return prefix ? { ...prefix, seed: p.seed, pre: [...p.events] } : null;

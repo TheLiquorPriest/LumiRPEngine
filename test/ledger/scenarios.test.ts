@@ -2,7 +2,7 @@
 // The randomized gate is properties.test.ts; these name the cases a reader checks first.
 
 import { describe, expect, test } from "bun:test";
-import { decodeJournal, decodeLedger, journalPath } from "../../src/backend/ledger-io";
+import { decodeJournal, decodeLedger, journalPath, toChain } from "../../src/backend/ledger-io";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { startMarkersFrom } from "../../src/backend/start-markers";
 import { presetAdjudication } from "../../src/shared/adjudication";
@@ -363,6 +363,23 @@ describe("ledger scenarios", () => {
     await expectAgree(h, chat);
     // It never folds as stored, so nothing on it is undone.
     expect((await h.write(chat, { kind: "undo", id: "u1", messageId: a2.id, swipeId: g.swipeId, refs: [{ in: "events", index: 0 }] })).reason).toBe("read on another chain: a rebased view everywhere");
+  });
+
+  test("a reply whose own swipe is deleted while it streams is not read, and records nothing", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "earn:5", "Okay.");
+    const a1 = h.host.head(chat);
+    if (!a1) throw new Error("no head");
+    const g = await h.host.start(chat, { type: "swipe", messageId: a1.id });
+    h.host.deleteSwipe(chat, a1.id, g.swipeId);
+    await h.host.settle();
+    // No read context, so the post steps make no model call for it.
+    const core = await h.core(chat);
+    expect(core.commitContext(g.id, a1.id, toChain(await h.host.chats.messages(chat, h.host.userId)))).toBeNull();
+    await h.host.finish(g, "A windfall! [found:40]");
+    expect(Object.keys(core.journal.messages[a1.id]?.ledger.swipes ?? {})).toEqual(["0"]);
+    await expectAgree(h, chat);
   });
 
   test("a grouped purchase rebased onto a poorer branch drops whole: no payment, no item (L41)", async () => {
