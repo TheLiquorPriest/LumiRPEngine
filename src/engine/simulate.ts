@@ -34,6 +34,7 @@ import { dropTouches } from "./touched";
 import { own } from "./pack-kit";
 import type { WorldDoc } from "../shared/world";
 import { stepTracks, type TrackChange } from "./tracks";
+import { signalVisible } from "./visibility";
 import { Working } from "./working";
 import { minutesBetween } from "./world-state";
 import { clampUnitCap } from "./time-limits";
@@ -147,7 +148,8 @@ function clockTo(w: Working, at: number, cause: ClockEvent["cause"], e: Emitter)
 
 /**
  * Moves the clock to `to`, stepping every completed slot (see the header). A timelapse stops
- * early on a `stop`-class interrupt, the unit cap (always after at least one slot) or `stopWhen`.
+ * early on a `stop`-class interrupt the POV can see, the unit cap (always after at least one slot)
+ * or `stopWhen`.
  */
 export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOptions): AdvanceResult {
   const from = w.state.clock;
@@ -254,8 +256,10 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     result.agentDays += slotDays;
     for (const s of signalsSince(before)) {
       const p = own(policy, s.class);
-      if (p === "stop" && timelapse) result.stops.push(s);
-      else if (p === "note" || (p === "stop" && !timelapse)) result.notes.push(s);
+      // A signal the POV can't see never stops a timelapse, as it never stops an action queue:
+      // stopping (and the chip and Outcome line that say what stopped it) would give it away.
+      if (p === "stop" && timelapse && signalVisible(reg, w.world, w.state, w.world.pov, s)) result.stops.push(s);
+      else if (p === "note" || p === "stop") result.notes.push(s);
     }
     if (timelapse && result.stops.length > 0) {
       result.stop = "interrupt";

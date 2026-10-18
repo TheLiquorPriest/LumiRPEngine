@@ -136,6 +136,35 @@ describe("simulation stepping", () => {
     expect(noted.out.result.notes.some((n) => n.class === "invitation")).toBe(true);
   });
 
+  test("a signal the POV can't see never stops a timelapse or says what stopped it; one it can see does", () => {
+    const world = simWorld();
+    const s0 = startState(world);
+    // An incident every slot, hidden (a secret) or not; incidents stop a run.
+    const run = (visibility?: string) => {
+      const alarms: PackDef = {
+        id: "alarmtest",
+        label: "Alarm test",
+        version: 1,
+        domain: null,
+        requires: [],
+        register(r) {
+          r.process({ id: "alarmtest.alarm", domain: "weather", minLevel: 1, step: () => [{ type: "engine.signal", data: { class: "incident", text: "A silent alarm calls the guards.", ...(visibility ? { visibility } : {}) } }] });
+        },
+      };
+      const reg = registryOf([alarms]);
+      const w = new Working(reg, world, s0);
+      const out = runTimelapse(reg, w, { type: "duration", minutes: 2 * 1440 }, { runSeed: "run-1", overrides: { ...allNote, incident: "stop" } });
+      if ("code" in out) throw new Error(out.reason);
+      return { result: out.result, summary: w.events.find((e) => e.type === "timelapse") };
+    };
+    const hidden = run("secret");
+    expect([hidden.result.stop, hidden.result.stoppedBy, hidden.result.to]).toEqual(["target", null, s0.clock + 2 * 1440]);
+    expect(hidden.summary).toMatchObject({ stoppedBy: null });
+    const seen = run();
+    expect([seen.result.stop, seen.result.stoppedBy]).toEqual(["interrupt", "incident"]);
+    expect(seen.summary).toMatchObject({ stoppedBy: "incident" });
+  });
+
   test("the unit cap ends a segment on a slot boundary, always after at least one slot; segments compose", () => {
     const world = simWorld();
     const s0 = startState(world);

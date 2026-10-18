@@ -270,7 +270,7 @@ A Timelapse skips ahead while the world keeps living: bills fall due, you commut
 | **note** | bills and paydays, rule triggers, overdue loans |
 | **ignore** | needs thresholds and weather alerts |
 
-The first *stop* ends the Timelapse at the end of that time slot. *Notes* go into the Montage. The same world and the same policy always stop in the same place, and you can override the policy for a single Timelapse in the sheet.
+The first *stop* you could see ends the Timelapse at the end of that time slot; something hidden from you never stops it, so a stop never gives a secret away. *Notes* go into the Montage. The same world and the same policy always stop in the same place, and you can override the policy for a single Timelapse in the sheet.
 
 **The safety cap.** One Timelapse segment is limited, by default, to **600 agent-days** (the people who are simulated in detail, plus you, times the days) and **5,000 events**; you can lower either but not raise it. A longer request ends at the last whole time slot inside the cap, and a **Continue timelapse** chip carries on from there. Segments add up exactly as if you had done it in one go, as long as nothing else changes the world between them. A Timelapse can reach at most 366 days ahead.
 
