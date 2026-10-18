@@ -403,7 +403,7 @@ The number is the most steps a turn can run: each step takes one call from its p
 |---|---|---|
 | `interpret` (Interpret typed input) | Before the reply | Reads typed text as an action, including a request to let time pass. |
 | `npc.choose` (NPC choices) | Before the reply for people who are with you; after the reply for people elsewhere | Picks what an NPC does on a close call or invitation, from a list the engine enumerates (always including "do nothing"). |
-| `puzzle.answer` (Puzzle answers) | Before the reply | Judges a free-text puzzle answer, only for puzzles whose author opted in; the answer is a probability against a threshold. It runs unless you turn it off. |
+| `puzzle.answer` (Puzzle answers) | Before the reply | Judges a free-text puzzle answer, only for puzzles whose author opted in; the answer is a probability against a threshold. It runs unless you turn it off, on every answer while its Signals are empty. |
 | `judge` (Judge your approach) | Before the reply | Rates how well you describe your approach to an action's check, with one line on why, and when the story decides gives each outcome's odds. It runs only when the world's rules for checks need it; see [How checks are decided](#how-checks-are-decided). Off in Lean. |
 | `brief` (Scene brief), `outline` (Prose outline) | Before the reply, once the engine has planned the turn | Write a short briefing or a prose outline for the narrator. The engine always writes a deterministic outline from its own beats; the brief and the prose outline stack on top of it in the Outline section. |
 | `extract` (Extract changes) | After the reply | Reads the reply for changes. See [Extraction modes](#extraction-modes). |
