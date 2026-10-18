@@ -18,7 +18,7 @@ import type { ExprEnv } from "./expr";
 import { readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import type { Touch } from "./registry";
 import type { Registry } from "./registry-impl";
-import { asObject, evalExpr, fieldDef, isGone, placeOfEntity, scopeEnv, truthy } from "./scope";
+import { asObject, evalExpr, fieldDef, isGone, placeOfEntity, placeWithin, scopeEnv, truthy } from "./scope";
 import { selectorMatches } from "./selector";
 import { placeVisit } from "./seen";
 import type { WorldState } from "./state";
@@ -105,14 +105,16 @@ export function canSeeField(reg: Registry, world: WorldDoc, state: Readonly<Worl
 
 /**
  * A place on its own: public; `known_by` and known to the POV (a `knows` relation, its `knownBy`, or
- * listed in its `known_places`) or where it is now; `discoverable` the same, or anywhere it has been.
+ * listed in its `known_places`) or where it is now, which is every place around it as much as the
+ * one it stands in, so a room of someone's flat keeps the flat; `discoverable` the same, or anywhere
+ * it has been. A secret place is never seen, not even from inside.
  */
 function placeSeen(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, place: PlaceId, def: PlaceDef): boolean {
   const discoverable = def.visibility === "discoverable";
   const v = discoverable ? "known_by" : visibilityOf(def.visibility);
   if (v !== "known_by") return v === "public";
   const known = own(state.entities, pov)?.fields.known_places;
-  if (knows(state, pov, place) || placeOfEntity(state, pov) === place || (Array.isArray(known) && known.includes(place)) || granted(reg, world, state, pov, def.knownBy)) return true;
+  if (knows(state, pov, place) || placeWithin(world, placeOfEntity(state, pov), place) || (Array.isArray(known) && known.includes(place)) || granted(reg, world, state, pov, def.knownBy)) return true;
   // `space.seen` is the world POV's own record.
   return discoverable && pov === world.pov && placeVisit(state, place) !== null;
 }

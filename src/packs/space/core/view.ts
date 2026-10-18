@@ -103,8 +103,8 @@ export function buildMapView(ctx: ReadContext, chosen: MapDisplay | null = null)
   const path = placePath(world, here);
   const inside = new Set(path);
   const known = (id: PlaceId): boolean => canSeePlace(ctx.registry, world, state, world.pov, id);
-  // The places around the POV that it may not know (a secret one, someone's flat it was let into)
-  // are drawn, but never by their own id or name: each goes by a stand-in, outermost first.
+  // The places around the POV that it may not know (a secret one, or a room of one) are drawn, but
+  // never by their own id or name: each goes by a stand-in, outermost first.
   const standIns = new Map<PlaceId, PlaceId>();
   for (const id of path) if (!known(id)) standIns.set(id, standIn(world, standIns.size + 1));
   const closed = closedRoutes(ctx);

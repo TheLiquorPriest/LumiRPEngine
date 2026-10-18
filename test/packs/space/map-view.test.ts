@@ -116,7 +116,7 @@ describe("map scopes", () => {
     expect(marina.grid?.width).toBe(18);
   });
 
-  test("known follows what the POV can see: a place known to others is left off until the POV knows it; one the POV is inside shows as somewhere, and so does its room", () => {
+  test("known follows what the POV can see: a place known to others is left off until the POV knows it, and goes by its name while the POV is inside it", () => {
     const world = modernUsWorld("w", "R");
     world.places.maya_kitchen = { id: "maya_kitchen", name: "Maya's kitchen", parent: "maya_flat", fields: {} };
     const state = startState(world);
@@ -127,15 +127,11 @@ describe("map scopes", () => {
     state.entities.you!.relations = state.entities.you!.relations.filter((r) => r.to !== "maya_flat");
     state.entities.you!.fields.place = "maya_kitchen";
     const inside = buildMapView(reg.context(world, state));
-    // Inside it without knowing it: drawn, but by a stand-in, never by its own id or name.
-    expect(JSON.stringify(inside)).not.toContain("maya_flat");
-    expect(JSON.stringify(inside)).not.toContain("Maya's flat");
-    const flat = town(inside).find((p) => !p.known);
-    expect(flat?.name).toBe(HIDDEN_PLACE_NAME);
-    // The kitchen the POV stands in is as hidden as the flat around it: a stand-in too.
-    expect(JSON.stringify(inside)).not.toContain("Maya's kitchen");
-    expect(scopeOf(inside, flat?.id ?? null).places.map((p) => [p.id === inside.here, p.name, p.known])).toEqual([[true, HIDDEN_PLACE_NAME, false]]);
-    expect(inside.scope).toBe(flat?.id ?? "");
+    // Standing in its kitchen counts as being there: the flat and the kitchen go by their own ids and names.
+    expect(town(inside).find((p) => p.id === "maya_flat")).toMatchObject({ name: "Maya's flat", known: true });
+    expect(scopeOf(inside, "maya_flat").places.map((p) => [p.id, p.name, p.known])).toEqual([["maya_kitchen", "Maya's kitchen", true]]);
+    expect([inside.here, inside.scope]).toEqual(["maya_kitchen", "maya_flat"]);
+    expect(JSON.stringify(inside)).not.toContain(HIDDEN_PLACE_NAME);
   });
 
   test("routes and the grid show from Space 2, the POV's own cell from Space 3", () => {
