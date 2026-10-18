@@ -873,6 +873,7 @@ export function settingsFixture(): UserSettings {
     overrideWorldAdjudication: false,
     extraction: { regard: { mode: "never" } },
     swipeDefault: "rerun",
+    hideJsonBlocks: true,
   };
 }
 

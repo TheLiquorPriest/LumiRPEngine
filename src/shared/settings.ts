@@ -192,4 +192,6 @@ export interface UserSettings {
   overrideWorldAdjudication: boolean;
   extraction: ExtractionBounds;
   swipeDefault: "rerun" | "renarrate";
+  /** World chats keep a regex script that hides each reply's `<json>…</json>` block and keeps it out of World Info scanning (DESIGN §6.6). */
+  hideJsonBlocks: boolean;
 }

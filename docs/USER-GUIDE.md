@@ -522,6 +522,10 @@ LumiRPEngine doesn't manage World Info for now. In a world chat your own lore bo
 - If the engine stalls, the world's sections are missing from that turn's prompt (they stay switched off) and the Context panel has no entry for it; a turn the engine couldn't plan in time is also marked **Not fully simulated**.
 - The world's own lore (Build → Lore) is kept in the world. The engine's helpers read it ([Lore for the helpers](#lore-for-the-helpers)); the narrator doesn't get it yet.
 
+### JSON blocks in replies
+
+Some presets ask the AI to end every reply with a block of JSON between `<json>` and `</json>`, such as a tracker or a ledger. In a world chat LumiRPEngine hides those blocks: the reply shows without them, Lumiverse's World Info doesn't scan them for keywords, and the engine's own helpers read the reply without them. The block itself stays exactly as the AI wrote it, so anything that reads it, such as the `{{jsonBlock}}` macro, still finds it. A block is hidden by a regex script LumiRPEngine keeps in each world chat, **LumiRPEngine · Hide JSON blocks** in the regex panel's LumiRPEngine folder; it works on new replies, older ones and edited ones, and chats without a world don't get one. To see the blocks again, turn off **Settings → Preset → Hide JSON blocks in world chats**, which removes the scripts; turning it on again brings them back, starting with the chat you have open. Deleting a world removes its chats' scripts.
+
 ### Delivery verification
 
 Activation isn't delivery: an entry can be switched on and still not reach the prompt. Opening the **Context** panel runs a **test prompt build**, a dry run that sends nothing and saves nothing, and searches it for each section of the latest generation by its heading (such as "[Scene]"): a section it finds is **delivered**, and one it doesn't is **not delivered**. Outcome, Montage and Outline come only from a real turn's plan, which a dry run doesn't make, so the test build leaves them **unchecked**, as it does a section left out over the budget. The check tells you whether a section reached the prompt, not where in the prompt it landed.

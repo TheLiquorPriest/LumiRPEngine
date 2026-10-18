@@ -13,6 +13,7 @@
     "chat_mutation",
     "world_books",
     "presets",
+    "regex_scripts",
     "decisions",
     "ui_panels"
   ],

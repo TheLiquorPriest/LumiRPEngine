@@ -43,7 +43,7 @@ LumiRPEngine requires **Lumiverse's `staging` branch from 16 October 2026 (commi
 
 ## Permissions
 
-LumiRPEngine asks for eight permissions. Here is why each one is there:
+LumiRPEngine asks for nine permissions. Here is why each one is there:
 
 - `generation`: to follow each reply from start to finish, to run the World Info interceptor that puts the world's sections into the prompt, and to make its own small helper calls.
 - `context_handler`: to plan each turn (elapsed time, what your action does, what the world did in the meantime) before the reply is generated.
@@ -51,6 +51,7 @@ LumiRPEngine asks for eight permissions. Here is why each one is there:
 - `chat_mutation`: to read each chat's messages and swipes, so the world stays in step with every swipe, edit and branch; to save the world's record on each reply; and to add your palette, chip and map actions to the chat as messages.
 - `world_books`: to create and maintain the world's own lore book, which holds its sections, attach it to the chat, read the books you pick for **Import from lore** or **Index a World Info book**, and tell you when a book that lore was indexed from has changed.
 - `presets`: to read your active preset, so it can check where the world's sections will land in the prompt and warn you about settings that cause trouble.
+- `regex_scripts`: to keep one regex script in each world chat that hides the JSON blocks some presets ask replies to carry and keeps them out of World Info scanning. **Settings → Preset** turns it off.
 - `decisions`: to use Lumiverse's Decisions API for the probability questions the engine asks, such as what an NPC does on a close call.
 - `ui_panels`: for the status pill, the map and the action palette with its Timelapse tab, which float over the chat. The drawer tab needs no permission.
 

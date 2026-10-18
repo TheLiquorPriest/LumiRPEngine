@@ -3,7 +3,8 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { SpindleAPI, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
+import type { WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
+import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { ChatId, UserId } from "../shared/ids";
@@ -21,11 +22,12 @@ import type {
   InterceptorEntry,
   InterceptorInput,
   InterceptorResult,
+  HostRegexScript,
   QuietToolCall,
   SwipeAction,
 } from "./host";
 
-declare const spindle: SpindleAPI;
+declare const spindle: HostSpindleAPI;
 
 // ---------------------------------------------------------------- decoding
 
@@ -483,6 +485,42 @@ export function createSpindleHost(): HostPort {
       async active(userId) {
         const c = (await spindle.connections.list(userId)).find((x) => x.is_default);
         return c ? { id: c.id, name: c.name } : null;
+      },
+    },
+    regex: {
+      async chatScripts(chatId, userId) {
+        const out: HostRegexScript[] = [];
+        for (let offset = 0; offset < 100_000; offset += 200) {
+          const page = await spindle.regex_scripts.list({ scope: "chat", ...(chatId ? { scopeId: chatId } : {}), limit: 200, offset, userId });
+          for (const s of page.data) {
+            if (s.scope !== "chat" || !s.scope_id) continue;
+            out.push({ id: s.id, chatId: s.scope_id, mine: s.can_mutate, findRegex: s.find_regex, replaceString: s.replace_string, flags: s.flags, placement: [...s.placement], targets: Array.isArray(s.target) ? [...s.target] : [s.target], runOnEdit: s.run_on_edit, metadata: toJsonObject(s.metadata) });
+          }
+          if (page.data.length < 200 || offset + page.data.length >= page.total) break;
+        }
+        return out;
+      },
+      async write(id, script, userId) {
+        const input: RegexScriptInput = {
+          name: script.name,
+          script_id: script.scriptId,
+          find_regex: script.findRegex,
+          replace_string: script.replaceString,
+          flags: script.flags,
+          placement: [...script.placement],
+          target: [...script.targets],
+          scope: "chat",
+          scope_id: script.chatId,
+          run_on_edit: script.runOnEdit,
+          substitute_macros: "none",
+          description: script.description,
+          folder: script.folder,
+          metadata: script.metadata,
+        };
+        return (id === null ? await spindle.regex_scripts.create(input, userId) : await spindle.regex_scripts.update(id, input, userId)).id;
+      },
+      async remove(id, userId) {
+        await spindle.regex_scripts.delete(id, userId);
       },
     },
     processes: {

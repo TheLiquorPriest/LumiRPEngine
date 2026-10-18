@@ -139,7 +139,11 @@ export class Dispatcher {
       case "lre.state.resync": {
         reply(r.type, { accepted: true });
         if (r.chatId) {
-          if (await this.rt.runOf(r.chatId, userId)) await this.rt.ledger.open(r.chatId, userId);
+          const run = await this.rt.runOf(r.chatId, userId);
+          if (run) {
+            await this.rt.ledger.open(r.chatId, userId);
+            this.rt.jsonHiding.seen(r.chatId, run.worldId, userId);
+          }
           await this.rt.push.snapshot(r.chatId, userId, session);
         }
         return;
@@ -257,7 +261,11 @@ export class Dispatcher {
       }
       case "lre.settings.get":
       case "lre.settings.set": {
-        if (r.type === "lre.settings.set") await this.rt.settings.set(userId, r.patch);
+        if (r.type === "lre.settings.set") {
+          const hid = (await this.rt.settings.get(userId)).hideJsonBlocks;
+          const hides = (await this.rt.settings.set(userId, r.patch)).hideJsonBlocks;
+          if (hides !== hid) await this.rt.hidingChanged(userId, hides);
+        }
         const settings = await this.rt.settings.get(userId);
         const routed = settings.modelUse.steps.extract?.route?.connectionId ?? null;
         // The connection whose learning Settings shows: extraction's route, else the user's default.
@@ -409,6 +417,8 @@ export class Dispatcher {
       }
       case "delete":
         await store.remove(r.worldId, userId);
+        // Its chats are no longer world chats, so their JSON-hiding scripts go (DESIGN §6.6).
+        await this.rt.jsonHiding.removeWorld(r.worldId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] world ${r.worldId}: its chats' JSON-hiding regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
         return { worlds: await store.list(userId) };
       case "commit": {
         const committed = await store.commit(r.worldId, r.base, userId);
@@ -433,18 +443,18 @@ export class Dispatcher {
         // A chat keeps its run: attaching again never resets its journal under it.
         const existing = await this.rt.runOf(r.chatId, userId);
         if (existing && existing.worldId !== r.worldId) throw new RequestError("conflict", "This chat already plays another world. Start a new chat for this one.");
-        if (existing) {
-          await this.rt.book.attach(r.chatId, await this.rt.book.ensure(world, index, userId), userId);
-          await this.rt.push.snapshot(r.chatId, userId);
-          return { revision: existing.revision };
+        if (existing) await this.rt.book.attach(r.chatId, await this.rt.book.ensure(world, index, userId), userId);
+        else {
+          await this.rt.host.chats.mergeChatMetadata(r.chatId, { [LEDGER_NAMESPACE]: JSON.parse(JSON.stringify(newChatRun(r.worldId, revision))) as JsonValue }, userId);
+          const bookId = await this.rt.book.ensure(world, index, userId);
+          await this.rt.book.attach(r.chatId, bookId, userId);
+          this.rt.forgetChat(r.chatId);
+          await this.rt.ledger.open(r.chatId, userId);
         }
-        await this.rt.host.chats.mergeChatMetadata(r.chatId, { [LEDGER_NAMESPACE]: JSON.parse(JSON.stringify(newChatRun(r.worldId, revision))) as JsonValue }, userId);
-        const bookId = await this.rt.book.ensure(world, index, userId);
-        await this.rt.book.attach(r.chatId, bookId, userId);
-        this.rt.forgetChat(r.chatId);
-        await this.rt.ledger.open(r.chatId, userId);
+        // The chat's JSON blocks are hidden from now on (DESIGN §6.6); without the permission the attach still stands.
+        await this.rt.jsonHiding.ensure(r.chatId, r.worldId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${r.chatId}: the JSON-hiding regex script wasn't written (${error instanceof Error ? error.message : String(error)})`, userId));
         await this.rt.push.snapshot(r.chatId, userId);
-        return { revision };
+        return { revision: existing ? existing.revision : revision };
       }
       case "upgrade": {
         const before = await this.rt.runOf(r.chatId, userId);

@@ -113,6 +113,7 @@ export function defaultSettings(): UserSettings {
     overrideWorldAdjudication: false,
     extraction: {},
     swipeDefault: "rerun",
+    hideJsonBlocks: true,
   };
 }
 
@@ -292,6 +293,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     overrideWorldAdjudication: typeof v.overrideWorldAdjudication === "boolean" ? v.overrideWorldAdjudication : d.overrideWorldAdjudication,
     extraction,
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
+    hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
   };
 }
 

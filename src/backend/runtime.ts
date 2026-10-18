@@ -56,6 +56,7 @@ import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, onlyPass
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
+import { JsonHiding, withoutHiddenJson } from "./json-hiding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
 import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
@@ -448,6 +449,8 @@ export class Runtime implements TurnHooks {
   /** Connections seen refusing the lore tools (DESIGN §5.4). */
   readonly toolSupport: ToolSupport;
   readonly ledger: LedgerService;
+  /** Each world chat's JSON-hiding regex script (DESIGN §6.6). */
+  readonly jsonHiding: JsonHiding;
   readonly push: StatePush;
   /** What LumiRPEngine Studio may read, and its offers (DESIGN §15). */
   readonly studio: StudioBridge;
@@ -495,6 +498,7 @@ export class Runtime implements TurnHooks {
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
     this.book = new EngineBook(this.host, this.worlds);
+    this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
@@ -554,6 +558,7 @@ export class Runtime implements TurnHooks {
       return null;
     }
     pinned.set(run.revision, world);
+    this.jsonHiding.seen(chatId, run.worldId, userId);
     const settings = await this.settings.get(userId);
     lruSet(this.settingsCache, userId, settings, 256);
     // One bridge per chat run: a second env resolution (concurrent opens) must not orphan the
@@ -1108,12 +1113,14 @@ export class Runtime implements TurnHooks {
    * that read's chips go first. The decline for a typed action that named nothing (`unfitId`) is about
    * the player's message, not the reply, so any read of the swipe keeps it and its note.
    */
-  async prepareRead(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, key: string, text: string, context: ReadInput, post: boolean, replace = false): Promise<void> {
+  async prepareRead(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, key: string, content: string, context: ReadInput, post: boolean, replace = false): Promise<void> {
+    // What the engine reads of the reply: none of the JSON blocks its regex script hid (DESIGN §6.6).
+    const text = withoutHiddenJson(content);
     if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind) && c.id !== unfitId(messageId, swipeId));
     const bridge = this.bridges.get(chatId);
     if (!bridge) return;
     const settings = await this.settings.get(userId);
-    const input = { chatId, userId, messageId, generationId: key, content: text };
+    const input = { chatId, userId, messageId, generationId: key, content };
     const pre = this.prePhase.get(key);
     const plan = bridge.planFor(context.seed);
     const ctx = this.registry.context(context.world, context.state);
@@ -1634,6 +1641,25 @@ export class Runtime implements TurnHooks {
   /** The user's default connection id, the key its D4 learning is kept under; `"active"` when the host can't say. */
   async activeConnectionId(userId: UserId): Promise<string> {
     return (await this.host.connections.active(userId).catch(() => null))?.id ?? ACTIVE_CONNECTION;
+  }
+
+  /**
+   * Settings turned JSON hiding off, and every world chat's script goes; or on, and the open world
+   * chat's comes back now, every other one's as the engine meets it (DESIGN §6.6).
+   */
+  async hidingChanged(userId: UserId, hides: boolean): Promise<void> {
+    try {
+      if (!hides) {
+        await this.jsonHiding.removeAll(userId);
+        return;
+      }
+      this.jsonHiding.forget(userId);
+      const open = await this.host.chats.active(userId);
+      const run = open ? await this.runOf(open, userId) : null;
+      if (open && run) await this.jsonHiding.ensure(open, run.worldId, userId);
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] JSON-hiding regex scripts: ${error instanceof Error ? error.message : String(error)}`, userId);
+    }
   }
 
   /**

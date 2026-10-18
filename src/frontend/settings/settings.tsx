@@ -1,8 +1,8 @@
 // Settings (DESIGN §12): model use and budgets, realism (new chats and this chat), how checks are
 // decided (new chats and this chat), time, per-type extraction modes with D4 learning, steps and
-// connections, pins and Upgrade, the swipe default and caveats. Realism, time and check settings
-// seed new chats behind a world's own defaults (or instead of them, with "Use my settings" on);
-// running-chat changes are markers.
+// connections, pins and Upgrade, the swipe default, the preset (hidden JSON blocks) and caveats.
+// Realism, time and check settings seed new chats behind a world's own defaults (or instead of
+// them, with "Use my settings" on); running-chat changes are markers.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
@@ -13,7 +13,7 @@ import { EXTRACTION_TYPES } from "../../shared/settings";
 import type { ExtractionType } from "../../shared/settings";
 import type { AdjudicationPresetId, WorldDoc, WorldIndex } from "../../shared/world";
 import { useApp, useView } from "../app";
-import { Empty, Row, Seg, useBusy } from "../components";
+import { Empty, HostSwitch, Row, Seg, useBusy } from "../components";
 import { humanize } from "../format";
 import { settingsTimePatch, TimeControlsEditor } from "../time-controls";
 import { AdjudicationSeed, AdjudicationThisChat } from "./adjudication";
@@ -21,7 +21,7 @@ import { OverrideWorldSwitch, RealismSeed, RealismThisChat } from "./realism";
 import { ModelUseSection, StepsSection } from "./steps";
 import { UpgradePanel } from "./upgrade";
 
-type SectionId = "model" | "realism" | "checks" | "time" | "extraction" | "steps" | "pins" | "swipes" | "caveats";
+type SectionId = "model" | "realism" | "checks" | "time" | "extraction" | "steps" | "pins" | "swipes" | "preset" | "caveats";
 
 function Fold(props: { id: SectionId; title: string; summary?: string; open: SectionId | null; setOpen(id: SectionId | null): void; children: ComponentChildren }) {
   const expanded = props.open === props.id;
@@ -257,6 +257,16 @@ export function Settings() {
           disabled={busy}
           onChange={(swipeDefault) => patch({ swipeDefault })}
         />
+      </Fold>
+      <Fold id="preset" title="Preset" summary={settings.hideJsonBlocks ? "JSON blocks hidden in world chats" : "JSON blocks shown"} {...fold}>
+        <div class="lre-field" data-lre-hide-json>
+          <HostSwitch label="Hide JSON blocks in world chats" checked={settings.hideJsonBlocks} disabled={busy} onChange={(hideJsonBlocks) => patch({ hideJsonBlocks })} />
+          <span class="lre-small lre-muted">
+            {settings.hideJsonBlocks
+              ? "A <json>…</json> block a reply carries (some presets ask for one) is hidden and kept out of World Info scanning, through a regex script each world chat keeps. The block stays as written, so anything that reads it still can."
+              : "Replies show their <json> blocks, and World Info scans them like the rest of the reply."}
+          </span>
+        </div>
       </Fold>
       <Fold id="caveats" title="Caveats" summary={data.caveats.length > 0 ? `${data.caveats.length} active warning${data.caveats.length === 1 ? "" : "s"}` : undefined} {...fold}>
         <div class="lre-stack">

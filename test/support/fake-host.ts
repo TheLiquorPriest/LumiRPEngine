@@ -20,6 +20,7 @@ import type {
   HostGenerationType,
   HostMessage,
   HostPort,
+  HostRegexScript,
   InterceptorInput,
   InterceptorResult,
   ProcessEvent,
@@ -141,6 +142,34 @@ export class FakeHost implements HostPort {
   connections: HostPort["connections"] = {
     active: async () => this.activeConnection,
   };
+
+  /** The user's regex scripts: the engine's own, and any a test plants (`mine: false` for one the engine may not change). */
+  readonly regexScripts = new Map<string, HostRegexScript & { scriptId: string; disabled: boolean }>();
+
+  regex: HostPort["regex"] = {
+    chatScripts: async (chatId) => [...this.regexScripts.values()].filter((s) => chatId === null || s.chatId === chatId).map(({ scriptId: _id, disabled: _off, ...s }) => structuredClone(s)),
+    write: async (id, script) => {
+      // The host normalizes a script id and keeps it unique per user.
+      const scriptId = script.scriptId.toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+      if ([...this.regexScripts.values()].some((s) => s.scriptId === scriptId && s.id !== id)) throw new Error("script_id already exists");
+      const prior = id === null ? undefined : this.regexScripts.get(id);
+      if (id !== null && !prior?.mine) throw new Error("Regex script not found or not this extension's");
+      const next = { id: id ?? this.newId("regex"), chatId: script.chatId, mine: true, scriptId, findRegex: script.findRegex, replaceString: script.replaceString, flags: script.flags, placement: [...script.placement], targets: [...script.targets], runOnEdit: script.runOnEdit, metadata: structuredClone(script.metadata), disabled: prior?.disabled ?? false };
+      this.regexScripts.set(next.id, next);
+      return next.id;
+    },
+    remove: async (id) => {
+      if (!this.regexScripts.get(id)?.mine) throw new Error("Regex script not found or not this extension's");
+      this.regexScripts.delete(id);
+    },
+  };
+
+  /** A reply as the host saves it: the chat's enabled `response` scripts applied in turn (no macros: plain replacement); an edit runs only the run-on-edit ones. */
+  baked(chatId: ChatId, text: string, edit = false): string {
+    let out = text;
+    for (const s of this.regexScripts.values()) if (!s.disabled && s.chatId === chatId && s.targets.includes("response") && s.placement.includes("ai_output") && (!edit || s.runOnEdit)) out = out.replace(new RegExp(s.findRegex, s.flags), s.replaceString);
+    return out;
+  }
 
   storage: HostPort["storage"] = {
     read: async (path, userId) => this.files.get(`${userId}/${path}`) ?? null,
@@ -316,7 +345,7 @@ export class FakeHost implements HostPort {
   /** Edits the displayed swipe in place (PUT /messages/:id): MESSAGE_EDITED. */
   editMessage(chatId: ChatId, messageId: MessageId, text: string): void {
     const m = this.message(chatId, messageId);
-    m.swipes[m.swipeId] = text;
+    m.swipes[m.swipeId] = m.isUser ? text : this.baked(chatId, text, true);
     this.emit("MESSAGE_EDITED", { chatId, message: this.hostMessage(chatId, messageId) });
   }
 
@@ -554,7 +583,9 @@ export class FakeHost implements HostPort {
     for (const h of this.lifecycleHandlers) h({ processId, key, state, ...(error ? { error } : {}) });
   }
 
-  async finish(g: Generation, text: string, opts: FinishOptions = {}): Promise<void> {
+  async finish(g: Generation, reply: string, opts: FinishOptions = {}): Promise<void> {
+    // The host bakes the generated text (for a Continue, only what was added) before it saves it.
+    const text = g.type === "impersonate" ? reply : this.baked(g.chatId, reply);
     if (!g.open) return;
     g.open = false;
     this.inFlight.delete(g.id);

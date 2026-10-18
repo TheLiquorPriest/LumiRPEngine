@@ -263,6 +263,42 @@ export interface DryRun {
   model: string;
 }
 
+// ---------------------------------------------------------------- regex scripts
+
+/** A chat-scoped regex script (`regex_scripts`), as the backend reads one. */
+export interface HostRegexScript {
+  id: string;
+  /** The chat it is scoped to. */
+  chatId: ChatId;
+  /** This extension created it, so it may change or delete it (the host's `can_mutate`). */
+  mine: boolean;
+  findRegex: string;
+  replaceString: string;
+  flags: string;
+  placement: string[];
+  /** Where it runs; one script may run on several targets. */
+  targets: string[];
+  runOnEdit: boolean;
+  metadata: JsonObject;
+}
+
+/** A chat-scoped script the backend writes. Its capture references are the host's (`$&`), with no macros. */
+export interface HostRegexScriptInput {
+  name: string;
+  /** Stable and unique per user: the host refuses a second script with the same one. */
+  scriptId: string;
+  chatId: ChatId;
+  findRegex: string;
+  replaceString: string;
+  flags: string;
+  placement: "ai_output"[];
+  targets: ("response" | "display")[];
+  runOnEdit: boolean;
+  description: string;
+  folder: string;
+  metadata: JsonObject;
+}
+
 // ---------------------------------------------------------------- the port
 
 export interface HostPort {
@@ -318,6 +354,13 @@ export interface HostPort {
   connections: {
     /** The user's default connection: the one a generation without its own route uses. */
     active(userId: UserId): Promise<{ id: string; name: string } | null>;
+  };
+  regex: {
+    /** Chat-scoped scripts: one chat's, or with null every chat's. */
+    chatScripts(chatId: ChatId | null, userId: UserId): Promise<HostRegexScript[]>;
+    /** Writes a script: a new one when `id` is null, else `id`'s definition (whether it is switched on stays the user's). Its id. */
+    write(id: string | null, script: HostRegexScriptInput, userId: UserId): Promise<string>;
+    remove(id: string, userId: UserId): Promise<void>;
   };
   processes: {
     spawn(options: { entry: string; kind: string; key: string; payload: JsonValue; userId: UserId }): Promise<ProcessHandle>;

@@ -12,6 +12,7 @@ import type { LoreDrift } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
 import type { HostBookEntry, HostPort } from "./host";
+import { withoutHiddenJson } from "./json-hiding";
 import { WorldError, type WorldStore } from "./worlds";
 
 /** The most of a chat's text a saved entry keeps. */
@@ -66,7 +67,8 @@ export async function saveFromChat(host: HostPort, worlds: WorldStore, chatId: C
   const wanted = excerpt === undefined ? "" : plain(excerpt);
   const from = wanted === "" ? reply : (messages.filter((m) => plain(m.content).includes(wanted)).at(-1) ?? reply);
   if (!from) throw new WorldError("not_found", "the chat has no reply to save yet");
-  const content = (wanted === "" ? from.content : (excerpt ?? "")).trim().slice(0, SAVED_MAX_CHARS);
+  // A whole reply is saved as the engine reads it: without the JSON blocks its regex script hid (DESIGN §6.6).
+  const content = (wanted === "" ? withoutHiddenJson(from.content) : (excerpt ?? "")).trim().slice(0, SAVED_MAX_CHARS);
   const draft = await worlds.working(worldId, userId);
   const title = savedTitle(content);
   const base = `lore_${topicIdOf(title.split(/\s+/).slice(0, 5).join(" ")) || "saved"}`;

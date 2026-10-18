@@ -4,9 +4,24 @@
 // `import type`.
 //
 // Host sources: frontend/src/lib/spindle/dom-decorator-service.ts:62-83,
-// frontend/src/lib/spindle/frontend-context.ts:25-78.
+// frontend/src/lib/spindle/frontend-context.ts:25-78; for the backend's `spindle`,
+// src/services/regex-scripts.service.ts (validateInput, rowToRegexScript).
 
-import type { SpindleFloatWidgetHandle, SpindleFloatWidgetOptions, SpindleFrontendContext } from "lumiverse-spindle-types";
+import type { RegexScriptCreateDTO, RegexScriptDTO, RegexScriptListOptionsDTO, RegexTargetDTO, SpindleAPI, SpindleFloatWidgetHandle, SpindleFloatWidgetOptions, SpindleFrontendContext } from "lumiverse-spindle-types";
+
+/** A regex script's `target` is a list on the host, so one script can bake a reply and render it; a single target reads as a list of one. */
+export type RegexScriptInput = Omit<RegexScriptCreateDTO, "target"> & { target?: RegexTargetDTO[] };
+
+export type RegexScriptRow = Omit<RegexScriptDTO, "target"> & { target: RegexTargetDTO | RegexTargetDTO[] };
+
+/** The backend's `spindle` global as the host runs it. */
+export type HostSpindleAPI = Omit<SpindleAPI, "regex_scripts"> & {
+  regex_scripts: Omit<SpindleAPI["regex_scripts"], "list" | "create" | "update"> & {
+    list(options?: RegexScriptListOptionsDTO): Promise<{ data: RegexScriptRow[]; total: number }>;
+    create(input: RegexScriptInput, userId?: string): Promise<RegexScriptRow>;
+    update(scriptId: string, input: RegexScriptInput, userId?: string): Promise<RegexScriptRow>;
+  };
+};
 
 export interface DecoratorRenderContext {
   mount: string;
