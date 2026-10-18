@@ -38,6 +38,7 @@ import { ALIVE, type EntityDef, type RelationInstance, type WorldDoc } from "../
 import { calendarOf, slotIndexAt } from "./calendar";
 import type { EventTypes } from "./events";
 import { FoldError } from "./ledger/chain";
+import { acts } from "./life";
 import { mutableSlice, optionalService, own, sliceRecord } from "./pack-kit";
 import type { ReadContext } from "./registry";
 import { completeRelations, counterpartOf, type RelationTypes } from "./relations";
@@ -341,6 +342,8 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
   const agents: EntityId[] = [];
   const openings: { account: EntityId; cents: number }[] = [];
   const minor = (v: JsonValue | undefined): number => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : 0);
+  // Agents not acting under the revision in force: one the merge brings back to acting is caught up below.
+  const idle = Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !acts(inForce, state, id));
 
   // New entities, as a chat's first state holds them.
   for (const d of plan.entities) {
@@ -484,6 +487,9 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
     if (def && visibilityOf(def.visibility) === "public") notes.push(`${def.label}: back to ${own(def.stages, t.start)?.label ?? "its start"}, since this revision of the world no longer has the stage it was at`);
   }
 
+  // Someone the revision brings back to a state that acts (its own, or a custom state now acting)
+  // picks up from now, as a revival in play does, never replaying the time it spent not acting.
+  for (const id of idle) if (own(state.entities, id)?.agent === true && acts(after, state, id) && !agents.includes(id)) agents.push(id);
   // A new agent starts caught up: it never replays the slots from before it joined.
   const slot = slotIndexAt(calendarOf(after), state.clock);
   for (const id of agents) sliceRecord(state, PACK, "agents")[id] = slot;

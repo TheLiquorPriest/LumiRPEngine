@@ -19,7 +19,7 @@ import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { paramCandidates } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import { placeOfEntity } from "../../src/engine/scope";
-import { agentCursor, ALL_NOTE, lod1Agents } from "../../src/engine/simulate";
+import { agentCursor, ALL_NOTE, completedSlot, lod1Agents } from "../../src/engine/simulate";
 import { runTimelapse } from "../../src/engine/time";
 import { canSeeEntity } from "../../src/engine/visibility";
 import { Working } from "../../src/engine/working";
@@ -29,7 +29,11 @@ import { fightChoices } from "../../src/packs/combat/core/flow";
 import { encounterOf } from "../../src/packs/combat/core/model";
 import { fightWorld, plan, povFirst, reg as combatReg, started } from "../packs/combat/support";
 import { modernUsWorld } from "../packs/riverton";
-import { fold, POV, startState } from "../packs/support";
+import { fold, POV, startState, baseWorld } from "../packs/support";
+import { Play, registry as templateReg } from "../packs/templates/play";
+import { hashJson } from "../../src/shared/hash";
+import { applyMarker } from "../../src/engine/events";
+import { initialState } from "../../src/engine/world-state";
 
 const reg = createRegistry(ALL_PACKS);
 const YOU = "you";
@@ -299,5 +303,34 @@ describe("life states: a death during a time skip", () => {
     expect(once.state.entities).toEqual(twice.state.entities);
     const cursors = (w: Working): number[] => Object.keys(w.state.entities).sort().filter((id) => w.state.entities[id]?.agent).map((id) => agentCursor(w.world, w.state, id));
     expect(cursors(once)).toEqual(cursors(twice));
+  });
+});
+
+describe("life states: People and an Upgrade", () => {
+  test("a body the POV knows of has no regard voiced in People", () => {
+    const p = new Play("mystery_manor");
+    p.lapseTo(24 * 60 + 8 * 60 + 30);
+    move(p.w, "pov", "library");
+    expect(lifeKnownTo(p.state, "sir_alaric", "pov")).toBe("dead");
+    const alaric = templateReg.renderers.filter((r) => r.slot === "people").flatMap((r) => r.render(p.w.ctx)).filter((l) => l.includes("Sir Alaric"));
+    expect(alaric.length).toBeGreaterThan(0);
+    expect(alaric.filter((l) => !l.includes("dead"))).toEqual([]);
+  });
+
+  test("a revision that brings someone back to a state that acts picks them up from now, as a revival in play does", () => {
+    const a = baseWorld();
+    a.lifeStates = { lost: { label: "Lost", reads: "is lost", acts: false } };
+    a.entities.rosa = { id: "rosa", kind: "person", name: "Rosa", tier: "supporting", agent: true, life: "dead", fields: { place: "cafe" }, relations: [] };
+    a.entities.vic = { id: "vic", kind: "person", name: "Vic", tier: "supporting", agent: true, life: "lost", fields: { place: "cafe" }, relations: [] };
+    const b = structuredClone(a);
+    delete b.entities.rosa!.life;
+    b.lifeStates = { lost: { label: "Lost", reads: "is lost", acts: true } };
+    b.name = `${a.name}, revised`;
+    const [ra, rb] = [hashJson(a), hashJson(b)];
+    const docs = new Map([[ra, a], [rb, b]]);
+    const state = fold(reg, a, initialState(a, ra, reg), [{ type: "clock", minutes: 10 * 1440, cause: "tick" }]);
+    applyMarker(state, { kind: "migrate", to: rb, merge: {} }, { worlds: (r) => docs.get(r), types: reg });
+    expect(lifeOf(state, "rosa")).toBe("alive");
+    for (const id of ["rosa", "vic"]) expect(agentCursor(b, state, id)).toBeGreaterThanOrEqual(completedSlot(b, state));
   });
 });

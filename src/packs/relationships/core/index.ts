@@ -23,6 +23,7 @@ import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import type { BandDef, KindDef, RelationTypeDef } from "../../../shared/world";
+import { povLife } from "../../../engine/life";
 import { numOf, objOf, strOf, own } from "../../../engine/pack-kit";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { bandOf, kindIs, placeOfEntity } from "../../../engine/scope";
@@ -364,6 +365,9 @@ export const relationshipsPack: PackDef = {
         for (const id of Object.keys(ctx.state.entities).sort()) {
           if (id === ctx.world.pov || placeOfEntity(ctx.state, id) !== here) continue;
           if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) continue;
+          // A body the POV knows of holds no regard to voice: Cast life's line says how it lies.
+          const life = povLife(ctx.world, ctx.state, id);
+          if (life && !life.acts) continue;
           const line = voiceLine(ctx, id);
           if (line) lines.push(line);
         }
