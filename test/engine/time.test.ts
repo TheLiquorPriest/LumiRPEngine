@@ -71,6 +71,22 @@ describe("elapsed time and time controls", () => {
     expect(pauseBookkeeping(world, pinned)).toEqual([{ type: "engine.pause", data: { scene: null } }]);
   });
 
+  test("pausing again in a scene left since holds the clock there, though the raw flag never cleared", () => {
+    const world = timeWorld();
+    const reg = registryOf();
+    const s = startState(world);
+    applyMarker(s, { kind: "time", control: "pause", scope: { all: true }, to: true });
+    const left = fold(reg, world, s, pauseBookkeeping(world, s));
+    left.entities[POV]!.fields.place = "cafe";
+    // The raw flag stays set, but the clock runs in the new scene.
+    expect([left.time.paused, clockPaused(world, left)]).toEqual([true, false]);
+    applyMarker(left, { kind: "time", control: "pause", scope: { all: true }, to: true });
+    expect(clockPaused(world, left)).toBe(true);
+    const pinned = fold(reg, world, left, pauseBookkeeping(world, left));
+    expect(clockPaused(world, pinned)).toBe(true);
+    expect(turnElapsed(world, pinned, 45)).toEqual({ minutes: 0, source: "paused" });
+  });
+
   test("plan turns: every unpaused turn advances the clock (L26); a paused one doesn't", () => {
     const world = timeWorld();
     const reg = registryOf();

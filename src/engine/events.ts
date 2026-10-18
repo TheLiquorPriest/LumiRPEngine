@@ -30,6 +30,7 @@ import type {
   UpgradePicks,
 } from "../shared/ledger";
 import { UPGRADE_ASPECTS } from "../shared/ledger";
+import { unpinPause } from "./engine-pack";
 import type { EventTypeDef, ReadContext, Rejection } from "./registry";
 import type { WorldState } from "./state";
 import { touch } from "./touched";
@@ -435,7 +436,10 @@ function setTimeControl(state: WorldState, body: Extract<MarkerBody, { kind: "ti
       if (typeof to === "number") t.scale = to;
       return;
     case "pause":
-      if (typeof to === "boolean") t.paused = to;
+      if (typeof to !== "boolean") return;
+      t.paused = to;
+      // Pausing holds the clock in the scene where it is pressed, even over a pause left behind in another.
+      if (to) unpinPause(state);
       return;
     case "interrupt":
       if ("interrupt" in scope && (to === "stop" || to === "note" || to === "ignore")) t.interrupts[scope.interrupt] = to;

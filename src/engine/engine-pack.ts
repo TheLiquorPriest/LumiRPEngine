@@ -107,6 +107,12 @@ function slice(state: WorldState): JsonObject {
   return s;
 }
 
+/** Lifts the clock pause's scene pin, so a pause set again holds in the scene it is set in: the next plan pins it there (DESIGN §9.2). */
+export function unpinPause(state: WorldState): void {
+  const s = state.packs[ENGINE_PACK];
+  if (s && typeof s.pauseScene === "string") s.pauseScene = null;
+}
+
 function sub(state: WorldState, key: string): JsonObject {
   const s = slice(state);
   const v = s[key];

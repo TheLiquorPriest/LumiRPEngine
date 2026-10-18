@@ -13,7 +13,7 @@ import type { ActionDef, MapDisplay, RetryRule, WorldDoc } from "../shared/world
 import { tableChoices } from "../shared/tables";
 import { policyOf } from "../engine/adjudication";
 import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
-import { placeSceneType, sceneType } from "../engine/time";
+import { clockPaused, placeSceneType, sceneType } from "../engine/time";
 import { identifiers } from "../engine/expr";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
@@ -103,7 +103,8 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
     fixes.scene = { entity: pov, field: "scene", type: "text", value: typeof pinned === "string" ? pinned : "", options: [{ value: "", label: `Place default (${label(placeSceneType(world, state))})` }, ...[...types].map((type) => ({ value: type, label: label(type) }))] };
   }
   return {
-    clock: { minutes: state.clock, label: formatClock(cal, state.clock, offset), dayPart: dayPartAt(cal, state.clock + offset).label, paused: state.time.paused, scale: state.time.scale },
+    // Paused as the engine reads it: for the scene it was paused in, so a scene change shows the clock running.
+    clock: { minutes: state.clock, label: formatClock(cal, state.clock, offset), dayPart: dayPartAt(cal, state.clock + offset).label, paused: clockPaused(world, state), scale: state.time.scale },
     place: shown,
     weather,
     cash: money === 0 ? null : money === 1 ? (band ? { band } : panelCash && typeof panelCash.band === "string" ? { band: panelCash.band } : null) : cents === null ? null : { cents },
@@ -268,7 +269,7 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
   const calendar = ctx.levelOf(world.pov, "calendar");
   const timelapse: TimelapseView = {
     action: TIMELAPSE_ACTION,
-    blocked: calendar < 1 ? "Calendar is off" : state.time.paused ? "Resume the clock first" : null,
+    blocked: calendar < 1 ? "Calendar is off" : clockPaused(world, state) ? "Resume the clock first" : null,
     durations: [30, 60, 180, 480, 1440, 10080],
     until: [
       ...world.calendar.dayParts.map((d) => ({ label: d.label, target: { type: "day_part" as const, dayPart: d.id } })),
@@ -292,7 +293,7 @@ function controls(world: WorldDoc, state: WorldState, sceneType: string): Contro
       sceneType,
       sceneTicks: { ...state.time.sceneTicks },
       scale: state.time.scale,
-      paused: state.time.paused,
+      paused: clockPaused(world, state),
       interrupts: { ...state.time.interrupts },
       speedThrough: structuredClone(state.time.speedThrough),
       montage: state.time.montage,
