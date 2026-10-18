@@ -272,8 +272,12 @@ export class LedgerFold {
       const view = recPath !== null && recPath !== parent;
       let converged = false;
       if (view) {
+        // A view folds as its record did on its own path only from the same state and with the same
+        // entries: a marker or post entry made on this branch (live here by its `at`, inert on the
+        // record's path) can make a stored one fail, so then everything is re-validated.
+        const asOnPath = liveMarkers.every((mk) => mk.at === null || mk.at === recPath) && livePost.every((p) => p.at === recPath);
         const original = this.pathStates.get(recPath);
-        converged = original !== undefined && original === hashJson(state);
+        converged = asOnPath && original !== undefined && original === hashJson(state);
       } else if (recPath !== null && !this.pathStates.has(recPath)) {
         this.pathStates.set(recPath, hashJson(state));
       }
