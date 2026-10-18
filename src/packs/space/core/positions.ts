@@ -14,7 +14,7 @@ import { mapSettingsOf } from "../../../shared/maps";
 import type { GridDef, GridTrigger, WorldDoc } from "../../../shared/world";
 import { labelOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
-import { placeOfEntity } from "../../../engine/scope";
+import { isGone, placeOfEntity } from "../../../engine/scope";
 import { selectorMatches } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { canSeePlace, knownBySelector } from "../../../engine/visibility";
@@ -118,6 +118,7 @@ export function arrivalEvents(ctx: ReadContext, entity: EntityId, to: PlaceId): 
 export function stepEvents(ctx: ReadContext, entity: EntityId, to: Cell): LedgerEvent[] | Rejection {
   const e = own(ctx.state.entities, entity);
   if (!e) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
+  if (isGone(ctx.state, entity)) return { code: "gone", reason: `${labelOf(ctx, entity)} has been removed` };
   const here = placeOfEntity(ctx.state, entity);
   const stand = standingGrid(ctx.world, here);
   const index = stand ? cellIndex(stand.grid, to) : null;
@@ -179,13 +180,14 @@ export function reach(ctx: ReadContext, a: EntityId, b: EntityId): boolean {
 /**
  * Whether a `space.pos` event steps into a grid trigger's zone or onto its cell (the `space.entered`
  * query, DESIGN §10): the new cell is inside it, the one before wasn't (or was on another grid), the
- * grid is the trigger's (`in`), and the one moving is the POV, or matches `who`.
+ * grid is the trigger's (`in`), and the one moving is the POV, or matches `who`; a removed entity
+ * fires nothing.
  */
 export function entered(ctx: ReadContext, on: GridTrigger, e: LedgerEvent): boolean {
   if (e.type !== POS_EVENT || !("data" in e)) return false;
   const at = spotData(e.data.at);
   const entity = strOf(e.data.entity);
-  if (!at || (on.in !== undefined && on.in !== at.scope)) return false;
+  if (!at || (on.in !== undefined && on.in !== at.scope) || isGone(ctx.state, entity)) return false;
   // A `who` the engine can't read whole fails closed, as a `knownBy` does.
   const who = on.who === undefined ? null : knownBySelector(on.who);
   if (on.who === undefined ? entity !== ctx.world.pov : who === null || !selectorMatches(ctx.registry, ctx.world, ctx.state, who, entity)) return false;

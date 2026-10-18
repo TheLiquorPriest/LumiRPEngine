@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../../src/shared/hash";
 import { cellIndex, findPath, gridMinutes, hasCell, standingGrid } from "../../../src/shared/grid";
 import { mapLint } from "../../../src/shared/maps";
+import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { RuleDef, WorldDoc } from "../../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../../src/engine/authoring";
+import { applyEffects } from "../../../src/engine/effects";
 import { readEngineSlice } from "../../../src/engine/engine-pack";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
@@ -148,5 +150,36 @@ describe("the grid system", () => {
     expect(counts).toEqual([0, 1, 1, 1, 2]);
     expect(w.state.entities.you?.fields.warmth).toBe(2);
     expect(hashJson(fold(reg, world, s0, w.events))).toBe(hashJson(w.state));
+  });
+
+  test("a removed person fires no zone or cell trigger and can't be stepped", () => {
+    const rules: RuleDef[] = [
+      { id: "warm", on: { zone: "hearth", in: "inn", who: { ids: ["cook"] } }, do: [{ type: "add", args: { entity: "cook", field: "warmth", delta: 1 } }] },
+      { id: "spot", on: { cell: [5, 5], in: "inn", who: { kind: ["person"] } }, do: [{ type: "add", args: { entity: "cook", field: "warmth", delta: 10 } }] },
+    ];
+    const setup = (gone: boolean) => {
+      const world = inn({ rules });
+      world.entities.cook = { id: "cook", kind: "person", name: "Mara", tier: "background", fields: { place: "taproom", x: 2, y: 2, ...(gone ? { gone: true } : {}) }, relations: [] };
+      return play(world).w;
+    };
+    const stepCook = (w: Working) => {
+      const r = applyEffects(reg, w, [{ type: "space.step", args: { entity: "cook", x: 5, y: 5 } }], { bindings: {}, rng: createRng("step") });
+      runRulesOnEvents(reg, w, r.applied, { seed: "step" });
+      return r;
+    };
+    const fired = (w: Working) => Object.keys(readEngineSlice(w.state).fired).sort();
+
+    const here = setup(false);
+    expect(stepCook(here).rejected).toEqual([]);
+    expect(fired(here)).toEqual(["spot", "warm"]);
+
+    const away = setup(true);
+    expect(stepCook(away).rejected.map((r) => r.rejection.code)).toEqual(["gone"]);
+    expect([away.state.entities.cook?.fields.x, away.state.entities.cook?.fields.y]).toEqual([2, 2]);
+    // A move that reaches the ledger some other way still fires nothing for them.
+    const moved: LedgerEvent = { type: "space.pos", data: { entity: "cook", at: { scope: "inn", x: 5, y: 5 }, from: { scope: "inn", x: 5, y: 4 } } };
+    away.apply(moved);
+    runRulesOnEvents(reg, away, [moved], { seed: "moved" });
+    expect(fired(away)).toEqual([]);
   });
 });

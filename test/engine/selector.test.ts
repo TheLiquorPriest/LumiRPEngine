@@ -2,7 +2,7 @@
 // inheritance, and group membership follows groups that are themselves members.
 
 import { describe, expect, test } from "bun:test";
-import { selectEntities, selectorMatches } from "../../src/engine/selector";
+import { membersOf, selectEntities, selectorMatches } from "../../src/engine/selector";
 import type { WorldDoc } from "../../src/shared/world";
 import { baseWorld, POV, registryOf, startState } from "../packs/support";
 
@@ -67,5 +67,13 @@ describe("selectors", () => {
     const later = structuredClone(s);
     later.entities.dev!.relations = [];
     expect(selectorMatches(reg, w, later, { memberOf: ["guild_hall"] }, "dev")).toBe(false);
+  });
+
+  test("a removed entity matches no selector and is no group's member", () => {
+    const later = structuredClone(s);
+    later.entities.dev!.fields.gone = true;
+    expect(selectEntities(reg, w, later, {})).toEqual(["crew", "guild_hall", POV]);
+    expect(selectorMatches(reg, w, later, { ids: ["dev"] }, "dev")).toBe(false);
+    expect(membersOf(reg, w, later, "guild_hall")).toEqual([]);
   });
 });

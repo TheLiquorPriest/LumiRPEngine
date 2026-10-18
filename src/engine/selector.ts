@@ -1,8 +1,10 @@
 // Selectors (DESIGN §4.1): which entities a rule, schedule, visibility grant, filter or grouping
 // applies to. Classes and tags are definitional, so they are read live from the world for the
-// entities it defines (an Upgrade reclassifies a running chat) and from state for spawned ones and
-// those whose own an Upgrade kept; kind follows inheritance; tier and group membership come from the
-// folded state, where play can change them.
+// entities it defines (an Upgrade reclassifies a running chat) and from state for spawned ones,
+// those whose own an Upgrade kept, and those a GM classified; kind follows inheritance; tier and
+// group membership come from the folded state, where play can change them. A removed entity
+// (`isGone`) matches no selector and is no group's member, so no caller has to filter it out;
+// GM views and Upgrade read state directly and still see it.
 
 import type { EntityId } from "../shared/ids";
 import { withinValue } from "../shared/classes";
@@ -11,7 +13,7 @@ import type { JsonValue } from "../shared/json";
 import { tierOf } from "../shared/tiers";
 import type { FacetId, FacetValueId, Selector, WorldDoc } from "../shared/world";
 import type { Registry } from "./registry-impl";
-import { kindDef, kindIs } from "./scope";
+import { isGone, kindDef, kindIs } from "./scope";
 import type { WorldState } from "./state";
 
 /** The relation that makes an entity a member of a group. */
@@ -21,7 +23,7 @@ export const GROUP_KIND = "group";
 /** How deep group nesting is followed (a crew in a guild in a city's council). */
 const MEMBERSHIP_DEPTH = 8;
 
-/** Where an entity's classes and tags live: its state when it holds them (spawned, or kept through an Upgrade), else the world's definition. */
+/** Where an entity's classes and tags live: its state when it holds them (spawned, kept through an Upgrade, or set by a GM edit), else the world's definition. */
 function definitional(world: WorldDoc, state: Readonly<WorldState>, id: EntityId): { class?: Record<FacetId, FacetValueId[]>; tags?: string[] } | undefined {
   const held = hasOwn(state.entities, id) ? state.entities[id] : undefined;
   if (held && (held.class !== undefined || held.tags !== undefined)) return held;
@@ -78,16 +80,17 @@ export function isGroup(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   return !!e && kindIs(reg, world, e.kind, GROUP_KIND);
 }
 
-/** A group's members that aren't groups themselves (people, things), directly or through member groups, in id order. */
+/** A group's members that aren't groups themselves (people, things), directly or through member groups, in id order; removed ones aren't members. */
 export function membersOf(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, group: EntityId): EntityId[] {
   return Object.keys(state.entities)
     .sort()
-    .filter((id) => id !== group && !isGroup(reg, world, state, id) && isMemberOf(state, id, group));
+    .filter((id) => id !== group && !isGroup(reg, world, state, id) && !isGone(state, id) && isMemberOf(state, id, group));
 }
 
+/** Whether the selector matches the entity; a removed entity matches none. */
 export function selectorMatches(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, selector: Readonly<Selector>, id: EntityId): boolean {
   const entity = hasOwn(state.entities, id) ? state.entities[id] : undefined;
-  if (!entity) return false;
+  if (!entity || isGone(state, id)) return false;
   if (selector.ids && !selector.ids.includes(id)) return false;
   if (selector.kind && !selector.kind.some((k) => kindIs(reg, world, entity.kind, k))) return false;
   if (selector.tier && !selector.tier.includes(entity.tier)) return false;

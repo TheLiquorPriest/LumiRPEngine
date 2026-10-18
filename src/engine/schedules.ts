@@ -108,16 +108,17 @@ export function ownerRank(reg: Registry, world: WorldDoc, state: Readonly<WorldS
 /**
  * Entities a schedule applies to: the owner entity; a group's members that aren't groups
  * themselves (through member groups too); every entity of the owner kind; or what a selector
- * matches. Ownerless schedules apply to none, and a removed entity keeps no schedule.
+ * matches. Ownerless schedules apply to none, and a removed entity keeps no schedule: a removed
+ * group routes none of its members.
  */
 export function scheduleOwners(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, schedule: ScheduleDef): EntityId[] {
   const owner = schedule.owner;
-  if (isRecord(owner)) return selectEntities(reg, world, state, owner).filter((id) => !isGone(state, id));
+  if (isRecord(owner)) return selectEntities(reg, world, state, owner);
   if (typeof owner !== "string" || owner === "") return [];
   const e = own(state.entities, owner);
   if (e) {
-    if (kindIs(reg, world, e.kind, GROUP_KIND)) return membersOf(reg, world, state, owner).filter((id) => !isGone(state, id));
-    return isGone(state, owner) ? [] : [owner];
+    if (isGone(state, owner)) return [];
+    return kindIs(reg, world, e.kind, GROUP_KIND) ? membersOf(reg, world, state, owner) : [owner];
   }
   return Object.keys(state.entities)
     .sort()

@@ -182,4 +182,16 @@ describe("group schedules and selectors", () => {
   test("group regard over a family: the members' mean, through the household", () => {
     expect(evalIn(world(), "faction_regard(harlows, sam)")).toBe(30);
   });
+
+  test("a removed member counts in no group mean, and a removed group's schedule routes none of its members", () => {
+    const w = world({ schedules: { dinner: { id: "dinner", owner: "harlows", target: "place", recurrence: { every: "day" }, slots: [{ start: "18:00", end: "19:00", value: "cafe" }] } } });
+    const gone = (id: string) => ({ ...w, entities: { ...w.entities, [id]: { ...w.entities[id]!, fields: { ...w.entities[id]!.fields, gone: true } } } });
+    expect(evalIn(gone("mara"), "faction_regard(harlows, sam)")).toBe(40);
+    const routed = (wd: WorldDoc) => {
+      const work = new Working(reg, wd, startState(wd, reg));
+      return scheduleInstants(wd, allSchedules(reg, wd), work.state.clock, work.state.clock + 15 * 60).flatMap((inst) => instantEvents(reg, work.ctx, inst, "seed").filter((ev) => ev.type === "set" && ev.entity !== POV));
+    };
+    expect(routed(w).length).toBeGreaterThan(0);
+    expect(routed(gone("harlows"))).toEqual([]);
+  });
 });
