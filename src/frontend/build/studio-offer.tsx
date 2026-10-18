@@ -40,7 +40,7 @@ export function useStudioOffer(props: { installed(): void; review(next: { worldI
   }, [asked]);
   const install = (reviewed: StudioOfferView) =>
     run(async () => {
-      const result = await app.request({ type: "lre.studio", op: "install", offerId: reviewed.offerId, ...(reviewed.headMoved ? { acceptMovedHead: true } : {}) });
+      const result = await app.request({ type: "lre.studio", op: "install", offerId: reviewed.offerId, hash: reviewed.hash, ...(reviewed.headMoved ? { acceptMovedHead: true } : {}) });
       const done = result?.installed;
       if (!done) return;
       setOffer(null);

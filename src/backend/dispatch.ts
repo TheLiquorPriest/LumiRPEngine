@@ -344,28 +344,32 @@ export class Dispatcher {
 
   /** LumiRPEngine Studio's offer (DESIGN §15): reviewed on `offer`, installed only on the player's `install`. */
   private async studio(r: Extract<FrontendToBackend, { type: "lre.studio" }>, userId: UserId): Promise<ResultBodies["lre.studio"]> {
-    const read = await this.rt.studio.offer(userId);
-    if (!read.offer) {
-      if (r.op === "offer") return { offer: null, message: read.reason };
-      throw new RequestError("not_found", read.reason);
+    if (r.op === "offer") {
+      const read = await this.rt.studio.offer(userId);
+      return read.offer ? { offer: (await this.reviewOffer(read.offer, read.hash, userId)).view } : { offer: null, message: read.reason };
     }
-    const offer = read.offer;
-    const { view, world } = await this.reviewOffer(offer, userId);
-    if (r.op === "offer") return { offer: view };
-    // The player confirmed what they reviewed: anything the Studio offered since is reviewed first.
-    if (offer.offerId !== r.offerId) throw new RequestError("conflict", "LumiRPEngine Studio offers something else now; review it again.");
-    if (view.installed) throw new RequestError("conflict", "This offer is already installed.");
-    if (view.blocked !== null || world === null) throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
-    if (view.headMoved && r.acceptMovedHead !== true) throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
-    const store = this.rt.worlds;
-    const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId).then((created) => ({ ...created, lint: macroReview(created.world) }));
-    await this.syncBook(done.world.id, userId);
-    await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
-    return { installed: { offerId: offer.offerId, mode: offer.mode, worldId: done.world.id, name: done.world.name, revision: done.revision, attachChatId: offer.attachChatId ?? null }, lint: done.lint };
+    // One install at a time per user, so an offer is checked and marked installed before another install reads it.
+    return this.rt.studio.installing(userId, async () => {
+      const read = await this.rt.studio.offer(userId);
+      if (!read.offer) throw new RequestError("not_found", read.reason);
+      const offer = read.offer;
+      const { view, world } = await this.reviewOffer(offer, read.hash, userId);
+      // The player confirmed what they reviewed: anything the Studio offered or changed since is reviewed first.
+      if (offer.offerId !== r.offerId || read.hash !== r.hash) throw new RequestError("conflict", "LumiRPEngine Studio offers something else now; review it again.");
+      if (view.installed) throw new RequestError("conflict", "This offer is already installed.");
+      if (view.blocked !== null || world === null) throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
+      if (view.headMoved && r.acceptMovedHead !== true) throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
+      const store = this.rt.worlds;
+      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId).then((created) => ({ ...created, lint: macroReview(created.world) }));
+      // Marked before anything else can fail: the world is written, so the offer is installed.
+      await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
+      await this.syncBook(done.world.id, userId);
+      return { installed: { offerId: offer.offerId, mode: offer.mode, worldId: done.world.id, name: done.world.name, revision: done.revision, attachChatId: offer.attachChatId ?? null }, lint: done.lint };
+    });
   }
 
   /** An offer as Build reviews it: the document as this engine reads it, its lint and macros, and what keeps it from installing. */
-  private async reviewOffer(offer: StudioOffer, userId: UserId): Promise<{ view: StudioOfferView; world: WorldDoc | null }> {
+  private async reviewOffer(offer: StudioOffer, hash: string, userId: UserId): Promise<{ view: StudioOfferView; world: WorldDoc | null }> {
     const installed = await this.rt.studio.installedAs(userId, offer.offerId);
     const view: StudioOfferView = {
       offerId: offer.offerId,
@@ -381,6 +385,7 @@ export class Dispatcher {
       blocked: null,
       installed: installed ? { worldId: installed.worldId, revision: installed.revision } : null,
       headMoved: null,
+      hash,
     };
     if (!isWorldDoc(offer.doc)) return { view: { ...view, blocked: `It isn't an ${WORLD_FORMAT} document.` }, world: null };
     let world: WorldDoc;

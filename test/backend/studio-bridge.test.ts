@@ -107,9 +107,9 @@ describe("the Studio bridge", () => {
     expect(Array.isArray(reviewed.macros) && reviewed.macros.length).toBe(1);
     expect(rig.body(await rig.send({ type: "lre.world", op: "list" })).worlds).toEqual([]);
 
-    const stale = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-0" });
+    const stale = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-0", hash: await reviewedHash(rig) });
     expect(stale.type === "lre.error" && stale.code).toBe("conflict");
-    const installed = rig.body(await rig.send({ type: "lre.studio", op: "install", offerId: "offer-1" }));
+    const installed = rig.body(await rig.send({ type: "lre.studio", op: "install", offerId: "offer-1", hash: await reviewedHash(rig) }));
     if (!isRecord(installed.installed)) throw new Error("not installed");
     expect(installed.installed.worldId).not.toBe(world.id);
     expect([installed.installed.mode, installed.installed.name, Array.isArray(installed.lint) && installed.lint.length]).toEqual(["new", "Test world 0", 1]);
@@ -117,7 +117,7 @@ describe("the Studio bridge", () => {
     expect(Array.isArray(worlds) && worlds.map((w) => (isRecord(w) ? w.id : null))).toEqual([installed.installed.worldId]);
 
     expect((await review(rig)).installed).toEqual({ worldId: installed.installed.worldId, revision: installed.installed.revision });
-    const again = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-1" });
+    const again = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-1", hash: await reviewedHash(rig) });
     expect(again.type === "lre.error" && again.code).toBe("conflict");
     // The engine is the only reader of the Studio's offer.
     const offerReads = rig.host.rpcPool.reads.filter((r) => r.endpoint === offerEndpoint(rig.host.userId));
@@ -139,13 +139,13 @@ describe("the Studio bridge", () => {
 
     rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "places", id: "shed", value: { id: "shed", name: "The shed", fields: {} } }));
     expect(String((await review(rig)).blocked)).toContain("unsaved changes");
-    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-2" });
+    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-2", hash: await reviewedHash(rig) });
     expect(refused.type === "lre.error" && refused.code).toBe("conflict");
 
     rig.body(await rig.send({ type: "lre.editor", op: "discard", worldId, base: null }));
     const reviewed = await review(rig);
     expect([reviewed.blocked, reviewed.target, reviewed.attachChatId]).toEqual([null, { worldId, name: read.name }, chatId]);
-    const installed = rig.body(await rig.send({ type: "lre.studio", op: "install", offerId: "offer-2" }));
+    const installed = rig.body(await rig.send({ type: "lre.studio", op: "install", offerId: "offer-2", hash: await reviewedHash(rig) }));
     if (!isRecord(installed.installed)) throw new Error("not installed");
     expect([installed.installed.worldId, installed.installed.mode, installed.installed.attachChatId]).toEqual([worldId, "revision", chatId]);
     const revision = String(installed.installed.revision);
@@ -165,7 +165,7 @@ describe("the Studio bridge", () => {
     const broken = await review(rig);
     expect(Number(broken.errors)).toBeGreaterThan(0);
     expect(String(broken.blocked)).toContain("error");
-    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-3" });
+    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-3", hash: await reviewedHash(rig) });
     expect(refused.type === "lre.error" && refused.code).toBe("validation");
 
     offer(rig, { offerId: "offer-4", doc: { format: "something-else", name: "Not a world" }, mode: "new", createdAt: 2 });
@@ -178,7 +178,7 @@ describe("the Studio bridge", () => {
     const body = rig.body(await rig.send({ type: "lre.studio", op: "offer" }));
     expect(body.offer).toBeNull();
     expect(String(body.message)).toContain("LumiRPEngine Studio");
-    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-1" });
+    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-1", hash: "" });
     expect(refused.type === "lre.error" && refused.code).toBe("not_found");
   });
 
@@ -192,13 +192,35 @@ describe("the Studio bridge", () => {
     next.places.pier = { id: "pier", name: "The pier", fields: {} };
     offer(rig, { offerId: "offer-5", doc: doc(next), mode: "revision", worldId, baseRevision: taken.revision, createdAt: 9 });
     expect((await review(rig)).headMoved).toEqual({ base: taken.revision, head: moved });
-    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-5" });
+    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-5", hash: await reviewedHash(rig) });
     expect(refused.type === "lre.error" && refused.code).toBe("conflict");
-    const installed = rig.body(await rig.send({ type: "lre.studio", op: "install", offerId: "offer-5", acceptMovedHead: true }));
+    const installed = rig.body(await rig.send({ type: "lre.studio", op: "install", offerId: "offer-5", hash: await reviewedHash(rig), acceptMovedHead: true }));
     if (!isRecord(installed.installed)) throw new Error("not installed");
     expect(installed.installed.worldId).toBe(worldId);
     // An offer taken from the head as it is now isn't flagged.
     offer(rig, { offerId: "offer-6", doc: doc(next), mode: "revision", worldId, baseRevision: String(installed.installed.revision), createdAt: 10 });
     expect((await review(rig)).headMoved).toBeNull();
   });
+
+  test("Install takes only the offer as reviewed, and installs it once however often it's pressed", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld("Harbor");
+    const taken = await studioRead<StudioWorldRead>(rig, worldChannel(rig.host.userId, worldId));
+    offer(rig, { offerId: "offer-7", doc: doc(taken.world), mode: "new", createdAt: 11 });
+    const reviewed = await reviewedHash(rig);
+    // The Studio changes the offer under the same id after the player reviewed it.
+    const changed = structuredClone(taken.world);
+    changed.places.pier = { id: "pier", name: "The pier", fields: {} };
+    offer(rig, { offerId: "offer-7", doc: doc(changed), mode: "new", createdAt: 11 });
+    const stale = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-7", hash: reviewed });
+    expect(stale.type === "lre.error" && stale.code).toBe("conflict");
+    const hash = await reviewedHash(rig);
+    const both = await Promise.all([rig.send({ type: "lre.studio", op: "install", offerId: "offer-7", hash }), rig.send({ type: "lre.studio", op: "install", offerId: "offer-7", hash })]);
+    expect(both.map((r) => (r.type === "lre.error" ? r.code : "installed")).sort()).toEqual(["conflict", "installed"]);
+  });
 });
+
+/** The pending offer's hash as Build's review shows it, which Install names back. */
+async function reviewedHash(rig: Rig): Promise<string> {
+  return String((await review(rig)).hash);
+}

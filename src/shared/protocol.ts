@@ -376,7 +376,7 @@ export type StudioRequest = Request<"lre.studio"> &
   (
     | { op: "offer" }
     /** `acceptMovedHead`: install a revision though its world's head moved since the Studio took it (`StudioOfferView.headMoved`). */
-    | { op: "install"; offerId: string; acceptMovedHead?: boolean }
+    | { op: "install"; offerId: string; hash: string; acceptMovedHead?: boolean }
   );
 
 /** A Studio offer as Build reviews it before anything is installed. */
@@ -406,6 +406,8 @@ export interface StudioOfferView {
    * committed since, so Build warns and Install must confirm it (`acceptMovedHead`).
    */
   headMoved: { base: RevisionId | null; head: RevisionId } | null;
+  /** The offer as reviewed (`hashJson` of it): Install names it back, and is refused when the offer has changed since. */
+  hash: string;
 }
 
 /** Settings → Preset (DESIGN §6.8): `get` reads the active preset's card; `add` adds the RPEngine blocks it lacks, then reads it. */

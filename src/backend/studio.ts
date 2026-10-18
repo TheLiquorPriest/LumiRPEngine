@@ -6,6 +6,7 @@
 //
 //   userStorage/studio/installed.json   the offers installed, so one offer is installed once
 
+import { hashJson } from "../shared/hash";
 import type { ChatId, RevisionId, UserId, WorldId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { StateView } from "../shared/state-view";
@@ -37,7 +38,8 @@ function isInstalled(v: unknown): v is InstalledOffer {
   return isRecord(v) && typeof v.offerId === "string" && typeof v.worldId === "string" && typeof v.revision === "string";
 }
 
-export type OfferRead = { offer: StudioOffer } | { offer: null; reason: string };
+/** The offer waiting, with its `hashJson`, which an install names back; or why there is none. */
+export type OfferRead = { offer: StudioOffer; hash: string } | { offer: null; reason: string };
 
 export class StudioBridge {
   /** Users whose endpoints are published. */
@@ -117,7 +119,7 @@ export class StudioBridge {
     }
     if (raw === null || raw === undefined) return { offer: null, reason: "LumiRPEngine Studio has no world waiting for you." };
     const offer = readOffer(raw);
-    return offer ? { offer } : { offer: null, reason: "LumiRPEngine Studio sent an offer this engine can't read." };
+    return offer ? { offer, hash: hashJson(offer) } : { offer: null, reason: "LumiRPEngine Studio sent an offer this engine can't read." };
   }
 
   /** The world revision an offer became, if it was installed. */
@@ -129,6 +131,24 @@ export class StudioBridge {
     const kept = [...(await this.installed(userId)).filter((i) => i.offerId !== entry.offerId), entry].slice(-INSTALLED_CAP);
     await this.host.storage.write(`${INSTALLED_FILE}.tmp`, JSON.stringify({ v: 1, offers: kept }), userId);
     await this.host.storage.move(`${INSTALLED_FILE}.tmp`, INSTALLED_FILE, userId);
+  }
+
+  /** Installs under way per user. */
+  private readonly installs = new Map<UserId, Promise<void>>();
+
+  /** Runs `work` once the user's earlier installs have settled, so one offer can't be installed twice at once. */
+  async installing<T>(userId: UserId, work: () => Promise<T>): Promise<T> {
+    const run = (this.installs.get(userId) ?? Promise.resolve()).then(work);
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.installs.set(userId, settled);
+    try {
+      return await run;
+    } finally {
+      if (this.installs.get(userId) === settled) this.installs.delete(userId);
+    }
   }
 
   private async installed(userId: UserId): Promise<InstalledOffer[]> {
