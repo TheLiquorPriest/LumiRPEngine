@@ -8,13 +8,19 @@ import { Card, Empty, Seg, useBusy } from "../components";
 
 const COLLECTIONS: readonly WorldCollection[] = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
 /** World parts whose issues open the part: `ruleset.progression.level.thresholds` → the Ruleset part; `loreIndex.terms.ferry` → the lookup table. */
-const PARTS: readonly WorldPart[] = ["calendar", "realism", "time", "ruleset", "loreIndex"];
+const PARTS: readonly WorldPart[] = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex"];
 
 /** The editor an issue path opens: `entities.npc_dev.fields.cash` → entities / npc_dev. */
 export function issueTarget(path: string): { collection: WorldCollection; id: string } | null {
   const [head, id] = path.split(".");
   const collection = COLLECTIONS.find((c) => c === head);
   return collection && id ? { collection, id } : null;
+}
+
+/** The world part an issue path opens, when it isn't an item's: `tiers.crowd.band` → Tiers; `spawnTier` sits at the top level, but the Tiers part edits it. */
+export function issuePart(path: string): WorldPart | null {
+  const head = path.split(".")[0];
+  return head === "spawnTier" ? "tiers" : (PARTS.find((p) => p === head) ?? null);
 }
 
 type Severity = LintIssue["severity"];
@@ -60,7 +66,7 @@ export function CheckView(props: { worldId: string }) {
           <Card>
             {shown.map((issue, i) => {
               const target = issueTarget(issue.path);
-              const part = target ? undefined : PARTS.find((p) => p === issue.path.split(".")[0]);
+              const part = issuePart(issue.path);
               return (
                 <div key={`${issue.path}:${issue.code}:${i}`} class="lre-lint">
                   <span class={issue.severity === "error" ? "lre-badge neg" : issue.severity === "warning" ? "lre-badge warn" : "lre-badge"}>{issue.severity}</span>

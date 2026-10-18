@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { checkBalance } from "../../src/frontend/build/expr-editor";
-import { issueTarget } from "../../src/frontend/build/check";
+import { issuePart, issueTarget } from "../../src/frontend/build/check";
 import { proposalGroups, proposalWrites, shownValue, startTicked } from "../../src/frontend/build/jobs";
 import { kindFields, refOptions } from "../../src/frontend/build/schema-form";
 import { cellProblem } from "../../src/frontend/build/table-editor";
@@ -203,6 +203,12 @@ describe("small parsers", () => {
     expect(issueTarget("entities.npc_dev.fields.cash")).toEqual({ collection: "entities", id: "npc_dev" });
     expect(issueTarget("lore.store_history.content")).toEqual({ collection: "lore", id: "store_history" });
     expect(issueTarget("calendar.holidays")).toBeNull();
+    // A part's issue opens the part, the tiers' and the spawn tier's included.
+    expect(issuePart("calendar.holidays")).toBe("calendar");
+    expect(issuePart("tiers.crowd.band")).toBe("tiers");
+    expect(issuePart("tiers.crowd.label")).toBe("tiers");
+    expect(issuePart("spawnTier")).toBe("tiers");
+    expect(issuePart("entities.npc_dev.fields.cash")).toBeNull();
   });
 });
 
