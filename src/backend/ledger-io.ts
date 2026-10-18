@@ -327,6 +327,12 @@ export class LedgerService {
   private readonly preReply = new Map<UserId, number>();
   /** The context handler's registered timeout; 0 until attached. */
   private contextTimeout = 0;
+  /**
+   * Generations started and not yet ended or stopped, and calls of the context handler in flight:
+   * while either holds, the host may be walking its handler list, so a registration waits.
+   */
+  private readonly generating = new Set<string>();
+  private handling = 0;
 
   constructor(
     private readonly host: HostPort,
@@ -342,15 +348,17 @@ export class LedgerService {
       h.on("MESSAGE_EDITED", (e, userId) => this.onMessage(e.chatId, userId, e.message.id, "edited")),
       h.on("MESSAGE_SWIPED", (e, userId) => this.onSwiped(e.chatId, userId, e.message.id, e.action, e.swipeId)),
       h.on("MESSAGE_DELETED", (e, userId) => this.onMessage(e.chatId, userId, e.messageId, "deleted")),
-      h.on("GENERATION_STARTED", (e, userId) =>
-        this.run(e.chatId, userId, async (core, observed) => {
+      h.on("GENERATION_STARTED", (e, userId) => {
+        this.generating.add(e.generationId);
+        return this.run(e.chatId, userId, async (core, observed) => {
           core.sync(observed);
           const kind = this.hooks && userId ? await this.hooks.kindOf({ chatId: e.chatId, userId, kind: KIND[e.generationType] }) : KIND[e.generationType];
           core.started({ generationId: e.generationId, kind, targetMessageId: e.targetMessageId, targetSwipeId: e.targetSwipeId }, observed);
-        }),
-      ),
-      h.on("GENERATION_ENDED", (e, userId) =>
-        this.run(e.chatId, userId, async (core, observed) => {
+        });
+      }),
+      h.on("GENERATION_ENDED", (e, userId) => {
+        this.generationEnded(e.generationId);
+        return this.run(e.chatId, userId, async (core, observed) => {
           core.sync(observed);
           // A generation that ended in error commits as stopped: no auto-read, no
           // extraction; the reply's Retry read chip covers whatever text was saved.
@@ -369,14 +377,15 @@ export class LedgerService {
           }
           core.ended({ generationId: e.generationId, ...(e.messageId ? { messageId: e.messageId } : {}), content: e.content }, observed);
           if (this.hooks && turn) await this.hooks.afterCommit({ ...turn, content: e.content });
-        }),
-      ),
-      h.on("GENERATION_STOPPED", (e, userId) =>
-        this.run(e.chatId, userId, (core, observed) => {
+        });
+      }),
+      h.on("GENERATION_STOPPED", (e, userId) => {
+        this.generationEnded(e.generationId);
+        return this.run(e.chatId, userId, (core, observed) => {
           core.sync(observed);
           core.stopped({ generationId: e.generationId, content: e.content }, observed);
-        }),
-      ),
+        });
+      }),
     );
     this.registerContext();
   }
@@ -391,12 +400,23 @@ export class LedgerService {
     if (this.contextTimeout > 0) this.registerContext();
   }
 
-  /** Registers the context handler again when its timeout changes (the host replaces a registration); before any user's settings are read, it waits the host's longest. */
+  /**
+   * Registers the context handler again when its timeout changes (the host replaces a registration);
+   * before any user's settings are read, it waits the host's longest. The host replaces it inside the
+   * handler list its chain walks, which would skip the next extension's handler or run this one
+   * twice, so while a generation or a call of the handler is under way the change waits for them.
+   */
   private registerContext(): void {
     const timeout = this.preReply.size === 0 ? CONTEXT_HANDLER_MAX_MS : Math.min(CONTEXT_HANDLER_MAX_MS, Math.max(...this.preReply.values()) + PLAN_MARGIN_MS);
-    if (timeout === this.contextTimeout) return;
+    if (timeout === this.contextTimeout || (this.contextTimeout > 0 && (this.generating.size > 0 || this.handling > 0))) return;
     this.contextTimeout = timeout;
     this.host.registerContextHandler((input, signal) => this.planBeforeReply(input, signal), timeout);
+  }
+
+  /** A generation is over: a registration that waited for the host's chain goes ahead once none is under way. */
+  private generationEnded(generationId: string): void {
+    this.generating.delete(generationId);
+    if (this.contextTimeout > 0) this.registerContext();
   }
 
   /** The context handler (DESIGN §5.1): the pre phase, the plan, then the plan phase. */
@@ -404,19 +424,27 @@ export class LedgerService {
     // Model steps stop the plan's margin before the host gives up on this call, counted from its
     // start, so the plan lands even when the chat's queue ate into the wait.
     const steps = AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, this.contextTimeout - PLAN_MARGIN_MS))]);
-    await this.run(input.chatId, input.userId, async (core, observed) => {
-      core.sync(observed);
-      const pending = Object.values(core.journal.pending)
-        .filter((p) => !p.planned && (p.kind === KIND[input.generationType] || (p.kind === "renarrate" && (input.generationType === "swipe" || input.generationType === "regenerate"))))
-        .at(-1);
-      if (!pending && !input.dryRun) return;
-      if (this.hooks) await this.hooks.beforePlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending?.generationId ?? null, dryRun: input.dryRun, connectionId: input.connectionId, signal: steps });
-      // The host gave up on the handler: no plan, so the turn commits degraded.
-      if (signal.aborted) return;
-      core.plan(pending?.generationId ?? "", observed, input.dryRun);
-      // Prose steps about the plan (brief, outline) run once it exists, inside the same handler.
-      if (this.hooks && pending && !input.dryRun) await this.hooks.afterPlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending.generationId, signal: steps });
-    });
+    this.handling++;
+    try {
+      await this.run(input.chatId, input.userId, async (core, observed) => {
+        core.sync(observed);
+        const pending = Object.values(core.journal.pending)
+          .filter((p) => !p.planned && (p.kind === KIND[input.generationType] || (p.kind === "renarrate" && (input.generationType === "swipe" || input.generationType === "regenerate"))))
+          .at(-1);
+        if (!pending && !input.dryRun) return;
+        if (this.hooks) await this.hooks.beforePlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending?.generationId ?? null, dryRun: input.dryRun, connectionId: input.connectionId, signal: steps });
+        // The host gave up on the handler: no plan, so the turn commits degraded.
+        if (signal.aborted) return;
+        core.plan(pending?.generationId ?? "", observed, input.dryRun);
+        // Prose steps about the plan (brief, outline) run once it exists, inside the same handler.
+        if (this.hooks && pending && !input.dryRun) await this.hooks.afterPlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending.generationId, signal: steps });
+      });
+    } finally {
+      // The host's chain may still be running other extensions' handlers after this one returns (a dry
+      // run sends no generation events), so a waiting registration goes ahead only at a generation's
+      // end or the next settings read, never from here.
+      this.handling--;
+    }
   }
 
   detach(): void {
