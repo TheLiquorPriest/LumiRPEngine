@@ -40,6 +40,29 @@ describe("dispatch", () => {
     expect(markers()).toBe(before + 1);
   });
 
+  test("a realism preview reads the level the chat plays at: a stored level below the ruleset's minimum counts as the minimum", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld();
+    const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "ruleset", value: { minLevels: { sheets: 3 } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    rig.body(await rig.send({ type: "lre.marker", chatId, kind: "resolve", domain: "sheets", scope: { all: true }, to: 1 }));
+    expect((await stateOf(rig, chatId)).realism.levels.sheets).toBe(1);
+    const lines = async (to: number): Promise<{ text: string; tone: string }[]> => {
+      const preview = rig.body(await rig.send({ type: "lre.marker", chatId, preview: true, kind: "resolve", domain: "sheets", scope: { all: true }, to })).preview;
+      return isRecord(preview) && Array.isArray(preview.lines) ? preview.lines.filter(isRecord).map((l) => ({ text: String(l.text), tone: String(l.tone) })) : [];
+    };
+    // Already played at 3: 3 or a drop below the minimum changes nothing, and 4 rises from 3, never from 1.
+    expect((await lines(3)).map((l) => l.tone)).toEqual(["info"]);
+    expect((await lines(2)).map((l) => l.tone)).toEqual(["info"]);
+    const rise = await lines(4);
+    expect(rise[0]?.tone).toBe("promote");
+    expect(rise[0]?.text).toContain("3");
+    expect(rise[0]?.text).not.toMatch(/\b1\b/);
+  });
+
   test("an earlier user edit pauses; Keep and Discard resolve the pause", async () => {
     for (const choice of ["keep", "discard"] as const) {
       const rig = new Rig();

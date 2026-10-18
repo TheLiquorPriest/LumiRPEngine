@@ -21,6 +21,7 @@ import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService } from "../engine/pack-kit";
+import { rulesetFloor } from "../engine/registry-impl";
 import { applyTimeAdvance, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
@@ -408,16 +409,20 @@ export class Dispatcher {
     const { state, world } = await this.head(chatId, userId);
     const lines: MarkerPreview["lines"] = [];
     if (body.kind === "resolve") {
-      // The level the marker changes, at its own scope (a band's cap or an entity's override, else the domain's).
+      // The level the marker changes, at its own scope (a band's cap or an entity's override, else the
+      // domain's), and the one it sets, as the chat plays them: never below the ruleset's minimum, which
+      // a later Upgrade or profile may have raised above the stored setting.
       const domainLevel = state.realism.levels[body.domain];
       const scope = body.scope;
-      const from = "all" in scope ? domainLevel : "tier" in scope ? (state.realism.tierCaps[scope.tier]?.[body.domain] ?? domainLevel) : (state.entities[scope.entity]?.levels[body.domain] ?? domainLevel);
+      const stored = "all" in scope ? domainLevel : "tier" in scope ? (state.realism.tierCaps[scope.tier]?.[body.domain] ?? domainLevel) : (state.entities[scope.entity]?.levels[body.domain] ?? domainLevel);
+      const from = rulesetFloor(world, body.domain, stored);
+      const to = rulesetFloor(world, body.domain, body.to);
       const who = "all" in scope ? "" : "tier" in scope ? ` for ${BAND_WHO[scope.tier]}` : ` for ${state.entities[scope.entity]?.name ?? scope.entity}`;
       const name = this.rt.registry.packs.find((p) => p.domain === body.domain)?.label ?? body.domain;
-      if (body.to < from) lines.push({ text: `${name}${who} drops from level ${from} to ${body.to}: processes above level ${body.to} stop and their inputs freeze; detail stays stored.`, tone: "freeze" });
-      else if (body.to > from) lines.push({ text: `${name}${who} rises from level ${from} to ${body.to}: detail is filled in when first shown.`, tone: "promote" });
+      if (to < from) lines.push({ text: `${name}${who} drops from level ${from} to ${to}: processes above level ${to} stop and their inputs freeze; detail stays stored.`, tone: "freeze" });
+      else if (to > from) lines.push({ text: `${name}${who} rises from level ${from} to ${to}: detail is filled in when first shown.`, tone: "promote" });
       else lines.push({ text: `${name}${who} stays at level ${from}.`, tone: "info" });
-      if (body.to > from && body.to >= 2) lines.push({ text: `People without ${name.toLowerCase()} detail get it from the pinned tables when you open them.`, tone: "materialize" });
+      if (to > from && to >= 2) lines.push({ text: `People without ${name.toLowerCase()} detail get it from the pinned tables when you open them.`, tone: "materialize" });
     } else if (body.kind === "time") {
       lines.push({ text: `${body.control} changes from the next turn; earlier turns keep the setting they were planned with.`, tone: "info" });
     } else if (body.kind === "adjudicate") {
