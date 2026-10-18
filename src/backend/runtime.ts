@@ -15,6 +15,7 @@ import { EXTRACTION_TYPES, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
+import { fightOffers } from "../packs/combat/core/index";
 import { transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
@@ -680,19 +681,22 @@ export class Runtime implements TurnHooks {
     // Answer names the open puzzles the player can see, so a typed "I dial 1887" finds it.
     const puzzles = openPuzzleTitles(this.registry, render.world, render.state);
     const labelOf = (a: ActionDef): string => (a.pack === "story" && a.id === "answer" && puzzles.length > 0 ? `${a.label} (open: ${puzzles.join("; ")})` : a.label);
-    // A param naming a table row lists the rows' ids, so the helper answers with one ("athletics", not "climbing").
-    const paramsOf = (a: ActionDef): string[] => Object.entries(a.params).map(([name, p]) => (p.table !== undefined ? `${name}: one of ${tableChoices(hasOwn(render.world.tables, p.table) ? render.world.tables[p.table] : undefined).map((c) => c.key).join(", ")}` : name));
-    const catalog = [...all.map((a) => ({ id: a.id, label: labelOf(a), params: paramsOf(a), ...(a.lexicon ? { lexicon: a.lexicon } : {}) })), timelapseEntry];
+    // A param naming a table row lists the rows' ids, so the helper answers with one ("athletics", not
+    // "climbing"); the list keeps to the param's own parentheses, so the next param can't read as a row.
+    const paramsOf = (a: ActionDef): string[] => Object.entries(a.params).map(([name, p]) => (p.table !== undefined ? `${name} (one of: ${tableChoices(hasOwn(render.world.tables, p.table) ? render.world.tables[p.table] : undefined).map((c) => c.key).join(" | ")})` : name));
+    // Only what fits the fight's state for the POV (Fight outside one, attacks in one), as the Combat tab lists them.
+    const offered = all.filter((a) => fightOffers(render.world, render.state, a));
+    const catalog = [...offered.map((a) => ({ id: a.id, label: labelOf(a), params: paramsOf(a), ...(a.lexicon ? { lexicon: a.lexicon } : {}) })), timelapseEntry];
     let result: InterpretOutput | null;
     const lore = this.stepLore(run, at, { text: `${text}\n${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.world, render.state) });
     if (run.config.route?.provider === "decision") {
       // A Decision route answers which action (or none); a helper call fills its params when it has any.
       const criteria: Record<string, string> = { none: "Not an action: speech, a request, a feeling or a recap." };
-      for (const a of all) criteria[a.id] = labelOf(a);
+      for (const a of offered) criteria[a.id] = labelOf(a);
       criteria[TIMELAPSE_ACTION] = timelapseEntry.label;
       const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore);
       const a = answer?.answers.action;
-      const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null } } : all.find((x) => x.id === a.choice)) : undefined;
+      const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null } } : offered.find((x) => x.id === a.choice)) : undefined;
       if (!chosen) result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
       else if (Object.keys(chosen.params).length === 0 || !budget.take()) result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
       else result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore);

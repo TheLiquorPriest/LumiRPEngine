@@ -12,6 +12,7 @@
 
 import type { JsonObject } from "../shared/json";
 import type { ActionDef, WorldDoc } from "../shared/world";
+import { offersAction } from "../shared/world";
 import type { Registry } from "./registry-impl";
 import { isGone, kindIs } from "./scope";
 import { selectorMatches } from "./selector";
@@ -200,6 +201,8 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
   // Numbers fill an action's number params in the order they were said: "walk over to 6, 2" is x 6, y 2.
   const numbers = [...text.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
   for (const action of actions.values()) {
+    // A combat action only where the ruleset has combat, as the palette and interpret offer them.
+    if (!offersAction(world, action)) continue;
     for (const raw of action.lexicon ?? []) {
       const phrase = raw.trim().toLowerCase();
       if (phrase.length <= 2) continue;

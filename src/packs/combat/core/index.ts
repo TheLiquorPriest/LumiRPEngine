@@ -396,4 +396,4 @@ export const combatPack: PackDef = {
 export default combatPack;
 
 export type { EncounterRow, EncounterView } from "./view";
-export { combatEntries, paletteEncounter } from "./view";
+export { combatEntries, fightOffers, paletteEncounter } from "./view";
