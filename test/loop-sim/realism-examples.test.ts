@@ -7,6 +7,7 @@ import { calendarOf, clockOfLocal } from "../../src/engine/calendar";
 import { applyEffects } from "../../src/engine/effects";
 import { materializeAll, pinnedVersion, previewMaterialization } from "../../src/engine/materialize";
 import { REALISM_PRESETS } from "../../src/engine/realism";
+import { authorLines, playerLines } from "../../src/engine/player-events";
 import { createRegistry } from "../../src/engine/registry-impl";
 import type { PackDef } from "../../src/engine/registry";
 import { resolveAction } from "../../src/engine/resolve";
@@ -316,6 +317,32 @@ describe("realism examples: NPC lives", () => {
     expect(lines.some((l) => /^Maya Chen invites you/.test(l))).toBe(true);
     const choice = plan.events.find((e) => e.type === "engine.choice" && "data" in e && String(e.data.key).startsWith("maya:invite:"));
     expect(choice).toBeDefined();
+  });
+
+  test("an invitation to a place the POV can't see names it in no player line or Montage, only in the GM's line", () => {
+    const world = modernUsWorld("inv", "Riverton");
+    world.realism.levels.castlife = 4;
+    world.realism.levels.relationships = 4;
+    world.entities.maya!.relations.push({ type: "regard", to: "you", fields: { warmth: 60, trust: 50, respect: 40, t: 0 } });
+    // Away from the POV's own building, every place is one it doesn't know.
+    const own = new Set(["riverton", "apartment_bldg", "apartment", "apartment_hall", "garage"]);
+    for (const p of Object.values(world.places)) if (!own.has(p.id)) p.visibility = "secret";
+    const hidden = Object.values(world.places).flatMap((p) => (own.has(p.id) ? [] : [p.name]));
+    const state = startState(world);
+    const plan = planTurn({ registry: reg, world, state, runSeed: "inv", seed: "s", kind: "normal", userTexts: [""], intent: timelapseIntent({ type: "duration", minutes: 4 * 1440 }, ALL_NOTE) });
+    const invitations = plan.events.filter((e) => e.type === "castlife.invitation");
+    const montage = (plan.montage?.groups ?? []).flatMap((g) => g.lines).filter((l) => l.includes("invites you"));
+    const player = playerLines(reg, world, state, world.pov, plan.events, 1000).filter((l) => l.includes("invites you"));
+    expect([invitations.length > 0, montage.length > 0]).toEqual([true, true]);
+    for (const line of [...montage, ...player]) {
+      expect(line).toMatch(/invites you to meet up at \d/);
+      for (const name of hidden) expect(line).not.toContain(name);
+    }
+    // The GM's lines, worded for no one, still say where.
+    const first = invitations[0];
+    const where = first && "data" in first && typeof first.data.place === "string" ? (world.places[first.data.place]?.name ?? "") : "";
+    expect(where).not.toBe("");
+    expect(authorLines(reg, world, state, invitations, 10).some((l) => l.includes(where))).toBe(true);
   });
 
   test("an NPC↔NPC encounter changes their regard (what rules and predicates read)", () => {

@@ -363,11 +363,21 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     if (tie || recorded) out.push({ type: ENGINE_EVENTS.choice, data: { key, choice, via: recorded ? "recorded" : "seed", agent: who, options: "invite,stay" } });
     if (choice === "invite") {
       const where = block.place ?? placeOfType(ctx, "conversation", homeOf(ctx, who));
-      const text = `${e.name} invites you to ${where ? (own(ctx.world.places, where)?.name ?? where) : "meet up"} at ${formatHHMM(dateAt(cal, slot.end).minuteOfDay)}.`;
+      // The invitation is the POV's: its text never names a place the POV can't see.
+      const text = invitationText(ctx, who, where, slot.end, pov);
       out.push({ type: "castlife.invitation", data: { agent: who, place: where, at: slot.end, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } });
     }
   }
   return out;
+}
+
+/**
+ * An invitation as `viewer` reads it: where to meet only when they can see the place, else just "meet
+ * up"; with no viewer (the GM's lines, Check world), the place by its own name.
+ */
+function invitationText(ctx: ReadContext, agent: EntityId, place: PlaceId | null, at: number, viewer?: EntityId): string {
+  const named = place !== null && (viewer === undefined || canSeePlace(ctx.registry, ctx.world, ctx.state, viewer, place)) ? (own(ctx.world.places, place)?.name ?? place) : null;
+  return `${own(ctx.state.entities, agent)?.name ?? agent} invites you to ${named ?? "meet up"} at ${formatHHMM(dateAt(calendarOf(ctx.world), at).minuteOfDay)}.`;
 }
 
 /**
@@ -431,7 +441,7 @@ const EVENTS: EventTypeDef<PackEvent>[] = [
       list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text) });
       s.invitations = list;
     },
-    describe: (e) => strOf(e.data.text),
+    describe: (e, ctx, viewer) => invitationText(ctx, strOf(e.data.agent), typeof e.data.place === "string" ? e.data.place : null, numOf(e.data.at), viewer),
   },
 ];
 
