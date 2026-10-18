@@ -13,6 +13,7 @@
 import type { JsonObject } from "../shared/json";
 import type { ActionDef, WorldDoc } from "../shared/world";
 import { offersAction } from "../shared/world";
+import { optionalQuery } from "./pack-kit";
 import type { Registry } from "./registry-impl";
 import { isGone, kindIs } from "./scope";
 import { selectorMatches } from "./selector";
@@ -197,12 +198,16 @@ export function typedIntent(reg: Registry, world: WorldDoc, state: Readonly<Worl
   const people = new Set<string>();
   for (const [id, e] of Object.entries(state.entities)) if (id !== pov && kindIs(reg, world, e.kind, "person") && !isGone(state, id)) for (const w of words(e.name)) people.add(w);
   const acts = (start: number) => playerActs(said, start, people);
+  // Only what fits the fight's state for the POV, as interpret and the Combat tab offer it: a start
+  // outside a fight, any other combat action in one the POV is in.
+  const ctx = reg.context(world, state);
+  const fits = optionalQuery(ctx, "combat.offers");
   let best: { action: ActionDef; params: JsonObject; filled: boolean; skipped: number; length: number } | null = null;
   // Numbers fill an action's number params in the order they were said: "walk over to 6, 2" is x 6, y 2.
   const numbers = [...text.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
   for (const action of actions.values()) {
-    // A combat action only where the ruleset has combat, as the palette and interpret offer them.
-    if (!offersAction(world, action)) continue;
+    // A combat action only where the ruleset has combat, and the fight's state allows it.
+    if (!offersAction(world, action) || fits?.(ctx, action) === false) continue;
     for (const raw of action.lexicon ?? []) {
       const phrase = raw.trim().toLowerCase();
       if (phrase.length <= 2) continue;

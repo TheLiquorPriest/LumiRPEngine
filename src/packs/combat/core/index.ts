@@ -36,7 +36,7 @@ import { knownBySelector } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
 import { fightChoices, hpLine, nextTurn, openRound, spendFor, type FightRound } from "./flow";
 import { attacks, canFight, downHolds, encounterOf, endHolds, engaged, fighterOf, fits, fullEconomy, hpByFighter, LOG_CAP, offTurnCost, PACK, povLeft, readFor, rulesOf, sameHp, stalemateRounds, stalledHolds, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
-import { buildEncounterView, type EncounterView } from "./view";
+import { buildEncounterView, fightOffers, type EncounterView } from "./view";
 
 declare module "../../../engine/registry" {
   interface ServiceMap {
@@ -54,6 +54,8 @@ declare module "../../../engine/registry" {
     "combat.hp_line": (ctx: ReadContext, e: LedgerEvent) => string | null | undefined;
     /** Whether someone is in the fight under way, where it is fought: no day plan or schedule moves them, and the clock waits. */
     "combat.engaged": (ctx: ReadContext, id: EntityId) => boolean;
+    /** Whether an action suits the fight's state for the POV (`fightOffers`): typed text reads only what the Combat tab and interpret offer. */
+    "combat.offers": (ctx: ReadContext, action: Pick<ActionDef, "combat">) => boolean;
   }
 }
 
@@ -340,6 +342,7 @@ export const combatPack: PackDef = {
     r.query("combat.gm", (ctx) => buildEncounterView(ctx, { gm: true }));
     r.query("combat.hp_line", hpLine);
     r.query("combat.engaged", (ctx, id) => engaged(ctx.state, ctx.world, id));
+    r.query("combat.offers", (ctx, action) => fightOffers(ctx.world, ctx.state, action));
 
     // Who is hostile to whom, as the default sides rule reads it (either way, as a link authored on one side only reads before a chat completes it).
     r.relation({ id: "hostile", label: "Hostile to", from: "*", to: "*", cardinality: "many_many", symmetric: true, fields: {}, pack: PACK });

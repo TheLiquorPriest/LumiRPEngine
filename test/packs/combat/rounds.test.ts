@@ -463,6 +463,18 @@ describe("rules and sides", () => {
     expect(read(applyProfile(make("f", "f"), PROFILES.modern, Object.fromEntries(registry.kinds)), "I pick a fight with Marta")).toBe("fight");
   });
 
+  test("Playtest reads fight words only as the fight's state allows, as interpret does", () => {
+    const { registry, world, state } = starterFight();
+    const read = (s: Readonly<WorldState>, text: string) => typedIntent(registry, world, s, text)?.action ?? null;
+    const calm = initialState(world, hashJson(world), registry);
+    expect(read(calm, "I attack Danny")).toBeNull();
+    expect(read(calm, "I end my turn")).toBeNull();
+    expect(read(calm, "I pick a fight with Danny")).toBe("fight");
+    expect(read(state, "I attack Danny")).toBe("attack");
+    expect(read(state, "I end my turn")).toBe("end_turn");
+    expect(read(state, "I pick a fight with Danny")).toBeNull();
+  });
+
   test("hostile is a relation type both sides hold, and the default sides rule reads it", () => {
     expect(reg.relations.get("hostile")).toMatchObject({ symmetric: true, pack: "combat" });
     const world = fightWorld((w) => {
