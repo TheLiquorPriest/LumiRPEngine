@@ -503,7 +503,7 @@ export function createSpindleHost(): HostPort {
           const page = await spindle.regex_scripts.list({ scope: "chat", ...(chatId ? { scopeId: chatId } : {}), limit: 200, offset, userId });
           for (const s of page.data) {
             if (s.scope !== "chat" || !s.scope_id) continue;
-            out.push({ id: s.id, chatId: s.scope_id, mine: s.can_mutate, findRegex: s.find_regex, replaceString: s.replace_string, flags: s.flags, placement: [...s.placement], targets: Array.isArray(s.target) ? [...s.target] : [s.target], runOnEdit: s.run_on_edit, metadata: toJsonObject(s.metadata) });
+            out.push({ id: s.id, chatId: s.scope_id, mine: s.can_mutate, findRegex: s.find_regex, replaceString: s.replace_string, flags: s.flags, placement: [...s.placement], targets: Array.isArray(s.target) ? [...s.target] : [s.target], runOnEdit: s.run_on_edit, sortOrder: s.sort_order, metadata: toJsonObject(s.metadata) });
           }
           if (page.data.length < 200 || offset + page.data.length >= page.total) break;
         }
@@ -521,6 +521,7 @@ export function createSpindleHost(): HostPort {
           scope: "chat",
           scope_id: script.chatId,
           run_on_edit: script.runOnEdit,
+          sort_order: script.sortOrder,
           substitute_macros: "none",
           description: script.description,
           folder: script.folder,

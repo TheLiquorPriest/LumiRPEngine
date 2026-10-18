@@ -57,7 +57,7 @@ import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, onlyPass
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
-import { JsonHiding, withoutHiddenJson } from "./json-hiding";
+import { JsonHiding, readableReply } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
@@ -1114,7 +1114,10 @@ export class Runtime implements TurnHooks {
       const at = input.core.commitContext(input.generationId, input.messageId, input.observed);
       context = at ? { ...at, recent } : null;
     }
-    if (context) await this.prepareRead(input.chatId, input.userId, input.messageId, input.swipeId, input.generationId, input.content, context, input.kind !== "continue");
+    // A Continue reads what it added, matched against the whole message: a JSON block it split is left out whole (DESIGN §6.7).
+    const full = input.kind === "continue" ? (input.observed[index]?.swipes[input.swipeId] ?? "") : "";
+    const before = full.endsWith(input.content) ? full.slice(0, full.length - input.content.length) : "";
+    if (context) await this.prepareRead(input.chatId, input.userId, input.messageId, input.swipeId, input.generationId, input.content, context, input.kind !== "continue", false, before);
   }
 
   /**
@@ -1126,13 +1129,14 @@ export class Runtime implements TurnHooks {
    * that read's chips go first. The decline for a typed action that named nothing (`unfitId`) is about
    * the player's message, not the reply, so any read of the swipe keeps it and its note.
    */
-  async prepareRead(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, key: string, content: string, context: ReadInput, post: boolean, replace = false): Promise<void> {
-    // What the engine reads of the reply: none of the JSON blocks its regex script hid (DESIGN §6.7).
-    const text = withoutHiddenJson(content);
+  async prepareRead(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, key: string, content: string, context: ReadInput, post: boolean, replace = false, before = ""): Promise<void> {
+    const settings = await this.settings.get(userId);
+    // What the engine reads of the reply: none of the JSON blocks the display hides, matched against the
+    // whole message when `before` holds the text a Continue went on from (DESIGN §6.7).
+    const text = readableReply(before + content, settings.hideJsonBlocks, before.length);
     if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind) && c.id !== unfitId(messageId, swipeId));
     const bridge = this.bridges.get(chatId);
     if (!bridge) return;
-    const settings = await this.settings.get(userId);
     const input = { chatId, userId, messageId, generationId: key, content };
     const pre = this.prePhase.get(key);
     // A read without a pre phase (a Continue, Re-read edit, Retry read) takes the user's latest read

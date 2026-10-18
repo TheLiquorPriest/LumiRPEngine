@@ -330,7 +330,7 @@ export class Dispatcher {
         if (r.op === "save") {
           const run = await this.rt.runOf(r.chatId, userId);
           if (!run) throw new RequestError("not_world_chat", "this chat is not attached to a world");
-          reply("lre.lore", await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, typeof r.text === "string" ? r.text : undefined));
+          reply("lre.lore", await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, (await this.rt.settings.get(userId)).hideJsonBlocks, typeof r.text === "string" ? r.text : undefined));
           return;
         }
         const world = await this.rt.worlds.working(r.worldId, userId);

@@ -302,7 +302,7 @@ export function Settings() {
           <HostSwitch label="Hide JSON blocks in world chats" checked={settings.hideJsonBlocks} disabled={busy} onChange={(hideJsonBlocks) => patch({ hideJsonBlocks })} />
           <span class="lre-small lre-muted">
             {settings.hideJsonBlocks
-              ? "A <json>…</json> block a reply carries (some presets ask for one) is hidden and kept out of World Info scanning, through a regex script each world chat keeps. The block stays as written, so anything that reads it still can."
+              ? "A <json>…</json> block a reply carries (some presets ask for one) is kept out of World Info scanning and hidden, after any display script of your preset has drawn it, through two regex scripts each world chat keeps. The block stays as written, so anything that reads it still can."
               : "Replies show their <json> blocks, and World Info scans them like the rest of the reply."}
           </span>
         </div>

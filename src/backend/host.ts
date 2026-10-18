@@ -311,6 +311,8 @@ export interface HostRegexScript {
   /** Where it runs; one script may run on several targets. */
   targets: string[];
   runOnEdit: boolean;
+  /** Lower runs earlier among the chat's scripts. */
+  sortOrder: number;
   metadata: JsonObject;
 }
 
@@ -326,6 +328,7 @@ export interface HostRegexScriptInput {
   placement: "ai_output"[];
   targets: ("response" | "display")[];
   runOnEdit: boolean;
+  sortOrder: number;
   description: string;
   folder: string;
   metadata: JsonObject;

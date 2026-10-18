@@ -185,7 +185,7 @@ export class FakeHost implements HostPort {
       if ([...this.regexScripts.values()].some((s) => s.scriptId === scriptId && s.id !== id)) throw new Error("script_id already exists");
       const prior = id === null ? undefined : this.regexScripts.get(id);
       if (id !== null && !prior?.mine) throw new Error("Regex script not found or not this extension's");
-      const next = { id: id ?? this.newId("regex"), chatId: script.chatId, mine: true, scriptId, findRegex: script.findRegex, replaceString: script.replaceString, flags: script.flags, placement: [...script.placement], targets: [...script.targets], runOnEdit: script.runOnEdit, metadata: structuredClone(script.metadata), disabled: prior?.disabled ?? false };
+      const next = { id: id ?? this.newId("regex"), chatId: script.chatId, mine: true, scriptId, findRegex: script.findRegex, replaceString: script.replaceString, flags: script.flags, placement: [...script.placement], targets: [...script.targets], runOnEdit: script.runOnEdit, sortOrder: script.sortOrder, metadata: structuredClone(script.metadata), disabled: prior?.disabled ?? false };
       this.regexScripts.set(next.id, next);
       return next.id;
     },
