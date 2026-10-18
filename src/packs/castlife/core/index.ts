@@ -32,7 +32,7 @@ import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { activeSlot, allSchedules, ownerRank, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
-import { acts, povLife } from "../../../engine/life";
+import { acts as lifeActs, povLife } from "../../../engine/life";
 import { classValues, isGroup, isMemberOf, MEMBER_OF } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
@@ -344,7 +344,7 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
   if (appraise && block.place && g.next() < ENCOUNTER_CHANCE) {
     const here = Object.keys(ctx.state.entities)
       .sort()
-      .filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other));
+      .filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place && acts(ctx, other));
     const other = here[Math.floor(g.next() * here.length)];
     if (other) {
       const known = acquainted(ctx.state, who, other);
@@ -393,7 +393,7 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
   for (const who of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, who);
     const trips = e?.fields.trips;
-    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || isGone(ctx.state, who) || !acts(ctx.world, ctx.state, who)) continue;
+    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts(ctx, who)) continue;
     for (const raw of trips) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
@@ -602,11 +602,12 @@ export function buildCastView(ctx: ReadContext): CastView {
 // ---------------------------------------------------------------- the Stance section
 
 /**
- * Whether someone acts, and so has a stance to tell (DESIGN §6.6): today, anyone still in the world.
- * The one test for it, so a person's life state can decide it in one place.
+ * Whether someone acts (DESIGN §6.6, §8): still in the world and in a life state that acts. The one
+ * test Cast life reads, so encounters, trips, day-plan ties and the Stance section agree: someone who
+ * doesn't act has no stance to tell, and a body the POV knows of reads through the people lines.
  */
 export function acts(ctx: ReadContext, who: EntityId): boolean {
-  return !isGone(ctx.state, who);
+  return !isGone(ctx.state, who) && lifeActs(ctx.world, ctx.state, who);
 }
 
 /** "Label: one; two." Clauses as one sentence: whitespace collapsed, each without its own full stop. */
@@ -699,7 +700,7 @@ export const castlifePack: PackDef = {
       const out: { key: string; agent: EntityId; options: string[] }[] = [];
       const decided = decisions(ctx.state);
       for (const id of Object.keys(ctx.state.entities).sort()) {
-        const plan = own(ctx.state.entities, id)?.agent && !isGone(ctx.state, id) && acts(ctx.world, ctx.state, id) ? dayPlan(ctx, id) : null;
+        const plan = own(ctx.state.entities, id)?.agent && acts(ctx, id) ? dayPlan(ctx, id) : null;
         for (const t of plan?.ties ?? []) if (t.via === "seed" && !own(decided, t.key)) out.push({ key: t.key, agent: id, options: t.options });
       }
       return out;
