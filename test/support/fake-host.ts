@@ -516,9 +516,19 @@ export class FakeHost implements HostPort {
 
   // ------------------------------------------------------------------ lore books and processes
 
-  readonly bookStore = new Map<string, { name: string; entries: Map<string, HostBookEntry> }>();
+  /** Books and their entries, each with the outlet the host keeps beside its extension data (reading an entry back doesn't show it). */
+  readonly bookStore = new Map<string, { name: string; entries: Map<string, HostBookEntry & { outlet: string | null }> }>();
 
-  /** Edits an entry as the host's World Info UI would (the engine never updates entries). */
+  /** An entry as the host stores it, outlet included (tests read where it sits). */
+  storedEntry(entryId: string): (HostBookEntry & { outlet: string | null }) | undefined {
+    for (const book of this.bookStore.values()) {
+      const e = book.entries.get(entryId);
+      if (e) return structuredClone(e);
+    }
+    return undefined;
+  }
+
+  /** Edits an entry as the host's World Info UI would. */
   editEntry(entryId: string, patch: Partial<HostBookEntryInput>): void {
     for (const book of this.bookStore.values()) {
       const e = book.entries.get(entryId);
@@ -533,18 +543,28 @@ export class FakeHost implements HostPort {
       return id;
     },
     exists: async (bookId) => this.bookStore.has(bookId),
-    entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map((e) => structuredClone(e)),
+    entries: async (bookId) => [...(this.bookStore.get(bookId)?.entries.values() ?? [])].map(({ outlet: _outlet, ...e }) => structuredClone(e)),
     createEntry: async (bookId, entry) => {
       const book = this.bookStore.get(bookId);
       if (!book) throw new Error(`no book ${bookId}`);
       const id = this.newId("entry");
-      book.entries.set(id, { ...structuredClone(entry), id, bookId });
+      book.entries.set(id, { ...structuredClone(entry), outlet: entry.outlet ?? null, id, bookId });
       return id;
+    },
+    place: async (entryId, placement, extensions) => {
+      this.placed.push(entryId);
+      for (const book of this.bookStore.values()) {
+        const e = book.entries.get(entryId);
+        if (e) book.entries.set(entryId, { ...e, ...structuredClone(placement), extensions: structuredClone(extensions) });
+      }
     },
     deleteEntry: async (entryId) => {
       for (const book of this.bookStore.values()) book.entries.delete(entryId);
     },
   };
+
+  /** Entries the backend moved, in order. */
+  readonly placed: string[] = [];
 
   /** Payloads sent to spawned lanes, by process id. */
   readonly processMail = new Map<string, unknown[]>();

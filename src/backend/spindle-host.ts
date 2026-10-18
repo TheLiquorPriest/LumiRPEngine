@@ -185,7 +185,8 @@ function usageTokens(raw: unknown): number {
   return (num(u, "input_tokens") ?? num(u, "prompt_tokens") ?? 0) + (num(u, "output_tokens") ?? num(u, "completion_tokens") ?? 0);
 }
 
-function entryInput(entry: HostBookEntryInput): WorldBookEntryCreateDTO {
+/** An entry as the host creates it; its outlet goes into `extensions.outlet_name`, where the host reads it. */
+export function entryInput(entry: HostBookEntryInput): WorldBookEntryCreateDTO {
   return {
     comment: entry.comment,
     content: entry.content,
@@ -196,7 +197,7 @@ function entryInput(entry: HostBookEntryInput): WorldBookEntryCreateDTO {
     depth: entry.depth,
     ...(entry.role !== null ? { role: entry.role } : {}),
     order_value: entry.order,
-    extensions: entry.extensions,
+    extensions: entry.outlet ? { ...entry.extensions, outlet_name: entry.outlet } : entry.extensions,
   };
 }
 
@@ -446,6 +447,10 @@ export function createSpindleHost(): HostPort {
       async createEntry(bookId, entry, userId) {
         const created = await spindle.world_books.entries.create(bookId, entryInput(entry), userId);
         return created.id;
+      },
+      async place(entryId, placement, extensions, userId) {
+        // The outlet goes beside the other fields: an update keeps the entry's old one otherwise.
+        await spindle.world_books.entries.update(entryId, { position: placement.position, depth: placement.depth, role: placement.role, outlet_name: placement.outlet, extensions }, userId);
       },
       async deleteEntry(entryId, userId) {
         await spindle.world_books.entries.delete(entryId, userId);

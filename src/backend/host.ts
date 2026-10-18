@@ -236,7 +236,20 @@ export interface HostBookEntry {
   extensions: JsonObject;
 }
 
-export type HostBookEntryInput = Omit<HostBookEntry, "id" | "bookId">;
+export type HostBookEntryInput = Omit<HostBookEntry, "id" | "bookId"> & {
+  /** The `{{outlet::name}}` the entry fills, kept in its `extensions.outlet_name`; none when absent. */
+  outlet?: string | null;
+};
+
+/** Where an entry sits in the prompt. The host keeps the outlet beside the extension data, so reading an entry back doesn't show it. */
+export interface HostEntryPlacement {
+  /** Host position code (0 = before character, 4 = at depth, 8 = only at its outlet, …). */
+  position: number;
+  depth: number;
+  role: "system" | "user" | "assistant";
+  /** Null takes the entry out of any outlet. */
+  outlet: string | null;
+}
 
 /** A child lane's message or lifecycle change (`backendProcesses`). */
 export interface ProcessEvent {
@@ -343,6 +356,8 @@ export interface HostPort {
     exists(bookId: string, userId: UserId): Promise<boolean>;
     entries(bookId: string, userId: UserId): Promise<HostBookEntry[]>;
     createEntry(bookId: string, entry: HostBookEntryInput, userId: UserId): Promise<string>;
+    /** Moves an entry (its position, depth, role and outlet) and rewrites its extension data. */
+    place(entryId: string, placement: HostEntryPlacement, extensions: JsonObject, userId: UserId): Promise<void>;
     deleteEntry(entryId: string, userId: UserId): Promise<void>;
   };
   /** A dry-run assembly of the chat's next prompt (deliverability check, DESIGN §4.2; the D32 preset lint). */

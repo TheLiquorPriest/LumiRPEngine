@@ -5,21 +5,33 @@
 //
 // Host sources: frontend/src/lib/spindle/dom-decorator-service.ts:62-83,
 // frontend/src/lib/spindle/frontend-context.ts:25-78; for the backend's `spindle`,
-// src/services/regex-scripts.service.ts (validateInput, rowToRegexScript).
+// src/services/regex-scripts.service.ts (validateInput, rowToRegexScript) and
+// src/services/world-books.service.ts (updateEntry, buildStoredEntryExtensions).
 
-import type { RegexScriptCreateDTO, RegexScriptDTO, RegexScriptListOptionsDTO, RegexTargetDTO, SpindleAPI, SpindleFloatWidgetHandle, SpindleFloatWidgetOptions, SpindleFrontendContext } from "lumiverse-spindle-types";
+import type { RegexScriptCreateDTO, RegexScriptDTO, RegexScriptListOptionsDTO, RegexTargetDTO, SpindleAPI, SpindleFloatWidgetHandle, SpindleFloatWidgetOptions, SpindleFrontendContext, WorldBookEntryDTO, WorldBookEntryUpdateDTO } from "lumiverse-spindle-types";
 
 /** A regex script's `target` is a list on the host, so one script can bake a reply and render it; a single target reads as a list of one. */
 export type RegexScriptInput = Omit<RegexScriptCreateDTO, "target"> & { target?: RegexTargetDTO[] };
 
 export type RegexScriptRow = Omit<RegexScriptDTO, "target"> & { target: RegexTargetDTO | RegexTargetDTO[] };
 
+/**
+ * An entry update keeps the entry's outlet unless it names one: `outlet_name` beside the other fields
+ * sets it, and null clears it (an `outlet_name` inside `extensions` counts only when an entry is created).
+ */
+export type WorldBookEntryWrite = WorldBookEntryUpdateDTO & { outlet_name?: string | null };
+
 /** The backend's `spindle` global as the host runs it. */
-export type HostSpindleAPI = Omit<SpindleAPI, "regex_scripts"> & {
+export type HostSpindleAPI = Omit<SpindleAPI, "regex_scripts" | "world_books"> & {
   regex_scripts: Omit<SpindleAPI["regex_scripts"], "list" | "create" | "update"> & {
     list(options?: RegexScriptListOptionsDTO): Promise<{ data: RegexScriptRow[]; total: number }>;
     create(input: RegexScriptInput, userId?: string): Promise<RegexScriptRow>;
     update(scriptId: string, input: RegexScriptInput, userId?: string): Promise<RegexScriptRow>;
+  };
+  world_books: Omit<SpindleAPI["world_books"], "entries"> & {
+    entries: Omit<SpindleAPI["world_books"]["entries"], "update"> & {
+      update(entryId: string, input: WorldBookEntryWrite, userId?: string): Promise<WorldBookEntryDTO>;
+    };
   };
 };
 

@@ -1,16 +1,18 @@
 // The engine-managed lore book per world (DESIGN §4.2, D11): "LumiRPEngine · <World>", one slot
 // entry per section, stored `disabled:true, key:[]` so nothing activates natively; only the
 // interceptor enables them, with content rendered from the fold (DESIGN §6.3) and chat-depth
-// placement (§6.4). The book is attached to world chats through `chat_world_book_ids`. It holds
-// slots only: world lore stays in the world document, and copies an earlier build synced into
-// the book are removed.
+// placement (§6.4). Each entry sits where its section's Position puts it, and follows the Position
+// when it changes. The book is attached to world chats through `chat_world_book_ids`. It holds
+// slots only: world lore stays in the world document, and copies an earlier build synced into the
+// book are removed.
 
 import type { ChatId, SlotId, UserId } from "../shared/ids";
+import type { JsonObject } from "../shared/json";
 import { isRecord } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
-import type { SectionTemplate, WorldDoc, WorldIndex } from "../shared/world";
-import type { HostBookEntry, HostPort, PlacementOverride } from "./host";
+import type { SectionTemplate, SlotPosition, WorldDoc, WorldIndex } from "../shared/world";
+import type { HostBookEntry, HostEntryPlacement, HostPort, PlacementOverride } from "./host";
 import type { WorldStore } from "./worlds";
 
 /** Sections a world gets when it defines none (DESIGN §4.2 slot list); lower rank is kept first. */
@@ -38,6 +40,18 @@ export function placementOf(section: SectionTemplate): PlacementOverride | null 
   return p.type === "chat_depth" ? { type: "chat_depth", role: p.role, depth: p.depth, direction: p.direction } : null;
 }
 
+/**
+ * Where a section's entry is stored for its Position: at its chat depth (the interceptor's placement
+ * repeats it each turn, with its direction); only at its outlet (host position 8, outlet-only, so the
+ * section lands at `{{outlet::name}}` and nowhere else); or before the character, where a native entry
+ * starts and the host's World Info editor may move it.
+ */
+export function entryPlacement(position: SlotPosition): HostEntryPlacement {
+  if (position.type === "chat_depth") return { position: 4, depth: position.depth, role: position.role, outlet: null };
+  if (position.type === "outlet") return { position: 8, depth: 4, role: "system", outlet: position.name.trim() };
+  return { position: 0, depth: 4, role: "system", outlet: null };
+}
+
 /** The slot an engine-book entry carries in its extension data. */
 export function slotOfEntry(extensions: Readonly<Record<string, unknown>>): SlotId | null {
   const ns = extensions[LEDGER_NAMESPACE];
@@ -60,10 +74,10 @@ export class EngineBook {
   ) {}
 
   /**
-   * Creates the world's book if it has none (or it was deleted) and a slot entry per section, and
-   * deletes the world lore copies an earlier build synced into it: lore is no longer delivered, and
-   * those copies (secret ones included) shouldn't sit in a host-visible book. The world document
-   * keeps the lore.
+   * Creates the world's book if it has none (or it was deleted) and a slot entry per section, moves
+   * each entry whose section's Position changed since the engine placed it, and deletes the world lore
+   * copies an earlier build synced into the book: lore is no longer delivered, and those copies (secret
+   * ones included) shouldn't sit in a host-visible book. The world document keeps the lore.
    */
   async ensure(world: WorldDoc, index: WorldIndex, userId: UserId): Promise<string> {
     let bookId = index.loreBookId;
@@ -72,35 +86,34 @@ export class EngineBook {
       await this.worlds.setLoreBook(world.id, bookId, userId);
     }
     // Read the book afresh: a slot entry deleted in the host's UI is recreated.
-    const existing = new Map<SlotId, string>();
+    const existing = new Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>();
     const leftoverLore: string[] = [];
     for (const e of await this.host.books.entries(bookId, userId)) {
       const slot = slotOfEntry(e.extensions);
-      if (slot) existing.set(slot, e.id);
+      const ns = e.extensions[LEDGER_NAMESPACE];
+      if (slot) existing.set(slot, { id: e.id, placed: isRecord(ns) && typeof ns.placed === "string" ? ns.placed : null, extensions: e.extensions });
       else if (loreOfEntry(e.extensions) !== null) leftoverLore.push(e.id);
     }
-    this.slots.set(bookId, existing);
+    const ids = new Map<SlotId, string>();
     for (const section of sectionsOf(world)) {
-      if (existing.has(section.id)) continue;
-      const placement = placementOf(section);
-      const id = await this.host.books.createEntry(
-        bookId,
-        {
-          comment: `LRE · ${section.label}`,
-          content: "",
-          keys: [],
-          disabled: true,
-          constant: false,
-          position: placement ? 4 : 0,
-          depth: placement?.depth ?? 4,
-          role: placement?.role ?? "system",
-          order: 100 + section.rank,
-          extensions: { [LEDGER_NAMESPACE]: { slot: section.id } },
-        },
-        userId,
-      );
-      existing.set(section.id, id);
+      const p = section.position;
+      // The Position the entry was placed for, so a later change of it is seen (the host's own entry
+      // fields can't tell: the outlet isn't read back, and a move in its editor changes them too).
+      const placed = p.type === "chat_depth" ? `chat_depth:${p.role}:${p.depth}:${p.direction}` : p.type === "outlet" ? `outlet:${p.name.trim()}` : "native";
+      const known = existing.get(section.id);
+      const extensions: JsonObject = { ...(known?.extensions ?? {}), [LEDGER_NAMESPACE]: { slot: section.id, placed } };
+      if (!known) {
+        ids.set(section.id, await this.host.books.createEntry(bookId, { comment: `LRE · ${section.label}`, content: "", keys: [], disabled: true, constant: false, ...entryPlacement(p), order: 100 + section.rank, extensions }, userId));
+        continue;
+      }
+      ids.set(section.id, known.id);
+      // A move in the host's editor stands until the Position changes; a native entry an earlier
+      // build made (none recorded) keeps its place.
+      if (known.placed !== placed && !(known.placed === null && p.type === "native")) await this.host.books.place(known.id, entryPlacement(p), extensions, userId);
     }
+    // Slots of sections the world no longer has keep their entries (voted off each turn).
+    for (const [slot, e] of existing) if (!ids.has(slot)) ids.set(slot, e.id);
+    this.slots.set(bookId, ids);
     for (const id of leftoverLore) await this.host.books.deleteEntry(id, userId);
     return bookId;
   }
