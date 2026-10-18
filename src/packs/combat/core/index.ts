@@ -32,7 +32,7 @@ import { placeOfEntity, truthy } from "../../../engine/scope";
 import { selectorMatches } from "../../../engine/selector";
 import { knownBySelector } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
-import { fightChoices, nextTurn, openRound, spendFor, type FightRound } from "./flow";
+import { fightChoices, hpLine, nextTurn, openRound, spendFor, type FightRound } from "./flow";
 import { canFight, downHolds, encounterOf, endHolds, fighterOf, fits, fullEconomy, LOG_CAP, offTurnCost, PACK, readFor, rulesOf, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
 import { buildEncounterView, type EncounterView } from "./view";
 
@@ -48,6 +48,8 @@ declare module "../../../engine/registry" {
     "combat.choices": (ctx: ReadContext) => { key: string; agent: EntityId; options: string[]; labels: Record<string, string> }[];
     /** The fight as the GM sees it; null without one. */
     "combat.gm": (ctx: ReadContext) => EncounterView | null;
+    /** A player's line for a change to someone else's HP that the POV sees as a wound band (`hpLine`): no number; undefined for any other event. */
+    "combat.hp_line": (ctx: ReadContext, e: LedgerEvent) => string | null | undefined;
   }
 }
 
@@ -318,6 +320,7 @@ export const combatPack: PackDef = {
     r.service("combat.round", openRound);
     r.query("combat.choices", fightChoices);
     r.query("combat.gm", (ctx) => buildEncounterView(ctx, { gm: true }));
+    r.query("combat.hp_line", hpLine);
 
     // What formulas read of the fight: a requirement `is_foe(self, target)` keeps an attack to foes.
     r.formula("can_fight", (ctx, e) => {

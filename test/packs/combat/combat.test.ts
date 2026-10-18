@@ -12,6 +12,7 @@ import { applyEffects } from "../../../src/engine/effects";
 import { actionOdds, resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import type { WorldState } from "../../../src/engine/state";
+import { authorLines, playerLines } from "../../../src/engine/player-events";
 import { planTurn } from "../../../src/engine/turn";
 import { lintStructure } from "../../../src/engine/world-lint";
 import { Working } from "../../../src/engine/working";
@@ -380,6 +381,27 @@ describe("what the POV may see", () => {
     expect(row(world)).toMatchObject({ hp: { current: 2, max: 7 }, wound: null });
     expect(buildEncounterView(reg.context(world, started(world).state))?.order.find((r) => r.you)?.hp).toEqual({ current: 12, max: 12 });
     expect(paletteEncounter(reg.context(world, started(world).state))).toEqual({ round: 1, turn: "you", yours: true, economy: [{ id: "action", label: "Action", left: 1, of: 1 }, { id: "move", label: "Move", left: 1, of: 1 }] });
+  });
+
+  test("in wounds mode the change chip, the Journal and the narrator's Outcome give others' HP as a band, never a number; the GM's lines keep it", () => {
+    const world = fightWorld((w) => {
+      povFirst(w);
+      w.entities.goblin!.fields.ac = 0;
+    });
+    const w = started(world, ["goblin"]);
+    const p = plan(world, w.state, "strike", { target: "goblin" });
+    const after = fold(reg, world, w.state, p.events);
+    const hits = p.events.filter((e) => (e.type === "set" || e.type === "add") && e.entity === "goblin" && e.field === "hp");
+    expect(hits.length).toBeGreaterThan(0);
+    const player = playerLines(reg, world, after, POV, p.events, 40).filter((l) => l.startsWith("Goblin")).join("\n");
+    expect(player).toMatch(/Goblin(: (hurt|badly hurt)| takes damage)/);
+    expect(player).not.toMatch(/\d/);
+    expect(p.combat.join("\n")).toMatch(/Goblin takes damage \((hurt|badly hurt)\)\./);
+    expect(p.combat.join("\n")).not.toContain("Goblin loses");
+    expect(authorLines(reg, world, after, hits, 8).join("\n")).toMatch(/Goblin: HP −?\d/);
+    // With numbers shown, the player gets them too.
+    world.ruleset!.combat!.showHp = "exact";
+    expect(playerLines(reg, world, after, POV, hits, 8).join("\n")).toMatch(/Goblin: HP −?\d/);
   });
 });
 

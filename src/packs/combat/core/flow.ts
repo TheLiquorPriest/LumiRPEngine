@@ -117,6 +117,13 @@ function capital(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** The wound band `current` HP of `max` reads as, by the rules' bands or the default ones. */
+function woundOf(rules: CombatDef, current: number, max: number | null): string {
+  const percent = max !== null && max > 0 ? Math.round((Math.max(0, current) / max) * 100) : current > 0 ? 100 : 0;
+  const bands = Array.isArray(rules.wounds) && rules.wounds.length > 0 ? rules.wounds : DEFAULT_WOUNDS;
+  return bandOf(bands, percent)?.label ?? "";
+}
+
 /**
  * HP as the POV sees it (DESIGN §11): its own exactly; anyone else's exactly when the rules show
  * numbers and the HP field is visible, else as a wound band; nothing for someone it can't see.
@@ -128,9 +135,25 @@ export function hpSeen(ctx: ReadContext, rules: CombatDef, id: EntityId, gm = fa
   if (gm || id === ctx.world.pov) return { current, max };
   if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id)) return null;
   if (rules.showHp === "exact" && canSeeField(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id, rules.hp)) return { current, max };
-  const percent = max !== null && max > 0 ? Math.round((Math.max(0, current) / max) * 100) : current > 0 ? 100 : 0;
-  const bands = Array.isArray(rules.wounds) && rules.wounds.length > 0 ? rules.wounds : DEFAULT_WOUNDS;
-  return { wound: bandOf(bands, percent)?.label ?? "" };
+  return { wound: woundOf(rules, current, max) };
+}
+
+/**
+ * A player's line (a chip, the Journal) for a change to someone else's HP that the POV sees as a
+ * wound band: the band a `set` leaves them in, or which way an `add` went, never a number (an
+ * `add` carries no HP to band, and the state the line is read against may be later than it). Null
+ * for someone the POV can't see; undefined for any other event, which reads as usual.
+ */
+export function hpLine(ctx: ReadContext, e: LedgerEvent): string | null | undefined {
+  const rules = rulesOf(ctx.world);
+  if (!rules || (e.type !== "set" && e.type !== "add") || e.field !== rules.hp || e.entity === ctx.world.pov) return undefined;
+  const seen = hpSeen(ctx, rules, e.entity);
+  if (seen === null) return null;
+  if (!("wound" in seen)) return undefined;
+  const who = labelOf(ctx, e.entity);
+  if (e.type === "add") return `${who} ${e.delta < 0 ? "takes damage" : "recovers"}`;
+  const band = typeof e.value === "number" ? woundOf(rules, e.value, hpMaxOf(ctx, rules, e.entity)) : "";
+  return band !== "" ? `${who}: ${band}` : null;
 }
 
 /** The HP field's name for lines: its label on the POV's kind, else the field id in words. */
@@ -160,15 +183,22 @@ class FightLines {
     if (happened) this.happened = true;
   }
 
-  /** The HP changes since `before`, as the POV sees them ("Goblin loses 7 HP (badly hurt)."). */
+  /**
+   * The HP changes since `before`, as the POV sees them: its own and exact HP by the numbers ("Goblin
+   * loses 7 HP (5 of 12 left)."), a wound band without them ("Goblin takes damage (badly hurt).").
+   */
   changes(ctx: ReadContext, before: ReadonlyMap<EntityId, number>): void {
     for (const [id, was] of before) {
       const now = hpOf(ctx, this.rules, id);
       const who = nameFor(ctx, id);
       if (now === was || who === "someone") continue;
       const seen = hpSeen(ctx, this.rules, id);
+      if (seen && "wound" in seen) {
+        this.push(`${capital(who)} ${now < was ? "takes damage" : "recovers"}${seen.wound ? ` (${seen.wound})` : ""}.`);
+        continue;
+      }
       const verb = (now < was ? "lose" : "gain") + (id === ctx.world.pov ? "" : "s");
-      const left = !seen ? "" : "wound" in seen ? (seen.wound ? ` (${seen.wound})` : "") : ` (${seen.current}${seen.max !== null ? ` of ${seen.max}` : ""} left)`;
+      const left = seen ? ` (${seen.current}${seen.max !== null ? ` of ${seen.max}` : ""} left)` : "";
       this.push(`${capital(who)} ${verb} ${Math.abs(now - was)} ${hpName(ctx, this.rules)}${left}.`);
     }
   }

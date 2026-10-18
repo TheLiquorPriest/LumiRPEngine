@@ -14,7 +14,7 @@ import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
 import type { Registry } from "./registry-impl";
 import { bandOf, fieldDef, GONE_FIELD } from "./scope";
 import type { WorldState } from "./state";
-import { own } from "./pack-kit";
+import { optionalQuery, own } from "./pack-kit";
 import { canSeeEntity, canSeeField, canSeePlace, eventVisible, findLeaks, knows, trackKnown, unrevealedSecrets, visibilityOf } from "./visibility";
 
 /** Event types that are engine or pack bookkeeping: never player-facing lines. */
@@ -350,12 +350,17 @@ function wordedLines(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
   events.forEach((e, i) => {
     if (e.type === "set") lastSet.set(`${e.entity}\u0000${e.field}`, i);
   });
+  // A change to someone else's HP that the POV sees as a wound band reads as one, never as a number
+  // (the combat pack's `combat.hp_line`, DESIGN §11).
+  const ctx = player ? reg.context(world, state) : null;
+  const hpLine = ctx ? optionalQuery(ctx, "combat.hp_line") : null;
   for (const [i, e] of events.entries()) {
     if (e.type === "set" && lastSet.get(`${e.entity}\u0000${e.field}`) !== i) continue;
     if (BOOKKEEPING.has(e.type)) continue;
     if (player && !playerEventVisible(reg, world, state, pov, e)) continue;
     if (player && e.type === "set" && !canSeeField(reg, world, state, pov, e.entity, e.field)) continue;
-    const text = rawLine(reg, world, state, pov, e, player);
+    const banded = ctx && hpLine ? hpLine(ctx, e) : undefined;
+    const text = banded === undefined ? rawLine(reg, world, state, pov, e, player) : banded;
     if (!text || lines.some((l) => l.text === text)) continue;
     if (player) {
       // Text that must never reach a player line: unrevealed truths and gated secret lore, and hidden names.
