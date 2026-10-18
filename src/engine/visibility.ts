@@ -337,11 +337,32 @@ export function findLeaks(value: JsonValue | string | undefined, secrets: readon
 }
 
 /**
+ * The accents people often leave out on Latin, Greek and Cyrillic letters, once decomposed (the
+ * combining marks U+0300–U+036F): Zoë is Zoe, Алёна is Алена. Other scripts' marks are parts of their
+ * letters and stay ("राम" keeps its vowel sign).
+ */
+const ACCENTS = /[\u0300-\u036f]/g;
+
+/** Letters with no decomposition that people write plain all the same: Søren is Soren, Łukasz is Lukasz. */
+const PLAIN_LETTERS: Record<string, string> = { ø: "o", æ: "ae", œ: "oe", ß: "ss", đ: "d", ł: "l", ı: "i", ð: "d", þ: "th" };
+
+/** A text without the accents people leave out, composed alike however it was typed; its case is kept. */
+function unaccented(text: string): string {
+  return text.normalize("NFD").replace(ACCENTS, "").normalize("NFC");
+}
+
+/** A word as name checks compare it: as written ("zoë", "łukasz") and plain ("zoe", "lukasz"). */
+interface Spelling {
+  written: string;
+  plain: string;
+}
+
+/**
  * A text's words as name checks compare them: lowercase runs of letters, marks and digits ("Vex's"
  * is "vex" and "s"; "राम" keeps its vowel sign), composed alike however they were typed.
  */
-function nameWords(text: string): string[] {
-  return text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+function spellings(text: string): Spelling[] {
+  return (text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).map((written) => ({ written, plain: unaccented(written).replace(/[øæœßđłıðþ]/g, (c) => PLAIN_LETTERS[c] ?? c) }));
 }
 
 /** Words too common to name anything on their own: "The Vault of Sorrows" is said by "vault" and "sorrows". */
@@ -352,42 +373,68 @@ const WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
 /**
  * Whether `words` come in `said` (a text's words joined by spaces) in order, each later in the same
  * word as the one before or in the next. A word of ASCII letters and digits counts only whole, so
- * "dangerous" doesn't say "dan"; one with any other letter counts anywhere, since a script written
+ * "dangerous" doesn't say "dan", or with an English plural ending ("the Okafors", "two lanterns",
+ * "the Joneses", "the pantries"); one with any other letter counts anywhere, since a script written
  * without spaces (李雷在监视你) or an inflected form (Вексом for Векс) has no word end to find.
  * Words are runs of letters, marks and digits, so none needs escaping in the pattern.
  */
 function saysInOrder(said: string, words: readonly string[]): boolean {
-  const parts = words.map((w) => (/^[a-z0-9]+$/.test(w) ? `(?<!${WORD_CHAR})${w}(?!${WORD_CHAR})` : w));
+  const parts = words.map((w) => {
+    if (!/^[a-z0-9]+$/.test(w)) return w;
+    const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
+    return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
+  });
   return new RegExp(parts.join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
+}
+
+/** What a text says, read for name checks: its words as written and plain, with and without words like "the". */
+function sayings(text: string): { says(words: readonly Spelling[], all: boolean): boolean; capital(letter: string): boolean } {
+  const words = spellings(text);
+  const joined = (key: keyof Spelling, all: boolean): string =>
+    words
+      .filter((w) => all || !hasOwn(FUNCTION_WORDS, w.plain))
+      .map((w) => w[key])
+      .join(" ");
+  const texts = { written: joined("written", false), plain: joined("plain", false), writtenAll: joined("written", true), plainAll: joined("plain", true) };
+  const cased = unaccented(text);
+  return {
+    // Plain, "Zoe" says Zoë; as written, an inflected "Łukaszem" still says Łukasz.
+    says: (parts, all) => saysInOrder(all ? texts.plainAll : texts.plain, parts.map((p) => p.plain)) || saysInOrder(all ? texts.writtenAll : texts.written, parts.map((p) => p.written)),
+    capital: (letter) => new RegExp(`(?<!${WORD_CHAR})${letter}(?!${WORD_CHAR})`, "u").test(cased),
+  };
 }
 
 /**
  * Whether a model's free text (a judge's reason, a lore trace's search) names any of `people` or
- * says any of `labels`, ignoring case and the words that name nothing on their own ("the", "of"),
- * each word read as `saysInOrder` reads it. A person counts by any word of their name ("Vex is
- * watching" names Vex Morrow): one of ASCII letters from two letters, one in another script however
- * short (李雷). Anything else (a place, a thing, a track's label, a lore title) counts only by all its
- * words in order, so "under the chapel" says Under the Chapel and "under" alone doesn't. A word or
- * label `heard` says too doesn't count: whoever reads the text has seen it said.
+ * says any of `labels`, ignoring case, the accents people leave out (Zoe for Zoë) and the words that
+ * name nothing on their own ("the", "of"), each word read as `saysInOrder` reads it. A person counts
+ * by any word of their name ("Vex is watching" names Vex Morrow): one of ASCII letters from two
+ * letters, one in another script however short (李雷). A name of single letters (Q, M) counts as that
+ * capital standing alone, except A and I, which are words. Anything else (a place, a thing, a
+ * track's label, a lore title) counts only by all its words in order, so "under the chapel" says
+ * Under the Chapel and "under" alone doesn't. A word or label `heard` says too doesn't count: whoever
+ * reads the text has seen it said.
  */
 export function namesAny(text: string, people: readonly string[], labels: readonly string[] = [], heard = ""): boolean {
-  const words = nameWords(text);
-  const said = words.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
-  const heardWords = nameWords(heard);
-  const known = heardWords.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
+  const said = sayings(text);
+  const known = sayings(heard);
   for (const name of people) {
-    for (const w of nameWords(name)) {
-      if (hasOwn(FUNCTION_WORDS, w) || (w.length < 2 && /^[a-z0-9]+$/.test(w))) continue;
-      if (saysInOrder(said, [w]) && !saysInOrder(known, [w])) return true;
+    const words = spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
+    const counted = words.filter((w) => !/^[a-z0-9]$/.test(w.plain));
+    for (const w of counted) if (said.says([w], false) && !known.says([w], false)) return true;
+    if (counted.length > 0) continue;
+    for (const w of words) {
+      const letter = w.plain.toUpperCase();
+      if (/^[B-HJ-Z]$/.test(letter) && said.capital(letter) && !known.capital(letter)) return true;
     }
   }
   for (const label of labels) {
-    const all = nameWords(label);
-    const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w));
+    const all = spellings(label);
+    const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
     // A label of nothing but such words ("On and On") counts only as it is.
     const whole = named.length === 0;
     const parts = whole ? all : named;
-    if (parts.length > 0 && saysInOrder(whole ? words.join(" ") : said, parts) && !saysInOrder(whole ? heardWords.join(" ") : known, parts)) return true;
+    if (parts.length > 0 && said.says(parts, whole) && !known.says(parts, whole)) return true;
   }
   return false;
 }

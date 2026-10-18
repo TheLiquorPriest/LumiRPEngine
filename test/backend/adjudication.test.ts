@@ -317,4 +317,23 @@ describe("the judge step and people the POV can't see", () => {
     expect(namesAny("他在龙门客栈等你", [], ["龙门 客栈"])).toBe(true);
     expect(namesAny("The brass key glints", [], ["Silver Key"])).toBe(false);
   });
+
+  test("a name counts without the accents people leave out, in the plural, and as one capital letter; ordinary words stay words", () => {
+    expect(namesAny("Zoe is watching", ["Zoë Hart"])).toBe(true);
+    expect(namesAny("Zoë is watching", ["Zoe Hart"])).toBe(true);
+    expect(namesAny("Soren knows", ["Søren Lund"])).toBe(true);
+    expect(namesAny("Алена ждёт", ["Алёна"])).toBe(true);
+    // As written, an inflected form still counts.
+    expect(namesAny("Rozmawiała z Łukaszem", ["Łukasz"])).toBe(true);
+    expect(namesAny("The Okafors are home", ["Ada Okafor"])).toBe(true);
+    expect(namesAny("Two lanterns glow", [], ["Lantern"])).toBe(true);
+    expect(namesAny("The pantries are bare", [], ["The Pantry"])).toBe(true);
+    expect(namesAny("Q wants a word", ["Q"])).toBe(true);
+    expect(namesAny("Ask M's driver", ["M"])).toBe(true);
+    expect(namesAny("She renews the lease", ["René Dubois"])).toBe(false);
+    expect(namesAny("A quick word, then I leave", ["Q"])).toBe(false);
+    expect(namesAny("I wait. A man waits too.", ["I", "A"])).toBe(false);
+    expect(namesAny("Seven times out of 7", ["7"])).toBe(false);
+    expect(namesAny("Q wants a word", ["Q"], [], "Where is Q?")).toBe(false);
+  });
 });

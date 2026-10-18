@@ -146,16 +146,18 @@ describe("the Stance section", () => {
       w.tracks.s_till = { id: "s_till", kind: "secret", label: "The short till", start: "hidden", visibility: "secret", stages: { hidden: { label: "Hidden", next: [], truth: "Maya covers the short till" } } };
       w.lore.toledo = { id: "toledo", title: "The Toledo years", content: "What happened before Riverton.", keys: [], links: [], secret: true, gate: "false" };
       w.entities.vex = { id: "vex", kind: "person", name: "Vex Morrow", tier: "supporting", fields: {}, relations: [], visibility: "secret" };
+      w.entities.zoe = { id: "zoe", kind: "person", name: "Zoë Hart", tier: "supporting", fields: {}, relations: [], visibility: "secret" };
       cues(w, "maya", [
         { text: "everyone can see Maya covers the short till", track: "s_till" },
         { text: "goes quiet whenever Vex is mentioned", track: "s_till" },
         { text: "won't talk about the Toledo years", track: "s_till" },
+        { text: "watches Zoe from the window", track: "s_till" },
         { text: "fidgets with her apron", track: "s_till" },
       ]);
     });
     const shown = stance(world, state).join("\n");
     expect(shown).toContain("fidgets with her apron");
-    for (const dropped of ["covers the short till", "Vex", "Toledo"]) expect(shown).not.toContain(dropped);
+    for (const dropped of ["covers the short till", "Vex", "Toledo", "Zoe"]) expect(shown).not.toContain(dropped);
   });
 });
 
