@@ -469,7 +469,7 @@ export class Dispatcher {
           await this.rt.ledger.open(r.chatId, userId);
         }
         // The chat's JSON blocks are hidden from now on (DESIGN §6.7); without the permission the attach still stands.
-        await this.rt.jsonHiding.ensure(r.chatId, r.worldId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${r.chatId}: the JSON-hiding regex script wasn't written (${error instanceof Error ? error.message : String(error)})`, userId));
+        await this.rt.jsonHiding.ensure(r.chatId, r.worldId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${r.chatId}: the JSON regex scripts weren't written (${error instanceof Error ? error.message : String(error)})`, userId));
         await this.rt.push.snapshot(r.chatId, userId);
         return { revision: existing ? existing.revision : revision };
       }

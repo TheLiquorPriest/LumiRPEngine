@@ -303,11 +303,11 @@ export type HostPresetBlockInput = { kind: "category"; name: string } | { kind: 
 
 // ---------------------------------------------------------------- regex scripts
 
-/** A chat-scoped regex script (`regex_scripts`), as the backend reads one. */
+/** A regex script of the user's (`regex_scripts`), scoped to a chat or global, as the backend reads one. */
 export interface HostRegexScript {
   id: string;
-  /** The chat it is scoped to. */
-  chatId: ChatId;
+  /** The chat it is scoped to; null for a global one. */
+  chatId: ChatId | null;
   /** This extension created it, so it may change or delete it (the host's `can_mutate`). */
   mine: boolean;
   findRegex: string;
@@ -317,22 +317,22 @@ export interface HostRegexScript {
   /** Where it runs; one script may run on several targets. */
   targets: string[];
   runOnEdit: boolean;
-  /** Lower runs earlier among the chat's scripts. */
+  /** Lower runs earlier: on display among every script, elsewhere within its scope (global ones before a chat's). */
   sortOrder: number;
   metadata: JsonObject;
 }
 
-/** A chat-scoped script the backend writes. Its capture references are the host's (`$&`), with no macros. */
+/** A script the backend writes, scoped to a chat, or global with `chatId` null. Its capture references are the host's (`$&`, `$1`), with no macros. */
 export interface HostRegexScriptInput {
   name: string;
   /** Stable and unique per user: the host refuses a second script with the same one. */
   scriptId: string;
-  chatId: ChatId;
+  chatId: ChatId | null;
   findRegex: string;
   replaceString: string;
   flags: string;
   placement: "ai_output"[];
-  targets: ("response" | "display")[];
+  targets: ("response" | "display" | "prompt")[];
   runOnEdit: boolean;
   sortOrder: number;
   description: string;
@@ -409,6 +409,8 @@ export interface HostPort {
   regex: {
     /** Chat-scoped scripts: one chat's, or with null every chat's. */
     chatScripts(chatId: ChatId | null, userId: UserId): Promise<HostRegexScript[]>;
+    /** Global scripts. */
+    globalScripts(userId: UserId): Promise<HostRegexScript[]>;
     /** Writes a script: a new one when `id` is null, else `id`'s definition (whether it is switched on stays the user's). Its id. */
     write(id: string | null, script: HostRegexScriptInput, userId: UserId): Promise<string>;
     remove(id: string, userId: UserId): Promise<void>;

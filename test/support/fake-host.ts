@@ -185,7 +185,8 @@ export class FakeHost implements HostPort {
   readonly regexScripts = new Map<string, HostRegexScript & { scriptId: string; disabled: boolean }>();
 
   regex: HostPort["regex"] = {
-    chatScripts: async (chatId) => [...this.regexScripts.values()].filter((s) => chatId === null || s.chatId === chatId).map(({ scriptId: _id, disabled: _off, ...s }) => structuredClone(s)),
+    chatScripts: async (chatId) => [...this.regexScripts.values()].filter((s) => s.chatId !== null && (chatId === null || s.chatId === chatId)).map(({ scriptId: _id, disabled: _off, ...s }) => structuredClone(s)),
+    globalScripts: async () => [...this.regexScripts.values()].filter((s) => s.chatId === null).map(({ scriptId: _id, disabled: _off, ...s }) => structuredClone(s)),
     write: async (id, script) => {
       // The host normalizes a script id and keeps it unique per user.
       const scriptId = script.scriptId.toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
@@ -202,11 +203,21 @@ export class FakeHost implements HostPort {
     },
   };
 
-  /** A reply as the host saves it: the chat's enabled `response` scripts applied in turn (no macros: plain replacement); an edit runs only the run-on-edit ones. */
+  /**
+   * `text` through the chat's enabled scripts on `target` for AI output (no macros: plain replacement), in
+   * the order the host runs them: the frontend runs display scripts by sort order alone, the backend runs
+   * the others global first, then the chat's, each by sort order; the order they were made in breaks a tie.
+   * An edit runs only the run-on-edit ones.
+   */
+  scripted(chatId: ChatId, target: "response" | "display" | "prompt", text: string, edit = false): string {
+    const tier = (s: HostRegexScript) => (target !== "display" && s.chatId !== null ? 1 : 0);
+    const scripts = [...this.regexScripts.values()].filter((s) => !s.disabled && (s.chatId === null || s.chatId === chatId) && s.targets.includes(target) && s.placement.includes("ai_output") && (!edit || s.runOnEdit));
+    return scripts.sort((a, b) => tier(a) - tier(b) || a.sortOrder - b.sortOrder).reduce((out, s) => out.replace(new RegExp(s.findRegex, s.flags), s.replaceString), text);
+  }
+
+  /** A reply as the host saves it: its `response` scripts applied; an edit runs only the run-on-edit ones. */
   baked(chatId: ChatId, text: string, edit = false): string {
-    let out = text;
-    for (const s of this.regexScripts.values()) if (!s.disabled && s.chatId === chatId && s.targets.includes("response") && s.placement.includes("ai_output") && (!edit || s.runOnEdit)) out = out.replace(new RegExp(s.findRegex, s.flags), s.replaceString);
-    return out;
+    return this.scripted(chatId, "response", text, edit);
   }
 
   storage: HostPort["storage"] = {

@@ -242,6 +242,21 @@ class DiagnosticsLog {
   }
 }
 
+/** The user's regex scripts on one scope (with `chat` and no `scopeId`, every chat's), paged through. */
+async function listScripts(options: { scope: "chat" | "global"; scopeId?: string }, userId: string): Promise<HostRegexScript[]> {
+  const out: HostRegexScript[] = [];
+  for (let offset = 0; offset < 100_000; offset += 200) {
+    const page = await spindle.regex_scripts.list({ ...options, limit: 200, offset, userId });
+    for (const s of page.data) {
+      const chatId = s.scope === "chat" ? s.scope_id : null;
+      if (s.scope !== options.scope || (s.scope === "chat" && !chatId)) continue;
+      out.push({ id: s.id, chatId, mine: s.can_mutate, findRegex: s.find_regex, replaceString: s.replace_string, flags: s.flags, placement: [...s.placement], targets: Array.isArray(s.target) ? [...s.target] : [s.target], runOnEdit: s.run_on_edit, sortOrder: s.sort_order, metadata: toJsonObject(s.metadata) });
+    }
+    if (page.data.length < 200 || offset + page.data.length >= page.total) break;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- the port
 
 export function createSpindleHost(): HostPort {
@@ -504,16 +519,10 @@ export function createSpindleHost(): HostPort {
     },
     regex: {
       async chatScripts(chatId, userId) {
-        const out: HostRegexScript[] = [];
-        for (let offset = 0; offset < 100_000; offset += 200) {
-          const page = await spindle.regex_scripts.list({ scope: "chat", ...(chatId ? { scopeId: chatId } : {}), limit: 200, offset, userId });
-          for (const s of page.data) {
-            if (s.scope !== "chat" || !s.scope_id) continue;
-            out.push({ id: s.id, chatId: s.scope_id, mine: s.can_mutate, findRegex: s.find_regex, replaceString: s.replace_string, flags: s.flags, placement: [...s.placement], targets: Array.isArray(s.target) ? [...s.target] : [s.target], runOnEdit: s.run_on_edit, sortOrder: s.sort_order, metadata: toJsonObject(s.metadata) });
-          }
-          if (page.data.length < 200 || offset + page.data.length >= page.total) break;
-        }
-        return out;
+        return listScripts({ scope: "chat", ...(chatId ? { scopeId: chatId } : {}) }, userId);
+      },
+      async globalScripts(userId) {
+        return listScripts({ scope: "global" }, userId);
       },
       async write(id, script, userId) {
         const input: RegexScriptInput = {
@@ -524,7 +533,7 @@ export function createSpindleHost(): HostPort {
           flags: script.flags,
           placement: [...script.placement],
           target: [...script.targets],
-          scope: "chat",
+          scope: script.chatId === null ? "global" : "chat",
           scope_id: script.chatId,
           run_on_edit: script.runOnEdit,
           sort_order: script.sortOrder,

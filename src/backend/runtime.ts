@@ -453,7 +453,7 @@ export class Runtime implements TurnHooks {
   /** Connections seen refusing the lore tools (DESIGN §5.4). */
   readonly toolSupport: ToolSupport;
   readonly ledger: LedgerService;
-  /** Each world chat's JSON-hiding regex script (DESIGN §6.7). */
+  /** The JSON regex scripts, each world chat's and the user's unwraps (DESIGN §6.7). */
   readonly jsonHiding: JsonHiding;
   /** What the active preset says: section outlets, helper guidance, narrator rules (DESIGN §6.8). */
   readonly presets: PresetBinding;
@@ -1775,13 +1775,14 @@ export class Runtime implements TurnHooks {
   }
 
   /**
-   * Settings turned JSON hiding off, and every world chat's script goes; or on, and the open world
-   * chat's comes back now, every other one's as the engine meets it (DESIGN §6.6).
+   * Settings turned JSON hiding off, and every world chat's hiding goes (its exclusion and the user's
+   * unwraps stay); or on, and the open world chat's comes back now, every other one's as the engine meets
+   * it (DESIGN §6.7).
    */
   async hidingChanged(userId: UserId, hides: boolean): Promise<void> {
     try {
       if (!hides) {
-        await this.jsonHiding.removeAll(userId);
+        await this.jsonHiding.removeHiding(userId);
         return;
       }
       this.jsonHiding.forget(userId);
