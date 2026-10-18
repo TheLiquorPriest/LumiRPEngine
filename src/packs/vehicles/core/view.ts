@@ -1,10 +1,13 @@
-// The Garage panel's view model (`vehicles.garage`): the POV's vehicles and the ones it uses.
+// The Garage panel's view model (`vehicles.garage`): the POV's vehicles and the ones it uses. Where
+// one is, or its home base, reads "Somewhere" when the POV can't see the place, as on every player
+// surface.
 
 import type { EntityId } from "../../../shared/ids";
 import type { ReadContext } from "../../../engine/registry";
 import { calendarOf, formatClock } from "../../../engine/calendar";
 import { numOf, strOf, own, rowOf } from "../../../engine/pack-kit";
 import { isGone, kindIs, placeOfEntity } from "../../../engine/scope";
+import { canSeePlace, HIDDEN_PLACE_NAME } from "../../../engine/visibility";
 import { rangeLeft, serviceInterval } from "./index";
 
 export interface GarageVehicle {
@@ -47,7 +50,7 @@ export function buildGarageView(ctx: ReadContext): GarageView {
       name: e.name,
       kind: strOf(cls?.domain, "road"),
       status: level <= 1 ? (e.fields.status === "broken" ? "broken" : "runs fine") : strOf(e.fields.status, "ok").replace(/_/g, " "),
-      place: place ? (own(ctx.world.places, place)?.name ?? place) : null,
+      place: place ? (canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? (own(ctx.world.places, place)?.name ?? place) : HIDDEN_PLACE_NAME) : null,
     };
     if (level >= 2) {
       v.fuelPct = Math.round(numOf(e.fields.fuel_pct, 100));
@@ -58,7 +61,8 @@ export function buildGarageView(ctx: ReadContext): GarageView {
       if (typeof e.fields.odometer_mi === "number") v.odometerLabel = `${Math.round(e.fields.odometer_mi).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")} mi`;
       else if (typeof e.fields.engine_hours === "number") v.odometerLabel = `${Math.round(e.fields.engine_hours)} h`;
       if (typeof e.fields.condition === "number") v.condition = e.fields.condition;
-      if (typeof e.fields.home === "string") v.home = own(ctx.world.places, e.fields.home)?.name ?? e.fields.home;
+      const home = e.fields.home;
+      if (typeof home === "string") v.home = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, home) ? (own(ctx.world.places, home)?.name ?? home) : HIDDEN_PLACE_NAME;
       if (grant?.r) {
         const until = grant.r.until;
         v.assignedTo = { name: own(ctx.state.entities, grant.b)?.name ?? grant.b, ...(until !== undefined ? { until: formatClock(cal, until) } : {}), overdue: until !== undefined && until <= ctx.state.clock };

@@ -36,7 +36,7 @@ import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
 import { lastSighting } from "../../../engine/seen";
 import { playerKnows } from "../../../engine/player-events";
-import { canSeeEntity, canSeeField, canSeePlace, visibilityOf } from "../../../engine/visibility";
+import { canSeeEntity, canSeeField, canSeePlace, HIDDEN_PLACE_NAME, visibilityOf } from "../../../engine/visibility";
 
 // ---------------------------------------------------------------- needs
 
@@ -541,7 +541,8 @@ export function buildCastView(ctx: ReadContext): CastView {
     };
     if (present) {
       if (typeof e.fields.activity === "string" && sees("activity")) p.activity = shownActivity(ctx, id, e.fields.activity).replace(/_/g, " ");
-      if (sees("place")) p.place = own(ctx.world.places, place)?.name ?? place;
+      // Someone here is where the POV is: a place it can't see is named as every player surface names it.
+      if (sees("place")) p.place = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? (own(ctx.world.places, place)?.name ?? place) : HIDDEN_PLACE_NAME;
     } else if (level >= 2) {
       const last = lastSighting(ctx.state, id);
       if (last) p.lastSeen = { ...(canSeePlace(ctx.registry, ctx.world, ctx.state, pov, last.place) ? { place: own(ctx.world.places, last.place)?.name ?? last.place } : {}), at: formatClock(cal, last.at) };

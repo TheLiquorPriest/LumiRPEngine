@@ -15,6 +15,8 @@ import { canSeePlace, HIDDEN_PLACE_NAME, povPlace } from "../../src/engine/visib
 import { Working } from "../../src/engine/working";
 import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
+import { buildCastView } from "../../src/packs/castlife/core/index";
+import { buildGarageView } from "../../src/packs/vehicles/core/view";
 import { buildMapView } from "../../src/packs/space/core/view";
 import { decodeMapView } from "../../src/packs/space/ui/view";
 import { factLines } from "../../src/backend/turn-steps";
@@ -61,6 +63,26 @@ describe("a secret place the POV stands in", () => {
       expect(facts).not.toContain("safehouse");
       expect(facts).not.toContain("Cellar room");
     }
+  });
+
+  test("is Somewhere in Cast, the Garage and the narrator's vehicles line, where a place the POV sees keeps its name", () => {
+    const world = modernUsWorld("w", "R");
+    world.places.hideout = { id: "hideout", name: "The Smugglers' Hideout", parent: "riverton", fields: {}, visibility: "secret" };
+    const state = startState(world);
+    for (const id of [world.pov, "maya", "truck"]) state.entities[id]!.fields.place = "hideout";
+    state.entities.truck!.fields.home = "hideout";
+    const ctx = reg.context(world, state);
+    const cast = buildCastView(ctx);
+    const garage = buildGarageView(ctx);
+    const facts = factLines(reg, world, state, []);
+    expect(cast.people.find((p) => p.id === "maya")?.place).toBe(HIDDEN_PLACE_NAME);
+    expect(garage.vehicles.find((v) => v.id === "truck")).toMatchObject({ place: HIDDEN_PLACE_NAME, home: HIDDEN_PLACE_NAME });
+    expect(facts.some((l) => l.startsWith("Pickup truck: somewhere,"))).toBe(true);
+    expect(JSON.stringify([cast, garage, facts])).not.toContain("Smugglers");
+    // Back in the building's garage, the truck's place is named again; only its home base isn't.
+    state.entities.truck!.fields.place = "garage";
+    expect(buildGarageView(reg.context(world, state)).vehicles.find((v) => v.id === "truck")).toMatchObject({ place: "Building garage", home: HIDDEN_PLACE_NAME });
+    expect(factLines(reg, world, state, []).some((l) => l.startsWith("Pickup truck: at Building garage,"))).toBe(true);
   });
 });
 

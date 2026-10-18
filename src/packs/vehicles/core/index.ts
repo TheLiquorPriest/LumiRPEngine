@@ -22,6 +22,7 @@ import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import { kindIs, placeOfEntity } from "../../../engine/scope";
+import { canSeePlace } from "../../../engine/visibility";
 import { buildGarageView } from "./view";
 import classes from "./tables/modern-us/classes.json";
 import factors from "./tables/modern-us/factors.json";
@@ -430,7 +431,9 @@ export const vehiclesPack: PackDef = {
           const e = own(ctx.state.entities, v);
           if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || e.fields.owner !== pov) continue;
           const place = placeOfEntity(ctx.state, v);
-          const parts = [`${e.name}: at ${place ? (own(ctx.world.places, place)?.name ?? place) : "an unknown place"}`];
+          // The narrator hears where it is as the player may: a place the POV can't see is somewhere.
+          const where = !place ? "at an unknown place" : canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? `at ${own(ctx.world.places, place)?.name ?? place}` : "somewhere";
+          const parts = [`${e.name}: ${where}`];
           if (level === 1) parts.push(e.fields.status === "broken" ? "broken down" : "runs fine");
           else {
             const range = rangeLeft(ctx, v);
