@@ -10,7 +10,7 @@ import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { calendarOf, slotIndexAt } from "../../src/engine/calendar";
 import { readEngineSlice } from "../../src/engine/engine-pack";
 import { applyMarker, EXTERNAL_ACCOUNT_PREFIX, validMarkerBody } from "../../src/engine/events";
-import { isGone } from "../../src/engine/scope";
+import { isGone, placeOfEntity } from "../../src/engine/scope";
 import { inClass, tagsOf } from "../../src/engine/selector";
 import type { WorldState } from "../../src/engine/state";
 import { touchedAspect, touchedField } from "../../src/engine/touched";
@@ -440,6 +440,45 @@ describe("the merge on a grid", () => {
     upgrade(taken, { lantern: { fields: { place: "take", x: "take", y: "take" } } });
     expect(taken.state.entities.lantern?.fields).toEqual(initialState(taken.b, taken.rb, reg).entities.lantern?.fields);
     expect(taken.state.entities.lantern?.fields.place).toBe("kitchen");
+  });
+
+  test("a thing held in play keeps its holder: an Upgrade never lays it on the map, picked or not", () => {
+    // Revision a keeps the lantern in a chest in the taproom; revision b's map lays it in a cell.
+    const chest =
+      (laid: boolean) =>
+      (w: WorldDoc): void => {
+        lantern(laid)(w);
+        w.entities.chest = { id: "chest", kind: "item", name: "Chest", tier: "background", fields: { place: "taproom" }, relations: [] };
+        if (!laid) w.entities.lantern!.relations = [{ type: "in", to: "chest" }];
+      };
+    const carried = (): Chat => {
+      const c = between(inn(chest(false)), inn(chest(true)));
+      // The POV takes it out of the chest: only what holds it changes.
+      play(c, [
+        { type: "unlink", rel: "in", from: "lantern", to: "chest" },
+        { type: "link", rel: "in", from: "lantern", to: "you" },
+      ]);
+      return c;
+    };
+    const kept = carried();
+    const row = upgradePreview(reg, planUpgrade(kept.state, kept.env, kept.rb), kept.state, kept.b, kept.a).entities.find((r) => r.entity === "lantern")?.changes.find((c) => c.label === "Placement");
+    expect(row).toMatchObject({ pick: "keep", why: "changed in play" });
+    upgrade(kept);
+    expect(kept.state.entities.lantern?.fields).toEqual({});
+    expect(kept.state.entities.lantern?.relations).toEqual([{ type: "in", to: "you" }]);
+    // It goes where the POV goes.
+    const walked = fold(reg, kept.b, kept.state, [{ type: "set", entity: "you", field: "place", value: "kitchen" }]);
+    expect(placeOfEntity(walked, "lantern")).toBe("kitchen");
+    const taken = carried();
+    upgrade(taken, { lantern: { entity: "take" } });
+    expect(taken.state.entities.lantern?.fields).toEqual({});
+    expect(taken.state.entities.lantern?.relations).toEqual([{ type: "in", to: "you" }]);
+    // Left in the chest, it comes out and lies where the map lays it, as in a new chat.
+    const untouched = between(inn(chest(false)), inn(chest(true)));
+    upgrade(untouched);
+    expect(untouched.state.entities.lantern?.relations).toEqual([]);
+    expect(untouched.state.entities.lantern?.fields).toEqual(initialState(untouched.b, untouched.rb, reg).entities.lantern?.fields);
+    expect(untouched.state.entities.lantern?.fields).toMatchObject({ place: "taproom", x: 5, y: 3 });
   });
 
   test("an Upgrade that turns the grid system on puts the POV on a cell, sees from there, and can walk", () => {

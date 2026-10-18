@@ -69,6 +69,13 @@ export function touchedRelation(state: Readonly<WorldState>, id: EntityId, rel: 
   return isRecord(targets) && own(targets, to) === true;
 }
 
+/** Whether an applied event wrote any of the entity's relations of this type (for `in`: what holds it). */
+export function touchedAnyRelation(state: Readonly<WorldState>, id: EntityId, rel: RelationTypeId): boolean {
+  const relations = entryOf(state, id)?.relations;
+  const targets = isRecord(relations) ? own(relations, rel) : undefined;
+  return isRecord(targets) && Object.values(targets).includes(true);
+}
+
 export function touchedAspect(state: Readonly<WorldState>, id: EntityId, aspect: TouchAspect): boolean {
   return entryOf(state, id)?.[aspect] === true;
 }

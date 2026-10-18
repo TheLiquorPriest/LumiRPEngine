@@ -12,7 +12,9 @@
 //   - an entity new to the chat is created as a chat's first state creates it, its symmetric and
 //     inverse relations two-sided, an agent caught up to now, a thing a map lays in a cell lying there;
 //   - where an entity is (its place and cell) is one part, read as a chat starting on each revision
-//     holds it, so a map that newly lays a thing in a cell, or moves its cell, moves it;
+//     holds it, so a map that newly lays a thing in a cell, or moves its cell, moves it; putting it
+//     into something or taking it out in play counts as moving it, and a thing held inside something
+//     keeps its holder, so it never gets a place and cell while held;
 //   - an entity gone from the revision stays, holding the classes, tags and visibility it had,
 //     unless picked `remove`: then it leaves the world and is unlinked, as a GM's Remove does;
 //   - kind, name, tier, agent flag, level overrides, classes and tags, and each field;
@@ -42,7 +44,7 @@ import { completeRelations, counterpartOf, type RelationTypes } from "./relation
 import { GONE_FIELD, placeOfEntity } from "./scope";
 import type { EntityState, WorldState } from "./state";
 import { observeCells } from "./seen";
-import { forget, touchedAspect, touchedField, touchedRelation } from "./touched";
+import { forget, touchedAnyRelation, touchedAspect, touchedField, touchedRelation } from "./touched";
 import { visibilityOf } from "./visibility";
 import { clampLevels } from "./world-state";
 
@@ -249,9 +251,10 @@ export function planUpgrade(state: Readonly<WorldState>, env: MarkerEnv, to: Rev
       fields[f] = { now: own(now.fields, f), next: value, touched };
     }
     // Its place and cell are one part: a move in play keeps all of it, and taking any of it takes the
-    // revision's place and cell together, so a cell never lands in another place than its own.
+    // revision's place and cell together, so a cell never lands in another place than its own. Play
+    // putting it into something or taking it out (`in`) moved it too.
     if (PLACEMENT_FIELDS.some((f) => !same(own(earlier, f), own(later, f)))) {
-      const touched = whole || PLACEMENT_FIELDS.some((f) => touchedField(state, id, f));
+      const touched = whole || PLACEMENT_FIELDS.some((f) => touchedField(state, id, f)) || touchedAnyRelation(state, id, "in");
       for (const f of PLACEMENT_FIELDS) if (!same(own(now.fields, f), own(later, f))) fields[f] = { now: own(now.fields, f), next: own(later, f), touched };
     }
     const olds = byKey(was ? (own(oldRel, id) ?? []) : now.relations);
@@ -364,9 +367,10 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
     if (e && !e.relations.some((r) => r.type === "in")) Object.assign(e.fields, { place: item.place, x: item.cell.x, y: item.cell.y });
   }
 
-  // Changed entities: their parts, then their relations, a pair together.
+  // Changed entities: their parts, then their relations, a pair together, then where they are.
   const byId = new Map(plan.entities.map((d) => [d.id, d]));
   const decided = new Set<string>();
+  const placements: { id: EntityId; fields: [FieldId, PartDiff<JsonValue | undefined>][] }[] = [];
   for (const d of plan.entities) {
     const e = own(state.entities, d.id);
     if (d.status !== "changed" || !e) continue;
@@ -397,13 +401,15 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
       }
       if (aspect === "tier" || aspect === "agent" || aspect === "levels") forget(state, d.id, { aspect });
     }
-    // The place and cell go together: taken only when every one of them that differs is taken.
-    const placed = PLACEMENT_FIELDS.every((f) => {
+    // The place and cell go together: taken only when every one of them that differs is taken, once
+    // the relations are merged (below).
+    const placement = PLACEMENT_FIELDS.flatMap((f): [FieldId, PartDiff<JsonValue | undefined>][] => {
       const diff = own(d.fields, f);
-      return !diff || takes(p, p?.fields ? own(p.fields, f) : undefined, diff.touched);
+      return diff ? [[f, diff]] : [];
     });
+    if (placement.length > 0 && placement.every(([f, diff]) => takes(p, p?.fields ? own(p.fields, f) : undefined, diff.touched))) placements.push({ id: d.id, fields: placement });
     for (const [f, diff] of Object.entries(d.fields)) {
-      if (!(PLACEMENT_FIELDS.includes(f) ? placed : takes(p, p?.fields ? own(p.fields, f) : undefined, diff.touched))) continue;
+      if (PLACEMENT_FIELDS.includes(f) || !takes(p, p?.fields ? own(p.fields, f) : undefined, diff.touched)) continue;
       if (diff.next === undefined) delete e.fields[f];
       else e.fields[f] = structuredClone(diff.next);
       forget(state, d.id, { field: f });
@@ -426,6 +432,19 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
         if (m.next) e.relations.push(structuredClone(m.next));
         forget(state, holder, { rel: m.rel, to: m.to });
       }
+    }
+  }
+  // A thing held inside something keeps its holder: a taken placement may clear its place and cell,
+  // never give it one, so it stays in the hands or the chest it is in.
+  for (const { id, fields } of placements) {
+    const e = own(state.entities, id);
+    if (!e) continue;
+    const held = e.relations.some((r) => r.type === "in");
+    for (const [f, diff] of fields) {
+      if (diff.next === undefined) delete e.fields[f];
+      else if (held) continue;
+      else e.fields[f] = structuredClone(diff.next);
+      forget(state, id, { field: f });
     }
   }
 
