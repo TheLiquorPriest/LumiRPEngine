@@ -25,21 +25,20 @@ function setup(): { world: WorldDoc; state: WorldState } {
 const line = (world: WorldDoc, state: WorldState, e: LedgerEvent): string | null => playerLine(reg, world, state, world.pov, e);
 
 describe("player-facing event lines", () => {
-  test("an unmet NPC's move is hidden until the POV knows them; then it reads in names", () => {
+  test("someone else's move never reads, met or not; the POV's own reads in names", () => {
     const { world, state } = setup();
     const move: LedgerEvent = { type: "set", entity: "maya", field: "place", value: "park" };
     expect(metBy(state, "you", "maya")).toBe(false);
     expect(line(world, state, move)).toBeNull();
     state.entities.you!.relations.push({ type: "knows", to: "maya" });
-    expect(line(world, state, move)).toBe("Maya Chen → Riverside Park");
+    expect(line(world, state, move)).toBeNull();
     expect(line(world, state, { type: "set", entity: "you", field: "place", value: "cafe" })).toBe("You → Daybreak Café");
   });
 
-  test("someone where the POV is counts as met; a secret entity never shows", () => {
+  test("someone where the POV is counts as met, and their routine still never reads", () => {
     const { world, state } = setup();
     state.entities.maya!.fields.place = "apartment";
-    expect(line(world, state, { type: "set", entity: "maya", field: "activity", value: "reading" })).toBe("Maya Chen: reading");
-    world.entities.maya!.visibility = "secret";
+    expect(metBy(state, "you", "maya")).toBe(true);
     expect(line(world, state, { type: "set", entity: "maya", field: "activity", value: "reading" })).toBeNull();
   });
 

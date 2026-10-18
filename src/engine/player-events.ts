@@ -191,6 +191,10 @@ export function playerEventVisible(reg: Registry, world: WorldDoc, state: Readon
     if (e.data.npc === true) return false;
     if (POV_ONLY.has(e.type) && (e.data.agent ?? e.data.entity ?? e.data.who) !== pov) return false;
   }
+  // Where someone else goes and what they're doing is their routine, which a death the POV didn't see
+  // quietly ends. The Journal is read later, against what the POV knows by then, so it can't tell
+  // which of those moves the POV saw: it words none of them, and Scene and People say who is here.
+  if (e.type === "set" && e.entity !== pov && (e.field === "place" || e.field === "activity") && kindIs(reg, world, own(state.entities, e.entity)?.kind ?? "", "person")) return false;
   if (e.type === "stage" && !trackShown(reg, world, state, pov, e.track)) return false;
   for (const r of refsOf(world, state, e)) {
     if (r.kind === "entity" && !playerKnows(reg, world, state, pov, r.id)) return false;

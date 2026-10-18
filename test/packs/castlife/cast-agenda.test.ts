@@ -35,7 +35,7 @@ test("a secret agenda shows nowhere in Cast, not behind a public one, nor in the
   for (const secret of ["Poison the mayor", "Buy arsenic", "b_secret"]) expect(JSON.stringify(maya)).not.toContain(secret);
 });
 
-test("someone on an agenda reads as busy in Cast, the Journal and the narrator's lines unless all their agendas are public", () => {
+test("someone on an agenda reads as busy in Cast and the narrator's lines unless all their agendas are public; the Journal words no one else's activity", () => {
   const world = modernUsWorld("w", "R");
   world.tracks.a_public = { id: "a_public", kind: "agenda", label: "Open a bakery", owner: "maya", start: "save", visibility: "public", stages: { save: { label: "Save money", priority: 5, next: [] } } };
   const state = startState(world);
@@ -54,10 +54,10 @@ test("someone on an agenda reads as busy in Cast, the Journal and the narrator's
     };
   };
   // Every agenda Maya has is public: what she is doing may be said.
-  expect(said()).toEqual({ cast: "agenda", journal: ["Maya Chen: agenda"], people: ["Maya Chen (agenda) is here."], outline: ["Maya Chen is agenda."] });
+  expect(said()).toEqual({ cast: "agenda", journal: [], people: ["Maya Chen (agenda) is here."], outline: ["Maya Chen is agenda."] });
   // With a secret one too, the agenda she is on could be it.
   world.tracks.b_secret = { id: "b_secret", kind: "agenda", label: "Poison the mayor", owner: "maya", start: "buy", visibility: "secret", stages: { buy: { label: "Buy arsenic", priority: 9, next: [] } } };
-  expect(said()).toEqual({ cast: "busy", journal: ["Maya Chen: busy"], people: ["Maya Chen (busy) is here."], outline: ["Maya Chen is busy."] });
+  expect(said()).toEqual({ cast: "busy", journal: [], people: ["Maya Chen (busy) is here."], outline: ["Maya Chen is busy."] });
   // Any other activity reads as it is.
   state.entities.maya!.fields.activity = "work_shift";
   expect(said().cast).toBe("work shift");
