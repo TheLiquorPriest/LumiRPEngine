@@ -755,7 +755,10 @@ export class Runtime implements TurnHooks {
       const a = answer?.answers.action;
       const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null } } : offered.find((x) => x.id === a.choice)) : undefined;
       if (!chosen) result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
-      else if (Object.keys(chosen.params).length === 0 || !budget.take()) result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
+      else if (Object.keys(chosen.params).length === 0) result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
+      // With no call left to fill its params, the action went unread, as when the call fails: a chip
+      // says so, with Retry, rather than blaming the player for a place or person they did name.
+      else if (!budget.take()) result = null;
       else result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore);
     } else {
       result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore);
@@ -1035,10 +1038,11 @@ export class Runtime implements TurnHooks {
    * budget. Proposals are sorted by mode (D4 precedence, then bounds); the automatic ones and the
    * decisions are prepared for the core's read; undo, confirm, decline, contradiction and choice
    * chips are stored. With `replace` (a Re-read edit), the read replaces the swipe's earlier one, so
-   * that read's chips go first.
+   * that read's chips go first. The decline for a typed action that named nothing (`unfitId`) is about
+   * the player's message, not the reply, so any read of the swipe keeps it and its note.
    */
   async prepareRead(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, key: string, text: string, context: ReadInput, post: boolean, replace = false): Promise<void> {
-    if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind));
+    if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind) && c.id !== unfitId(messageId, swipeId));
     const bridge = this.bridges.get(chatId);
     if (!bridge) return;
     const settings = await this.settings.get(userId);
@@ -1237,8 +1241,8 @@ export class Runtime implements TurnHooks {
         payload: { type: String(proposal.type), connection, proposal, seed: `${context.seed}:check` },
       });
     });
-    // Another swipe of this reply replaces its notes.
-    const notes = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.messageId !== messageId);
+    // Another swipe of this reply replaces its notes; this swipe's note on its typed action stays.
+    const notes = (await this.outcomeNotes.list(chatId, userId)).filter((n) => n.messageId !== messageId || n.id === unfitId(messageId, swipeId));
     declines.forEach((d, i) => {
       const id = `decline:${input.messageId}:${input.generationId}:${i}`;
       notes.push({ id, messageId, text: declineNote(d.proposal, d.reason, "accept", context.state, context.world) });
@@ -1307,17 +1311,19 @@ export class Runtime implements TurnHooks {
         stored.push({ id: `not_action:${at}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as "${label}". Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(res.events)) as JsonValue } });
       }
     }
-    // The helper call that reads typed text failed (DESIGN §9.4): the turn ran as plain roleplay. Retry
-    // runs it again, as the swipe chip's Re-run does, and reads the text afresh.
+    // `interpret` couldn't read the typed text (DESIGN §9.4): its call failed, or a Decision route's choice
+    // had no call left for its params. The turn ran as plain roleplay. Retry runs it again, as the swipe
+    // chip's Re-run does, and reads the text afresh.
     if (input.kind !== "continue" && userText.trim() !== "" && bridge.wasUnread(userText)) {
-      stored.push({ id: `read_failed:${at}`, kind: "read_failed", ...base, label: "Couldn't read your action", detail: "The call that reads your message failed, so this turn ran as plain roleplay. Retry runs the turn again.", actions: [{ id: "rerun", label: "Retry", style: "primary" }], expires: "next_send", payload: {} });
+      stored.push({ id: `read_failed:${at}`, kind: "read_failed", ...base, label: "Couldn't read your action", detail: "The call that reads your message failed, or none was left before the reply, so this turn ran as plain roleplay. Retry runs the turn again.", actions: [{ id: "rerun", label: "Retry", style: "primary" }], expires: "next_send", payload: {} });
     }
     // `interpret` read an action whose params name nothing in the world that fits (DESIGN §9.4): the
     // turn ran as plain roleplay, and a decline chip says why. As after a declined change (§9.5), the
-    // next reply is told it didn't happen, and Remove it or Accept rewords that note.
+    // next reply is told it didn't happen, and Remove it or Accept rewords that note. Both are about the
+    // typed message, so a later read of this reply keeps them (`prepareRead`).
     const unfit = input.kind === "continue" ? undefined : bridge.unfitOf(userText);
     if (unfit) {
-      const id = `unfit:${at}`;
+      const id = unfitId(input.messageId, input.swipeId);
       const what = `the player's "${unfit.label}"`;
       const notes = { accept: narratedNote(what, unfit.reason, "accept"), remove: narratedNote(what, unfit.reason, "remove") };
       const kept = (await this.outcomeNotes.list(input.chatId, input.userId)).filter((n) => n.id !== id);
@@ -1726,12 +1732,26 @@ function namesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
 }
 
 /**
+ * Whether text a chip shows from `interpret`'s read names anything hidden: what `namesHidden` finds,
+ * or anything else that leads to a secret lore entry (its aliases, keys and topics, and the lookup
+ * terms filed to it), by all its words in order.
+ */
+function chipNamesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, text: string): boolean {
+  return namesHidden(reg, world, state, text) || namesAny(text, [], secretLoreNames(reg, world, state));
+}
+
+/** A swipe's decline chip, and its Outcome note, for a typed action that named nothing that fits. */
+function unfitId(messageId: MessageId, swipeId: number): string {
+  return `unfit:${messageId}:${swipeId}`;
+}
+
+/**
  * Why `interpret`'s action couldn't apply (DESIGN §9.4), for its decline chip and the next reply's
  * note: what its param named, as the player typed it ("Rena isn't anyone in this world"), a real
- * thing of another kind by its name ("Bluebird Coffee isn't a person"), or that it has none (the
- * player may not have said, or a Decision route had no call left to read it). A name the POV can't
- * see, one carrying an unrevealed secret (`secrets`, less the player's own words) or anything too
- * long for a name is never repeated: "it names no one you know".
+ * thing of another kind by its name ("Bluebird Coffee isn't a person"), or that it has none. A name
+ * the player didn't type, one the POV can't see, one that leads to a secret or carries an unrevealed
+ * secret (`secrets`, less the player's own words), or anything too long for a name is never
+ * repeated: "it names no one you know".
  */
 function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, unfit: UnfitRef, text: string, secrets: readonly string[]): string {
   const { def, value } = unfit;
@@ -1741,12 +1761,12 @@ function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
   const id = typeof value === "string" ? value : "";
   const entity = own(state.entities, id);
   const placeDef = entity ? undefined : own(world.places, id);
-  // A real thing reads by its name where the POV can see it; anything else as the player typed it
-  // ("Rena" for a model's "rena"), else as the model gave it, an id's underscores as spaces.
+  // A real thing reads by its name where the POV can see it; anything else only as the player typed it
+  // ("Rena" for a model's "rena"), an id's underscores read as spaces.
   const given = id.replace(/_+/g, " ").trim();
   const typed = given === "" ? undefined : new RegExp(given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").exec(text)?.[0];
-  const name = entity ? (canSeeEntity(reg, world, state, world.pov, id) ? entity.name : "") : placeDef ? (canSeePlace(reg, world, state, world.pov, id) ? placeDef.name : "") : (typed ?? given);
-  if (name === "" || name.length > 80 || findLeaks(name, secrets).length > 0 || namesHidden(reg, world, state, name)) return place ? "it names no place you know" : person ? "it names no one you know" : "it names nothing you know";
+  const name = entity ? (canSeeEntity(reg, world, state, world.pov, id) ? entity.name : "") : placeDef ? (canSeePlace(reg, world, state, world.pov, id) ? placeDef.name : "") : (typed ?? "");
+  if (name === "" || name.length > 80 || findLeaks(name, secrets).length > 0 || chipNamesHidden(reg, world, state, name)) return place ? "it names no place you know" : person ? "it names no one you know" : "it names nothing you know";
   // Only a param of one kind refuses a real thing, for being another.
   if ((entity || placeDef) && def.ref !== undefined) {
     const kind = place ? "place" : (reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase();

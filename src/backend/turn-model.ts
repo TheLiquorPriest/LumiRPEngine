@@ -113,7 +113,7 @@ export class TurnBridge implements TurnModel {
   private readonly intents = new Map<string, InterpretOutput | null>();
   /** User texts whose intent `interpret` read from typed text (a "Not an action?" chip applies). */
   private readonly interpreted = new Set<string>();
-  /** User texts whose `interpret` call failed: their turn ran as plain roleplay ("Couldn't read your action"). */
+  /** User texts `interpret` couldn't read (its call failed, or a Decision route's choice had no call left for its params): their turn ran as plain roleplay ("Couldn't read your action"). */
   private readonly unread = new Set<string>();
   /** Actions `interpret` read but couldn't apply, their params naming nothing that fits, keyed like `intents`: the turn plays as plain roleplay, and its reply says why. */
   private readonly unfit = new Map<string, UnfitAction>();
@@ -149,8 +149,9 @@ export class TurnBridge implements TurnModel {
   }
 
   /**
-   * The `interpret` call for this text failed. No intent is kept, so the turn plans as plain
-   * roleplay and the next turn on the same text (the chip's Retry, a Re-run) reads it again.
+   * `interpret` couldn't read this text: its call failed, or a Decision route's choice had no call
+   * left for its params. No intent is kept, so the turn plans as plain roleplay and the next turn on
+   * the same text (the chip's Retry, a Re-run) reads it again.
    */
   setUnread(userText: string): void {
     this.intents.delete(userText);
@@ -160,7 +161,7 @@ export class TurnBridge implements TurnModel {
     if (this.unread.size > 64) this.unread.delete(this.unread.values().next().value ?? "");
   }
 
-  /** Whether this text's turn ran unread because its `interpret` call failed. */
+  /** Whether this text's turn ran unread because `interpret` couldn't read it. */
   wasUnread(userText: string): boolean {
     return this.unread.has(userText);
   }

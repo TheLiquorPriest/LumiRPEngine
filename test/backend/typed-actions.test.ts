@@ -18,8 +18,11 @@ const INTERPRET_MARK = "You map a player's typed input";
 /** A secret track's truth, short enough to fit a second action. */
 const TRUTH = "the ferryman sank the old boat";
 
-/** A Port Alder chat; `hidden` adds someone of that name the POV can't see, `truth` a secret track holding `TRUTH`. */
-async function chat(extra: { hidden?: string; truth?: boolean } = {}): Promise<{ rig: Rig; chatId: string }> {
+/**
+ * A Port Alder chat. `hidden` adds someone of that name the POV can't see, `truth` a secret track
+ * holding `TRUTH`, and `secretAlias` a secret lore entry known by that alias.
+ */
+async function chat(extra: { hidden?: string; truth?: boolean; secretAlias?: string } = {}): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
   const put = async (collection: string, id: string, value: JsonObject): Promise<void> => {
@@ -27,7 +30,8 @@ async function chat(extra: { hidden?: string; truth?: boolean } = {}): Promise<{
   };
   if (extra.hidden) await put("entities", "hidden_one", { id: "hidden_one", kind: "person", name: extra.hidden, tier: "background", fields: {}, relations: [], visibility: "secret" });
   if (extra.truth) await put("tracks", "wreck", { id: "wreck", kind: "secret", label: "The wreck", start: "hidden", visibility: "secret", stages: { hidden: { label: "Hidden", next: [], truth: TRUTH } } });
-  if (extra.hidden || extra.truth) rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  if (extra.secretAlias) await put("lore", "courier", { id: "courier", title: "The masked courier", content: "The masked courier carries letters nobody else may read.", keys: [], aliases: [extra.secretAlias], links: [], secret: true, gate: "false", audience: [] });
+  if (Object.keys(extra).length > 0) rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   return { rig, chatId };
@@ -36,6 +40,20 @@ async function chat(extra: { hidden?: string; truth?: boolean } = {}): Promise<{
 /** `interpret` answers `read(typed text)`; every other step reads nothing. */
 function reading(rig: Rig, read: (text: string) => JsonObject): void {
   rig.host.quietReply = (req: QuietRequest) => ((req.messages[0]?.content ?? "").includes(INTERPRET_MARK) ? JSON.stringify(read(req.messages[1]?.content ?? "")) : "{}");
+}
+
+/** `interpret` on the Decision route, which chooses `action`, with `calls` model calls before the reply. */
+async function decisionRoute(rig: Rig, action: string, calls: number): Promise<void> {
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "standard" } } }));
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", budgets: { pre: { calls } }, steps: { interpret: { enabled: true, signals: ["typed_input"], route: { provider: "decision", connectionId: null, model: null } } } } } }));
+  rig.host.decideReply = (req: DecideRequest): Answers => {
+    const out: Answers = {};
+    for (const [key, q] of Object.entries(req.questions)) {
+      const choice = key === "action" ? action : q.type === "choice" ? (Object.keys(q.criteria)[0] ?? "none") : null;
+      if (choice !== null) out[key] = { type: "choice", choice, probabilities: { [choice]: 1 }, confidence: 1 };
+    }
+    return out;
+  };
 }
 
 async function folded(rig: Rig, chatId: string) {
@@ -105,6 +123,52 @@ describe("a typed action that names nothing in the world", () => {
     expect(chips.some((c) => c.kind === "decline")).toBe(true);
     for (const c of chips) expect(`${c.label} ${c.detail ?? ""}`.toLowerCase()).not.toContain("vex");
   });
+
+  test("a name the player didn't type, or one that leads to secret lore, is never repeated on the chip", async () => {
+    const made = await chat();
+    reading(made.rig, pay("Lena"));
+    await made.rig.turn(made.chatId, "I pay the barista for the latte.", "You hand the barista a few bills.");
+    const madeChips = await replyChips(made.rig, made.chatId);
+    expect(madeChips.some((c) => c.kind === "decline")).toBe(true);
+    for (const c of madeChips) expect(`${c.label} ${c.detail ?? ""}`).not.toContain("Lena");
+
+    const lore = await chat({ secretAlias: "Rena" });
+    reading(lore.rig, pay("rena"));
+    await lore.rig.turn(lore.chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
+    const loreChips = await replyChips(lore.rig, lore.chatId);
+    expect(loreChips.some((c) => c.kind === "decline")).toBe(true);
+    for (const c of loreChips) expect(`${c.label} ${c.detail ?? ""}`.toLowerCase()).not.toContain("rena");
+  });
+
+  test("on the Decision route with no call left to read where the player goes, the move goes unread, never 'couldn't'", async () => {
+    const { rig, chatId } = await chat();
+    // The choice takes the only call before the reply, so none is left to fill its params.
+    await decisionRoute(rig, "go", 1);
+    reading(rig, () => ({ action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9 }));
+    await rig.turn(chatId, "I walk to Bluebird Coffee.", "You set off down Main Street.");
+    const chips = await replyChips(rig, chatId);
+    expect(chips.some((c) => c.kind === "decline")).toBe(false);
+    expect(chips.find((c) => c.kind === "read_failed")?.actions.map((a) => a.id)).toEqual(["rerun"]);
+    expect(await nextTurn(rig, chatId, "I look around.")).not.toContain("Go to");
+  });
+
+  test("a Continue and a Re-read edit of the reply keep the decline and the note it leaves the next reply", async () => {
+    const { rig, chatId } = await chat();
+    reading(rig, pay("rena"));
+    await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
+    const head = rig.host.head(chatId);
+    if (!head) throw new Error("no reply");
+    const g = await rig.host.start(chatId, { type: "continue" });
+    await rig.host.finish(g, " She smiles and turns to the next customer.");
+    rig.host.editMessage(chatId, head.id, "You hand Rena a few bills, and she smiles.");
+    await rig.host.settle();
+    const reread = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "reread");
+    if (!reread) throw new Error("no Re-read chip");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: reread.id, choice: "reread" }));
+    expect((await replyChips(rig, chatId)).some((c) => c.kind === "decline")).toBe(true);
+    expect((await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay"))).toContain("Rena");
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });
 
 describe("a second action in the same message", () => {
@@ -134,17 +198,8 @@ describe("a second action in the same message", () => {
 
   test("on the Decision route, the helper call that fills the params brings it too", async () => {
     const { rig, chatId } = await chat();
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "standard" } } }));
     // The choice and the helper call that fills its params each take a call; NPC choices may take another.
-    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", budgets: { pre: { calls: 4 } }, steps: { interpret: { enabled: true, signals: ["typed_input"], route: { provider: "decision", connectionId: null, model: null } } } } } }));
-    rig.host.decideReply = (req: DecideRequest): Answers => {
-      const out: Answers = {};
-      for (const [key, q] of Object.entries(req.questions)) {
-        const choice = key === "action" ? "go" : q.type === "choice" ? (Object.keys(q.criteria)[0] ?? "none") : null;
-        if (choice !== null) out[key] = { type: "choice", choice, probabilities: { [choice]: 1 }, confidence: 1 };
-      }
-      return out;
-    };
+    await decisionRoute(rig, "go", 4);
     reading(rig, walkThenBuy("I buy a latte"));
     await rig.turn(chatId, "I walk to Bluebird Coffee to buy a latte.", "You push open the door of the cafe.");
     expect(rig.host.decideCalls.some((r) => isRecord(r.questions.action))).toBe(true);
