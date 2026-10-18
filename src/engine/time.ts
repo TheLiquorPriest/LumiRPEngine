@@ -24,6 +24,9 @@ import { clampScale, clampThreshold, clampTick, clampUnitCap, TIME_LIMITS } from
 
 export const DEFAULT_SCENE_TYPE = "conversation";
 
+/** The engine's own scene types, ticked by default (Settings → Time); a world may add its own. */
+export const ENGINE_SCENE_TYPES: readonly SceneTypeId[] = [DEFAULT_SCENE_TYPE, "action", "exploration", "downtime"];
+
 // ---------------------------------------------------------------- scene, pause and elapsed time
 
 /** The scene type: the POV's `scene` field (actions, ✎ fixes), else its place's default. */

@@ -13,7 +13,7 @@ import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
 import { tableChoices } from "../shared/tables";
 import { checkView, policyOf } from "../engine/adjudication";
 import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
-import { clockPaused, DEFAULT_SCENE_TYPE, placeSceneType, sceneType } from "../engine/time";
+import { clockPaused, DEFAULT_SCENE_TYPE, ENGINE_SCENE_TYPES, placeSceneType, sceneType } from "../engine/time";
 import { identifiers } from "../engine/expr";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
@@ -65,11 +65,12 @@ export function compactSpan(minutes: number): string {
 }
 
 /**
- * The scene types the POV may know of (DESIGN §7): the engine's default, the world's and the chat's
- * tick types, and those of the places the POV can see. One only a hidden place has is never named.
+ * The scene types the POV may know of (DESIGN §7): the engine's own and those of the places the POV
+ * can see. A world's tick says nothing of who may know a type, so one only a hidden place has, or
+ * only an action sets, is never named, whatever tick the world gives it.
  */
 function knownSceneTypes(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): Set<string> {
-  return new Set([DEFAULT_SCENE_TYPE, ...Object.keys(world.time.sceneTicks), ...Object.keys(state.time.sceneTicks), ...Object.values(world.places).flatMap((p) => (p.sceneType && canSeePlace(registry, world, state, world.pov, p.id) ? [p.sceneType] : []))]);
+  return new Set([...ENGINE_SCENE_TYPES, ...Object.values(world.places).flatMap((p) => (p.sceneType && canSeePlace(registry, world, state, world.pov, p.id) ? [p.sceneType] : []))]);
 }
 
 function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonValue>, ctx: ReadContext): HudView {
@@ -103,8 +104,8 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   if (weatherFix) fixes.weather = weatherFix;
   // The scene type lives in the POV's `scene` field, which wins over its place's default until an
   // action, a rule or another fix sets it; "" goes back to following the place. The ✎ offers the
-  // scene types the POV may know of, never one only a hidden place has: it doesn't name the place
-  // default's type, or count a pinned one as current, when that is such a type.
+  // scene types the POV may know of (`knownSceneTypes`), and only those: it doesn't name the place
+  // default's type, or count a pinned one as current, when that is another type.
   const pinned = state.entities[pov]?.fields.scene;
   if (state.entities[pov]) {
     const types = knownSceneTypes(ctx.registry, world, state);
@@ -133,9 +134,9 @@ function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry
     if (!kindIs(registry, world, e.kind, "person") || !canSeeEntity(registry, world, state, world.pov, id)) continue;
     present.push({ id, name: e.name, label: world.kinds[e.kind]?.label ?? e.kind });
   }
-  // The scene in force as the player reads it: a type only a hidden place has (the POV standing in
-  // one it can't see, or pinned to its type) reads as the engine's default scene, which is how it
-  // paces too, having no tick of its own. Display only: the clock still reads the type in force.
+  // The scene in force as the player reads it: a type the POV may not know of (one only a hidden
+  // place has or only an action sets, whether the POV stands in that place or is pinned to it)
+  // reads as the engine's default scene. Display only: the clock still paces by the type in force.
   const type = sceneType(world, state);
   return { placeId: povPlace(registry, world, state)?.id ?? null, sceneType: knownSceneTypes(registry, world, state).has(type) ? type : DEFAULT_SCENE_TYPE, present, elapsed: headElapsed };
 }

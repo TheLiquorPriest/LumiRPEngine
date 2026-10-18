@@ -131,11 +131,11 @@ describe("a place the POV is inside", () => {
 });
 
 describe("the scene type", () => {
-  /** A chat whose POV has these fields, in a world with a secret vault ("ritual"), a cellar inside it ("smuggling") and a public market ("haggling"). */
-  async function sceneChat(fields: JsonObject): Promise<{ rig: Rig; chatId: string }> {
+  /** A chat whose POV has these fields, in a world with a secret vault ("ritual"), a cellar inside it ("smuggling") and a public market ("haggling"), and `ticks` added to its scene ticks. */
+  async function sceneChat(fields: JsonObject, ticks: Record<string, number> = {}): Promise<{ rig: Rig; chatId: string }> {
     const rig = new Rig();
     const worldId = await rig.newWorld();
-    const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })) as { draft: { entities: Record<string, JsonObject & { fields: JsonObject }> } };
+    const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })) as { draft: { entities: Record<string, JsonObject & { fields: JsonObject }>; time: JsonObject & { sceneTicks: JsonObject } } };
     const put = async (collection: string, id: string, value: JsonObject) => rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
     await put("places", "vault", { id: "vault", name: "The Vault of Sorrows", fields: {}, visibility: "secret", sceneType: "ritual" });
     await put("places", "cellar", { id: "cellar", name: "Cellar", parent: "vault", fields: {}, sceneType: "smuggling" });
@@ -143,6 +143,7 @@ describe("the scene type", () => {
     const pov = draft.entities[POV];
     if (!pov) throw new Error("no POV");
     await put("entities", POV, { ...pov, fields: { ...pov.fields, ...fields } });
+    if (Object.keys(ticks).length > 0) rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "time", value: { ...draft.time, sceneTicks: { ...draft.time.sceneTicks, ...ticks } } }));
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -156,7 +157,7 @@ describe("the scene type", () => {
   }
   const offered = (fix: { options?: { value: unknown }[] }): unknown[] => (fix.options ?? []).map((o) => o.value);
 
-  test("the ✎ offers the world's scene types and the visible places' ones, never one only a hidden place has", async () => {
+  test("the ✎ offers the engine's four scene types and the visible places' ones, never one only a hidden place has", async () => {
     const fix = await sceneFix({});
     expect(offered(fix)).toEqual(["", "conversation", "action", "exploration", "downtime", "haggling"]);
     expect(fix.options?.[0]?.label).toBe("Place default (Conversation)");
@@ -201,6 +202,25 @@ describe("the scene type", () => {
         asShown.entities[POV]!.fields.scene = c.shown;
         expect(tickMinutes(render.world, render.state)).toBe(tickMinutes(render.world, asShown));
       }
+    }
+  });
+
+  test("a type the world gives a tick of its own is named only as any other: not the hidden vault's, nor one only an action sets; the tick rows still list it, and it paces by its tick", async () => {
+    const cases: { fields: JsonObject; inForce: string; minutes: number; placeDefault: string; value: string | null }[] = [
+      { fields: { place: "vault" }, inForce: "ritual", minutes: 10, placeDefault: "Place default", value: "" },
+      { fields: { scene: "work" }, inForce: "work", minutes: 15, placeDefault: "Place default (Conversation)", value: null },
+    ];
+    for (const c of cases) {
+      const { rig, chatId } = await sceneChat(c.fields, { ritual: 10, work: 15 });
+      const view = await rig.rt.view(chatId, rig.host.userId);
+      const fix = view.hud?.fixes.scene;
+      expect([view.scene?.sceneType, view.controls?.time.sceneType]).toEqual(["conversation", "conversation"]);
+      expect([offered(fix ?? {}), fix?.options?.[0]?.label, fix?.value]).toEqual([["", "conversation", "action", "exploration", "downtime", "haggling"], c.placeDefault, c.value]);
+      // Settings → Time is the author's configuration: its tick rows still list every type the world ticks.
+      expect(Object.keys(view.controls?.time.sceneTicks ?? {})).toEqual(expect.arrayContaining(["ritual", "work"]));
+      const render = (await rig.rt.ledger.core(chatId, rig.host.userId))?.renderState(toChain(await rig.host.chats.messages(chatId, rig.host.userId)));
+      if (!render) throw new Error("no head state");
+      expect([sceneType(render.world, render.state), tickMinutes(render.world, render.state)]).toEqual([c.inForce, c.minutes]);
     }
   });
 });
