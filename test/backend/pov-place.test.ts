@@ -14,6 +14,8 @@ import { initialState } from "../../src/engine/world-state";
 import { ALL_PACKS } from "../../src/packs/index";
 import { decodeMapView } from "../../src/packs/space/ui/view";
 import { factLines } from "../../src/backend/turn-steps";
+import { toChain } from "../../src/backend/ledger-io";
+import { sceneType, tickMinutes } from "../../src/engine/time";
 import { modernUsWorld } from "../packs/riverton";
 import { startState } from "../packs/support";
 import { Rig } from "../support/rig";
@@ -58,9 +60,9 @@ describe("a secret place the POV stands in", () => {
   });
 });
 
-describe("the scene ✎", () => {
-  /** The scene ✎ for a POV with these fields, in a world with a secret vault ("ritual"), a cellar inside it ("smuggling") and a public market ("haggling"). */
-  async function sceneFix(fields: JsonObject) {
+describe("the scene type", () => {
+  /** A chat whose POV has these fields, in a world with a secret vault ("ritual"), a cellar inside it ("smuggling") and a public market ("haggling"). */
+  async function sceneChat(fields: JsonObject): Promise<{ rig: Rig; chatId: string }> {
     const rig = new Rig();
     const worldId = await rig.newWorld();
     const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })) as { draft: { entities: Record<string, JsonObject & { fields: JsonObject }> } };
@@ -74,19 +76,23 @@ describe("the scene ✎", () => {
     rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
     const chatId = rig.host.createChat("Morning, Sam.");
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    return { rig, chatId };
+  }
+  async function sceneFix(fields: JsonObject) {
+    const { rig, chatId } = await sceneChat(fields);
     const fix = (await rig.rt.view(chatId, rig.host.userId)).hud?.fixes.scene;
     if (!fix) throw new Error("no scene ✎");
     return fix;
   }
   const offered = (fix: { options?: { value: unknown }[] }): unknown[] => (fix.options ?? []).map((o) => o.value);
 
-  test("offers the world's scene types and the visible places' ones, never one only a hidden place has", async () => {
+  test("the ✎ offers the world's scene types and the visible places' ones, never one only a hidden place has", async () => {
     const fix = await sceneFix({});
     expect(offered(fix)).toEqual(["", "conversation", "action", "exploration", "downtime", "haggling"]);
     expect(fix.options?.[0]?.label).toBe("Place default (Conversation)");
   });
 
-  test("standing in the hidden place, or pinned to its type, names that type nowhere", async () => {
+  test("standing in the hidden place, or pinned to its type, the ✎ names that type nowhere", async () => {
     const cases: { fields: JsonObject; placeDefault: string; value: string | null }[] = [
       { fields: { place: "vault" }, placeDefault: "Place default", value: "" },
       { fields: { place: "cellar" }, placeDefault: "Place default", value: "" },
@@ -99,6 +105,32 @@ describe("the scene ✎", () => {
       // A pinned type the ✎ doesn't offer isn't marked as the current one either.
       expect(fix.value).toBe(c.value);
       expect(JSON.stringify(fix).toLowerCase()).not.toMatch(/ritual|smuggling/);
+    }
+  });
+
+  test("the Scene row names it only when the POV may know it, else the engine's default scene; the clock still paces by the type in force", async () => {
+    const cases: { fields: JsonObject; shown: string; inForce: string }[] = [
+      { fields: { place: "market" }, shown: "haggling", inForce: "haggling" },
+      { fields: { place: "vault" }, shown: "conversation", inForce: "ritual" },
+      { fields: { place: "cellar" }, shown: "conversation", inForce: "smuggling" },
+      { fields: { scene: "ritual" }, shown: "conversation", inForce: "ritual" },
+      { fields: { place: "vault", scene: "action" }, shown: "action", inForce: "action" },
+    ];
+    for (const c of cases) {
+      const { rig, chatId } = await sceneChat(c.fields);
+      const view = await rig.rt.view(chatId, rig.host.userId);
+      // The HUD details and Play → Scene read `scene.sceneType`; the time controls mark the tick in force by `controls.time.sceneType`.
+      expect([view.scene?.sceneType, view.controls?.time.sceneType]).toEqual([c.shown, c.shown]);
+      expect(JSON.stringify({ scene: view.scene, controls: view.controls }).toLowerCase()).not.toMatch(/ritual|smuggling/);
+      // Display only: the engine still reads the type in force, and one with no tick of its own paces as the default scene shown.
+      const render = (await rig.rt.ledger.core(chatId, rig.host.userId))?.renderState(toChain(await rig.host.chats.messages(chatId, rig.host.userId)));
+      if (!render) throw new Error("no head state");
+      expect(sceneType(render.world, render.state)).toBe(c.inForce);
+      if (c.shown !== c.inForce) {
+        const asShown = structuredClone(render.state);
+        asShown.entities[POV]!.fields.scene = c.shown;
+        expect(tickMinutes(render.world, render.state)).toBe(tickMinutes(render.world, asShown));
+      }
     }
   });
 });
