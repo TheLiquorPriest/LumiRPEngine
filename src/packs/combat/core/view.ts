@@ -17,7 +17,7 @@ import { isGone } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity } from "../../../engine/visibility";
 import { combatActions, hpSeen, targetParam } from "./flow";
-import { budgetCount, encounterOf, fighterOf, povLeft, rulesOf, standing, type Encounter, type Side } from "./model";
+import { budgetCount, DOWN_CONDITION, encounterOf, fighterOf, povLeft, rulesOf, standing, type Encounter, type Side } from "./model";
 
 export interface EncounterRow {
   /** Null for someone the POV can't see. */
@@ -125,7 +125,8 @@ function logLines(ctx: ReadContext, enc: Encounter, gm: boolean): string[] {
 
 /**
  * The Encounter card (DESIGN §11), as the POV sees it or, with `gm`, everything; null without a
- * fight, and for the player once the POV has left it.
+ * fight, and for the player once the POV has left it. Down reads the fight itself, at any Sheets
+ * level; the down condition the Sheets pack shows from Sheets 4 isn't listed beside it again.
  */
 export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean } = {}): EncounterView | null {
   const rules = rulesOf(ctx.world);
@@ -134,6 +135,7 @@ export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean } = {}
   if (!rules || !enc || (!gm && povLeft(ctx.state, ctx.world, enc))) return null;
   const head = paletteEncounter(ctx);
   const conditionsOf = optionalQuery(ctx, "sheets.conditions");
+  const downCondition = typeof rules.down?.condition === "string" && rules.down.condition.trim() !== "" ? rules.down.condition : DOWN_CONDITION;
   const order = enc.order.map((f, i): EncounterRow => {
     const name = nameOf(ctx, f.id, gm);
     const seen = name === null ? null : hpSeen(ctx, rules, f.id, gm);
@@ -148,7 +150,7 @@ export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean } = {}
       init: name === null ? null : f.init,
       hp: seen && "current" in seen ? seen : null,
       wound: seen && "wound" in seen && seen.wound !== "" ? seen.wound : null,
-      conditions: name === null || isGone(ctx.state, f.id) || !own(ctx.state.entities, f.id) ? [] : (conditionsOf?.(ctx, f.id) ?? []),
+      conditions: name === null || isGone(ctx.state, f.id) || !own(ctx.state.entities, f.id) ? [] : (conditionsOf?.(ctx, f.id) ?? []).filter((c) => !(f.down && c === downCondition)),
     };
   });
   const current = enc.order[enc.turn]?.id;

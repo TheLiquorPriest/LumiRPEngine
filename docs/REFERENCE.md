@@ -242,6 +242,12 @@ Panels: `castlife.cast`. Slots it writes: `people`.
 
 Version 1 · realism domain none · requires none.
 
+### Relation types
+
+| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |
+|---|---|---|---|---|---|---|---|
+| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |
+
 ### Effects
 
 | Effect | Arguments |

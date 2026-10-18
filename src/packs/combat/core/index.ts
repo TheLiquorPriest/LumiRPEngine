@@ -16,7 +16,8 @@
 //   combat.decision  {key, choice}                                          an `npc.choose` pick for a turn
 //
 // Effects: `combat.start {foes?}` (ids, a selector, or everyone hostile here), `combat.end
-// {winner?}`, `combat.end_turn {who?}` and `combat.spend {who?, cost}`.
+// {winner?}`, `combat.end_turn {who?}` and `combat.spend {who?, cost}`. The pack also defines the `hostile`
+// relation type the default sides rule reads (symmetric, so both sides hold it).
 
 import type { JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
@@ -335,6 +336,9 @@ export const combatPack: PackDef = {
     r.query("combat.gm", (ctx) => buildEncounterView(ctx, { gm: true }));
     r.query("combat.hp_line", hpLine);
     r.query("combat.engaged", (ctx, id) => engaged(ctx.state, ctx.world, id));
+
+    // Who is hostile to whom, as the default sides rule reads it (either way, as a link authored on one side only reads before a chat completes it).
+    r.relation({ id: "hostile", label: "Hostile to", from: "*", to: "*", cardinality: "many_many", symmetric: true, fields: {}, pack: PACK });
 
     // What formulas read of the fight: a requirement `is_foe(self, target)` keeps an attack to foes.
     r.formula("can_fight", (ctx, e) => {
