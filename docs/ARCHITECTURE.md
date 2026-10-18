@@ -146,7 +146,7 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 | `userStorage/runs/<chatId>/plans.json` | Planned-turn lines by seed (the newest 128), for Re-narrate |
 | `userStorage/runs/<chatId>/outcome-notes.json` | `OutcomeNote[]`: notes for the next turn's Outcome slot, dropped once a later message has committed and another follows |
 | `userStorage/runs/<chatId>/prefs.json` | `{v: 1, mapDisplay?}`: the player's choices for the chat that aren't part of its world, such as the map's display mode (`lre.map`) |
-| `userStorage/runs/<chatId>/inspector.json` | `{v: 2, records, delivery}`: the last 10 interceptor runs and the last delivery check by slot, read when the chat is first viewed; a `v: 1` history is read with its lore traces' query text dropped |
+| `userStorage/runs/<chatId>/inspector.json` | `{v: 2, records, delivery}`: the last 10 interceptor runs and the last delivery check by slot, read when the chat is first viewed; a `v: 1` history is read with its lore traces' query text dropped, a trace that lists a secret entry isn't read at all, and an `npc.choose` trace is read without its lookups' text and its entries' titles |
 
 ### 3.2 Ledger (`shared/ledger.ts`)
 
