@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS } from "../shared/settings";
+import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, SPEED_ACTIVITIES, SPEED_DEFAULT } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import type { HostPort } from "./host";
@@ -101,7 +101,8 @@ export function defaultSettings(): UserSettings {
       sceneTicks: { conversation: 2, action: 1, exploration: 10, downtime: 30 },
       scale: 1,
       interrupts: { invitation: "stop", bill: "note", decline: "stop", incident: "stop", quest: "stop", rule: "note", arrival: "stop", overdue: "note", needs: "ignore", weather: "ignore" },
-      speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } },
+      // Every activity Settings → Time lists has the policy it shows.
+      speedThrough: Object.fromEntries(SPEED_ACTIVITIES.map((activity) => [activity, { ...SPEED_DEFAULT }])),
       montage: "key",
       unitCap: { agentDays: 600, events: 5000 },
     },
@@ -257,7 +258,13 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
   for (const c of INTERRUPT_CLASSES) if (hasOwn(rawInterrupts, c)) interrupts[c] = oneOf<InterruptPolicy>(rawInterrupts[c], ["stop", "note", "ignore"]) ?? d.time.interrupts[c];
   const unitCap = isRecord(t.unitCap) ? t.unitCap : {};
   const time: TimeSettings = {
-    sceneTicks: isRecord(t.sceneTicks) ? entries(t.sceneTicks, 64, (x) => int(x, 0, 1440)) : d.time.sceneTicks,
+    // Engine time is whole minutes: a tick between them reads as the minute it plays, so its row stays.
+    sceneTicks: isRecord(t.sceneTicks)
+      ? entries(t.sceneTicks, 64, (x) => {
+          const minutes = real(x, 0, 1440);
+          return minutes === undefined ? undefined : Math.round(minutes);
+        })
+      : d.time.sceneTicks,
     scale: real(t.scale, 0.01, 1000) ?? d.time.scale,
     interrupts,
     speedThrough: isRecord(t.speedThrough) ? entries(t.speedThrough, 64, speedOf) : d.time.speedThrough,

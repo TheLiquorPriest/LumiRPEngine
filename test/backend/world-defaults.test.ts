@@ -6,6 +6,7 @@ import { REALISM_PRESETS } from "../../src/engine/realism";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import type { ControlsView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
+import { SPEED_ACTIVITIES, SPEED_DEFAULT } from "../../src/shared/settings";
 import { Rig } from "../support/rig";
 
 /** A new chat on a starter; its controls before the first turn are the levels that turn will use. */
@@ -62,5 +63,13 @@ describe("new chats start from the world's realism and time defaults", () => {
     await reloaded.turn(chatId, "I look around.", "The street is quiet.");
     expect(JSON.stringify((await reloaded.rt.ledger.core(chatId, reloaded.host.userId))?.journal)).not.toContain("npc_calls");
     expect(await reloaded.send({ type: "lre.marker", chatId, kind: "time", control: "npc_calls", scope: { all: true }, to: 2 })).toMatchObject({ type: "lre.error", code: "bad_request" });
+  });
+
+  test("Settings → Time holds a policy for every Speed through activity it lists, and a tick between minutes keeps its row as the minute it plays", async () => {
+    const rig = new Rig();
+    const settings = rig.body(await rig.send({ type: "lre.settings.set", patch: { time: { sceneTicks: { action: 2.5 } } } })).settings as { time: { sceneTicks: Record<string, number>; speedThrough: Record<string, unknown> } };
+    expect(Object.keys(settings.time.speedThrough).sort()).toEqual([...SPEED_ACTIVITIES].sort());
+    for (const policy of Object.values(settings.time.speedThrough)) expect(policy).toEqual(SPEED_DEFAULT);
+    expect(settings.time.sceneTicks.action).toBe(3);
   });
 });

@@ -61,6 +61,10 @@ export const PLAN_MARGIN_MS = 15_000;
 /** The longest before-the-reply wall clock: the rest of the host's wait, so the plan always lands (DESIGN §5.1). */
 export const PRE_REPLY_MAX_MS = CONTEXT_HANDLER_MAX_MS - PLAN_MARGIN_MS;
 
+/** The activities Speed through always lists (DESIGN §9.2), each offered as a timelapse past 30 minutes unless set otherwise; worlds may add more. */
+export const SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"] as const;
+export const SPEED_DEFAULT: Readonly<{ mode: "offer" | "auto"; thresholdMinutes: number }> = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
+
 export interface PhaseBudget {
   calls: number;
   ms: number;

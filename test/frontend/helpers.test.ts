@@ -6,7 +6,7 @@ import { kindFields, refOptions } from "../../src/frontend/build/schema-form";
 import { cellProblem } from "../../src/frontend/build/table-editor";
 import { parseFixValue } from "../../src/frontend/fix-editor";
 import { visiblePanels } from "../../src/frontend/play/play";
-import { settingsTimePatch } from "../../src/frontend/time-controls";
+import { settingsTimePatch, speedRows } from "../../src/frontend/time-controls";
 import type { PanelDef } from "../../src/frontend/registry";
 import type { UiCatalog } from "../../src/frontend/ui-registry";
 import { slotProblems } from "../../src/packs/calendar/ui/schedule-editor";
@@ -158,6 +158,13 @@ describe("time settings patches", () => {
     expect(settingsTimePatch({ control: "interrupt", scope: { interrupt: "bill" }, to: "stop" })).toEqual({ time: { interrupts: { bill: "stop" } } });
     expect(settingsTimePatch({ control: "speed_through", scope: { activity: "sleep" }, to: { mode: "auto", thresholdMinutes: 60 } })).toEqual({ time: { speedThrough: { sleep: { mode: "auto", thresholdMinutes: 60 } } } });
     expect(settingsTimePatch({ control: "pause", scope: { all: true }, to: true })).toEqual({});
+  });
+
+  test("Speed through lists its four activities and the world's own, and one without a policy shows none rather than a default", () => {
+    const rows = speedRows({ sleep: { mode: "auto", thresholdMinutes: 60 }, ferry: { mode: "offer", thresholdMinutes: 15 } });
+    expect(rows.map((r) => r.activity)).toEqual(["sleep", "work_shift", "travel", "waiting", "ferry"]);
+    expect(rows.find((r) => r.activity === "sleep")?.policy).toEqual({ mode: "auto", thresholdMinutes: 60 });
+    expect(rows.find((r) => r.activity === "travel")?.policy).toBeNull();
   });
 });
 

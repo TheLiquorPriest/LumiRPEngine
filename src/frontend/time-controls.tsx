@@ -4,9 +4,11 @@
 // running chat.
 
 import type { JsonObject, JsonValue } from "../shared/json";
+import { hasOwn } from "../shared/json";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../shared/ids";
 import type { TimeControl, TimeScope } from "../shared/ledger";
+import { SPEED_ACTIVITIES, SPEED_DEFAULT } from "../shared/settings";
 import { HostSlider, NumberStepper, Seg } from "./components";
 import { formatMinutes, humanize } from "./format";
 
@@ -25,9 +27,10 @@ export interface TimeChange {
   to: JsonValue;
 }
 
-/** Activities Speed through always lists (DESIGN §9.2); worlds may add more. */
-export const SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"] as const;
-const SPEED_DEFAULT = { mode: "offer", thresholdMinutes: 30 } as const;
+/** Speed through's rows: the activities it always lists, then the world's own, each with its policy, or null when it has none (that activity passes within the turn). */
+export function speedRows(speedThrough: TimeValues["speedThrough"]): { activity: string; policy: TimeValues["speedThrough"][string] | null }[] {
+  return [...new Set<string>([...SPEED_ACTIVITIES, ...Object.keys(speedThrough)])].map((activity) => ({ activity, policy: hasOwn(speedThrough, activity) ? (speedThrough[activity] ?? null) : null }));
+}
 
 /** A time change as a Settings merge patch (the seed for new chats). */
 export function settingsTimePatch(change: TimeChange): JsonObject {
@@ -58,7 +61,6 @@ const POLICY_OPTIONS = [
 
 export function TimeControlsEditor(props: { values: TimeValues; onChange(change: TimeChange): void; currentSceneType?: string; disabled?: boolean }) {
   const { values } = props;
-  const activities = [...new Set<string>([...SPEED_ACTIVITIES, ...Object.keys(values.speedThrough)])];
   return (
     <div class="lre-stack" data-lre-time-controls>
       <section class="lre-card">
@@ -70,7 +72,7 @@ export function TimeControlsEditor(props: { values: TimeValues; onChange(change:
             value={minutes}
             min={0}
             max={1440}
-            step={0.5}
+            integer
             disabled={props.disabled}
             onChange={(to) => props.onChange({ control: "tick", scope: { sceneType }, to })}
           />
@@ -98,34 +100,34 @@ export function TimeControlsEditor(props: { values: TimeValues; onChange(change:
       </section>
       <section class="lre-card">
         <div class="lre-h">Speed through</div>
-        {activities.map((activity) => {
-          const current = values.speedThrough[activity] ?? SPEED_DEFAULT;
-          return (
-            <div key={activity} class="lre-stack" style={{ marginBottom: "8px" }}>
-              <span class="lre-small lre-muted">{humanize(activity)}</span>
-              <Seg<"offer" | "auto">
-                label={`${humanize(activity)} mode`}
-                value={current.mode}
-                options={[
-                  { value: "offer", label: "Offer a timelapse" },
-                  { value: "auto", label: "Run it" },
-                ]}
-                disabled={props.disabled}
-                onChange={(mode) => props.onChange({ control: "speed_through", scope: { activity }, to: { mode, thresholdMinutes: current.thresholdMinutes } })}
-              />
-              <NumberStepper
-                label="When longer than (min)"
-                value={current.thresholdMinutes}
-                min={0}
-                max={1440}
-                step={5}
-                integer
-                disabled={props.disabled}
-                onChange={(thresholdMinutes) => props.onChange({ control: "speed_through", scope: { activity }, to: { mode: current.mode, thresholdMinutes } })}
-              />
-            </div>
-          );
-        })}
+        {speedRows(values.speedThrough).map(({ activity, policy }) => (
+          <div key={activity} class="lre-stack" style={{ marginBottom: "8px" }}>
+            <span class="lre-small lre-muted">
+              {humanize(activity)}
+              {policy ? "" : " · passes within the turn"}
+            </span>
+            <Seg<"offer" | "auto">
+              label={`${humanize(activity)} mode`}
+              value={policy?.mode ?? null}
+              options={[
+                { value: "offer", label: "Offer a timelapse" },
+                { value: "auto", label: "Run it" },
+              ]}
+              disabled={props.disabled}
+              onChange={(mode) => props.onChange({ control: "speed_through", scope: { activity }, to: { mode, thresholdMinutes: policy?.thresholdMinutes ?? SPEED_DEFAULT.thresholdMinutes } })}
+            />
+            <NumberStepper
+              label="When longer than (min)"
+              value={policy?.thresholdMinutes ?? null}
+              min={0}
+              max={1440}
+              step={5}
+              integer
+              disabled={props.disabled}
+              onChange={(thresholdMinutes) => props.onChange({ control: "speed_through", scope: { activity }, to: { mode: policy?.mode ?? SPEED_DEFAULT.mode, thresholdMinutes } })}
+            />
+          </div>
+        ))}
       </section>
       <section class="lre-card">
         <div class="lre-h">Montage and limits</div>
