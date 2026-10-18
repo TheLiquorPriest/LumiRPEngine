@@ -63,7 +63,7 @@ function optionOf(ctx: ReadContext, action: ActionDef, params: JsonObject, label
     label,
     params,
     // As every other check reads: an attack the policy settles without a roll shows no dice odds.
-    ...checkView(odds, policyFor(ctx.world, ctx.state, action).retry),
+    ...checkView(odds, policyFor(ctx.world, ctx.state, action, ctx.world.pov).retry),
     ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
     ...(odds.available ? {} : { disabled: odds.failed?.code === "requirement" ? "Not possible here and now" : (odds.failed?.reason ?? "Not available") }),
   };

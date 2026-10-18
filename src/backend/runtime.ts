@@ -835,7 +835,7 @@ export class Runtime implements TurnHooks {
     const action = findAction(this.registry, render.world, intent.action);
     if (!action) return null;
     const shown = actionOdds(this.registry, render.world, render.state, { action, params: intent.params });
-    const policy = policyFor(render.world, render.state, action);
+    const policy = policyFor(render.world, render.state, action, render.world.pov);
     if (!shown.available || !shown.verdict || !shown.odds || !needsJudge(policy, shown.verdict)) return null;
     return { intent, action, verdict: shown.verdict, odds: shown.odds, policy };
   }

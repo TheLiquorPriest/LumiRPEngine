@@ -24,7 +24,8 @@ import type { ActionDef, AdjudicationDef, CheckAuthority, CheckDef, RetryRule, W
 import { bandOutcome, checkBands, NO_BAND, type CheckReading, type CheckShift, type ReadyCheck } from "./checks";
 import { readEngineSlice, type TryRecord } from "./engine-pack";
 import type { Value } from "./expr";
-import { own } from "./pack-kit";
+import { optionalQuery, own } from "./pack-kit";
+import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import type { Availability } from "./resolve";
 import type { Rng } from "./rng";
@@ -83,9 +84,18 @@ export function policyOf(world: WorldDoc, state: Readonly<WorldState>): Adjudica
   return state.adjudication ?? readAdjudication(world.ruleset?.adjudication) ?? defaultAdjudication();
 }
 
-/** The policy a check of this action answers to: a combat action's rolls plainly unless the world's combat hands fights to the policy (DESIGN §11). */
-export function policyFor(world: WorldDoc, state: Readonly<WorldState>, action: Pick<ActionDef, "combat">): AdjudicationDef {
-  return action.combat !== undefined && world.ruleset?.combat?.adjudicate !== "policy" ? defaultAdjudication() : policyOf(world, state);
+/**
+ * The policy a check of this action answers to (DESIGN §11). A combat action rolls plainly unless
+ * the world's combat hands fights to the policy and the POV takes it: everyone else's attacks always
+ * roll, as the `check` effect's NPC checks do, since no player chose them and no judge reads them.
+ */
+export function policyFor(world: WorldDoc, state: Readonly<WorldState>, action: Pick<ActionDef, "combat">, actor: EntityId): AdjudicationDef {
+  return action.combat !== undefined && (actor !== world.pov || world.ruleset?.combat?.adjudicate !== "policy") ? defaultAdjudication() : policyOf(world, state);
+}
+
+/** The fight under way and its round, as the retry record keeps them; null without one. */
+export function fightRound(ctx: ReadContext): string | null {
+  return optionalQuery(ctx, "combat.round_key")?.(ctx) ?? null;
 }
 
 /** The outcomes that count as a success: the check's `pass`, else `success` and every band listed after it; empty when it names none. */
@@ -154,14 +164,16 @@ export function markedFor(registry: Registry, world: WorldDoc, state: Readonly<W
 
 /**
  * Whether something relevant changed since a failed attempt: the scene (the actor is elsewhere, or
- * the POV left and came back), and under `changed` also the time passed or the check's odds.
+ * the POV left and came back), and under `changed` also the time passed, a new round of the fight
+ * the attempt was made in (a fight takes no clock time), or the check's odds.
  */
-function changedSince(policy: AdjudicationDef, world: WorldDoc, state: Readonly<WorldState>, actor: EntityId, ready: ReadyCheck, prior: TryRecord): boolean {
+function changedSince(policy: AdjudicationDef, registry: Registry, world: WorldDoc, state: Readonly<WorldState>, actor: EntityId, ready: ReadyCheck, prior: TryRecord): boolean {
   const here = placeOfEntity(state, actor);
   if (here !== prior.place) return true;
   // The POV's observations know when it last arrived; nobody else's movements are kept.
   if (actor === world.pov && here !== null && (placeVisit(state, here)?.last ?? 0) > prior.at) return true;
   if (policy.retry === "once") return false;
+  if (prior.round !== undefined && fightRound(registry.context(world, state)) !== prior.round) return true;
   return state.clock - prior.at >= policy.retryAfter || oddsSignature(ready) !== prior.odds;
 }
 
@@ -187,7 +199,7 @@ export function verdictOf(policy: AdjudicationDef, input: VerdictInput): Verdict
   const unrolled = (why: NoRoll, outcome: string | null, prior: TryRecord | null = null): Verdict => ({ roll: false, why, outcome, chance, pass, prior });
   if (policy.retry !== "free" && pass.length > 0) {
     const prior = own(readEngineSlice(state).tries, tryKey(actor, action.id, input.params));
-    if (prior?.failed && !changedSince(policy, world, state, actor, ready, prior)) return unrolled("retry", prior.outcome, prior);
+    if (prior?.failed && !changedSince(policy, registry, world, state, actor, ready, prior)) return unrolled("retry", prior.outcome, prior);
   }
   if (chance !== null && policy.impossibleAt !== null && chance <= policy.impossibleAt) return unrolled("impossible", failOutcome(action, ready, odds, pass));
   if (chance !== null && policy.trivialAt !== null && chance >= policy.trivialAt) return unrolled("trivial", passOutcome(action, ready, odds, pass));

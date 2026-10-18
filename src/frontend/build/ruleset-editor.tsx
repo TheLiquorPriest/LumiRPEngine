@@ -561,7 +561,7 @@ const COMBAT: FieldSpec = {
     { kind: "expr", key: "end", label: "Over when (default: one side has no one standing)", optional: true },
     { kind: "number", key: "stalemate", label: "Peters out after this many rounds in a row with no attack and no one hurt (default 3; 0: never)", min: 0, step: 1, optional: true },
     { kind: "enum", key: "endTurn", label: "The player's turn ends", values: ["spent", "manual"], optional: true },
-    { kind: "enum", key: "adjudicate", label: "Attacks and other fight checks are settled by (dice: always rolled; policy: the adjudication policy)", values: ["dice", "policy"], optional: true },
+    { kind: "enum", key: "adjudicate", label: "Attacks and other fight checks are settled by (dice: always rolled; policy: the adjudication policy for the player's own, while everyone else's always roll)", values: ["dice", "policy"], optional: true },
     { kind: "object", key: "tactics", label: "Everyone else's tactics", optional: true, fields: [{ kind: "expr", key: "threat", label: "A target's threat, with self and target (default its HP)", optional: true }, { kind: "expr", key: "lowHp", label: "Defends when (default a quarter of its HP or less)", optional: true }] },
     { kind: "enum", key: "showHp", label: "Others' HP shows as", values: ["wounds", "exact"], optional: true },
     { kind: "json", key: "wounds", label: "Wound bands over the HP left in percent", optional: true, hint: '[{"label": "hurt", "min": 50, "max": 100}, …]' },

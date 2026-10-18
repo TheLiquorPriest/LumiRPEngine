@@ -56,6 +56,8 @@ declare module "../../../engine/registry" {
     "combat.engaged": (ctx: ReadContext, id: EntityId) => boolean;
     /** Whether an action suits the fight's state for the POV (`fightOffers`): typed text reads only what the Combat tab and interpret offer. */
     "combat.offers": (ctx: ReadContext, action: Pick<ActionDef, "combat">) => boolean;
+    /** The fight under way and its round as one key (`<encounter>:<round>`); null without one. A retry rule counts a new round as a change, since a fight takes no clock time. */
+    "combat.round_key": (ctx: ReadContext) => string | null;
   }
 }
 
@@ -343,6 +345,10 @@ export const combatPack: PackDef = {
     r.query("combat.hp_line", hpLine);
     r.query("combat.engaged", (ctx, id) => engaged(ctx.state, ctx.world, id));
     r.query("combat.offers", (ctx, action) => fightOffers(ctx.world, ctx.state, action));
+    r.query("combat.round_key", (ctx) => {
+      const enc = encounterOf(ctx.state);
+      return enc ? `${enc.id}:${enc.round}` : null;
+    });
 
     // Who is hostile to whom, as the default sides rule reads it (either way, as a link authored on one side only reads before a chat completes it).
     r.relation({ id: "hostile", label: "Hostile to", from: "*", to: "*", cardinality: "many_many", symmetric: true, fields: {}, pack: PACK });

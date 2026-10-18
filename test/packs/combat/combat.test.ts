@@ -447,23 +447,50 @@ describe("the adjudication policy", () => {
     expect(lintStructure(odd, reg).some((i) => i.path === "ruleset.combat.adjudicate")).toBe(true);
   });
 
-  test("handed to Narrative-first, everyone else's attacks still roll: no judge reads them", () => {
-    const world = policyWorld((w) => {
-      w.ruleset!.adjudication = presetAdjudication("narrative");
-      w.ruleset!.combat!.adjudicate = "policy";
-      // The goblin's +3 against 20 hits on a natural 17 or better; passed unrolled, it would always hit.
-      w.entities[POV]!.fields.ac = 20;
-    });
-    const outcomes: string[] = [];
-    for (let i = 0; i < 16; i++) {
-      for (const e of plan(world, started(world).state, "end_turn", {}, `npc${i}`).events) {
-        if (e.type !== "engine.adjudged" || !("data" in e) || e.data === null || typeof e.data !== "object" || Array.isArray(e.data) || e.data.actor !== "goblin") continue;
-        expect(e.data.rolled).toBe(true);
-        outcomes.push(String(e.data.outcome));
+  test("handed to the policy, everyone else's attacks still roll, under Narrative-first and Balanced alike", () => {
+    // The goblin's +3 against 20 is risky (Narrative-first leaves it to the story); against 5 it is a sure thing (Balanced passes it unrolled).
+    for (const [preset, ac] of [["narrative", 20], ["balanced", 5]] as const) {
+      const world = policyWorld((w) => {
+        w.ruleset!.adjudication = presetAdjudication(preset);
+        w.ruleset!.combat!.adjudicate = "policy";
+        w.entities[POV]!.fields.ac = ac;
+      });
+      const state = started(world).state;
+      expect(actionOdds(reg, world, state, { action: world.actions.strike!, actor: "goblin", params: { target: POV } }).verdict?.roll).toBe(true);
+      // The player's own attack still answers to the policy.
+      expect(actionOdds(reg, world, state, { action: world.actions.strike!, params: { target: "goblin" } }).verdict?.why).toBe(preset === "narrative" ? "story" : null);
+      let acts = 0;
+      for (let i = 0; i < 16; i++) {
+        const events = plan(world, state, "end_turn", {}, `npc${i}`).events;
+        expect(events.some((e) => e.type === "engine.adjudged" && "data" in e && e.data.actor === "goblin")).toBe(false);
+        acts += events.filter((e) => e.type === "combat.act" && "data" in e && e.data.actor === "goblin").length;
       }
+      expect(acts).toBe(16);
     }
-    expect(outcomes.length).toBe(16);
-    expect(outcomes).toContain("miss");
-    expect(outcomes).toContain("hit");
+  });
+
+  test("handed to Balanced, the player's missed attack rolls again next round: a new round is a change", () => {
+    const world = policyWorld((w) => {
+      w.ruleset!.adjudication = presetAdjudication("balanced");
+      w.ruleset!.combat!.adjudicate = "policy";
+      // Nothing left to do after the strike, so the turn ends and the others take theirs.
+      delete w.actions.step;
+    });
+    const start = started(world).state;
+    const strike = { action: world.actions.strike!, params: { target: "bandit" } };
+    let next: WorldState | null = null;
+    for (let i = 0; i < 64 && !next; i++) {
+      const turn = plan(world, start, "strike", { target: "bandit" }, `miss${i}`);
+      const mine = turn.events.find((e) => e.type === "engine.adjudged" && "data" in e && e.data.actor === POV);
+      if (!mine || !("data" in mine) || mine.data.failed !== true) continue;
+      const after = fold(reg, world, start, turn.events);
+      const enc = encounterOf(after);
+      if (enc?.round === 2 && enc.order[enc.turn]?.id === POV && actionOdds(reg, world, after, strike).available) next = after;
+    }
+    if (!next) throw new Error("no seed missed and came round again");
+    expect(actionOdds(reg, world, next, strike).verdict?.roll).toBe(true);
+    const again = plan(world, next, "strike", { target: "bandit" }, "again");
+    const mine = again.events.find((e) => e.type === "engine.adjudged" && "data" in e && e.data.actor === POV);
+    expect(mine && "data" in mine ? mine.data.rolled : null).toBe(true);
   });
 });

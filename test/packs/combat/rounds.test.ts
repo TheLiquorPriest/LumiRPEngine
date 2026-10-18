@@ -402,12 +402,13 @@ describe("what the Combat tab offers", () => {
     expect(settled?.odds).toBeUndefined();
     expect(settled?.detail).not.toContain("DC");
     const warnings = (patch: (w: WorldDoc) => void) => lintStructure(fightWorld(patch), reg).filter((i) => i.path === "ruleset.combat.adjudicate" && i.severity === "warning");
+    // Everyone else's attacks roll and a new round is a change, so only a retry that waits for a new scene still misleads.
     expect(warnings((w) => {
       w.ruleset!.adjudication = presetAdjudication("narrative");
       w.ruleset!.combat!.adjudicate = "policy";
-    }).length).toBeGreaterThan(0);
+    })).toEqual([]);
     expect(warnings((w) => {
-      w.ruleset!.adjudication = readAdjudication({ preset: "custom", retry: "changed" })!;
+      w.ruleset!.adjudication = readAdjudication({ preset: "custom", retry: "once" })!;
       w.ruleset!.combat!.adjudicate = "policy";
     })).toHaveLength(1);
     expect(warnings((w) => {

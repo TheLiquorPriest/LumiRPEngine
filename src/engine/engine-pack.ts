@@ -54,6 +54,8 @@ export interface TryRecord {
   failed: boolean;
   /** The check as it was rolled (dice, modifier, DC): a different one is a change. */
   odds: string;
+  /** The fight and its round, when one was under way: a later round is a change. */
+  round?: string;
 }
 
 export interface EngineSlice {
@@ -87,7 +89,7 @@ export function readEngineSlice(state: Readonly<WorldState>): EngineSlice {
   for (const [k, v] of Object.entries(rec(s.agents))) if (typeof v === "number") agents[k] = v;
   const tries: Record<string, TryRecord> = {};
   for (const [k, v] of Object.entries(rec(s.tries))) {
-    if (isRecord(v) && typeof v.at === "number" && (typeof v.place === "string" || v.place === null) && typeof v.outcome === "string" && typeof v.failed === "boolean" && typeof v.odds === "string") tries[k] = { at: v.at, place: v.place, outcome: v.outcome, failed: v.failed, odds: v.odds };
+    if (isRecord(v) && typeof v.at === "number" && (typeof v.place === "string" || v.place === null) && typeof v.outcome === "string" && typeof v.failed === "boolean" && typeof v.odds === "string") tries[k] = { at: v.at, place: v.place, outcome: v.outcome, failed: v.failed, odds: v.odds, ...(typeof v.round === "string" ? { round: v.round } : {}) };
   }
   return {
     fired,
@@ -290,8 +292,8 @@ const events: EventTypeDef<PackEvent>[] = [
       // Only an attempt a retry rule reads carries a key; its record is the latest for that check.
       const key = e.data.key;
       if (typeof key !== "string" || !safeKey(key)) return;
-      const place = e.data.place;
-      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str(e, "outcome"), failed: e.data.failed === true, odds: str(e, "odds") };
+      const { place, round } = e.data;
+      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str(e, "outcome"), failed: e.data.failed === true, odds: str(e, "odds"), ...(typeof round === "string" ? { round } : {}) };
     },
     describe: (e) => `${str(e, "actor")}: ${str(e, "action").replace(/_/g, " ")}, ${str(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str(e, "why")})`}`,
   },
