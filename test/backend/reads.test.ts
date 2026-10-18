@@ -130,6 +130,35 @@ describe("a refused read", () => {
     expect(rig.host.quietCalls.length).toBe(calls);
     expect((await chips(rig, chatId)).map((ch) => ch.id)).toEqual(before);
   });
+
+  test("a stopped Re-run read elsewhere offers no Retry read, which could only be refused", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    // An earlier reply with a second swipe, the one the next turn's Re-run is planned on.
+    rig.host.sendUser(chatId, "I look around.");
+    await rig.host.settle();
+    await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "Okay.");
+    const first = rig.host.head(chatId);
+    if (!first) throw new Error("no reply");
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe", messageId: first.id }), "Nothing happens.");
+    rig.host.sendUser(chatId, "I wait.");
+    await rig.host.settle();
+    await rig.host.finish(await rig.host.start(chatId, { type: "normal" }), "Okay.");
+    const head = rig.host.head(chatId);
+    if (!head) throw new Error("no reply");
+    // While the Re-run streams, the swipe it was planned on goes; then it stops.
+    const g = await rig.host.start(chatId, { type: "swipe", messageId: head.id });
+    rig.host.navigate(chatId, first.id, 0);
+    await rig.host.settle();
+    rig.host.deleteSwipe(chatId, first.id, 1);
+    await rig.host.settle();
+    await rig.host.stop(g, "Half a reply.");
+    const rec = (await rig.rt.ledger.core(chatId, rig.host.userId))?.journal.messages[head.id]?.ledger.swipes[String(g.swipeId)];
+    expect(rec?.status).toBe("stopped");
+    expect(rec?.readElsewhere).toBe(true);
+    expect((await chips(rig, chatId)).some((ch) => ch.kind === "retry_read")).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });
 
 

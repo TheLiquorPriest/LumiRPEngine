@@ -510,7 +510,8 @@ function derivedChips(chain: readonly ChainMessage[], fold: FoldOutput, keepRepo
     }
     if (i !== headIndex) return;
     const text = m.swipes[m.swipeId] ?? "";
-    if (rec.status === "stopped") chips.push({ id: `retry_read:${m.id}:${m.swipeId}`, kind: "retry_read", messageId: m.id, label: "Retry read", detail: "The reply stopped early; read what was saved.", actions: [{ id: "retry_read", label: "Retry read" }], expires: "never" });
+    // A record read elsewhere never folds as stored, so a read of it is always refused: no chip leads there.
+    if (rec.status === "stopped" && !rec.readElsewhere) chips.push({ id: `retry_read:${m.id}:${m.swipeId}`, kind: "retry_read", messageId: m.id, label: "Retry read", detail: "The reply stopped early; read what was saved.", actions: [{ id: "retry_read", label: "Retry read" }], expires: "never" });
     if (rec.status === "degraded" && text.trim() === "") chips.push({ id: `retry:${m.id}:${m.swipeId}`, kind: "retry", messageId: m.id, label: "Retry", detail: "The narrator returned an empty reply.", actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send" });
     else if (rec.status === "degraded") chips.push({ id: `degraded:${m.id}:${m.swipeId}`, kind: "degraded", messageId: m.id, label: "Not fully simulated", detail: "Part of this turn ran engine-only.", actions: [], expires: "next_send" });
     const minutes = clockMinutes(rec.events);
