@@ -21,7 +21,7 @@ import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService } from "../engine/pack-kit";
-import { parseOverrides, parseTarget } from "../engine/time";
+import { applyTimeAdvance, parseOverrides, parseTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
 import { actionOdds } from "../engine/resolve";
@@ -34,7 +34,7 @@ import { JobError, type JobRunner } from "./jobs";
 import { bookDrift, saveFromChat } from "./lore";
 import { ACTIVE_CONNECTION, declineNote, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
-import { applyProposals } from "./turn-model";
+import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
 import { TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
@@ -581,10 +581,20 @@ export class Dispatcher {
         }
         const { state, world } = await this.head(chatId, userId);
         const w = new Working(this.rt.registry, world, state);
-        // The seed the chip's check used, so a purchase charges the amount its label shows.
-        const [outcome] = applyProposals(this.rt.registry, w, [proposal], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:confirm`, this.runSeedOf(chatId));
-        if (!outcome || outcome.rejection) throw new RequestError("validation", outcome?.rejection?.reason ?? "the change no longer applies");
-        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events: [...outcome.materialized, ...outcome.events] } });
+        let events: LedgerEvent[];
+        if (proposal.type === "time_advance") {
+          // A narrated time skip applies as it would have automatically (DESIGN §9.4): whole, with its
+          // catch-up, from the clock the head stands at now, or not at all.
+          const advance = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+          if (!advance.applied) throw new RequestError("validation", advance.reason === "unit_cap" ? "too much happens in between to run it inside the turn" : "the time skip no longer applies");
+          events = [...w.events];
+        } else {
+          // The seed the chip's check used, so a purchase charges the amount its label shows.
+          const [outcome] = applyProposals(this.rt.registry, w, [proposal], typeof chip.payload.seed === "string" ? chip.payload.seed : `${id}:confirm`, this.runSeedOf(chatId));
+          if (!outcome || outcome.rejection) throw new RequestError("validation", outcome?.rejection?.reason ?? "the change no longer applies");
+          events = [...outcome.materialized, ...outcome.events];
+        }
+        const result = await this.write(chatId, userId, { kind: "post", id: this.nextId(), target: "head", entry: { kind: "confirm", events } });
         await settle("accepted");
         return { applied: result.applied, pending: result.pending };
       }

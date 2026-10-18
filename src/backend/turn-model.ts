@@ -99,7 +99,7 @@ export interface EnginePipeline {
 /** A Timelapse chip a read produced (an extracted `time.advance` over the cap or the unit cap). */
 export interface ReadChip {
   target: TimelapseTarget;
-  reason: string;
+  reason: "over_cap" | "unit_cap";
 }
 
 export class TurnBridge implements TurnModel {

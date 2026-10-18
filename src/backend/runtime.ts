@@ -21,7 +21,7 @@ import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
 import type { EngineTurnPlan } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
-import { parseOverrides, parseTarget } from "../engine/time";
+import { applyTimeAdvance, parseOverrides, parseTarget } from "../engine/time";
 import { boundProposal } from "../engine/bounds";
 import { calendarOf, dateAt, formatClock, formatHHMM, nextTimeOfDay, weekdayName, type Calendar } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
@@ -55,7 +55,7 @@ import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
-import { applyProposals, type EnginePipeline, type PlanProse, TurnBridge } from "./turn-model";
+import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge } from "./turn-model";
 import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, refsExist, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, type PlanStart, type SignalFacts, type StepRun, type Tie } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, spanText, TIMELAPSE_ACTION } from "./view";
 import { WorldStore } from "./worlds";
@@ -327,6 +327,20 @@ export interface ReadInput {
   world: WorldDoc;
   seed: string;
   pre: LedgerEvent[];
+}
+
+/** The Timelapse chip for a narrated time skip that can't apply inside the turn (DESIGN §9.4), with every interrupt class at `note`. */
+function skipAheadChip(id: string, at: { messageId: MessageId; swipeId: number }, target: TimelapseTarget, reason: "over_cap" | "unit_cap"): StoredChip {
+  return {
+    id,
+    kind: "timelapse_offer",
+    ...at,
+    label: "The narration skipped ahead — run it as a timelapse?",
+    detail: reason === "unit_cap" ? "Too much happens in between to run it inside the turn." : "Longer than a turn can cover.",
+    actions: [{ id: "timelapse", label: "Run timelapse", style: "primary" }],
+    expires: "next_send",
+    payload: { target: JSON.parse(JSON.stringify(target)) as JsonValue, allNote: true },
+  };
 }
 
 /** Why a timelapse stopped, as the stop chip says it. */
@@ -1087,6 +1101,30 @@ export class Runtime implements TurnHooks {
       });
     });
     confirm.forEach((proposal, i) => {
+      // A narrated time skip under confirm (DESIGN §9.4) is checked as it would apply automatically:
+      // whole, with its catch-up, after this read's automatic changes. One that fits is offered for
+      // Apply; a longer one, or one whose catch-up can't run whole, gets the Timelapse chip instead.
+      if (proposal.type === "time_advance") {
+        const advance = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+        if (advance.chip) stored.push(skipAheadChip(`adv:${messageId}:${swipeId}:c${i}`, { messageId, swipeId }, advance.chip.target, advance.reason ?? "over_cap"));
+        else if (advance.applied) {
+          stored.push({
+            id: `confirm:${input.messageId}:${input.generationId}:${i}`,
+            kind: "confirm",
+            messageId: input.messageId,
+            swipeId,
+            label: describeProposal(proposal, context.world, context.state),
+            detail: "The narration says this much time passed. Apply it?",
+            actions: [
+              { id: "confirm", label: "Apply", style: "primary" },
+              { id: "reject", label: "No" },
+            ],
+            expires: "next_send",
+            payload: { type: "time_advance", connection, proposal },
+          });
+        } else this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(proposal)} (no skip a timelapse could reach)`, input.userId);
+        return;
+      }
       // Offer Apply only for what would apply now: a decline gets its own chip, a purchase nothing
       // prices asks for a price; anything else that can't validate (an unknown item) is logged and dropped.
       const also = unsure.has(proposal);
@@ -1228,9 +1266,7 @@ export class Runtime implements TurnHooks {
       const left = rest.type === "duration" ? ` (${compactSpan(rest.minutes)} left)` : "";
       stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) as JsonValue } });
     }
-    for (const [i, chip] of bridge.chipsFor(input.content).entries()) {
-      stored.push({ id: `adv:${at}:${i}`, kind: "timelapse_offer", ...base, label: "The narration skipped ahead — run it as a timelapse?", detail: chip.reason === "unit_cap" ? "Too much happens in between to run it inside the turn." : "Longer than a turn can cover.", actions: [{ id: "timelapse", label: "Run timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue, allNote: true } });
-    }
+    for (const [i, chip] of bridge.chipsFor(input.content).entries()) stored.push(skipAheadChip(`adv:${at}:${i}`, base, chip.target, chip.reason));
     await this.chips.add(input.chatId, input.userId, stored);
   }
 

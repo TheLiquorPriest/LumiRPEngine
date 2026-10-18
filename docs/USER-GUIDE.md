@@ -292,7 +292,7 @@ When the narration implies an activity the engine hadn't seen start, you always 
 
 ### When the story jumps ahead
 
-If the reply says "three days later", the engine can read that as a time jump, but only for time the reply describes *beyond* what the turn already used, and only up to 4 hours at once. It runs the whole interval so the world catches up, and if the jump is longer or can't finish, it becomes a **Timelapse** chip instead. The time advance has its own mode (see [Extraction modes](#extraction-modes)); it applies only on **auto**, its starting mode, and on **confirm** a time jump is dropped rather than asked about.
+If the reply says "three days later", the engine can read that as a time jump, but only for time the reply describes *beyond* what the turn already used, and only up to 4 hours at once. It runs the whole interval so the world catches up, and if the jump is longer or can't finish, it becomes a **Timelapse** chip instead. The time advance has its own mode (see [Extraction modes](#extraction-modes)): on **auto**, its starting mode, it applies by itself; on **confirm** a chip asks first, and **Apply** runs it.
 
 ## Realism
 
@@ -464,7 +464,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 
 | Type in Settings (as a Mode change chip names it) | What it covers | Starting mode |
 |---|---|---|
-| **Time passing** (Time skips) · `time_advance` | The story jumps ahead ("three hours later") | auto |
+| **Time passing** (Time skips) · `time_advance` | The story jumps ahead ("three hours later"). Up to 4 hours applies with the world caught up (under confirm, when you tap **Apply**); a longer jump becomes a **Run timelapse** chip in either mode | auto |
 | **Moving somewhere** (Moves) · `location` | Someone moves | auto |
 | **Conditions (hurt, tired…)** (Condition changes) · `condition` | A status changes (tired, injured, soaked) | auto |
 | **Learning a fact** (New facts) · `knows` | You learn a public fact, or hear of a place you didn't know (never a secret one) | confirm |
