@@ -508,6 +508,11 @@ function BandCapsInput(props: { label: string; value: JsonValue | undefined; onC
   );
 }
 
+/** Whether a checkbox shows ticked: as the engine reads the value (a lore `secret` that isn't false is secret), else only `true`. */
+export function boolChecked(spec: Extract<FieldSpec, { kind: "bool" }>, value: JsonValue | undefined): boolean {
+  return spec.reads ? spec.reads(value) : value === true;
+}
+
 export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefined; ctx: FormCtx; path: string; parent: JsonObject; onChange(value: JsonValue | undefined): void }) {
   const { spec, ctx } = props;
   const path = spec.key ? `${props.path}.${spec.key}` : props.path;
@@ -521,15 +526,18 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
       return <NumberInput label={spec.label} value={props.value} min={spec.min} max={spec.max} step={spec.step} optional={spec.optional} hint={spec.hint} issues={issues} onChange={props.onChange} />;
     case "bool":
       return (
-        <label class="lre-row">
-          <span class="k">
-            {spec.label}
-            {spec.hint ? <span class="sub">{spec.hint}</span> : null}
-          </span>
-          <span class="lre-check">
-            <input type="checkbox" checked={props.value === true} onChange={(event) => props.onChange(event.currentTarget.checked)} />
-          </span>
-        </label>
+        <>
+          <label class="lre-row">
+            <span class="k">
+              {spec.label}
+              {spec.hint ? <span class="sub">{spec.hint}</span> : null}
+            </span>
+            <span class="lre-check">
+              <input type="checkbox" checked={boolChecked(spec, props.value)} onChange={(event) => props.onChange(event.currentTarget.checked)} />
+            </span>
+          </label>
+          <Issues issues={issues} />
+        </>
       );
     case "enum":
       return <SelectInput label={spec.label} value={props.value} options={spec.values.map((v) => ({ value: v, label: v }))} optional={spec.optional} issues={issues} onChange={props.onChange} />;

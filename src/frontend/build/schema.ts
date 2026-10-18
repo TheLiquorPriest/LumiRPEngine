@@ -2,7 +2,8 @@
 // editors (DESIGN §13). One descriptor per collection; packs override a collection's editor through
 // `UiRegistry.editor`, and the descriptors stay the default.
 
-import type { JsonObject } from "../../shared/json";
+import type { JsonObject, JsonValue } from "../../shared/json";
+import { loreIsSecret } from "../../shared/lore";
 import { DOMAINS } from "../../shared/ids";
 import type { WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnTierOf } from "../../shared/tiers";
@@ -13,7 +14,8 @@ export type RefCollection = "kinds" | "relations" | "entities" | "places" | "gri
 export type FieldSpec =
   | { kind: "text"; key: string; label: string; multiline?: boolean; optional?: boolean; readonly?: boolean; hint?: string }
   | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number; optional?: boolean; hint?: string }
-  | { kind: "bool"; key: string; label: string; hint?: string }
+  /** `reads`: how the engine reads a value that may not be a boolean (by default only `true` is on). */
+  | { kind: "bool"; key: string; label: string; hint?: string; reads?: (value: JsonValue | undefined) => boolean }
   | { kind: "enum"; key: string; label: string; values: readonly string[]; optional?: boolean }
   /** `inline`: the value may also be an inline definition, which is then edited as JSON. */
   | { kind: "ref"; key: string; label: string; collection: RefCollection; optional?: boolean; any?: boolean; inline?: boolean }
@@ -354,7 +356,8 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "text", key: "group", label: "Group", optional: true, hint: "Entries sharing a group are alternatives to each other" },
     { kind: "number", key: "priority", label: "Priority", optional: true, step: 1, hint: "Higher comes first among otherwise equal entries" },
     { kind: "enum", key: "visibility", label: "Who may read it (Known by: once the player character knows everything it links)", values: ["public", "known_by"], optional: true },
-    { kind: "bool", key: "secret", label: "Secret", hint: "Only the helpers you pick read it, until the gate holds" },
+    // The engine treats any `secret` but false as secret, so the box shows it ticked (lint warns of the value).
+    { kind: "bool", key: "secret", label: "Secret", hint: "Only the helpers you pick read it, until the gate holds", reads: (secret) => loreIsSecret({ secret }) },
     { kind: "expr", key: "gate", label: "Gate (revealed once it holds)", optional: true },
   ],
   classifications: [

@@ -768,6 +768,7 @@
         },
         "group": { "type": "string" },
         "priority": { "type": "number" },
+        "visibility": { "enum": ["public", "known_by"], "description": "who may read a non-secret entry: everyone (absent or public), or only once the POV knows every person and place it links" },
         "secret": { "type": "boolean" },
         "gate": { "$ref": "#/$defs/expr" },
         "audience": { "type": "array", "description": "the helpers that may read a secret entry before its gate holds", "items": { "$ref": "#/$defs/stepPurpose" } }

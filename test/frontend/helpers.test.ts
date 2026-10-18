@@ -16,6 +16,8 @@ import type { JobProposal } from "../../src/shared/protocol";
 import type { StateView } from "../../src/shared/state-view";
 import type { GridDef, KindDef } from "../../src/shared/world";
 import { baseWorld } from "../packs/support";
+import { COLLECTION_SPECS } from "../../src/frontend/build/schema";
+import { boolChecked } from "../../src/frontend/build/schema-form";
 
 const grid = (): GridDef => ({ id: "g", width: 3, height: 2, terrain: ["a", "b", "c", "d", "e", "f"], blocked: [2, 4], zones: { z: [0, 5] } });
 
@@ -201,5 +203,15 @@ describe("small parsers", () => {
     expect(issueTarget("entities.npc_dev.fields.cash")).toEqual({ collection: "entities", id: "npc_dev" });
     expect(issueTarget("lore.store_history.content")).toEqual({ collection: "lore", id: "store_history" });
     expect(issueTarget("calendar.holidays")).toBeNull();
+  });
+});
+
+describe("Build's checkboxes", () => {
+  test("a lore secret that isn't a boolean shows ticked, as the engine reads it; another box shows only true", () => {
+    const secret = COLLECTION_SPECS.lore.find((s) => s.key === "secret");
+    if (secret?.kind !== "bool") throw new Error("no checkbox");
+    expect([true, "true", 1, false, undefined].map((v) => boolChecked(secret, v))).toEqual([true, true, true, false, false]);
+    const symmetric = { kind: "bool", key: "symmetric", label: "Symmetric" } as const;
+    expect([true, "true", 1].map((v) => boolChecked(symmetric, v))).toEqual([true, false, false]);
   });
 });

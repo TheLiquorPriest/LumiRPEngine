@@ -64,4 +64,10 @@ describe("world schema", () => {
     expect(problems(withValue(world, ["ruleset", "combat"], { rounds: true, initiative: { check: "agility" } }))).toEqual([]);
     expect(problems(withValue(world, ["ruleset", "magic"], {}))).toEqual(['ruleset.magic: "magic" isn\'t a field here']);
   });
+
+  test("lore may be Known by, read once the POV knows what it links; no other reader is a value", () => {
+    expect(problems(withValue(world, ["lore", "harbor_history", "visibility"], "known_by"))).toEqual([]);
+    expect(problems(withValue(world, ["lore", "harbor_history", "visibility"], "public"))).toEqual([]);
+    expect(problems(withValue(world, ["lore", "harbor_history", "visibility"], "secret"))).toEqual(['lore.harbor_history.visibility: should be "public" or "known_by"']);
+  });
 });
