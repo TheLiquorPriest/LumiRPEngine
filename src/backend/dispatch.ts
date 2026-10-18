@@ -138,6 +138,8 @@ export class Dispatcher {
       case "lre.hello":
       case "lre.state.resync": {
         reply(r.type, { accepted: true });
+        // The frontend says which Loom preset is active: the preset prompts assemble with (DESIGN §6.8).
+        if (r.type === "lre.hello" && r.presetId !== undefined) this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null);
         if (r.chatId) {
           const run = await this.rt.runOf(r.chatId, userId);
           if (run) {
@@ -318,6 +320,7 @@ export class Dispatcher {
         return;
       }
       case "lre.preset": {
+        if (r.op === "active") this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null);
         const card = await this.rt.presetCard(userId, r.op === "add");
         if (!card) throw new RequestError("not_found", "There is no active preset to add the blocks to.");
         reply("lre.preset", { card });

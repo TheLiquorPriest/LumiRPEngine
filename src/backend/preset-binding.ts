@@ -6,6 +6,12 @@
 // one, and "RPEngine · narrator" gives the narrator rules for world chats only. The engine reads them as
 // text: it resolves no host macro in them (their braces are neutralized), skips their `//` note lines
 // and bounds their length. Each preset revision is read once.
+//
+// The preset is the one the host assembles with, as far as the engine can tell: the active Loom preset,
+// which only the frontend can read (`loom.activePresetId`, sent with each hello and when it changes),
+// else the preset the generation's connection links, else the one the chat's last reply was assembled
+// with. Presets and block states the host binds to a chat, persona, character or connection aren't
+// visible to the engine.
 
 import type { ChatId, UserId } from "../shared/ids";
 import { neutralizeMacros } from "../shared/macros";
@@ -36,7 +42,7 @@ export type Guidance = Readonly<Partial<Record<GuidanceTarget, string>>>;
 export type GuidanceState = "missing" | "empty" | "read" | "enabled";
 
 export interface PresetConfig {
-  /** The preset world chats assemble with; null when the host can't say. */
+  /** The preset world chats assemble with; null when the engine can't tell. */
   preset: { id: string; name: string } | null;
   /** The `lre_` outlets its enabled blocks hold, lowercase, as the host matches them. */
   outlets: ReadonlySet<string>;
@@ -124,13 +130,34 @@ export class PresetBinding {
   private readonly said = new Map<string, Omit<PresetConfig, "preset">>();
   /** Each user's latest read, for a read of a reply that had no pre phase. */
   private readonly latest = new Map<UserId, PresetConfig>();
+  /** Each user's active Loom preset, as their frontend last reported it (null: none is active). */
+  private readonly loom = new Map<UserId, string | null>();
 
   constructor(private readonly host: HostPort) {}
 
-  /** What the preset prompts assemble with says now; nothing when the host can't say (logged). With a chat, its last reply's preset is the fallback. */
-  async current(chatId: ChatId | null, userId: UserId): Promise<PresetConfig> {
+  /** The frontend's report of the user's active Loom preset (`loom.activePresetId`). */
+  useLoom(userId: UserId, presetId: string | null): void {
+    this.loom.delete(userId);
+    this.loom.set(userId, presetId);
+    if (this.loom.size > 1024) this.loom.delete(this.loom.keys().next().value ?? "");
+  }
+
+  /** The preset prompts assemble with, in the host's order: the active Loom preset, else the one the generation's connection links, else the one the chat's last reply used. */
+  private async resolve(chatId: ChatId | null, userId: UserId, connectionId: string | null): Promise<{ id: string; name: string; revision: number } | null> {
+    const candidates = [async () => this.loom.get(userId) ?? null, async () => (connectionId ? this.host.presets.ofConnection(connectionId, userId) : null), async () => (chatId ? this.host.presets.lastUsed(chatId, userId) : null)];
+    for (const candidate of candidates) {
+      const id = await candidate();
+      // One that no longer exists (deleted since) is skipped for the next.
+      const preset = id ? await this.host.presets.get(id, userId) : null;
+      if (preset) return preset;
+    }
+    return null;
+  }
+
+  /** What the preset prompts assemble with says now; nothing when the engine can't tell (logged). `connectionId` is the generation's, when it has one. */
+  async current(chatId: ChatId | null, userId: UserId, connectionId: string | null = null): Promise<PresetConfig> {
     try {
-      const preset = await this.host.presets.active(chatId, userId);
+      const preset = await this.resolve(chatId, userId, connectionId);
       if (!preset) return NO_PRESET;
       const key = `${userId}\u0000${preset.id}\u0000${preset.revision}`;
       let said = this.said.get(key);
@@ -160,7 +187,7 @@ export class PresetBinding {
    * at the end. Null when there is no active preset.
    */
   async addBlocks(chatId: ChatId | null, userId: UserId): Promise<PresetConfig | null> {
-    const preset = await this.host.presets.active(chatId, userId);
+    const preset = await this.resolve(chatId, userId, null);
     if (!preset) return null;
     const blocks = await this.host.presets.blocks(preset.id, userId);
     const missing = GUIDANCE_TARGETS.filter((t) => readPreset(blocks).blocks[t] === "missing");

@@ -242,14 +242,6 @@ class DiagnosticsLog {
 
 export function createSpindleHost(): HostPort {
   const diagnostics = new DiagnosticsLog();
-  // The host's active Loom preset (the `activeLoomPresetId` setting) has no read API: it is learned
-  // from its change events, else from the preset the chat's last reply was assembled with.
-  const activePreset = new Map<string, string>();
-  const learn = (userId: string | undefined, presetId: unknown): void => {
-    if (userId && typeof presetId === "string" && presetId !== "") activePreset.set(userId, presetId);
-  };
-  spindle.on("PRESET_CHANGED", (payload, userId) => learn(userId, isRecord(payload) ? payload.presetId : null));
-  spindle.on("SETTINGS_UPDATED", (payload, userId) => learn(userId, isRecord(payload) && payload.key === "activeLoomPresetId" ? payload.value : null));
   return {
     chats: {
       async messages(chatId) {
@@ -468,22 +460,16 @@ export function createSpindleHost(): HostPort {
       };
     },
     presets: {
-      async active(chatId, userId) {
-        // The host's order: the default connection's linked preset, else the active Loom preset.
-        const connection = (await spindle.connections.list(userId)).find((c) => c.is_default);
-        let presetId = connection?.preset_id ?? activePreset.get(userId) ?? null;
-        if (!presetId && chatId) {
-          const rows = await spindle.chat.getMessages(chatId);
-          for (let i = rows.length - 1; i >= 0 && !presetId; i--) {
-            const row = rows[i];
-            if (!row || row.is_user) continue;
-            presetId = (await spindle.generate.getBreakdown(row.id, userId))?.presetId ?? null;
-            break;
-          }
-        }
-        if (!presetId) return null;
+      async get(presetId, userId) {
         const preset = await spindle.presets.get(presetId, userId);
         return preset ? { id: preset.id, name: preset.name, revision: preset.cache_revision } : null;
+      },
+      async ofConnection(connectionId, userId) {
+        return (await spindle.connections.list(userId)).find((c) => c.id === connectionId)?.preset_id ?? null;
+      },
+      async lastUsed(chatId, userId) {
+        const reply = (await spindle.chat.getMessages(chatId)).findLast((row) => !row.is_user);
+        return reply ? ((await spindle.generate.getBreakdown(reply.id, userId))?.presetId ?? null) : null;
       },
       async blocks(presetId, userId) {
         return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({ id: b.id, name: b.name, content: b.content, enabled: b.enabled, marker: b.marker, injectionTrigger: [...(b.injectionTrigger ?? [])] }));

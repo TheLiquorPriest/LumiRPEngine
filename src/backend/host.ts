@@ -378,11 +378,12 @@ export interface HostPort {
   /** A dry-run assembly of the chat's next prompt (deliverability check, DESIGN §4.2; the D32 preset lint). */
   dryRun(chatId: ChatId, userId: UserId): Promise<DryRun>;
   presets: {
-    /**
-     * The preset prompts assemble with, and its revision (which each change to it bumps): the default
-     * connection's, else the active Loom preset, else (with a chat) the one its last reply used.
-     */
-    active(chatId: ChatId | null, userId: UserId): Promise<{ id: string; name: string; revision: number } | null>;
+    /** A preset with its revision (each change to it bumps it); null when there's no such preset. */
+    get(presetId: string, userId: UserId): Promise<{ id: string; name: string; revision: number } | null>;
+    /** The preset a connection links, if it links one. */
+    ofConnection(connectionId: string, userId: UserId): Promise<string | null>;
+    /** The preset the chat's last reply was assembled with, when the host kept its breakdown. */
+    lastUsed(chatId: ChatId, userId: UserId): Promise<string | null>;
     /** The preset's blocks, in order. */
     blocks(presetId: string, userId: UserId): Promise<HostPresetBlock[]>;
     /** Adds a block at `index` (null: the end). */

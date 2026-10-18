@@ -111,6 +111,8 @@ describe("the preset's guidance", () => {
   test("Add RPEngine blocks adds each missing block switched off, notes only, under an RPEngine category; again adds nothing", async () => {
     const rig = new Rig();
     await rig.worldChat();
+    // The frontend reports the Loom preset in use: there is no chat yet to read one from.
+    rig.body(await rig.send({ type: "lre.preset", op: "active", presetId: "preset-1" }));
     rig.host.presetBlocks = [block("Main", "Write well.", true), block("RPEngine · judge", "Be generous.", false)];
     const card = rig.body(await rig.send({ type: "lre.preset", op: "add" })).card as { blocks: { target: string; state: string }[] };
     const names = rig.host.presetBlocks.map((b) => b.name);
@@ -123,5 +125,40 @@ describe("the preset's guidance", () => {
     expect(card.blocks.find((b) => b.target === "extract")?.state).toBe("empty");
     rig.body(await rig.send({ type: "lre.preset", op: "add" }));
     expect(rig.host.presetBlocks.map((b) => b.name)).toEqual(names);
+  });
+});
+
+describe("which preset counts", () => {
+  test("the Loom preset the frontend reports is read first, the one the generation's connection links only without it, and the last reply's after that", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    rig.host.otherPresets.set("linked", { name: "Linked", revision: 1, blocks: [block("Story", "{{outlet::lre_scene}}", true)] });
+    rig.host.otherPresets.set("loom", { name: "Loom", revision: 1, blocks: [] });
+    rig.host.connectionPresets.set("conn-1", "linked");
+    rig.host.contextConnectionId = "conn-1";
+    rig.host.lastUsedPreset = null;
+    const twin = await entryWith(rig, chatId, "twin", "scene");
+    const routed = async (text: string): Promise<boolean> => {
+      await rig.turn(chatId, text, "Quiet.");
+      return rig.host.lastInterceptor?.enabled.includes(twin) === true;
+    };
+    // Without a Loom preset, the one the generation's connection links places Scene.
+    expect(await routed("I look around.")).toBe(true);
+    // The Loom preset the frontend reports comes first.
+    rig.body(await rig.send({ type: "lre.preset", op: "active", presetId: "loom" }));
+    expect(await routed("I wait.")).toBe(false);
+    // A hello saying none is active: the connection's again.
+    rig.body(await rig.send({ type: "lre.hello", chatId, presetId: null }));
+    expect(await routed("I wait more.")).toBe(true);
+    // With neither, the one the chat's last reply was assembled with; with none of the three, no preset.
+    rig.host.contextConnectionId = null;
+    rig.host.lastUsedPreset = "linked";
+    expect(await routed("I wait again.")).toBe(true);
+    rig.host.lastUsedPreset = null;
+    expect(await routed("I wait once more.")).toBe(false);
+    // Settings → Preset names the Loom preset.
+    rig.body(await rig.send({ type: "lre.preset", op: "active", presetId: "loom" }));
+    const card = rig.body(await rig.send({ type: "lre.preset", op: "get" })).card as { preset: { name: string } | null };
+    expect(card.preset?.name).toBe("Loom");
   });
 });

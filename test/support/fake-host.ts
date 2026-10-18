@@ -133,17 +133,31 @@ export class FakeHost implements HostPort {
   /** The active preset as a dry run sees it (the D32 lint). */
   preset: { name: string; blocks: { id: string; name: string; content: string }[]; maxTokens: number | null; model: string } = { name: "Default", blocks: [], maxTokens: null, model: "fake" };
 
-  /** The active preset's blocks (`presets.blocks`) and its revision, which each change made through the port bumps. */
+  /** The default preset's blocks (`presets.blocks`) and its revision, which each change made through the port bumps. */
   presetBlocks: HostPresetBlock[] = [];
   presetRevision = 1;
-  /** How many times the preset's blocks were read (each revision is read once). */
+  /** How many times a preset's blocks were read (each revision is read once). */
   blockReads = 0;
+  /** Presets besides the default one, "preset-1" (whose name is `preset.name`). */
+  readonly otherPresets = new Map<string, { name: string; revision: number; blocks: HostPresetBlock[] }>();
+  /** The preset each connection links. */
+  readonly connectionPresets = new Map<string, string>();
+  /** The preset the chat's last reply was assembled with, as its breakdown says. */
+  lastUsedPreset: string | null = "preset-1";
+  /** The connection the context handler is given (`connectionId`). */
+  contextConnectionId: string | null = null;
 
   presets: HostPort["presets"] = {
-    active: async () => ({ id: "preset-1", name: this.preset.name, revision: this.presetRevision }),
-    blocks: async () => {
+    get: async (presetId) => {
+      if (presetId === "preset-1") return { id: presetId, name: this.preset.name, revision: this.presetRevision };
+      const other = this.otherPresets.get(presetId);
+      return other ? { id: presetId, name: other.name, revision: other.revision } : null;
+    },
+    ofConnection: async (connectionId) => this.connectionPresets.get(connectionId) ?? null,
+    lastUsed: async () => this.lastUsedPreset,
+    blocks: async (presetId) => {
       this.blockReads++;
-      return structuredClone(this.presetBlocks);
+      return structuredClone(presetId === "preset-1" ? this.presetBlocks : (this.otherPresets.get(presetId)?.blocks ?? []));
     },
     addBlock: async (_presetId, block, index) => {
       const id = this.newId("block");
@@ -498,7 +512,7 @@ export class FakeHost implements HostPort {
     await this.settle();
     const context = new AbortController();
     if (opts.abandonContext) context.abort();
-    if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: opts.type, dryRun: false, connectionId: null, personaId: null }, context.signal);
+    if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: opts.type, dryRun: false, connectionId: this.contextConnectionId, personaId: null }, context.signal);
     await this.runInterceptor(chatId);
     if (this.options.wiBook) this.emit("WORLD_INFO_ACTIVATED", { chatId, entries: [], stats: {} });
     this.emit("GENERATION_IN_PROGRESS", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator" });

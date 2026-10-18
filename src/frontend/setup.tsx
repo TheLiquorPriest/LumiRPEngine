@@ -251,6 +251,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     void client.open(chatId);
   };
   if (ctx.state) {
+    // The active Loom preset is the one prompts assemble with, and only the frontend can read it (DESIGN §6.8).
+    client.presetId = ctx.state.get<string | null>("loom.activePresetId") ?? null;
+    cleanups.push(
+      ctx.state.subscribe<string | null>("loom.activePresetId", (presetId) => {
+        if ((presetId ?? null) === client.presetId) return;
+        client.presetId = presetId ?? null;
+        void app.request({ type: "lre.preset", op: "active", presetId: client.presetId });
+      }),
+    );
     cleanups.push(ctx.state.subscribe<{ chatId: string | null }>("chat.active", (value) => openActive(value.chatId)));
   } else {
     for (const event of ["CHAT_CHANGED", "CHAT_SWITCHED"]) cleanups.push(ctx.events.on(event, () => openActive(ctx.getActiveChat().chatId)));

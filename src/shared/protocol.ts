@@ -49,6 +49,8 @@ export interface StateDelta extends Envelope<"lre.state.delta"> {
 /** The frontend opened (or switched to) a chat; the backend replies with a snapshot. */
 export interface HelloRequest extends Request<"lre.hello"> {
   chatId: ChatId | null;
+  /** The active Loom preset as the frontend's state has it (`loom.activePresetId`); absent when it can't say. */
+  presetId?: string | null;
 }
 
 export interface ResyncRequest extends Request<"lre.state.resync"> {
@@ -410,8 +412,11 @@ export interface StudioOfferView {
   hash: string;
 }
 
-/** Settings → Preset (DESIGN §6.8): `get` reads the active preset's card; `add` adds the RPEngine blocks it lacks, then reads it. */
-export type PresetRequest = Request<"lre.preset"> & { op: "get" | "add" };
+/**
+ * Settings → Preset (DESIGN §6.8): `get` reads the active preset's card; `add` adds the RPEngine
+ * blocks it lacks, then reads it; `active` tells the backend the active Loom preset changed.
+ */
+export type PresetRequest = Request<"lre.preset"> & ({ op: "get" | "add" } | { op: "active"; presetId: string | null });
 
 /** What the active preset says to LumiRPEngine: the section outlets its enabled blocks hold (with the section each places, null when none has that name) and each guidance block's state. */
 export interface PresetCard {

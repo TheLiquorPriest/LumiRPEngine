@@ -624,7 +624,7 @@ export class Runtime implements TurnHooks {
     const settings = await this.settings.get(input.userId);
     lruSet(this.settingsCache, input.userId, settings, 256);
     // The preset this generation assembles with, read once for its phases and its interceptor run.
-    const preset = await this.presets.current(input.chatId, input.userId);
+    const preset = await this.presets.current(input.chatId, input.userId, input.connectionId);
     const target = p.messageId ? input.observed.findIndex((m) => m.id === p.messageId) : input.observed.length;
     const before = input.observed.slice(0, target < 0 ? input.observed.length : target);
     const lastUser = before.findLast((m) => m.isUser);
@@ -1751,7 +1751,7 @@ export class Runtime implements TurnHooks {
     const found = presetCaveats(assembly, null);
     if (found.length === 0) return found;
     // Named by the preset the host assembles with (block ids repeat across copied presets).
-    const preset = await this.host.presets.active(chatId, userId).catch(() => null);
+    const preset = (await this.presets.current(chatId, userId)).preset;
     return preset ? presetCaveats(assembly, preset.name) : found;
   }
 
