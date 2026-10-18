@@ -774,10 +774,10 @@ export class Runtime implements TurnHooks {
     }
     // `interpret` may read secret lore its audience allows (DESIGN §7): what it returns becomes chips,
     // Journal lines and the Outcome, so an answer carrying a secret's unrevealed text is played as
-    // roleplay. Words the player typed are theirs to repeat.
+    // roleplay. Words the player typed are theirs to repeat. Its second action is checked on its own.
     const typedText = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typedText.includes(s.toLowerCase()));
-    if (findLeaks({ params: result.params, ...(result.then ? { then: result.then } : {}), ...(result.next ? { next: result.next } : {}) }, secrets).length > 0) {
+    if (findLeaks({ params: result.params, ...(result.then ? { then: result.then } : {}) }, secrets).length > 0) {
       this.host.log("info", `[LumiRPEngine] interpret: ${result.action ?? "no action"} carried an unrevealed secret; played as roleplay`, userId);
       bridge.setOffer(text, null);
       bridge.setNext(text, null);
@@ -785,9 +785,8 @@ export class Runtime implements TurnHooks {
       return;
     }
     // The input's second action ("…to buy a latte") is offered once the first has run, as a chip that
-    // sends it as the next message (DESIGN §5.2). Time passing is `then`'s, never a second action, and
-    // a chip never names someone or something the POV can't see.
-    bridge.setNext(text, result.next && !onlyPassesTime(result.next, render.world, all.flatMap((a) => a.lexicon ?? []), TIMELAPSE_LEXICON) && !namesHidden(this.registry, render.world, render.state, result.next) ? result.next : null);
+    // sends it as the next message (DESIGN §5.2), when it reads as an action of its own.
+    bridge.setNext(text, result.next ? offeredNext(this.registry, render.world, render.state, result.next, text, all.flatMap((a) => a.lexicon ?? []), secrets) : null);
     // A bare time span reads as the timelapse itself; one after another action ("I head home and
     // sleep until the next morning") is offered once that action has run.
     const timeOnly = result?.action === TIMELAPSE_ACTION ? result.params : result && !result.action && result.then ? result.then : null;
@@ -819,6 +818,9 @@ export class Runtime implements TurnHooks {
     const unfit = chosen ? unfitRef(this.registry, chosen, result.params, render.world, render.state) : null;
     if (chosen && unfit) {
       this.host.log("info", `[LumiRPEngine] interpret: ${chosen.id} names nothing in the world (${JSON.stringify(result.params)}); played as roleplay`, userId);
+      // Nothing that follows the action (time after it, a second action) is offered when it didn't play.
+      bridge.setOffer(text, null);
+      bridge.setNext(text, null);
       bridge.setUnfit(text, { label: chosen.label, reason: unfitReason(this.registry, render.world, render.state, unfit, text, secrets) });
       return;
     }
@@ -1743,6 +1745,32 @@ function chipNamesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldSt
 /** A swipe's decline chip, and its Outcome note, for a typed action that named nothing that fits. */
 function unfitId(messageId: MessageId, swipeId: number): string {
   return `unfit:${messageId}:${swipeId}`;
+}
+
+/** What a model writes for "nothing" ("none", "null", "N/A"), compared as `offeredNext` compares words. */
+const NO_VALUE: Record<string, true> = { "": true, none: true, null: true, nil: true, na: true, "n a": true, nothing: true, no: true, undefined: true, empty: true };
+
+/**
+ * `interpret`'s second action as its chip may offer it (DESIGN §5.2), or null. It must read as an
+ * action to the typed-input classifier (`lexicon` holds the actions' phrases), and not one that only
+ * lets time pass, which is `then`'s. A placeholder for nothing ("none", "N/A") is none, and neither
+ * is the message or its first action said again ("I walk to Bluebird Coffee" after "I walk to
+ * Bluebird Coffee to buy a latte"), whose chip would play it twice. One carrying an unrevealed secret
+ * (`secrets`, less the player's own words), or naming anything hidden, is dropped on its own: the
+ * first action still plays.
+ */
+function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, next: string, text: string, lexicon: readonly string[], secrets: readonly string[]): string | null {
+  // Compared as words, without the player's own "I" or "we": "I walk to the cafe." is "walk to the cafe".
+  const words = (s: string): string =>
+    s
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim()
+      .replace(/^(?:i|we)\s+/, "");
+  const said = words(next);
+  if (hasOwn(NO_VALUE, said) || words(text).startsWith(said)) return null;
+  if (!classifyTyped(next, world, [...lexicon, ...TIMELAPSE_LEXICON]) || onlyPassesTime(next, world, lexicon, TIMELAPSE_LEXICON)) return null;
+  return findLeaks(next, secrets).length > 0 || chipNamesHidden(reg, world, state, next) ? null : next;
 }
 
 /**

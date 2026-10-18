@@ -206,18 +206,53 @@ describe("a second action in the same message", () => {
     expect((await replyChips(rig, chatId)).filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I buy a latte"]);
   });
 
-  test("one that only lets time pass, or carries an unrevealed secret, is never offered", async () => {
-    const { rig, chatId } = await chat({ truth: true });
-    reading(rig, walkThenBuy("I sleep until the next morning"));
-    await rig.turn(chatId, "I walk to Bluebird Coffee and sleep until the next morning.", "You push open the door of the cafe.");
-    expect((await replyChips(rig, chatId)).some((c) => c.kind === "choice")).toBe(false);
-
+  test("a secret in it, or a name that leads to secret lore, drops only it: the walk still plays; time passing is never offered", async () => {
+    const { rig, chatId } = await chat({ truth: true, secretAlias: "Rena" });
     const { state, world } = await folded(rig, chatId);
     expect(unrevealedSecrets(rig.rt.registry, world, state)).toContain(TRUTH);
-    reading(rig, walkThenBuy(`I tell Marcus ${TRUTH}`));
-    await rig.turn(chatId, "I walk back to Bluebird Coffee and tell Marcus what I heard.", "Marcus looks up from his coffee.");
+    reading(rig, walkThenBuy(`I buy a postcard saying ${TRUTH}`));
+    await rig.turn(chatId, "I walk to Bluebird Coffee to buy a postcard.", "You push open the door of the cafe.");
+    const after = await folded(rig, chatId);
+    expect(placeOfEntity(after.state, after.world.pov)).toBe("bluebird_coffee");
     const chips = await replyChips(rig, chatId);
     expect(chips.some((c) => c.kind === "choice")).toBe(false);
     for (const c of chips) expect(`${c.label} ${c.detail ?? ""}`).not.toContain(TRUTH);
+
+    for (const [typed, next] of [
+      ["I walk to Bluebird Coffee and buy Rena a latte.", "I buy Rena a latte"],
+      ["I walk to Bluebird Coffee and sleep until the next morning.", "I sleep until the next morning"],
+    ] as const) {
+      reading(rig, walkThenBuy(next));
+      await rig.turn(chatId, typed, "The cafe is quiet.");
+      expect((await replyChips(rig, chatId)).some((c) => c.kind === "choice")).toBe(false);
+    }
+  });
+
+  test("a placeholder, the message or its first action said again, or words that aren't an action are never offered", async () => {
+    const { rig, chatId } = await chat();
+    const offered: Record<string, string | undefined> = {};
+    for (const [typed, next] of [
+      ["I walk to Bluebird Coffee to buy a latte.", "none"],
+      ["I walk to Bluebird Coffee to buy a mocha.", "N/A"],
+      ["I walk to Bluebird Coffee to buy a scone.", "I walk to Bluebird Coffee"],
+      ["I walk to Bluebird Coffee to buy a cookie.", "I walk to Bluebird Coffee to buy a cookie"],
+      ["I walk to Bluebird Coffee and smile at the barista.", "I smile at the barista"],
+      ["I walk to Bluebird Coffee to buy a muffin.", "I buy a muffin"],
+    ] as const) {
+      reading(rig, walkThenBuy(next));
+      await rig.turn(chatId, typed, "The cafe is quiet.");
+      offered[next] = (await replyChips(rig, chatId)).find((c) => c.kind === "choice")?.label;
+    }
+    expect(offered).toEqual({ none: undefined, "N/A": undefined, "I walk to Bluebird Coffee": undefined, "I walk to Bluebird Coffee to buy a cookie": undefined, "I smile at the barista": undefined, "I buy a muffin": "I buy a muffin" });
+  });
+
+  test("when the first action names nothing in the world, nothing after it is offered", async () => {
+    const { rig, chatId } = await chat();
+    reading(rig, () => ({ action: "pay", params: { to: "rena", amount: 6 }, confidence: 0.9, next: "I buy a muffin", then: { minutes: 60 } }));
+    await rig.turn(chatId, "I pay Rena for the latte, buy a muffin and wait an hour.", "You hand Rena a few bills.");
+    const kinds = (await replyChips(rig, chatId)).map((c) => c.kind);
+    expect(kinds).toContain("decline");
+    expect(kinds).not.toContain("choice");
+    expect(kinds).not.toContain("timelapse_offer");
   });
 });
