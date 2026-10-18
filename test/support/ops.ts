@@ -779,8 +779,9 @@ export class Runner {
     }
     const core = await this.h.core(chat);
     const made = core.journal.messages[messageId]?.ledger.swipes[String(swipeId)];
-    const parent = (await this.h.folds(chat)).reference.messages.find((m) => m.id === messageId)?.parentPath;
-    if (!source || !made || parent === undefined || core.journal.pauses.length > 0) return;
+    // The fixes in force on the path the Re-run was planned on (its record's), whatever chain is in force now.
+    if (!source || !made || made.path === "" || core.journal.pauses.length > 0) return;
+    const parent = made.path;
     const sourceUndone = source.undone;
     const off = (seq: number, index: number): boolean => sourceUndone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
     const live = source.post.filter((p) => p.kind === "fix" && isLive(p.at, parent, source.path !== "" ? source.path : null) && !p.events.every((_, i) => off(p.seq, i)));

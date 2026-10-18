@@ -631,9 +631,10 @@ export class LedgerCore {
       const candidate = target.ledger?.swipes[String(s)];
       if (candidate && !isTombstoned(this.journal.tombstones, target.id, candidate)) source = candidate;
     }
-    const fixes = source ? source.post.filter((e) => e.kind === "fix" && isLive(e.at, prefix.parent, turnPath(source))) : [];
+    // The fixes in force on the path the Re-run was planned on, which its record is anchored at.
+    const fixes = source ? source.post.filter((e) => e.kind === "fix" && isLive(e.at, rec.path, turnPath(source))) : [];
     if (!source || fixes.length === 0) return;
-    const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, rec.path));
+    const markers = (target.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, rec.path, rec.path));
     const carried = this.carry(prefix.state, prefix.world, fixes, source.undone, markers);
     rec.post = carried.kept.map((e) => ({ ...e, at: rec.path }));
     rec.undone = carried.undone;
@@ -690,6 +691,25 @@ export class LedgerCore {
     return path;
   }
 
+  /**
+   * The chain a turn's post steps read against (P2, L7): the one it was planned on. Its record folds
+   * as stored only there, so what it reads, and what a Re-run carries, must validate there; on any
+   * other chain it is a rebased view, which re-validates them anyway. When an earlier swipe changed
+   * while the reply streamed, that chain is rebuilt from the messages as they stand with the swipes
+   * the plan saw, and taken once it folds to the turn's path again. One that can't be rebuilt (a
+   * message the plan saw is gone) never folds to that path, so the chain in force stands.
+   */
+  private plannedChain(p: PendingTurn, observed: readonly ChainMessage[], index: number): readonly ChainMessage[] {
+    if (!p.planned || p.chain.length !== index || p.chain.every((e, i) => observed[i]?.id === e.id && observed[i]?.swipeId === e.swipeId)) return observed;
+    const rebuilt: ChainMessage[] = [];
+    for (const [i, e] of p.chain.entries()) {
+      const m = observed[i];
+      if (!m || m.id !== e.id || e.swipeId >= m.swipes.length) return observed;
+      rebuilt.push({ ...m, swipeId: e.swipeId });
+    }
+    return (this.fold(rebuilt).messages.at(-1)?.path ?? ROOT_PATH) === this.commitPath(p) ? [...rebuilt, ...observed.slice(index)] : observed;
+  }
+
   /** What a Re-read edit or Retry read of an existing record reads against (its fold prefix plus `pre`). */
   readContext(messageId: MessageId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc; seed: string; pre: LedgerEvent[] } | null {
     const index = observed.findIndex((m) => m.id === messageId);
@@ -732,7 +752,7 @@ export class LedgerCore {
     const p = this.journal.pending[generationId];
     const index = observed.findIndex((m) => m.id === messageId);
     if (!p || index < 0 || this.pausedWithin(observed.slice(0, index))) return null;
-    const prefix = this.prefixState(observed, index, { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: p.planned ? this.commitPath(p) : "", undone: [] });
+    const prefix = this.prefixState(this.plannedChain(p, observed, index), index, { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: p.planned ? this.commitPath(p) : "", undone: [] });
     return prefix ? { ...prefix, seed: p.seed, pre: [...p.events] } : null;
   }
 
@@ -773,6 +793,8 @@ export class LedgerCore {
     // A pause that arrived while the reply streamed: the plan stands (it was made on its path), the
     // reply goes unread (there is no state to read it against) and the record is degraded.
     const paused = this.pausedWithin(observed.slice(0, index));
+    // Read against the chain the turn was planned on, which its record is anchored at.
+    const planned = this.plannedChain(p, observed, index);
     const rec: Rec = {
       v: 1,
       defHash: this.env.run.revision,
@@ -795,7 +817,7 @@ export class LedgerCore {
       rec.undone = structuredClone(p.undone ?? []);
       if (p.dropped && p.dropped.length > 0) rec.dropped = structuredClone(p.dropped);
       if (readReply && content !== "" && !paused) {
-        const prefix = this.prefixState(observed, index, rec);
+        const prefix = this.prefixState(planned, index, rec);
         if (prefix) {
           const target = this.chain(observed)[index];
           const later: ({ seq: number; marker: Marker } | { seq: number; entry: PostEntry })[] = [
@@ -816,7 +838,7 @@ export class LedgerCore {
     } else if (!paused) {
       // A Re-run reads its reply on its fold prefix, then carries its source's fixes after it.
       const rerun = p.kind === "swipe" || p.kind === "regenerate";
-      const prefix = (readReply && content !== "") || rerun ? this.prefixState(observed, index, rec) : null;
+      const prefix = (readReply && content !== "") || rerun ? this.prefixState(planned, index, rec) : null;
       if (prefix && readReply && content !== "") rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
       if (prefix && rerun) this.carryFixes(rec, this.chain(observed)[index], swipeId, prefix);
     }
