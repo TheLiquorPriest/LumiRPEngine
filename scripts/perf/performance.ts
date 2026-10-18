@@ -120,8 +120,8 @@ function sizes(ledgers: MessageLedger[]): JsonValue {
 if (which === "fold" || which === "all") {
   const world = withLevels(modernUsWorld("w_bench", "Riverton L4"), "level4");
   const out: Record<string, JsonValue> = {};
-  // `B9_TURNS=50,200` for a quick run; the gate is 1,000 and 5,000.
-  for (const turns of (process.env.B9_TURNS ?? "1000,5000").split(",").map(Number)) {
+  // `LRE_PERF_TURNS=50,200` for a quick run; the gate is 1,000 and 5,000.
+  for (const turns of (process.env.LRE_PERF_TURNS ?? "1000,5000").split(",").map(Number)) {
     const chat = buildChat(world, turns);
     const cold: number[] = [];
     for (let i = 0; i < 5; i++) cold.push(coldFold(chat, chat.observed).ms);
