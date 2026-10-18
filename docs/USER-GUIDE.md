@@ -333,6 +333,7 @@ A tier can make its people **live their own day (agendas and plans) by default**
 People you mark as **Lives their own day (agendas and plans)** in their entity editor get goals and agendas that feed their choices, even on Story. They are consulted by the AI only on close calls or invitations. Everyone else follows schedules and seeded incidents.
 
 **Life and death.** Everyone is **Alive**, **Dying**, **Dead**, or in a state the world adds in **Build → World → Life states** (a label, whether someone in it still acts, and how the narrator reads it, such as "lies unconscious"); an entity's editor sets the state it starts in. Someone who doesn't act keeps no routine or day plan, makes no choices and takes no turn in a fight, and their body stays where it lies, still there to find. You learn of it by seeing it happen, by walking in on it, or by being told (the story, a rule or the GM); until then Cast, Scene and the narrator show what you last knew. Rules change it with the `life` effect, and a world's combat can send the fallen into a state of its own (**down** → life state).
+A death reaches the Journal on the turn it happened only if you saw it; otherwise it appears when you hear of it. Other people's comings and goings stay out of the Journal (Scene and People show who is around), and a reply can't walk a body anywhere. An entity's editor can also say **Who knows how it starts**: everyone else takes it for alive until they find out.
 
 ### Promote and demote
 
