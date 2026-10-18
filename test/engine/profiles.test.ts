@@ -232,3 +232,39 @@ describe("applying a profile", () => {
     expect(lintWorld(broken, reg).filter((i) => i.path === "actions.skill_check.params.skill.table").map((i) => i.severity)).toEqual(["error"]);
   });
 });
+
+describe("a profile in an authored world", () => {
+  test("a kind that defines a profile field itself keeps its definition, and its people their values", () => {
+    const world = baseWorld();
+    // Robots are people whose strength is a word and whose level starts at 0, by their own kind's definitions.
+    world.kinds.robot = { id: "robot", label: "Robot", extends: "person", fields: { str: { type: "text", label: "Strength" }, level: { type: "number", label: "Level", min: 0 } } };
+    world.entities.unit7 = { id: "unit7", kind: "robot", name: "Unit 7", tier: "background", fields: { place: "home", str: "hydraulic", level: 0 }, relations: [] };
+    expect(planProfile(world, PROFILES.modern, packKinds).values.filter((v) => v.entity === "unit7")).toEqual([]);
+    const applied = applyProfile(world, PROFILES.modern, packKinds);
+    expect(applied.entities.unit7?.fields).toMatchObject({ str: "hydraulic", level: 0 });
+    expect(applied.kinds.robot?.fields.str).toEqual({ type: "text", label: "Strength" });
+  });
+
+  test("Push a skill spends its Action Point only on a roll: a refused retry or a push too hard to try costs nothing", () => {
+    const make = STARTER_WORLDS.modern_slice_of_life;
+    if (!make) throw new Error("no starter");
+    const world = applyProfile(make("s", "s"), PROFILES.modern, packKinds);
+    const start = initialState(world, hashJson(world), reg);
+    const ap = (w: Working): number => Number(scopeEnv({ reg, ctx: w.ctx, bindings: { self: world.pov } }).lookup(["self", "action_points"]));
+    const full = ap(new Working(reg, world, start));
+    const params = { skill: "athletics", difficulty: "hard" };
+    let failed: Working | null = null;
+    for (let i = 0; i < 50 && !failed; i++) {
+      const w = new Working(reg, world, start);
+      const res = resolveAction(reg, w, { action: "push_skill", params }, createRng(`p${i}`));
+      expect([res.check === null, ap(w)]).toEqual([false, full - 1]);
+      if (res.outcome === "failure") failed = w;
+    }
+    if (!failed) throw new Error("no failing push");
+    const again = resolveAction(reg, failed, { action: "push_skill", params }, createRng("again"));
+    expect([again.check, again.adjudged?.why, ap(failed)]).toEqual([null, "retry", full - 1]);
+    const hard = new Working(reg, world, start);
+    const heroic = resolveAction(reg, hard, { action: "push_skill", params: { skill: "athletics", difficulty: "heroic" } }, createRng("heroic"));
+    expect([heroic.check, heroic.adjudged?.why, ap(hard)]).toEqual([null, "impossible", full]);
+  });
+});

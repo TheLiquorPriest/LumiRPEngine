@@ -230,6 +230,8 @@ function planOf(world: WorldDoc, profile: ProfileDef, packKinds: PackKinds, choi
     people++;
     for (const [field, def] of taken) {
       if (def.derived !== undefined || !hasOwn(e.fields, field)) continue;
+      // A kind between the entity's and the POV's that defines the field keeps its own definition, so its values stay.
+      if (upChain(world, packKinds, e.kind, (k, d) => (k === kind.id ? false : hasOwn(d.fields, field) ? true : undefined)) === true) continue;
       const from = e.fields[field];
       if (from === undefined) continue;
       const to = fitted(def, from);

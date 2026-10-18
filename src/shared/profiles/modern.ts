@@ -71,7 +71,8 @@ export const MODERN: ProfileDef = {
       params: { skill: { type: "text", label: "Skill", table: "modern.skills" }, difficulty: DIFFICULTY_PARAM },
       requires: ["self.action_points >= 1"],
       check: { id: "push_skill", dice: "d20+1d6", modifier: SKILL_MOD, dc: DIFFICULTY, bands: DEGREES },
-      outcomes: Object.fromEntries(["failure", "success", "great"].map((o) => [o, [{ type: "add", args: { entity: "self", field: "action_points", delta: -1 } }]])),
+      // The point is spent on a roll: a check the policy settles without one (too hard, a refused retry) costs nothing.
+      outcomes: Object.fromEntries(["failure", "success", "great"].map((o) => [o, [{ type: "add", args: { entity: "self", field: "action_points", delta: "=roll.total == null ? 0 : -1" } }]])),
       duration: "10",
       lexicon: ["spend an action point", "push myself", "dig deep"],
       observable: "pushes hard",
