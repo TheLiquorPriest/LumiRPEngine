@@ -317,13 +317,10 @@ function dataBlock(vars: Readonly<Record<string, string>>): string {
   return parts.join("\n\n") || "(no facts)";
 }
 
-function strings(v: JsonValue | undefined, max: number, chars = 300): string[] {
-  if (typeof v === "string") return v.trim() === "" ? [] : [v.trim().slice(0, chars)];
-  if (!Array.isArray(v)) return [];
-  return v
-    .filter((x): x is string => typeof x === "string" && x.trim() !== "")
-    .slice(0, max)
-    .map((x) => x.trim().slice(0, chars));
+/** A step's non-empty strings, trimmed, at most `max` of them: each longer than `chars` is cut to it, or with `"drop"`, left out. */
+function strings(v: JsonValue | undefined, max: number, chars = 300, long: "cut" | "drop" = "cut"): string[] {
+  const all = (typeof v === "string" ? [v] : Array.isArray(v) ? v : []).flatMap((x) => (typeof x === "string" && x.trim() !== "" ? [x.trim()] : []));
+  return (long === "drop" ? all.filter((x) => x.length <= chars) : all.map((x) => x.slice(0, chars))).slice(0, max);
 }
 
 /**
@@ -335,7 +332,9 @@ export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "
   const instructions = renderTemplate(run.template?.template ?? BUILTIN[kind], vars);
   const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore });
   if (!isRecord(raw)) return null;
-  const lines = kind === "brief" ? strings(raw.text, 1, 600) : kind === "outline" ? strings(raw.beats, 4) : strings(raw.choices, 4, 120);
+  // A suggestion is a chip's text and the player's next message: one too long for a chip is dropped,
+  // never cut, so a cut can't leave part of a secret that the leak check below looks for whole.
+  const lines = kind === "brief" ? strings(raw.text, 1, 600) : kind === "outline" ? strings(raw.beats, 4) : strings(raw.choices, 4, 120, "drop");
   return lines.filter((l) => findLeaks(l, secrets).length === 0);
 }
 

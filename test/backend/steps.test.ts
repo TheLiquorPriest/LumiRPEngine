@@ -1,6 +1,7 @@
 // Model calls per turn by preset (DESIGN §5.3) on one typed turn that fires every signal: the
 // classifier, open ties for an agent with the POV and one elsewhere, a reply. Also: routes reach
-// the host, and prose steps never see a secret (secrecy batching rule).
+// the host, prose steps never see a secret (secrecy batching rule), and a suggestion too long for a
+// chip is dropped, never cut.
 
 import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
@@ -34,7 +35,7 @@ function decide(req: DecideRequest): Answers {
 
 const ALL_ON: JsonObject = Object.fromEntries(["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
 
-async function turnCalls(preset: "lean" | "standard" | "full" | "custom", steps?: JsonObject): Promise<{ rig: Rig; chatId: string; counts: Record<string, number>; total: number }> {
+async function turnCalls(preset: "lean" | "standard" | "full" | "custom", steps?: JsonObject, reply: (req: QuietRequest) => string = quiet): Promise<{ rig: Rig; chatId: string; counts: Record<string, number>; total: number }> {
   const rig = new Rig();
   if (preset === "custom") {
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
@@ -54,7 +55,7 @@ async function turnCalls(preset: "lean" | "standard" | "full" | "custom", steps?
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning, Sam.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-  rig.host.quietReply = quiet;
+  rig.host.quietReply = reply;
   rig.host.decideReply = decide;
   const start = rig.rt.meter.log.length;
   await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
@@ -94,6 +95,17 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     expect(total).toBe(8);
     const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
     expect(chips.filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I board the ferry", "I go home"]);
+  });
+
+  test("a suggestion too long for a chip is dropped, not cut, so no part of a secret it carries reaches a chip", async () => {
+    // The secret runs across the 120th character: a cut there would keep only its start.
+    const long = `I ask the old harbor master down at the pier, as calmly as I can manage, about the night they say ${TRUTH} out past the breakwater`;
+    expect(long.indexOf(TRUTH)).toBeLessThan(120);
+    expect(long.indexOf(TRUTH) + TRUTH.length).toBeGreaterThan(120);
+    const { rig, chatId } = await turnCalls("custom", undefined, (req) => (req.messages[0]?.content.includes("Suggest three short") ? JSON.stringify({ choices: [long, "I go home"] }) : quiet(req)));
+    const labels = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "choice").map((c) => c.label);
+    for (const label of labels) expect(label).not.toContain("ferryman");
+    expect(labels).toEqual(["I go home"]);
   });
 
   test("a step's route (connection and model) reaches the host; prose prompts never carry a secret", async () => {
