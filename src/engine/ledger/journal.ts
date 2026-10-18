@@ -209,6 +209,11 @@ export class LedgerCore {
     this.snapshot(observed, deferred);
   }
 
+  /**
+   * A journal rebuilt from message metadata (a branch, an import, a lost journal). The chat counts as
+   * started only once a message carries its starting markers, as when they are planned: a first
+   * reply read without a plan holds events but no markers, and the next planned turn writes them.
+   */
   private bootstrap(observed: readonly ChainMessage[]): void {
     const j = this.journal;
     for (const m of observed) {
@@ -218,7 +223,6 @@ export class LedgerCore {
       for (const rec of Object.values(m.ledger.swipes)) {
         for (const p of rec.post) j.seq = Math.max(j.seq, p.seq);
         j.seq = Math.max(j.seq, rec.markersApplied, rec.seq);
-        if (rec.events.length > 0) j.started = true;
       }
       if (m.ledger.markers.some((mk) => mk.start)) j.started = true;
     }

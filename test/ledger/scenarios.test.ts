@@ -87,6 +87,30 @@ describe("ledger scenarios", () => {
     await expectAgree(h, chat);
   });
 
+  test("a copy of a chat whose first reply was read without a plan gets its starting markers on its next turn, as the chat does", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    // The host gives up on the first turn's context handler: nothing is planned, and the reply is still read.
+    h.host.sendUser(chat, "look around");
+    await h.host.settle();
+    const g = await h.host.start(chat, { type: "normal", abandonContext: true });
+    await h.host.finish(g, "You find a coin. [found:5]");
+    expect((await h.core(chat)).journal.started).toBe(false);
+    const branch = h.host.branch(chat, h.host.head(chat)?.id ?? "");
+    const imported = h.host.importCopy(chat);
+    await h.send(chat, "earn:5");
+    const source = (await h.folds(chat)).reference.state;
+    expect(source.adjudication).toEqual(presetAdjudication("crunchy"));
+    for (const id of [branch, imported]) {
+      await h.service.open(id, h.host.userId);
+      await h.host.settle();
+      expect((await h.core(id)).journal.started).toBe(false);
+      await h.send(id, "earn:5");
+      expect(hashJson((await h.folds(id)).reference.state)).toBe(hashJson(source));
+      await expectAgree(h, id);
+    }
+  });
+
   test("a branch, an import and a journal rebuilt from metadata fold every record on its path; Undo and Re-read work there", async () => {
     const h = new Harness();
     const chat = await h.newChat();

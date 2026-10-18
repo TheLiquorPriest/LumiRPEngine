@@ -64,6 +64,8 @@ export interface StartOptions {
   messageId?: MessageId;
   /** Normal replies: the host creates the reply at the end instead of staging it (P4's other save path). */
   createAtEnd?: boolean;
+  /** The host gives up on the context handler: it runs with its signal already aborted, so nothing is planned. */
+  abandonContext?: boolean;
 }
 
 export interface FinishOptions {
@@ -437,7 +439,9 @@ export class FakeHost implements HostPort {
     this.inFlight.set(g.id, g);
     this.emit("GENERATION_STARTED", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator", generationType: opts.type });
     await this.settle();
-    if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: opts.type, dryRun: false, connectionId: null, personaId: null }, new AbortController().signal);
+    const context = new AbortController();
+    if (opts.abandonContext) context.abort();
+    if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: opts.type, dryRun: false, connectionId: null, personaId: null }, context.signal);
     await this.runInterceptor(chatId);
     if (this.options.wiBook) this.emit("WORLD_INFO_ACTIVATED", { chatId, entries: [], stats: {} });
     this.emit("GENERATION_IN_PROGRESS", { generationId: g.id, chatId, model: "fake", targetMessageId, targetSwipeId, characterId: null, characterName: "Narrator", contextClipStats: null });
