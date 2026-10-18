@@ -6,6 +6,7 @@
 // with it first: `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
 import { facetsInOrder } from "../shared/classes";
+import type { FacetDef } from "../shared/world";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids";
@@ -298,6 +299,7 @@ const events: EventTypeDef<PackEvent>[] = [
       if (!classes) return { code: "bad_event", reason: "a classification is facet → values" };
       const problem = classProblems(ctx.world, classes, ent.name)[0];
       if (problem) return { code: problem.code, reason: problem.message };
+      if (e.data.was !== undefined && !classOf(e.data.was)) return { code: "bad_event", reason: "the classification before is facet → values" };
       return tagList(e.data.tags) ? null : { code: "bad_event", reason: "tags are a list of words" };
     },
     apply: (e, state) => {
@@ -310,18 +312,27 @@ const events: EventTypeDef<PackEvent>[] = [
     touches: (e) => [{ entity: str(e, "entity"), aspect: "class" }],
     describe: (e, ctx, viewer) => {
       const classes = classOf(e.data.class) ?? {};
-      // A player's line names only the facets players can see, and never tags (DESIGN §4.1).
-      const parts = facetsInOrder(ctx.world)
-        .filter(([, f]) => viewer === undefined || f.shown === true)
-        .flatMap(([id, f]) => {
-          const values = own(classes, id) ?? [];
-          return values.length > 0 ? [`${f.label} ${values.map((v) => own(f.values, v)?.label ?? v).join(", ")}`] : [];
-        });
-      const tags = tagList(e.data.tags) ?? [];
-      if (viewer === undefined && tags.length > 0) parts.push(`tags ${tags.join(", ")}`);
       const name = own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity");
-      if (parts.length > 0) return `${name}: ${parts.join("; ")}`;
-      return viewer === undefined ? `${name}: no classification or tags` : "";
+      const valuesOf = (f: FacetDef, values: readonly string[]): string => (values.length > 0 ? values.map((v) => own(f.values, v)?.label ?? v).join(", ") : "none");
+      if (viewer !== undefined) {
+        // A player's line says only what changed on the facets players can see, a cleared one
+        // included, and never tags (DESIGN §4.1), so an edit to a hidden facet or a tag has no line.
+        // Without the values before, it can't say what changed, so it says nothing.
+        const was = classOf(e.data.was);
+        if (!was) return "";
+        const same = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
+        const changed = facetsInOrder(ctx.world)
+          .filter(([id, f]) => f.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? []))
+          .map(([id, f]) => `${f.label} ${valuesOf(f, own(classes, id) ?? [])}`);
+        return changed.length > 0 ? `${name}: ${changed.join("; ")}` : "";
+      }
+      const parts = facetsInOrder(ctx.world).flatMap(([id, f]) => {
+        const values = own(classes, id) ?? [];
+        return values.length > 0 ? [`${f.label} ${valuesOf(f, values)}`] : [];
+      });
+      const tags = tagList(e.data.tags) ?? [];
+      if (tags.length > 0) parts.push(`tags ${tags.join(", ")}`);
+      return parts.length > 0 ? `${name}: ${parts.join("; ")}` : `${name}: no classification or tags`;
     },
   },
   {

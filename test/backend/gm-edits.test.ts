@@ -30,6 +30,8 @@ async function chat(rig: Rig): Promise<string> {
   await put("tracks", "feud", { id: "feud", kind: "quest", label: "The feud", start: "simmer", visibility: "public", stages: { simmer: { label: "Simmering", next: [] }, boil: { label: "Boiling over", next: [] } } });
   // Not shown to players: only Build and the GM side see it.
   await put("classifications", "role", { id: "role", label: "Role", multiple: false, values: { ally: { label: "Ally" }, foe: { label: "Foe" } } });
+  // Shown to players: Cast groups by it, and a change to it reaches their Journal.
+  await put("classifications", "side", { id: "side", label: "Side", multiple: false, shown: true, values: { town: { label: "Townsfolk" }, guild: { label: "Guild" } } });
   await put("actions", "talk", { id: "talk", label: "Talk to", params: { to: { type: "ref", ref: "person" } }, requires: [], outcomes: { default: [] }, duration: "1" });
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
   const chatId = rig.host.createChat("Morning, Sam.");
@@ -230,6 +232,39 @@ describe("GM edits", () => {
     const g = await rig.host.start(chatId, { type: "swipe" });
     await rig.host.finish(g, "Quiet, still.");
     expect(await owners()).toEqual(["dev"]);
+  });
+
+  test("classify: the player's line says only what changed on facets players can see, never a hidden facet or a tag", async () => {
+    const rig = new Rig();
+    const chatId = await chat(rig);
+    await edit(rig, chatId, { op: "link", rel: "knows", from: POV, to: "dev" });
+    const seen = async () => {
+      const view = await rig.rt.view(chatId, rig.host.userId);
+      return { journal: view.journal.filter((n) => n.kind === "fix").map((n) => n.text), chip: view.chips.filter((c) => c.kind === "fix").at(-1)?.detail ?? "" };
+    };
+    const hidden = ["Role", "Foe", "traitor"];
+    // A visible facet set: the line names it and its new value.
+    await edit(rig, chatId, { op: "classify", entity: "dev", class: { side: ["town"] }, tags: [] });
+    let now = await seen();
+    expect(now.chip).toContain("Townsfolk");
+    const before = now.journal.length;
+    // Only a hidden facet and a tag change: no Journal line, and the Corrected chip names nothing.
+    await edit(rig, chatId, { op: "classify", entity: "dev", class: { side: ["town"], role: ["foe"] }, tags: ["traitor"] });
+    now = await seen();
+    expect(now.journal.length).toBe(before);
+    for (const word of [...hidden, "Townsfolk", "Side"]) expect(now.chip).not.toContain(word);
+    // The visible facet cleared: the line says so, and still names nothing hidden.
+    await edit(rig, chatId, { op: "classify", entity: "dev", class: { role: ["foe"] }, tags: ["traitor"] });
+    now = await seen();
+    expect(now.journal.length).toBe(before + 1);
+    expect(now.chip).toContain("Side");
+    for (const word of [...hidden, "Townsfolk"]) expect(now.chip).not.toContain(word);
+    // Changed from one visible value to another: the new one is named.
+    await edit(rig, chatId, { op: "classify", entity: "dev", class: { side: ["guild"] }, tags: [] });
+    now = await seen();
+    expect(now.chip).toContain("Guild");
+    for (const word of [...hidden, "Townsfolk"]) expect(now.chip).not.toContain(word);
+    for (const line of now.journal) for (const word of hidden) expect(line).not.toContain(word);
   });
 });
 

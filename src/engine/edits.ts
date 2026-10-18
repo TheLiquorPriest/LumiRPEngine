@@ -280,7 +280,13 @@ function classifyOp(w: Working, op: Extract<EditOp, { op: "classify" }>): Reject
   const facets = new Set([...Object.keys(classes), ...Object.keys(w.world.classifications)]);
   const unchanged = [...facets].every((f) => sameAs(classValues(w.world, w.state, op.entity, f), classes[f] ?? [])) && sameAs(tagsOf(w.world, w.state, op.entity), tags);
   if (unchanged) return reject("no_change", "nothing to change");
-  return applyAll(w, [{ type: ENGINE_EVENTS.classes, data: { entity: op.entity, class: classes, tags } }]);
+  // What it read as before, kept in the event so its player line can say only what changed, the
+  // same on every replay: which facets players see is read when the line is worded.
+  const was = Object.fromEntries([...facets].flatMap((f) => {
+    const values = classValues(w.world, w.state, op.entity, f);
+    return values.length > 0 ? [[f, [...values]]] : [];
+  }));
+  return applyAll(w, [{ type: ENGINE_EVENTS.classes, data: { entity: op.entity, class: classes, tags, was } }]);
 }
 
 function spawnOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "spawn" }>, rng: Rng): Rejection | null {

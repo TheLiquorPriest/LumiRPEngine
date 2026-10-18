@@ -143,7 +143,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "engine.pause", data: { scene: null } },
   { type: "engine.check", data: { actor: "you", check: "initiative", outcome: "success" } },
   { type: "engine.entity", data: { entity: "dev", tier: "supporting", agent: false, levels: { money: 2 } } },
-  { type: "engine.class", data: { entity: "dev", class: {}, tags: ["regular"] } },
+  { type: "engine.class", data: { entity: "dev", class: {}, tags: ["regular"], was: {} } },
   { type: "engine.observed", data: { people: {} } },
   { type: "engine.adjudged", data: { actor: "you", action: "climb", outcome: "success", rolled: true } },
   { type: "space.pos", data: { entity: "you", at: { scope: "inn", x: 4, y: 3 }, from: { scope: "inn", x: 3, y: 2 } } },
