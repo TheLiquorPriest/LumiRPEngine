@@ -36,7 +36,7 @@ import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
 import { lastSighting } from "../../../engine/seen";
 import { playerKnows } from "../../../engine/player-events";
-import { canSeeEntity, canSeeField, canSeePlace } from "../../../engine/visibility";
+import { canSeeEntity, canSeeField, canSeePlace, visibilityOf } from "../../../engine/visibility";
 
 // ---------------------------------------------------------------- needs
 
@@ -172,6 +172,9 @@ function within(dayStart: number, fromH: number, toH: number): { from: number; t
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
 }
 
+/** The planner's option id prefix for an agenda's step: `agenda:<track>`. */
+const AGENDA_OPTION = "agenda:";
+
 /** The planner's options for one agent and day: sleep, meals, socializing, leisure, chores, agenda steps and retrievals. */
 export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): PlanOption[] {
   const level = ctx.levelOf(who, "castlife");
@@ -199,7 +202,7 @@ export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): P
       options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
     });
   }
-  for (const a of agendaFor(ctx.world, ctx.state, who)) options.push({ id: `agenda:${a.track}`, label: a.stageLabel, activity: "agenda", place: home, duration: 60, window: within(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
+  for (const a of agendaFor(ctx.world, ctx.state, who)) options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: "agenda", place: home, duration: 60, window: within(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
   const overdue = optionalQuery(ctx, "gear.overdue");
   if (overdue) {
     for (const g of overdue(ctx, who)) {
@@ -212,7 +215,8 @@ export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): P
 
 export interface DayPlan {
   day: number;
-  blocks: { start: number; end: number; label: string; activity: string; place: PlaceId | null; reasons: string[]; fixed: boolean }[];
+  /** `option` is the planner's option the block came from (`agenda:<track>` for an agenda's step). */
+  blocks: { start: number; end: number; option: string; label: string; activity: string; place: PlaceId | null; reasons: string[]; fixed: boolean }[];
   ties: { key: string; chosen: string; via: string; options: string[] }[];
   tieZone: boolean;
 }
@@ -235,7 +239,7 @@ export function planFor(ctx: ReadContext, who: EntityId, day: number, rng: Rng):
     blocks: plan.blocks.map((b: PlanBlock) => {
       const tie = plan.ties.find((t) => t.at === b.start);
       const close = tie ? [tie.via === "seed" ? "close call" : `close call, ${own(ctx.state.entities, who)?.name.split(" ")[0] ?? "they"} chose`] : [];
-      return { start: b.start, end: b.end, label: b.label, activity: b.activity, place: b.place, reasons: b.fixed || b.utility <= 0 ? b.reasons : [...b.reasons, `utility ${Math.round(b.utility * 10) / 10}`, ...close], fixed: b.fixed };
+      return { start: b.start, end: b.end, option: b.option, label: b.label, activity: b.activity, place: b.place, reasons: b.fixed || b.utility <= 0 ? b.reasons : [...b.reasons, `utility ${Math.round(b.utility * 10) / 10}`, ...close], fixed: b.fixed };
     }),
     ties: plan.ties.map((t) => ({ key: t.key, chosen: t.chosen, via: t.via, options: t.options.map((o) => o.id) })),
     tieZone: plan.tieZone,
@@ -470,7 +474,8 @@ function kindOfBlock(activity: string): "work" | "sleep" | "free" | "travel" | "
  * Play → Cast (DESIGN §7, §12): the people the POV knows (`playerKnows`) and anyone it can see here.
  * Someone here shows what they are doing and, with LOD1, their day; someone away shows only where
  * and when the POV last saw them, never where they are now or what they plan. Fields follow field
- * visibility, and agendas show only when public.
+ * visibility, and agendas show only when public: each agenda on its own, so a secret one never
+ * shows behind a public one, and a block of the day spent on one that isn't public reads as busy.
  */
 export function buildCastView(ctx: ReadContext): CastView {
   const pov = ctx.world.pov;
@@ -480,6 +485,7 @@ export function buildCastView(ctx: ReadContext): CastView {
   const view = optionalQuery(ctx, "relationships.view");
   // Who the POV can see: the groups shown, and the people present (the shared rules, `isGone` included).
   const shown = (id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
+  const publicTrack = (track: string): boolean => visibilityOf(own(ctx.world.tracks, track)?.visibility) === "public";
   const groupIds = Object.keys(ctx.state.entities)
     .sort()
     .filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && shown(id));
@@ -524,10 +530,11 @@ export function buildCastView(ctx: ReadContext): CastView {
     const regard = view ? view(ctx, id, pov) : [];
     if (regard.length > 0) p.regard = regard;
     const plan = present && e.agent ? dayPlan(ctx, id) : null;
-    if (plan && level >= 3) p.timeline = plan.blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
-    const agenda = agendaFor(ctx.world, ctx.state, id);
-    if (agenda.length > 0 && own(ctx.world.tracks, agenda[0]?.track ?? "")?.visibility === "public") p.agenda = agenda.map((a) => ({ label: a.label, stage: a.stageLabel }));
-    const next = plan?.blocks.find((b) => b.start > ctx.state.clock);
+    const blocks = plan?.blocks.map((b) => (b.option.startsWith(AGENDA_OPTION) && !publicTrack(b.option.slice(AGENDA_OPTION.length)) ? { ...b, label: "Busy", reasons: ["their own business"] } : b));
+    if (blocks && level >= 3) p.timeline = blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
+    const agenda = agendaFor(ctx.world, ctx.state, id).filter((a) => publicTrack(a.track));
+    if (agenda.length > 0) p.agenda = agenda.map((a) => ({ label: a.label, stage: a.stageLabel }));
+    const next = blocks?.find((b) => b.start > ctx.state.clock);
     if (next) p.next = { at: formatClock(cal, next.start), label: next.label };
     people.push(p);
   }
