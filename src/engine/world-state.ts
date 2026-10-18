@@ -8,7 +8,7 @@ import { arrivalCell, cellIndex, placedItems, standingGrid } from "../shared/gri
 import { hasOwn, isRecord } from "../shared/json";
 import { mapSettingsOf } from "../shared/maps";
 import { agentOf } from "../shared/tiers";
-import type { WorldDoc } from "../shared/world";
+import { ALIVE, type WorldDoc } from "../shared/world";
 import { own } from "./pack-kit";
 import { completeRelations, type RelationTypes } from "./relations";
 import { placeOfEntity } from "./scope";
@@ -52,6 +52,8 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
       relations: structuredClone(e.relations),
       levels: clampLevels(e.levels ?? {}),
       agent: agentOf(world, { id, tier: e.tier, agent: e.agent }),
+      // Only when it isn't alive, so a world without life states starts as it always has.
+      ...(typeof e.life === "string" && e.life !== ALIVE ? { life: e.life } : {}),
     };
   }
   completeRelations(types, world, entities);

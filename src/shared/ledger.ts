@@ -207,7 +207,7 @@ export type UpgradePick = "take" | "keep";
 export type EntityUpgradePick = UpgradePick | "remove";
 
 /** The definition parts an Upgrade merges besides fields and relations. */
-export const UPGRADE_ASPECTS = ["kind", "name", "tier", "agent", "levels", "class"] as const;
+export const UPGRADE_ASPECTS = ["kind", "name", "tier", "agent", "levels", "class", "life"] as const;
 export type UpgradeAspect = (typeof UPGRADE_ASPECTS)[number];
 
 /**

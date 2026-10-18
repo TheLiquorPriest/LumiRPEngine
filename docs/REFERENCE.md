@@ -31,6 +31,7 @@ Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1,
 | `award` | `entity`, `progression`, `amount` |
 | `beat` | `hint` |
 | `check` | `check`, `actor?`, `target?`, `outcomes` |
+| `life` | `entity`, `to?`, `tell?` |
 | `link` | `rel`, `from`, `to`, `until?`, `fields?` |
 | `move` | `entity`, `to` |
 | `note` | `text`, `visibility?` |
@@ -73,12 +74,13 @@ The engine's own:
 - `table_step(table, value, column)`
 - `today_at(time)`
 
-Taxonomy:
+Taxonomy and life states:
 
 - `band_of(entity)`
 - `has_tag(entity, tag)`
 - `in_class(entity, facet, value)`
 - `kind_is(entity, kind)`
+- `life_of(entity)`
 - `member_of(entity, group)`
 - `tier_of(entity)`
 
@@ -86,7 +88,7 @@ Taxonomy:
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.signal`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.signal`, `engine.told`.
 
 ### Relation types
 
@@ -97,6 +99,7 @@ Built in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `re
 | Proposal | Bound by |
 |---|---|
 | `knows` | `knows` |
+| `life` | `life` |
 | `spawn` | `spawn` |
 
 ### Step purposes

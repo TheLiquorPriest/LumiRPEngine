@@ -95,6 +95,7 @@
     "tiers": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/tier" } },
     "spawnTier": { "$ref": "#/$defs/id", "description": "The tier a spawned entity gets when it names none." },
     "spawnCap": { "type": "integer", "minimum": 0, "maximum": 500, "description": "Characters replies may introduce in a chat, in total. Absent: 24." },
+    "lifeStates": { "type": "object", "description": "The world's own life states besides alive, dying and dead, by id. Absent: only those three.", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/lifeState" } },
     "start": {
       "type": "object",
       "description": "Where and when the POV starts: a place id and an ISO local date-time.",
@@ -238,6 +239,13 @@
         "until": { "type": "number", "description": "game minutes: the end of a time-bounded relation" }
       }
     },
+    "lifeState": {
+      "type": "object",
+      "description": "A life state: its label, whether someone in it still acts, and how the narrator reads it after their name.",
+      "required": ["label", "acts", "reads"],
+      "additionalProperties": false,
+      "properties": { "label": { "type": "string" }, "acts": { "type": "boolean" }, "reads": { "type": "string" } }
+    },
     "entity": {
       "type": "object",
       "required": ["id", "kind", "name", "tier", "fields", "relations"],
@@ -251,6 +259,7 @@
         "relations": { "type": "array", "items": { "$ref": "#/$defs/relation" } },
         "levels": { "$ref": "#/$defs/domainLevels" },
         "agent": { "type": "boolean" },
+        "life": { "$ref": "#/$defs/id", "description": "the life state it starts in; absent: alive" },
         "characterId": { "type": "string" },
         "visibility": { "$ref": "#/$defs/visibility" },
         "knownBy": { "$ref": "#/$defs/selector" },

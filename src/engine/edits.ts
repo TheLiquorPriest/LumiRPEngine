@@ -289,6 +289,14 @@ function classifyOp(w: Working, op: Extract<EditOp, { op: "classify" }>): Reject
   return applyAll(w, [{ type: ENGINE_EVENTS.classes, data: { entity: op.entity, class: classes, tags, was } }]);
 }
 
+/** A life state, and who is told it (DESIGN §8): everyone with the entity learns a change anyway. Nothing to do is refused. */
+function lifeOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "life" }>, rng: Rng): Rejection | null {
+  const before = w.events.length;
+  const rejection = run(reg, w, [{ type: "life", args: { entity: op.entity, ...(op.to !== undefined ? { to: op.to } : {}), ...(op.tell !== undefined ? { tell: op.tell } : {}) } }], rng);
+  if (rejection) return rejection;
+  return w.events.length === before ? reject("no_change", "nothing to change") : null;
+}
+
 function spawnOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "spawn" }>, rng: Rng): Rejection | null {
   const name = op.name.trim();
   if (name === "" || name.length > 80) return reject("bad_name", "a name is 1–80 characters");
@@ -360,6 +368,8 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
       return entityOp(w, op);
     case "classify":
       return classifyOp(w, op);
+    case "life":
+      return lifeOp(reg, w, op, rng);
     case "spawn":
       return spawnOp(reg, w, op, rng);
     case "despawn":
@@ -430,6 +440,9 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
           }
           return { op: "classify", entity: o.entity, class: classes, tags: o.tags.filter(str) };
         }
+        case "life":
+          if (!str(o.entity) || (o.to !== undefined && !str(o.to)) || (o.tell !== undefined && !(Array.isArray(o.tell) && o.tell.every(str))) || (o.to === undefined && o.tell === undefined)) return null;
+          return { op: "life", entity: o.entity, ...(str(o.to) ? { to: o.to } : {}), ...(Array.isArray(o.tell) ? { tell: o.tell.filter(str) } : {}) };
         case "spawn":
           if (!str(o.kind) || !str(o.name) || [o.id, o.tier, o.place].some((v) => v !== undefined && !str(v)) || (o.agent !== undefined && typeof o.agent !== "boolean")) return null;
           return { op: "spawn", kind: o.kind, name: o.name, ...(str(o.id) ? { id: o.id } : {}), ...(str(o.tier) ? { tier: o.tier } : {}), ...(str(o.place) ? { place: o.place } : {}), ...(typeof o.agent === "boolean" ? { agent: o.agent } : {}) };

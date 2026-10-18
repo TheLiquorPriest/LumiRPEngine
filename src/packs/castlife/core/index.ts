@@ -32,6 +32,7 @@ import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
 import { activeSlot, allSchedules, ownerRank, routineStays, scheduleInstants, scheduleOwners } from "../../../engine/schedules";
 import { isGone, kindDef, kindIs, placeOfEntity } from "../../../engine/scope";
+import { acts, povLife } from "../../../engine/life";
 import { classValues, isGroup, isMemberOf, MEMBER_OF } from "../../../engine/selector";
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
@@ -336,14 +337,14 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     return out;
   }
 
-  // NPC↔NPC encounters: at most one per slot, with someone at the block's place. Acquaintances
-  // (a regard relation either way) meet and their regard moves; strangers sometimes get acquainted.
+  // NPC↔NPC encounters: at most one per slot, with someone at the block's place who still acts.
+  // Acquaintances (a regard relation either way) meet and their regard moves; strangers sometimes get acquainted.
   const appraise = optionalService(ctx, "relationship.appraise");
   const g = rng.fork("encounters");
   if (appraise && block.place && g.next() < ENCOUNTER_CHANCE) {
     const here = Object.keys(ctx.state.entities)
       .sort()
-      .filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place && !isGone(ctx.state, other));
+      .filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other));
     const other = here[Math.floor(g.next() * here.length)];
     if (other) {
       const known = acquainted(ctx.state, who, other);
@@ -383,16 +384,16 @@ function invitationText(ctx: ReadContext, agent: EntityId, place: PlaceId | null
 }
 
 /**
- * Trips and vacations hold people away (LOD0, every person, Cast life ≥ 1). A slot is stepped when
- * it completes, so a trip under way at the slot's end takes the person away then (once: the hold
- * marks it), and one ending within the slot brings them home.
+ * Trips and vacations hold people away (LOD0, every person who still acts, Cast life ≥ 1). A slot
+ * is stepped when it completes, so a trip under way at the slot's end takes the person away then
+ * (once: the hold marks it), and one ending within the slot brings them home.
  */
 function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   for (const who of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, who);
     const trips = e?.fields.trips;
-    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || isGone(ctx.state, who)) continue;
+    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || isGone(ctx.state, who) || !acts(ctx.world, ctx.state, who)) continue;
     for (const raw of trips) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
@@ -456,6 +457,8 @@ export interface CastPerson {
   place?: string;
   /** Someone away: where (when the POV may name the place) and when the POV last saw them. */
   lastSeen?: { place?: string; at: string };
+  /** Their life state as the POV knows it (DESIGN §8), when that isn't alive: its label. */
+  life?: string;
   regard?: { axis: string; band: string; value?: number }[];
   timeline?: { start: string; end: string; label: string; kind: "work" | "sleep" | "free" | "travel" | "other"; reasons: string[] }[];
   agenda?: { label: string; stage: string }[];
@@ -505,7 +508,8 @@ function kindOfBlock(activity: string): "work" | "sleep" | "free" | "travel" | "
 /**
  * Play → Cast (DESIGN §7, §12): the people the POV knows (`playerKnows`) and anyone it can see here.
  * Someone here shows what they are doing and, with LOD1, their day; someone away shows only where
- * and when the POV last saw them, never where they are now or what they plan. Fields follow field
+ * and when the POV last saw them, never where they are now or what they plan. A life state shows as
+ * the POV knows it, and someone it knows doesn't act shows no doing or day. Fields follow field
  * visibility, and agendas show only when public: each agenda on its own, so a secret one never
  * shows behind a public one, and a block of the day spent on one that isn't public reads as busy.
  */
@@ -551,8 +555,11 @@ export function buildCastView(ctx: ReadContext): CastView {
       classes,
       groups: membershipsOf(id).map((m) => ({ id: m.id, ...(m.role !== undefined ? { role: m.role } : {}) })),
     };
+    const life = povLife(ctx.world, ctx.state, id);
+    if (life) p.life = life.label;
+    const still = life !== null && !life.acts;
     if (present) {
-      if (typeof e.fields.activity === "string" && sees("activity")) p.activity = shownActivity(ctx, id, e.fields.activity).replace(/_/g, " ");
+      if (typeof e.fields.activity === "string" && sees("activity") && !still) p.activity = shownActivity(ctx, id, e.fields.activity).replace(/_/g, " ");
       // Someone here is where the POV is: a place it can't see is named as every player surface names it.
       if (sees("place")) p.place = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? (own(ctx.world.places, place)?.name ?? place) : HIDDEN_PLACE_NAME;
     } else if (level >= 2) {
@@ -561,7 +568,7 @@ export function buildCastView(ctx: ReadContext): CastView {
     }
     const regard = view ? view(ctx, id, pov) : [];
     if (regard.length > 0) p.regard = regard;
-    const plan = present && e.agent ? dayPlan(ctx, id) : null;
+    const plan = present && e.agent && !still ? dayPlan(ctx, id) : null;
     const blocks = plan?.blocks.map((b) => (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) ? { ...b, label: "Busy", reasons: ["their own business"] } : b));
     if (blocks && level >= 3) p.timeline = blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
     const agenda = agendaFor(ctx.world, ctx.state, id).filter((a) => publicTrack(ctx.world, a.track));
@@ -692,7 +699,7 @@ export const castlifePack: PackDef = {
       const out: { key: string; agent: EntityId; options: string[] }[] = [];
       const decided = decisions(ctx.state);
       for (const id of Object.keys(ctx.state.entities).sort()) {
-        const plan = own(ctx.state.entities, id)?.agent && !isGone(ctx.state, id) ? dayPlan(ctx, id) : null;
+        const plan = own(ctx.state.entities, id)?.agent && !isGone(ctx.state, id) && acts(ctx.world, ctx.state, id) ? dayPlan(ctx, id) : null;
         for (const t of plan?.ties ?? []) if (t.via === "seed" && !own(decided, t.key)) out.push({ key: t.key, agent: id, options: t.options });
       }
       return out;
@@ -753,9 +760,11 @@ export const castlifePack: PackDef = {
           if (!e || id === pov || !here || placeOfEntity(ctx.state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person") || isGone(ctx.state, id)) continue;
           // The narrator is told only who the POV can see: a secret or unknown person stays out of the prose.
           if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) continue;
-          // What they are doing is a field: told only when the POV may see it.
+          // What they are doing is a field: told only when the POV may see it. A life state the POV
+          // knows reads instead ("lies dead"); one it doesn't know of is never told.
+          const life = povLife(ctx.world, ctx.state, id);
           const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
-          lines.push(`${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
+          lines.push(life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
         }
         if (ctx.levelOf(pov, "castlife") >= 4) {
           const urgent = Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label);

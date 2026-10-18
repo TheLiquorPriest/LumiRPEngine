@@ -229,11 +229,12 @@ function builtInSection(engine: PackRecord): string[] {
   const reg = createRegistry(ALL_PACKS);
   const coreEvents = coreEventTypes(() => reg).map((e) => e.type);
   const out: string[] = ["## Engine built-ins", ""];
-  out.push("### Core effects", "", ...effectRows(Object.entries(CORE_EFFECTS).map(([type, args]) => ({ type, args }))), "");
+  // The engine pack's own effects (`life`) read like the core ones, so they share the table.
+  out.push("### Core effects", "", ...effectRows([...Object.entries(CORE_EFFECTS).map(([type, args]) => ({ type, args })), ...engine.effects]), "");
   out.push("### Formula functions", "");
   out.push(`Math: ${codes([...MATH_FUNCTIONS].sort(byText))}. ${code("min")} and ${code("max")} take any number of arguments.`, "");
   out.push("The engine's own:", "", ...sortedBy(Object.entries(BUILTIN_FUNCTIONS), ([name]) => name).map(([name, params]) => `- ${code(`${name}(${params.join(", ")})`)}${EFFECT_ONLY_FUNCTIONS.includes(name) ? ": effect arguments only" : ""}`), "");
-  out.push("Taxonomy:", "", ...formulaRows(engine.formulas), "");
+  out.push("Taxonomy and life states:", "", ...formulaRows(engine.formulas), "");
   out.push("### Events", "", `Core: ${codes(unique(coreEvents))}.`, "", `Engine bookkeeping: ${codes(unique(engine.events))}.`, "");
   out.push("### Relation types", "", `Built in: ${codes([...BUILTIN_RELATIONS])}. Packs add the typed ones below.`, "");
   out.push("### Proposals", "", ...table(["Proposal", "Bound by"], sortedBy(engine.proposals, (p) => p.type).map((p) => [code(p.type), code(p.boundField)])), "");

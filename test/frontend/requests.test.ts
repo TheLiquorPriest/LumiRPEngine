@@ -152,6 +152,7 @@ describe("GM edits", () => {
     class: {},
     tags: [],
     sheet: null,
+    life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] },
   };
   const regard = [
     { id: "warmth", label: "Warmth", type: "number" as const, min: -100, max: 100 },

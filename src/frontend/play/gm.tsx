@@ -15,7 +15,7 @@ import { ClassesInput } from "../build/facet-editor";
 import { TagListInput } from "../build/selector-editor";
 import { parseFixValue } from "../fix-editor";
 import type { PanelProps } from "../registry";
-import { adjustOp, classifyOp, editRequest, entityStateOp, relationFields } from "../requests";
+import { adjustOp, classifyOp, editRequest, entityStateOp, lifeEditOp, relationFields } from "../requests";
 import { decodeEncounterView, EncounterCard } from "../../packs/combat/ui/panel";
 
 type Section = "entities" | "places" | "tracks" | "money" | "fight" | "edits";
@@ -177,6 +177,53 @@ function Classification(props: { entity: GmEntity; editor: Editor }) {
   );
 }
 
+/** The life state, who knows it as it is, and who is told it with this save (DESIGN §8); everyone with them learns a change anyway. */
+function Life(props: { entity: GmEntity; editor: Editor }) {
+  const { entity, editor } = props;
+  const [to, setTo] = useState(entity.life.state);
+  const [tell, setTell] = useState<string[]>([]);
+  const op = lifeEditOp(entity, to, tell);
+  const name = (id: string): string => (editor.gm.entities.find((e) => e.id === id)?.pov ? "You" : (editor.gm.entities.find((e) => e.id === id)?.name ?? id));
+  const others = editor.gm.entities.filter((e) => e.id !== entity.id && !e.gone && !tell.includes(e.id));
+  const { everyone, aware, unaware } = entity.life;
+  return (
+    <Card title="Life">
+      <Row k="Known to" v={everyone ? (unaware.length > 0 ? `everyone but ${unaware.map((p) => name(p.id)).join(", ")}` : "everyone") : aware.length > 0 ? aware.map((p) => name(p.id)).join(", ") : "no one"} />
+      <label class="lre-field">
+        <span class="label">Life state</span>
+        <select class="lre-input" value={to} onChange={(event) => setTo(event.currentTarget.value)}>
+          {editor.gm.lifeStates.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
+              {s.acts ? "" : " (doesn't act)"}
+            </option>
+          ))}
+        </select>
+      </label>
+      {tell.length > 0 ? (
+        <div class="lre-inline" style={{ flexWrap: "wrap" }}>
+          {tell.map((id) => (
+            <button key={id} type="button" class="lre-btn small" aria-label={`Don't tell ${name(id)}`} onClick={() => setTell(tell.filter((t) => t !== id))}>
+              {name(id)} ✕
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <select class="lre-input" value="" aria-label="Tell someone" onChange={(event) => (event.currentTarget.value ? setTell([...tell, event.currentTarget.value]) : undefined)}>
+        <option value="">+ Tell someone…</option>
+        {others.map((e) => (
+          <option key={e.id} value={e.id}>
+            {e.pov ? "You" : e.name}
+          </option>
+        ))}
+      </select>
+      <button type="button" class="lre-btn primary" disabled={editor.busy || op === null} onClick={() => op && void editor.edit([op])}>
+        Save
+      </button>
+    </Card>
+  );
+}
+
 /** A relation's fields as the row shows them: by their labels, with a regard's current value. */
 function relationDetail(r: GmRelation, gm: GmView): string | undefined {
   const defs = gm.relationTypes.find((t) => t.id === r.type)?.fields ?? [];
@@ -322,6 +369,7 @@ function EntityEditor(props: { entity: GmEntity; editor: Editor; onClose(): void
         aside={
           <span class="lre-inline">
             {entity.gone ? <span class="lre-badge neg">Removed</span> : null}
+            {entity.life.state !== "alive" ? <span class="lre-badge neg">{entity.life.label}</span> : null}
             {entity.visibility !== "public" ? <span class="lre-badge warn">{entity.visibility.replace(/_/g, " ")}</span> : null}
             <button type="button" class="lre-btn small ghost" onClick={props.onClose}>
               All
@@ -370,6 +418,7 @@ function EntityEditor(props: { entity: GmEntity; editor: Editor; onClose(): void
       <Placement entity={entity} editor={editor} />
       <Relations entity={entity} editor={editor} />
       <EntityState key={`${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`} entity={entity} editor={editor} />
+      <Life key={JSON.stringify(entity.life)} entity={entity} editor={editor} />
       <Classification key={JSON.stringify([entity.class, entity.tags])} entity={entity} editor={editor} />
     </div>
   );
@@ -447,6 +496,7 @@ function Entities(props: { editor: Editor }) {
               </span>
               {e.pov ? <span class="lre-badge accent">You</span> : null}
               {e.gone ? <span class="lre-badge neg">Removed</span> : null}
+              {e.life.state !== "alive" ? <span class="lre-badge neg">{e.life.label}</span> : null}
               {e.spawned ? <span class="lre-badge">Spawned</span> : null}
               {e.agent ? <span class="lre-badge">Own day</span> : null}
               {e.visibility !== "public" ? <span class="lre-badge warn">{e.visibility.replace(/_/g, " ")}</span> : null}

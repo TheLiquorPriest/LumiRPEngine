@@ -46,6 +46,8 @@ A world is one JSON document; Lumiverse keeps one per revision and never changes
 
 The scalars are `format`, `id`, `name`, `engineVersion`, `pov`, `seedMode` (`fresh` or `same_roll`), `lenientPricing`, the optional `spawnTier`, the optional `spawnCap` (how many people replies may introduce in a chat: a whole number from 0 to 500, 24 when absent), and `suppressed`, a list kept for the format that nothing reads.
 
+A world may add `lifeStates`, its own life states besides `alive`, `dying` and `dead` (each `{label, acts, reads}`; an id a built-in has is an error), and an entity may name the state it starts in with `life` (alive when absent).
+
 A few rules a studio has to keep:
 
 - **Maps own what they draw.** The places, grid and routes a map compiles into carry `map` with its id, and every read compiles the maps again, replacing what an earlier compile made. Edit the map, not the compiled items. A map's place whose id the world already has, or a grid id already taken, compiles without that part, and lint says so.

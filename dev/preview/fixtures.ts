@@ -472,7 +472,7 @@ const BACKGROUND = [1, 1, 1, 1, 1, 1, 3, 2, 1];
 
 /** The GM view (`lre.gm`): everyone, the secret and the removed included, and every track's truths. */
 export function gmFixture(): GmView {
-  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, ...rest });
+  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
   return {
     entities: [
       entity("pov", "Sam Rivera", "person", "principal", "diner", {
@@ -533,6 +533,11 @@ export function gmFixture(): GmView {
       { id: "principal", label: "Leads" },
       { id: "supporting", label: "Supporting cast" },
       { id: "background", label: "Background" },
+    ],
+    lifeStates: [
+      { id: "alive", label: "Alive", acts: true },
+      { id: "dying", label: "Dying", acts: false },
+      { id: "dead", label: "Dead", acts: false },
     ],
     domains: DOMAINS.map((id) => ({ id, label: id === "castlife" ? "Cast life" : `${id.charAt(0).toUpperCase()}${id.slice(1)}` })),
     // The world fixture's facets, its GM-only one included.
@@ -871,7 +876,7 @@ export function settingsFixture(): UserSettings {
   };
 }
 
-const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm" };
+const DEFAULTS: Record<ExtractionType, ExtractionModeView["mode"]> = { time_advance: "auto", location: "auto", condition: "auto", knows: "confirm", give: "confirm", purchase: "confirm", transfer: "confirm", regard: "confirm", quantity: "confirm", spawn: "confirm", life: "confirm" };
 
 /** What the backend would derive: pins first, then learning on the connection, then D4 defaults. */
 export function extractionView(settings: UserSettings): Record<ExtractionType, ExtractionModeView> {

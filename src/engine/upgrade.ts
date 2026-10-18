@@ -17,7 +17,7 @@
 //     keeps its holder, so it never gets a place and cell while held;
 //   - an entity gone from the revision stays, holding the classes, tags and visibility it had,
 //     unless picked `remove`: then it leaves the world and is unlinked, as a GM's Remove does;
-//   - kind, name, tier, agent flag, level overrides, classes and tags, and each field;
+//   - kind, name, tier, agent flag, level overrides, classes and tags, life state, and each field;
 //   - each relation by type and target; the two sides of a symmetric or inverse pair change together
 //     or not at all;
 //   - a taken opening balance of an account whose holder's money is open posts the difference
@@ -34,7 +34,7 @@ import { mapSettingsOf } from "../shared/maps";
 import type { EntityPicks, LedgerEvent, MarkerBody, UpgradeAspect, UpgradePick, UpgradePicks } from "../shared/ledger";
 import { UPGRADE_ASPECTS } from "../shared/ledger";
 import { agentOf } from "../shared/tiers";
-import type { EntityDef, RelationInstance, WorldDoc } from "../shared/world";
+import { ALIVE, type EntityDef, type RelationInstance, type WorldDoc } from "../shared/world";
 import { calendarOf, slotIndexAt } from "./calendar";
 import type { EventTypes } from "./events";
 import { FoldError } from "./ledger/chain";
@@ -166,7 +166,7 @@ function classesOf(e: Pick<EntityDef, "class" | "tags"> | undefined): { class: R
 
 /** A definition as the chat holds it, for an entity the revision defines but the earlier one didn't (play created it, or an older revision left it). */
 function heldDef(id: EntityId, e: EntityState): EntityDef {
-  return { id, kind: e.kind, name: e.name, tier: e.tier, fields: e.fields, relations: e.relations, levels: e.levels, agent: e.agent, ...(e.class ? { class: e.class } : {}), ...(e.tags ? { tags: e.tags } : {}) };
+  return { id, kind: e.kind, name: e.name, tier: e.tier, fields: e.fields, relations: e.relations, levels: e.levels, agent: e.agent, ...(e.class ? { class: e.class } : {}), ...(e.tags ? { tags: e.tags } : {}), ...(e.life ? { life: e.life } : {}) };
 }
 
 /**
@@ -236,6 +236,7 @@ export function planUpgrade(state: Readonly<WorldState>, env: MarkerEnv, to: Rev
     part("tier", base.tier, next.tier, now.tier, touchedAspect(state, id, "tier"));
     part("agent", was ? agentOf(before, was) : now.agent, agentOf(after, next), now.agent, touchedAspect(state, id, "agent"));
     part("levels", clampLevels(base.levels ?? {}), clampLevels(next.levels ?? {}), now.levels, touchedAspect(state, id, "levels"));
+    part("life", base.life ?? ALIVE, next.life ?? ALIVE, now.life ?? ALIVE, touchedAspect(state, id, "life"));
     // Classes and tags are read live from the revision in force, so the chat's are those, unless it
     // holds its own (spawned, kept through an Upgrade, or set by a GM edit, which counts as play's).
     const held = now.class !== undefined || now.tags !== undefined ? classesOf(now) : classesOf(own(inForce.entities, id) ?? base);
@@ -346,7 +347,7 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
     if (d.status !== "new" || pickOf(d.id)?.entity === "keep") continue;
     const def = d.def;
     const agent = agentOf(after, { id: d.id, tier: def.tier, agent: def.agent });
-    state.entities[d.id] = { kind: def.kind, name: def.name, tier: def.tier, fields: structuredClone(def.fields), relations: structuredClone(d.start?.relations ?? []), levels: clampLevels(def.levels ?? {}), agent };
+    state.entities[d.id] = { kind: def.kind, name: def.name, tier: def.tier, fields: structuredClone(def.fields), relations: structuredClone(d.start?.relations ?? []), levels: clampLevels(def.levels ?? {}), agent, ...(def.life && def.life !== ALIVE ? { life: def.life } : {}) };
     created.push(d);
     if (agent) agents.push(d.id);
     if (minor(own(def.fields, OPENING)) !== 0) openings.push({ account: d.id, cents: minor(own(def.fields, OPENING)) });
@@ -396,11 +397,14 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
         const on = agentOf(after, d.def);
         if (on && !e.agent) agents.push(d.id);
         e.agent = on;
+      } else if (aspect === "life") {
+        if (d.def.life === undefined || d.def.life === ALIVE) delete e.life;
+        else e.life = d.def.life;
       } else {
         delete e.class;
         delete e.tags;
       }
-      if (aspect === "tier" || aspect === "agent" || aspect === "levels" || aspect === "class") forget(state, d.id, { aspect });
+      if (aspect === "tier" || aspect === "agent" || aspect === "levels" || aspect === "class" || aspect === "life") forget(state, d.id, { aspect });
     }
     // The place and cell go together: taken only when every one of them that differs is taken, once
     // the relations are merged (below).

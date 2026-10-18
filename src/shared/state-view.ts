@@ -83,7 +83,8 @@ export interface SceneView {
   /** The POV's place, or null when it is nowhere or somewhere it can't see. */
   placeId: PlaceId | null;
   sceneType: string;
-  present: { id: EntityId; name: string; label: string }[];
+  /** People here the POV can see; `life`: their life state as the POV knows it, when that isn't alive (DESIGN §8). */
+  present: { id: EntityId; name: string; label: string; life?: string }[];
   /** The last turn's elapsed time in minutes. */
   elapsed: number;
 }
@@ -334,6 +335,8 @@ export interface GmEntity {
   tags: string[];
   /** The world ruleset's designed sheet read on this entity; null when the world designs none. */
   sheet: SheetSectionView[] | null;
+  /** Its life state (DESIGN §8), and who knows it as it is: everyone but `unaware`, or only `aware` (people). */
+  life: { state: string; label: string; acts: boolean; everyone: boolean; aware: { id: EntityId; name: string }[]; unaware: { id: EntityId; name: string }[] };
 }
 
 /**
@@ -344,6 +347,8 @@ export interface GmView {
   entities: GmEntity[];
   kinds: { id: string; label: string }[];
   tiers: { id: string; label: string }[];
+  /** The world's life states, built in and its own, in order: what the life editor offers. */
+  lifeStates: { id: string; label: string; acts: boolean }[];
   domains: { id: DomainId; label: string }[];
   /** The world's classification facets, hidden ones too: what the classification editor offers. */
   classifications: Record<FacetId, FacetDef>;

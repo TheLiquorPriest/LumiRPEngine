@@ -25,6 +25,7 @@ import { presetOf } from "../engine/realism";
 import { levelFloors, type Registry } from "../engine/registry-impl";
 import { actionOdds, paramCandidates } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
+import { povLife } from "../engine/life";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, findLeaks, povPlace, unrevealedTruths } from "../engine/visibility";
@@ -130,9 +131,11 @@ function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry
   for (const [id, e] of Object.entries(state.entities)) {
     if (id === world.pov || placeOfEntity(state, id) !== placeId || placeId === null || isGone(state, id)) continue;
     // Authored kinds extend `person` (the starters' `character`). Someone the POV can't see (secret,
-    // or `known_by` and not known) isn't listed, even standing right there.
+    // or `known_by` and not known) isn't listed, even standing right there. A body stays listed where
+    // it lies, with its life state as the POV knows it.
     if (!kindIs(registry, world, e.kind, "person") || !canSeeEntity(registry, world, state, world.pov, id)) continue;
-    present.push({ id, name: e.name, label: world.kinds[e.kind]?.label ?? e.kind });
+    const life = povLife(world, state, id);
+    present.push({ id, name: e.name, label: world.kinds[e.kind]?.label ?? e.kind, ...(life ? { life: life.label } : {}) });
   }
   // The scene in force as the player reads it: a type the POV may not know of (one only a hidden
   // place has or only an action sets, whether the POV stands in that place or is pinned to it)

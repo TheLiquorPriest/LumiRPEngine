@@ -9,6 +9,7 @@
 // types and changes with them; its test checks it against the starters and the preview world.
 
 import type { JsonObject, JsonValue } from "./json";
+import { hasOwn, isRecord } from "./json";
 import type {
   ActionId,
   ActivityType,
@@ -213,6 +214,8 @@ export interface EntityDef {
   levels?: Partial<Record<DomainId, Level>>;
   /** LOD1 agents run agendas and the planner (DESIGN §8). Unset: the tier's `agentDefault`. */
   agent?: boolean;
+  /** The life state it starts in (DESIGN §8): one of the world's life states. Unset: alive. */
+  life?: LifeStateId;
   /** Lumiverse character id, for group chats. */
   characterId?: string;
   visibility?: Visibility;
@@ -886,8 +889,11 @@ export interface CombatDef {
   economy: Record<string, CombatBudgetDef>;
   /** The pool field that holds hit points. */
   hp: FieldId;
-  /** When a participant is down (default: no HP left), and the condition it then has (default `down`). */
-  down?: { when?: Expr; condition?: string };
+  /**
+   * When a participant is down (default: no HP left), the condition it then has (default `down`),
+   * and the life state it falls into (DESIGN §8; none by default): back up, it is alive again.
+   */
+  down?: { when?: Expr; condition?: string; life?: LifeStateId };
   /** Who is hostile to whom (default: a `hostile` relation either way), and who fights beside whom (default: no one), with `self` and `other`. */
   sides?: { hostile?: Expr; ally?: Expr };
   /** When the fight is over (default: one side has no one standing). */
@@ -1034,6 +1040,8 @@ export interface WorldDoc {
   spawnTier?: TierId;
   /** Characters replies may introduce in a chat, in total (DESIGN §9.4); absent, `DEFAULT_SPAWN_CAP`. */
   spawnCap?: number;
+  /** The world's own life states besides alive, dying and dead (DESIGN §8); absent, only those three. */
+  lifeStates?: Record<LifeStateId, LifeStateDef>;
   /** Where the POV starts. */
   start: { place: PlaceId; at: string };
 }
@@ -1068,6 +1076,58 @@ export const MAX_SPAWN_CAP = 500;
 export function spawnCapOf(world: Pick<WorldDoc, "spawnCap">): number {
   const cap: unknown = world.spawnCap;
   return typeof cap === "number" && Number.isFinite(cap) ? Math.max(0, Math.min(MAX_SPAWN_CAP, Math.trunc(cap))) : DEFAULT_SPAWN_CAP;
+}
+
+/** A life state's id: `alive`, `dying`, `dead`, or one the world defines (DESIGN §8). */
+export type LifeStateId = string;
+
+/** A life state (DESIGN §8): how players and the narrator read it, and whether someone in it still acts. */
+export interface LifeStateDef {
+  label: string;
+  /** Whether someone in this state still acts: follows schedules and day plans, chooses, takes combat turns. */
+  acts: boolean;
+  /** How the narrator reads someone in it, after their name: "lies dead", "is dying". */
+  reads: string;
+}
+
+/** The life state everyone is in unless the world or play says otherwise. */
+export const ALIVE: LifeStateId = "alive";
+
+/** The built-in life states. A world adds its own beside them (`WorldDoc.lifeStates`) and can't redefine these. */
+export const BUILTIN_LIFE_STATES: Readonly<Record<string, LifeStateDef>> = {
+  alive: { label: "Alive", acts: true, reads: "is alive" },
+  dying: { label: "Dying", acts: false, reads: "is dying" },
+  dead: { label: "Dead", acts: false, reads: "lies dead" },
+};
+
+/** A world's own life state as the engine reads it: a missing label is its id, a missing reading "is <label>", and only `acts: true` acts. */
+function ownLifeState(id: LifeStateId, raw: unknown): LifeStateDef {
+  const def = isRecord(raw) ? raw : {};
+  const label = typeof def.label === "string" && def.label.trim() !== "" ? def.label : id.replace(/_/g, " ");
+  return { label, acts: def.acts === true, reads: typeof def.reads === "string" && def.reads.trim() !== "" ? def.reads : `is ${label.toLowerCase()}` };
+}
+
+/** Every life state a world has: the built-ins, then its own in id order (one that reuses a built-in's id is the built-in, and lint flags it). */
+export function lifeStatesOf(world: Pick<WorldDoc, "lifeStates">): [LifeStateId, LifeStateDef][] {
+  const own = isRecord(world.lifeStates) ? Object.keys(world.lifeStates).filter((id) => !hasOwn(BUILTIN_LIFE_STATES, id)).sort() : [];
+  return [...Object.entries(BUILTIN_LIFE_STATES), ...own.map((id): [LifeStateId, LifeStateDef] => [id, ownLifeState(id, world.lifeStates?.[id])])];
+}
+
+/** Whether a world has this life state. */
+export function isLifeState(world: Pick<WorldDoc, "lifeStates">, id: LifeStateId): boolean {
+  return hasOwn(BUILTIN_LIFE_STATES, id) || (isRecord(world.lifeStates) && hasOwn(world.lifeStates, id));
+}
+
+/**
+ * A life state's definition. One the world no longer has (an Upgrade dropped it while someone was
+ * in it) reads as its id and doesn't act: an unknown state never sets anyone acting again.
+ */
+export function lifeStateOf(world: Pick<WorldDoc, "lifeStates">, id: LifeStateId): LifeStateDef {
+  const builtIn = hasOwn(BUILTIN_LIFE_STATES, id) ? BUILTIN_LIFE_STATES[id] : undefined;
+  if (builtIn) return builtIn;
+  if (isRecord(world.lifeStates) && hasOwn(world.lifeStates, id)) return ownLifeState(id, world.lifeStates[id]);
+  const label = id.replace(/_/g, " ");
+  return { label, acts: false, reads: `is ${label}` };
 }
 
 function grouped(n: bigint): string {

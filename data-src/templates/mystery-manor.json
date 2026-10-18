@@ -2307,7 +2307,8 @@
           "args": {"who": "julian_ashcombe", "place": "library", "activity": "a late brandy with the host", "minutes": 35}
         },
         {"type": "set_flag", "text": "Sir Alaric is dead.", "args": {"flag": "alaric_alive", "value": false}},
-        {"type": "set", "text": "Sir Alaric lies in the library.", "args": {"entity": "sir_alaric", "field": "place", "value": "library"}}
+        {"type": "set", "text": "Sir Alaric lies in the library.", "args": {"entity": "sir_alaric", "field": "place", "value": "library"}},
+        {"type": "life", "text": "Sir Alaric dies; only the one with him knows it.", "args": {"entity": "sir_alaric", "to": "dead"}}
       ]
     },
     {
@@ -2348,7 +2349,7 @@
       "do": [
         {"type": "move", "text": "Nell is in the library.", "args": {"who": "nell_sparrow", "place": "library"}},
         {"type": "set_flag", "text": "The body has been found.", "args": {"flag": "body_found", "value": true}},
-        {"type": "set", "text": "Sir Alaric lies dead where he fell.", "args": {"entity": "sir_alaric", "field": "activity", "value": "dead"}},
+        {"type": "life", "text": "The scream tells the household and the player that Sir Alaric is dead.", "args": {"entity": "sir_alaric", "tell": ["pov", "lady_honoria", "rupert_thorne", "verity_lorne", "julian_ashcombe", "dr_lionel_farrant", "gideon_pell", "mrs_marsh", "nell_sparrow"]}},
         {
           "type": "note",
           "text": "Nell screams; Pell is first on the scene, then Lady Honoria and the household.",

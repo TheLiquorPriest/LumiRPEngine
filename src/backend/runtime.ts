@@ -1724,6 +1724,7 @@ export const TYPE_LABELS: Record<ExtractionType, string> = {
   regard: "Feelings",
   quantity: "Quantities",
   spawn: "New characters",
+  life: "Life and death",
 };
 
 /** The puzzles the player can see that take an answer now, as "Puzzle — stage" titles (interpret's Answer label). */
@@ -2125,6 +2126,8 @@ export function describeProposal(p: JsonObject, world?: WorldDoc, state?: Readon
       return `${s("who")} learns: ${s("fact")}`;
     case "spawn":
       return `New: ${s("name")}`;
+    case "life":
+      return `${s("entity")}: ${raw("state").replace(/_/g, " ")}`;
     case "time_advance":
       return `+${s("minutes")} min`;
     default:

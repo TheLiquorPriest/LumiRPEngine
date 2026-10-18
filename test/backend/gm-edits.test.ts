@@ -118,9 +118,9 @@ describe("GM edits", () => {
     expect(state.entities.dev).toMatchObject({ tier: "supporting", agent: false, levels: { money: 3 } });
     // Back to the tier's level, and an agent again, caught up to now.
     await edit(rig, chatId, { op: "entity", entity: "dev", agent: true, levels: { money: null } });
-    const after = (await folded(rig, chatId)).state;
+    const { state: after, world } = await folded(rig, chatId);
     expect(after.entities.dev?.levels).toEqual({});
-    expect(lod1Agents(after)).toContain("dev");
+    expect(lod1Agents(world, after)).toContain("dev");
   });
 
   test("spawn: a new entity through the spawn effect, at its place and tier", async () => {
@@ -144,7 +144,7 @@ describe("GM edits", () => {
       return {
         scene: view.scene?.present.map((p) => p.id) ?? [],
         palette: paramCandidates(rig.rt.registry, world, state, talk, "to"),
-        agents: lod1Agents(state),
+        agents: lod1Agents(world, state),
         seen: canSeeEntity(rig.rt.registry, world, state, POV, "dev"),
         coinSeen: canSeeEntity(rig.rt.registry, world, state, POV, "coin"),
       };

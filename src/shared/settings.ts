@@ -113,7 +113,7 @@ export interface TimeSettings {
 }
 
 /** Extraction proposal types with a per-type mode (DESIGN §9.4, §11). */
-export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn"] as const;
+export const EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life"] as const;
 export type ExtractionType = (typeof EXTRACTION_TYPES)[number];
 
 /**
@@ -128,6 +128,7 @@ export const EXTRACTION_DEFAULTS: Readonly<Partial<Record<ExtractionType, BoundM
   regard: "confirm",
   transfer: "confirm",
   spawn: "confirm",
+  life: "confirm",
   knows: "confirm",
   give: "confirm",
   purchase: "confirm",

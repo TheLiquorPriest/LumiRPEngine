@@ -44,6 +44,8 @@ export type FieldSpec =
   | { kind: "tier"; key: string; label: string }
   /** The LOD1 agent flag: yes, no, or (unset) the entity's tier's default. */
   | { kind: "agent"; key: string; label: string }
+  /** One of the world's life states (DESIGN §8), built in and its own; unset is alive. */
+  | { kind: "life"; key: string; label: string }
   /** A cap per domain for each detail band, keyed by band id. */
   | { kind: "bandCaps"; key: string; label: string };
 
@@ -151,6 +153,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     },
     { kind: "levels", key: "levels", label: "Level overrides" },
     { kind: "agent", key: "agent", label: "Lives their own day (agendas and plans)" },
+    { kind: "life", key: "life", label: "Starts (life state)" },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
     { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
@@ -463,6 +466,22 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
     { kind: "enum", key: "seedMode", label: "Re-run rolls", values: ["fresh", "same_roll"] },
     { kind: "bool", key: "lenientPricing", label: "Lenient pricing (accept narrated prices inside the band)" },
     { kind: "number", key: "spawnCap", label: "People replies may introduce in a chat (0 for none)", min: 0, max: 500, step: 1 },
+    {
+      kind: "record",
+      key: "lifeStates",
+      label: "Life states (besides Alive, Dying and Dead)",
+      keyLabel: "State id",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Life state",
+        fields: [
+          { kind: "text", key: "label", label: "Label" },
+          { kind: "bool", key: "acts", label: "Still acts (follows schedules and plans, chooses, takes combat turns)" },
+          { kind: "text", key: "reads", label: "Reads to the narrator as", hint: "lies unconscious · is missing · walks again" },
+        ],
+      },
+    },
     {
       kind: "object",
       key: "currency",

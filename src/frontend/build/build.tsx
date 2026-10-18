@@ -610,7 +610,7 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
       return doc.time as unknown as JsonObject;
     case "meta":
       // Map settings and the spawn cap show as the world plays them: a world without them, with the defaults.
-      return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
+      return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
   }
 }
 

@@ -12,7 +12,8 @@ import { isRecord } from "../shared/json";
 import type { UpgradeChange, UpgradeEntityRow, UpgradePreview, UpgradeTarget } from "../shared/protocol";
 import { tierLabel } from "../shared/tiers";
 import type { FieldDef, RelationInstance, WorldDoc } from "../shared/world";
-import { formatMoney } from "../shared/world";
+import { formatMoney, lifeStateOf } from "../shared/world";
+import { lifeKnownTo } from "../engine/life";
 import { own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import { relationDef } from "../engine/relations";
@@ -21,7 +22,7 @@ import type { WorldState } from "../engine/state";
 import { PLACEMENT_FIELDS, type PartDiff, type RelationDiff, type UpgradePlan } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, trackKnown, visibilityOf } from "../engine/visibility";
 
-const ASPECT_LABEL: Record<UpgradeAspect, string> = { kind: "Kind", name: "Name", tier: "Tier", agent: "Lives off-screen", levels: "Level overrides", class: "Classes and tags" };
+const ASPECT_LABEL: Record<UpgradeAspect, string> = { kind: "Kind", name: "Name", tier: "Tier", agent: "Lives off-screen", levels: "Level overrides", class: "Classes and tags", life: "Life state" };
 
 /** How much of a long value (a list of appointments) a row shows. */
 const MAX_TEXT = 140;
@@ -70,6 +71,7 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
     if (aspect === "kind" && typeof v === "string") return kindDef(reg, after, v)?.label ?? kindDef(reg, inForce, v)?.label ?? v;
     if (aspect === "tier" && typeof v === "string") return tierLabel(after, v);
     if (aspect === "levels" && isRecord(v)) return Object.entries(v).map(([domain, level]) => `${domain} ${String(level)}`).join(", ") || "none";
+    if (aspect === "life" && typeof v === "string") return lifeStateOf(after, v).label;
     if (aspect === "class" && isRecord(v)) {
       const classes = isRecord(v.class) ? Object.entries(v.class).map(([facet, values]) => `${own(after.classifications, facet)?.label ?? facet}: ${Array.isArray(values) ? values.join(", ") : ""}`) : [];
       const tags = Array.isArray(v.tags) && v.tags.length > 0 ? [`tags: ${v.tags.join(", ")}`] : [];
@@ -104,7 +106,10 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
     } else {
       for (const aspect of UPGRADE_ASPECTS) {
         const diff: PartDiff | undefined = d.aspects[aspect];
-        if (diff) row.changes.push(marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] }));
+        if (!diff) continue;
+        // A life state the player hasn't heard of is the GM's: the row stays behind the gate.
+        if (aspect === "life" && diff.now !== lifeKnownTo(state, d.id, pov)) spoils = true;
+        row.changes.push(marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] }));
       }
       for (const [field, diff] of Object.entries(d.fields)) {
         if (PLACEMENT_FIELDS.includes(field)) continue;

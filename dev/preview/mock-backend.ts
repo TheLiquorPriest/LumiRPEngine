@@ -145,7 +145,7 @@ export class MockBackend {
     for (const op of ops) {
       if (op.op === "spawn") {
         const id = op.id ?? `${op.kind}:${gm.entities.length}`;
-        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null });
+        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] } });
         lines.push(`${op.name} is here`);
         continue;
       }
@@ -198,6 +198,14 @@ export class MockBackend {
           entity.tags = op.tags;
           lines.push(`${entity.name}'s classification changed`);
           break;
+        case "life": {
+          const def = gm.lifeStates.find((s) => s.id === (op.to ?? entity.life.state));
+          if (!def) return `There's no life state ${op.to ?? ""}.`;
+          const told = (op.tell ?? []).map((t) => ({ id: t, name: name(t) }));
+          entity.life = op.to !== undefined && op.to !== entity.life.state ? { state: def.id, label: def.label, acts: def.acts, everyone: false, aware: told, unaware: [] } : { ...entity.life, aware: [...entity.life.aware, ...told] };
+          lines.push(`${entity.name}: ${def.label}`);
+          break;
+        }
         case "despawn":
         case "restore":
           entity.gone = op.op === "despawn";

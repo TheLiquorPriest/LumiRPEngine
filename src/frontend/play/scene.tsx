@@ -44,6 +44,7 @@ export function ScenePanel(props: PanelProps) {
                     <span class="title">{person.name}</span>
                     <span class="sub">{person.label}</span>
                   </span>
+                  {person.life ? <span class="lre-badge neg">{person.life}</span> : null}
                   {pending ? (
                     <span class="lre-badge warn">pending</span>
                   ) : (

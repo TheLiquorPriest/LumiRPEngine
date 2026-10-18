@@ -10,6 +10,7 @@ import type { Value } from "../../../engine/expr";
 import { mutableSlice, numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import { evalExpr, fieldDef, isGone, placeOfEntity, poolMax, scopeEnv, truthy } from "../../../engine/scope";
+import { acts } from "../../../engine/life";
 import type { WorldState } from "../../../engine/state";
 
 export const PACK = "combat";
@@ -135,9 +136,12 @@ export function fighterOf(enc: Encounter, id: EntityId): Fighter | undefined {
   return enc.order.find((f) => f.id === id);
 }
 
-/** Whether a participant still fights: not down, not removed, and still where the fight is. */
-export function standing(state: Readonly<WorldState>, enc: Encounter, f: Fighter): boolean {
-  return !f.down && !isGone(state, f.id) && own(state.entities, f.id) !== undefined && placeOfEntity(state, f.id) === enc.place;
+/** What a fight reads to tell who still fights: the world's life states and the state. */
+export type FightRead = { world: Pick<WorldDoc, "lifeStates">; state: Readonly<WorldState> };
+
+/** Whether a participant still fights: not down, not removed, in a life state that acts (DESIGN §8), and still where the fight is. */
+export function standing(at: FightRead, enc: Encounter, f: Fighter): boolean {
+  return !f.down && !isGone(at.state, f.id) && own(at.state.entities, f.id) !== undefined && acts(at.world, at.state, f.id) && placeOfEntity(at.state, f.id) === enc.place;
 }
 
 /**
@@ -183,10 +187,10 @@ export function hpMaxOf(ctx: ReadContext, rules: CombatDef, id: EntityId): numbe
   return pool ? poolMax(ctx.registry, ctx, id, pool) : null;
 }
 
-/** Whether an entity can fight: it is in the world and its kind has the HP field. */
+/** Whether an entity can fight: it is in the world, in a life state that acts, and its kind has the HP field. */
 export function canFight(ctx: ReadContext, rules: CombatDef, id: EntityId): boolean {
   const e = own(ctx.state.entities, id);
-  return !!e && !isGone(ctx.state, id) && fieldDef(ctx.registry, ctx.world, e.kind, rules.hp) !== undefined;
+  return !!e && !isGone(ctx.state, id) && acts(ctx.world, ctx.state, id) && fieldDef(ctx.registry, ctx.world, e.kind, rules.hp) !== undefined;
 }
 
 /** Whether the down rule holds for a participant: the rules' formula, else no HP left. */
@@ -227,14 +231,14 @@ export function offTurnCost(rules: CombatDef, cost: Readonly<Record<string, numb
 }
 
 /** Standing participants of a side. */
-export function standingOn(state: Readonly<WorldState>, enc: Encounter, side: Side): Fighter[] {
-  return enc.order.filter((f) => f.side === side && standing(state, enc, f));
+export function standingOn(at: FightRead, enc: Encounter, side: Side): Fighter[] {
+  return enc.order.filter((f) => f.side === side && standing(at, enc, f));
 }
 
 /** Whether the fight is over: the rules' end formula, else one side has no one standing. */
 export function endHolds(ctx: ReadContext, rules: CombatDef, enc: Encounter): boolean {
   if (rules.end !== undefined) return truthy(readFor(ctx, rules.end, {}, false));
-  return standingOn(ctx.state, enc, "party").length === 0 || standingOn(ctx.state, enc, "foes").length === 0;
+  return standingOn(ctx, enc, "party").length === 0 || standingOn(ctx, enc, "foes").length === 0;
 }
 
 /** How many calm rounds in a row end a fight as a stalemate: the rules' `stalemate` as a whole number from 0 (none ever does), else 3. */
@@ -262,8 +266,8 @@ export function stalledHolds(ctx: ReadContext, rules: CombatDef, enc: Encounter)
 }
 
 /** Which side won: the only one with anyone standing, else none. */
-export function winnerOf(state: Readonly<WorldState>, enc: Encounter): Side | null {
-  const party = standingOn(state, enc, "party").length;
-  const foes = standingOn(state, enc, "foes").length;
+export function winnerOf(at: FightRead, enc: Encounter): Side | null {
+  const party = standingOn(at, enc, "party").length;
+  const foes = standingOn(at, enc, "foes").length;
   return party > 0 && foes === 0 ? "party" : foes > 0 && party === 0 ? "foes" : null;
 }

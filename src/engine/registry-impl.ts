@@ -23,6 +23,7 @@ import type {
   ServiceMap,
   TableDef,
 } from "./registry";
+import { knowing } from "./life";
 import { observing } from "./seen";
 import { touching } from "./touched";
 import type { WorldState } from "./state";
@@ -155,8 +156,9 @@ export function createRegistry(packs: readonly PackDef[]): Registry {
     },
   };
 
-  // Moving events also keep the POV's observations (`space.seen`); both folds apply these same types.
-  for (const def of coreEventTypes(() => registry)) once(events, def.type, observing(def, canSeeEntity), "event type");
+  // Moving events also keep the POV's observations (`space.seen`) and teach whoever they leave with a
+  // body what became of it (`engine/life`); both folds apply these same types.
+  for (const def of coreEventTypes(() => registry)) once(events, def.type, knowing(observing(def, canSeeEntity)), "event type");
 
   const seen = new Set<string>();
   for (const pack of packs) {

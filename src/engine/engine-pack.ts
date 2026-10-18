@@ -1,12 +1,13 @@
 // The built-in `engine` pack: bookkeeping events the runtime records (rule firings, interrupt
 // signals, agent catch-up cursors, recorded choices, puzzle attempts, reveals, the paused scene,
 // checks rolled by the `check` effect), GM edits of an entity's tier, agent flag and levels and of
-// its classes and tags, the engine's narration channels (`knows`, `spawn`) and the taxonomy formulas
-// (`kind_is`, `in_class`, `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built
-// with it first: `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
+// its classes and tags, life states (`engine/life`: the events, the `life` effect, the `life`
+// channel and `life_of`), the engine's narration channels (`knows`, `spawn`) and the taxonomy
+// formulas (`kind_is`, `in_class`, `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is
+// built with it first: `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
 import { facetsInOrder } from "../shared/classes";
-import type { FacetDef } from "../shared/world";
+import { isLifeState, lifeStateOf, type FacetDef } from "../shared/world";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids";
@@ -15,6 +16,8 @@ import { isBand, tierBand, tierLabel, tierOf } from "../shared/tiers";
 import type { PackEvent } from "../shared/ledger";
 import type { EventTypeDef, PackDef, ReadContext, Rejection } from "./registry";
 import type { Value } from "./expr";
+import { acts, applyLife, lifeChannel, lifeEffect, lifeKnownTo, lifeOf, tellLife } from "./life";
+import { calendarOf, slotIndexAt } from "./calendar";
 import { knowsChannel, spawnChannel } from "./narration-channels";
 import { kindIs } from "./scope";
 import { restoreObservations } from "./seen";
@@ -46,6 +49,10 @@ export const ENGINE_EVENTS = {
   observed: "engine.observed",
   /** How the adjudication policy decided an action's check (DESIGN §11): rolled or not and why, the judge's rating, and the attempt a retry rule reads. */
   adjudged: "engine.adjudged",
+  /** An entity's life state set (DESIGN §8, `engine/life`): everyone with it learns it as it changes. */
+  life: "engine.life",
+  /** People told an entity's life state as it is. */
+  told: "engine.told",
 } as const;
 
 /** An action's latest attempt at a check, as a retry rule reads it (DESIGN §11). */
@@ -353,6 +360,43 @@ const events: EventTypeDef<PackEvent>[] = [
     },
     describe: (e) => `${str(e, "actor")}: ${str(e, "action").replace(/_/g, " ")}, ${str(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str(e, "why")})`}`,
   },
+  {
+    type: ENGINE_EVENTS.life,
+    validate: (e, ctx) => {
+      const ent = own(ctx.state.entities, str(e, "entity"));
+      if (!ent) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
+      if (!isLifeState(ctx.world, str(e, "to"))) return { code: "bad_life", reason: `there's no life state ${str(e, "to")}` };
+      return lifeOf(ctx.state, str(e, "entity")) === str(e, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str(e, "to")).label.toLowerCase()}` } : null;
+    },
+    apply: (e, state, ctx) => applyLife(state, ctx, str(e, "entity"), str(e, "to")),
+    touches: (e) => [{ entity: str(e, "entity"), aspect: "life" }],
+    describe: (e, ctx, viewer) => {
+      const id = str(e, "entity");
+      const def = lifeStateOf(ctx.world, str(e, "to"));
+      const name = own(ctx.state.entities, id)?.name ?? id;
+      if (viewer === undefined) return `${name}: ${def.label}`;
+      // A player's line only once the POV knows it: a death it didn't see or hear of has none.
+      if (lifeKnownTo(ctx.state, id, viewer) !== str(e, "to")) return "";
+      return id === viewer ? `You: ${def.label}` : `${name} ${def.reads}`;
+    },
+  },
+  {
+    type: ENGINE_EVENTS.told,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, str(e, "entity"))) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
+      const who = e.data.who;
+      return Array.isArray(who) && who.length > 0 && who.every((id) => typeof id === "string" && own(ctx.state.entities, id)) ? null : { code: "bad_event", reason: "told needs the people told" };
+    },
+    apply: (e, state) => tellLife(state, str(e, "entity"), Array.isArray(e.data.who) ? e.data.who.filter((id): id is string => typeof id === "string") : []),
+    describe: (e, ctx, viewer) => {
+      const id = str(e, "entity");
+      const name = own(ctx.state.entities, id)?.name ?? id;
+      const who = Array.isArray(e.data.who) ? e.data.who.filter((x): x is string => typeof x === "string") : [];
+      if (viewer === undefined) return `${who.map((w) => own(ctx.state.entities, w)?.name ?? w).join(", ")} learn: ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+      // Someone else being told is nobody's news; the POV hears what it now takes to be so.
+      return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
+    },
+  },
 ];
 
 /** A formula argument naming an entity in the state, with that entity; null otherwise. */
@@ -371,6 +415,23 @@ export const enginePack: PackDef = {
     for (const def of events) r.event(def);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
+    r.proposal(lifeChannel);
+    // Someone who acts again comes back caught up, as a restored agent does: the slots spent out of it aren't lived again.
+    r.effect({
+      type: "life",
+      args: ["entity", "to?", "tell?"],
+      resolve: (a, ctx) => {
+        const out = lifeEffect(a, ctx);
+        const subject = typeof a.entity === "string" ? a.entity : "";
+        const wakes = Array.isArray(out) && typeof a.to === "string" && out.some((e) => e.type === ENGINE_EVENTS.life) && own(ctx.state.entities, subject)?.agent === true && !acts(ctx.world, ctx.state, subject) && lifeStateOf(ctx.world, a.to).acts;
+        return wakes && Array.isArray(out) ? [...out, { type: ENGINE_EVENTS.caught, data: { agent: subject, slot: slotIndexAt(calendarOf(ctx.world), ctx.state.clock) } }] : out;
+      },
+    });
+    // An entity's life state (DESIGN §8), for rules and requirements: "" for an unknown entity.
+    r.formula("life_of", (ctx, entity) => {
+      const hit = entityArg(ctx, entity);
+      return hit ? lifeOf(ctx.state, hit[0]) : "";
+    });
     // Taxonomy (DESIGN §4.1): what a selector tests, one constraint at a time. An unknown entity is false (or "").
     r.formula("kind_is", (ctx, entity, kind) => {
       const hit = entityArg(ctx, entity);

@@ -144,6 +144,8 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "engine.check", data: { actor: "you", check: "initiative", outcome: "success" } },
   { type: "engine.entity", data: { entity: "dev", tier: "supporting", agent: false, levels: { money: 2 } } },
   { type: "engine.class", data: { entity: "dev", class: {}, tags: ["regular"], was: {} } },
+  { type: "engine.life", data: { entity: "dev", to: "dying" } },
+  { type: "engine.told", data: { entity: "dev", who: ["you"] } },
   { type: "engine.observed", data: { people: {} } },
   { type: "engine.adjudged", data: { actor: "you", action: "climb", outcome: "success", rolled: true } },
   { type: "space.pos", data: { entity: "you", at: { scope: "inn", x: 4, y: 3 }, from: { scope: "inn", x: 3, y: 2 } } },
@@ -171,7 +173,7 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "combat.end", data: { encounter: "e1", reason: "over" } },
 ];
 
-/** What an event wrote of entities' definitions: each field, relation (by type and target), tier, agent flag, level overrides and classes and tags that changed, each new entity and each own account's balance. */
+/** What an event wrote of entities' definitions: each field, relation (by type and target), tier, agent flag, level overrides, classes and tags and life state that changed, each new entity and each own account's balance. */
 function written(before: Readonly<WorldState>, after: Readonly<WorldState>): Touch[] {
   const out: Touch[] = [];
   const differs = (a: unknown, b: unknown): boolean => JSON.stringify(a) !== JSON.stringify(b);
@@ -190,6 +192,7 @@ function written(before: Readonly<WorldState>, after: Readonly<WorldState>): Tou
     if (was.agent !== e.agent) out.push({ entity: id, aspect: "agent" });
     if (differs(was.levels, e.levels)) out.push({ entity: id, aspect: "levels" });
     if (differs([was.class, was.tags], [e.class, e.tags])) out.push({ entity: id, aspect: "class" });
+    if (was.life !== e.life) out.push({ entity: id, aspect: "life" });
     if (own(before.accounts, id) !== own(after.accounts, id)) out.push({ entity: id, aspect: "posted" });
   }
   return out;

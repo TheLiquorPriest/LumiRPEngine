@@ -113,6 +113,13 @@ export function classifyOp(entity: GmEntity, classes: Readonly<Record<FacetId, F
   return unchanged ? null : { op: "classify", entity: entity.id, class: Object.fromEntries(Object.entries(classes).filter(([, v]) => v.length > 0)), tags: [...tags] };
 }
 
+/** The GM's life edit of an entity (DESIGN §8): its state when the form changed it, and who is told it. Null when there is nothing to send. */
+export function lifeEditOp(entity: GmEntity, to: string, tell: readonly EntityId[]): EditOp | null {
+  const changes = to !== entity.life.state;
+  if (!changes && tell.length === 0) return null;
+  return { op: "life", entity: entity.id, ...(changes ? { to } : {}), ...(tell.length > 0 ? { tell: [...tell] } : {}) };
+}
+
 /**
  * A relation's fields from the GM's inputs, one per field its type declares: a number within the
  * field's bounds, one of an enum's values, yes or no, else the text. An empty input leaves the

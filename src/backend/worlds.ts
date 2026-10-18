@@ -297,6 +297,12 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
       if (value.spawnCap === DEFAULT_SPAWN_CAP) delete doc.spawnCap;
       else doc.spawnCap = value.spawnCap;
     }
+    // The world's own life states, as the editor sends them (lint checks each); none is no record, so a world saved untouched stays as it was.
+    if (value.lifeStates !== undefined) {
+      const states = isRecord(value.lifeStates) ? Object.fromEntries(Object.entries(value.lifeStates).filter(([id, s]) => safeKey(id) && isRecord(s))) : {};
+      if (Object.keys(states).length === 0) delete doc.lifeStates;
+      else doc.lifeStates = states as unknown as WorldDoc["lifeStates"];
+    }
     // Map settings as the engine reads them; the defaults are no settings, so a world saved untouched stays as it was.
     if (value.mapSettings !== undefined) {
       const settings = mapSettingsOf({ mapSettings: value.mapSettings });

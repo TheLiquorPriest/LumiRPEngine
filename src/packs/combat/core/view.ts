@@ -96,7 +96,7 @@ export function combatEntries(ctx: ReadContext): PaletteEntry[] {
   for (const action of combatActions(ctx.registry, ctx.world)) {
     const param = targetParam(action);
     if (!fightOffers(ctx.world, ctx.state, action) || param === undefined) continue;
-    const targets = param === null ? [null] : enc ? enc.order.filter((f) => f.id !== ctx.world.pov && standing(ctx.state, enc, f) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, f.id)).map((f) => f.id) : paramCandidates(ctx.registry, ctx.world, ctx.state, action, param).slice(0, 24);
+    const targets = param === null ? [null] : enc ? enc.order.filter((f) => f.id !== ctx.world.pov && standing(ctx, enc, f) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, f.id)).map((f) => f.id) : paramCandidates(ctx.registry, ctx.world, ctx.state, action, param).slice(0, 24);
     const options = targets.map((t) => optionOf(ctx, action, param !== null && t !== null ? { [param]: t } : {}, t !== null ? labelOf(ctx, t) : action.label));
     if (options.length > 0) entries.push({ action: action.id, label: action.label, group: "combat", options });
   }
@@ -150,7 +150,7 @@ export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean } = {}
       you: f.id === ctx.world.pov,
       current: i === enc.turn,
       down: f.down,
-      out: !f.down && !standing(ctx.state, enc, f),
+      out: !f.down && !standing(ctx, enc, f),
       init: name === null ? null : f.init,
       hp: seen && "current" in seen ? seen : null,
       wound: seen && "wound" in seen && seen.wound !== "" ? seen.wound : null,

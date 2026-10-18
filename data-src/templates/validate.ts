@@ -38,8 +38,8 @@ const EFFECTS: Record<string, string[]> = {
   regard: ["who", "toward"], reveal: ["track", "to"], advance: ["track"], set_route: ["route"], set_flag: ["flag"], set_weather: ["region"],
   schedule_override: ["who", "place"], set_scene: ["place"], price_modifier: ["scope"], payroll: ["employer"], note: [],
 };
-/** Engine effect types an action may use directly, with the arguments that name ids. */
-const ENGINE_EFFECTS: Record<string, string[]> = { set: ["entity"], add: ["entity"], move: ["entity", "to"], link: ["from", "to"], "gear.transfer": ["item", "to"], "gear.lend": ["item", "to"], "gear.give": ["item", "from", "to"] };
+/** Engine effect types an action or rule may use directly, with the arguments that name ids (a `life` effect's `tell` names people the engine checks). */
+const ENGINE_EFFECTS: Record<string, string[]> = { set: ["entity"], add: ["entity"], move: ["entity", "to"], link: ["from", "to"], life: ["entity"], "gear.transfer": ["item", "to"], "gear.lend": ["item", "to"], "gear.give": ["item", "from", "to"] };
 const BUILTIN_FUNCTIONS = ["min", "max", "clamp", "floor", "ceil", "round", "abs", "field", "rel", "has_rel", "rel_count", "rel_field", "stage", "since", "place", "at", "level", "knows", "fired", "attempts", "revealed", "band", "next_time", "today_at", "hours", "days", "holiday", "count_at"];
 const BARE_NAMES = ["pov", "here", "self", "level", "stage", "clock", "minute", "hour", "day", "weekday", "date", "month", "year", "daypart"];
 const WEALTH = ["broke", "poor", "modest", "comfortable", "rich", "wealthy"];

@@ -11,11 +11,12 @@ import { DOMAINS } from "../shared/ids";
 import type { GmEntity, GmField, GmView } from "../shared/state-view";
 import { tiersInOrder } from "../shared/tiers";
 import type { FieldDef, FieldType, WorldDoc } from "../shared/world";
-import { BUILTIN_RELATIONS } from "../shared/world";
+import { BUILTIN_RELATIONS, lifeStateOf, lifeStatesOf } from "../shared/world";
 import { fieldBounds } from "./effects";
 import { optionalQuery, own } from "./pack-kit";
 import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
+import { lifeAwareness, lifeOf } from "./life";
 import { buildEntitySheet } from "./ruleset";
 import { GONE_FIELD, isGone, kindFields, placeOfEntity, scopeEnv } from "./scope";
 import { classValues, tagsOf } from "./selector";
@@ -51,6 +52,9 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
     fields.push({ id: field, label: field.replace(/_/g, " "), type: typeof value === "number" ? "number" : typeof value === "boolean" ? "bool" : Array.isArray(value) ? "list" : "text", value, extra: true });
   }
   const regard = optionalQuery(ctx, "regard");
+  const life = lifeStateOf(world, lifeOf(state, id));
+  const awareness = lifeAwareness(reg, world, state, id);
+  const named = (ids: readonly string[]): { id: string; name: string }[] => ids.map((p) => ({ id: p, name: own(state.entities, p)?.name ?? p }));
   return {
     id,
     name: e.name,
@@ -83,6 +87,7 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
     ),
     tags: [...tagsOf(world, state, id)],
     sheet: buildEntitySheet(ctx, id),
+    life: { state: lifeOf(state, id), label: life.label, acts: life.acts, everyone: awareness.everyone, aware: named(awareness.aware), unaware: named(awareness.unaware) },
   };
 }
 
@@ -103,6 +108,7 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
       .flatMap((id) => entityOf(reg, ctx, id) ?? []),
     kinds: [...kinds].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label)),
     tiers: tiersInOrder(world).map(([id, t]) => ({ id, label: t.label })),
+    lifeStates: lifeStatesOf(world).map(([id, def]) => ({ id, label: def.label, acts: def.acts })),
     domains: DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
     classifications: world.classifications,
     places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null })),

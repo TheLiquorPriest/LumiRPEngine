@@ -25,6 +25,8 @@ export interface CastPerson {
   activity?: string;
   place?: string;
   lastSeen?: { place?: string; at: string };
+  /** Their life state as the POV knows it, when that isn't alive. */
+  life?: string;
   regard: { axis: string; band: string; value?: number }[];
   timeline: { start: string; end: string; label: string; kind: SlotKind; reasons: string[] }[];
   agenda: { label: string; stage: string }[];
@@ -77,6 +79,7 @@ export function decodeCastView(value: unknown): CastView | null {
             activity: optStr(p.activity),
             place: optStr(p.place),
             lastSeen: isRecord(p.lastSeen) ? { place: optStr(p.lastSeen.place), at: str(p.lastSeen.at) } : undefined,
+            life: optStr(p.life),
             regard: list(p.regard, (r) => ({ axis: str(r.axis), band: str(r.band), value: optNum(r.value) })),
             timeline: list(p.timeline, (s) => ({ start: str(s.start), end: str(s.end), label: str(s.label), kind: oneOf(s.kind, SLOT_KINDS, "other"), reasons: strings(s.reasons) })),
             agenda: list(p.agenda, (a) => ({ label: str(a.label), stage: str(a.stage) })),
@@ -228,7 +231,7 @@ export function CastPanel(props: PanelProps) {
   const card = (p: CastPerson) => {
     const pending = props.state.pending.some((mark) => mark.entity === p.id);
     return (
-      <Card key={p.id} title={p.name} aside={<span class="lre-inline">{p.here ? <span class="lre-badge pos">here</span> : null}{pending ? <span class="lre-badge warn">pending</span> : null}</span>}>
+      <Card key={p.id} title={p.name} aside={<span class="lre-inline">{p.life ? <span class="lre-badge neg">{p.life}</span> : null}{p.here ? <span class="lre-badge pos">here</span> : null}{pending ? <span class="lre-badge warn">pending</span> : null}</span>}>
         <div class="lre-muted lre-small">{[p.role, p.activity, p.place].filter((part) => part).join(" · ")}</div>
         {p.timeline.length > 0 ? <Timeline slots={p.timeline} /> : null}
         {p.regard.map((r) => (

@@ -320,6 +320,25 @@ describe("the merge", () => {
     expect(touchedAspect(taken.state, "dev", "class")).toBe(false);
   });
 
+  test("a life state play set is kept by default, one play never set follows the revision, and a pick takes the revision's", () => {
+    const base = (a: WorldDoc): void => {
+      a.entities.rosa = { id: "rosa", kind: "person", name: "Rosa", tier: "supporting", fields: { place: "cafe" }, relations: [] };
+    };
+    const edit = (b: WorldDoc): void => {
+      b.lifeStates = { missing: { label: "Missing", acts: false, reads: "is missing" } };
+      for (const e of [b.entities.dev, b.entities.rosa]) if (e) e.life = "missing";
+    };
+    const c = chat(edit, base);
+    play(c, [{ type: "engine.life", data: { entity: "dev", to: "dead" } }]);
+    upgrade(c);
+    expect([c.state.entities.dev?.life, c.state.entities.rosa?.life]).toEqual(["dead", "missing"]);
+    const taken = chat(edit, base);
+    play(taken, [{ type: "engine.life", data: { entity: "dev", to: "dead" } }]);
+    upgrade(taken, { dev: { life: "take" } });
+    expect(taken.state.entities.dev?.life).toBe("missing");
+    expect(touchedAspect(taken.state, "dev", "life")).toBe(false);
+  });
+
   test("relations: authored additions and removals come in, and both sides of a pair change together or neither does", () => {
     const base = (a: WorldDoc): void => {
       const sam = a.entities[POV];

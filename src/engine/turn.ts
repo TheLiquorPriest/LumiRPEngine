@@ -25,6 +25,7 @@ import type { Registry } from "./registry-impl";
 import { resolveAction, type Resolution } from "./resolve";
 import { createRng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick } from "./rules";
+import { acts } from "./life";
 import { isGone, placeOfEntity } from "./scope";
 import { advance, catchUp, coarsen, interruptPolicy } from "./simulate";
 import type { PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
@@ -60,10 +61,11 @@ export interface EngineTurnPlan extends TurnPlan {
   combat: string[];
 }
 
+/** LOD1 agents with the POV who still act (DESIGN §8): caught up with it, not off-screen. */
 function onScreen(w: Working): EntityId[] {
   const here = placeOfEntity(w.state, w.world.pov);
   if (!here) return [];
-  return Object.keys(w.state.entities).filter((id) => id !== w.world.pov && own(w.state.entities, id)?.agent && placeOfEntity(w.state, id) === here && !isGone(w.state, id));
+  return Object.keys(w.state.entities).filter((id) => id !== w.world.pov && own(w.state.entities, id)?.agent && placeOfEntity(w.state, id) === here && !isGone(w.state, id) && acts(w.world, w.state, id));
 }
 
 /** One of a turn's actions: the intent's first, or one queued after it. */

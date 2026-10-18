@@ -9,6 +9,7 @@ import { commitments } from "../../../src/packs/castlife/core/index";
 import { coreEventTypes, type EventTypes } from "../../../src/engine/events";
 import type { EventTypeDef } from "../../../src/engine/registry";
 import { runRulesOnEvents } from "../../../src/engine/rules";
+import { knowing, lifeKnownTo, lifeOf } from "../../../src/engine/life";
 import { unobserved } from "../../../src/engine/seen";
 import { dropTouches } from "../../../src/engine/touched";
 import type { WorldState } from "../../../src/engine/state";
@@ -163,19 +164,21 @@ describe("Harrowmere Hall (mystery_manor)", () => {
     expect(active()).toContain("q_call_for_help");
   });
 
-  test("Sir Alaric's routine ends with Friday: his body stays in the library and he never goes back to the study or the dinner table", () => {
+  test("Sir Alaric dies in the library on Friday night: his body stays there, off every timetable, and only those with him or told know", () => {
     const p = new Play("mystery_manor");
     const alaric = () => p.state.entities.sir_alaric?.fields;
     expect(alaric()?.place).toBe("library");
     expect(alaric()?.activity).toBe("among his collection");
+    // Rules fire at slot ticks: by half past six on Saturday he is dead; Ashcombe, with him, knows, and the player hasn't heard.
+    p.lapseTo(DAY + 6 * 60 + 30);
+    expect([lifeOf(p.state, "sir_alaric"), lifeKnownTo(p.state, "sir_alaric", "julian_ashcombe"), lifeKnownTo(p.state, "sir_alaric", "pov")]).toEqual(["dead", "dead", "alive"]);
+    // Nell's scream at 07:20 tells the household and the player.
     p.lapseTo(DAY + 8 * 60 + 30);
-    // The body is in the library once Nell finds it, and it is no longer on any timetable.
     expect(p.flag("body_found")).toBe(true);
-    expect(alaric()?.place).toBe("library");
-    expect(alaric()?.activity).toBe("dead");
+    expect([lifeKnownTo(p.state, "sir_alaric", "pov"), lifeKnownTo(p.state, "sir_alaric", "lady_honoria")]).toEqual(["dead", "dead"]);
     for (const [clock, what] of [[DAY + 9 * 60 + 43, "Saturday 09:43"], [2 * DAY + 10 * 60, "Sunday 10:00"], [7 * DAY + 20 * 60, "the next Friday at dinner"]] as const) {
       p.lapseTo(clock);
-      expect([what, alaric()?.place, alaric()?.activity]).toEqual([what, "library", "dead"]);
+      expect([what, alaric()?.place, lifeOf(p.state, "sir_alaric")]).toEqual([what, "library", "dead"]);
     }
   });
 
@@ -334,10 +337,13 @@ describe("Port Alder (modern_slice_of_life)", () => {
   });
 });
 
-/** Folds events with the core event types as they were before the POV's observations (`space.seen`) and the touched record were kept. */
+/**
+ * Folds events with the core event types as they were before the POV's observations (`space.seen`)
+ * and the touched record were kept; what moving teaches about the dead (`engine/life`) is the world's.
+ */
 function foldUnobserving(world: WorldDoc, start: Readonly<WorldState>, events: readonly LedgerEvent[]): WorldState {
   const types: EventTypes = { get: (type) => plain.get(type) ?? registry.get(type) };
-  const plain = new Map<string, EventTypeDef>(coreEventTypes(() => types).map((d) => [d.type, d]));
+  const plain = new Map<string, EventTypeDef>(coreEventTypes(() => types).map((d) => [d.type, knowing(d)]));
   const state = structuredClone(start) as WorldState;
   for (const e of events) types.get(e.type)?.apply(e, state, registry.context(world, state));
   return state;

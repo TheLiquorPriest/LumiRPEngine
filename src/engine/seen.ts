@@ -121,7 +121,8 @@ function company(state: Readonly<WorldState>, ctx: ReadContext, sees: SeesEntity
   return { here, people };
 }
 
-function movesSomeone(e: LedgerEvent): boolean {
+/** Whether an event can move someone: a `place` set, an `in` link or unlink, or a spawn. */
+export function movesSomeone(e: LedgerEvent): boolean {
   if (e.type === "set") return e.field === "place";
   if (e.type === "link" || e.type === "unlink") return e.rel === "in";
   return e.type === "spawn";

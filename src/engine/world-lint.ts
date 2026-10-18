@@ -10,7 +10,7 @@ import type { LintIssue } from "../shared/protocol";
 import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, WorldDoc } from "../shared/world";
-import { MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
+import { BUILTIN_LIFE_STATES, isLifeState, MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
 import { compile } from "./expr";
 import { frozenPredicates } from "./realism";
 import { rulesetFloor, type Registry } from "./registry-impl";
@@ -162,6 +162,27 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
       const who = `A spawn in ${path}`;
       const problems = classes ? classProblems(world, classes, who) : [{ code: "unknown_facet", message: `${who} gives a class that isn't a facet → values map.` }];
       for (const p of problems) warn(`${path}.${i}`, p.code, `${p.message} The spawn is refused.`);
+    });
+  }
+
+  // Life states (DESIGN §8): the world's own beside the built-ins, and each one an entity, the combat
+  // rules or a `life` effect names.
+  for (const [id, def] of Object.entries(isRecord(world.lifeStates) ? world.lifeStates : {})) {
+    const raw: unknown = def;
+    if (hasOwn(BUILTIN_LIFE_STATES, id)) err(`lifeStates.${id}`, "life_builtin", `"${id}" is a built-in life state; give yours another id.`);
+    else if (!isRecord(raw) || typeof raw.label !== "string" || raw.label.trim() === "") warn(`lifeStates.${id}.label`, "life_label", `Life state ${id} has no label, so players see its id.`);
+    else if (typeof raw.reads !== "string" || raw.reads.trim() === "") warn(`lifeStates.${id}.reads`, "life_reads", `Life state ${id} doesn't say how the narrator reads it, so it reads "is ${raw.label.toLowerCase()}".`);
+  }
+  for (const [id, e] of Object.entries(world.entities)) {
+    if (e.life !== undefined && !isLifeState(world, e.life)) err(`entities.${id}.life`, "unknown_life", `${e.name} starts in life state "${e.life}", which isn't one of the world's.`);
+  }
+  const downLife: unknown = world.ruleset?.combat?.down?.life;
+  if (downLife !== undefined && (typeof downLife !== "string" || !isLifeState(world, downLife))) err("ruleset.combat.down.life", "unknown_life", `Combat's down rule names life state "${String(downLife)}", which isn't one of the world's.`);
+  for (const { path, effects } of effectLists(world)) {
+    effects.forEach((spec, i) => {
+      const to = spec.args.to;
+      // A state given as a formula is checked when the effect runs.
+      if (spec.type === "life" && typeof to === "string" && !to.startsWith("=") && !isLifeState(world, to)) warn(`${path}.${i}`, "unknown_life", `A life change in ${path} names life state "${to}", which isn't one of the world's; it is refused.`);
     });
   }
 

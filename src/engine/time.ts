@@ -305,7 +305,7 @@ export function runTimelapse(reg: Registry, w: Working, target: TimelapseTarget,
 
 /** The smallest unit cap that still fits one slot for every LOD1 agent plus the POV (lint and Settings use it). */
 export function minimumUnitCap(world: WorldDoc, state: Readonly<WorldState>): number {
-  const agents = lod1Agents(state).filter((a) => a !== world.pov).length + 1;
+  const agents = lod1Agents(world, state).filter((a) => a !== world.pov).length + 1;
   return (agents * shortestSlot(calendarOf(world))) / MINUTES_PER_DAY;
 }
 

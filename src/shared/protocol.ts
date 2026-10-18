@@ -11,7 +11,7 @@ import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, 
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, KindDef, MapDisplay, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, MapDisplay, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -116,6 +116,8 @@ export type EditOp =
   | { op: "stage"; track: TrackId; to: StageId }
   | { op: "entity"; entity: EntityId; tier?: TierId; agent?: boolean; levels?: Partial<Record<DomainId, number | null>> }
   | { op: "classify"; entity: EntityId; class: Record<FacetId, FacetValueId[]>; tags: string[] }
+  /** A life state (DESIGN §8), and who is told it besides everyone with the entity; at least one of them. */
+  | { op: "life"; entity: EntityId; to?: LifeStateId; tell?: EntityId[] }
   | { op: "spawn"; kind: KindId; name: string; id?: EntityId; tier?: TierId; place?: PlaceId; agent?: boolean }
   | { op: "despawn"; entity: EntityId }
   | { op: "restore"; entity: EntityId };

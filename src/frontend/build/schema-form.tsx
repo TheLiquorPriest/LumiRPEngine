@@ -10,7 +10,7 @@ import { BANDS, DOMAINS } from "../../shared/ids";
 import { formatMoneyInput, minorUnitPlural, parseMoneyInput } from "../../shared/money";
 import { BAND_LABEL, tierOf, tiersInOrder } from "../../shared/tiers";
 import type { LintIssue } from "../../shared/protocol";
-import { BUILTIN_RELATIONS, formatMoney } from "../../shared/world";
+import { ALIVE, BUILTIN_RELATIONS, formatMoney, lifeStatesOf } from "../../shared/world";
 import type { FacetValueDef, FieldDef, WorldCurrency, WorldDoc } from "../../shared/world";
 import { MoneyInput } from "../money-input";
 import { floorNote } from "../settings/realism";
@@ -664,6 +664,20 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
         </label>
       );
     }
+    case "life":
+      // Unset is alive, so the built-in default isn't offered twice.
+      return (
+        <SelectInput
+          label={spec.label}
+          value={props.value}
+          optional
+          options={lifeStatesOf(ctx.doc)
+            .filter(([id]) => id !== ALIVE)
+            .map(([id, def]) => ({ value: id, label: def.acts ? def.label : `${def.label} (doesn't act)` }))}
+          issues={issues}
+          onChange={props.onChange}
+        />
+      );
     case "object": {
       if (spec.optional && !isRecord(props.value)) {
         return (

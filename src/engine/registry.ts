@@ -56,15 +56,16 @@ export interface ReadContext {
 
 /**
  * Part of an entity's definition an applied event writes (DESIGN §4.3, the touched record): one of
- * its fields, one relation (by type and target), its tier, agent flag, level overrides or classes
- * and tags, the entity itself when play created it, or an account's balance. Names only, never values.
+ * its fields, one relation (by type and target), its tier, agent flag, level overrides, classes
+ * and tags or life state, the entity itself when play created it, or an account's balance. Names
+ * only, never values.
  */
 export type Touch =
   | { entity: EntityId; field: FieldId }
   | { entity: EntityId; rel: RelationTypeId; to: string }
   | { entity: EntityId; aspect: TouchAspect };
 
-export type TouchAspect = "tier" | "agent" | "levels" | "class" | "spawned" | "posted";
+export type TouchAspect = "tier" | "agent" | "levels" | "class" | "life" | "spawned" | "posted";
 
 /** A registered event type: validation against the state before it, and its reducer. */
 export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {
@@ -165,7 +166,7 @@ export interface ProposalChannelDef {
   /** Proposal type, e.g. `purchase`, `regard`, `time_advance`. */
   type: string;
   /** The field type whose bound applies. */
-  boundField: FieldType | "spawn" | "knows";
+  boundField: FieldType | "spawn" | "knows" | "life";
   validate(proposal: JsonObject, ctx: ReadContext): Rejection | null;
   toEffects(proposal: JsonObject, ctx: ReadContext): EffectSpec[];
 }

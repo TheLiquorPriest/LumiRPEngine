@@ -1526,7 +1526,8 @@
           "args": {"who": "julian_ashcombe", "place": "library", "activity": "a late brandy with the host", "minutes": 35}
         },
         {"type": "story.flag", "args": {"name": "alaric_alive", "value": false}},
-        {"type": "set", "args": {"entity": "sir_alaric", "field": "place", "value": "library"}}
+        {"type": "set", "args": {"entity": "sir_alaric", "field": "place", "value": "library"}},
+        {"type": "life", "args": {"entity": "sir_alaric", "to": "dead"}}
       ],
       "once": true
     },
@@ -1549,7 +1550,23 @@
       "do": [
         {"type": "castlife.override", "args": {"who": "nell_sparrow", "place": "library", "minutes": 180}},
         {"type": "story.flag", "args": {"name": "body_found", "value": true}},
-        {"type": "set", "args": {"entity": "sir_alaric", "field": "activity", "value": "dead"}},
+        {
+          "type": "life",
+          "args": {
+            "entity": "sir_alaric",
+            "tell": [
+              "pov",
+              "lady_honoria",
+              "rupert_thorne",
+              "verity_lorne",
+              "julian_ashcombe",
+              "dr_lionel_farrant",
+              "gideon_pell",
+              "mrs_marsh",
+              "nell_sparrow"
+            ]
+          }
+        },
         {"type": "note", "args": {"text": "Nell screams; Pell is first on the scene, then Lady Honoria and the household."}}
       ],
       "when": "not flag('alaric_alive')",

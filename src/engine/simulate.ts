@@ -26,6 +26,7 @@ import { rulesetFloor, type Registry } from "./registry-impl";
 import { createRng, type Rng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick, type RuleFiring } from "./rules";
 import { allSchedules, instantEvents, scheduleInstants, type ScheduleInstant } from "./schedules";
+import { acts } from "./life";
 import { isGone } from "./scope";
 import { lostObservations, unobserved } from "./seen";
 import type { WorldState } from "./state";
@@ -45,10 +46,10 @@ export function processSeed(runSeed: string, process: string, entity: EntityId, 
   return hashParts(runSeed, process, entity, slotIndex);
 }
 
-/** LOD1 agents, by id; one a GM removed is out of the world and steps no more. */
-export function lod1Agents(state: Readonly<WorldState>): EntityId[] {
+/** LOD1 agents, by id; one a GM removed is out of the world, and one whose life state doesn't act (DESIGN §8), and neither steps. */
+export function lod1Agents(world: Pick<WorldDoc, "lifeStates">, state: Readonly<WorldState>): EntityId[] {
   return Object.keys(state.entities)
-    .filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id))
+    .filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id) && acts(world, state, id))
     .sort();
 }
 
@@ -157,8 +158,8 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   const slots = slotsEnding(cal, from, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
-  const agents = timelapse ? lod1Agents(w.state).filter((a) => a !== w.world.pov) : [];
-  if (timelapse && opts.includePov !== false && own(w.state.entities, w.world.pov)) agents.unshift(w.world.pov);
+  const agents = timelapse ? lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov) : [];
+  if (timelapse && opts.includePov !== false && own(w.state.entities, w.world.pov) && acts(w.world, w.state, w.world.pov)) agents.unshift(w.world.pov);
   const cursors = new Map(agents.map((a) => [a, agentCursor(w.world, w.state, a)]));
   let next = 0;
 
@@ -266,7 +267,7 @@ export interface CatchUpResult {
 export function catchUp(reg: Registry, w: Working, opts: CatchUpOptions): CatchUpResult {
   const cal = calendarOf(w.world);
   const done = completedSlot(w.world, w.state);
-  const all = lod1Agents(w.state).filter((a) => a !== w.world.pov);
+  const all = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
   const slice = readEngineSlice(w.state);
   const onScreen = (opts.onScreen ?? []).filter((a) => all.includes(a)).sort();
   const queue = all.filter((a) => !onScreen.includes(a));

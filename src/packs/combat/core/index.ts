@@ -226,7 +226,7 @@ const events: EventTypeDef<PackEvent>[] = [
       const f = fighterOf(enc, who);
       const cost = counts(e.data.cost);
       if (!rules || !f || !cost || Object.values(cost).some((n) => n <= 0)) return reject("bad_event", "a spend needs a participant and what it spends");
-      if (!standing(ctx.state, enc, f)) return reject("down", `${labelOf(ctx, who)} is out of the fight`);
+      if (!standing(ctx, enc, f)) return reject("down", `${labelOf(ctx, who)} is out of the fight`);
       if (enc.order[enc.turn]?.id !== who && !offTurnCost(rules, cost)) return reject("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
       return fits(cost, f.left) ? null : reject("spent", `${labelOf(ctx, who)} has nothing like that left`);
     },
@@ -319,7 +319,7 @@ export const combatPack: PackDef = {
       resolve(a, ctx) {
         const enc = encounterOf(ctx.state);
         if (!enc) return reject("no_fight", "no fight is under way");
-        const winner = a.winner === "party" || a.winner === "foes" ? a.winner : winnerOf(ctx.state, enc);
+        const winner = a.winner === "party" || a.winner === "foes" ? a.winner : winnerOf(ctx, enc);
         return [{ type: "combat.end", data: { encounter: enc.id, reason: "effect", winner, rounds: enc.round } }];
       },
     });
@@ -376,7 +376,7 @@ export const combatPack: PackDef = {
     });
     r.formula("standing", (ctx, side) => {
       const enc = encounterOf(ctx.state);
-      return enc && (side === "party" || side === "foes") ? standingOn(ctx.state, enc, side).length : 0;
+      return enc && (side === "party" || side === "foes") ? standingOn(ctx, enc, side).length : 0;
     });
     r.formula("encounter_round", (ctx) => encounterOf(ctx.state)?.round ?? 0);
     r.formula("budget_left", (ctx, e, budget) => own(fighterArg(ctx, e)?.f.left ?? {}, String(budget ?? "")) ?? 0);

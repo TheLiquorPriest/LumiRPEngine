@@ -332,6 +332,8 @@ A tier can make its people **live their own day (agendas and plans) by default**
 
 People you mark as **Lives their own day (agendas and plans)** in their entity editor get goals and agendas that feed their choices, even on Story. They are consulted by the AI only on close calls or invitations. Everyone else follows schedules and seeded incidents.
 
+**Life and death.** Everyone is **Alive**, **Dying**, **Dead**, or in a state the world adds in **Build → World → Life states** (a label, whether someone in it still acts, and how the narrator reads it, such as "lies unconscious"); an entity's editor sets the state it starts in. Someone who doesn't act keeps no routine or day plan, makes no choices and takes no turn in a fight, and their body stays where it lies, still there to find. You learn of it by seeing it happen, by walking in on it, or by being told (the story, a rule or the GM); until then Cast, Scene and the narrator show what you last knew. Rules change it with the `life` effect, and a world's combat can send the fallen into a state of its own (**down** → life state).
+
 ### Promote and demote
 
 You can change a domain's level at any time in **Settings → Realism**. A new chat starts from its world's own realism and time defaults, and the **New chats** tab fills in only what a world leaves out; turn on **Use my settings instead of a world's defaults for new chats** (also in **Settings → Time**) if you always want your own levels, say Story everywhere. Its **This chat** tab changes the running chat, for **Everyone** or for just the **Leads**, **Supporting** or **Background** band (it names the world's tiers in that band); before the chat's first turn it shows the levels that turn will use. A single character's level is set on the character in the Build editors (**Level overrides**).
@@ -475,6 +477,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Feelings toward others** (Feelings) · `regard` | Someone's feelings change: by at most 10 on each feeling per reply, however often the reply says so | confirm |
 | **Quantities** · `quantity` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
 | **New people** (New characters) · `spawn` | A new character appears (up to the world's limit, 24 by default, and duplicates are removed) | confirm |
+| **Life and death** · `life` | Someone dies, is dying, collapses or comes round (what you already knew is left out) | confirm |
 
 Beyond the mode, every field has a limit on how much a single change may be, and **the strictest rule always wins**. Fields a world marks as locked are never offered to the model. If a narrated change contradicts the engine's own outcome, the engine's outcome wins. A purchase takes in the seller's handover and the payment, so one sale is not applied three times, and a payer has to be an account.
 

@@ -19,9 +19,10 @@ import { hashParts } from "../../../shared/hash";
 import { isRecord } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
-import type { ActionDef, CombatDef, WorldDoc } from "../../../shared/world";
-import { offersAction } from "../../../shared/world";
+import type { ActionDef, CombatDef, EffectSpec, WorldDoc } from "../../../shared/world";
+import { ALIVE, isLifeState, offersAction } from "../../../shared/world";
 import { applyEffects } from "../../../engine/effects";
+import { lifeOf } from "../../../engine/life";
 import { labelOf, own } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
@@ -74,7 +75,7 @@ export function spendFor(ctx: ReadContext, actor: EntityId, action: Pick<ActionD
   const you = actor === ctx.world.pov;
   const f = fighterOf(enc, actor);
   if (!f) return { code: "not_fighting", reason: you ? "you aren't in this fight" : `${labelOf(ctx, actor)} isn't in this fight` };
-  if (!standing(ctx.state, enc, f)) return { code: "down", reason: you ? "you are out of the fight" : `${labelOf(ctx, actor)} is out of the fight` };
+  if (!standing(ctx, enc, f)) return { code: "down", reason: you ? "you are out of the fight" : `${labelOf(ctx, actor)} is out of the fight` };
   const cost = costOf(action);
   if (enc.order[enc.turn]?.id !== actor && !offTurnCost(rules, cost)) return { code: "not_your_turn", reason: you ? "it isn't your turn" : `it isn't ${labelOf(ctx, actor)}'s turn` };
   const short = Object.entries(cost).filter(([budget, n]) => (f.left[budget] ?? 0) < n).map(([budget]) => own(rules.economy, budget)?.label ?? budget);
@@ -99,7 +100,7 @@ export function nextTurn(ctx: ReadContext, rules: CombatDef, enc: Encounter): Le
   for (let k = 1; k <= n; k++) {
     const index = (enc.turn + k) % n;
     const f = enc.order[index];
-    if (!f || !standing(ctx.state, enc, f)) continue;
+    if (!f || !standing(ctx, enc, f)) continue;
     const round = enc.round + Math.floor((enc.turn + k) / n);
     const reset: Record<string, Record<string, number>> = {};
     if (round > enc.round) {
@@ -255,20 +256,24 @@ function stalled(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boo
 
 /**
  * After anything happened in a fight: whether the POV has left it, who went down or got back up
- * (with the rules' condition, through the Sheets pack's `sheets.condition` where it's loaded), then
- * whether it's over or has stalled. True when no fight is under way any more.
+ * (with the rules' condition, through the Sheets pack's `sheets.condition` where it's loaded, and
+ * the rules' life state: falling into it, and alive again once back up from it), then whether it's
+ * over or has stalled. True when no fight is under way any more.
  */
 function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boolean {
   const enc = encounterOf(w.state);
   if (!enc || leave(w, rng.fork("left"), lines)) return true;
   const condition = typeof rules.down?.condition === "string" && rules.down.condition.trim() !== "" ? rules.down.condition : DOWN_CONDITION;
+  const life = typeof rules.down?.life === "string" && isLifeState(w.world, rules.down.life) && rules.down.life !== ALIVE ? rules.down.life : null;
   for (const f of enc.order) {
     if (!own(w.state.entities, f.id)) continue;
     const down = downHolds(w.ctx, rules, f.id);
     const from = w.events.length;
     if (down === f.down || record(w, [{ type: "combat.down", data: { encounter: enc.id, entity: f.id, down } }], rng.seed).length === 0) continue;
     const fall = rng.fork(`down:${f.id}`);
-    applyEffects(w.reg, w, [{ type: "sheets.condition", args: { who: f.id, condition, ...(down ? { mod: 0 } : { clear: true }) } }], { bindings: { self: f.id }, rng: fall });
+    const effects: EffectSpec[] = [{ type: "sheets.condition", args: { who: f.id, condition, ...(down ? { mod: 0 } : { clear: true }) } }];
+    if (life !== null && (down || lifeOf(w.state, f.id) === life)) effects.push({ type: "life", args: { entity: f.id, to: down ? life : ALIVE } });
+    applyEffects(w.reg, w, effects, { bindings: { self: f.id }, rng: fall });
     asUnit(w, from, fall.seed);
     const who = nameFor(w.ctx, f.id);
     if (who !== "someone") lines.push(`${capital(who)} ${f.id === w.world.pov ? "are" : "is"} ${down ? "down" : "back up"}.`);
@@ -276,7 +281,7 @@ function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): bool
   const now = encounterOf(w.state);
   if (!now) return true;
   if (!endHolds(w.ctx, rules, now)) return stalled(w, rules, rng.fork("calm"), lines);
-  const winner = winnerOf(w.state, now);
+  const winner = winnerOf(w, now);
   record(w, [{ type: "combat.end", data: { encounter: now.id, reason: "over", winner, rounds: now.round } }], rng.seed);
   lines.push(`The fight is over${winner === "party" ? ": your side won" : winner === "foes" ? ": your side lost" : ""}.`);
   return encounterOf(w.state) === null;
@@ -334,7 +339,7 @@ export function fightOptions(reg: Registry, world: WorldDoc, state: Readonly<Wor
   for (const action of combatActions(reg, world)) {
     const param = targetParam(action);
     if (action.combat?.start === true || param === undefined) continue;
-    const targets = param === null ? [null] : enc.order.filter((f) => f.id !== actor && standing(state, enc, f)).map((f) => f.id);
+    const targets = param === null ? [null] : enc.order.filter((f) => f.id !== actor && standing({ world, state }, enc, f)).map((f) => f.id);
     for (const target of targets) {
       const params: JsonObject = param !== null && target !== null ? { [param]: target } : {};
       const odds = actionOdds(reg, world, state, { action, actor, params });
@@ -412,7 +417,7 @@ function othersTurn(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): 
   for (let n = 0; n < ACTS_PER_TURN; n++) {
     const enc = encounterOf(w.state);
     const f = enc ? fighterOf(enc, me.id) : undefined;
-    if (!enc || !f || enc.order[enc.turn]?.id !== me.id || enc.round !== start.round || !standing(w.state, enc, f)) return;
+    if (!enc || !f || enc.order[enc.turn]?.id !== me.id || enc.round !== start.round || !standing(w, enc, f)) return;
     const options = fightOptions(w.reg, w.world, w.state, me.id);
     const chosen = (n === 0 && decided !== undefined ? options.find((o) => optionKey(o) === decided) : undefined) ?? tacticFor(w.ctx, rules, enc, f, options);
     if (!chosen || !act(w, rules, me.id, chosen, rng.fork(`act:${n}`), lines)) break;
@@ -429,7 +434,7 @@ function othersUntilPov(w: Working, rules: CombatDef, rng: Rng, lines: FightLine
     const enc = encounterOf(w.state);
     const current = enc?.order[enc.turn];
     if (!enc || !current) return;
-    const live = standing(w.state, enc, current);
+    const live = standing(w, enc, current);
     if (current.id === w.world.pov && live) return;
     steps.left ??= enc.order.length;
     if (steps.left <= 0) return;
@@ -455,7 +460,7 @@ function startLine(ctx: ReadContext, e: LedgerEvent): string {
 function closing(ctx: ReadContext, rules: CombatDef, lines: FightLines): string[] {
   const enc = encounterOf(ctx.state);
   const me = enc ? fighterOf(enc, ctx.world.pov) : undefined;
-  if (enc && me && !standing(ctx.state, enc, me)) lines.push(`You are out of the fight; it goes on (round ${enc.round}).`, false);
+  if (enc && me && !standing(ctx, enc, me)) lines.push(`You are out of the fight; it goes on (round ${enc.round}).`, false);
   else if (enc && me && enc.order[enc.turn]?.id === me.id) {
     const left = Object.entries(rules.economy).flatMap(([budget, def]) => (isRecord(def) ? [`${me.left[budget] ?? 0} ${typeof def.label === "string" && def.label !== "" ? def.label : budget}`] : []));
     lines.push(`Round ${enc.round}, your turn${left.length > 0 ? `: ${left.join(", ")} left` : ""}.`, false);
@@ -536,7 +541,7 @@ export function fightChoices(ctx: ReadContext): { key: string; agent: EntityId; 
     const f = enc.order[index];
     if (!f || f.id === ctx.world.pov) break;
     const key = turnKey(enc, enc.round + Math.floor((enc.turn + k) / n), f.id);
-    if (!standing(ctx.state, enc, f) || own(decided, key) !== undefined) continue;
+    if (!standing(ctx, enc, f) || own(decided, key) !== undefined) continue;
     // Its options as they will be when its turn starts: its turn, its per-turn budgets refilled.
     const state = structuredClone(ctx.state) as WorldState;
     writeEncounter(state, { ...enc, turn: index, order: enc.order.map((p) => (p.id === f.id ? { ...p, left: { ...p.left, ...turnRefill(ctx, rules, p.id) } } : p)) });

@@ -5,7 +5,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { Band, DomainId, EntityId, InterruptClass, InterruptPolicy, KindId, Level, PackId, RevisionId, SceneTypeId, StageId, TierId, TrackId } from "../shared/ids";
-import type { AdjudicationDef, FacetId, FacetValueId, RelationInstance } from "../shared/world";
+import type { AdjudicationDef, FacetId, FacetValueId, LifeStateId, RelationInstance } from "../shared/world";
 
 export interface EntityState {
   kind: KindId;
@@ -23,6 +23,8 @@ export interface EntityState {
    */
   class?: Record<FacetId, FacetValueId[]>;
   tags?: string[];
+  /** Its life state (DESIGN §8); absent while alive. Who knows it is the engine slice's `life` (`engine/life`). */
+  life?: LifeStateId;
 }
 
 export interface TrackState {

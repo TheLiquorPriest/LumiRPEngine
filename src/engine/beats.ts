@@ -10,6 +10,7 @@ import type { WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, formatHHMM, MINUTES_PER_DAY } from "./calendar";
 import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import type { Registry } from "./registry-impl";
+import { povLife } from "./life";
 import type { Resolution } from "./resolve";
 import type { Rng } from "./rng";
 import { allSchedules, nextStartFor, scheduleOwners } from "./schedules";
@@ -85,9 +86,12 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
     for (const id of Object.keys(state.entities).sort()) {
       const e = own(state.entities, id);
       if (!e || id === pov || !e.agent || placeOfEntity(state, id) !== here || !canSeeEntity(reg, world, state, pov, id)) continue;
-      // What they are doing is a field: told only when the POV may see it.
+      // What they are doing is a field: told only when the POV may see it. A life state the POV knows
+      // reads instead ("lies dead"); one it doesn't know of is never told.
+      const life = povLife(world, state, id);
       const act = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
-      if (typeof act === "string" && act !== "" && act !== "idle") lines.push(`${e.name} is ${(shownActivity ? shownActivity(ctx, id, act) : act).replace(/_/g, " ")}.`);
+      if (life) lines.push(`${e.name} ${life.reads}.`);
+      else if (typeof act === "string" && act !== "" && act !== "idle") lines.push(`${e.name} is ${(shownActivity ? shownActivity(ctx, id, act) : act).replace(/_/g, " ")}.`);
     }
   }
   const cal = calendarOf(world);

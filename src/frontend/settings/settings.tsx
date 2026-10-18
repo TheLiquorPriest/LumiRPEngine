@@ -52,6 +52,7 @@ const EXTRACTION_LABEL: Record<ExtractionType, string> = {
   regard: "Feelings toward others",
   quantity: "Quantities",
   spawn: "New people",
+  life: "Life and death (dying, dead, collapsed…)",
 };
 
 const MODE_OPTIONS: { value: BoundMode; label: string }[] = [
