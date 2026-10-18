@@ -293,11 +293,11 @@ function acquainted(state: Readonly<WorldState>, a: EntityId, b: EntityId): bool
 
 // ---------------------------------------------------------------- the agent process
 
-/** Steps one LOD1 agent through one slot (Cast life ≥ 3): plan the day, live the block, needs, encounters, invitations. */
+/** Steps one LOD1 agent through one slot (Cast life ≥ 3): plan the day, live the block, needs, encounters, invitations; nothing for someone who doesn't act. */
 function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) => Rng, who: EntityId): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   const e = own(ctx.state.entities, who);
-  if (!e) return out;
+  if (!e || !acts(ctx, who)) return out;
   const level = ctx.levelOf(who, "castlife");
   const cal = calendarOf(ctx.world);
   // A slot is stepped when it completes: the agent takes up the block that holds from the slot's end.

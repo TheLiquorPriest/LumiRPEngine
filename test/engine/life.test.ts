@@ -18,7 +18,7 @@ import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import { paramCandidates } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import { placeOfEntity } from "../../src/engine/scope";
-import { ALL_NOTE, lod1Agents } from "../../src/engine/simulate";
+import { agentCursor, ALL_NOTE, lod1Agents } from "../../src/engine/simulate";
 import { runTimelapse } from "../../src/engine/time";
 import { canSeeEntity } from "../../src/engine/visibility";
 import { Working } from "../../src/engine/working";
@@ -245,5 +245,39 @@ describe("life states: who knows", () => {
     expect(castLife(w, "jordan")).toBeUndefined();
     expect(peopleLines(w).join(" ")).toContain("Jordan Price");
     expect(peopleLines(w).join(" ")).not.toContain("dead");
+  });
+});
+
+describe("life states: a death during a time skip", () => {
+  /** Riverton at Cast life 3, Maya at the park, and a rule that kills her at the first slot's end. */
+  function dying(): Working {
+    const w = riverton(3, (wd) => {
+      wd.rules.kill = { id: "kill", on: { tick: "slot" }, do: [{ type: "life", args: { entity: "maya", to: "dead" } }], once: true };
+    });
+    move(w, "maya", "park");
+    return w;
+  }
+
+  test("someone who dies during a time skip lives none of the rest of it", () => {
+    const w = dying();
+    const from = w.events.length;
+    lapse(w, 2 * 24 * 60);
+    const events = w.events.slice(from);
+    const death = events.findIndex((e) => e.type === "engine.life");
+    expect(death).toBeGreaterThan(-1);
+    const lived = events.slice(death + 1).filter((e) => e.type === "set" && e.entity === "maya" && (e.field === "place" || e.field === "activity"));
+    expect(lived).toEqual([]);
+  });
+
+  test("a two-day skip in which someone dies ends as two one-day skips do", () => {
+    const once = dying();
+    lapse(once, 2 * 24 * 60);
+    const twice = dying();
+    lapse(twice, 24 * 60);
+    lapse(twice, 24 * 60);
+    expect(lifeOf(twice.state, "maya")).toBe("dead");
+    expect(once.state.entities).toEqual(twice.state.entities);
+    const cursors = (w: Working): number[] => Object.keys(w.state.entities).sort().filter((id) => w.state.entities[id]?.agent).map((id) => agentCursor(w.world, w.state, id));
+    expect(cursors(once)).toEqual(cursors(twice));
   });
 });

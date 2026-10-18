@@ -135,6 +135,11 @@ function emitter(reg: Registry, w: Working, seed: string, rules: RuleFiring[]): 
   };
 }
 
+/** Whether an agent still steps: in the world and in a life state that acts (DESIGN §8). */
+function stillActs(w: Working, id: EntityId): boolean {
+  return !isGone(w.state, id) && acts(w.world, w.state, id);
+}
+
 function clockTo(w: Working, at: number, cause: ClockEvent["cause"], e: Emitter): void {
   const minutes = at - w.state.clock;
   if (minutes > 0) e.emit([{ type: "clock", minutes, cause }]);
@@ -158,9 +163,23 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   const slots = slotsEnding(cal, from, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
-  const agents = timelapse ? lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov) : [];
-  if (timelapse && opts.includePov !== false && own(w.state.entities, w.world.pov) && acts(w.world, w.state, w.world.pov)) agents.unshift(w.world.pov);
-  const cursors = new Map(agents.map((a) => [a, agentCursor(w.world, w.state, a)]));
+  /**
+   * Who a timelapse slot steps, in order: the POV first (with `includePov`), then the LOD1 agents by
+   * id. Read afresh each slot, so someone who dies on the way stops there and someone brought back
+   * steps again, as they would across two shorter timelapses.
+   */
+  const stepping = (): EntityId[] => {
+    if (!timelapse) return [];
+    const list = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+    if (opts.includePov !== false && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov)) list.unshift(w.world.pov);
+    return list;
+  };
+  /** Records how far an agent was stepped, when the state holds another slot. */
+  const settle = (agent: EntityId, slot: number): void => {
+    if (slot !== agentCursor(w.world, w.state, agent)) w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot } });
+  };
+  // How far each agent has been stepped; written when it stops stepping and when the interval ends.
+  let cursors = new Map<EntityId, number>();
   let next = 0;
 
   const applyInstants = (until: number): void => {
@@ -182,12 +201,21 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   };
 
   for (const slot of slots) {
+    const agents = stepping();
+    // Someone who stopped acting keeps the cursor of the last slot they lived, recorded now, so a
+    // revival (which catches them up) never replays the time they spent dead.
+    for (const [agent, cursor] of [...cursors]) {
+      if (agents.includes(agent)) continue;
+      settle(agent, cursor);
+      cursors.delete(agent);
+    }
     const slotDays = (agents.length * (slot.end - slot.start)) / MINUTES_PER_DAY;
     if (timelapse && result.slots > 0 && result.agentDays + slotDays > cap.agentDays) {
       result.stop = "cap";
       break;
     }
     const mark = timelapse && result.slots > 0 ? w.mark() : null;
+    const held = mark ? new Map(cursors) : null;
     const before = w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
@@ -199,12 +227,14 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
     }
     for (const agent of agents) {
-      const cursor = cursors.get(agent) ?? slot.index - 1;
-      for (let k = cursor + 1; k <= slot.index; k++) {
+      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
+      // Someone a death earlier in the slot stopped, or who dies on the way, steps no further.
+      while (k < slot.index && stillActs(w, agent)) {
+        k++;
         const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed);
         if (applied.length > 0) result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
-      cursors.set(agent, slot.index);
+      cursors.set(agent, k);
     }
     const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
     const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
@@ -214,6 +244,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
 
     if (mark && w.events.length - startEvents > cap.events) {
       w.restore(mark);
+      if (held) cursors = held;
       result.rules.length = rulesBefore;
       result.tracks.length = tracksBefore;
       result.stop = "cap";
@@ -241,7 +272,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
     applyInstants(to);
     clockTo(w, to, cause, e);
   }
-  for (const [agent, slot] of cursors) if (slot !== agentCursor(w.world, w.state, agent)) w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot } });
+  for (const [agent, slot] of cursors) settle(agent, slot);
   result.to = w.state.clock;
   result.events = w.events.length - startEvents;
   return result;
@@ -282,11 +313,13 @@ export function catchUp(reg: Registry, w: Working, opts: CatchUpOptions): CatchU
   for (const agent of order) {
     if (taken >= opts.agents || budget <= 0) break;
     const cursor = agentCursor(w.world, w.state, agent);
-    if (cursor >= done) continue;
+    // Someone an earlier agent's slot left dead or removed is passed by, cursor and all.
+    if (cursor >= done || !stillActs(w, agent)) continue;
     taken++;
     if (!onScreen.includes(agent)) advancedQueue = rotated.indexOf(agent) + 1;
     let k = cursor;
-    while (k < done && budget > 0) {
+    // One who stops acting on the way stops there, its cursor at the last slot it lived.
+    while (k < done && budget > 0 && stillActs(w, agent)) {
       k++;
       const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed);
       if (applied.length > 0) runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) });
@@ -297,7 +330,7 @@ export function catchUp(reg: Registry, w: Working, opts: CatchUpOptions): CatchU
   }
   if (queue.length > 0 && advancedQueue > 0) w.apply({ type: ENGINE_EVENTS.cursor, data: { rr: (rr + advancedQueue) % queue.length } });
   let backlog = 0;
-  for (const agent of all) backlog += Math.max(0, done - agentCursor(w.world, w.state, agent));
+  for (const agent of lod1Agents(w.world, w.state)) if (agent !== w.world.pov) backlog += Math.max(0, done - agentCursor(w.world, w.state, agent));
   return { stepped, backlog };
 }
 
