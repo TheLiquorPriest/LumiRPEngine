@@ -58,6 +58,51 @@ describe("a secret place the POV stands in", () => {
   });
 });
 
+describe("the scene ✎", () => {
+  /** The scene ✎ for a POV with these fields, in a world with a secret vault ("ritual"), a cellar inside it ("smuggling") and a public market ("haggling"). */
+  async function sceneFix(fields: JsonObject) {
+    const rig = new Rig();
+    const worldId = await rig.newWorld();
+    const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })) as { draft: { entities: Record<string, JsonObject & { fields: JsonObject }> } };
+    const put = async (collection: string, id: string, value: JsonObject) => rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
+    await put("places", "vault", { id: "vault", name: "The Vault of Sorrows", fields: {}, visibility: "secret", sceneType: "ritual" });
+    await put("places", "cellar", { id: "cellar", name: "Cellar", parent: "vault", fields: {}, sceneType: "smuggling" });
+    await put("places", "market", { id: "market", name: "Market", fields: {}, sceneType: "haggling" });
+    const pov = draft.entities[POV];
+    if (!pov) throw new Error("no POV");
+    await put("entities", POV, { ...pov, fields: { ...pov.fields, ...fields } });
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const fix = (await rig.rt.view(chatId, rig.host.userId)).hud?.fixes.scene;
+    if (!fix) throw new Error("no scene ✎");
+    return fix;
+  }
+  const offered = (fix: { options?: { value: unknown }[] }): unknown[] => (fix.options ?? []).map((o) => o.value);
+
+  test("offers the world's scene types and the visible places' ones, never one only a hidden place has", async () => {
+    const fix = await sceneFix({});
+    expect(offered(fix)).toEqual(["", "conversation", "action", "exploration", "downtime", "haggling"]);
+    expect(fix.options?.[0]?.label).toBe("Place default (Conversation)");
+  });
+
+  test("standing in the hidden place, or pinned to its type, names that type nowhere", async () => {
+    const cases: { fields: JsonObject; placeDefault: string; value: string | null }[] = [
+      { fields: { place: "vault" }, placeDefault: "Place default", value: "" },
+      { fields: { place: "cellar" }, placeDefault: "Place default", value: "" },
+      { fields: { scene: "ritual" }, placeDefault: "Place default (Conversation)", value: null },
+    ];
+    for (const c of cases) {
+      const fix = await sceneFix(c.fields);
+      expect(offered(fix)).toEqual(["", "conversation", "action", "exploration", "downtime", "haggling"]);
+      expect(fix.options?.[0]?.label).toBe(c.placeDefault);
+      // A pinned type the ✎ doesn't offer isn't marked as the current one either.
+      expect(fix.value).toBe(c.value);
+      expect(JSON.stringify(fix).toLowerCase()).not.toMatch(/ritual|smuggling/);
+    }
+  });
+});
+
 // A 12 × 7 inn under fog, the grid system on: the taproom the POV starts in, a kitchen through a
 // door, and a back hall below a wall the POV hasn't seen yet.
 const LAYOUT = ["############", "#ttttt#kkkk#", "#ttttt+kkkk#", "#ttttt#kkkk#", "##+#########", "#hhhhhhhhhh#", "#####+######"];

@@ -13,7 +13,7 @@ import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
 import { tableChoices } from "../shared/tables";
 import { checkView, policyOf } from "../engine/adjudication";
 import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
-import { clockPaused, placeSceneType, sceneType } from "../engine/time";
+import { clockPaused, DEFAULT_SCENE_TYPE, placeSceneType, sceneType } from "../engine/time";
 import { identifiers } from "../engine/expr";
 import type { ChainMessage, FoldOutput } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
@@ -94,13 +94,17 @@ function hud(world: WorldDoc, state: WorldState, panels: Record<PanelId, JsonVal
   const weatherFix = optionalQuery(ctx, "weather.fix")?.(ctx) ?? null;
   if (weatherFix) fixes.weather = weatherFix;
   // The scene type lives in the POV's `scene` field, which wins over its place's default until an
-  // action, a rule or another fix sets it; "" goes back to following the place.
+  // action, a rule or another fix sets it; "" goes back to following the place. The ✎ offers the
+  // world's scene types (the engine's default, the world's ticks and the chat's) and those of the
+  // places the POV can see, never one only a hidden place has: it doesn't name the place default's
+  // type, or count a pinned one as current, when that is such a type.
   const pinned = state.entities[pov]?.fields.scene;
   if (state.entities[pov]) {
-    const types = new Set([...Object.keys(world.time.sceneTicks), ...Object.keys(state.time.sceneTicks), ...Object.values(world.places).flatMap((p) => (p.sceneType ? [p.sceneType] : []))]);
-    if (typeof pinned === "string" && pinned !== "") types.add(pinned);
+    const types = new Set([DEFAULT_SCENE_TYPE, ...Object.keys(world.time.sceneTicks), ...Object.keys(state.time.sceneTicks), ...Object.values(world.places).flatMap((p) => (p.sceneType && canSeePlace(ctx.registry, world, state, pov, p.id) ? [p.sceneType] : []))]);
     const label = (type: string) => `${type.charAt(0).toUpperCase()}${type.slice(1).replace(/_/g, " ")}`;
-    fixes.scene = { entity: pov, field: "scene", type: "text", value: typeof pinned === "string" ? pinned : "", options: [{ value: "", label: `Place default (${label(placeSceneType(world, state))})` }, ...[...types].map((type) => ({ value: type, label: label(type) }))] };
+    const placeDefault = placeSceneType(world, state);
+    const value = typeof pinned !== "string" || pinned === "" ? "" : types.has(pinned) ? pinned : null;
+    fixes.scene = { entity: pov, field: "scene", type: "text", value, options: [{ value: "", label: types.has(placeDefault) ? `Place default (${label(placeDefault)})` : "Place default" }, ...[...types].map((type) => ({ value: type, label: label(type) }))] };
   }
   return {
     // Paused as the engine reads it: for the scene it was paused in, so a scene change shows the clock running.
