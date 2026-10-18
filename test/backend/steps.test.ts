@@ -1,7 +1,7 @@
 // Model calls per turn by preset (DESIGN §5.3) on one typed turn that fires every signal: the
 // classifier, open ties for an agent with the POV and one elsewhere, a reply. Also: routes reach
-// the host, prose steps never see a secret (secrecy batching rule), and a suggestion too long for a
-// chip is dropped, never cut.
+// the host, prose steps never see a secret (secrecy batching rule), a suggestion too long for a chip
+// is dropped, never cut, and a brief is checked whole for a secret before it's cut.
 
 import { describe, expect, test } from "bun:test";
 import type { Answers } from "../../src/engine/decide";
@@ -106,6 +106,26 @@ describe("model calls per preset (DESIGN §5.3)", () => {
     const labels = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "choice").map((c) => c.label);
     for (const label of labels) expect(label).not.toContain("ferryman");
     expect(labels).toEqual(["I go home"]);
+  });
+
+  test("a brief is checked whole before it's cut: a secret across the cut withholds it, and a long clean one still runs, cut", async () => {
+    const pad = "Sam stands at the window of the little house, watching the gulls wheel over the harbor. ".repeat(6);
+    // The secret runs across the brief's 600th character: a cut there would keep only its start.
+    const leaky = `${pad}Down at the far end of the pier people still whisper that ${TRUTH}, though nobody will say it aloud.`;
+    expect(leaky.indexOf(TRUTH)).toBeLessThan(600);
+    expect(leaky.indexOf(TRUTH) + TRUTH.length).toBeGreaterThan(600);
+    const clean = `${pad}The ferry is late again, and the queue at the ramp grows longer by the minute.`;
+    expect(clean.length).toBeGreaterThan(600);
+    const outlineFor = async (brief: string): Promise<string> => {
+      const { rig } = await turnCalls("full", undefined, (req) => (req.messages[0]?.content.includes("You brief a roleplay narrator") ? JSON.stringify({ text: brief }) : quiet(req)));
+      return rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outline]"))?.content ?? "";
+    };
+    const withheld = await outlineFor(leaky);
+    expect(withheld).not.toContain("Brief:");
+    expect(withheld).not.toContain("ferryman");
+    const kept = await outlineFor(clean);
+    expect(kept).toContain(`Brief: ${pad.trim()}`);
+    expect(kept).not.toContain("by the minute");
   });
 
   test("a step's route (connection and model) reaches the host; prose prompts never carry a secret", async () => {
