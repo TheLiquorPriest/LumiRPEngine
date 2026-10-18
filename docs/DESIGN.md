@@ -173,7 +173,7 @@ Six concepts plus one pipeline.
   - **Lint:** the schema; the id and the scope; ragged rows and the size; unknown legend characters, and legend places not on the map; places outside the grid or the frame; unknown places and maps (link ends, `opens`); id collisions; a scope that already has a grid; partial links.
 - **Storage:**
   - `userStorage/worlds/<worldId>/index.json`: name, head, lore book id.
-  - `rev/<sha256>.json`: immutable revisions, named by their content hash.
+  - `rev/<revision>.json`: immutable revisions, named by their content hash (`hashJson`, a MurmurHash3 x86 128-bit digest written as 32 hex digits; not cryptographic).
   - Writes are atomic (temp file, then `storage.move`). Pinned revisions are never garbage-collected automatically.
   - Edits in Build go to a **draft**; **Commit** makes a new revision and **Discard** throws the draft away.
   - Revisions are cached per user, world and revision (an LRU of 128, never replaced in place). A read or export needs a revision the world's index lists. An open chat pins only the revisions its ledger references (its run's, the targets of its migrate markers on the chain or in held writes, and the revisions its records were planned under), loading each before a fold can need it, so evicting a cache entry never breaks a fold and a world's long commit history stays out of memory.
@@ -197,7 +197,7 @@ Six concepts plus one pipeline.
 - **Attachment:** the book is appended to the chat's `chat_world_book_ids` (read-merge through `runtimeState.write`).
 
 ### 4.3 Run (per chat; D6)
-- **Chat metadata:** `lumi_rp_engine = {v, worldId, runSeed, startedAt}`.
+- **Chat metadata:** `lumi_rp_engine = {v, worldId, revision, runSeed, startedAt}`; `revision` is the world revision the chat was attached to, which its starting `migrate` marker repeats.
 - **Ledger** in `spindle_metadata.lumi_rp_engine` on assistant messages: `{v, swipes:{[index]:Rec}, markers:[…]}`.
 - **Ledger principles.** Four rules govern this section and §5; everything below applies them.
   - **P1. Path tags.** Every `post` entry and every marker records `at`, the parent path it was made under (the path hash, below, of everything before its message). An entry is **live** when `at` equals the current parent path, or when `at` equals its record's `path` (it was made with its record on-path, so it travels with the record into the record's rebased views). Only live entries fold and count toward the record and path hashes. Any other entry is **inert**: it changes nothing, and the Keep report lists it as "made on another branch". New `post` entries and markers go only to the head assistant message; that includes markers made during a regenerate of an earlier message, whose `at` therefore chains the new swipe. Switching back is therefore exact: whatever was made on the other branch is inert on this one. `keep[parentPath]` follows the same rule. Starting markers are the one untagged kind, since no branch made them (below).
@@ -214,7 +214,7 @@ Six concepts plus one pipeline.
   - **`keep`:** the user's Keep-report conversions, keyed by the parent path they apply to (`{[parentPath]: {convert:[event refs]}}`). Absent unless the user converts an event.
   - **`accepted`:** `{len, hash}` of swipe content accepted without being read: an assistant edit (below), or a Continue that was not read (non-head, on a message without a record, stopped, or with a re-rendered prefix; §5.1 steps 5–6). Verification accepts content that matches `swipeHash` or `accepted`. Neither `swipeHash` nor the record hash covers it, so accepting text never moves a path. While it is set, the message offers **Re-read edit**.
   - `status`: `ok | degraded | stopped`. `conflict` is derived from a journal pause entry (below) and never written to records.
-  - `intents`: the interpretation cache, keyed by `hash(user-message content, interpret config)`.
+  - `intents`: always empty. The reading of a turn's text (`interpret`'s answer and any judgement) is kept in memory by the backend's turn bridge, keyed by the text, and a palette or chip action is recorded on its user message.
   - `diag`: a key into the `userStorage` diagnostics.
 - **Markers** are message-level, **pure intents with no values**, each with `at` (P1) and a chat-wide sequence number (`seq`, shared with `post` entries). They attach to the head assistant message:
   - `migrate{to, merge?}`: world Upgrade; `merge` holds the owner's picks for the definition merge (below);
@@ -294,42 +294,26 @@ Six concepts plus one pipeline.
 ### 5.1 Hooks and lifecycle
 
 1. **`GENERATION_STARTED`.**
-   - Note `{generationId → chatId, targetMessageId?, targetSwipeId, generationType}`. `targetSwipeId` is present for every type; for Continue, `targetMessageId` is null (G1).
-   - Increment the chat's **generation counter**.
-   - Clear the applied-plan slot.
+   - Journal a `pending` entry `{generationId, kind, targetMessageId?, targetSwipeId}`. `targetSwipeId` is present for every type; for Continue, `targetMessageId` is null (G1), so the head swipe's content is captured instead (length and hash). A swipe or regenerate the player asked to Re-narrate (the swipe default, or the **Swipe as…** chip) names its source: the nearest earlier swipe of the target that holds a live record.
    - Open the turn's in-flight window (P2, §4.3).
 
 2. **Context handler.** Non-required. One registration serves every user, so its timeout is the slowest before-the-reply wall clock among the users whose settings are loaded, plus 15 s for the plan, within the host's 120 s; before any user's settings are read it is the full 120 s, and it is registered again when a user's settings change it (the host replaces a registration). The settings keep that wall clock at 105 s or less. The steps stop 15 s before the timeout, counted from the handler's start, so a plan lands even when the chat's queue ate into the wait.
-   - **Fingerprint:** a hash of the chat id and every non-empty message as `id:contentHash`. The context handler reads the chat, skipping the staged empty reply; the interceptor reads `ctx.messages`. The two matched in every generation type I tried, including Edit-and-Send in branch mode (in the branch chat).
-   - **Not a world chat:** return.
-   - **Impersonate:** return.
-   - **Continue:** the target is unknown before the reply (G1): for Continue, `GENERATION_STARTED` carries no `targetMessageId`. Capture the **head** swipe's content (length and hash), then re-render the head's current fold (its committed record, live `post` entries and markers; render only: no resolve, simulate or model calls), stored under the Continue fingerprint. The target is checked at `GENERATION_ENDED` (step 5).
-   - **Dry Run:** plan from the last committed decisions. No calls, no writes; previews are labelled. The interceptor cannot tell a dry run (G1), so the plan a dry-run context handler stores is marked dry, and when the newest plan for a fingerprint is dry, the interceptor writes no slot.
-   - **Re-narrate:** render the new swipe's fold prefix (P3, §4.3), stored under the target fingerprint. No resolve, simulate or model calls; its post steps run at `GENERATION_ENDED` (step 5) and commit as a `narr` entry.
-   - **Single writer:** wait for the previous post-pass up to its bound. On expiry, abort it and run its extraction inline, or close it as `degraded`. Its commit goes to the shadow first; the fold reads the overlay. Either way its window closes, and the writes only it held are journaled before this turn folds (P2).
-   - **Otherwise:**
-     1. Fold to the parent, with the target message's live markers applied. The target can be any assistant message: an explicit `message_id` on regenerate or swipe names an earlier one. That swipe is a turn on that message, and later records become rebased views (§4.3).
-     2. **Deterministic plan:**
-        - the **elapsed time** for the turn: a timelapse segment or the action's duration, otherwise the scene's default tick × the time scale; zero while the clock is paused (§9.2);
-        - resolve;
-        - simulate, **in process** (D9): calendar processes, the day planner, LOD0, catch-up, bounded by deterministic units (days, agents, events), with any remainder left on a deterministic **backlog** (a timelapse runs whole inside its unit cap instead);
-        - render beats and slots.
-     3. Check `signal.aborted`. Store the plan under the target fingerprint, stamped when the handler returns, and append a shadow `pending` entry holding the chain the plan was folded on and the pinned hashes of the turn's user messages (P4). A plan expires at its generation's `GENERATION_ENDED` or `GENERATION_STOPPED`, so a later `spindle.assemble` or dry run never matches a stale plan. Plans are kept per seed, so a Re-run's plan never replaces another swipe's.
-     4. Model steps by priority, refining the stored plan:
-        - `interpret`, when the typed-input classifier fires, then re-resolve. If the action, its duration or its activity changed, recompute the elapsed time and re-simulate (including a Speed-through `auto` timelapse) within the remaining deadline. If that cannot finish, the turn is handled as a simulation timeout (below), and an interpreted timelapse or Speed through becomes its offer chip;
-        - `npc.choose` in the tie zone or on an invitation;
-        - `judge`, when the turn's action has a check the adjudication policy would roll with the player's words counting, or leaves to the story (§11); its answer rides on the intent, so a Re-run reads it again;
-        - prose outline steps.
-        - At the deadline, the remaining steps use their deterministic fallback (§5.3).
-     5. No message writes.
-   - **Simulation timeout or failure:** use the head render, record `degraded` with zero simulation events, and leave the interval on the backlog. A timelapse segment is not applied at all (§9.2).
+   - **One queue per chat.** The handler runs on the chat's queue, after whatever is ahead of it (a previous turn's post steps included), and plans the newest unplanned `pending` entry of its generation's type. The interceptor reads that entry back from the journal (step 3), so the two calls need no matching.
+   - **Not a world chat, Impersonate, Continue:** no plan. A Continue's target is known only at `GENERATION_ENDED` (G1); before the reply the narrator gets the head's sections.
+   - **Dry Run:** no model calls, no plan and no writes.
+   - **Re-narrate** (P3, §4.3): no model steps and no new plan before the reply. The turn copies its source's seed, `pre` events and `markersApplied`, re-validates the source's live ✎ fixes and materializations against the new swipe's fold prefix, and its narration renders from that prefix, with the source plan's Outcome, Montage and Outline lines (from the turn bridge, or `plans.json`). Its post steps run at `GENERATION_ENDED` and commit as a `narr` entry. When the source can't be reproduced, the turn is planned as a Re-run.
+   - **Otherwise,** in this order:
+     1. **Steps before the plan** (§5.2, §5.3), on the before-the-reply budget: the turn's intent (a palette or chip action recorded on its user message, else `interpret` when its signals fire; a typed span over 24 hours becomes a Timelapse offer rather than the turn's action), side by side with `npc.choose` for the agents with the POV in the tie zone or on an invitation, while a call stays free for the judge; then `puzzle.answer` when an Answer needs judging, `judge` when the player described their own action and its check is one the adjudication policy would roll with the player's words counting, or leaves to the story (§11), and any agent choice still waiting. Their answers ride on the turn's intent and decisions, kept in memory by the turn's text, so the plan, and a Re-run of the same text while they are kept, read them without asking again. A step that can't start in time uses its fallback (§5.3).
+     2. **The plan** (deterministic): fold to the parent with the target message's live markers applied (the target can be any assistant message: an explicit `message_id` on regenerate or swipe names an earlier one, that swipe is a turn on that message, and later records become rebased views, §4.3), and before the chat's first planned record its starting markers; then resolve the action with any judgement, a fight's round around it, the turn's **elapsed time** (§9.2), and simulation **in process** (D9): calendar processes, the day planner, LOD0, schedules, tracks and rules, and catch-up for up to four off-screen agents, bounded by deterministic units (days, agents, events), with any remainder left on the deterministic **backlog** (a timelapse runs whole inside its unit cap instead); then beats and the turn's chips. The plan goes on the `pending` entry with the chain it was folded on, the pinned hashes of the turn's user messages (P4), its seed and its events, and the turn bridge keeps its chips and section lines by seed (`plans.json` keeps the lines too), so a Re-run's plan never replaces another swipe's.
+     3. **Steps after the plan:** `brief` and the prose `outline`, side by side on what is left of the budget. Their text goes to the Outline slot.
+     4. No message writes.
+   - **When the host gives up** before the plan is made, no plan is stored: the narrator gets the head's sections, and the turn commits `degraded` with no planned events (its reply is still read). The plan itself is never cut short by the clock, since simulation is bounded only by deterministic units (§9.2).
 
 3. **World Info interceptor.** Registered at a **late priority**; it makes no model call (the host fixes 10 s).
    - **Not a world chat:** return `void`.
-   - Capture the chat's generation counter.
-   - Match a plan by fingerprint, else use the head render. The head render carries persistent sections only, never Outcome or Outline.
-   - Fill the slots within the section budget (§6.2, §6.3) and vote on the world's own book (§6.4). Entries of other books are left to native World Info.
-   - The applied-plan slot is written **only if the counter still matches**.
+   - It renders the newest planned `pending` turn: that turn's fold prefix with its planned events, and the plan's Outcome, Montage and Outline lines (from the turn bridge, or from `plans.json` after a restart). With no planned turn (a Continue, a dry run, or a turn the host gave up planning) it renders the head's fold, with no plan lines. The declines the last reply left for the next turn lead the Outcome slot (§9.5).
+   - Fill the slots within the section budget (§6.2, §6.3) and vote on the world's own book (§6.4). Entries of other books are left to native World Info. A planned turn's run goes into the inspector history (§6.5).
+   - It writes nothing to the ledger or the journal, so an interceptor the host lets finish after its generation stopped changes nothing.
 
 4. **Narrator generation.**
 
@@ -341,26 +325,26 @@ Six concepts plus one pipeline.
      - off-screen agents, in process (D9);
      - tracks and rules.
    - Validate with the bounds (§11), against the turn's fold prefix (P2, §4.3).
-   - **Commit:** compute `path` over the chain stored with the `pending` entry plus the turn's user messages hashed per P4; compute `swipeHash` and `intents`; write the record through the queue; clear the shadow `pending` entry; close the window (P2). The host keeps swipe navigation enabled during a generation. If an earlier message changed meanwhile, the new record is off-path: a swipe change makes it a rebased view (re-validated, with a Keep-report chip), and a user-message edit, including one to the turn's own user messages (P4), puts it under the pause; an assistant edit leaves it on-path (§4.3).
+   - **Commit:** compute `path` over the chain stored with the `pending` entry plus the turn's user messages hashed per P4; compute `swipeHash`; write the record through the queue; clear the shadow `pending` entry; close the window (P2). The host keeps swipe navigation enabled during a generation. If an earlier message changed meanwhile, the new record is off-path: a swipe change makes it a rebased view (re-validated, with a Keep-report chip), and a user-message edit, including one to the turn's own user messages (P4), puts it under the pause; an assistant edit leaves it on-path (§4.3).
    - **Continue** (head target): `GENERATION_ENDED.content` holds the whole swipe, re-rendered. A head without a record (a greeting before the first turn) is accepted unread, like a non-head target. Otherwise extraction reads **only the suffix after the captured content**, and only if the content still starts with it. The host re-renders the whole combined swipe, and literal-brace shielding is keyed by the full content's hash, so a prefix with literal braces can change; then the Continue is accepted unread, as for a non-head target. The suffix is validated against the head's fold, and its events become a **`post` entry of kind `cont`** whose `seq` is assigned when the Continue commits. Everything journaled before the Continue started therefore folds before it, as it was in effect when the suffix was generated; writes made while it streamed are held by its window and fold after it (P2). `swipeHash` is updated; the head's own `path` chains only earlier messages and is unchanged. Effects already in the record are never re-read.
    - **Non-head guard.** `GENERATION_ENDED.messageId` names the continued message, and an explicit `message_id` can name any assistant message. If it is not the head assistant message, extraction is skipped and **no events are appended to any record**, since a non-head append would change every later path hash. This is an assistant edit (§4.3): the new content becomes the record's `accepted` identity (a bare record for a message without one), later paths are unchanged, and the message offers Re-read edit. Re-verification of a message edited during a Continue waits for its `GENERATION_ENDED` or `GENERATION_STOPPED` (step 6), because the save emits `MESSAGE_EDITED` first.
-   - **`ok` only if the applied-plan slot held this plan.** Otherwise the turn is `degraded`, and auto-apply is suppressed for this turn's action targets.
+   - **Status:** `ok` when the turn was planned and its reply isn't empty; otherwise `degraded`. A turn without a plan still has its reply read, unless a pause sits before it.
    - Unresolved confirm chips from the previous reply expire at this send; nothing is applied.
    - **Swipe index:** from the `GENERATION_STARTED` note, for every type. Both Edit-and-Send modes stage a blank swipe; in branch mode it is in the branch chat, where every event of the turn lands.
 
 6. **`GENERATION_STOPPED`.**
-   - Increment the generation counter and clear the slot. The host lets a stopped generation's interceptor run to completion, so only the counter stops its slot write (L35).
+   - The host lets the stopped generation's interceptor run to completion; it writes nothing (step 3).
    - If content was saved (other than by a Continue), commit the pre-reply events as `stopped` (Retry read / Discard); otherwise drop the plan. Either way the window closes (P2).
    - **Retry read of a stopped reply.** The reply was saved unread, so a Retry read reads everything saved by then, a Continue after it included, and replaces what was read meanwhile (that Continue's suffix read, the proposals confirmed from its chips, and that read's chips). It then marks the reply read, so no change or charge lands twice and no Retry read is left; a Re-read edit of a stopped reply marks it read too.
    - **A stopped Continue.** The host saves `original + postfix + partial` onto the continued swipe without a macro re-render, then emits `GENERATION_STOPPED` with only the partial suffix and no `messageId`. Any message may also be edited meanwhile, and `updateMessage` emits `MESSAGE_EDITED` for every write, metadata-only ones included. The target is therefore found by content: among the messages whose `MESSAGE_EDITED` arrived during the Continue, the one whose swipe `targetSwipeId` (from `GENERATION_STARTED`) now ends with the partial suffix; if several do, the one whose content before the Continue (`swipeHash`, `accepted` or the chain snapshot) is a prefix of it. Every other edit made during the Continue is classified normally (§4.3). The new content becomes the target's `accepted` identity (a bare record if it has none), as for any assistant edit. On a head whose record holds events the chip is **Retry read**, which extracts only the partial suffix into a `cont` entry that takes its `seq` then; `swipeHash` then covers the text and `accepted` is cleared. Elsewhere it is Re-read edit.
 
-7. **Restart recovery.** Assistant messages without a record are restored from the shadow `pending` entry as `degraded`, or flagged with **Read this turn**; that closes any window left open, and its held writes are then journaled (P2). A `pending` entry whose staged reply is gone (the host removes it at restart) is dropped: no record is made, its window closes and its held writes are journaled. Tombstoned (discarded) records are never restored; tombstones match by message id, `swipeHash` and stored-record hash (§4.3).
+7. **Restart recovery.** An assistant message whose reply was saved but that has no record is committed from its shadow `pending` entry as `degraded`, unread (*Not fully simulated*); that closes any window left open, and its held writes are then journaled (P2). A `pending` entry whose staged reply is gone (the host removes it at restart) is dropped: no record is made, its window closes and its held writes are journaled. Tombstoned (discarded) records are never restored; tombstones match by message id, `swipeHash` and stored-record hash (§4.3).
 
 8. **Swipe options.**
-   - **Re-run** (the default): a fresh seed, with cached probabilities re-sampled; the source's ✎ fixes and GM edits are carried after the new turn's events (P3).
+   - **Re-run** (the default): a fresh seed (the same roll where the world's `seedMode` is `same_roll`). The turn's text keeps the reading kept for it (`interpret`'s answer and any judgement) while the turn bridge holds it, so the dice change and the rest is asked afresh; the source's ✎ fixes and GM edits are carried after the new turn's events (P3).
    - **Re-narrate:** P3 (§4.3): the same seed, `pre` events and `markersApplied`, the source's ✎ fixes and materializations re-validated against the new swipe's fold prefix, narration rendered from that prefix, and new post steps committed as a `narr` entry.
 
-9. **Activation check** on `WORLD_INFO_ACTIVATED`. It consumes the slot, writes its result into the shadow `pending` entry, and confirms activation, not delivery.
+9. **Activation check** on `WORLD_INFO_ACTIVATED`: the latest inspector record reads Activation confirmed once every entry the interceptor forced activated. It confirms activation, not delivery.
 
 10. **Queued writes.** UI edits, between-turn materialization (`post`), confirmations, markers, Keep and Discard are journaled at once outside a window and held inside one (P2); each takes its `seq` and `at` when it is journaled. Journaled writes, late commits and re-asserts are flushed per message through its queue once no generation is in flight.
 
@@ -376,7 +360,7 @@ Six concepts plus one pipeline.
   - Answers are probabilities, sampled with a seeded RNG. A helper yes/no without a probability is no answer.
   - On the Decision route, `interpret` asks a choice question over the available actions (and "none"); when the chosen action takes parameters, a helper call fills them (a second call, budget permitting), because the Decisions API answers questions, not parameters.
 - **Prompted steps:**
-  - World step templates use the engine placeholders only: `{{world}}`, `{{pov}}`, `{{place}}`, `{{clock}}`, `{{scene}}`, `{{facts}}`, `{{present}}`, `{{outcome}}`, `{{beats}}`, `{{brief}}`, `{{user}}`, `{{reply}}`, `{{recent}}`. Host macros in a template are not evaluated, because helper calls are quiet generations that skip prompt assembly; the import lint lists any macro a template carries. Every placeholder is player-visible content.
+  - World step templates use the engine placeholders only: `{{world}}`, `{{pov}}`, `{{place}}`, `{{clock}}`, `{{scene}}`, `{{facts}}`, `{{present}}`, `{{outcome}}`, `{{beats}}`, `{{user}}`, `{{reply}}`, and `{{brief}}` and `{{recent}}`, which are reserved and always render empty. Host macros in a template are not evaluated, because helper calls are quiet generations that skip prompt assembly; the import lint lists any macro a template carries. Every placeholder is player-visible content.
   - Output `text` or `effects` (bounded like extraction; money amounts in an `effects` output are plain amounts in the world's currency as written, 8 for $8, and the engine converts them to minor units as it does for extraction). Built-in purposes: `brief`, `outline`, `extract`, `choices`.
 - **Where each output goes:** `brief` leads the Outline slot as "Brief: …"; a prose `outline` adds Outline lines after the engine's beats; `contradiction` becomes a chip (Re-narrate / It's fine) plus a correction line in the next Outcome slot; `choices` become chips that send the suggestion as the player's message; `effects` templates produce proposals that go through the extraction modes and bounds, after the reply only. The narrator sees prose steps through the slots it already reads, and corrections and suggestions stay under the player's control.
 - **Outline:** `beats` always renders the deterministic outline; prompted outline steps stack on top.
@@ -387,9 +371,9 @@ Six concepts plus one pipeline.
 
 | Preset | Pre-reply (context handler) | Post-reply | Model steps a turn: most | Engine budget (sections) |
 |---|---|---|---|---|
-| **Lean** (floor) | `interpret` when the classifier fires | `extract` | narrator + up to 2 | 300 tokens |
-| **Standard** (default) | `interpret` when the classifier fires; `npc.choose` on `tie_zone`/`invitation`; `judge` when the adjudication policy needs it | `extract`; off-screen `npc.choose` on `tie_zone` | narrator + up to 4 | 600 tokens |
-| **Full** | `interpret`, `brief`, `npc.choose` for all present agents, prose `outline`, `judge` when the policy needs it | `extract`, off-screen `npc.choose`, `contradiction` | narrator + up to 9 | 1000 tokens |
+| **Lean** (floor) | `interpret` when the classifier fires; `puzzle.answer` when an Answer needs judging | `extract` | narrator + up to 2 | 300 tokens |
+| **Standard** (default) | `interpret` when the classifier fires; `judge` when the adjudication policy needs it; `npc.choose` on `tie_zone`/`invitation`; `puzzle.answer` when an Answer needs judging | `extract`; off-screen `npc.choose` on `tie_zone` | narrator + up to 4 | 600 tokens |
+| **Full** | `interpret` on every message, `npc.choose` for all present agents, `judge` when the policy needs it, `puzzle.answer` when an Answer needs judging; then `brief` and the prose `outline` | `extract`, off-screen `npc.choose`, `contradiction` | narrator + up to 8 | 1000 tokens |
 | **Custom** | Any step, signal, provider or model | Same | Depends on the steps enabled; the call meter shows it | User budgets |
 
 **Measured calls per turn** (the test suite's busiest case: one typed turn that fires every signal, with the classifier, an open tie for an agent with the POV and one elsewhere, and a reply; the narrator is not counted):
@@ -398,23 +382,23 @@ Six concepts plus one pipeline.
 |---|---|---|
 | Lean | 2 | `interpret`, `extract` |
 | Standard | 4 | `interpret`, `npc.choose` ×2 (with the POV before the plan, off-screen after the reply), `extract` |
-| Full | 7 | Standard + `brief`, prose `outline`, `contradiction` (an eighth call judges a puzzle answer when one is typed, a ninth the approach when the policy needs it) |
+| Full | 7 | Standard + `brief`, prose `outline`, `contradiction` (an eighth call judges a puzzle answer or the player's approach when one needs it; an Answer has no check, so never both) |
 | Custom, every step on `always` | 8 | Full + `choices` (`puzzle.answer` runs only when an Answer needs judging) |
 
-The most a turn can run is what the preset's steps and phase budgets allow: each step takes one call from its phase's budget when it starts, and a puzzle answer to judge counts, as does an approach to judge (Full's 9 is the 7 of the busiest tested turn plus those two). Lean never judges an approach. No typical count is given: the earlier figures were measured with the retired lore-selection step and haven't been measured again. The call meter shows each turn's real count. Each step is its own call; a JSON repair or a Decision-to-helper fallback adds one call that no budget is charged for.
+The most a turn can run is what the preset's steps and phase budgets allow: each step takes one call from its phase's budget when it starts. Full's 8 is the 7 of the busiest tested turn plus a judged puzzle answer or approach. On Standard the judge's call comes before `npc.choose`'s, so a judged turn leaves the choice of an agent with the POV to the numbers. Lean never judges an approach, and `puzzle.answer` is on in every preset until turned off. No typical count is given: the earlier figures were measured with the retired lore-selection step and haven't been measured again. The call meter shows each turn's real count. A step can cost more than its one call: each lore lookup round takes one from its phase's lookup budget (§5.4), and a JSON repair, a Decision-to-helper fallback or `interpret`'s one retry after a transient failure adds a call that no budget is charged for.
 
 **Budgets**
 - Budgets are a **call count and a wall clock per phase for model steps**. Simulation is bounded only by deterministic units.
 - Defaults, as calls and time before / after the reply: Lean 1 (20 s) / 1 (30 s); Standard 2 (30 s) / 2 (45 s); Full 8 (60 s) / 4 (60 s).
 - **Lore lookups** have their own budget per phase (`PhaseBudget.lookup`: rounds, and the window from the phase's start in which one may begin), apart from the calls: Lean none; Standard 2 (15 s) / 1 (20 s); Full 3 (30 s) / 2 (30 s) (§5.4). The calls counted above leave them out; the call meter counts them.
-- Steps run by priority; independent steps run in parallel or batched.
-- At the deadline, each remaining step uses its fallback: utility-only NPC choice, beats-only outline, or plain roleplay plus extraction. The post phase keeps the user's deadline, with no hidden floor: a budget of 0 ms means no post call.
-- **Host caps:** context handler 120 s; World Info interceptor 10 s; decisions 30 s per call. Each Import or Refine model call has its own 120 s deadline besides cancel.
+- Before the reply, the turn's intent and the choices of agents with the POV run side by side (the choices only while a call stays free for the judge), then `puzzle.answer`, `judge` and any choice still waiting; after the plan, `brief` and `outline` side by side. After the reply, independent steps run side by side.
+- When a phase's calls or time run out, each remaining step uses its fallback: utility-only NPC choice, beats-only outline, a check rolled as if unjudged (one the story would decide goes to the dice), or plain roleplay plus extraction. The post phase keeps the user's deadline, with no hidden floor: a budget of 0 ms means no post call.
+- **Host caps:** the context handler waits at most 120 s (§5.1); World Info interceptor 10 s; decisions 30 s per call. Each Import or Refine model call has its own 120 s deadline besides cancel.
 - **Reasoning models:** helper calls to a reasoning model need `max_tokens` of about 1,500 or more; at 160 they failed because reasoning counts toward the limit.
 - The call meter shows each turn's calls, tokens, latency and lore lookups in the HUD, with averages and the 95th percentile in Settings. It is kept per user in `userStorage/call-meter.json` (the last 200 turns and the current one), so a restart keeps its numbers.
 - **Lean** is the documented floor of D3 and does not meet "a model decides" on its own.
 
-### 5.4 Lore for the engine's helpers (D37)
+### 5.4 Lore for the engine's helpers
 
 Every model step reads the world lore it needs (§4.2) through the engine's own search; native World Info activation plays no part.
 
@@ -422,7 +406,7 @@ Every model step reads the world lore it needs (§4.2) through the engine's own 
   - **Ranking**, compared in order: exact hits on lookup-table terms, aliases, keywords and titles (in `terms`, or said in `query`); links to what the step is about; topics asked for or named in the query; the query's words in the entry (stop words dropped, each word counted at most 3 times); the author's priority. Ties go by id. Of a group's entries only the best is returned.
   - **Snippets** are `Title: text`, cut at a word to the token budget, with the caller's counter: the host tokenizer's count once it has counted that text for the user (fetched in the background, as for sections, §6.3), else the section estimate.
   - **Visibility is enforced inside it:** a secret entry whose gate doesn't hold reaches only the purposes in its audience, never a `PROSE_STEPS` purpose or an `effects` template; a gate that is missing or can't be evaluated never holds; once it holds, the entry reads as public. A `known_by` entry follows §7 for its links and fails closed. The GM (`purpose: "gm"`) reads everything.
-- **Policy per step** (`StepConfig.lore`: `{policy, tokens, transport?}`): `none`, `prefetch`, `lookup` or `prefetch+lookup`. A settings file without one reads with its own preset's values (Custom fills in from Standard), and a step no preset configures prefetches 300 tokens. Presets: Lean prefetches 200 tokens and never looks up; Standard gives `interpret`, `extract` and `npc.choose` both at 400; Full both at 600 for those and `contradiction`, and a 400-token prefetch to `brief` and `outline`.
+- **Policy per step** (`StepConfig.lore`: `{policy, tokens, transport?}`): `none`, `prefetch`, `lookup` or `prefetch+lookup`. A settings file without one reads with its own preset's values (Custom fills in from Standard), and a step no preset configures prefetches 300 tokens. Presets: Lean prefetches 200 tokens and never looks up; Standard gives `interpret`, `extract`, `npc.choose` and `judge` both at 400; Full both at 600 for those and `contradiction`, and a 400-token prefetch to `brief` and `outline`.
 - **Prefetch:** before a step's call, the index is searched with the step's own inputs: the player's message, the reply, the POV, its place and the places holding it, the people it can see there, the visible tracks' labels, stages and cues, a decision's agents and options, or a judged action's label, targets and place with the player's words. The hits go into the prompt as a "World lore" block, or into the state a Decision call reads, at no extra call. A world without lore changes no prompt.
 - **Lookups** (JSON helper steps, through quiet generation): the model is offered the lore tools (`lore_search`, `lore_get`, `lore_list`; JSON mode is off while they are) or, on a connection seen refusing tools, the two-phase `{"need": [...]}` form. The host has no tool-role messages, so a round's results (each round within the step's lore tokens, at most 3 asks) go back in a follow-up user message and the call is made again, after the model's ask replayed with only the calls the round answered. A `lore_list` answer names at most 12 entries, each costing the round's tokens as a snippet does, and says how many more there are; a call to a tool that isn't a lore tool is refused, never run as a search. The instructions name up to 12 of the lookup table's topics, and only those the step can read an entry under, so a topic only secrets it can't read are filed under stays unnamed.
   - **Transport:** `auto` uses tools until a connection refuses them. A tool call that fails non-transiently is asked again in the need form on the round already held, and once that works the refusal is kept per connection, in memory and in `userStorage/lore-tools.json`. A step may pin `tools` or `need`.
@@ -794,7 +778,7 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 - leak tests: no chip, Journal line or model prompt names an unmet or secret entity, even when the narration describes an unnamed figure who is such an entity.
 
 **Fake-host tests**
-- fingerprints and the generation counter (Stop, then Regenerate); slot correctness;
+- a stopped reply, or a generation that ends in error, commits `stopped`, unread, with a Retry read;
 - the Continue path: suffix-only extraction, no double application, the `cont` entry's `seq` at commit. A non-head Continue (explicit `message_id`) appends no events, records `accepted`, offers Re-read edit and leaves later paths unchanged. A Continue whose prefix holds literal braces is accepted unread, with no conflict. A stopped Continue, head or non-head, records `accepted` on the message found by content, even when another message is edited or another writer touches metadata during the Continue, and raises no conflict; Retry read on the head extracts the partial suffix once;
 - an earlier-swipe switch makes later records rebased views without a pause; switching back restores the original at any time. An earlier user-message edit pauses. Editing an assistant reply, on the head or earlier, by edit or swipe `PUT`, keeps the world and offers Re-read edit; Re-read on an earlier message rebases later records. Deleting a middle message rebases. A regenerate with an explicit `message_id` on an earlier message is a turn there, and later records become views;
 - an earlier swipe switch while a reply streams: the new record commits off-path as a rebased view with a Keep-report chip; an earlier user-message edit while it streams puts it under the pause, and an assistant edit does not; the host's macro re-render of the turn's own user message does not pause either;
@@ -865,7 +849,6 @@ The ledger is accepted by this executable suite, not by review on paper.
 | **L32 Bounds** | Every applied model-proposed change is within its field bound and channel (§9.4); prices come from the catalog or the category band. |
 | **L33 Overflow** | A record past its size target coarsens or chunks, and round-trips without truncation. |
 | **L34 Previews record nothing** | Dry Run, the GM view, the inspector, audits and playtests leave the ledger and journal unchanged. |
-| **L35 No stale slot** | The applied-plan slot is written only while the generation counter matches; a stopped generation's interceptor, which the host lets finish, never writes it. |
 | **L36 Kits** | Kit completeness is derived from template plus overrides; taking a piece adds one override. |
 | **L37 Context on the fake host** | The interceptor disables, enables and forces nothing outside the world's own book and sets no recursion override; inside it, only filled slots are enabled and forced, and every other entry is disabled. |
 | **L38 Assistant edits keep the world** | Editing an assistant message, on the head or earlier, by edit or swipe `PUT`, active or inactive, never changes the fold unless Re-read edit is tapped; Re-read on an earlier message makes later records rebased views. |
@@ -948,9 +931,9 @@ The design rests on assumptions about the host and the models, checked on the re
 | 7 UI | Pass, with fixes (§12; D33). |
 
 1. **Correlation.**
-   - Fingerprint equality for normal, regenerate, swipe, continue and Edit-and-Send.
+   - The context handler and the interceptor see the same chain for normal, regenerate, swipe, continue and Edit-and-Send generations. The engine doesn't rely on it: the interceptor reads the turn back from the journal (§5.1).
    - A dry run during a live generation.
-   - **Stop, then Regenerate:** no stale slot write; the in-flight `select` is aborted (`select` since retired).
+   - **Stop, then Regenerate:** the host lets the stopped generation's interceptor finish, and that interceptor writes nothing (§5.1); the in-flight `select` is aborted (`select` since retired).
    - The `spindle.assemble` path.
    - `select` latency inside the interceptor, p95 ≤ 6 s (`select` since retired).
 2. **Delivery.**
@@ -1023,8 +1006,8 @@ The design rests on assumptions about the host and the models, checked on the re
 |---|---|
 | Scope (Warp's larger version was cut back) | Six concepts; uniform representation; packs with level contracts; schema-driven editors; boundary lint; gates first; per-block checks. |
 | Prompt bloat | Compact renderers; the section budget, with Outcome never evicted; the inspector. User lore follows native World Info and its budget (§6). |
-| Latency | Deterministic plan first; no model call in the World Info interceptor; tie-zone-only NPC calls; beats by default; budgets with fallbacks; the call meter. |
-| Ledger divergence | Concrete events; fold order; journaled markers and `seq`s; path tags (P1); one in-flight window per turn (P2); rebased views that never rewrite records; Keep re-validation; tombstones; chain snapshot; fingerprints; generation counter; single writer; recovery; the executable ledger property suite with a reference fold (§14). |
+| Latency | A deterministic plan; no model call in the World Info interceptor; tie-zone-only NPC calls; beats by default; budgets with fallbacks; the call meter. |
+| Ledger divergence | Concrete events; fold order; journaled markers and `seq`s; path tags (P1); one in-flight window per turn (P2); rebased views that never rewrite records; Keep re-validation; tombstones; chain snapshot; one queue per chat; recovery; the executable ledger property suite with a reference fold (§14). |
 | Coexistence (metadata, other interceptors) | Documented caveats; G2 follow-up. |
 | Host-wide worker cost | Disclosure; measured; G3 follow-up. |
 | Worker or child stall | Fail-closed engine slots; deterministic-unit bounds; backlog; separate lanes; heartbeat chunking. |
@@ -1090,7 +1073,7 @@ The design rests on assumptions about the host and the models, checked on the re
 The ledger is accepted by an executable property suite (§14): a reference fold, a fake host that replays the host's recorded event orders, randomized operation sequences and named invariants. These are the risks the design accepts.
 
 1. If the backend stalls, the world's sections are missing from that turn; a turn it couldn't plan in time commits `degraded`.
-2. Rare plan interleaving falls back to the head render.
+2. If two generations in one chat overlap, the interceptor renders the newest planned turn, which may be the other generation's.
 3. The host-wide worker cost remains until G3.
 4. Cross-extension metadata clobbering remains until G2.
 5. Activation is confirmed, not delivery: the delivery check finds whether a section reached the prompt, not where it landed.

@@ -154,7 +154,7 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 
 | Store | Shape |
 |---|---|
-| Chat metadata `lumi_rp_engine` | `ChatRun {v, worldId, runSeed, startedAt}` |
+| Chat metadata `lumi_rp_engine` | `ChatRun {v, worldId, revision, runSeed, startedAt}` |
 | Assistant message `spindle_metadata.lumi_rp_engine` | `MessageLedger {v, swipes: {[index]: Rec}, markers}` |
 | `userStorage/runs/<chatId>/journal.json` | `Journal`: `seq`, chain snapshot, latest ledger per message, pauses, tombstones, held writes, refused writes (`refused`: the latest 8 held writes that didn't validate when their windows closed, with the reason, until dismissed), open windows, pending turns, `started` |
 

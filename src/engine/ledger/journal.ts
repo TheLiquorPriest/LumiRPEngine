@@ -706,7 +706,7 @@ export class LedgerCore {
    * its planned events, else the head fold. Before the chat's first record it includes the starting
    * markers the first turn applies (the world's realism and time defaults, with the user's settings
    * filling in, DESIGN §9.1), so the palette judges actions at the levels the turn will use. Pure:
-   * nothing is written (L35 has no slot to go stale).
+   * nothing is written.
    */
   renderState(observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc } | null {
     const planned = Object.values(this.journal.pending).filter((p) => p.planned).at(-1);
