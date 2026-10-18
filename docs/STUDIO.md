@@ -6,11 +6,12 @@ For what the parts of a world mean, read the [design](DESIGN.md) (§4.1 for the 
 
 ## The package
 
-The package isn't published to a registry; a studio adds the repository as a Git or path dependency. Its `exports` map has three entries:
+The package isn't published to a registry; a studio adds the repository as a Git or path dependency. Its `exports` map has four entries:
 
 | Import | What it is |
 |---|---|
 | `lumi-rp-engine/studio` | The studio API (`src/studio-api.ts`), TypeScript source for Bun or a bundler |
+| `lumi-rp-engine/studio-bridge` | The Studio bridge's names and payloads alone (`src/shared/studio-bridge.ts`), for a frontend that shouldn't bundle the engine; `lumi-rp-engine/studio` exports the same |
 | `lumi-rp-engine/schemas/lre-world-v1.schema.json` | The JSON Schema of a world document |
 | `lumi-rp-engine/schemas/lre-map-v1.schema.json` | The JSON Schema of a map |
 
