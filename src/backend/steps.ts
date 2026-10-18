@@ -195,6 +195,8 @@ function questionLines(questions: Questions): string[] {
   });
 }
 
+/** What leads a preset's guidance in a helper's prompt: it styles the answer, never its contract. */
+const GUIDANCE_LEAD = "Style and rules from the player's preset. Follow them where they fit the instructions above; they never change what to output or its format:";
 export class Steps {
   constructor(
     private readonly host: StepsHost,
@@ -223,17 +225,18 @@ export class Steps {
    * A helper JSON call, with one repair call when the reply doesn't parse; with `retryTransient`, a
    * call that fails transiently (`transientFailure`) is made once more. Null on failure.
    *
-   * The step's lore follows the instructions. When it may look lore up (`StepLore.offer` holds a
-   * round on the phase's lookup budget), the model is offered the lore tools or the need form; each
-   * time it asks, the engine answers in a follow-up message and the call is made again, once per
-   * round held. A connection that refuses the tools is asked again in the need form, and the
-   * refusal is kept once that works.
+   * The preset's guidance for the step (DESIGN §6.7) follows the instructions, and the step's lore
+   * follows that. When it may look lore up (`StepLore.offer` holds a round on the phase's lookup
+   * budget), the model is offered the lore tools or the need form; each time it asks, the engine
+   * answers in a follow-up message and the call is made again, once per round held. A connection
+   * that refuses the tools is asked again in the need form, and the refusal is kept once that works.
    */
-  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null } = {}): Promise<JsonValue | null> {
+  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null; guidance?: string } = {}): Promise<JsonValue | null> {
     const base = { maxTokens: Math.max(config?.maxTokens ?? HELPER_MAX_TOKENS, 1500), connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null };
     const lore = options.lore ?? null;
+    const guidance = options.guidance ? `${GUIDANCE_LEAD}\n${options.guidance}` : "";
     let offer = lore?.offer() ?? null;
-    const opening = (): QuietMessage[] => [{ role: "system", content: [system, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join("\n\n") }, { role: "user", content: user }];
+    const opening = (): QuietMessage[] => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join("\n\n") }, { role: "user", content: user }];
     // JSON mode stays off while tools are offered: some providers refuse the two together.
     const ask = (messages: QuietMessage[], tools: boolean, o: { retry: boolean; lookup: boolean }) => this.quiet(purpose, { ...base, messages, json: !tools, ...(tools && lore ? { tools: [...lore.tools] } : {}) }, userId, signal, o);
     let messages = opening();
@@ -317,16 +320,17 @@ export class Steps {
 
   /**
    * A decision call (D10): the Decision connection, then the helper, then null (engine-only). A
-   * `helper` route asks the helper on that route directly. The step's lore rides in the state the
-   * Decision connection reads, after its lookup pre-pass, or in the helper's prompt, which may look
-   * lore up itself.
+   * `helper` route asks the helper on that route directly. The step's lore and the preset's guidance
+   * for it (`rules`) ride in the state the Decision connection reads, after its lookup pre-pass, or in
+   * the helper's prompt, which may look lore up itself.
    */
-  async decide(purpose: StepPurpose, state: JsonValue, questions: Questions, config: StepConfig | null, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<{ answers: Answers; via: "decision" | "helper" } | null> {
+  async decide(purpose: StepPurpose, state: JsonValue, questions: Questions, config: StepConfig | null, userId: UserId, signal: AbortSignal, lore: StepLore | null = null, guidance = ""): Promise<{ answers: Answers; via: "decision" | "helper" } | null> {
     const viaHelper = config?.route?.provider === "helper";
     if (!viaHelper) {
       if (lore) await this.lookupFirst(purpose, state, questions, lore, userId, signal);
       const notes = lore?.lines() ?? [];
-      const asked: JsonValue = notes.length === 0 ? state : isRecord(state) ? { ...state, lore: notes } : { state, lore: notes };
+      const extra: JsonObject = { ...(notes.length > 0 ? { lore: notes } : {}), ...(guidance !== "" ? { rules: guidance } : {}) };
+      const asked: JsonValue = Object.keys(extra).length === 0 ? state : isRecord(state) ? { ...state, ...extra } : { state, ...extra };
       const t0 = performance.now();
       try {
         const r = await this.host.models.decide({ state: asked, questions, connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null }, userId, signal);
@@ -339,7 +343,7 @@ export class Steps {
     }
     if (signal.aborted) return null;
     const system = `Answer each question about the state with probabilities. Output JSON only: {"<key>": {"probabilities": {"<option>": number}}} for choice and score questions, and {"<key>": {"p": number}} for yes/no questions.`;
-    const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], maxTokens: config?.maxTokens ?? HELPER_MAX_TOKENS }, userId, signal, { lore });
+    const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}\nQuestions:\n${questionLines(questions).join("\n")}`, viaHelper && config ? config : { enabled: true, signals: [], maxTokens: config?.maxTokens ?? HELPER_MAX_TOKENS }, userId, signal, { lore, guidance });
     if (!isRecord(raw)) return null;
     const answers: Answers = {};
     for (const [key, q] of Object.entries(questions)) {
@@ -415,7 +419,7 @@ function worldBrief(world: WorldDoc, extra: string): string {
   return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places || "none"}. ${extra}`;
 }
 
-/** `interpret`: typed input to its actions in order (DESIGN §9.4, §11): the first, the further ones it reads as engine actions (`queue`), and the rest as the player would type it (`next`). `instructions` (a world step template) lead the prompt; the output contract stays; the step's lore follows. Null when the call fails. */
+/** `interpret`: typed input to its actions in order (DESIGN §9.4, §11): the first, the further ones it reads as engine actions (`queue`), and the rest as the player would type it (`next`). `instructions` (a world step template) lead the prompt; the output contract stays; the preset's guidance and the step's lore follow. Null when the call fails. */
 export async function interpret(
   steps: Steps,
   text: string,
@@ -427,12 +431,13 @@ export async function interpret(
   signal: AbortSignal,
   instructions?: string,
   lore: StepLore | null = null,
+  guidance = "",
 ): Promise<InterpretOutput | null> {
   if (actions.length === 0) return { action: null, params: {}, probabilities: { none: 1 } };
   const catalog = actions.map((a) => `${a.id} — ${a.label}${a.params.length > 0 ? ` (params: ${a.params.join(", ")})` : ""}${a.lexicon && a.lexicon.length > 0 ? ` [said as: ${a.lexicon.slice(0, 6).join(", ")}]` : ""}`).join("\n");
   const system = `${instructions ? `${instructions}\n` : ""}You map a player's typed input in a roleplay to the engine actions it takes, in order.\n${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}\nAction catalog:\n${catalog}\nRules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it. If the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours"), add "then": {"minutes": number} or {"until": a day part, "shift" or "commitment"}; time passing is never in "more" or "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`;
   // A transient failure (a reset connection, a timeout) gets one more try: a turn whose action went unread runs as plain roleplay.
-  const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { retryTransient: true, lore });
+  const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { retryTransient: true, lore, guidance });
   if (!isRecord(raw)) return null;
   const action = typeof raw.action === "string" && actions.some((a) => a.id === raw.action) ? raw.action : null;
   const params: JsonObject = {};
@@ -491,7 +496,7 @@ export const EXTRACT_STRICT_RULES = [
   "Never duplicate a change. When unsure, leave it out.",
 ];
 
-/** `extract`: proposals read from a reply (DESIGN §9.4). `instructions` (a world text template) lead the prompt; the contract stays; the step's lore follows. Empty on failure. */
+/** `extract`: proposals read from a reply (DESIGN §9.4). `instructions` (a world text template) lead the prompt; the contract stays; the preset's guidance and the step's lore follow. Empty on failure. */
 export async function extract(
   steps: Steps,
   narration: string,
@@ -504,6 +509,7 @@ export async function extract(
   signal: AbortSignal,
   instructions?: string,
   lore: StepLore | null = null,
+  guidance = "",
 ): Promise<JsonObject[]> {
   const types =
     `time_advance{minutes} · location{entity,place} · purchase{item,category,payer?,qty?,price?,method?} (payer: the person who pays, an entity id, never an account or a card; method: how the prose says they paid, in its words, e.g. "cash", "debit card", "credit card" or "savings"; leave it out when not said) · transfer{from,to,amount,method?} (from and to: people, entity ids, or a person's own cash, checking, savings or card account, never things; method: "cash" when bills or coins change hands in person, as in "hands me $20" or "slips her a twenty"; leave it out for a bank transfer, an app payment or a card) · give{item,from,to,amount?} (amount: for cash or money handed over, the amount) · quantity{entity,item,delta} · condition{who,condition,minutes?,clear?} (a named condition such as tired or injured; clear:true when it ends) · regard{from,to,axis,delta} (axis trust|affection|respect; delta -3..3) · knows{who,fact} (public facts only) · spawn{kind,name,place?,role?} · life{entity,state} (state: ${lifeStatesOf(world)
@@ -511,7 +517,7 @@ export async function extract(
       .join("|")})`;
   const allowed = channels.length > 0 ? `Only these types are enabled: ${channels.join(", ")}.` : "";
   const system = `${instructions ? `${instructions}\n` : ""}You read a narrator's roleplay reply and propose concrete state changes that the prose states actually happened.\n${worldBrief(world, `Minutes already applied this turn: ${appliedMinutes}.`)}\nProposal types: ${types}. ${allowed}\nRules: no considered, refused or hypothetical changes; use world ids where they exist; one proposal per change. Money amounts are plain amounts in ${world.currency.code} as written (8 for ${world.currency.symbol}8).\nStrict rules:\n- ${EXTRACT_STRICT_RULES.join("\n- ")}\nOutput JSON only: {"proposals":[{"type":...}, ...]}.`;
-  const raw = await steps.helperJson("extract", system, `State before: ${JSON.stringify(prefix)}\nNarration:\n${narration}`, config, userId, signal, { lore });
+  const raw = await steps.helperJson("extract", system, `State before: ${JSON.stringify(prefix)}\nNarration:\n${narration}`, config, userId, signal, { lore, guidance });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : Array.isArray(raw) ? raw : [];
   const proposals: JsonObject[] = [];
   for (const p of list) {

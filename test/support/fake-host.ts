@@ -20,6 +20,7 @@ import type {
   HostGenerationType,
   HostMessage,
   HostPort,
+  HostPresetBlock,
   HostRegexScript,
   InterceptorInput,
   InterceptorResult,
@@ -132,8 +133,24 @@ export class FakeHost implements HostPort {
   /** The active preset as a dry run sees it (the D32 lint). */
   preset: { name: string; blocks: { id: string; name: string; content: string }[]; maxTokens: number | null; model: string } = { name: "Default", blocks: [], maxTokens: null, model: "fake" };
 
+  /** The active preset's blocks (`presets.blocks`) and its revision, which each change made through the port bumps. */
+  presetBlocks: HostPresetBlock[] = [];
+  presetRevision = 1;
+  /** How many times the preset's blocks were read (each revision is read once). */
+  blockReads = 0;
+
   presets: HostPort["presets"] = {
-    active: async () => ({ id: "preset-1", name: this.preset.name }),
+    active: async () => ({ id: "preset-1", name: this.preset.name, revision: this.presetRevision }),
+    blocks: async () => {
+      this.blockReads++;
+      return structuredClone(this.presetBlocks);
+    },
+    addBlock: async (_presetId, block, index) => {
+      const id = this.newId("block");
+      const created: HostPresetBlock = block.kind === "category" ? { id, name: block.name, content: "", enabled: true, marker: "category", injectionTrigger: [] } : { id, name: block.name, content: block.content, enabled: false, marker: null, injectionTrigger: [] };
+      this.presetBlocks.splice(index ?? this.presetBlocks.length, 0, created);
+      this.presetRevision++;
+    },
   };
 
   /** The user's default connection (`connections.list`, `is_default`). */

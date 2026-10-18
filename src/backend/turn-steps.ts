@@ -31,6 +31,7 @@ import type { WorldState } from "../engine/state";
 import type { EngineTurnPlan } from "../engine/turn";
 import { canSeeEntity, findLeaks, povPlace } from "../engine/visibility";
 import { LookupBudget, type StepLore } from "./lore-steps";
+import type { Guidance } from "./preset-binding";
 import { inMinorUnits, type Steps } from "./steps";
 
 // ---------------------------------------------------------------- facts the steps see
@@ -259,6 +260,8 @@ export interface StepRun {
   config: StepConfig;
   /** The world's template for this run; null for the built-in prompt. */
   template: StepTemplateDef | null;
+  /** The active preset's style and rules for the step, appended after the prompt (DESIGN §6.7); "" for none. */
+  guidance: string;
 }
 
 /** The world's step templates for a purpose, in id order (DESIGN §5.2 "templates with engine placeholders"). */
@@ -270,15 +273,17 @@ function templatesFor(world: WorldDoc, purpose: StepPurpose): StepTemplateDef[] 
 
 /**
  * The runs of a purpose this phase: one per world template (its own signals, else the step's),
- * or the built-in prompt. The user's step settings decide whether the purpose runs at all
- * (`stepConfigOf`: `puzzle.answer` is the author's opt-in, so it runs unless the user turned it off).
+ * or the built-in prompt; with `output`, only the templates with that output. The user's step
+ * settings decide whether the purpose runs at all (`stepConfigOf`: `puzzle.answer` is the author's
+ * opt-in, so it runs unless the user turned it off). Each run carries the preset's guidance for it.
  */
-export function runsOf(modelUse: ModelUseSettings, world: WorldDoc, purpose: StepPurpose, facts: SignalFacts, output?: StepTemplateDef["output"]): StepRun[] {
+export function runsOf(modelUse: ModelUseSettings, world: WorldDoc, purpose: StepPurpose, facts: SignalFacts, options: { output?: StepTemplateDef["output"]; guidance?: Guidance } = {}): StepRun[] {
   const config = stepConfigOf(modelUse.steps, purpose);
   if (!config.enabled) return [];
-  const templates = templatesFor(world, purpose).filter((t) => output === undefined || t.output === output);
-  if (templates.length === 0) return output === "effects" ? [] : fires(config.signals, facts) ? [{ purpose, config, template: null }] : [];
-  return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config.signals, facts)).map((template) => ({ purpose, config, template }));
+  const guidance = options.guidance?.[purpose] ?? "";
+  const templates = templatesFor(world, purpose).filter((t) => options.output === undefined || t.output === options.output);
+  if (templates.length === 0) return options.output === "effects" ? [] : fires(config.signals, facts) ? [{ purpose, config, template: null, guidance }] : [];
+  return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config.signals, facts)).map((template) => ({ purpose, config, template, guidance }));
 }
 
 // ---------------------------------------------------------------- prompts
@@ -347,7 +352,7 @@ function proseLines(v: JsonValue | undefined, max: number, secrets: readonly str
  */
 export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "outline" | "choices", vars: Readonly<Record<string, string>>, secrets: readonly string[], userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<string[] | null> {
   const instructions = renderTemplate(run.template?.template ?? BUILTIN[kind], vars);
-  const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore });
+  const raw = await steps.helperJson(run.purpose, `${instructions}\n${CONTRACT[kind]}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance });
   if (!isRecord(raw)) return null;
   // A brief or an outline beat may run long and is cut, once checked whole. A suggestion is a chip's
   // text and the player's next message: one too long for a chip is dropped rather than cut.
@@ -358,7 +363,7 @@ export async function promptedText(steps: Steps, run: StepRun, kind: "brief" | "
 export async function promptedEffects(steps: Steps, run: StepRun, vars: Readonly<Record<string, string>>, currency: WorldCurrency, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<JsonObject[]> {
   if (!run.template) return [];
   const money = `Money amounts are plain amounts in ${currency.code} as written (8 for ${currency.symbol}8).`;
-  const raw = await steps.helperJson(run.purpose, `${renderTemplate(run.template.template, vars)}\n${CONTRACT.effects} ${money}`, dataBlock(vars), run.config, userId, signal, { lore });
+  const raw = await steps.helperJson(run.purpose, `${renderTemplate(run.template.template, vars)}\n${CONTRACT.effects} ${money}`, dataBlock(vars), run.config, userId, signal, { lore, guidance: run.guidance });
   const list = isRecord(raw) && Array.isArray(raw.proposals) ? raw.proposals : [];
   const out: JsonObject[] = [];
   for (const p of list.slice(0, 15)) if (isRecord(p) && typeof p.type === "string") out.push(inMinorUnits(JSON.parse(JSON.stringify(p)) as JsonObject, currency));
@@ -396,7 +401,7 @@ export async function npcChoose(steps: Steps, run: StepRun, ties: readonly Tie[]
     questions[`t${i}`] = { type: "choice", instructions: run.template?.template ?? "What does this character choose to do, given their needs, plans and relationships? Pick what they would most plausibly do.", criteria };
     state[`t${i}`] = describe(t);
   });
-  const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal, lore);
+  const answer = await steps.decide("npc.choose", state, questions, run.config, userId, signal, lore, run.guidance);
   if (!answer) return [];
   return decisionEvents(asked, answer.answers, rng);
 }
@@ -427,7 +432,7 @@ export async function contradiction(steps: Steps, run: StepRun, facts: readonly 
     criteria[`f${i}`] = f;
   });
   const questions: Questions = { contradicts: { type: "choice", instructions: run.template?.template ?? "Does the narrator's reply contradict one of these engine facts? Pick the fact it contradicts, or none.", criteria } };
-  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run.config, userId, signal, lore);
+  const answer = await steps.decide("contradiction", { reply: reply.slice(0, 4000) }, questions, run.config, userId, signal, lore, run.guidance);
   const a = answer?.answers.contradicts;
   if (!a || a.type !== "choice" || a.choice === "none" || a.confidence < 0.5) return null;
   const index = Number(a.choice.slice(1));
@@ -440,7 +445,7 @@ export async function contradiction(steps: Steps, run: StepRun, facts: readonly 
  */
 export async function puzzleAnswer(steps: Steps, run: StepRun, question: string, accepted: readonly string[], answer: string, userId: UserId, signal: AbortSignal, lore: StepLore | null = null): Promise<number | null> {
   const questions: Questions = { correct: { type: "noul", instructions: run.template?.template ?? "Is the player's answer correct: the same as one of the accepted answers, allowing for wording and spelling?" } };
-  const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run.config, userId, signal, lore);
+  const result = await steps.decide("puzzle.answer", { question, accepted: [...accepted], answer }, questions, run.config, userId, signal, lore, run.guidance);
   const a = result?.answers.correct;
   return a && a.type === "noul" ? a.noul : null;
 }
@@ -476,7 +481,7 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
   if (run.config.route?.provider === "decision") {
     const questions: Questions = { rating: { type: "score", instructions: `${lead} Rate it from ${scale}.`, criteria: Array.from({ length: ask.max + 1 }, (_, i) => String(i)) } };
     if (guidance) questions.outcome = { type: "choice", instructions: "How does it turn out? The dice's exact odds are guidance: a strong approach moves them toward success, a weak one away.", criteria: guidance };
-    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run.config, userId, signal, lore);
+    const answer = await steps.decide("judge", { action: ask.action, player: ask.text.slice(0, 2000), scene: ask.scene }, questions, run.config, userId, signal, lore, run.guidance);
     const rating = answer?.answers.rating;
     if (!rating || rating.type !== "score") return null;
     const outcome = answer?.answers.outcome;
@@ -491,7 +496,7 @@ export async function judge(steps: Steps, run: StepRun, ask: JudgeAsk, userId: U
     .filter((line) => line !== "")
     .join("\n");
   const user = `Action: ${ask.action}\nThe player wrote: ${ask.text.slice(0, 2000)}\nScene: ${JSON.stringify(ask.scene)}${guidance ? `\nOutcomes with the dice's exact odds: ${JSON.stringify(guidance)}` : ""}`;
-  const raw = await steps.helperJson("judge", system, user, run.config, userId, signal, { lore });
+  const raw = await steps.helperJson("judge", system, user, run.config, userId, signal, { lore, guidance: run.guidance });
   // A reply without a rating is no answer: a made-up middle rating would read as the model's.
   if (!isRecord(raw) || typeof raw.rating !== "number" || !Number.isFinite(raw.rating)) return null;
   const reason = typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";

@@ -43,7 +43,8 @@ import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, 
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
-import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
+import type { PresetCard } from "../shared/protocol";
+import { DEFAULT_SECTIONS, EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./host";
@@ -57,6 +58,7 @@ import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { JsonHiding, withoutHiddenJson } from "./json-hiding";
+import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
 import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
@@ -88,6 +90,8 @@ interface LorePhase {
   active: string;
   /** What the player said this turn, with the reply after it: words the player has seen. */
   said: string;
+  /** The active preset's style and rules for each helper (DESIGN §6.7). */
+  guidance: Guidance;
 }
 
 /** Chips a read stores for its swipe; a read that replaces it (Re-read edit, Retry read) drops them. */
@@ -451,6 +455,8 @@ export class Runtime implements TurnHooks {
   readonly ledger: LedgerService;
   /** Each world chat's JSON-hiding regex script (DESIGN §6.6). */
   readonly jsonHiding: JsonHiding;
+  /** What the active preset says: section outlets, helper guidance, narrator rules (DESIGN §6.7). */
+  readonly presets: PresetBinding;
   readonly push: StatePush;
   /** What LumiRPEngine Studio may read, and its offers (DESIGN §15). */
   readonly studio: StudioBridge;
@@ -480,7 +486,7 @@ export class Runtime implements TurnHooks {
   /** The POV's place after each chat's last plan (the `scene_change` signal). */
   private readonly lastPlace = new Map<ChatId, string | null>();
   /** What the pre phase saw, per generation, for the plan phase's signals. */
-  private readonly prePhase = new Map<string, { facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null }>();
+  private readonly prePhase = new Map<string, { facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null; preset: PresetConfig }>();
   /** Each generation's lore traces, step by step (the inspector shows them, DESIGN §6.5). */
   private readonly loreTraces = new Map<string, LoreStepTrace[]>();
 
@@ -499,6 +505,7 @@ export class Runtime implements TurnHooks {
     this.chatPrefs = new ChatPrefs(this.host);
     this.book = new EngineBook(this.host, this.worlds);
     this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks);
+    this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
@@ -616,6 +623,8 @@ export class Runtime implements TurnHooks {
     if (!bridge || input.dryRun || !p || p.kind === "continue" || p.kind === "impersonate" || (p.kind === "renarrate" && p.renarrateOf)) return;
     const settings = await this.settings.get(input.userId);
     lruSet(this.settingsCache, input.userId, settings, 256);
+    // The preset this generation assembles with, read once for its phases and its interceptor run.
+    const preset = await this.presets.current(input.chatId, input.userId);
     const target = p.messageId ? input.observed.findIndex((m) => m.id === p.messageId) : input.observed.length;
     const before = input.observed.slice(0, target < 0 ? input.observed.length : target);
     const lastUser = before.findLast((m) => m.isUser);
@@ -646,18 +655,18 @@ export class Runtime implements TurnHooks {
       invitation: (before.findLast((m) => !m.isUser)?.ledger?.swipes[String(before.findLast((m) => !m.isUser)?.swipeId ?? 0)]?.events ?? []).some((e) => e.type === "castlife.invitation"),
       timelapse: isRecord(recorded) && recorded.action === TIMELAPSE_ACTION,
     };
-    const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text);
+    const at = await this.lorePhase("pre", p.generationId, input.userId, render.world, render.state, budget, text, preset.guidance);
     const intentTask = text.trim() === "" || bridge.hasIntent(text) ? Promise.resolve() : this.readIntent(bridge, text, recorded, render, all, settings, facts, budget, at);
     // The judge's call for the player's own action comes before npc.choose's (DESIGN §11). Present
     // agents' choices run beside the intent only while a call stays free for the judge; otherwise
     // they take what is left once it has run. Before `interpret` names the action, the judge may
     // run whenever the policy weighs the player's words or leaves checks to the story.
     const policy = policyOf(render.world, render.state);
-    const judging = described && runsOf(settings.modelUse, render.world, "judge", facts).length > 0 && (bridge.hasIntent(text) ? this.judgeTarget(bridge.intentOf(text), render) !== null : policy.description.weight !== "none" || policy.authority === "narrative");
-    const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts)[0];
+    const judging = described && runsOf(settings.modelUse, render.world, "judge", facts, { guidance: at.guidance }).length > 0 && (bridge.hasIntent(text) ? this.judgeTarget(bridge.intentOf(text), render) !== null : policy.description.weight !== "none" || policy.authority === "narrative");
+    const npcRun = runsOf(settings.modelUse, render.world, "npc.choose", facts, { guidance: at.guidance })[0];
     const choose = npcRun && ties.present.length > 0 ? () => npcChoose(this.steps, npcRun, ties.present, (t) => this.describeTie(t, render.world, render.state), createRng(hashParts("lre.npc.pre", bridge.runSeed, p.generationId)), input.userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.present, render.world, render.state))) : null;
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
-    this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId });
+    this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
     await this.judgeAnswer(bridge, text, render, settings, facts, budget, at);
     if (described) await this.judgeApproach(bridge, text, render, settings, facts, budget, at);
@@ -683,8 +692,8 @@ export class Runtime implements TurnHooks {
     lruSet(this.lastPlace, input.chatId, placeOfEntity(render.state, render.world.pov), 256);
     const settings = this.settingsCache.get(input.userId) ?? (await this.settings.get(input.userId));
     const facts: SignalFacts = { ...pre.facts, ...planFacts(render.world, pre.start, render.state, plan) };
-    const briefRuns = runsOf(settings.modelUse, render.world, "brief", facts, "text");
-    const outlineRuns = runsOf(settings.modelUse, render.world, "outline", facts, "text");
+    const briefRuns = runsOf(settings.modelUse, render.world, "brief", facts, { output: "text", guidance: pre.preset.guidance });
+    const outlineRuns = runsOf(settings.modelUse, render.world, "outline", facts, { output: "text", guidance: pre.preset.guidance });
     if (briefRuns.length === 0 && outlineRuns.length === 0) {
       await this.keepPlanLines(input.chatId, input.userId, p.seed, plan, render.world, undefined);
       return;
@@ -696,7 +705,7 @@ export class Runtime implements TurnHooks {
     const recent = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
     const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, "", "", recent), secrets);
     const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join("\n"), links: this.sceneLinks(render.world, render.state) };
-    const at = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget, pre.text);
+    const at = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget, pre.text, pre.preset.guidance);
     const run = (r: StepRun, kind: "brief" | "outline", stepVars = vars): Promise<string[]> => (budget.take() ? promptedText(this.steps, r, kind, stepVars, secrets, input.userId, budget.signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []) : Promise.resolve([]));
     const briefTask = Promise.all(briefRuns.map((r) => run(r, "brief")));
     // An outline template that names {{brief}} waits for the brief (leak-checked as it comes back).
@@ -757,7 +766,7 @@ export class Runtime implements TurnHooks {
       return;
     }
     // Letting time pass is always in the catalog, so a world without actions still interprets.
-    const run = runsOf(settings.modelUse, render.world, "interpret", facts)[0];
+    const run = runsOf(settings.modelUse, render.world, "interpret", facts, { guidance: at.guidance })[0];
     if (!run || !budget.take()) {
       bridge.setIntent(text, null);
       return;
@@ -782,7 +791,7 @@ export class Runtime implements TurnHooks {
       const criteria: Record<string, string> = { none: "Not an action: speech, a request, a feeling or a recap." };
       for (const a of offered) criteria[a.id] = labelOf(a);
       criteria[TIMELAPSE_ACTION] = timelapseEntry.label;
-      const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore);
+      const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
       const a = answer?.answers.action;
       const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null } } : offered.find((x) => x.id === a.choice)) : undefined;
       if (!chosen) result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
@@ -790,9 +799,9 @@ export class Runtime implements TurnHooks {
       // With no call left to fill its params, the action went unread, as when the call fails: a chip
       // says so, with Retry, rather than blaming the player for a place or person they did name.
       else if (!budget.take()) result = null;
-      else result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore);
+      else result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog.filter((c) => c.id === chosen.id), scene, { ...run.config, route: { provider: "helper", connectionId: null, model: null } }, userId, budget.signal, undefined, lore, run.guidance);
     } else {
-      result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore);
+      result = await interpret(this.steps, text, povWorld(this.registry, render.world, render.state), catalog, scene, run.config, userId, budget.signal, run.template ? renderTemplate(run.template.template, { world: render.world.name, pov: render.state.entities[render.world.pov]?.name ?? render.world.pov }) : undefined, lore, run.guidance);
     }
     // The call failed (a transient failure already had its second try): the turn runs as plain
     // roleplay, and a chip says the action went unread, with a Retry that runs the turn again.
@@ -895,7 +904,7 @@ export class Runtime implements TurnHooks {
     const answer = typeof intent.params.answer === "string" ? intent.params.answer : "";
     if (typeof intent.params.decision === "number" || !checkAnswer(render.world, render.state, track, answer).needsDecision) return;
     const stage = render.world.tracks[track]?.stages[render.state.tracks[track]?.stage ?? render.world.tracks[track]?.start ?? ""];
-    const run = runsOf(settings.modelUse, render.world, "puzzle.answer", facts)[0];
+    const run = runsOf(settings.modelUse, render.world, "puzzle.answer", facts, { guidance: at.guidance })[0];
     if (!run || !stage?.answer || !budget.take()) return;
     const owner = render.world.tracks[track]?.owner;
     const p = await puzzleAnswer(this.steps, run, stage.label, stage.answer.expect, answer, at.userId, budget.signal, this.stepLore(run, at, { text: `${stage.label}\n${answer}`, links: owner ? [owner] : [] }));
@@ -937,7 +946,7 @@ export class Runtime implements TurnHooks {
     const target = this.judgeTarget(bridge.intentOf(text), render);
     if (!target) return;
     const { intent, index, action, params, verdict, odds, policy } = target;
-    const run = runsOf(settings.modelUse, render.world, "judge", facts)[0];
+    const run = runsOf(settings.modelUse, render.world, "judge", facts, { guidance: at.guidance })[0];
     if (!run || !budget.take()) return;
     const story = verdict.why === "story" ? Object.fromEntries(outcomeChoices(action, Object.keys(odds)).map((o) => [o, odds[o] ?? 0])) : null;
     // The judge hears where the POV is as the player may know it: its reason is shown to the player.
@@ -973,8 +982,8 @@ export class Runtime implements TurnHooks {
    * where its traces go, and what the player has seen said this turn. Nothing is read from the host
    * for a world without lore.
    */
-  private async lorePhase(phase: "pre" | "post", key: string, userId: UserId, world: WorldDoc, state: WorldState, budget: StepBudget, said: string): Promise<LorePhase> {
-    const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION, said };
+  private async lorePhase(phase: "pre" | "post", key: string, userId: UserId, world: WorldDoc, state: WorldState, budget: StepBudget, said: string, guidance: Guidance): Promise<LorePhase> {
+    const at: LorePhase = { phase, key, userId, world, state, budget, active: ACTIVE_CONNECTION, said, guidance };
     if (Object.keys(world.lore).length === 0) return at;
     await this.toolSupport.ready(userId);
     return { ...at, active: await this.activeConnectionId(userId) };
@@ -1122,6 +1131,9 @@ export class Runtime implements TurnHooks {
     const settings = await this.settings.get(userId);
     const input = { chatId, userId, messageId, generationId: key, content };
     const pre = this.prePhase.get(key);
+    // A read without a pre phase (a Continue, Re-read edit, Retry read) takes the user's latest read
+    // of the preset: the read itself asks the host for nothing more.
+    const guidance = (pre?.preset ?? this.presets.last(userId)).guidance;
     const plan = bridge.planFor(context.seed);
     const ctx = this.registry.context(context.world, context.state);
     const ties = tiesOf(ctx, context.world, context.state);
@@ -1134,20 +1146,20 @@ export class Runtime implements TurnHooks {
     const modelUse = settings.modelUse;
     // What the reply's steps search lore with: the reply and the player's message, in the POV's scene.
     const read = { text: `${text}\n${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
-    const at = await this.lorePhase("post", key, userId, context.world, context.state, budget, read.text);
+    const at = await this.lorePhase("post", key, userId, context.world, context.state, budget, read.text, guidance);
     const lore = (r: StepRun, effects = false) => this.stepLore(r, at, read, effects);
     // Each step takes its call from the budget when it starts, in priority order.
-    const extractRun = runsOf(modelUse, context.world, "extract", facts).find((r) => r.template === null || r.template.output !== "effects");
+    const extractRun = runsOf(modelUse, context.world, "extract", facts, { guidance }).find((r) => r.template === null || r.template.output !== "effects");
     const extractTask = extractRun && budget.take()
-      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" || this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun))
+      ? extract(this.steps, text, povWorld(this.registry, context.world, context.state), prefixSummary(this.registry, context.world, context.state), clockMinutes(context.pre), EXTRACTION_TYPES.filter((t) => t === "time_advance" || this.registry.proposals.has(t)), extractRun.config, userId, budget.signal, extractRun.template ? renderTemplate(extractRun.template.template, vars) : undefined, lore(extractRun), extractRun.guidance)
       : Promise.resolve([]);
-    const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, "effects")).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
-    const npcRun = runsOf(modelUse, context.world, "npc.choose", facts)[0];
+    const effectsTasks = (["extract", "contradiction", "choices"] as const).flatMap((purpose) => runsOf(modelUse, context.world, purpose, facts, { output: "effects", guidance })).map((r) => (budget.take() ? promptedEffects(this.steps, r, vars, context.world.currency, userId, budget.signal, lore(r, true)) : Promise.resolve([])));
+    const npcRun = runsOf(modelUse, context.world, "npc.choose", facts, { guidance })[0];
     const npcTask = npcRun && ties.offscreen.length > 0 && budget.take() ? npcChoose(this.steps, npcRun, ties.offscreen, (t) => this.describeTie(t, context.world, context.state), createRng(hashParts("lre.npc.post", bridge.runSeed, key)), userId, budget.signal, this.stepLore(npcRun, at, this.tieInputs(ties.offscreen, context.world, context.state))) : Promise.resolve([]);
-    const contradictionRun = runsOf(modelUse, context.world, "contradiction", facts).find((r) => r.template === null || r.template.output === "decision");
+    const contradictionRun = runsOf(modelUse, context.world, "contradiction", facts, { guidance }).find((r) => r.template === null || r.template.output === "decision");
     const told = [...(plan ? planLines(plan, context.world, this.registry).outcome : []), ...factLines(this.registry, context.world, context.state, secrets)];
     const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text, userId, budget.signal, lore(contradictionRun)) : Promise.resolve(null);
-    const choiceRuns = runsOf(modelUse, context.world, "choices", facts, "text");
+    const choiceRuns = runsOf(modelUse, context.world, "choices", facts, { output: "text", guidance });
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
     const [extracted, effects, decisions, contradicted, choices] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks)]);
     // The reply's lore traces join its generation's inspector record (the pre phase's are there already).
@@ -1525,13 +1537,16 @@ export class Runtime implements TurnHooks {
     const settings = await this.settings.get(input.userId);
     const result: InterceptorResult = { disabled: [], enabled: [], forced: [], mutated: [] };
     const bookId = index?.loreBookId ?? null;
-    const slotIds = bookId ? await this.book.slotEntries(bookId, input.userId) : new Map<string, string>();
+    const entries = bookId ? await this.book.entriesOf(bookId, input.userId) : { slots: new Map<string, string>(), twins: new Map<string, string>(), narrator: null, narratorOutlet: null };
+    const slotIds = entries.slots;
     const present = new Set(input.entries.filter((e) => e.bookId === bookId).map((e) => e.id));
     const ctx = this.registry.context(world, state);
     const secrets = unrevealedSecrets(this.registry, world, state);
     const plan = Object.values(core.journal.pending).filter((p) => p.planned).at(-1);
     const turnPlan = plan ? this.bridges.get(input.chatId)?.planFor(plan.seed) : undefined;
     const prose = turnPlan && plan ? this.bridges.get(input.chatId)?.proseFor(plan.seed) : undefined;
+    // What the active preset says this generation: the one its pre phase read, else read now (a dry run).
+    const preset = (plan ? this.prePhase.get(plan.generationId)?.preset : undefined) ?? (await this.presets.current(input.chatId, input.userId));
     // A plan the bridge no longer holds (a restart, or 64 newer plans) comes back from storage.
     const kept = plan && !turnPlan ? await this.planNotes.get(input.chatId, input.userId, plan.seed) : null;
     const outline = turnPlan ? planOutline(turnPlan, prose) : (kept?.outline ?? []);
@@ -1547,14 +1562,20 @@ export class Runtime implements TurnHooks {
       // world lore an earlier build synced into the book is removed; the hook itself reads nothing.
       const missing = sectionsOf(world).some((s) => !present.has(slotIds.get(s.id) ?? ""));
       if (missing) record.warnings = ["Some engine slot entries were missing from the world's book; they are recreated for the next turn."];
-      if (missing || input.entries.some((e) => e.bookId === bookId && loreOfEntry(e.extensions) !== null)) void this.book.ensure(world, index, input.userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] book repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
+      // A book an earlier build made has no outlet twins or narrator entries yet: they are added quietly.
+      const unrouted = sectionsOf(world).some((s) => !present.has(entries.twins.get(s.id) ?? "")) || !present.has(entries.narrator ?? "") || !present.has(entries.narratorOutlet ?? "");
+      if (missing || unrouted || input.entries.some((e) => e.bookId === bookId && loreOfEntry(e.extensions) !== null)) void this.book.ensure(world, index, input.userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] book repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
     }
     // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2).
     let budget = settings.modelUse.tokens.sections;
     const { delivery } = await this.inspector.load(input.chatId, input.userId);
     const uncounted: string[] = [];
     for (const section of sectionsOf(world)) {
-      const entryId = slotIds.get(section.id);
+      // The preset places the section itself when an enabled block holds `{{outlet::lre_<slot>}}`
+      // (DESIGN §6.7): its outlet twin is filled instead, and the world's placement waits.
+      const twin = entries.twins.get(section.id);
+      const routed = twin !== undefined && present.has(twin) && preset.outlets.has(outletOf(section.id));
+      const entryId = routed ? twin : slotIds.get(section.id);
       if (!entryId || !present.has(entryId)) continue;
       const lines: string[] = [];
       for (const r of this.registry.renderers) {
@@ -1586,10 +1607,19 @@ export class Runtime implements TurnHooks {
       record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
       if (clipped) continue;
       budget -= cost;
-      const placement = placementOf(section);
+      const placement = routed ? null : placementOf(section);
       result.enabled.push(entryId);
       result.forced.push(entryId);
       result.mutated.push({ id: entryId, content, ...(placement ? { placement } : {}) });
+    }
+    // The preset's narrator rules, for world chats only: at its `{{outlet::lre_narrator}}`, else
+    // before the character. They are the preset's own text, apart from the section budget.
+    const rules = preset.guidance.narrator;
+    const rulesAt = entries.narratorOutlet !== null && present.has(entries.narratorOutlet) && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
+    if (rules && rulesAt && present.has(rulesAt)) {
+      result.enabled.push(rulesAt);
+      result.forced.push(rulesAt);
+      result.mutated.push({ id: rulesAt, content: `[Narrator rules]\n${rules}` });
     }
     this.countLater(input.userId, uncounted);
     record.budget.used = settings.modelUse.tokens.sections - budget;
@@ -1641,6 +1671,26 @@ export class Runtime implements TurnHooks {
   /** The user's default connection id, the key its D4 learning is kept under; `"active"` when the host can't say. */
   async activeConnectionId(userId: UserId): Promise<string> {
     return (await this.host.connections.active(userId).catch(() => null))?.id ?? ACTIVE_CONNECTION;
+  }
+
+  /**
+   * Settings → Preset (DESIGN §6.7): what the active preset says, read for the open chat (else the
+   * world chat last played); with `add`, after adding the RPEngine blocks it lacks. Its outlets are
+   * named by the open world chat's sections, else the default ones. Null when `add` finds no preset.
+   */
+  async presetCard(userId: UserId, add: boolean): Promise<PresetCard | null> {
+    const open = await this.host.chats.active(userId).catch(() => null);
+    const chatId = open ?? this.lastWorldChat.get(userId) ?? null;
+    const config = add ? await this.presets.addBlocks(chatId, userId) : await this.presets.current(chatId, userId);
+    if (!config) return null;
+    const run = open ? await this.runOf(open, userId) : null;
+    const sections = run ? sectionsOf((await this.worlds.get(run.worldId, userId, run.revision)).world) : Object.values(DEFAULT_SECTIONS);
+    const labels = new Map<string, string>([...sections.map((s): [string, string] => [outletOf(s.id), s.label]), [NARRATOR_OUTLET, "Narrator rules"]]);
+    return {
+      preset: config.preset,
+      outlets: [...config.outlets].sort().map((outlet) => ({ outlet, label: labels.get(outlet) ?? null })),
+      blocks: GUIDANCE_TARGETS.map((target) => ({ target, name: `${GUIDANCE_PREFIX}${target}`, state: config.blocks[target] })),
+    };
   }
 
   /**

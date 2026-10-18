@@ -3,7 +3,7 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
+import type { PromptBlockCreateDTO, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -472,7 +472,7 @@ export function createSpindleHost(): HostPort {
         // The host's order: the default connection's linked preset, else the active Loom preset.
         const connection = (await spindle.connections.list(userId)).find((c) => c.is_default);
         let presetId = connection?.preset_id ?? activePreset.get(userId) ?? null;
-        if (!presetId) {
+        if (!presetId && chatId) {
           const rows = await spindle.chat.getMessages(chatId);
           for (let i = rows.length - 1; i >= 0 && !presetId; i--) {
             const row = rows[i];
@@ -483,7 +483,15 @@ export function createSpindleHost(): HostPort {
         }
         if (!presetId) return null;
         const preset = await spindle.presets.get(presetId, userId);
-        return preset ? { id: preset.id, name: preset.name } : null;
+        return preset ? { id: preset.id, name: preset.name, revision: preset.cache_revision } : null;
+      },
+      async blocks(presetId, userId) {
+        return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({ id: b.id, name: b.name, content: b.content, enabled: b.enabled, marker: b.marker, injectionTrigger: [...(b.injectionTrigger ?? [])] }));
+      },
+      async addBlock(presetId, block, index, userId) {
+        // A guidance block is never sent to the narrator: it stays switched off, and the engine reads it.
+        const input: PromptBlockCreateDTO = block.kind === "category" ? { name: block.name, marker: "category", categoryMode: "checkbox", content: "" } : { name: block.name, content: block.content, enabled: false, role: "system", position: "pre_history" };
+        await spindle.presets.blocks.create(presetId, input, { ...(index !== null ? { index } : {}), userId });
       },
     },
     connections: {

@@ -119,7 +119,8 @@ describe("backend runtime", () => {
     if (!bookId) throw new Error("no engine book");
     const slots = await rig.host.books.entries(bookId, rig.host.userId);
     expect(slots.length).toBeGreaterThan(0);
-    expect(slots.every((e) => slotOfEntry(e.extensions) !== null && e.disabled && e.keys.length === 0 && e.content === "")).toBe(true);
+    // The engine's own entries only: slots, their outlet twins and the narrator rules, all stored switched off and empty.
+    expect(slots.every((e) => { const ns = e.extensions[LEDGER_NAMESPACE]; return (slotOfEntry(e.extensions) !== null || (isRecord(ns) && (typeof ns.twin === "string" || typeof ns.narrator === "string"))) && e.disabled && e.keys.length === 0 && e.content === ""; })).toBe(true);
     // A gated secret's lore as an earlier build synced it: its full text, its gate in extension data.
     await rig.host.books.createEntry(bookId, { comment: "The vault", content: "Rumors say the bank has an old vault.", keys: [], disabled: true, constant: false, position: 0, depth: 4, role: null, order: 200, extensions: { [LEDGER_NAMESPACE]: { lore: "vault", keys: ["ferry"], links: [], secret: true, gate: "false", hash: "old" } } }, rig.host.userId);
     // Attaching the world to a chat ensures its book: the copy goes, the slots stay.

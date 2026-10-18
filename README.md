@@ -50,7 +50,7 @@ LumiRPEngine asks for nine permissions. Here is why each one is there:
 - `chats`: to read and update a chat's metadata, where a world chat records the world it plays and lists the world's lore book (attaching a world writes both), and to know which chat is open.
 - `chat_mutation`: to read each chat's messages and swipes, so the world stays in step with every swipe, edit and branch; to save the world's record on each reply; and to add your palette, chip and map actions to the chat as messages.
 - `world_books`: to create and maintain the world's own lore book, which holds its sections, attach it to the chat, read the books you pick for **Import from lore** or **Index a World Info book**, and tell you when a book that lore was indexed from has changed.
-- `presets`: to read your active preset, so it can check where the world's sections will land in the prompt and warn you about settings that cause trouble.
+- `presets`: to read your active preset, so it can check where the world's sections will land in the prompt, warn you about settings that cause trouble, place sections where the preset's `{{outlet::lre_…}}` macros ask and pass its RPEngine blocks to the engine's helpers; and, when you ask in **Settings → Preset**, to add those blocks to it.
 - `regex_scripts`: to keep one regex script in each world chat that hides the JSON blocks some presets ask replies to carry and keeps them out of World Info scanning. **Settings → Preset** turns it off.
 - `decisions`: to use Lumiverse's Decisions API for the probability questions the engine asks, such as what an NPC does on a close call.
 - `ui_panels`: for the status pill, the map and the action palette with its Timelapse tab, which float over the chat. The drawer tab needs no permission.

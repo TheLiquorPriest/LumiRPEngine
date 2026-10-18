@@ -397,6 +397,16 @@ export interface StudioOfferView {
   installed: { worldId: WorldId; revision: RevisionId } | null;
 }
 
+/** Settings → Preset (DESIGN §6.8): `get` reads the active preset's card; `add` adds the RPEngine blocks it lacks, then reads it. */
+export type PresetRequest = Request<"lre.preset"> & { op: "get" | "add" };
+
+/** What the active preset says to LumiRPEngine: the section outlets its enabled blocks hold (with the section each places, null when none has that name) and each guidance block's state. */
+export interface PresetCard {
+  preset: { id: string; name: string } | null;
+  outlets: { outlet: string; label: string | null }[];
+  blocks: { target: string; name: string; state: "missing" | "empty" | "read" | "enabled" }[];
+}
+
 export type FrontendToBackend =
   | HelloRequest
   | ResyncRequest
@@ -416,7 +426,8 @@ export type FrontendToBackend =
   | MapRequest
   | JobRequest
   | LoreRequest
-  | StudioRequest;
+  | StudioRequest
+  | PresetRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -481,6 +492,7 @@ export interface ResultBodies {
    * became, with the macros to review before playing it (`lint`).
    */
   "lre.studio": { offer?: StudioOfferView | null; message?: string; installed?: { offerId: string; mode: "new" | "revision"; worldId: WorldId; name: string; revision: RevisionId; attachChatId: ChatId | null }; lint?: LintIssue[] };
+  "lre.preset": { card: PresetCard };
 }
 
 export type ResultMessage = {

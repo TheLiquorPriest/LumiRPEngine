@@ -13,6 +13,7 @@ import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { SectionTemplate, SlotPosition, WorldDoc, WorldIndex } from "../shared/world";
 import type { HostBookEntry, HostEntryPlacement, HostPort, PlacementOverride } from "./host";
+import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
 import type { WorldStore } from "./worlds";
 
 /** Sections a world gets when it defines none (DESIGN §4.2 slot list); lower rank is kept first. */
@@ -64,9 +65,39 @@ export function loreOfEntry(extensions: Readonly<Record<string, unknown>>): stri
   return isRecord(ns) && typeof ns.lore === "string" ? ns.lore : null;
 }
 
+/** The engine's entries in one world's book. */
+export interface BookEntries {
+  /** Each section's own entry, by slot. */
+  slots: Map<SlotId, string>;
+  /** Each section's outlet twin, outlet-only at `{{outlet::lre_<slot>}}`, for a preset that places the section itself (DESIGN §6.7). */
+  twins: Map<SlotId, string>;
+  /** The preset's narrator rules: their own entry (before the character) and their twin at `{{outlet::lre_narrator}}`. */
+  narrator: string | null;
+  narratorOutlet: string | null;
+}
+
+/** The engine's entries among a book's, with the Position each slot entry was placed for, and the lore copies an earlier build left. */
+function sortEntries(all: readonly HostBookEntry[]): { found: BookEntries; slots: Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>; leftoverLore: string[] } {
+  const found: BookEntries = { slots: new Map(), twins: new Map(), narrator: null, narratorOutlet: null };
+  const slots = new Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>();
+  const leftoverLore: string[] = [];
+  for (const e of all) {
+    const ns = e.extensions[LEDGER_NAMESPACE];
+    const slot = slotOfEntry(e.extensions);
+    if (slot) {
+      found.slots.set(slot, e.id);
+      slots.set(slot, { id: e.id, placed: isRecord(ns) && typeof ns.placed === "string" ? ns.placed : null, extensions: e.extensions });
+    } else if (isRecord(ns) && typeof ns.twin === "string") found.twins.set(ns.twin, e.id);
+    else if (isRecord(ns) && ns.narrator === "rules") found.narrator = e.id;
+    else if (isRecord(ns) && ns.narrator === "outlet") found.narratorOutlet = e.id;
+    else if (loreOfEntry(e.extensions) !== null) leftoverLore.push(e.id);
+  }
+  return { found, slots, leftoverLore };
+}
+
 export class EngineBook {
-  /** bookId → slot → entry id */
-  private readonly slots = new Map<string, Map<SlotId, string>>();
+  /** The engine's entries by book. */
+  private readonly known = new Map<string, BookEntries>();
 
   constructor(
     private readonly host: HostPort,
@@ -74,8 +105,9 @@ export class EngineBook {
   ) {}
 
   /**
-   * Creates the world's book if it has none (or it was deleted) and a slot entry per section, moves
-   * each entry whose section's Position changed since the engine placed it, and deletes the world lore
+   * Creates the world's book if it has none (or it was deleted) and the engine's entries in it: a slot
+   * entry and an outlet twin per section, and the narrator rules with their twin. It moves each slot
+   * entry whose section's Position changed since the engine placed it, and deletes the world lore
    * copies an earlier build synced into the book: lore is no longer delivered, and those copies (secret
    * ones included) shouldn't sit in a host-visible book. The world document keeps the lore.
    */
@@ -85,49 +117,41 @@ export class EngineBook {
       bookId = await this.host.books.create(`LumiRPEngine · ${world.name}`, "Engine-managed slots. Entries here are activated only by LumiRPEngine.", userId);
       await this.worlds.setLoreBook(world.id, bookId, userId);
     }
-    // Read the book afresh: a slot entry deleted in the host's UI is recreated.
-    const existing = new Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>();
-    const leftoverLore: string[] = [];
-    for (const e of await this.host.books.entries(bookId, userId)) {
-      const slot = slotOfEntry(e.extensions);
-      const ns = e.extensions[LEDGER_NAMESPACE];
-      if (slot) existing.set(slot, { id: e.id, placed: isRecord(ns) && typeof ns.placed === "string" ? ns.placed : null, extensions: e.extensions });
-      else if (loreOfEntry(e.extensions) !== null) leftoverLore.push(e.id);
-    }
-    const ids = new Map<SlotId, string>();
+    // Read the book afresh: an entry deleted in the host's UI is recreated.
+    const { found, slots, leftoverLore } = sortEntries(await this.host.books.entries(bookId, userId));
+    const blank = { content: "", keys: [] as string[], disabled: true, constant: false };
     for (const section of sectionsOf(world)) {
       const p = section.position;
       // The Position the entry was placed for, so a later change of it is seen (the host's own entry
       // fields can't tell: the outlet isn't read back, and a move in its editor changes them too).
       const placed = p.type === "chat_depth" ? `chat_depth:${p.role}:${p.depth}:${p.direction}` : p.type === "outlet" ? `outlet:${p.name.trim()}` : "native";
-      const known = existing.get(section.id);
+      const known = slots.get(section.id);
       const extensions: JsonObject = { ...(known?.extensions ?? {}), [LEDGER_NAMESPACE]: { slot: section.id, placed } };
-      if (!known) {
-        ids.set(section.id, await this.host.books.createEntry(bookId, { comment: `LRE · ${section.label}`, content: "", keys: [], disabled: true, constant: false, ...entryPlacement(p), order: 100 + section.rank, extensions }, userId));
-        continue;
-      }
-      ids.set(section.id, known.id);
+      if (!known) found.slots.set(section.id, await this.host.books.createEntry(bookId, { ...blank, comment: `LRE · ${section.label}`, ...entryPlacement(p), order: 100 + section.rank, extensions }, userId));
       // A move in the host's editor stands until the Position changes; a native entry an earlier
       // build made (none recorded) keeps its place.
-      if (known.placed !== placed && !(known.placed === null && p.type === "native")) await this.host.books.place(known.id, entryPlacement(p), extensions, userId);
+      else if (known.placed !== placed && !(known.placed === null && p.type === "native")) await this.host.books.place(known.id, entryPlacement(p), extensions, userId);
+      if (!found.twins.has(section.id)) found.twins.set(section.id, await this.host.books.createEntry(bookId, { ...blank, comment: `LRE · ${section.label} (preset outlet)`, position: 8, depth: 4, role: "system", outlet: outletOf(section.id), order: 100 + section.rank, extensions: { [LEDGER_NAMESPACE]: { twin: section.id } } }, userId));
     }
-    // Slots of sections the world no longer has keep their entries (voted off each turn).
-    for (const [slot, e] of existing) if (!ids.has(slot)) ids.set(slot, e.id);
-    this.slots.set(bookId, ids);
+    found.narrator ??= await this.host.books.createEntry(bookId, { ...blank, comment: "LRE · Narrator rules", position: 0, depth: 4, role: "system", order: 99, extensions: { [LEDGER_NAMESPACE]: { narrator: "rules" } } }, userId);
+    found.narratorOutlet ??= await this.host.books.createEntry(bookId, { ...blank, comment: "LRE · Narrator rules (preset outlet)", position: 8, depth: 4, role: "system", outlet: NARRATOR_OUTLET, order: 99, extensions: { [LEDGER_NAMESPACE]: { narrator: "outlet" } } }, userId);
+    this.known.set(bookId, found);
     for (const id of leftoverLore) await this.host.books.deleteEntry(id, userId);
     return bookId;
   }
 
-  async slotEntries(bookId: string, userId: UserId): Promise<Map<SlotId, string>> {
-    const known = this.slots.get(bookId);
+  /** The engine's entries in the book, read once and kept until the next ensure. */
+  async entriesOf(bookId: string, userId: UserId): Promise<BookEntries> {
+    const known = this.known.get(bookId);
     if (known) return known;
-    const map = new Map<SlotId, string>();
-    for (const e of await this.host.books.entries(bookId, userId)) {
-      const slot = slotOfEntry(e.extensions);
-      if (slot) map.set(slot, e.id);
-    }
-    this.slots.set(bookId, map);
-    return map;
+    const { found } = sortEntries(await this.host.books.entries(bookId, userId));
+    this.known.set(bookId, found);
+    return found;
+  }
+
+  /** Each section's own entry, by slot. */
+  async slotEntries(bookId: string, userId: UserId): Promise<Map<SlotId, string>> {
+    return (await this.entriesOf(bookId, userId)).slots;
   }
 
   /** Appends the book to the chat's `chat_world_book_ids` (read-merge-write). */

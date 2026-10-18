@@ -317,6 +317,12 @@ export class Dispatcher {
         }
         return;
       }
+      case "lre.preset": {
+        const card = await this.rt.presetCard(userId, r.op === "add");
+        if (!card) throw new RequestError("not_found", "There is no active preset to add the blocks to.");
+        reply("lre.preset", { card });
+        return;
+      }
       case "lre.lore": {
         if (r.op === "save") {
           const run = await this.rt.runOf(r.chatId, userId);

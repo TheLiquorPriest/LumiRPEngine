@@ -8,7 +8,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { BoundMode } from "../../shared/ids";
-import type { ExtractionModeView, SettingsResult, UpgradePreview } from "../../shared/protocol";
+import type { ExtractionModeView, PresetCard, SettingsResult, UpgradePreview } from "../../shared/protocol";
 import { EXTRACTION_TYPES } from "../../shared/settings";
 import type { ExtractionType } from "../../shared/settings";
 import type { AdjudicationPresetId, WorldDoc, WorldIndex } from "../../shared/world";
@@ -157,6 +157,44 @@ function PinsSection() {
   );
 }
 
+const BLOCK_STATE: Record<PresetCard["blocks"][number]["state"], string> = {
+  missing: "Not in this preset",
+  empty: "Switched off, nothing written yet",
+  read: "Read for this helper",
+  enabled: "Switched on: it reaches the narrator in every chat, so the engine doesn't read it",
+};
+
+/** The active preset and what it says to LumiRPEngine (DESIGN §6.7; docs/PRESETS.md). */
+function PresetSection() {
+  const app = useApp();
+  const [card, setCard] = useState<PresetCard | null>(null);
+  const [busy, run] = useBusy();
+  useEffect(() => {
+    void app.request({ type: "lre.preset", op: "get" }).then((result) => setCard(result?.card ?? null));
+  }, []);
+  if (!card) return <Empty>Reading the active preset…</Empty>;
+  const missing = card.blocks.some((b) => b.state === "missing");
+  const add = () =>
+    run(async () => {
+      const result = await app.request({ type: "lre.preset", op: "add" });
+      if (result) setCard(result.card);
+    });
+  return (
+    <div class="lre-stack" data-lre-preset-card>
+      <Row k="Active preset" v={card.preset?.name ?? "—"} sub="The preset world chats assemble with now: your default connection's, else the active Loom preset." />
+      <div class="lre-h">Outlets</div>
+      {card.outlets.length === 0 ? <Empty>None: the world places every section.</Empty> : card.outlets.map((o) => <Row key={o.outlet} k={<code>{`{{outlet::${o.outlet}}}`}</code>} v={o.label ?? "no section of that name"} tone={o.label ? undefined : "warn"} />)}
+      <div class="lre-h">Guidance blocks</div>
+      {card.blocks.map((b) => (
+        <Row key={b.target} k={b.name} v={BLOCK_STATE[b.state]} tone={b.state === "enabled" ? "warn" : b.state === "read" ? undefined : "muted"} />
+      ))}
+      <button type="button" class="lre-btn" disabled={busy || !card.preset || !missing} onClick={add}>
+        Add RPEngine blocks to this preset
+      </button>
+    </div>
+  );
+}
+
 const STATIC_CAVEATS = [
   "LumiRPEngine does not manage lore; Lumiverse's World Info works as usual in world chats.",
   "Realism and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat from Play (Calendar, realism for this chat).",
@@ -259,6 +297,7 @@ export function Settings() {
         />
       </Fold>
       <Fold id="preset" title="Preset" summary={settings.hideJsonBlocks ? "JSON blocks hidden in world chats" : "JSON blocks shown"} {...fold}>
+        <PresetSection />
         <div class="lre-field" data-lre-hide-json>
           <HostSwitch label="Hide JSON blocks in world chats" checked={settings.hideJsonBlocks} disabled={busy} onChange={(hideJsonBlocks) => patch({ hideJsonBlocks })} />
           <span class="lre-small lre-muted">

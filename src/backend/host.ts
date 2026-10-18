@@ -276,6 +276,21 @@ export interface DryRun {
   model: string;
 }
 
+/** A preset prompt block as the engine reads it (`presets.blocks`). */
+export interface HostPresetBlock {
+  id: string;
+  name: string;
+  content: string;
+  enabled: boolean;
+  /** `"category"` for a category header, another marker for a structural block, else null. */
+  marker: string | null;
+  /** The generation types the block assembles for; empty for every one. */
+  injectionTrigger: string[];
+}
+
+/** A block the engine adds to a preset: a category header, or text that stays switched off. */
+export type HostPresetBlockInput = { kind: "category"; name: string } | { kind: "text"; name: string; content: string };
+
 // ---------------------------------------------------------------- regex scripts
 
 /** A chat-scoped regex script (`regex_scripts`), as the backend reads one. */
@@ -363,8 +378,15 @@ export interface HostPort {
   /** A dry-run assembly of the chat's next prompt (deliverability check, DESIGN §4.2; the D32 preset lint). */
   dryRun(chatId: ChatId, userId: UserId): Promise<DryRun>;
   presets: {
-    /** The preset the chat's prompts assemble with: the default connection's, else the active Loom preset. */
-    active(chatId: ChatId, userId: UserId): Promise<{ id: string; name: string } | null>;
+    /**
+     * The preset prompts assemble with, and its revision (which each change to it bumps): the default
+     * connection's, else the active Loom preset, else (with a chat) the one its last reply used.
+     */
+    active(chatId: ChatId | null, userId: UserId): Promise<{ id: string; name: string; revision: number } | null>;
+    /** The preset's blocks, in order. */
+    blocks(presetId: string, userId: UserId): Promise<HostPresetBlock[]>;
+    /** Adds a block at `index` (null: the end). */
+    addBlock(presetId: string, block: HostPresetBlockInput, index: number | null, userId: UserId): Promise<void>;
   };
   connections: {
     /** The user's default connection: the one a generation without its own route uses. */
