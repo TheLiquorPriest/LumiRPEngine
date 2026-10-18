@@ -1,4 +1,4 @@
-// Wires the fake host, the test pack and the real backend ledger service for tests.
+// Wires the fake host, the engine, test and combat packs and the real backend ledger service for tests.
 
 import { ChatSnapshots, LedgerService, toChain } from "../../src/backend/ledger-io";
 import { defaultSettings } from "../../src/backend/settings-store";
@@ -14,17 +14,22 @@ import { LedgerFold } from "../../src/engine/ledger/fold";
 import type { LedgerCore, TurnModel } from "../../src/engine/ledger/journal";
 import { referenceFold, type FoldTypes } from "../../src/engine/ledger/reference";
 import type { EventTypeDef, PackDef } from "../../src/engine/registry";
+import { enginePack } from "../../src/engine/engine-pack";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
+import type { QueueStop } from "../../src/engine/turn";
 import combatPack from "../../src/packs/combat/core/index";
 import { FakeHost } from "./fake-host";
-import { testModel, testPack, testWorlds } from "./test-pack";
+import { testModelWith, testPack, testWorlds } from "./test-pack";
 
-/** What a test may change about the harness's chats: packs beside the test and combat packs, the turn model, and the user's settings. */
+/** What a test may change about the harness's chats: packs beside the engine, test and combat packs, the turn model, and the user's settings. */
 export interface HarnessOptions {
   packs?: readonly PackDef[];
   model?: TurnModel;
   settings?: UserSettings;
 }
+
+/** The queued turns the harness's own model planned (Re-runs and turns planned in flight included), and how each queue that stopped early stopped. */
+export type Plays = Record<"queued" | QueueStop, number>;
 
 export interface Folds {
   reference: FoldOutput;
@@ -47,14 +52,20 @@ export class Harness {
   private seeds = 0;
   /** Makes the next swipe or regenerate a Re-narrate (P3), as the swipe-option chip does. */
   renarrateNext = false;
+  readonly plays: Plays = { queued: 0, check: 0, failure: 0, interruption: 0 };
   private readonly model: TurnModel;
   private readonly settings: UserSettings;
 
   constructor(seedMode: WorldDoc["seedMode"] = "fresh", options: HarnessOptions = {}) {
-    this.registry = createRegistry([testPack, combatPack, ...(options.packs ?? [])]);
-    this.model = options.model ?? testModel;
+    this.registry = createRegistry([enginePack, testPack, combatPack, ...(options.packs ?? [])]);
+    this.model =
+      options.model ??
+      testModelWith((plan) => {
+        if (plan.resolutions.length > 1) this.plays.queued++;
+        if (plan.stopped) this.plays[plan.stopped.cause]++;
+      });
     this.settings = options.settings ?? defaultSettings();
-    this.worlds = testWorlds(seedMode, true);
+    this.worlds = testWorlds(seedMode, true, true);
     this.revisions = [...this.worlds.keys()];
     this.boot();
   }

@@ -71,6 +71,10 @@ describe("ledger property suite", () => {
       if (!ONE && RUNS >= 100) expect(coverage.shiftedPlans).toBeGreaterThan(0);
       // Fights start, act, pass the turn and end (on any view, swipes and rebases included).
       for (const k of ["start", "act", "turn", "end"] as const) if (!ONE && RUNS >= 100) expect(coverage.fights[k]).toBeGreaterThan(0);
+      // Life changes and tellings land in planned turns (through the engine's `life` effect and a rule),
+      // and queued turns play several actions and stop at a check, a failure and an interruption.
+      for (const k of ["life", "told"] as const) if (!ONE && RUNS >= 100) expect(coverage.lives[k]).toBeGreaterThan(0);
+      for (const k of ["queued", "check", "failure", "interruption"] as const) if (!ONE && RUNS >= 100) expect(coverage.queues[k]).toBeGreaterThan(0);
     },
     24 * 60 * 60 * 1000,
   );

@@ -31,11 +31,11 @@ import { isLive, isTombstoned } from "../../src/engine/ledger/path";
 import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
-import type { Folds, Harness } from "./harness";
+import type { Folds, Harness, Plays } from "./harness";
 import { openMoney, POV } from "./test-pack";
 
 export type Op =
-  | { op: "send"; text: number; reply: number; createAtEnd: boolean; rerender: boolean; money?: number; toll?: number; fight?: number; opens?: number }
+  | { op: "send"; text: number; reply: number; createAtEnd: boolean; rerender: boolean; money?: number; toll?: number; fight?: number; opens?: number; life?: number }
   | { op: "regenerate"; at: number; reply: number; renarrate?: boolean; toll?: number; opens?: number }
   | { op: "continue"; at: number; reply: number; stop: boolean; rerenderPrefix: boolean }
   | { op: "editAndSend"; at: number; text: number; reply: number; branch: boolean }
@@ -50,16 +50,18 @@ export type Op =
   | { op: "import" }
   /**
    * `gm`: a GM-style fix instead (a money correction, a relation added or removed, a grouped edit),
-   * picked by its value; `open`: a ✎ cash fix on Dev instead, which opens his money first while it isn't.
+   * picked by its value; `open`: a ✎ cash fix on Dev instead, which opens his money first while it
+   * isn't; `life`: a GM life edit instead (a state set, someone told, or both as one unit).
    */
-  | { op: "write"; kind: number; a: number; b: number; gm?: number; open?: number }
-  /** A GM-style fix on the head (with `open`, a ✎ cash fix on Dev), then a Re-run of the head with any reply (L43). */
-  | { op: "fixRerun"; gm: number; a: number; reply: number; open?: number; opens?: number }
+  | { op: "write"; kind: number; a: number; b: number; gm?: number; open?: number; life?: number }
+  /** A GM-style fix on the head (with `open`, a ✎ cash fix on Dev; with `life`, a GM life edit), then a Re-run of the head with any reply (L43). */
+  | { op: "fixRerun"; gm: number; a: number; reply: number; open?: number; opens?: number; life?: number }
   | { op: "dryRun" }
   | { op: "restart" }
   | { op: "clobber"; at: number; echo: boolean }
   | { op: "excursion"; at: number; inner: Op[] }
-  | { op: "inFlight"; type: number; inner: Op[]; stop: boolean; reply: number; opens?: number }
+  /** With `life`, the turn in flight is a queued or life turn (`LIFE_TEXTS`). */
+  | { op: "inFlight"; type: number; inner: Op[]; stop: boolean; reply: number; opens?: number; life?: number }
   /** An Upgrade with picks (the definition merge) to one of the revisions, `picks` choosing them. */
   | { op: "upgrade"; to: number; picks: number }
   /** The chat as an earlier build wrote it from here (`Runner.earlierBuildStarts`): first in a sequence, if at all. */
@@ -77,13 +79,47 @@ const TOLL_REPLIES = ["You pay the toll. [pay:30]", "A fee is taken. [pay:15]", 
 const FIGHT_TEXTS = ["fight:rat", "strike:rat", "strike:rat", "end_turn", "flee"];
 // Replies naming Dev, whose read opens his money (once), kept apart for the same reason; the optional `opens` op field picks from these.
 const OPENING_REPLIES = ["Dev counts out his wages. [opens:dev]", "Dev pays you back. [opens:dev] [found:5]"];
+// Turns the engine plans with life changes and queued actions (DESIGN §8, §11), kept apart for the
+// same reason; the optional `life` op field picks from these. A queue stops at the gamble's check, a
+// splurge Sam can't afford, a visible alarm, a fight starting, or Sam collapsing; never at a hidden alarm.
+const LIFE_TEXTS = [
+  "do:kill:rat",
+  "do:revive:rat",
+  "do:wound:dev",
+  "do:revive:dev",
+  "do:tell:dev",
+  "do:collapse",
+  "do:revive:sam",
+  "do:work,go_out,kill:rat,go_in",
+  "do:go_out,revive:rat,go_in,tell:rat",
+  "do:work,gamble,work",
+  "do:work,splurge,work",
+  "do:work,alarm,work",
+  "do:work,hush,work",
+  "do:fight:rat,work",
+  "do:finish,work",
+  "do:collapse,work",
+];
+// GM life edits as the GM view records them (`engine/edits` through the `life` effect), kept apart for the same reason.
+const LIFE_FIXES: LedgerEvent[][] = [
+  [{ type: "engine.life", data: { entity: "dev", to: "dead" } }],
+  [{ type: "engine.life", data: { entity: "dev", to: "alive" } }],
+  [{ type: "engine.life", data: { entity: "rat", to: "dying" } }],
+  [{ type: "engine.life", data: { entity: POV, to: "dying" } }],
+  [{ type: "engine.told", data: { entity: "rat", who: [POV] } }],
+  [
+    { type: "engine.life", data: { entity: "rat", to: "dead" }, group: "edit:life" },
+    { type: "engine.told", data: { entity: "rat", who: ["dev"] }, group: "edit:life" },
+  ],
+];
 
 /**
  * How often a run exercised a funds drop, a grouped drop on a rebased view, a Re-run carrying or
  * dropping a fix, a Re-run dropping a fix whose materialization its new swipe had already made, a
  * copy of an earlier build's chat whose starting markers it had to restore, a turn checked on the
- * chain it was planned on after a deletion moved a swipe it saw, and a fight's start, acts, turns
- * and end (the suite asserts they happen).
+ * chain it was planned on after a deletion moved a swipe it saw, a fight's start, acts, turns and
+ * end, a turn's planned life changes and tellings, and queued turns and each way one stops early
+ * (the suite asserts they happen).
  */
 export interface Coverage {
   fundsDrops: number;
@@ -94,14 +130,17 @@ export interface Coverage {
   earlierCopies: number;
   shiftedPlans: number;
   fights: Record<"start" | "act" | "turn" | "end", number>;
+  lives: Record<"life" | "told", number>;
+  queues: Plays;
 }
 
 /** A fresh count for a runner or a whole suite. */
 export function noCoverage(): Coverage {
-  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, stripped: 0, earlierCopies: 0, shiftedPlans: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
+  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, stripped: 0, earlierCopies: 0, shiftedPlans: 0, fights: { start: 0, act: 0, turn: 0, end: 0 }, lives: { life: 0, told: 0 }, queues: { queued: 0, check: 0, failure: 0, interruption: 0 } };
 }
 
 const FIGHT_EVENTS: Record<string, keyof Coverage["fights"]> = { "combat.start": "start", "combat.act": "act", "combat.turn": "turn", "combat.end": "end" };
+const LIFE_EVENTS: Record<string, keyof Coverage["lives"]> = { "engine.life": "life", "engine.told": "told" };
 
 /**
  * The indexes of the source's events a carried copy left out, or null when the copy isn't the source
@@ -200,8 +239,43 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     else if (depth === 0) ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3), opens, removals), stop: r() < 0.25, reply: r(), ...(opens.next() < 0.3 ? { opens: opens.next() } : {}) });
     else ops.push({ op: "write", kind: r(), a: r(), b: r() });
   }
+  // Life changes and queued turns come after the rest, from a stream of their own, so every operation
+  // before them is generated and runs as before.
+  if (depth === 0) {
+    const lives = rng.fork("lives");
+    ops.push(...generateLives(lives, 1 + Math.floor(lives.next() * 12)));
+  }
   // Drawn from a stream of its own, so the sequence is otherwise as before.
   if (depth === 0 && rng.fork("earlier-build").next() < 0.25) ops.unshift({ op: "earlierBuild" });
+  return ops;
+}
+
+/**
+ * Life changes and queued turns (DESIGN §8, §11): turns the engine plans with the `life` effect,
+ * its rule and a queue of actions (`LIFE_TEXTS`), GM life edits (`LIFE_FIXES`), and around them the
+ * Re-runs, Re-narrates, edits, swipes, Keep choices, Upgrades and turns in flight that move a record
+ * onto another view, where its life changes re-validate.
+ */
+function generateLives(rng: Rng, length: number): Op[] {
+  const ops: Op[] = [];
+  const r = (): number => rng.next();
+  const opens = rng.fork("opens");
+  const removals = rng.fork("removals");
+  for (let i = 0; i < length; i++) {
+    const roll = r();
+    if (roll < 0.4) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: false, life: r() });
+    else if (roll < 0.5) ops.push({ op: "regenerate", at: r(), reply: r(), renarrate: r() < 0.5 });
+    else if (roll < 0.58) ops.push({ op: "write", kind: r(), a: r(), b: r(), life: r() });
+    else if (roll < 0.63) ops.push({ op: "fixRerun", gm: r(), a: r(), reply: r(), life: r() });
+    else if (roll < 0.68) ops.push({ op: "editUser", at: r(), text: r() });
+    else if (roll < 0.72) ops.push({ op: "editAndSend", at: r(), text: r(), reply: r(), branch: r() < 0.3 });
+    else if (roll < 0.77) ops.push({ op: "navigate", at: r(), swipe: r() });
+    else if (roll < 0.8) ops.push({ op: "deleteSwipe", at: r(), swipe: r() });
+    // Keep (with a conversion when something dropped) or Discard.
+    else if (roll < 0.86) ops.push({ op: "write", kind: 0.62 + r() * 0.23, a: r(), b: r() });
+    else if (roll < 0.9) ops.push({ op: "upgrade", to: r(), picks: r() });
+    else ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3), opens, removals, rng.fork(`lives:${i}`)), stop: r() < 0.25, reply: r(), life: r() });
+  }
   return ops;
 }
 
@@ -219,15 +293,16 @@ function generateExcursion(rng: Rng, length: number): Op[] {
 
 /**
  * Operations interleaved while a reply streams (P2); `opens` and `removals` are the generator's own
- * streams for Dev's money and for swipe deletions, swipe PUTs and message deletions. A removal
- * often lands on the message the operation before it touched: navigating a message off a swipe,
- * then deleting that swipe, is how a swipe the plan saw goes.
+ * streams for Dev's money and for swipe deletions, swipe PUTs and message deletions, and `lives`
+ * (life changes' turns in flight only) makes some writes GM life edits. A removal often lands on the
+ * message the operation before it touched: navigating a message off a swipe, then deleting that
+ * swipe, is how a swipe the plan saw goes.
  */
-function generateInner(rng: Rng, length: number, opens: Rng, removals: Rng): Op[] {
+function generateInner(rng: Rng, length: number, opens: Rng, removals: Rng, lives?: Rng): Op[] {
   const ops: Op[] = [];
   for (let i = 0; i < length; i++) {
     const roll = rng.next();
-    if (roll < 0.4) ops.push({ op: "write", kind: rng.next(), a: rng.next(), b: rng.next(), ...(rng.next() < 0.3 ? { gm: rng.next() } : {}), ...(opens.next() < 0.2 ? { open: opens.next() } : {}) });
+    if (roll < 0.4) ops.push({ op: "write", kind: rng.next(), a: rng.next(), b: rng.next(), ...(rng.next() < 0.3 ? { gm: rng.next() } : {}), ...(opens.next() < 0.2 ? { open: opens.next() } : {}), ...(lives && lives.next() < 0.3 ? { life: lives.next() } : {}) });
     else if (roll < 0.55) ops.push({ op: "navigate", at: rng.next() * 0.8, swipe: rng.next() });
     else if (roll < 0.7) ops.push({ op: "editAssistant", at: rng.next() * 0.8, text: rng.next() });
     else if (roll < 0.8) ops.push({ op: "editUser", at: rng.next(), text: rng.next() });
@@ -315,8 +390,9 @@ export class Runner {
     const chat = this.current;
     switch (op.op) {
       case "send": {
-        // Money texts take precedence, so fights never thin out the postings the coverage counts.
-        const text = op.money !== undefined ? pick(MONEY_TEXTS, op.money) : op.fight !== undefined ? pick(FIGHT_TEXTS, op.fight) : pick(USER_TEXTS, op.text);
+        // Money texts take precedence, so fights never thin out the postings the coverage counts; fights
+        // take it over life and queued turns, which would otherwise thin out a fight's turns.
+        const text = op.money !== undefined ? pick(MONEY_TEXTS, op.money) : op.fight !== undefined ? pick(FIGHT_TEXTS, op.fight) : op.life !== undefined ? pick(LIFE_TEXTS, op.life) : pick(USER_TEXTS, op.text);
         const u = host.sendUser(chat, text);
         await host.settle();
         const g = await host.start(chat, { type: "normal", createAtEnd: op.createAtEnd });
@@ -501,7 +577,7 @@ export class Runner {
       case "fixRerun": {
         const head = this.assistants().at(-1);
         if (!head || this.assistants().length < 2) return;
-        await this.h.write(chat, { kind: "post", id: `w${++this.ids}`, target: "head", entry: { kind: "fix", events: op.open !== undefined ? await this.devCashFix(op.open) : gmFix(op.gm, op.a) } });
+        await this.h.write(chat, { kind: "post", id: `w${++this.ids}`, target: "head", entry: { kind: "fix", events: op.open !== undefined ? await this.devCashFix(op.open) : op.life !== undefined ? pick(LIFE_FIXES, op.life) : gmFix(op.gm, op.a) } });
         const core = await this.h.core(chat);
         const before = structuredClone(core.journal.messages[head.id]?.ledger);
         const tombstones = structuredClone(core.journal.tombstones);
@@ -564,7 +640,7 @@ export class Runner {
         let g: Generation;
         let before: { ledger: MessageLedger | undefined; tombstones: Tombstone[] } | null = null;
         if (type === "normal") {
-          host.sendUser(chat, pick(USER_TEXTS, op.reply));
+          host.sendUser(chat, op.life !== undefined ? pick(LIFE_TEXTS, op.life) : pick(USER_TEXTS, op.reply));
           await host.settle();
           g = await host.start(chat, { type: "normal" });
         } else {
@@ -890,6 +966,7 @@ export class Runner {
     const id = `w${++this.ids}`;
     if (op.open !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: await this.devCashFix(op.open) } };
     if (op.gm !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: gmFix(op.gm, op.a) } };
+    if (op.life !== undefined) return { kind: "post", id, target: "head", entry: { kind: "fix", events: pick(LIFE_FIXES, op.life) } };
     const all = this.messages();
     const k = op.kind;
     if (k < 0.15) return { kind: "post", id, target: "head", entry: { kind: "materialize", events: [{ type: "materialize", entity: POV, domain: "gear", generatorVersion: 1, tablesRevision: "t", events: [{ type: "set", entity: POV, field: "detail", value: `detail-${Math.floor(op.a * 5)}` }] }] } };
@@ -975,6 +1052,8 @@ export class Runner {
         for (const e of rec.events) {
           const counted = Object.hasOwn(FIGHT_EVENTS, e.type) ? FIGHT_EVENTS[e.type] : undefined;
           if (counted) this.coverage.fights[counted]++;
+          const life = Object.hasOwn(LIFE_EVENTS, e.type) ? LIFE_EVENTS[e.type] : undefined;
+          if (life) this.coverage.lives[life]++;
         }
         const lists: { events: LedgerEvent[]; ref: (index: number) => EventRef }[] = [{ events: rec.events, ref: (index) => ({ in: "events", index }) }, ...rec.post.map((p) => ({ events: p.events, ref: (index: number): EventRef => ({ in: "post", seq: p.seq, index }) }))];
         for (const list of lists) {
@@ -1082,6 +1161,8 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       coverage.earlierCopies += runner.coverage.earlierCopies;
       coverage.shiftedPlans += runner.coverage.shiftedPlans;
       for (const k of ["start", "act", "turn", "end"] as const) coverage.fights[k] += runner.coverage.fights[k];
+      for (const k of ["life", "told"] as const) coverage.lives[k] += runner.coverage.lives[k];
+      for (const k of ["queued", "check", "failure", "interruption"] as const) coverage.queues[k] += runner.h.plays[k];
     }
     return null;
   } catch (error) {
