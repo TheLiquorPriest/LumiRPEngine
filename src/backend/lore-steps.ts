@@ -9,21 +9,23 @@
 // the phase's lookup budget, held before the model is offered it: a step that can't hold one gets
 // no tools, and answers with its prefetch only.
 //
-// The trace is shown to the player, so it carries only what the player may know (§7). A step that
-// may read an unrevealed secret writes its lookups with what that secret says: they show as their
-// kind and count only. Any other step's text is withheld when it carries a secret, or names someone
-// or somewhere the POV doesn't know; a lookup the model wrote is also withheld when it names a
-// secret entry.
+// The trace is shown to the player, so it carries only what the player may know (§7). An
+// unrevealed secret entry isn't in it at all, nor counted among what a search matched. A step that
+// may read an unrevealed secret writes its lookups with what that secret says, and `npc.choose`
+// writes its with an NPC's private options: their lookups show as their kind and count only, and
+// the entries `npc.choose` was given show without their titles. Any other step's text is withheld
+// when it carries a secret, or names someone or somewhere the POV doesn't know; a lookup the model
+// wrote is also withheld when it names a secret entry.
 
 import type { UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
-import { topicIdOf } from "../shared/lore";
+import { loreIsSecret, topicIdOf } from "../shared/lore";
 import type { StepLore as StepLoreSetting } from "../shared/settings";
 import type { LoreStepTrace } from "../shared/state-view";
-import type { StepPurpose } from "../shared/world";
+import type { LoreEntryDef, StepPurpose } from "../shared/world";
 import { loreGet, loreList, loreSearch, readableLore, readsSecrets, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
-import { findLeaks } from "../engine/visibility";
+import { findLeaks, loreGateReader } from "../engine/visibility";
 import type { HostPort, QuietResult, QuietTool } from "./host";
 import { parseJsonReply } from "./steps";
 import { readStoredJson } from "./stored-json";
@@ -34,8 +36,11 @@ export interface LoreInputs {
   text: string;
   /** The people and places it is about. */
   links: string[];
-  /** What the trace shows instead of `text`, when the text is private (an NPC's options). */
-  shown?: string;
+  /**
+   * Private inputs (an NPC's options): what the trace shows instead of `text`, or null when it isn't
+   * shown at all, being about no one the POV may know.
+   */
+  shown?: string | null;
 }
 
 /** How a step's lookups reach its model. */
@@ -146,6 +151,10 @@ export class StepLore {
   private transport: LookupTransport;
   /** The step may read a secret whose gate doesn't hold: its model's lookups are written with what the secret says. */
   private readonly guarded: boolean;
+  /** The step reads someone's private plans (`LoreInputs.shown`): its lookups and what they found say what those are. */
+  private readonly privateInputs: boolean;
+  /** Whether a secret entry's gate holds: one that doesn't is left out of the trace. */
+  private readonly gateOpen: (entry: LoreEntryDef) => boolean;
 
   constructor(
     readonly purpose: StepPurpose,
@@ -153,7 +162,7 @@ export class StepLore {
     private readonly reader: LoreReader,
     phase: "pre" | "post",
     private readonly withheld: TraceWithheld,
-    options: { effects?: boolean; counted?: (texts: readonly string[]) => void; lookups?: StepLookups | null } = {},
+    options: { effects?: boolean; counted?: (texts: readonly string[]) => void; lookups?: StepLookups | null; privateInputs?: boolean } = {},
   ) {
     this.effects = options.effects === true;
     this.counted = options.counted ?? (() => undefined);
@@ -161,12 +170,14 @@ export class StepLore {
     this.transport = this.lookups?.transport ?? "tools";
     this.trace = { step: purpose, phase, policy: setting.policy, transport: "none", queries: [], entries: [], lookups: 0, notes: [] };
     this.guarded = readsSecrets(reader.reg, reader.world, reader.state, purpose, this.effects);
+    this.privateInputs = options.privateInputs === true;
+    this.gateOpen = loreGateReader(reader.reg, reader.world, reader.state);
   }
 
   /** The prefetch: the index searched with the step's own inputs, at no extra call. */
   prefetch(inputs: LoreInputs): void {
     if (this.setting.policy !== "prefetch" && this.setting.policy !== "prefetch+lookup") return;
-    this.take("prefetch", inputs.shown ?? inputs.text, loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: this.setting.tokens }));
+    this.take("prefetch", inputs.shown === undefined ? inputs.text : (inputs.shown ?? ""), loreSearch(this.reader, { query: inputs.text, links: inputs.links, purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: this.setting.tokens }));
   }
 
   private note(text: string): void {
@@ -175,22 +186,26 @@ export class StepLore {
 
   /**
    * A query as the trace shows it: shortened, and withheld when it carries what the trace must not
-   * show. A lookup the model wrote shows no text at all when the step may read a secret.
+   * show. A lookup the model wrote shows no text at all when the step may read a secret or reads
+   * private inputs.
    */
   private shown(kind: LoreStepTrace["queries"][number]["kind"], text: string): string {
-    if (kind !== "prefetch" && this.guarded) return "";
+    if (kind !== "prefetch" && (this.guarded || this.privateInputs)) return "";
     const shown = text.replace(/\s+/g, " ").trim();
     if (findLeaks(shown, kind === "prefetch" ? this.withheld.text : [...this.withheld.text, ...this.withheld.names]).length > 0) return WITHHELD;
     return shown.length > TRACE_CHARS ? `${shown.slice(0, TRACE_CHARS)}…` : shown;
   }
 
-  /** Records a search in the trace and keeps the hits the step hasn't been given yet. */
+  /**
+   * Records a search in the trace and keeps the hits the step hasn't been given yet. An unrevealed
+   * secret is neither listed nor counted; a private step's entries go without their titles.
+   */
   private take(kind: LoreStepTrace["queries"][number]["kind"], text: string, result: LoreResult): LoreHit[] {
-    this.trace.queries.push({ kind, text: this.shown(kind, text), matched: result.matched });
+    this.trace.queries.push({ kind, text: this.shown(kind, text), matched: result.matched - result.secret });
     const fresh = result.hits.filter((h) => !this.given.has(h.id));
     for (const h of fresh) {
       this.given.set(h.id, h);
-      this.trace.entries.push({ title: h.secret ? "A secret entry" : findLeaks(h.title, this.withheld.text).length > 0 ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut, secret: h.secret });
+      if (!h.secret) this.trace.entries.push({ title: this.privateInputs ? "" : findLeaks(h.title, this.withheld.text).length > 0 ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut });
     }
     if (fresh.length > 0) this.counted(fresh.map((h) => h.snippet));
     return fresh;
@@ -304,7 +319,13 @@ export class StepLore {
       }
       if (a.kind === "list") {
         const listed = loreList(this.reader, a.text, this.purpose, this.effects);
-        this.trace.queries.push({ kind: "list", text: this.shown("list", a.text), matched: listed.length });
+        // The trace counts what the list names, an unrevealed secret left out.
+        const lore = this.reader.world.lore;
+        const shownCount = listed.filter((l) => {
+          const def = hasOwn(lore, l.id) ? lore[l.id] : undefined;
+          return !(def && loreIsSecret(def) && !this.gateOpen(def));
+        }).length;
+        this.trace.queries.push({ kind: "list", text: this.shown("list", a.text), matched: shownCount });
         // A list names entries within the round's lore tokens, as a search's snippets are.
         const lines: string[] = [];
         for (const l of listed.slice(0, LIST_LIMIT)) {
@@ -322,7 +343,7 @@ export class StepLore {
       let result: LoreResult;
       if (a.kind === "get") {
         const hit = loreGet(this.reader, a.text, this.purpose, left, this.effects);
-        result = { hits: hit ? [hit] : [], matched: hit ? 1 : 0 };
+        result = { hits: hit ? [hit] : [], matched: hit ? 1 : 0, secret: hit?.secret === true ? 1 : 0 };
       } else {
         result = loreSearch(this.reader, { query: a.text, ...(a.topic ? { topics: [topicIdOf(a.topic)] } : {}), purpose: this.purpose, effects: this.effects, limit: SEARCH_LIMIT, tokenBudget: left, skip: new Set(this.given.keys()) });
       }

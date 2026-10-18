@@ -52,7 +52,12 @@ function isInspectorRecord(raw: unknown): raw is InspectorRecord {
 const TRANSPORTS: readonly LoreStepTrace["transport"][] = ["none", "tools", "need"];
 const QUERY_KINDS: readonly LoreStepTrace["queries"][number]["kind"][] = ["prefetch", "search", "get", "list"];
 
-/** A record's lore traces as stored: the well-formed ones, so a damaged trace costs only itself; `legacy` drops the queries' text. */
+/**
+ * A record's lore traces as stored: the well-formed ones, so a damaged trace costs only itself;
+ * `legacy` drops the queries' text. Whenever it was kept, a trace reads as one kept now would: one
+ * listing a secret entry isn't shown, and `npc.choose`'s (an NPC's private options) shows its
+ * lookups without their text and its entries without titles.
+ */
 function loreTracesOf(raw: unknown, legacy: boolean): LoreStepTrace[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: LoreStepTrace[] = [];
@@ -62,11 +67,14 @@ function loreTracesOf(raw: unknown, legacy: boolean): LoreStepTrace[] | undefine
     const policy = LORE_POLICIES.find((p) => p === t.policy);
     const transport = TRANSPORTS.find((x) => x === t.transport);
     if (!step || !policy || !transport || (t.phase !== "pre" && t.phase !== "post")) continue;
+    // A trace kept before secret entries were left out lists them, and its counts include them.
+    if (t.entries.some((e) => isRecord(e) && e.secret === true)) continue;
+    const privateInputs = step === "npc.choose";
     const queries = t.queries.flatMap((q) => {
       const kind = isRecord(q) ? QUERY_KINDS.find((k) => k === q.kind) : undefined;
-      return kind && isRecord(q) && typeof q.text === "string" && typeof q.matched === "number" ? [{ kind, text: legacy ? "" : q.text, matched: q.matched }] : [];
+      return kind && isRecord(q) && typeof q.text === "string" && typeof q.matched === "number" ? [{ kind, text: legacy || (privateInputs && kind !== "prefetch") ? "" : q.text, matched: q.matched }] : [];
     });
-    const entries = t.entries.flatMap((e) => (isRecord(e) && typeof e.title === "string" && typeof e.tokens === "number" && typeof e.cut === "boolean" && typeof e.secret === "boolean" ? [{ title: e.title, tokens: e.tokens, cut: e.cut, secret: e.secret }] : []));
+    const entries = t.entries.flatMap((e) => (isRecord(e) && typeof e.title === "string" && typeof e.tokens === "number" && typeof e.cut === "boolean" ? [{ title: privateInputs ? "" : e.title, tokens: e.tokens, cut: e.cut }] : []));
     out.push({ step, phase: t.phase, policy, transport, queries, entries, lookups: t.lookups, notes: [...t.notes] });
   }
   return out;

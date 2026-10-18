@@ -844,8 +844,9 @@ export class Runtime implements TurnHooks {
    * Its prefetch searches the step's own inputs now, at no call; its lookups go to the connection
    * the step's helper calls use (a helper route's, else the default), as tools unless the step says
    * otherwise or that connection was seen refusing them. Its trace is kept under the phase's key
-   * for the inspector. Snippets cost the host's count of their text once it has one for this
-   * user, else the estimate, and are counted in the background.
+   * for the inspector, unless the step is about no one the POV may know (`LoreInputs.shown` null).
+   * Snippets cost the host's count of their text once it has one for this user, else the
+   * estimate, and are counted in the background.
    */
   private stepLore(run: { purpose: StepPurpose; config: StepConfig }, at: LorePhase, inputs: LoreInputs, effects = false): StepLore | null {
     const { world, state, userId } = at;
@@ -866,9 +867,9 @@ export class Runtime implements TurnHooks {
     const unsaid = (s: string): boolean => !said.includes(s.toLowerCase());
     const people = Object.entries(state.entities).flatMap(([id, e]) => (povMayKnow(this.registry, world, state, id) || e.name.trim().length < 3 ? [] : [e.name]));
     const withheld = { text: [...unrevealedSecrets(this.registry, world, state), ...people, ...unseenPlaceNames(this.registry, world, state, world.pov)].filter(unsaid), names: secretLoreNames(this.registry, world, state).filter(unsaid) };
-    const lore = new StepLore(run.purpose, setting, reader, at.phase, withheld, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused } });
+    const lore = new StepLore(run.purpose, setting, reader, at.phase, withheld, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused }, privateInputs: inputs.shown !== undefined });
     lore.prefetch(inputs);
-    lruSet(this.loreTraces, at.key, [...(this.loreTraces.get(at.key) ?? []), lore.trace], 64);
+    if (inputs.shown !== null) lruSet(this.loreTraces, at.key, [...(this.loreTraces.get(at.key) ?? []), lore.trace], 64);
     return lore;
   }
 
@@ -894,14 +895,15 @@ export class Runtime implements TurnHooks {
   /**
    * What `npc.choose` searches lore with: the agents, their options and where they are. Its trace
    * shows only whose choice it is, by name where the POV knows them: the options are their private
-   * plans (§7).
+   * plans (§7). A batch with no one the POV may know has no trace to show: a row for it would say
+   * someone hidden is choosing.
    */
   private tieInputs(ties: readonly Tie[], world: WorldDoc, state: WorldState): LoreInputs {
     const links = ties.flatMap((t) => [t.agent, ...[placeOfEntity(state, t.agent)].filter((p): p is string => typeof p === "string")]);
     const text = ties.map((t) => `${state.entities[t.agent]?.name ?? t.agent}: ${t.options.map((o) => o.replace(/[_:.-]+/g, " ")).join(", ")}`).join("\n");
     const known = [...new Set(ties.filter((t) => povMayKnow(this.registry, world, state, t.agent)).map((t) => state.entities[t.agent]?.name ?? t.agent))];
     const last = known.at(-1);
-    const shown = last === undefined ? "An NPC's choice" : known.length === 1 ? `${last}'s choice` : `${known.slice(0, -1).join(", ")} and ${last}'s choices`;
+    const shown = last === undefined ? null : known.length === 1 ? `${last}'s choice` : `${known.slice(0, -1).join(", ")} and ${last}'s choices`;
     return { text, links: [...new Set(links)], shown };
   }
 

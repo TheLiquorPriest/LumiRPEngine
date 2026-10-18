@@ -305,7 +305,7 @@ describe("the inspector's lore traces", () => {
     return view.generations.flatMap((g) => g.lore ?? []).filter((t) => t.step === step).flatMap((t) => t.queries.filter((q) => q.kind !== "prefetch"));
   };
 
-  test("each step's searches, entries with their token cost, lookups and transport reach Context, survive a restart, and never name a secret", async () => {
+  test("each step's searches, entries with their token cost, lookups and transport reach Context, survive a restart, and never name or count a secret", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
     rig.host.quietReply = (req) => ((isStep(req, "interpret") || isStep(req, "extract")) && req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
@@ -316,9 +316,11 @@ describe("the inspector's lore traces", () => {
     // extract can't read the secret: its lookup shows; interpret can, so its lookup shows only what it was and found.
     expect(lookupsOf(context, "extract")).toEqual([{ kind: "search", text: "timetable", matched: 1 }]);
     expect(lookupsOf(context, "interpret")).toEqual([{ kind: "search", text: "", matched: 1 }]);
-    expect(context).toMatch(/"title":"Timetable","tokens":\d+,"cut":false,"secret":false/);
-    // interpret read the secret (its audience): the trace says only that it was a secret.
-    expect(context).toContain('"title":"A secret entry"');
+    expect(context).toMatch(/"title":"Timetable","tokens":\d+,"cut":false\}/);
+    // interpret read the secret (its audience), whose key "ferry" the prefetch matched: the trace
+    // neither lists nor counts it, so nothing says a secret was there.
+    expect(context).toContain('{"kind":"prefetch","text":"I walk to the ferry and wait.","matched":2}');
+    expect(context).not.toContain("secret");
     expect(context).not.toContain("The wreck");
     expect(context.toLowerCase()).not.toContain(SECRET.toLowerCase());
     expect(await contextOf(new Rig({ host: rig.host }), chatId)).toBe(context);
@@ -340,7 +342,9 @@ describe("the inspector's lore traces", () => {
       ["search", ""],
       ["list", ""],
     ]);
-    expect(lookupsOf(context, "interpret")[0]?.matched).toBe(1);
+    // The secret it read is neither listed nor counted.
+    expect(lookupsOf(context, "interpret")[0]?.matched).toBe(0);
+    expect(context).not.toContain("secret");
     for (const shown of [context, await storedOf(rig, chatId)]) {
       expect(shown).not.toContain("wreck");
       expect(shown).not.toContain("Wrecks");
@@ -367,15 +371,18 @@ describe("the inspector's lore traces", () => {
     }
   });
 
-  test("an NPC's choice shows in the trace as whose choice it is, never the options its prefetch searched with", async () => {
+  test("an NPC's choice shows in the trace as whose choice it is, with what it found untitled, and not at all for someone the POV can't know", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }]);
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     await rig.rt.inspector.settle();
     const context = await contextOf(rig, chatId);
-    const view = JSON.parse(context) as { generations: { lore?: { step: string; queries: { kind: string; text: string }[] }[] }[] };
-    const prefetched = view.generations.flatMap((g) => g.lore ?? []).filter((t) => t.step === "npc.choose").flatMap((t) => t.queries.filter((q) => q.kind === "prefetch").map((q) => q.text));
-    // Dev is here with Sam; Kim is elsewhere, and Sam has never met them.
-    expect(prefetched).toEqual(["Dev's choice", "An NPC's choice"]);
+    const view = JSON.parse(context) as { generations: { lore?: { step: string; queries: { kind: string; text: string }[]; entries: { title: string }[] }[] }[] };
+    const traces = view.generations.flatMap((g) => g.lore ?? []).filter((t) => t.step === "npc.choose");
+    // Dev is here with Sam; Kim is elsewhere, and Sam has never met them: Kim's choice has no row.
+    expect(traces.flatMap((t) => t.queries.filter((q) => q.kind === "prefetch").map((q) => q.text))).toEqual(["Dev's choice"]);
+    // The entries Dev's options found would say what Dev plans: they show without titles.
+    expect(traces.flatMap((t) => t.entries).length).toBeGreaterThan(0);
+    expect(traces.flatMap((t) => t.entries.map((e) => e.title)).every((title) => title === "")).toBe(true);
     for (const shown of [context, await storedOf(rig, chatId)]) {
       expect(shown).not.toContain("work, rest");
       expect(shown).not.toContain("Kim");
@@ -384,7 +391,7 @@ describe("the inspector's lore traces", () => {
     expect(JSON.stringify(rig.host.decideCalls.map((r) => r.state))).toContain('"work","rest"');
   });
 
-  test("a history kept before lookups were withheld shows its searches without their text", async () => {
+  test("a history kept before lookups were withheld shows its searches without their text, and an NPC choice's entries without titles", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }]);
     const trace = { step: "npc.choose", phase: "pre", policy: "prefetch+lookup", transport: "tools", queries: [{ kind: "prefetch", text: "Dev: work, rest", matched: 2 }, { kind: "get", text: "wreck", matched: 1 }], entries: [{ title: "Dev's past", tokens: 12, cut: false, secret: false }], lookups: 1, notes: [] };
     const record = { id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, forced: [], lore: [trace] };
@@ -393,9 +400,20 @@ describe("the inspector's lore traces", () => {
     const context = await contextOf(restarted, chatId);
     expect(lookupsOf(context, "npc.choose")).toEqual([{ kind: "get", text: "", matched: 1 }]);
     expect(context).toContain('{"kind":"prefetch","text":"","matched":2}');
-    expect(context).toContain('"title":"Dev\'s past"');
+    expect(context).toContain('"entries":[{"title":"","tokens":12,"cut":false}]');
+    expect(context).not.toContain("Dev's past");
     expect(context).not.toContain("work, rest");
     expect(context).not.toContain("wreck");
+  });
+
+  test("a history that lists a secret entry isn't shown: its counts include the secret", async () => {
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }]);
+    const trace = (secret: boolean) => ({ step: "interpret", phase: "pre", policy: "prefetch", transport: "none", queries: [{ kind: "prefetch", text: "the ferry", matched: 2 }], entries: [{ title: secret ? "A secret entry" : "The ferry", tokens: 12, cut: false, secret }], lookups: 0, notes: [] });
+    const record = { id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, forced: [], lore: [trace(true), trace(false)] };
+    await rig.host.storage.write(`${runDir(chatId)}inspector.json`, JSON.stringify({ v: 2, records: [record], delivery: {} }), rig.host.userId);
+    const context = await contextOf(new Rig({ host: rig.host }), chatId);
+    expect(context).not.toContain("A secret entry");
+    expect(context).toContain('"entries":[{"title":"The ferry","tokens":12,"cut":false}]');
   });
 });
 

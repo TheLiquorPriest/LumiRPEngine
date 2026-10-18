@@ -1,9 +1,10 @@
 // Play → Context (DESIGN §6.5): per generation, the activation confirmation, the engine sections
 // with their token cost, clipping and delivery, the section budget, and the lore each model step
 // read (§5.4): its searches, the entries it was given with their token cost, its lookups and how
-// they reached the model. Built by the backend as `core.context`; a secret entry shows only as
-// secret, a search that would name a secret or someone the player hasn't met is withheld, and a
-// step that may read a secret shows its lookups without their text ("—").
+// they reached the model. Built by the backend as `core.context`: an unrevealed secret entry isn't
+// in it at all, a search that would name a secret or someone the player hasn't met is withheld, a
+// step that may read a secret or an NPC's private options shows its lookups without their text
+// ("—"), and an NPC choice's entries show without titles ("—").
 
 import { useEffect, useState } from "preact/hooks";
 import { isRecord } from "../../shared/json";
@@ -28,7 +29,7 @@ function decodeLore(value: unknown): LoreStepTrace[] {
     policy: oneOf(t.policy, LORE_POLICIES, "prefetch"),
     transport: oneOf(t.transport, ["none", "tools", "need"] as const, "none"),
     queries: list(t.queries, (q) => ({ kind: oneOf(q.kind, ["prefetch", "search", "get", "list"] as const, "search"), text: str(q.text), matched: num(q.matched) })),
-    entries: list(t.entries, (e) => ({ title: str(e.title), tokens: num(e.tokens), cut: e.cut === true, secret: e.secret === true })),
+    entries: list(t.entries, (e) => ({ title: str(e.title), tokens: num(e.tokens), cut: e.cut === true })),
     lookups: num(t.lookups),
     notes: strings(t.notes),
   }));
@@ -150,7 +151,7 @@ export function ContextPanel(props: PanelProps) {
                     </div>
                   ))}
                   {t.entries.map((e, j) => (
-                    <Row key={`e${j}`} k={e.title} v={`${e.tokens} tok`} sub={e.cut ? "cut to fit" : undefined} tone={e.secret ? "warn" : undefined} />
+                    <Row key={`e${j}`} k={e.title === "" ? "—" : e.title} v={`${e.tokens} tok`} sub={e.cut ? "cut to fit" : undefined} />
                   ))}
                   {t.notes.map((n) => (
                     <div key={n} class="lre-small lre-warn">

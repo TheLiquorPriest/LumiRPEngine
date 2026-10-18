@@ -70,6 +70,8 @@ export interface LoreResult {
   hits: LoreHit[];
   /** Readable entries that matched, before the limit, the budget and `skip`. */
   matched: number;
+  /** Of `matched`, the secrets whose gate doesn't hold: the player's trace leaves them out. */
+  secret: number;
 }
 
 /** Terms and words shorter than this match nothing ("a", "it"). */
@@ -257,7 +259,7 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
     left -= snippet.tokens;
     hits.push({ id, title: typeof entry.title === "string" ? entry.title : id, snippet: snippet.text, tokens: snippet.tokens, cut: snippet.cut, secret: loreIsSecret(entry) && !open(entry), why });
   }
-  return { hits, matched: best.length };
+  return { hits, matched: best.length, secret: best.filter(({ entry }) => loreIsSecret(entry) && !open(entry)).length };
 }
 
 /** `lore.get`: one entry `purpose` may read, cut to the budget; null when it can't read it, or it doesn't exist or fit. */
