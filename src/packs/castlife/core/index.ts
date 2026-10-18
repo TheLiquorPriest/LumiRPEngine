@@ -390,7 +390,8 @@ function invitationText(ctx: ReadContext, agent: EntityId, place: PlaceId | null
  * (once: the hold marks it), and one ending within the slot brings them home. No one in a fight
  * under way leaves for a trip or comes home from one, as no day plan walks them out of it (the
  * combat pack's `combat.engaged`); someone still held away by a trip that has ended (the fight, or a
- * state that didn't act, kept them) comes home at the first slot they can.
+ * state that didn't act, kept them) comes home at the first slot they can. A trip that is over lets
+ * go of its holds, wherever the person is, so a later visit to its place is only a visit.
  */
 function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
@@ -399,17 +400,32 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
     const e = own(ctx.state.entities, who);
     const trips = e?.fields.trips;
     if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts(ctx, who) || engaged?.(ctx, who) === true) continue;
+    // The holds as this slot's trips leave them, so one trip letting go never undoes another taking hold.
+    let holds = objOf(e.fields.holds);
     for (const raw of trips) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
       const until = numOf(t.until, NaN);
       const place = strOf(t.place);
-      const away = objOf(e.fields.holds).place === until && e.fields.place === place;
+      // The trip took them away and hasn't let go of them yet.
+      const holding = objOf(e.fields.holds).place === until;
+      const away = holding && e.fields.place === place;
       if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place)) {
-        out.push({ type: "set", entity: who, field: "holds", value: { ...objOf(e.fields.holds), place: until, activity: until } }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
+        holds = { ...holds, place: until, activity: until };
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
       }
+      if (!(until <= slot.end && (until > slot.start || holding))) continue;
+      // Over: home if it ended within the slot, or if it still holds them at its place after slots
+      // that couldn't end it (anyone something else took elsewhere meanwhile stays there).
       const home = homeOf(ctx, who);
-      if (until <= slot.end && (until > slot.start || away) && home) out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
+      if ((until > slot.start || away) && home) out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
+      // Its holds have run out (they last until it ends), so dropping them changes nothing they hold:
+      // it only keeps the trip from taking them for still away the next time they stand at its place.
+      const kept = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
+      if (Object.keys(kept).length < Object.keys(holds).length) {
+        holds = kept;
+        out.push({ type: "set", entity: who, field: "holds", value: holds });
+      }
     }
   }
   return out;

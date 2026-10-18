@@ -5,7 +5,7 @@ import { applyEffects } from "../../../src/engine/effects";
 import { createRegistry } from "../../../src/engine/registry-impl";
 import { actionOdds, paramCandidates, resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
-import { ALL_NOTE } from "../../../src/engine/simulate";
+import { advance, ALL_NOTE } from "../../../src/engine/simulate";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
@@ -75,6 +75,58 @@ describe("castlife: commitments and the day planner", () => {
     expect(w.state.entities.rosa?.fields.activity).toBe("trip");
     lapse(w, until + 3 * 60 - w.state.clock);
     expect(w.state.entities.rosa?.fields.place).not.toBe("lake");
+  });
+
+  /** Riverton at Cast life 1 with Rosa's routine gone, so only trips move anyone, and a day's trip from the coming hour. */
+  function tripping(who: string, place: string): Working {
+    const w = setup(1, (wd) => {
+      delete wd.schedules.rosa_routine;
+    });
+    const from = w.state.clock + 60;
+    w.state.entities[who]!.fields.trips = [{ from, until: from + 1440, place, label: "Weekend away" }];
+    return w;
+  }
+  function set(w: Working, who: string, field: string, value: string): void {
+    const rejected = w.apply({ type: "set", entity: who, field, value });
+    if (rejected) throw new Error(rejected.reason);
+  }
+
+  test("a trip that is over lets go: back at its place days later, no one is sent home from there, the player character in an ordinary turn least of all", () => {
+    for (const who of ["rosa", "you"]) {
+      const w = tripping(who, "lake");
+      lapse(w, 3 * 1440);
+      expect(w.state.entities[who]?.fields.place).toBe(w.state.entities[who]?.fields.home);
+      // Back at the lake (a narrated move, a rule, a GM edit), where time passes: off screen for Rosa,
+      // an ordinary turn's for the player character, which leaves them where the player took them.
+      set(w, who, "place", "lake");
+      if (who === "you") advance(reg, w, w.state.clock + 6 * 60, { runSeed: "seed", mode: "turn" });
+      else lapse(w, 6 * 60);
+      expect(w.state.entities[who]?.fields.place).toBe("lake");
+    }
+  });
+
+  test("a trip that ended while nothing could end it lets go wherever they are, and takes them home only from its place", () => {
+    const w = tripping("rosa", "lake");
+    lapse(w, 12 * 60);
+    expect(w.state.entities.rosa?.fields.place).toBe("lake");
+    // Cast life is off as the trip ends, and meanwhile something takes her to the café.
+    w.state.realism.levels.castlife = 0;
+    lapse(w, 2 * 1440);
+    set(w, "rosa", "place", "cafe");
+    w.state.realism.levels.castlife = 1;
+    lapse(w, 6 * 60);
+    expect(w.state.entities.rosa?.fields.place).toBe("cafe");
+    set(w, "rosa", "place", "lake");
+    lapse(w, 6 * 60);
+    expect(w.state.entities.rosa?.fields.place).toBe("lake");
+  });
+
+  test("a trip spent at home ends once: what they do there afterwards isn't reset to idle at every slot", () => {
+    const w = tripping("rosa", "apartment_hall");
+    lapse(w, 3 * 1440);
+    set(w, "rosa", "activity", "reading");
+    lapse(w, 1440);
+    expect(w.state.entities.rosa?.fields.activity).toBe("reading");
   });
 
   test("off-screen agents live their plans: Maya is at the café during her shift", () => {
