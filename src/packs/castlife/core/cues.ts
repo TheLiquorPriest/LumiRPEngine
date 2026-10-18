@@ -88,7 +88,7 @@ function personKind(world: WorldDoc, kind: string): boolean {
 /** A name the player may not know, with how the runtime's check (`namesHidden`) finds it in a text. */
 interface HiddenName {
   name: string;
-  /** Secret for good: a secret entity or place, which `story.leaky_label` reports in a stage cue. */
+  /** A secret entity or place (by the `visibility` `story.leaky_label` reads), whose whole name that lint reports in any label or cue. */
   secret: boolean;
   /** The entity it names, so a person's own cue may name them. */
   entity?: EntityId;
@@ -106,8 +106,8 @@ function hiddenNames(world: WorldDoc): HiddenName[] {
   for (const e of Object.values(world.entities)) {
     const v = visibilityOf(e.visibility);
     if (v === "public") continue;
-    if (personKind(world, e.kind)) out.push({ name: e.name, secret: v === "secret", entity: e.id, said: (text) => namesAny(text, [e.name]) });
-    else label(e.name, v === "secret", e.id);
+    if (personKind(world, e.kind)) out.push({ name: e.name, secret: e.visibility === "secret", entity: e.id, said: (text) => namesAny(text, [e.name]) });
+    else label(e.name, e.visibility === "secret", e.id);
   }
   for (const p of Object.values(world.places)) if (visibilityOf(p.visibility) !== "public") label(p.name, p.visibility === "secret");
   for (const t of Object.values(world.tracks)) {
@@ -123,8 +123,10 @@ function hiddenNames(world: WorldDoc): HiddenName[] {
  * Lint (`castlife.cues`, DESIGN §6.6). An entity's cue with no text, standing for no secret, for
  * several or for one the world doesn't have or that hides nothing never shows. A cue that holds a
  * track's truth or a phrase of secret lore gives the secret away. A cue that names something the
- * player may not know is dropped while they don't; so is an owned track's stage cue, whose truths
- * and secret names `story.leaky_label` already reports.
+ * player may not know is dropped while they don't, and so is an owned track's stage cue. A stage cue
+ * that says a secret's name any other way than whole ("Vex" for Vex Morrow) gives it away, since it
+ * can also show in the Quest panel and section; its truths and whole secret names are
+ * `story.leaky_label`'s to report.
  */
 export function cueIssues(world: WorldDoc): LintIssue[] {
   const issues: LintIssue[] = [];
@@ -170,9 +172,14 @@ export function cueIssues(world: WorldDoc): LintIssue[] {
     for (const [stage, s] of Object.entries(t.stages)) {
       if (typeof s.cue !== "string") continue;
       const cue = s.cue;
-      // Secret entities and places in a stage cue are `story.leaky_label`'s to report.
-      const named = hidden.find((h) => !h.secret && h.entity !== owner.id && h.said(cue));
-      if (named) issue("warning", `tracks.${t.id}.stages.${stage}.cue`, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
+      const lower = cue.toLowerCase();
+      // Names read as the runtime reads them (`namesAny`), so a part of a name counts; a secret's whole
+      // name, as `story.leaky_label` reads it (longer than three letters), is that lint's to report.
+      const named = hidden.find((h) => h.entity !== owner.id && h.said(cue) && !(h.secret && h.name.length > 3 && lower.includes(h.name.toLowerCase()) && lower !== h.name.toLowerCase()));
+      if (!named) continue;
+      const path = `tracks.${t.id}.stages.${stage}.cue`;
+      if (named.secret) issue("error", path, `The cue of "${t.label}" at "${s.label}" gives away a secret ("${named.name}"): a cue says how someone acts, never who or what is hidden.`);
+      else issue("warning", path, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
     }
   }
   return issues;

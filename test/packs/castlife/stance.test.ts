@@ -203,9 +203,27 @@ describe("cue lint (castlife.cues)", () => {
     ]);
   });
 
-  test("an owned track's stage cue that names what the player may not know is a warning", () => {
+  test("an owned track's stage cue that names what the player may not know is a warning; one that says part of a secret's name is an error", () => {
     const world = modernUsWorld("w", "R");
-    world.tracks.s_flat = { id: "s_flat", kind: "secret", label: "Behind the door", owner: "maya", start: "quiet", visibility: "secret", stages: { quiet: { label: "Quiet", cue: "hurries home to Maya's flat after every shift", next: [] } } };
-    expect(lint(world).map((i) => [i.severity, i.path])).toEqual([["warning", "tracks.s_flat.stages.quiet.cue"]]);
+    world.entities.vex = { id: "vex", kind: "person", name: "Vex Morrow", tier: "supporting", fields: {}, relations: [], visibility: "secret" };
+    world.tracks.s_flat = {
+      id: "s_flat",
+      kind: "secret",
+      label: "Behind the door",
+      owner: "maya",
+      start: "quiet",
+      visibility: "secret",
+      stages: {
+        quiet: { label: "Quiet", cue: "hurries home to Maya's flat after every shift", next: [{ to: "watched", when: "false" }] },
+        watched: { label: "Watched", cue: "keeps an eye on Vex", next: [{ to: "named", when: "false" }] },
+        named: { label: "Named", cue: "keeps an eye on Vex Morrow", next: [] },
+      },
+    };
+    expect(lint(world).map((i) => [i.severity, i.path])).toEqual([
+      ["warning", "tracks.s_flat.stages.quiet.cue"],
+      ["error", "tracks.s_flat.stages.watched.cue"],
+    ]);
+    // The whole name is the story pack's leaky-label error, so it is reported once.
+    expect(reg.lints.flatMap((l) => l.check(world)).filter((i) => i.path === "tracks.s_flat.stages.named.cue").map((i) => i.code)).toEqual(["story.leaky_label"]);
   });
 });
