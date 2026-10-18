@@ -69,7 +69,7 @@ export function loreOfEntry(extensions: Readonly<Record<string, unknown>>): stri
 export interface BookEntries {
   /** Each section's own entry, by slot. */
   slots: Map<SlotId, string>;
-  /** Each section's outlet twin, outlet-only at `{{outlet::lre_<slot>}}`, for a preset that places the section itself (DESIGN §6.7). */
+  /** Each section's outlet twin, outlet-only at `{{outlet::lre_<slot>}}`, for a preset that places the section itself (DESIGN §6.8). */
   twins: Map<SlotId, string>;
   /** The preset's narrator rules: their own entry (before the character) and their twin at `{{outlet::lre_narrator}}`. */
   narrator: string | null;

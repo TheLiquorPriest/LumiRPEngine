@@ -67,7 +67,7 @@ export async function saveFromChat(host: HostPort, worlds: WorldStore, chatId: C
   const wanted = excerpt === undefined ? "" : plain(excerpt);
   const from = wanted === "" ? reply : (messages.filter((m) => plain(m.content).includes(wanted)).at(-1) ?? reply);
   if (!from) throw new WorldError("not_found", "the chat has no reply to save yet");
-  // A whole reply is saved as the engine reads it: without the JSON blocks its regex script hid (DESIGN §6.6).
+  // A whole reply is saved as the engine reads it: without the JSON blocks its regex script hid (DESIGN §6.7).
   const content = (wanted === "" ? withoutHiddenJson(from.content) : (excerpt ?? "")).trim().slice(0, SAVED_MAX_CHARS);
   const draft = await worlds.working(worldId, userId);
   const title = savedTitle(content);

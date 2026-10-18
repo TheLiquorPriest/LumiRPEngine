@@ -225,7 +225,7 @@ export class Steps {
    * A helper JSON call, with one repair call when the reply doesn't parse; with `retryTransient`, a
    * call that fails transiently (`transientFailure`) is made once more. Null on failure.
    *
-   * The preset's guidance for the step (DESIGN §6.7) follows the instructions, and the step's lore
+   * The preset's guidance for the step (DESIGN §6.8) follows the instructions, and the step's lore
    * follows that. When it may look lore up (`StepLore.offer` holds a round on the phase's lookup
    * budget), the model is offered the lore tools or the need form; each time it asks, the engine
    * answers in a follow-up message and the call is made again, once per round held. A connection

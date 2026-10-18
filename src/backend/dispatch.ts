@@ -423,7 +423,7 @@ export class Dispatcher {
       }
       case "delete":
         await store.remove(r.worldId, userId);
-        // Its chats are no longer world chats, so their JSON-hiding scripts go (DESIGN §6.6).
+        // Its chats are no longer world chats, so their JSON-hiding scripts go (DESIGN §6.7).
         await this.rt.jsonHiding.removeWorld(r.worldId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] world ${r.worldId}: its chats' JSON-hiding regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
         return { worlds: await store.list(userId) };
       case "commit": {
@@ -457,7 +457,7 @@ export class Dispatcher {
           this.rt.forgetChat(r.chatId);
           await this.rt.ledger.open(r.chatId, userId);
         }
-        // The chat's JSON blocks are hidden from now on (DESIGN §6.6); without the permission the attach still stands.
+        // The chat's JSON blocks are hidden from now on (DESIGN §6.7); without the permission the attach still stands.
         await this.rt.jsonHiding.ensure(r.chatId, r.worldId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] chat ${r.chatId}: the JSON-hiding regex script wasn't written (${error instanceof Error ? error.message : String(error)})`, userId));
         await this.rt.push.snapshot(r.chatId, userId);
         return { revision: existing ? existing.revision : revision };

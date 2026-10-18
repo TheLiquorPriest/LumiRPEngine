@@ -1,4 +1,4 @@
-// Hidden JSON blocks (DESIGN §6.6): each world chat keeps one regex script of the engine's own that
+// Hidden JSON blocks (DESIGN §6.7): each world chat keeps one regex script of the engine's own that
 // wraps a reply's <json>…</json> block in an element the display hides and World Info skips, the block
 // itself byte for byte as written and never wrapped twice. Chats that aren't world chats get none. The
 // script comes with attaching, comes back the first time the engine meets an older world chat after a

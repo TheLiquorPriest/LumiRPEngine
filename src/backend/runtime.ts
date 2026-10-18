@@ -90,7 +90,7 @@ interface LorePhase {
   active: string;
   /** What the player said this turn, with the reply after it: words the player has seen. */
   said: string;
-  /** The active preset's style and rules for each helper (DESIGN §6.7). */
+  /** The active preset's style and rules for each helper (DESIGN §6.8). */
   guidance: Guidance;
 }
 
@@ -453,9 +453,9 @@ export class Runtime implements TurnHooks {
   /** Connections seen refusing the lore tools (DESIGN §5.4). */
   readonly toolSupport: ToolSupport;
   readonly ledger: LedgerService;
-  /** Each world chat's JSON-hiding regex script (DESIGN §6.6). */
+  /** Each world chat's JSON-hiding regex script (DESIGN §6.7). */
   readonly jsonHiding: JsonHiding;
-  /** What the active preset says: section outlets, helper guidance, narrator rules (DESIGN §6.7). */
+  /** What the active preset says: section outlets, helper guidance, narrator rules (DESIGN §6.8). */
   readonly presets: PresetBinding;
   readonly push: StatePush;
   /** What LumiRPEngine Studio may read, and its offers (DESIGN §15). */
@@ -1123,7 +1123,7 @@ export class Runtime implements TurnHooks {
    * the player's message, not the reply, so any read of the swipe keeps it and its note.
    */
   async prepareRead(chatId: ChatId, userId: UserId, messageId: MessageId, swipeId: number, key: string, content: string, context: ReadInput, post: boolean, replace = false): Promise<void> {
-    // What the engine reads of the reply: none of the JSON blocks its regex script hid (DESIGN §6.6).
+    // What the engine reads of the reply: none of the JSON blocks its regex script hid (DESIGN §6.7).
     const text = withoutHiddenJson(content);
     if (replace) await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind) && c.id !== unfitId(messageId, swipeId));
     const bridge = this.bridges.get(chatId);
@@ -1674,7 +1674,7 @@ export class Runtime implements TurnHooks {
   }
 
   /**
-   * Settings → Preset (DESIGN §6.7): what the active preset says, read for the open chat (else the
+   * Settings → Preset (DESIGN §6.8): what the active preset says, read for the open chat (else the
    * world chat last played); with `add`, after adding the RPEngine blocks it lacks. Its outlets are
    * named by the open world chat's sections, else the default ones. Null when `add` finds no preset.
    */

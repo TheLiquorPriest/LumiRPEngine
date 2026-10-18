@@ -1,4 +1,4 @@
-// What the active preset says in world chats (DESIGN §6.7; docs/PRESETS.md). A preset may place the
+// What the active preset says in world chats (DESIGN §6.8; docs/PRESETS.md). A preset may place the
 // engine's sections itself: `{{outlet::lre_<slot>}}` in an enabled block routes that section to the
 // outlet for the generation, through the section's outlet twin in the world's book, and
 // `{{outlet::lre_narrator}}` the narrator rules. Switched-off blocks named "RPEngine · <step>" give

@@ -1,4 +1,4 @@
-// The active preset's say in world chats (DESIGN §6.7): `{{outlet::lre_<slot>}}` in an enabled block
+// The active preset's say in world chats (DESIGN §6.8): `{{outlet::lre_<slot>}}` in an enabled block
 // routes that section to its outlet twin for the generation, while the world's placement stands
 // otherwise; switched-off "RPEngine · <step>" blocks are appended to that helper's prompt as style
 // and rules (notes skipped, macros never resolved, length bounded, read once per preset revision);

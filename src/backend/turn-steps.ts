@@ -260,7 +260,7 @@ export interface StepRun {
   config: StepConfig;
   /** The world's template for this run; null for the built-in prompt. */
   template: StepTemplateDef | null;
-  /** The active preset's style and rules for the step, appended after the prompt (DESIGN §6.7); "" for none. */
+  /** The active preset's style and rules for the step, appended after the prompt (DESIGN §6.8); "" for none. */
   guidance: string;
 }
 

@@ -1,4 +1,4 @@
-// Hidden JSON blocks in world chats (DESIGN §6.6). A preset may ask every reply to end with a
+// Hidden JSON blocks in world chats (DESIGN §6.7). A preset may ask every reply to end with a
 // `<json>…</json>` block (a tracker, a ledger). Each world chat keeps one chat-scoped regex script of
 // the engine's own that wraps every such block in `<div hidden wi-exclude>…</div>`: the display hides
 // it and World Info scanning skips it, while the block itself stays byte for byte as written, so

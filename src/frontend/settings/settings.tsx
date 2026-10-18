@@ -164,7 +164,7 @@ const BLOCK_STATE: Record<PresetCard["blocks"][number]["state"], string> = {
   enabled: "Switched on: it reaches the narrator in every chat, so the engine doesn't read it",
 };
 
-/** The active preset and what it says to LumiRPEngine (DESIGN §6.7; docs/PRESETS.md). */
+/** The active preset and what it says to LumiRPEngine (DESIGN §6.8; docs/PRESETS.md). */
 function PresetSection() {
   const app = useApp();
   const [card, setCard] = useState<PresetCard | null>(null);
