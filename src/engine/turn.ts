@@ -1,32 +1,36 @@
 // The turn pipeline (DESIGN §5.1 steps 2 and 5): the engine side of `TurnPipeline` (engine/steps).
 //
 // plan (pre-reply, fold order):
-//   pause bookkeeping → the action (materialization, requirements, check, effects, event rules)
-//   with a fight's turns around it (`combat.round`) → the elapsed time through `advance` (world
-//   processes, schedules, slot rules, tracks; none for an action inside a fight already under way,
-//   whose rounds take no clock time, while the action that starts one keeps its time) → a timelapse
-//   (explicit, or Speed through `auto`; never in a fight)
-//   → off-screen catch-up when time moved.
+//   pause bookkeeping → the actions in order (DESIGN §11 action queue), each against the state the
+//   one before it left: materialization, requirements, check, effects and event rules, with a
+//   fight's turns around it (`combat.round`), then its time through `advance` (world processes,
+//   schedules, slot rules, tracks; none for an action inside a fight already under way, whose rounds
+//   take no clock time, while the action that starts one keeps its time; the scene tick when no
+//   action ran), until the queue stops at a check, a failure or an interruption → a timelapse
+//   (explicit, or Speed through `auto`; never in a fight) → off-screen catch-up when time moved.
 // post (after extraction): catch-up when time didn't move in plan, turn rules and tracks.
 //
 // Intents: `interpret`'s answer, or a palette/command intent of the same shape. The built-in
 // `timelapse` action takes `params: {target, overrides?, segment?}` (time.ts `TimelapseTarget`).
 
-import type { JsonValue } from "../shared/json";
-import type { EntityId } from "../shared/ids";
+import type { JsonObject, JsonValue } from "../shared/json";
+import { hashParts } from "../shared/hash";
+import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent, TimelapseTarget } from "../shared/ledger";
+import type { Judgement } from "./adjudication";
 import { outline } from "./beats";
-import { ENGINE_EVENTS } from "./engine-pack";
+import { ENGINE_EVENTS, signalOf } from "./engine-pack";
 import { materializeAll } from "./materialize";
 import type { Registry } from "./registry-impl";
 import { resolveAction, type Resolution } from "./resolve";
 import { createRng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick } from "./rules";
 import { isGone, placeOfEntity } from "./scope";
-import { advance, catchUp, coarsen } from "./simulate";
+import { advance, catchUp, coarsen, interruptPolicy } from "./simulate";
 import type { PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
-import { buildMontage, fightHoldsClock, IN_FIGHT, pauseBookkeeping, parseOverrides, parseTarget, runTimelapse, speedThrough, turnElapsed, type Montage, type TimelapseOutcome } from "./time";
+import { buildMontage, fightHoldsClock, IN_FIGHT, pauseBookkeeping, parseOverrides, parseTarget, runTimelapse, sceneKey, speedThrough, turnElapsed, type Montage, type TimelapseOutcome } from "./time";
 import { stepTracks } from "./tracks";
+import { signalVisible } from "./visibility";
 import { Working } from "./working";
 import { optionalService, own } from "./pack-kit";
 
@@ -39,10 +43,15 @@ export type TurnChip =
   | { kind: "timelapse_offer"; activity: string; target: TimelapseTarget; remaining: number }
   | { kind: "continue_timelapse"; target: TimelapseTarget; remaining: number };
 
+/** Why a turn's action queue stopped before its last action (DESIGN §11). */
+export type QueueStop = "check" | "failure" | "interruption";
+
 /** The plan plus what the renderers and chips need. Only `events` and `elapsedMinutes` are recorded. */
 export interface EngineTurnPlan extends TurnPlan {
-  /** The POV's action; its events as recorded, with the rest of any event group they're in (a fight's act record and the rule events it fires). */
-  resolution: Resolution | null;
+  /** The POV's actions as played, in order (the first, then the queued ones until the queue stopped); each with its events as recorded, with the rest of any event group they're in (a fight's act record and the rule events it fires). */
+  resolutions: Resolution[];
+  /** How many queued actions the turn left unplayed, and why the queue stopped before them; null when it played them all. */
+  stopped: { left: number; cause: QueueStop } | null;
   timelapse: TimelapseOutcome | null;
   montage: Montage | null;
   chips: TurnChip[];
@@ -57,6 +66,33 @@ function onScreen(w: Working): EntityId[] {
   return Object.keys(w.state.entities).filter((id) => id !== w.world.pov && own(w.state.entities, id)?.agent && placeOfEntity(w.state, id) === here && !isGone(w.state, id));
 }
 
+/** One of a turn's actions: the intent's first, or one queued after it. */
+interface TurnStep {
+  action: ActionId;
+  params: JsonObject;
+  judgement: Judgement | null;
+}
+
+/**
+ * Whether the action queue stops after an action (DESIGN §11), and why: a failure (it couldn't run,
+ * or part of it was refused), a check (resolved, then the player sees how it fell), or an
+ * interruption: a fight (one starting, or one under way, where each turn is one act), a long
+ * activity Speed through offers or runs, a change of place or scene the action's own effects didn't
+ * make, or a signal the POV can see whose class stops a timelapse. A signal the POV can't see never
+ * stops it, since stopping would give it away.
+ */
+function queueStop(w: Working, res: Resolution, since: number, scene: string, speeding: boolean): QueueStop | null {
+  if (!res.ok || res.rejected.length > 0) return "failure";
+  if (res.check || res.adjudged) return "check";
+  if (speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene) return "interruption";
+  const policy = interruptPolicy(w.state);
+  const signalled = w.events.slice(since).some((e) => {
+    const s = "data" in e ? signalOf(e) : null;
+    return s !== null && policy[s.class] === "stop" && signalVisible(w.reg, w.world, w.state, w.world.pov, s);
+  });
+  return signalled ? "interruption" : null;
+}
+
 export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const reg: Registry = input.registry;
   const w = new Working(reg, input.world, input.state);
@@ -67,9 +103,10 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   materializeAll(reg, w, w.world.pov, input.runSeed);
   const from = w.state.clock;
   const intent = input.intent;
-  let resolution: Resolution | null = null;
+  const resolutions: Resolution[] = [];
+  let stopped: EngineTurnPlan["stopped"] = null;
   let timelapse: TimelapseOutcome | null = null;
-  let combat: string[] = [];
+  const combat: string[] = [];
 
   if (intent?.action === TIMELAPSE_ACTION) {
     const target = parseTarget(intent.params.target);
@@ -83,46 +120,69 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     if ("code" in outcome) w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
     else timelapse = outcome;
   } else {
-    // A fight under way runs everyone else's turns around the POV's action (the combat pack).
-    const fight = optionalService(w.ctx, "combat.round")?.(w, rng.fork("combat"));
-    const mark = w.events.length;
-    // Whether the action comes inside a fight already under way (the turns still due have run).
-    const inFight = fightHoldsClock(w.ctx);
-    if (intent?.action) {
-      resolution = resolveAction(reg, w, { action: intent.action, params: intent.params }, rng, { runSeed: input.runSeed, judgement: intent.judgement ?? null });
-      if (resolution.events.length > 0) runRulesOnEvents(reg, w, resolution.events, { seed: input.seed });
-    }
-    combat = fight?.after(resolution ? { resolution, params: intent?.params ?? {} } : null) ?? [];
-    if (resolution) {
-      // A fight makes the POV's act one event group with its record and the rule events it fires,
-      // after the act applied: the resolution carries the act as recorded, so an Undo of the action
-      // ("Not an action?") finds and takes all of it.
-      let end = mark + resolution.events.length;
-      const groups = new Set(w.events.slice(mark, end).flatMap((e) => (e.group !== undefined ? [e.group] : [])));
-      for (; end < w.events.length; end++) {
-        const group = w.events[end]?.group;
-        if (group === undefined || !groups.has(group)) break;
+    const steps: TurnStep[] = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null }))] : [];
+    // With no action the loop runs once all the same: a fight under way takes its turns, and the turn its tick.
+    for (let i = 0; i < Math.max(1, steps.length); i++) {
+      const step = steps[i] ?? null;
+      // The first action draws from the turn's own streams, as a turn of one action always has; each
+      // queued one from its own, so no two actions share a roll.
+      const draws = i === 0 ? rng : rng.fork(`queue:${i}`);
+      const seed = i === 0 ? input.seed : hashParts(input.seed, "queue", i);
+      // A fight under way runs everyone else's turns around the POV's action (the combat pack).
+      const fight = optionalService(w.ctx, "combat.round")?.(w, draws.fork("combat"));
+      const mark = w.events.length;
+      // Whether the action comes inside a fight already under way (the turns still due have run).
+      const inFight = fightHoldsClock(w.ctx);
+      let resolution: Resolution | null = null;
+      // The place and scene as the action's own effects leave them; any other change interrupts the queue.
+      let scene = sceneKey(w.world, w.state);
+      if (step) {
+        resolution = resolveAction(reg, w, { action: step.action, params: step.params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        scene = sceneKey(w.world, w.state);
+        if (resolution.events.length > 0) runRulesOnEvents(reg, w, resolution.events, { seed });
       }
-      resolution = { ...resolution, events: w.events.slice(mark, end) };
-    }
-    // A fight's rounds are seconds long: a turn inside one already under way, that still is, moves no
-    // clock, whatever its action took, so no day plan or schedule runs mid-fight (the combat pack also
-    // holds its participants in place). The turn whose action starts one keeps that action's time (a
-    // long stalk that ends in an ambush); nothing speeds through while one is under way.
-    const fighting = fightHoldsClock(w.ctx);
-    const elapsed = inFight && fighting ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
-    if (elapsed && elapsed.minutes > 0) advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
-    const act = resolution?.activity;
-    if (act && elapsed && elapsed.source !== "paused" && !fighting) {
-      const remaining = act.until - w.state.clock;
-      const mode = speedThrough(w.state, act.type, remaining);
-      if (mode !== "elapse") {
-        const until: TimelapseTarget = { type: "at", at: act.until };
-        if (mode === "auto") {
-          const outcome = runTimelapse(reg, w, until, { runSeed: input.runSeed });
-          if ("code" in outcome) chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
-          else timelapse = outcome;
-        } else chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+      combat.push(...(fight?.after(resolution ? { resolution, params: step?.params ?? {} } : null) ?? []));
+      if (resolution) {
+        // A fight makes the POV's act one event group with its record and the rule events it fires,
+        // after the act applied: the resolution carries the act as recorded, so an Undo of the action
+        // ("Not an action?") finds and takes all of it.
+        let end = mark + resolution.events.length;
+        const groups = new Set(w.events.slice(mark, end).flatMap((e) => (e.group !== undefined ? [e.group] : [])));
+        for (; end < w.events.length; end++) {
+          const group = w.events[end]?.group;
+          if (group === undefined || !groups.has(group)) break;
+        }
+        resolution = { ...resolution, events: w.events.slice(mark, end) };
+        resolutions.push(resolution);
+      }
+      // A fight's rounds are seconds long: a turn inside one already under way, that still is, moves no
+      // clock, whatever its action took, so no day plan or schedule runs mid-fight (the combat pack also
+      // holds its participants in place). The turn whose action starts one keeps that action's time (a
+      // long stalk that ends in an ambush); nothing speeds through while one is under way. Each action
+      // takes its own time, so durations add up; the scene tick stands in only when none ran.
+      const fighting = fightHoldsClock(w.ctx);
+      const elapsed = (inFight && fighting) || (i > 0 && !resolution?.ok) ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
+      if (elapsed && elapsed.minutes > 0) advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
+      const act = resolution?.activity;
+      let speeding = false;
+      if (act && elapsed && elapsed.source !== "paused" && !fighting) {
+        const remaining = act.until - w.state.clock;
+        const mode = speedThrough(w.state, act.type, remaining);
+        if (mode !== "elapse") {
+          speeding = true;
+          const until: TimelapseTarget = { type: "at", at: act.until };
+          if (mode === "auto") {
+            const outcome = runTimelapse(reg, w, until, { runSeed: input.runSeed });
+            if ("code" in outcome) chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+            else timelapse = outcome;
+          } else chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+        }
+      }
+      const left = steps.length - 1 - i;
+      const cause = resolution && left > 0 ? queueStop(w, resolution, mark, scene, speeding) : null;
+      if (cause) {
+        stopped = { left, cause };
+        break;
       }
     }
   }
@@ -135,11 +195,12 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   return {
     events,
     elapsedMinutes: w.state.clock - from,
-    resolution,
+    resolutions,
+    stopped,
     timelapse,
     montage,
     chips,
-    outline: outline(reg, w.world, w.state, { resolution, timelapse, events: w.events }, rng.fork("beats")),
+    outline: outline(reg, w.world, w.state, { resolutions, timelapse, events: w.events }, rng.fork("beats")),
     combat,
   };
 }

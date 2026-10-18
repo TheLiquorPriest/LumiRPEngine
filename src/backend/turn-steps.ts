@@ -91,14 +91,15 @@ export interface PlanStart {
 /** What a plan changed that signals read: scene, day part, day, beats, invitations, conflict, timelapse. */
 export function planFacts(world: WorldDoc, before: PlanStart, after: Readonly<WorldState>, plan: EngineTurnPlan | undefined): Pick<SignalFacts, "sceneChange" | "slotCrossed" | "dayStart" | "beat" | "invitation" | "conflict" | "timelapse"> {
   const cal = calendarOf(world);
-  const res = plan?.resolution ?? null;
+  // A conflict in any of the turn's actions (DESIGN §11 action queue) counts.
+  const conflict = (plan?.resolutions ?? []).some((res) => !res.ok || res.rejected.length > 0 || /fail|miss|bad/i.test(res.check?.outcome ?? (res.adjudged ? (res.outcome ?? "") : "")));
   return {
     sceneChange: before.place !== placeOfEntity(after, world.pov),
     slotCrossed: after.clock > before.clock && dayPartAt(cal, before.clock).id !== dayPartAt(cal, after.clock).id,
     dayStart: dateAt(cal, after.clock).dayIndex > dateAt(cal, before.clock).dayIndex,
     beat: (plan?.outline.length ?? 0) > 0,
     invitation: (plan?.events ?? []).some((e) => e.type === "castlife.invitation"),
-    conflict: !!res && (!res.ok || res.rejected.length > 0 || /fail|miss|bad/i.test(res.check?.outcome ?? (res.adjudged ? (res.outcome ?? "") : ""))),
+    conflict,
     timelapse: !!plan?.timelapse,
   };
 }

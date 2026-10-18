@@ -115,9 +115,9 @@ export class TurnBridge implements TurnModel {
   private readonly interpreted = new Set<string>();
   /** User texts `interpret` couldn't read (its call failed, or a Decision route's choice had no call left for its params): their turn ran as plain roleplay ("Couldn't read your action"). */
   private readonly unread = new Set<string>();
-  /** Actions `interpret` read but couldn't apply, their params naming nothing that fits, keyed like `intents`: the turn plays as plain roleplay, and its reply says why. */
+  /** Actions `interpret` read but couldn't apply, their params naming nothing that fits, keyed like `intents`: the first (the turn plays as plain roleplay) or a queued one (the queue ends before it); the reply says why. */
   private readonly unfit = new Map<string, UnfitAction>();
-  /** The input's second action (`interpret`'s `next`), offered as a chip that sends it as the next message, keyed like `intents`. */
+  /** What the input says that the turn won't play whatever happens, in words (`interpret`'s `next`, and actions after the queue's end), offered on a chip that sends it as the next message, keyed like `intents`. */
   private readonly nexts = new Map<string, string>();
   /** Prepared reads keyed by `hashParts(text)`. */
   private readonly reads = new Map<string, PreparedRead>();
@@ -148,6 +148,11 @@ export class TurnBridge implements TurnModel {
     if (this.interpreted.size > 64) this.interpreted.delete(this.interpreted.values().next().value ?? "");
   }
 
+  /** Replaces this text's intent with the same read amended (a judgement, a puzzle answer's probability), keeping what was noted about the read. */
+  amendIntent(userText: string, intent: InterpretOutput): void {
+    if (this.intents.has(userText)) this.intents.set(userText, intent);
+  }
+
   /**
    * `interpret` couldn't read this text: its call failed, or a Decision route's choice had no call
    * left for its params. No intent is kept, so the turn plans as plain roleplay and the next turn on
@@ -167,11 +172,12 @@ export class TurnBridge implements TurnModel {
   }
 
   /**
-   * `interpret` read an action whose params name nothing in the world that fits. No intent is kept,
-   * so the turn plays as plain roleplay, and its reply gets a decline chip saying why.
+   * `interpret` read an action whose params name nothing in the world that fits, and its reply gets a
+   * decline chip saying why. For the first action no intent is kept (`intent` null), so the turn plays
+   * as plain roleplay; for a queued one, `intent` holds the actions before it, which play.
    */
-  setUnfit(userText: string, unfit: UnfitAction): void {
-    this.setIntent(userText, null);
+  setUnfit(userText: string, unfit: UnfitAction, intent: InterpretOutput | null = null): void {
+    this.setIntent(userText, intent, intent !== null);
     this.unfit.set(userText, unfit);
     trim(this.unfit);
   }

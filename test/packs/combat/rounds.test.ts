@@ -361,7 +361,7 @@ describe("acts", () => {
     const parent = started(world).state;
     const p = plan(world, parent, "strike", { target: "goblin" });
     // The chip stores the resolution's events as JSON, and Undo looks them up in the turn's record.
-    const stored = JSON.parse(JSON.stringify(p.resolution?.events ?? [])) as JsonValue[];
+    const stored = JSON.parse(JSON.stringify(p.resolutions[0]?.events ?? [])) as JsonValue[];
     const refs = Runtime.refsOf({ events: p.events, pre: 0 }, stored, 0);
     expect(refs).toHaveLength(stored.length);
     expect(refs.map((r) => p.events[r.index]?.type)).toEqual(["combat.spend", "set", "combat.act"]);
@@ -439,7 +439,7 @@ describe("what the Combat tab offers", () => {
     expect(offer).toBeDefined();
     expect(offer?.disabled).toBeUndefined();
     const p = plan(world, fight.state, "fight", { target: "bandit" });
-    expect(p.resolution?.ok).toBe(true);
+    expect(p.resolutions[0]?.ok).toBe(true);
     expect(encounterOf(fold(reg, world, fight.state, p.events))?.order.map((f) => f.id).sort()).toEqual(["bandit", POV]);
   });
 

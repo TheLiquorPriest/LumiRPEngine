@@ -140,17 +140,17 @@ describe("a stated price is the Buy's when it is within ±25% of what it charged
     const ctx = rig.rt.registry.context(world, state);
     // A typed $9 sandwich charged $2.43, a typed $3 coffee charged $5.38, a typed $5 milk charged
     // $3.63, a typed $6 pair of coffees charged $10.76.
-    expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Deli sandwich", 243)], ctx, 900)).toBe("retold");
-    expect(boughtAlong(purchase("coffee", 3), [bought("Bought Coffee", 538)], ctx, 300)).toBe("retold");
-    expect(boughtAlong(purchase("milk", 5), [bought("Bought Milk, whole", 363)], ctx, 500)).toBe("retold");
-    expect(boughtAlong(purchase("coffees", 6), [bought("Bought Coffee ×2", 1076)], ctx, 600)).toBe("retold");
+    expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Deli sandwich", 243)], ctx, [900])).toBe("retold");
+    expect(boughtAlong(purchase("coffee", 3), [bought("Bought Coffee", 538)], ctx, [300])).toBe("retold");
+    expect(boughtAlong(purchase("milk", 5), [bought("Bought Milk, whole", 363)], ctx, [500])).toBe("retold");
+    expect(boughtAlong(purchase("coffees", 6), [bought("Bought Coffee ×2", 1076)], ctx, [600])).toBe("retold");
     // Without a typed price, the catalog row's range: $7.50 is inside "Milk, whole"'s.
     expect(boughtAlong(purchase("milk", 7.5), [bought("Bought Milk, whole", 363)], ctx)).toBe("retold");
     // A sandwich is not a loaf of bread, and lantern oil is oil, not the lantern: new purchases.
     expect(boughtAlong(purchase("sandwich", 9), [bought("Bought Bread, white sandwich loaf", 243)], ctx)).toBeNull();
-    expect(boughtAlong(purchase("lantern oil", 6), [bought("Bought lantern", 4000)], ctx, 4000)).toBeNull();
+    expect(boughtAlong(purchase("lantern oil", 6), [bought("Bought lantern", 4000)], ctx, [4000])).toBeNull();
     // The same noun at a price far from the Buy's, with no catalog row: maybe the Buy, maybe not.
-    expect(boughtAlong(purchase("tin kazoo", 4.5), [bought("Bought kazoo", 300)], ctx, 300)).toBe("unsure");
+    expect(boughtAlong(purchase("tin kazoo", 4.5), [bought("Bought kazoo", 300)], ctx, [300])).toBe("unsure");
   });
 
   test("another one, one for someone, a different quantity or a ruled-out qualifier is a new purchase", async () => {
@@ -166,7 +166,7 @@ describe("a stated price is the Buy's when it is within ±25% of what it charged
     expect(boughtAlong({ ...purchase("coffee", 5.38), qty: 2 }, coffee, ctx)).toBeNull();
     expect(boughtAlong(purchase("green apple", 1), [bought("Bought red apple", 100)], ctx)).toBeNull();
     // Told as another in the narration beside a price that fits: asked, not dropped.
-    expect(boughtAlong(purchase("coffee", 5.38), coffee, ctx, null, "She pours you another coffee and you pay for it.")).toBe("unsure");
+    expect(boughtAlong(purchase("coffee", 5.38), coffee, ctx, [], "She pours you another coffee and you pay for it.")).toBe("unsure");
   });
 });
 

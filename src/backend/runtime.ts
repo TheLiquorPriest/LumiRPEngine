@@ -19,8 +19,9 @@ import { fightOffers } from "../packs/combat/core/index";
 import { transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
-import type { EngineTurnPlan } from "../engine/turn";
+import type { EngineTurnPlan, QueueStop } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
+import { checkOf } from "../engine/checks";
 import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
 import { boundProposal } from "../engine/bounds";
 import { calendarOf, dateAt, formatClock, formatHHMM, nextTimeOfDay, weekdayName, type Calendar } from "../engine/calendar";
@@ -34,7 +35,7 @@ import { createRng } from "../engine/rng";
 import { kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { actionOdds, findAction, type Resolution } from "../engine/resolve";
-import type { InterpretOutput } from "../engine/steps";
+import type { InterpretOutput, QueuedAction } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
 import { namesHidden, playerKnows } from "../engine/player-events";
@@ -56,7 +57,7 @@ import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
-import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge } from "./turn-model";
+import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
 import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { WorldStore } from "./worlds";
@@ -259,21 +260,21 @@ function toldAsAnother(narration: string, head: string, ctx: ReadContext): boole
 }
 
 /**
- * A narrated purchase measured against the Buy this turn's own action made (DESIGN §11 Confirm
+ * A narrated purchase measured against the Buy this turn's own actions made (DESIGN §11 Confirm
  * chips). Only the same thing can be the Buy told again: the same main noun, as `itemName` reads
  * names ("milk" for the bought "Milk, whole", "brass lantern" for "old brass lantern"; "lantern
  * oil" is oil, not the lantern). Even then it's another purchase when its own words say so
  * ("another coffee", "a second one", "coffee for Danny"), when it names a different quantity, or a
  * qualifier that rules the Buy's out (green for red, large for small, iced for hot). It is the Buy
  * told again (`retold`) when one name's words hold all of the other's and any price the narration
- * states is the Buy's: within ±25% of what it charged, of the price the player typed for it
+ * states is the Buy's: within ±25% of what it charged, of a price the player typed for a Buy
  * (`typed`, minor units), or of anywhere in its catalog row's (or category's) range, since a
  * catalogued Buy is charged the catalog's price ("you pay $3 for the coffee" after a typed $3
  * coffee charged $5.38). Anything else of the same noun may be either (`unsure`): other qualifiers
  * ("leather card holder" for "credit card holder"), a price off the Buy's, or a narration that
  * says "another" beside it. Only a purchase the player character (or something they own) pays for.
  */
-export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext, typed: number | null = null, narration = ""): Along {
+export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext, typed: readonly number[] = [], narration = ""): Along {
   const { world, state } = ctx;
   if (p.type !== "purchase" || typeof p.item !== "string" || !povPays(p, world, state)) return null;
   const said = itemName(p.item);
@@ -293,7 +294,7 @@ export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: Rea
       const band = stated === null ? null : optionalQuery(ctx, "economy.bought_band")?.(ctx, buy.name, buy.qty, world.pov);
       return !!band && stated !== null && stated >= 0.75 * band.min && stated <= 1.25 * band.max;
     };
-    const priced = near(buy.cents) || (typed !== null && near(typed)) || inBand();
+    const priced = near(buy.cents) || typed.some(near) || inBand();
     if (holds && priced && !toldAsAnother(narration, said.head, ctx)) return "retold";
     verdict = "unsure";
   }
@@ -774,7 +775,7 @@ export class Runtime implements TurnHooks {
     }
     // `interpret` may read secret lore its audience allows (DESIGN §7): what it returns becomes chips,
     // Journal lines and the Outcome, so an answer carrying a secret's unrevealed text is played as
-    // roleplay. Words the player typed are theirs to repeat. Its second action is checked on its own.
+    // roleplay. Words the player typed are theirs to repeat. Its further actions are checked on their own.
     const typedText = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typedText.includes(s.toLowerCase()));
     if (findLeaks({ params: result.params, ...(result.then ? { then: result.then } : {}) }, secrets).length > 0) {
@@ -784,13 +785,17 @@ export class Runtime implements TurnHooks {
       bridge.setIntent(text, null);
       return;
     }
-    // The input's second action ("…to buy a latte") is offered once the first has run, as a chip that
-    // sends it as the next message (DESIGN §5.2), when it reads as an action of its own.
-    bridge.setNext(text, result.next ? offeredNext(this.registry, render.world, render.state, result.next, text, all.flatMap((a) => a.lexicon ?? []), secrets) : null);
-    // A bare time span reads as the timelapse itself; one after another action ("I head home and
-    // sleep until the next morning") is offered once that action has run.
-    const timeOnly = result?.action === TIMELAPSE_ACTION ? result.params : result && !result.action && result.then ? result.then : null;
+    // Words the turn won't play are offered on a chip that sends them as the next message (DESIGN
+    // §5.2), each piece only when it may be (`offeredNext`); "" when it may not.
+    const lexicon = all.flatMap((a) => a.lexicon ?? []);
+    const chipText = (piece: string): string => offeredNext(this.registry, render.world, render.state, piece, text, lexicon, secrets) ?? "";
+    let next = (result.next ?? []).map(chipText);
+    // A bare time span reads as the timelapse itself, which plays alone: anything after it is offered
+    // in words once it has run. One after another action ("I head home and sleep until the next
+    // morning") is offered once the actions have run.
+    const timeOnly = result.action === TIMELAPSE_ACTION ? result.params : !result.action && result.then ? result.then : null;
     if (timeOnly) {
+      bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
       const target = interpretedTarget(timeOnly, render.world, render.state.clock, text);
       // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
@@ -798,33 +803,57 @@ export class Runtime implements TurnHooks {
       bridge.setIntent(text, target && !over ? timelapseIntent(target) : null, target !== null && !over);
       return;
     }
-    bridge.setOffer(text, result?.then ? interpretedTarget(result.then, render.world, render.state.clock, text) : null);
-    // The model states money as written ("$200"); money params are minor units (cents).
-    const chosen = result?.action ? all.find((a) => a.id === result.action) : undefined;
-    if (result && chosen) {
-      const scale = 10 ** render.world.currency.decimals;
-      for (const [name, def] of Object.entries(chosen.params)) {
-        const v = result.params[name];
-        if (def.type === "money" && typeof v === "number" && Number.isFinite(v)) result.params[name] = Math.round(v * scale);
-      }
-      // A way of paying the player named that the model left out (a long sentence can lose it) is
-      // taken from the player's own words; a method the model did set stands.
-      const method = result.params.method;
-      const said = hasOwn(chosen.params, "method") && !(typeof method === "string" && method.trim() !== "") ? saidPayMethod(text) : null;
-      if (said) result.params.method = said;
-    }
+    const chosen = result.action ? all.find((a) => a.id === result.action) : undefined;
+    const params = chosen ? playable(chosen, result.params, render.world, [text]) : result.params;
     // An action whose params name nothing in the world that fits ("I pay Rena" where Rena is no one in
     // it) plays as plain roleplay, and its reply says why on a decline chip (DESIGN §9.4).
-    const unfit = chosen ? unfitRef(this.registry, chosen, result.params, render.world, render.state) : null;
+    const unfit = chosen ? unfitRef(this.registry, chosen, params, render.world, render.state) : null;
     if (chosen && unfit) {
-      this.host.log("info", `[LumiRPEngine] interpret: ${chosen.id} names nothing in the world (${JSON.stringify(result.params)}); played as roleplay`, userId);
-      // Nothing that follows the action (time after it, a second action) is offered when it didn't play.
+      this.host.log("info", `[LumiRPEngine] interpret: ${chosen.id} names nothing in the world (${JSON.stringify(params)}); played as roleplay`, userId);
+      // Nothing that follows the action (time after it, the actions after it) is offered when it didn't play.
       bridge.setOffer(text, null);
       bridge.setNext(text, null);
       bridge.setUnfit(text, { label: chosen.label, reason: unfitReason(this.registry, render.world, render.state, unfit, text, secrets) });
       return;
     }
-    bridge.setIntent(text, result, true);
+    // The further actions (DESIGN §11 action queue), each read as the first is. Time passing is never
+    // queued: as the last it is the input's `then`, and earlier it ends the queue and is left in words.
+    // One carrying a secret is dropped on its own, as a second action carrying one always was, and
+    // what follows it, which may hang on it, is left in words. One that names nothing that fits ends
+    // the queue with a decline chip, and nothing after it is offered, as after a first action that
+    // names nothing.
+    let then = result.then;
+    const queue: QueuedAction[] = [];
+    let misfit: UnfitAction | null = null;
+    const further = result.queue ?? [];
+    for (const [k, q] of further.entries()) {
+      const def = all.find((a) => a.id === q.action);
+      if (q.action === TIMELAPSE_ACTION || !def) {
+        if (k === further.length - 1 && !then && q.action === TIMELAPSE_ACTION) then = q.params;
+        else next = [...further.slice(k).map((r) => chipText(r.text)), ...next];
+        break;
+      }
+      if (findLeaks(q.params, secrets).length > 0) {
+        next = [...further.slice(k + 1).map((r) => chipText(r.text)), ...next];
+        break;
+      }
+      const ready = playable(def, q.params, render.world, [q.text, text]);
+      const ref = unfitRef(this.registry, def, ready, render.world, render.state);
+      if (ref) {
+        misfit = { label: def.label, reason: unfitReason(this.registry, render.world, render.state, ref, text, secrets) };
+        next = [];
+        then = undefined;
+        break;
+      }
+      queue.push({ action: def.id, params: ready, text: chipText(q.text) });
+    }
+    bridge.setNext(text, joinActions(next) || null);
+    bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state.clock, text) : null);
+    const intent: InterpretOutput = { action: result.action, params, probabilities: result.probabilities, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}) };
+    if (misfit) {
+      this.host.log("info", `[LumiRPEngine] interpret: queued ${misfit.label} names nothing in the world; the queue ends before it`, userId);
+      bridge.setUnfit(text, misfit, intent);
+    } else bridge.setIntent(text, intent, true);
   }
 
   /** `puzzle.answer` (DESIGN §10): an Answer the stage can't match exactly is judged, then retried with the probability. */
@@ -840,18 +869,27 @@ export class Runtime implements TurnHooks {
     if (!run || !stage?.answer || !budget.take()) return;
     const owner = render.world.tracks[track]?.owner;
     const p = await puzzleAnswer(this.steps, run, stage.label, stage.answer.expect, answer, at.userId, budget.signal, this.stepLore(run, at, { text: `${stage.label}\n${answer}`, links: owner ? [owner] : [] }));
-    if (p !== null) bridge.setIntent(text, { ...intent, params: { ...intent.params, puzzle: track, decision: p } }, bridge.wasInterpreted(text));
+    if (p !== null) bridge.amendIntent(text, { ...intent, params: { ...intent.params, puzzle: track, decision: p } });
   }
 
-  /** The player's action and its check as `judge` would rate them; null when the policy doesn't need it (no check, not rolled or left to the story, or already judged). */
-  private judgeTarget(intent: InterpretOutput | null, render: { world: WorldDoc; state: WorldState }): { intent: InterpretOutput; action: ActionDef; verdict: Verdict; odds: Record<string, number>; policy: AdjudicationDef } | null {
-    if (!intent?.action || intent.judgement || intent.action === TIMELAPSE_ACTION) return null;
-    const action = findAction(this.registry, render.world, intent.action);
-    if (!action) return null;
-    const shown = actionOdds(this.registry, render.world, render.state, { action, params: intent.params });
+  /**
+   * The turn's action whose check `judge` would rate, with its place in the turn (0 the first, then
+   * the queue's), its params, the check's verdict and odds, and the policy; null when the policy
+   * doesn't need it (no check, not rolled or left to the story, or already judged). The queue stops
+   * at its first check (DESIGN §11), so only the first action with one can roll. It is weighed in the
+   * state the turn starts from, and isn't judged when that state doesn't offer it yet.
+   */
+  private judgeTarget(intent: InterpretOutput | null, render: { world: WorldDoc; state: WorldState }): { intent: InterpretOutput; index: number; action: ActionDef; params: JsonObject; verdict: Verdict; odds: Record<string, number>; policy: AdjudicationDef } | null {
+    if (!intent?.action || intent.action === TIMELAPSE_ACTION) return null;
+    const steps = [{ action: intent.action, params: intent.params, judgement: intent.judgement }, ...(intent.queue ?? [])];
+    const index = steps.findIndex((s) => checkOf(render.world, findAction(this.registry, render.world, s.action)?.check) !== null);
+    const step = steps[index];
+    const action = step ? findAction(this.registry, render.world, step.action) : undefined;
+    if (!step || !action || step.judgement) return null;
+    const shown = actionOdds(this.registry, render.world, render.state, { action, params: step.params });
     const policy = policyFor(render.world, render.state, action, render.world.pov);
     if (!shown.available || !shown.verdict || !shown.odds || !needsJudge(policy, shown.verdict)) return null;
-    return { intent, action, verdict: shown.verdict, odds: shown.odds, policy };
+    return { intent, index, action, params: step.params, verdict: shown.verdict, odds: shown.odds, policy };
   }
 
   /**
@@ -868,14 +906,14 @@ export class Runtime implements TurnHooks {
     const userId = at.userId;
     const target = this.judgeTarget(bridge.intentOf(text), render);
     if (!target) return;
-    const { intent, action, verdict, odds, policy } = target;
+    const { intent, index, action, params, verdict, odds, policy } = target;
     const run = runsOf(settings.modelUse, render.world, "judge", facts)[0];
     if (!run || !budget.take()) return;
     const story = verdict.why === "story" ? Object.fromEntries(outcomeChoices(action, Object.keys(odds)).map((o) => [o, odds[o] ?? 0])) : null;
     // The judge hears where the POV is as the player may know it: its reason is shown to the player.
     const placeName = povPlace(this.registry, render.world, render.state)?.name ?? null;
     const scene = { you: render.state.entities[render.world.pov]?.name ?? render.world.pov, place: placeName, present: presentNames(this.registry, render.world, render.state) };
-    const targets = Object.values(intent.params).filter((v): v is string => typeof v === "string" && (hasOwn(render.state.entities, v) || hasOwn(render.world.places, v)));
+    const targets = Object.values(params).filter((v): v is string => typeof v === "string" && (hasOwn(render.state.entities, v) || hasOwn(render.world.places, v)));
     const names = targets.map((id) => render.state.entities[id]?.name ?? render.world.places[id]?.name ?? id);
     const lore = this.stepLore(run, at, { text: [action.label, text, placeName ?? "", ...names].join("\n"), links: [...new Set([...this.sceneLinks(render.world, render.state), ...targets])] });
     const judgement = await judge(this.steps, run, { action: action.label, text, max: policy.description.max, odds: story, scene }, userId, budget.signal, lore);
@@ -887,7 +925,9 @@ export class Runtime implements TurnHooks {
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typed.includes(s.toLowerCase()));
     const leaks = findLeaks(judgement.reason, secrets).length > 0 || namesHidden(this.registry, render.world, render.state, judgement.reason);
     if (leaks) this.host.log("info", `[LumiRPEngine] judge: the reason for ${action.id} carried an unrevealed secret or a hidden name; it isn't shown`, userId);
-    bridge.setIntent(text, { ...intent, judgement: leaks ? { ...judgement, reason: "" } : judgement }, bridge.wasInterpreted(text));
+    const judged = leaks ? { ...judgement, reason: "" } : judgement;
+    // The judgement rides on the action it rates: the first, or the queued one whose check it is.
+    bridge.amendIntent(text, index === 0 ? { ...intent, judgement: judged } : { ...intent, queue: (intent.queue ?? []).map((q, i) => (i === index - 1 ? { ...q, judgement: judged } : q)) });
   }
 
   /** What `npc.choose` sees about one tie: who, where, when, and the options (private plans stay in this decision call). */
@@ -1091,7 +1131,8 @@ export class Runtime implements TurnHooks {
     // that names the Buy with other things keeps the others, each its own purchase; one that may be
     // the Buy told again is only ever offered ("Also bought …?").
     const intent = pre ? bridge.intentOf(pre.text) : null;
-    const typed = intent?.action === "buy" && typeof intent.params.price === "number" ? intent.params.price : null;
+    // The prices the player typed for this turn's Buys (minor units): the first action's and the queued ones'.
+    const typed = intent ? [{ action: intent.action, params: intent.params }, ...(intent.queue ?? [])].flatMap((a) => (a.action === "buy" && typeof a.params.price === "number" ? [a.params.price] : [])) : [];
     const unsure = new Set<JsonObject>();
     const deduped = dedupeProposals(
       [...extracted, ...effects.flat()].flatMap((p) => splitAlongBuy(p, context.pre, ctx)),
@@ -1297,20 +1338,27 @@ export class Runtime implements TurnHooks {
     const idx = input.observed.findIndex((m) => m.id === input.messageId);
     const user = input.observed.slice(0, idx < 0 ? input.observed.length : idx).findLast((m) => m.isUser);
     const userText = user ? (user.swipes[user.swipeId] ?? "") : "";
-    // Rolls and odds, and an action that couldn't run (DESIGN §12 chips), from the turn's resolution.
-    const res = plan?.resolution;
-    this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId} ${input.kind}: plan ${plan ? "yes" : "no"}, action ${res?.action ?? "-"}, check ${res?.check?.outcome ?? (res?.adjudged ? `${res.outcome ?? "-"} (no roll: ${res.adjudged.why ?? "-"})` : "-")}`, input.userId);
-    if (res) {
-      // The action lives in the revision the chat folds at (after any Upgrade), not the run's first.
+    // Rolls and odds, and an action that couldn't run (DESIGN §12 chips), from the turn's actions as they played.
+    const played = plan?.resolutions ?? [];
+    const checked = played.map((res) => `action ${res.action}, check ${res.check?.outcome ?? (res.adjudged ? `${res.outcome ?? "-"} (no roll: ${res.adjudged.why ?? "-"})` : "-")}`);
+    this.host.log("info", `[LumiRPEngine] turn ${input.messageId.slice(0, 8)}:${input.swipeId} ${input.kind}: plan ${plan ? "yes" : "no"}, ${checked.length > 0 ? checked.join("; ") : "action -"}${plan?.stopped ? `; queue stopped (${plan.stopped.cause}) with ${plan.stopped.left} left` : ""}`, input.userId);
+    if (played.length > 0) {
+      // The actions live in the revision the chat folds at (after any Upgrade), not the run's first.
       const world = input.core.worldAt(input.core.fold(input.observed).state.revision) ?? input.core.worldAt(rec?.defHash ?? "");
-      const label = (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
-      const chip = rollChip(label, res);
-      if (chip) stored.push({ id: `roll:${at}`, kind: "roll", ...base, label: chip.label, detail: chip.detail, actions: [], expires: "never", payload: {} });
-      if (!res.ok && res.failed) stored.push({ id: `decline:${at}`, kind: "decline", ...base, label: `${label}: couldn't`, detail: playerReason(res.failed), actions: [], expires: "next_send", payload: {} });
-      else if (res.rejected.length > 0) stored.push({ id: `decline:${at}`, kind: "decline", ...base, label: `${label}: declined`, detail: res.rejected.map((r) => r.rejection.reason).join("; "), actions: [], expires: "next_send", payload: {} });
-      // Typed text `interpret` read as an action (DESIGN §9.4, §11): one tap undoes the resolution.
-      if (res.ok && res.events.length > 0 && input.kind !== "renarrate" && input.kind !== "continue" && bridge.wasInterpreted(userText)) {
-        stored.push({ id: `not_action:${at}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as "${label}". Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(res.events)) as JsonValue } });
+      const labelOf = (res: Resolution): string => (world?.actions[res.action] ?? this.registry.actions.get(res.action))?.label ?? res.action;
+      for (const [i, res] of played.entries()) {
+        const label = labelOf(res);
+        // A turn of one action keeps the chip ids it always had.
+        const n = i === 0 ? "" : `:${i}`;
+        const chip = rollChip(label, res);
+        if (chip) stored.push({ id: `roll:${at}${n}`, kind: "roll", ...base, label: chip.label, detail: chip.detail, actions: [], expires: "never", payload: {} });
+        if (!res.ok && res.failed) stored.push({ id: `decline:${at}${n}`, kind: "decline", ...base, label: `${label}: couldn't`, detail: playerReason(res.failed), actions: [], expires: "next_send", payload: {} });
+        else if (res.rejected.length > 0) stored.push({ id: `decline:${at}${n}`, kind: "decline", ...base, label: `${label}: declined`, detail: res.rejected.map((r) => r.rejection.reason).join("; "), actions: [], expires: "next_send", payload: {} });
+      }
+      // Typed text `interpret` read as actions (DESIGN §9.4, §11): one tap undoes what they did.
+      const done = played.filter((res) => res.ok && res.events.length > 0);
+      if (done.length > 0 && input.kind !== "renarrate" && input.kind !== "continue" && bridge.wasInterpreted(userText)) {
+        stored.push({ id: `not_action:${at}`, kind: "not_action", ...base, label: "Not an action?", detail: `Read as ${done.map((res) => `"${labelOf(res)}"`).join(", then ")}. Undo it if you only meant to say it.`, actions: [{ id: "undo", label: "Not an action", style: "danger" }], expires: "next_send", payload: { text: userText, events: JSON.parse(JSON.stringify(done.flatMap((res) => res.events))) as JsonValue } });
       }
     }
     // `interpret` couldn't read the typed text (DESIGN §9.4): its call failed, or a Decision route's choice
@@ -1320,9 +1368,10 @@ export class Runtime implements TurnHooks {
       stored.push({ id: `read_failed:${at}`, kind: "read_failed", ...base, label: "Couldn't read your action", detail: "The call that reads your message failed, or none was left before the reply, so this turn ran as plain roleplay. Retry runs the turn again.", actions: [{ id: "rerun", label: "Retry", style: "primary" }], expires: "next_send", payload: {} });
     }
     // `interpret` read an action whose params name nothing in the world that fits (DESIGN §9.4): the
-    // turn ran as plain roleplay, and a decline chip says why. As after a declined change (§9.5), the
-    // next reply is told it didn't happen, and Remove it or Accept rewords that note. Both are about the
-    // typed message, so a later read of this reply keeps them (`prepareRead`).
+    // turn ran as plain roleplay, or, for a queued action, the queue ended before it; a decline chip
+    // says why. As after a declined change (§9.5), the next reply is told it didn't happen, and Remove
+    // it or Accept rewords that note. Both are about the typed message, so a later read of this reply
+    // keeps them (`prepareRead`).
     const unfit = input.kind === "continue" ? undefined : bridge.unfitOf(userText);
     if (unfit) {
       const id = unfitId(input.messageId, input.swipeId);
@@ -1331,7 +1380,8 @@ export class Runtime implements TurnHooks {
       const kept = (await this.outcomeNotes.list(input.chatId, input.userId)).filter((n) => n.id !== id);
       await this.outcomeNotes.save(input.chatId, input.userId, [...kept, { id, messageId: input.messageId, text: notes.accept }]);
       const reason = `${unfit.reason.charAt(0).toUpperCase()}${unfit.reason.slice(1)}`;
-      stored.push({ id, kind: "decline", ...base, label: `${unfit.label}: couldn't`, detail: `${reason}. Your message played as plain roleplay, and the next reply is told it didn't happen.`, actions: [{ id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send", payload: { reason: unfit.reason, notes } });
+      const before = bridge.intentOf(userText) !== null ? "It didn't play, nor anything after it" : "Your message played as plain roleplay";
+      stored.push({ id, kind: "decline", ...base, label: `${unfit.label}: couldn't`, detail: `${reason}. ${before}, and the next reply is told it didn't happen.`, actions: [{ id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send", payload: { reason: unfit.reason, notes } });
     }
     await this.ageNotes(input.chatId, input.userId, input.messageId);
     const headState = input.core.fold(input.observed).state;
@@ -1342,18 +1392,21 @@ export class Runtime implements TurnHooks {
       const label = chip.kind === "timelapse_offer" ? `Timelapse${to} (${compactSpan(chip.remaining)})?` : `Continue timelapse (${compactSpan(chip.remaining)} left)`;
       stored.push({ id: `tl:${at}:${i}`, kind: chip.kind, ...base, label, actions: [{ id: "timelapse", label: chip.kind === "timelapse_offer" ? "Timelapse" : "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(chip.target)) as JsonValue } });
     }
-    // A typed timelapse longer than a turn runs on its own: offered, never run unasked.
-    const offer = input.kind === "continue" ? undefined : bridge.offerFor(userText);
+    // A typed timelapse longer than a turn runs on its own: offered, never run unasked. Time the
+    // message lets pass after its actions isn't offered while some of them are left to play.
+    const offer = input.kind === "continue" || plan?.stopped ? undefined : bridge.offerFor(userText);
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
       const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
       const detail = offer.type === "duration" && offer.minutes > INTERPRETED_TIMELAPSE_CAP ? "That's longer than one turn runs on its own. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue } });
     }
-    // The input's second action (DESIGN §5.2 `interpret`): one tap sends it as the next message, as a
-    // suggested choice does, and it plays as its own turn, with its own price, time and checks.
-    const next = input.kind === "continue" ? undefined : bridge.nextOf(userText);
-    if (next) stored.push({ id: `next:${at}`, kind: "choice", ...base, label: next, detail: "The rest of your message. Send plays it as its own turn.", actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: next } });
+    // What the turn didn't play of the message (DESIGN §5.2, §11): the queued actions left when the
+    // queue stopped, then the words no action reads. One tap sends it as the next message, as a
+    // suggested choice does, and it plays as the next turn, with its own prices, time and checks.
+    const left = plan?.stopped ? (bridge.intentOf(userText)?.queue ?? []).slice(-plan.stopped.left).map((q) => q.text) : [];
+    const next = input.kind === "continue" ? "" : joinActions([...left, bridge.nextOf(userText) ?? ""]);
+    if (next !== "") stored.push({ id: `next:${at}`, kind: "choice", ...base, label: next, detail: `The rest of your message${plan?.stopped ? `: ${STOPPED[plan.stopped.cause]}` : ""}. Send plays it as its own turn.`, actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: next } });
     // An interrupt ended the timelapse early (DESIGN §9.2): say why, and offer the rest of the run.
     const summary = plan?.timelapse?.summary;
     if (summary?.stoppedBy && !(plan?.chips ?? []).some((c) => c.kind === "continue_timelapse")) {
@@ -1740,13 +1793,13 @@ function unfitId(messageId: MessageId, swipeId: number): string {
 const NO_VALUE: Record<string, true> = { "": true, none: true, null: true, nil: true, na: true, "n a": true, nothing: true, no: true, undefined: true, empty: true };
 
 /**
- * `interpret`'s second action as its chip may offer it (DESIGN §5.2), or null. It must read as an
- * action to the typed-input classifier (`lexicon` holds the actions' phrases), and not one that only
- * lets time pass, which is `then`'s. A placeholder for nothing ("none", "N/A") is none, and neither
- * is the message or its first action said again ("I walk to Bluebird Coffee" after "I walk to
- * Bluebird Coffee to buy a latte"), whose chip would play it twice. One carrying an unrevealed secret
- * (`secrets`, less the player's own words), or naming anything hidden, is dropped on its own: the
- * first action still plays.
+ * Words of the message the turn won't play (a queued action's, or what no action reads) as its chip
+ * may offer them (DESIGN §5.2), or null. They must read as an action to the typed-input classifier
+ * (`lexicon` holds the actions' phrases), and not one that only lets time pass, which is `then`'s. A
+ * placeholder for nothing ("none", "N/A") is none, and neither is the message or its first action
+ * said again ("I walk to Bluebird Coffee" after "I walk to Bluebird Coffee to buy a latte"), whose
+ * chip would play it twice. Words carrying an unrevealed secret (`secrets`, less the player's own
+ * words), or naming anything hidden, are dropped on their own while the actions still play.
  */
 function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, next: string, text: string, lexicon: readonly string[], secrets: readonly string[]): string | null {
   // Compared as words, without the player's own "I" or "we": "I walk to the cafe." is "walk to the cafe".
@@ -1760,6 +1813,45 @@ function offeredNext(reg: Registry, world: WorldDoc, state: Readonly<WorldState>
   if (hasOwn(NO_VALUE, said) || words(text).startsWith(said)) return null;
   if (!classifyTyped(next, world, [...lexicon, ...TIMELAPSE_LEXICON]) || onlyPassesTime(next, world, lexicon, TIMELAPSE_LEXICON)) return null;
   return findLeaks(next, secrets).length > 0 || chipNamesHidden(reg, world, state, next) ? null : next;
+}
+
+/** Actions in the player's words as one message, in order ("I buy a latte. I sit by the window"); a single one stays exactly as given. Empty pieces are skipped. */
+function joinActions(pieces: readonly string[]): string {
+  const said = pieces.map((p) => p.trim()).filter((p) => p !== "");
+  return said.map((p, i) => (i < said.length - 1 && !/[.!?]$/.test(p) ? `${p}.` : p)).join(" ");
+}
+
+/** Why the action queue stopped, for the chip holding the rest of the message (DESIGN §11). */
+const STOPPED: Record<QueueStop, string> = {
+  check: "it stopped at the check",
+  failure: "it stopped when an action didn't go through",
+  interruption: "it stopped when something came up",
+};
+
+/** Why the action queue stopped, for the narrator (DESIGN §9.5, §11). */
+const STOPPED_NOTE: Record<QueueStop, string> = {
+  check: "it waits on that check",
+  failure: "an action didn't go through",
+  interruption: "something came up",
+};
+
+/**
+ * An action's params as `interpret` read them, ready to play: money the model stated as written
+ * ("$200") in minor units (cents), and a way of paying the player named that the model left out (a
+ * long sentence can lose it), from the first of `said` that names one ("credit card", "cash"); a
+ * method the model set stands.
+ */
+function playable(action: ActionDef, params: JsonObject, world: WorldDoc, said: readonly string[]): JsonObject {
+  const out: JsonObject = { ...params };
+  const scale = 10 ** world.currency.decimals;
+  for (const [name, def] of Object.entries(action.params)) {
+    const v = out[name];
+    if (def.type === "money" && typeof v === "number" && Number.isFinite(v)) out[name] = Math.round(v * scale);
+  }
+  const method = out.method;
+  const named = hasOwn(action.params, "method") && !(typeof method === "string" && method.trim() !== "") ? (said.map(saidPayMethod).find((m) => m !== null) ?? null) : null;
+  if (named) out.method = named;
+  return out;
 }
 
 /**
@@ -1804,14 +1896,14 @@ function planOutline(plan: EngineTurnPlan, prose: PlanProse | undefined): string
 }
 
 /**
- * What the narrator must know about the turn's plan (DESIGN §6.2 Outcome, §9.2 Montage, §11): the
- * action's result with its roll, or why it couldn't run; a fight's round; and a timelapse's Montage
- * groups and money.
+ * What the narrator must know about the turn's plan (DESIGN §6.2 Outcome, §9.2 Montage, §11): each
+ * action's result in the order they played, with its roll, or why it couldn't run, and that the
+ * rest of the message hasn't happened when the queue stopped; a fight's round; and a timelapse's
+ * Montage groups and money.
  */
 export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Registry): { outcome: string[]; montage: string[] } {
   const outcome: string[] = [];
-  const res = plan.resolution;
-  if (res) {
+  for (const res of plan.resolutions) {
     const label = (world.actions[res.action] ?? registry.actions.get(res.action))?.label ?? res.action;
     const reasons = res.rejected.slice(0, 3).map((r) => r.rejection.reason);
     if (!res.ok) outcome.push(`${label}: it didn't happen (${res.failed?.reason ?? "not possible"}). Narrate the attempt failing.`);
@@ -1830,6 +1922,8 @@ export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Regis
     const span = spanText(summary.to - summary.from);
     outcome.push(`Time passed: ${span}, from ${formatClock(cal, summary.from)} to ${formatClock(cal, summary.to)}${summary.stoppedBy ? `, stopped early by ${STOP_LABEL[summary.stoppedBy]}` : ""}. Narrate only this span.`);
   }
+  // The player's message holds more than the turn played: told so, the narrator doesn't play it out.
+  if (plan.stopped) outcome.push(`The rest of the player's message hasn't happened (${STOPPED_NOTE[plan.stopped.cause]}); don't narrate it.`);
   const montage: string[] = [];
   const m = plan.montage;
   if (m) {

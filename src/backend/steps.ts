@@ -10,7 +10,7 @@ import { isRecord } from "../shared/json";
 import type { StepConfig } from "../shared/settings";
 import type { StepPurpose, WorldCurrency, WorldDoc } from "../shared/world";
 import type { Answers, Questions } from "../engine/decide";
-import type { InterpretOutput } from "../engine/steps";
+import { ACTION_QUEUE_LIMIT, type InterpretOutput, type QueuedAction } from "../engine/steps";
 import { cashGift } from "../packs/gear/core/index";
 import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "./host";
 import type { LookupTransport, StepLore } from "./lore-steps";
@@ -414,7 +414,7 @@ function worldBrief(world: WorldDoc, extra: string): string {
   return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places || "none"}. ${extra}`;
 }
 
-/** `interpret`: typed input to at most one action (DESIGN §9.4), with the input's second action as the player would type it (`next`). `instructions` (a world step template) lead the prompt; the output contract stays; the step's lore follows. Null when the call fails. */
+/** `interpret`: typed input to its actions in order (DESIGN §9.4, §11): the first, the further ones it reads as engine actions (`queue`), and the rest as the player would type it (`next`). `instructions` (a world step template) lead the prompt; the output contract stays; the step's lore follows. Null when the call fails. */
 export async function interpret(
   steps: Steps,
   text: string,
@@ -429,7 +429,7 @@ export async function interpret(
 ): Promise<InterpretOutput | null> {
   if (actions.length === 0) return { action: null, params: {}, probabilities: { none: 1 } };
   const catalog = actions.map((a) => `${a.id} — ${a.label}${a.params.length > 0 ? ` (params: ${a.params.join(", ")})` : ""}${a.lexicon && a.lexicon.length > 0 ? ` [said as: ${a.lexicon.slice(0, 6).join(", ")}]` : ""}`).join("\n");
-  const system = `${instructions ? `${instructions}\n` : ""}You map a player's typed input in a roleplay to at most one engine action.\n${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}\nAction catalog:\n${catalog}\nRules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). If the input has two actions, return the first, and add "next": the second, written as the player would type it ("I walk to the market to buy bread" → "I buy bread"). If it also lets time pass after that action ("…and sleep until the next morning", "…then wait two hours"), add "then": {"minutes": number} or {"until": a day part, "shift" or "commitment"}; time passing is never "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "then"?: {...}, "next"?: string}.`;
+  const system = `${instructions ? `${instructions}\n` : ""}You map a player's typed input in a roleplay to the engine actions it takes, in order.\n${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}\nAction catalog:\n${catalog}\nRules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" → "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it. If the input lets time pass after its last action ("…and sleep until the next morning", "…then wait two hours"), add "then": {"minutes": number} or {"until": a day part, "shift" or "commitment"}; time passing is never in "more" or "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`;
   // A transient failure (a reset connection, a timeout) gets one more try: a turn whose action went unread runs as plain roleplay.
   const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { retryTransient: true, lore });
   if (!isRecord(raw)) return null;
@@ -438,10 +438,27 @@ export async function interpret(
   if (isRecord(raw.params)) for (const [k, v] of Object.entries(raw.params)) params[k] = JSON.parse(JSON.stringify(v ?? null)) as JsonValue;
   const confidence = typeof raw.confidence === "number" ? Math.min(1, Math.max(0, raw.confidence)) : 0.8;
   const then = isRecord(raw.then) ? (JSON.parse(JSON.stringify(raw.then)) as JsonObject) : undefined;
-  // The second action becomes a chip's text: one longer than a suggested choice is no single action,
-  // and it is dropped rather than cut, so a cut can't hide a secret from the leak check that follows.
-  const next = typeof raw.next === "string" ? raw.next.replace(/\s+/g, " ").trim() : "";
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(then ? { then } : {}), ...(next !== "" && next.length <= 120 ? { next } : {}) };
+  // Words that become a chip's text: one longer than a suggested choice is no single action, and it
+  // is dropped rather than cut, so a cut can't hide a secret from the leak check that follows.
+  const words = (v: JsonValue | undefined): string => {
+    const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
+    return s.length <= 120 ? s : "";
+  };
+  // The further actions, in order, up to the queue's bound. One no catalog action reads ends the
+  // queue: it and every one after it (and any past the bound) are left in words, as `next` is.
+  const queue: QueuedAction[] = [];
+  const rest: string[] = [];
+  for (const entry of action && Array.isArray(raw.more) ? raw.more.slice(0, 16) : []) {
+    const said = isRecord(entry) ? words(entry.text) : "";
+    const id = isRecord(entry) && typeof entry.action === "string" ? entry.action : null;
+    if (rest.length === 0 && queue.length < ACTION_QUEUE_LIMIT - 1 && isRecord(entry) && id !== null && actions.some((a) => a.id === id)) {
+      const own: JsonObject = {};
+      if (isRecord(entry.params)) for (const [k, v] of Object.entries(entry.params)) own[k] = JSON.parse(JSON.stringify(v ?? null)) as JsonValue;
+      queue.push({ action: id, params: own, text: said });
+    } else if (said !== "") rest.push(said);
+  }
+  const next = [...rest, words(raw.next)].filter((s) => s !== "");
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}), ...(next.length > 0 ? { next } : {}) };
 }
 
 /** A way of paying said as a payment: a preposition or "use" before it ("pay with my credit card", "on my debit card", "in cash", "from savings"), and not a thing named after it ("a credit card holder"). */

@@ -1,8 +1,8 @@
 // The deterministic outline (DESIGN §5.2 Outline, D13): `beats` always renders it; prompted outline
-// steps stack on top. Lines come from what this turn decided, in a fixed order: the action's
-// outcome, the timelapse, visible track changes and signals, storylet beats (a seeded weighted
-// order, so a Re-run may pick different storylets and a Re-narrate repeats them), agents present
-// and the next commitment. Everything is filtered to what the POV knows.
+// steps stack on top. Lines come from what this turn decided, in a fixed order: the actions'
+// outcomes as they played, the timelapse, visible track changes and signals, storylet beats (a
+// seeded weighted order, so a Re-run may pick different storylets and a Re-narrate repeats them),
+// agents present and the next commitment. Everything is filtered to what the POV knows.
 
 import type { EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
@@ -20,7 +20,8 @@ import type { TimelapseOutcome } from "./time";
 import { canSeeEntity, canSeeField, playerTrack, signalVisible } from "./visibility";
 
 export interface BeatInput {
-  resolution?: Resolution | null;
+  /** The turn's actions as played, in order (DESIGN §11 action queue). */
+  resolutions?: readonly Resolution[];
   timelapse?: TimelapseOutcome | null;
   /** The turn's events (signals, beats and stage changes are read from them). */
   events: readonly LedgerEvent[];
@@ -53,8 +54,7 @@ function weightedOrder<T extends { weight: number }>(items: readonly T[], rng: R
 export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, input: BeatInput, rng: Rng, max = MAX_BEATS): string[] {
   const pov: EntityId = world.pov;
   const lines: string[] = [];
-  const r = input.resolution;
-  if (r) {
+  for (const r of input.resolutions ?? []) {
     const label = own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     if (!r.ok) lines.push(`${label} doesn't happen: ${r.failed?.reason ?? "not possible"}.`);
     // A check the adjudication policy settled without a roll is decided all the same.

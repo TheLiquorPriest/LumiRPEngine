@@ -77,8 +77,9 @@ function run(world: WorldDoc, turns: number, seed: string, intent = intentAt): {
     expect(plan.elapsedMinutes).toBeGreaterThan(0);
     expect(s.state.clock).toBe(before + plan.elapsedMinutes);
     // Shown odds are the odds the roll used.
-    if (shown?.available && plan.resolution?.check) {
-      expect(plan.resolution.check.odds).toEqual(shown.odds ?? {});
+    const check = plan.resolutions[0]?.check;
+    if (shown?.available && check) {
+      expect(check.odds).toEqual(shown.odds ?? {});
       rolls++;
     }
     // The books balance.

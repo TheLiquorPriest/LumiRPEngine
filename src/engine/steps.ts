@@ -55,21 +55,36 @@ export interface StepPort {
   prompt(request: PromptRequest, signal: AbortSignal): Promise<StepOutcome<PromptResult>>;
 }
 
-/** `interpret`: typed input to at most one action (DESIGN §9.4). */
+/** `interpret`: typed input to its actions, in order (DESIGN §9.4, §11). */
 export interface InterpretInput {
   text: string;
   scene: JsonValue;
   actions: ActionId[];
 }
 
+/** The most actions one message plays in a turn: the first and the queued ones after it (DESIGN §11). */
+export const ACTION_QUEUE_LIMIT = 5;
+
+/** One of the input's actions after the first, as `interpret` read it: an engine action, its params, and its words. */
+export interface QueuedAction {
+  action: ActionId;
+  params: JsonObject;
+  /** As the player would type it ("I buy a latte"): what the chip offers when the queue stops before it; empty when it can't be offered. */
+  text: string;
+  /** The `judge` step's answer for its check, when the queue's check is this action's (DESIGN §11). */
+  judgement?: Judgement;
+}
+
 export interface InterpretOutput {
   action: ActionId | null;
   params: JsonObject;
   probabilities: Record<string, number>;
-  /** Time the input lets pass after the action ("…and sleep until the next morning"): `minutes` or `until`. */
+  /** Time the input lets pass after its last action ("…and sleep until the next morning"): `minutes` or `until`. */
   then?: JsonObject;
-  /** The input's second action, as the player would type it ("I buy a latte"): offered as a chip that sends it as the next message. Never time passing, which is `then`'s. */
-  next?: string;
+  /** The input's further actions, in order, each played against the state the one before it left until the queue stops (DESIGN §11); none without a first action. */
+  queue?: QueuedAction[];
+  /** What the input says after its actions that no engine action reads, each as the player would type it: offered on a chip that sends it as the next message. Never time passing, which is `then`'s. */
+  next?: string[];
   /** The `judge` step's answer for the action's check (DESIGN §11), recorded with the intent so a Re-run reads the same one. */
   judgement?: Judgement;
 }

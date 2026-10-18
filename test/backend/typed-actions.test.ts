@@ -1,7 +1,7 @@
-// What `interpret` reads from typed text (DESIGN §5.2, §9.4), on Port Alder: an action whose params
-// name nothing in the world plays as plain roleplay, says why on a decline chip and tells the next
-// reply it didn't happen; a second action in the same message is offered as a chip that sends it as
-// the next message, where it plays as its own turn.
+// What `interpret` reads from typed text (DESIGN §5.2, §9.4, §11), on Port Alder: an action whose
+// params name nothing in the world plays as plain roleplay, says why on a decline chip and tells the
+// next reply it didn't happen; a message's actions play in order in one turn until the queue stops,
+// and what the turn didn't play is offered as a chip that sends it as the next message.
 
 import { describe, expect, test } from "bun:test";
 import type { DecideRequest, QuietRequest } from "../../src/backend/host";
@@ -254,5 +254,59 @@ describe("a second action in the same message", () => {
     expect(kinds).toContain("decline");
     expect(kinds).not.toContain("choice");
     expect(kinds).not.toContain("timelapse_offer");
+  });
+});
+
+describe("several actions in one message (the action queue)", () => {
+  /** Reads the walk to Bluebird Coffee with `more` as its further actions, and anything else as buying a muffin. */
+  const walkThen =
+    (more: JsonObject[]) =>
+    (text: string): JsonObject =>
+      text.startsWith("I walk") ? { action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9, more } : { action: "buy", params: { item: "muffin" }, confidence: 0.9 };
+  const buying = (item: string, extra: JsonObject = {}): JsonObject => ({ action: "buy", params: { item, ...extra }, text: `I buy a ${item}` });
+  const bought = async (rig: Rig, chatId: string, item: RegExp): Promise<number> => (await history(rig, chatId)).filter((h) => isRecord(h) && typeof h.memo === "string" && item.test(h.memo)).length;
+  const outcomeLines = (rig: Rig): string[] => (rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "").split("\n").map((line) => line.replace(/^- /, ""));
+
+  test("'I walk to Bluebird Coffee and buy a latte' walks there and buys it in one turn, and the narrator is told both, in order", async () => {
+    const { rig, chatId } = await chat();
+    reading(rig, walkThen([buying("latte")]));
+    await rig.turn(chatId, "I walk to Bluebird Coffee and buy a latte.", "You order at the counter.");
+    const { state, world } = await folded(rig, chatId);
+    expect(placeOfEntity(state, world.pov)).toBe("bluebird_coffee");
+    expect(await bought(rig, chatId, /latte/i)).toBe(1);
+    const lines = outcomeLines(rig);
+    const at = (action: string): number => lines.findIndex((line) => line.startsWith(`${rig.rt.registry.actions.get(action)?.label ?? action}:`));
+    expect(at("go")).toBeGreaterThanOrEqual(0);
+    expect(at("buy")).toBeGreaterThan(at("go"));
+    expect((await replyChips(rig, chatId)).some((c) => c.kind === "choice")).toBe(false);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a Buy the money can't cover stops the queue: the rest is offered on the chip, and Send plays it as the next turn", async () => {
+    const { rig, chatId } = await chat();
+    reading(rig, (text): JsonObject => (text.startsWith("I buy a yacht") ? { action: "buy", params: { item: "yacht", price: 9000000 }, confidence: 0.9, more: [buying("muffin")] } : { action: "buy", params: { item: "muffin" }, confidence: 0.9 }));
+    await rig.turn(chatId, "I buy a yacht for $9,000,000, then a muffin.", "The broker laughs.");
+    expect(await bought(rig, chatId, /muffin/i)).toBe(0);
+    expect(outcomeLines(rig).some((line) => /hasn't happened/.test(line))).toBe(true);
+    const chip = (await replyChips(rig, chatId)).find((c) => c.kind === "choice");
+    expect(chip?.label).toBe("I buy a muffin");
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id, choice: chip?.actions[0]?.id })).applied).toBe(true);
+    expect((await rig.host.chats.messages(chatId, rig.host.userId)).findLast((m) => m.isUser)?.content).toBe("I buy a muffin");
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "The barista bags a muffin.");
+    expect(await bought(rig, chatId, /muffin/i)).toBe(1);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a queued action that names nothing in the world ends the queue with its decline, and nothing after it is offered", async () => {
+    const { rig, chatId } = await chat();
+    reading(rig, walkThen([{ action: "pay", params: { to: "rena", amount: 6 }, text: "I pay Rena" }, buying("muffin")]));
+    await rig.turn(chatId, "I walk to Bluebird Coffee, pay Rena and buy a muffin.", "You look around for Rena.");
+    const { state, world } = await folded(rig, chatId);
+    expect(placeOfEntity(state, world.pov)).toBe("bluebird_coffee");
+    const chips = await replyChips(rig, chatId);
+    expect(chips.find((c) => c.kind === "decline")?.detail).toContain("Rena");
+    expect(chips.some((c) => c.kind === "choice")).toBe(false);
+    expect(await bought(rig, chatId, /muffin/i)).toBe(0);
   });
 });
