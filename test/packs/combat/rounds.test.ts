@@ -120,6 +120,23 @@ describe("the clock in a fight", () => {
     expect(skip.timelapse).toBeNull();
   });
 
+  test("the action that starts a fight keeps its time; the turns inside it take none", () => {
+    const world = fightWorld((w) => {
+      povFirst(w);
+      // Stalk the goblin for twenty minutes, then jump it; the same stalk without a fight, to compare.
+      w.actions.ambush = { id: "ambush", label: "Stalk and ambush", params: { target: { type: "ref", ref: "person" } }, requires: [], combat: { cost: {}, start: true }, outcomes: { default: [{ type: "combat.start", args: { foes: "target" } }] }, duration: "20" };
+      w.actions.stalk = { id: "stalk", label: "Stalk", params: { target: { type: "ref", ref: "person" } }, requires: [], outcomes: { default: [] }, duration: "20" };
+    });
+    const calm = startState(world, reg);
+    expect(plan(world, calm, "stalk", { target: "goblin" }).elapsedMinutes).toBe(20);
+    const ambush = plan(world, calm, "ambush", { target: "goblin" });
+    expect(ambush.elapsedMinutes).toBe(20);
+    const fight = fold(reg, world, calm, ambush.events);
+    expect(encounterOf(fight)).not.toBeNull();
+    expect(fight.clock - calm.clock).toBe(20);
+    expect(plan(world, fight, "stalk", { target: "goblin" }).elapsedMinutes).toBe(0);
+  });
+
   test("no schedule moves anyone out of a fight under way", () => {
     const world = fightWorld((w) => {
       povFirst(w);
