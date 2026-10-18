@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../src/shared/hash";
 import type { EventRef, LedgerEvent, Marker, PostEntry, Rec } from "../../src/shared/ledger";
-import type { ChainMessage, FoldInput, FoldOutput } from "../../src/engine/ledger/chain";
+import type { ChainMessage, FoldInput, FoldOutput, FoldSnapshot, SnapshotStore } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import { computePaths, contentId, storedRecordHash } from "../../src/engine/ledger/path";
 import { referenceFold, type FoldTypes } from "../../src/engine/ledger/reference";
@@ -224,5 +224,29 @@ describe("reference fold", () => {
     const edited = fold();
     expect(validations).toBe(0);
     expect(hashJson(edited.state)).toBe(hashJson(referenceFold({ worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain }, registry).state));
+  });
+
+  test("a fold started from a stored snapshot remembers the steps it rebuilt: the same chain folds again from its cache (L42)", () => {
+    let gets = 0;
+    const stored = new Map<string, FoldSnapshot>();
+    const snapshots: SnapshotStore = {
+      get: (key) => (gets++, stored.get(key)),
+      put: (snapshot) => void stored.set(snapshot.key, snapshot),
+    };
+    const chain: ChainMessage[] = [reply("a0", "Morning.")];
+    for (let t = 1; t <= 8; t++) {
+      chain.push(user(`u${t}`, "walk"), reply(`a${t}`, `Walked ${t}.`));
+      record(chain, chain.length - 1, [{ type: "clock", minutes: 2, cause: "tick" }]);
+    }
+    const input: FoldInput = { worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain, snapshots };
+    new LedgerFold(registry, { snapshotEvery: 3 }).fold(input);
+    // After a restart the first fold starts from the last stored snapshot, two messages before the end.
+    const restarted = new LedgerFold(registry, { snapshotEvery: 3 });
+    const first = restarted.fold(input);
+    gets = 0;
+    const again = restarted.fold(input);
+    expect(gets).toBe(0);
+    expect(again).toEqual(first);
+    expect(hashJson(again.state)).toBe(hashJson(referenceFold(input, registry).state));
   });
 });

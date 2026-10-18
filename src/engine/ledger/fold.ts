@@ -3,8 +3,9 @@
 //    change at the head reuses everything before it; only every SNAPSHOT_EVERY-th step (and each
 //    fold's last) keeps a state copy, the rest keep their outputs;
 //  - stored snapshots (cold folds): a fold with no cached prefix finds the furthest stored
-//    state on its chain by path hash, rebuilds the outputs before it without state, and folds on
-//    from there; it stores a snapshot every SNAPSHOT_EVERY messages;
+//    state on its chain by path hash, rebuilds the outputs before it without state (and caches
+//    them, so the next fold walks the cache past it), and folds on from there; it stores a
+//    snapshot every SNAPSHOT_EVERY messages;
 //  - re-convergence: a rebased record whose running state equals the state a record folding the
 //    same (events, post entries, undos, Keep overlays, path and markers) folded from on its own
 //    path with nothing failing applies without re-validation (validation is a function of state).
@@ -182,10 +183,15 @@ export class LedgerFold {
         for (const [i, x] of snapshot.keep) keep.set(i, [...(keep.get(i) ?? []), x]);
         for (const [i, x] of snapshot.violations) violations.set(i, [...(violations.get(i) ?? []), x]);
         // Steps already cached keep their outputs; the rest come from their frames and the snapshot.
+        // They are remembered, the snapshot's step with its state, so the next fold of this chain
+        // walks the cache past the snapshot instead of starting from it again.
         for (let i = base + 1; i <= best; i++) {
           const f = frames[i - base - 1] as Frame;
-          steps.push({ state: null, result: f.result, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], paused: false });
-          keys.push(frameKeys[i - base - 1] as string);
+          const k = frameKeys[i - base - 1] as string;
+          const step: Step = { state: null, result: f.result, notes: [...f.notes, ...(notes.get(i) ?? [])], keep: [...f.keep, ...(keep.get(i) ?? [])], violations: violations.get(i) ?? [], paused: false };
+          this.remember(k, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
+          steps.push(step);
+          keys.push(k);
         }
         shared = snapshot.state;
         state = shared;
