@@ -40,6 +40,7 @@ export type TurnChip =
 
 /** The plan plus what the renderers and chips need. Only `events` and `elapsedMinutes` are recorded. */
 export interface EngineTurnPlan extends TurnPlan {
+  /** The POV's action; its events as recorded, with the rest of any event group they're in (a fight's act record and the rule events it fires). */
   resolution: Resolution | null;
   timelapse: TimelapseOutcome | null;
   montage: Montage | null;
@@ -83,11 +84,24 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   } else {
     // A fight under way runs everyone else's turns around the POV's action (the combat pack).
     const fight = optionalService(w.ctx, "combat.round")?.(w, rng.fork("combat"));
+    const mark = w.events.length;
     if (intent?.action) {
       resolution = resolveAction(reg, w, { action: intent.action, params: intent.params }, rng, { runSeed: input.runSeed, judgement: intent.judgement ?? null });
       if (resolution.events.length > 0) runRulesOnEvents(reg, w, resolution.events, { seed: input.seed });
     }
     combat = fight?.after(resolution ? { resolution, params: intent?.params ?? {} } : null) ?? [];
+    if (resolution) {
+      // A fight makes the POV's act one event group with its record and the rule events it fires,
+      // after the act applied: the resolution carries the act as recorded, so an Undo of the action
+      // ("Not an action?") finds and takes all of it.
+      let end = mark + resolution.events.length;
+      const groups = new Set(w.events.slice(mark, end).flatMap((e) => (e.group !== undefined ? [e.group] : [])));
+      for (; end < w.events.length; end++) {
+        const group = w.events[end]?.group;
+        if (group === undefined || !groups.has(group)) break;
+      }
+      resolution = { ...resolution, events: w.events.slice(mark, end) };
+    }
     // A fight still under way is seconds long: the turn moves no clock, whatever the action took, so
     // no day plan or schedule runs mid-fight (the combat pack also holds its participants in place).
     const elapsed = optionalQuery(w.ctx, "combat.engaged")?.(w.ctx, w.world.pov) === true ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);

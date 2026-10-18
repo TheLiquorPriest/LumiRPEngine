@@ -3,9 +3,11 @@
 // tab reads the policy's verdicts, and fights stay out of worlds without combat.
 
 import { describe, expect, test } from "bun:test";
+import { Runtime } from "../../../src/backend/runtime";
 import { presetAdjudication, readAdjudication } from "../../../src/shared/adjudication";
 import { hashJson } from "../../../src/shared/hash";
 import type { Level } from "../../../src/shared/ids";
+import type { JsonValue } from "../../../src/shared/json";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import { applyProfile, PROFILE_IDS, PROFILES } from "../../../src/shared/profiles/index";
 import type { WorldDoc } from "../../../src/shared/world";
@@ -312,6 +314,26 @@ describe("acts", () => {
     applyValidUnits(reg, p.events, view, (s) => reg.context(world, s));
     for (const id of [POV, "goblin", "bandit"]) expect(view.entities[id]?.fields.hp).toEqual(other.entities[id]?.fields.hp);
     expect(encounterOf(view)).toEqual(encounterOf(other));
+  });
+
+  test("a typed combat action's Not an action? Undo finds the whole act as recorded, and the turn folds without it", () => {
+    const world = fightWorld((w) => {
+      povFirst(w);
+      // Every strike lands, and no one goes down from one.
+      w.actions.strike!.check = { id: "strike", dice: "d20", dc: "-100", bands: [{ outcome: "miss", margin: { max: -1 } }, { outcome: "hit", margin: { min: 0 } }] };
+      for (const id of ["goblin", "bandit"]) w.entities[id]!.fields.max_hp = 40;
+    });
+    const parent = started(world).state;
+    const p = plan(world, parent, "strike", { target: "goblin" });
+    // The chip stores the resolution's events as JSON, and Undo looks them up in the turn's record.
+    const stored = JSON.parse(JSON.stringify(p.resolution?.events ?? [])) as JsonValue[];
+    const refs = Runtime.refsOf({ events: p.events, pre: 0 }, stored, 0);
+    expect(refs).toHaveLength(stored.length);
+    expect(refs.map((r) => p.events[r.index]?.type)).toEqual(["combat.spend", "set", "combat.act"]);
+    const undone = new Set(refs.map((r) => r.index));
+    const after = fold(reg, world, parent, p.events.filter((_, i) => !undone.has(i)));
+    expect(after.entities.goblin?.fields.hp).toEqual(parent.entities.goblin?.fields.hp);
+    expect(encounterOf(after)?.log.some((l) => l.actor === POV)).toBe(false);
   });
 
   test("the start line gives no total for someone the POV can't see", () => {

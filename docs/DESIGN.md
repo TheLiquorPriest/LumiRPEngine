@@ -714,7 +714,7 @@ I then re-measured with the engine's own `extract` step as shipped (strict rules
 
 **Action chips** (Timelapse offers and Continue timelapse) start a turn like a palette action. They lapse at the next send.
 
-**Undo.** Undo covers the latest reply; earlier changes go through Keep/Discard. An undo that later on-path events depend on is refused ("later events depend on it") rather than cascading, which keeps every on-path entry re-validatable (L7). "Not an action?" appears only on interpreted action resolutions, because a timelapse's events are clock and simulation output rather than undoable effects.
+**Undo.** Undo covers the latest reply; earlier changes go through Keep/Discard. An undo that later on-path events depend on is refused ("later events depend on it") rather than cascading, which keeps every on-path entry re-validatable (L7). "Not an action?" appears only on interpreted action resolutions, because a timelapse's events are clock and simulation output rather than undoable effects. It undoes the resolution's events as the record holds them: a combat act's spend, outcome, the rule events it fires and its `combat.act` record are one event group (§11), and it takes all of them.
 
 ## 12. Mobile-first UI (D12)
 
