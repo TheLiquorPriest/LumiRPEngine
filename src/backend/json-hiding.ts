@@ -130,6 +130,8 @@ export class JsonHiding {
   constructor(
     private readonly host: HostPort,
     private readonly hides: (userId: UserId) => Promise<boolean>,
+    /** Whether the world still exists: a deleted world's chats keep its id in their metadata, and never get their scripts back. */
+    private readonly worldExists: (worldId: WorldId, userId: UserId) => Promise<boolean>,
   ) {}
 
   private queued(key: string, step: () => Promise<void>): Promise<void> {
@@ -145,7 +147,7 @@ export class JsonHiding {
   /** The chat's scripts, created or brought up to date, while the user hides JSON blocks. */
   ensure(chatId: ChatId, worldId: WorldId, userId: UserId): Promise<void> {
     return this.queued(`${userId}\u0000${chatId}`, async () => {
-      if (!(await this.hides(userId))) return;
+      if (!(await this.hides(userId)) || !(await this.worldExists(worldId, userId))) return;
       const want = jsonScripts(chatId, worldId);
       const kept = (await this.host.regex.chatScripts(chatId, userId)).filter((s) => s.chatId === chatId);
       for (const role of ["exclude", "hide"] as const) {
@@ -186,6 +188,12 @@ export class JsonHiding {
   /** Hiding turned on again: each world chat gets its scripts back as the engine meets it. */
   forget(userId: UserId): void {
     for (const key of [...this.checked]) if (key.startsWith(`${userId}\u0000`)) this.checked.delete(key);
+  }
+
+  /** A deleted chat: the host keeps its chat-scoped scripts, so the engine's go. */
+  async removeChat(chatId: ChatId, userId: UserId): Promise<void> {
+    this.checked.delete(`${userId}\u0000${chatId}`);
+    await this.removeWhere(userId, (s) => s.chatId === chatId);
   }
 
   /** A deleted world's chats aren't world chats any more. */

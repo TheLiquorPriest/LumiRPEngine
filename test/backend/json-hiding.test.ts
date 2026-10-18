@@ -159,3 +159,29 @@ describe("the JSON scripts", () => {
     expect(scriptsOf(rig, kept)).toHaveLength(2);
   });
 });
+
+describe("deleted chats and worlds", () => {
+  test("deleting a world chat removes its scripts; the other world chats keep theirs", async () => {
+    const rig = new Rig();
+    const gone = await rig.worldChat();
+    const kept = await rig.worldChat();
+    rig.host.deleteChat(gone);
+    await rig.host.settle();
+    expect(scriptsOf(rig, gone)).toEqual([]);
+    expect(scriptsOf(rig, kept)).toHaveLength(2);
+  });
+
+  test("a deleted world's chats don't get their scripts back when the engine meets them again, after a restart too", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const run = await rig.rt.runOf(chatId, rig.host.userId);
+    rig.body(await rig.send({ type: "lre.world", op: "delete", worldId: run?.worldId ?? "" }));
+    await rig.send({ type: "lre.hello", chatId });
+    await rig.host.settle();
+    expect(scriptsOf(rig, chatId)).toEqual([]);
+    const next = rig.restart();
+    await next.send({ type: "lre.hello", chatId });
+    await next.host.settle();
+    expect(scriptsOf(next, chatId)).toEqual([]);
+  });
+});

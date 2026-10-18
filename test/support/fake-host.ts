@@ -426,6 +426,12 @@ export class FakeHost implements HostPort {
     this.emit("MESSAGE_DELETED", { chatId, messageId });
   }
 
+  /** Deletes a chat: CHAT_DELETED. As on the host, its chat-scoped regex scripts stay. */
+  deleteChat(chatId: ChatId): void {
+    this.chatsById.delete(chatId);
+    this.emit("CHAT_DELETED", { chatId });
+  }
+
   /** Branch: a new chat with copies of the messages up to `messageId`, metadata included. Silent. */
   branch(chatId: ChatId, messageId: MessageId): ChatId {
     const c = this.chat(chatId);

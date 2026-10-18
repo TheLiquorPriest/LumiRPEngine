@@ -95,7 +95,8 @@ const SWIPE_ACTIONS: Record<string, SwipeAction> = { added: "added", navigated: 
 
 function decodeEvent<K extends HostEventName>(event: K, p: unknown): HostEventMap[K] | null;
 function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventName] | null {
-  const chatId = str(p, "chatId");
+  // CHAT_DELETED names its chat `id`; every other event, `chatId`.
+  const chatId = str(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId) return null;
   switch (event) {
     case "GENERATION_STARTED":
@@ -150,6 +151,8 @@ function decodeEvent(event: HostEventName, p: unknown): HostEventMap[HostEventNa
       const previousSwipeId = num(p, "previousSwipeId");
       return { chatId, message, action, swipeId: num(p, "swipeId") ?? message.swipeId, ...(previousSwipeId !== undefined ? { previousSwipeId } : {}) };
     }
+    case "CHAT_DELETED":
+      return { chatId };
     case "MESSAGE_DELETED": {
       const messageId = str(p, "messageId");
       return messageId ? { chatId, messageId } : null;

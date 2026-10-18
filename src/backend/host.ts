@@ -110,6 +110,11 @@ export interface WorldInfoActivatedEvent {
   stats: JsonObject;
 }
 
+/** A chat deleted (the host sends `{ id }`). */
+export interface ChatDeletedEvent {
+  chatId: ChatId;
+}
+
 export interface HostEventMap {
   GENERATION_STARTED: GenerationStartedEvent;
   GENERATION_IN_PROGRESS: GenerationInProgressEvent;
@@ -120,6 +125,7 @@ export interface HostEventMap {
   MESSAGE_SWIPED: MessageSwipedEvent;
   MESSAGE_DELETED: MessageDeletedEvent;
   WORLD_INFO_ACTIVATED: WorldInfoActivatedEvent;
+  CHAT_DELETED: ChatDeletedEvent;
 }
 
 export type HostEventName = keyof HostEventMap;

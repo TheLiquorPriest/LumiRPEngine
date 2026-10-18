@@ -508,7 +508,7 @@ export class Runtime implements TurnHooks {
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
     this.book = new EngineBook(this.host, this.worlds);
-    this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks);
+    this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks, async (worldId, userId) => (await this.worlds.index(worldId, userId)) !== null);
     this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
@@ -533,6 +533,10 @@ export class Runtime implements TurnHooks {
       if (e.message.isUser && userId) void this.lapse(e.chatId, userId);
     });
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
+    // The host keeps a deleted chat's chat-scoped regex scripts, so the engine removes its own (DESIGN §6.7).
+    this.host.on("CHAT_DELETED", (e, userId) => {
+      if (userId) this.jsonHiding.removeChat(e.chatId, userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: its JSON regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
+    });
   }
 
   // ---------------------------------------------------------------- chats
