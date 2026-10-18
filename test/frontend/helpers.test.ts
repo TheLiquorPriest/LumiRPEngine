@@ -157,7 +157,6 @@ describe("time settings patches", () => {
     expect(settingsTimePatch({ control: "tick", scope: { all: true }, to: 1 })).toEqual({});
     expect(settingsTimePatch({ control: "interrupt", scope: { interrupt: "bill" }, to: "stop" })).toEqual({ time: { interrupts: { bill: "stop" } } });
     expect(settingsTimePatch({ control: "speed_through", scope: { activity: "sleep" }, to: { mode: "auto", thresholdMinutes: 60 } })).toEqual({ time: { speedThrough: { sleep: { mode: "auto", thresholdMinutes: 60 } } } });
-    expect(settingsTimePatch({ control: "npc_calls", scope: { all: true }, to: 2 })).toEqual({ time: { npcCallsPerTimelapse: 2 } });
     expect(settingsTimePatch({ control: "pause", scope: { all: true }, to: true })).toEqual({});
   });
 });

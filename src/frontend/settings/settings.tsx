@@ -228,7 +228,7 @@ export function Settings() {
           </p>
         </div>
         <TimeControlsEditor
-          values={{ sceneTicks: settings.time.sceneTicks, scale: settings.time.scale, interrupts: settings.time.interrupts, speedThrough: settings.time.speedThrough, montage: settings.time.montage, unitCap: settings.time.unitCap, npcCalls: settings.time.npcCallsPerTimelapse }}
+          values={{ sceneTicks: settings.time.sceneTicks, scale: settings.time.scale, interrupts: settings.time.interrupts, speedThrough: settings.time.speedThrough, montage: settings.time.montage, unitCap: settings.time.unitCap }}
           disabled={busy}
           onChange={(change) => {
             const body = settingsTimePatch(change);

@@ -19,9 +19,11 @@ import type {
   MarkerBody,
   MaterializeEvent,
   PostEvent,
+  RetiredTimeControl,
   SetEvent,
   SpawnEvent,
   StageEvent,
+  TimeControl,
   TimelapseEvent,
   UnlinkEvent,
   UpgradePick,
@@ -278,10 +280,12 @@ export function applyValidUnits(types: EventTypes, events: readonly LedgerEvent[
 
 // ---------------------------------------------------------------- markers
 
-const TIME_CONTROLS = ["tick", "scale", "pause", "interrupt", "speed_through", "montage", "unit_cap", "npc_calls"] as const;
+export const TIME_CONTROLS: readonly TimeControl[] = ["tick", "scale", "pause", "interrupt", "speed_through", "montage", "unit_cap"];
+/** Controls earlier builds wrote: a stored marker stays valid, with its body as it was clamped then (record paths hash it). */
+const RETIRED_TIME_CONTROLS: readonly RetiredTimeControl[] = ["npc_calls"];
 
-/** Bounds for time controls (DESIGN §9.2): minutes per tick, the time scale, the unit cap and NPC calls. */
-export const TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: [1, 10_080], agentDays: [1, 600], events: [1, 5000], npcCalls: [0, 50] } as const);
+/** Bounds for time controls (DESIGN §9.2): minutes per tick, the time scale and the unit cap. */
+export const TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: [1, 10_080], agentDays: [1, 600], events: [1, 5000] } as const);
 
 function clamp(v: number, [lo, hi]: readonly [number, number], integer = true): number {
   const x = Math.min(hi, Math.max(lo, v));
@@ -289,7 +293,7 @@ function clamp(v: number, [lo, hi]: readonly [number, number], integer = true): 
 }
 
 /** A time control's value, clamped to its bounds; undefined when it isn't that control's shape. */
-function timeValue(control: (typeof TIME_CONTROLS)[number], to: unknown): JsonValue | undefined {
+function timeValue(control: TimeControl | RetiredTimeControl, to: unknown): JsonValue | undefined {
   const num = typeof to === "number" && Number.isFinite(to) ? to : null;
   switch (control) {
     case "tick":
@@ -297,7 +301,8 @@ function timeValue(control: (typeof TIME_CONTROLS)[number], to: unknown): JsonVa
     case "scale":
       return num === null ? undefined : clamp(num, TIME_BOUNDS.scale, false);
     case "npc_calls":
-      return num === null ? undefined : clamp(num, TIME_BOUNDS.npcCalls);
+      // Retired: read as the earlier build clamped it.
+      return num === null ? undefined : clamp(num, [0, 50]);
     case "pause":
       return typeof to === "boolean" ? to : undefined;
     case "interrupt":
@@ -399,7 +404,7 @@ export function validMarkerBody(raw: unknown): MarkerBody | null {
       return safeKey(scope.entity) ? { kind: "resolve", domain, scope: { entity: scope.entity }, to: level } : null;
     }
     case "time": {
-      const control = TIME_CONTROLS.find((c) => c === raw.control);
+      const control = [...TIME_CONTROLS, ...RETIRED_TIME_CONTROLS].find((c) => c === raw.control);
       if (!control || !scope) return null;
       const to = timeValue(control, raw.to);
       if (to === undefined) return null;
@@ -447,7 +452,7 @@ function setTimeControl(state: WorldState, body: Extract<MarkerBody, { kind: "ti
       if (isRecord(to) && typeof to.agentDays === "number" && typeof to.events === "number") t.unitCap = { agentDays: to.agentDays, events: to.events };
       return;
     case "npc_calls":
-      if (typeof to === "number") t.npcCalls = to;
+      // Retired: nothing reads it.
       return;
   }
 }

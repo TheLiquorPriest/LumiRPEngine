@@ -295,7 +295,6 @@ function controls(world: WorldDoc, state: WorldState, sceneType: string): Contro
       speedThrough: structuredClone(state.time.speedThrough),
       montage: state.time.montage,
       unitCap: { ...state.time.unitCap },
-      npcCalls: state.time.npcCalls,
     },
   };
 }

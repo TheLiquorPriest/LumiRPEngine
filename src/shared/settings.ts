@@ -90,7 +90,6 @@ export interface TimeSettings {
   speedThrough: Record<string, { mode: "offer" | "auto"; thresholdMinutes: number }>;
   montage: "key" | "day" | "week";
   unitCap: { agentDays: number; events: number };
-  npcCallsPerTimelapse: number;
 }
 
 /** Extraction proposal types with a per-type mode (DESIGN §9.4, §11). */

@@ -14,8 +14,6 @@ export const TIME_LIMITS = Object.freeze({
   timelapseMinutes: 366 * MINUTES_PER_DAY,
   /** The unit cap's ceiling per segment: the default cap. */
   unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
-  /** NPC model calls per timelapse. */
-  npcCalls: 50,
   /** A Speed-through threshold's range, in minutes. */
   thresholdMinutes: [1, 7 * MINUTES_PER_DAY] as const,
 });
@@ -55,11 +53,6 @@ export function clampThreshold(v: unknown): number {
   const n = finite(v);
   const [lo, hi] = TIME_LIMITS.thresholdMinutes;
   return n === null ? lo : Math.round(within(n, lo, hi));
-}
-
-export function clampNpcCalls(v: unknown): number {
-  const n = finite(v);
-  return n === null ? 0 : Math.round(within(n, 0, TIME_LIMITS.npcCalls));
 }
 
 /** A realism level: a whole number 0–4; anything else is 0 (off). */

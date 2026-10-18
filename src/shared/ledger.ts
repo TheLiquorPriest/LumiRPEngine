@@ -189,7 +189,10 @@ export interface PostEntry {
 /** A level change for everyone, for one detail band (stored under `tier`, the key the band ids had as tiers) or for one entity. */
 export type ResolveScope = { all: true } | { tier: Band } | { entity: EntityId };
 
-export type TimeControl = "tick" | "scale" | "pause" | "interrupt" | "speed_through" | "montage" | "unit_cap" | "npc_calls";
+export type TimeControl = "tick" | "scale" | "pause" | "interrupt" | "speed_through" | "montage" | "unit_cap";
+
+/** A control an earlier build wrote into every chat's starting markers (NPC model calls per timelapse, which nothing read): a stored marker keeps it and it sets nothing. */
+export type RetiredTimeControl = "npc_calls";
 
 export type TimeScope =
   | { all: true }
@@ -226,7 +229,7 @@ export type MarkerBody =
   /** With `merge`, the revision's definition changes come into the chat as the picks say; without, only the revision switches. */
   | { kind: "migrate"; to: RevisionId; merge?: UpgradePicks }
   | { kind: "resolve"; domain: DomainId; scope: ResolveScope; to: Level }
-  | { kind: "time"; control: TimeControl; scope: TimeScope; to: JsonValue }
+  | { kind: "time"; control: TimeControl | RetiredTimeControl; scope: TimeScope; to: JsonValue }
   | { kind: "adjudicate"; to: AdjudicationDef };
 
 /** A message-level intent marker: a pure intent with no values (DESIGN §4.3). */

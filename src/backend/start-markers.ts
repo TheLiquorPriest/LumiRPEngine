@@ -27,8 +27,8 @@ function levelAt(map: unknown, key: string): Level | undefined {
 
 /**
  * The time controls a new chat starts with: the world's where it sets them, the user's for the rest
- * (the time scale, NPC calls, and any scene type, interrupt class or activity the world doesn't
- * name, or names with a value that isn't one).
+ * (the time scale, and any scene type, interrupt class or activity the world doesn't name, or names
+ * with a value that isn't one).
  */
 function worldFirstTime(user: TimeSettings, world: WorldDoc): TimeSettings {
   const w: unknown = world.time;
@@ -76,7 +76,6 @@ export function startMarkersFrom(settings: UserSettings, world: WorldDoc, revisi
   for (const [activity, policy] of Object.entries(t.speedThrough)) out.push({ kind: "time", control: "speed_through", scope: { activity }, to: { mode: policy.mode, thresholdMinutes: policy.thresholdMinutes } });
   out.push({ kind: "time", control: "montage", scope: { all: true }, to: t.montage });
   out.push({ kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: t.unitCap.agentDays, events: t.unitCap.events } });
-  out.push({ kind: "time", control: "npc_calls", scope: { all: true }, to: t.npcCallsPerTimelapse });
   const authored = readAdjudication(world.ruleset?.adjudication);
   out.push({ kind: "adjudicate", to: authored && !settings.overrideWorldAdjudication ? authored : settings.adjudication });
   return out;

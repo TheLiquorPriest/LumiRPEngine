@@ -1,7 +1,7 @@
 // Time controls (DESIGN §9.2): ticks per scene type, time scale, interrupt policy, Speed through per
-// activity, Montage granularity, the timelapse unit cap and Custom NPC calls. One editor, two
-// sinks: Settings → Time writes the seed for new chats (`settingsTimePatch`), Play → Calendar
-// writes `time` markers on the running chat.
+// activity, Montage granularity and the timelapse unit cap. One editor, two sinks: Settings → Time
+// writes the seed for new chats (`settingsTimePatch`), Play → Calendar writes `time` markers on the
+// running chat.
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { INTERRUPT_CLASSES } from "../shared/ids";
@@ -17,7 +17,6 @@ export interface TimeValues {
   speedThrough: Record<string, { mode: "offer" | "auto"; thresholdMinutes: number }>;
   montage: "key" | "day" | "week";
   unitCap: { agentDays: number; events: number };
-  npcCalls: number;
 }
 
 export interface TimeChange {
@@ -46,8 +45,6 @@ export function settingsTimePatch(change: TimeChange): JsonObject {
       return { time: { montage: change.to } };
     case "unit_cap":
       return { time: { unitCap: change.to } };
-    case "npc_calls":
-      return { time: { npcCallsPerTimelapse: change.to } };
     case "pause":
       return {};
   }
@@ -148,7 +145,6 @@ export function TimeControlsEditor(props: { values: TimeValues; onChange(change:
         </div>
         <NumberStepper label="Unit cap: agent-days per segment" value={values.unitCap.agentDays} min={1} max={100000} step={50} integer disabled={props.disabled} onChange={(agentDays) => props.onChange({ control: "unit_cap", scope: { all: true }, to: { agentDays, events: values.unitCap.events } })} />
         <NumberStepper label="Unit cap: events per segment" value={values.unitCap.events} min={1} max={1000000} step={500} integer disabled={props.disabled} onChange={(events) => props.onChange({ control: "unit_cap", scope: { all: true }, to: { agentDays: values.unitCap.agentDays, events } })} />
-        <NumberStepper label="NPC model calls per timelapse (Custom)" value={values.npcCalls} min={0} max={50} integer disabled={props.disabled} onChange={(to) => props.onChange({ control: "npc_calls", scope: { all: true }, to })} />
       </section>
     </div>
   );

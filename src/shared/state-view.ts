@@ -245,7 +245,6 @@ export interface ControlsView {
     speedThrough: Record<string, { mode: "offer" | "auto"; thresholdMinutes: number }>;
     montage: "key" | "day" | "week";
     unitCap: { agentDays: number; events: number };
-    npcCalls: number;
   };
   /** The policy deciding this chat's checks (DESIGN §11): its own marker's, else the world's, else plain rolling. */
   adjudication: AdjudicationDef;

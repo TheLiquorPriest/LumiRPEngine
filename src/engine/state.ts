@@ -44,7 +44,6 @@ export interface TimeState {
   speedThrough: Record<string, { mode: "offer" | "auto"; thresholdMinutes: number }>;
   montage: "key" | "day" | "week";
   unitCap: { agentDays: number; events: number };
-  npcCalls: number;
 }
 
 export interface WorldState {

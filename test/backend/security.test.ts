@@ -89,7 +89,8 @@ describe("prototype pollution", () => {
     const cap = validMarkerBody({ kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: 1e9, events: -4 } });
     expect(cap).toEqual({ kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: TIME_BOUNDS.agentDays[1], events: TIME_BOUNDS.events[0] } });
     expect(validMarkerBody({ kind: "time", control: "scale", scope: { all: true }, to: 1000 })).toEqual({ kind: "time", control: "scale", scope: { all: true }, to: TIME_BOUNDS.scale[1] });
-    expect(validMarkerBody({ kind: "time", control: "npc_calls", scope: { all: true }, to: 999 })).toEqual({ kind: "time", control: "npc_calls", scope: { all: true }, to: TIME_BOUNDS.npcCalls[1] });
+    // A retired control earlier builds wrote into every chat's starting markers stays readable, clamped as it was then.
+    expect(validMarkerBody({ kind: "time", control: "npc_calls", scope: { all: true }, to: 999 })).toEqual({ kind: "time", control: "npc_calls", scope: { all: true }, to: 50 });
   });
 
   test("a stored ledger keeps only valid markers and swipe-index keys", () => {

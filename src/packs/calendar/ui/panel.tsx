@@ -29,7 +29,7 @@ export function decodeCalendarView(value: unknown): CalendarView | null {
 function controlValues(state: StateView): TimeValues | null {
   const time = state.controls?.time;
   if (!time) return null;
-  return { sceneTicks: time.sceneTicks, scale: time.scale, interrupts: time.interrupts, speedThrough: time.speedThrough, montage: time.montage, unitCap: time.unitCap, npcCalls: time.npcCalls };
+  return { sceneTicks: time.sceneTicks, scale: time.scale, interrupts: time.interrupts, speedThrough: time.speedThrough, montage: time.montage, unitCap: time.unitCap };
 }
 
 export function CalendarPanel(props: PanelProps) {

@@ -18,7 +18,7 @@ import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodi
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import { EXTRACTION_TYPES } from "../shared/settings";
 import type { TimelapseTarget } from "../shared/ledger";
-import { validMarkerBody } from "../engine/events";
+import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService } from "../engine/pack-kit";
 import { parseOverrides, parseTarget } from "../engine/time";
@@ -223,7 +223,8 @@ export class Dispatcher {
       }
       case "lre.marker": {
         const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
-        if (!body) throw new RequestError("bad_request", "not a valid settings change");
+        // A retired control (an earlier build's starting markers) stays readable in stored ledgers, but nothing sets it now.
+        if (!body || (body.kind === "time" && !TIME_CONTROLS.some((c) => c === body.control))) throw new RequestError("bad_request", "not a valid settings change");
         if (body.kind === "migrate") {
           // An Upgrade target must be a revision of this chat's world.
           const run = await this.rt.runOf(r.chatId, userId);

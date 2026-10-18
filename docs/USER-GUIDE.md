@@ -246,7 +246,7 @@ Every turn has an **elapsed time**. It is one of: the length of a Timelapse, the
 
 Where to change them:
 
-- **Settings → Time** fills in, for **new chats**, what a world's own time defaults leave out (always the time scale and the NPC calls); with **Use my settings instead of a world's defaults for new chats** on, it replaces them.
+- **Settings → Time** fills in, for **new chats**, what a world's own time defaults leave out (always the time scale); with **Use my settings instead of a world's defaults for new chats** on, it replaces them.
 - **Play → Calendar** changes **this chat**.
 
 Both places have the same sections: **Default tick per scene type**, **Time scale**, **Timelapse interrupts**, **Speed through** and **Montage and limits**.
@@ -271,7 +271,7 @@ The first *stop* ends the Timelapse at the end of that time slot. *Notes* go int
 
 **The safety cap.** One Timelapse segment is limited, by default, to **600 agent-days** (the people who are simulated in detail, plus you, times the days) and **5,000 events**; you can lower either but not raise it. A longer request ends at the last whole time slot inside the cap, and a **Continue timelapse** chip carries on from there. Segments add up exactly as if you had done it in one go, as long as nothing else changes the world between them. A Timelapse can reach at most 366 days ahead.
 
-**NPC choices** during a Timelapse use the numbers only; the AI isn't called. A Custom setup can allow some AI choices: **NPC model calls per timelapse (Custom)**, under **Montage and limits**, is how many calls a Timelapse may spend (0 to 50), and it starts at 0. If a Timelapse can't finish in time, it isn't applied at all, because a partial result would depend on the clock. You get a **Timelapse didn't run** chip with **Retry**, which sends the same request again.
+**NPC choices** during a Timelapse use the numbers only; the AI isn't called. If a Timelapse can't finish in time, it isn't applied at all, because a partial result would depend on the clock. You get a **Timelapse didn't run** chip with **Retry**, which sends the same request again.
 
 ### Montage
 

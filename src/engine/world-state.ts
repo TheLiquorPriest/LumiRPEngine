@@ -96,7 +96,6 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
       speedThrough: Object.fromEntries(Object.entries(world.time.speedThrough).map(([k, p]) => [k, { mode: p.mode, thresholdMinutes: clampThreshold(p.thresholdMinutes) }])),
       montage: world.time.montage,
       unitCap: clampUnitCap(world.time.unitCap),
-      npcCalls: 0,
     },
     materialized: {},
     packs: {},

@@ -104,8 +104,6 @@ export function defaultSettings(): UserSettings {
       speedThrough: { sleep: { mode: "offer", thresholdMinutes: 30 } },
       montage: "key",
       unitCap: { agentDays: 600, events: 5000 },
-      // DESIGN §9.2: tie-zone choices during a timelapse are utility-only; Custom may allow N.
-      npcCallsPerTimelapse: 0,
     },
     // New chats start from the world's own realism and time defaults (DESIGN §9.1).
     overrideWorldDefaults: false,
@@ -265,7 +263,6 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     speedThrough: isRecord(t.speedThrough) ? entries(t.speedThrough, 64, speedOf) : d.time.speedThrough,
     montage: oneOf(t.montage, ["key", "day", "week"] as const) ?? d.time.montage,
     unitCap: { agentDays: int(unitCap.agentDays, 1, 1_000_000) ?? d.time.unitCap.agentDays, events: int(unitCap.events, 1, 10_000_000) ?? d.time.unitCap.events },
-    npcCallsPerTimelapse: int(t.npcCallsPerTimelapse, 0, 1000) ?? d.time.npcCallsPerTimelapse,
   };
   const rawBounds = isRecord(v.extraction) ? v.extraction : {};
   const extraction: ExtractionBounds = {};
