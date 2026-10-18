@@ -278,6 +278,63 @@ describe("ledger scenarios", () => {
     await expectAgree(h, chat);
   });
 
+  test("a swipe deleted while a reply streams moves the swipes its plan saw: the reply is read on the planned swipe (L5, L7)", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "deposit:60", "Okay.");
+    const a1 = h.host.head(chat);
+    if (!a1) throw new Error("no head");
+    for (const reply of ["Nothing happens.", "Charged. [pay:50]"]) await h.host.finish(await h.host.start(chat, { type: "swipe", messageId: a1.id }), reply);
+    // Swipes 0 and 1 leave Sam 60, swipe 2 (active) 10: the next turn is planned on swipe 2.
+    h.host.sendUser(chat, "look around");
+    await h.host.settle();
+    const g = await h.host.start(chat, { type: "normal" });
+    h.host.navigate(chat, a1.id, 0);
+    await h.host.settle();
+    h.host.deleteSwipe(chat, a1.id, 1);
+    await h.host.settle();
+    await h.host.finish(g, "You pay the toll. [pay:30]");
+    // Read on the planned swipe, now swipe 1, where Sam can't cover the toll.
+    const rec = (await h.core(chat)).journal.messages[g.messageId ?? ""]?.ledger.swipes["0"];
+    expect(rec?.events.map((e) => e.type)).toEqual(["clock"]);
+    await expectAgree(h, chat);
+    h.host.navigate(chat, a1.id, 1);
+    await h.host.settle();
+    const back = await h.folds(chat);
+    expect(back.optimized.messages.at(-1)?.fold).toBe("on_path");
+    expect(balanceOf(back.optimized.state)).toBe(10);
+    await expectAgree(h, chat);
+  });
+
+  test("a turn whose planned swipe is deleted while its reply streams is a rebased view everywhere, even where that swipe's text comes back (L7)", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "deposit:60", "Okay.");
+    const a1 = h.host.head(chat);
+    if (!a1) throw new Error("no head");
+    // The turn is planned on a swipe without a record, where Sam has nothing.
+    h.host.addSwipe(chat, a1.id, "Trimmed.");
+    await h.host.settle();
+    h.host.sendUser(chat, "look around");
+    await h.host.settle();
+    const g = await h.host.start(chat, { type: "normal" });
+    h.host.navigate(chat, a1.id, 0);
+    await h.host.settle();
+    h.host.deleteSwipe(chat, a1.id, 1);
+    await h.host.settle();
+    // Read on the chain in force, where Sam has 60.
+    await h.host.finish(g, "You pay the toll. [pay:30]");
+    expect(balanceOf((await h.folds(chat)).optimized.state)).toBe(30);
+    await expectAgree(h, chat);
+    // The same text again recreates the path the turn was planned on: it was never read there.
+    h.host.addSwipe(chat, a1.id, "Trimmed.");
+    await h.host.settle();
+    const recreated = await h.folds(chat);
+    expect(recreated.optimized.messages.at(-1)?.fold).toBe("view");
+    expect(recreated.optimized.keepReport.filter((k) => k.status === "dropped").map((k) => k.text)).toEqual(["sam can't cover 30"]);
+    await expectAgree(h, chat);
+  });
+
   test("a grouped purchase rebased onto a poorer branch drops whole: no payment, no item (L41)", async () => {
     const h = new Harness();
     const chat = await h.newChat();

@@ -27,6 +27,7 @@ import { startMarkersFrom } from "../../src/backend/start-markers";
 import { applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent, validMarkerBody } from "../../src/engine/events";
 import { touchedField } from "../../src/engine/touched";
 import { isLive, isTombstoned } from "../../src/engine/ledger/path";
+import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRng, type Rng } from "../../src/engine/rng";
 import type { FakeMessage, Generation } from "./fake-host";
 import type { Folds, Harness } from "./harness";
@@ -79,8 +80,9 @@ const OPENING_REPLIES = ["Dev counts out his wages. [opens:dev]", "Dev pays you 
 /**
  * How often a run exercised a funds drop, a grouped drop on a rebased view, a Re-run carrying or
  * dropping a fix, a Re-run dropping a fix whose materialization its new swipe had already made, a
- * copy of an earlier build's chat whose starting markers it had to restore, and a fight's start,
- * acts, turns and end (the suite asserts they happen).
+ * copy of an earlier build's chat whose starting markers it had to restore, a turn checked on the
+ * chain it was planned on after a deletion moved a swipe it saw, and a fight's start, acts, turns
+ * and end (the suite asserts they happen).
  */
 export interface Coverage {
   fundsDrops: number;
@@ -89,12 +91,13 @@ export interface Coverage {
   carryDrops: number;
   stripped: number;
   earlierCopies: number;
+  shiftedPlans: number;
   fights: Record<"start" | "act" | "turn" | "end", number>;
 }
 
 /** A fresh count for a runner or a whole suite. */
 export function noCoverage(): Coverage {
-  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, stripped: 0, earlierCopies: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
+  return { fundsDrops: 0, groupDrops: 0, carried: 0, carryDrops: 0, stripped: 0, earlierCopies: 0, shiftedPlans: 0, fights: { start: 0, act: 0, turn: 0, end: 0 } };
 }
 
 const FIGHT_EVENTS: Record<string, keyof Coverage["fights"]> = { "combat.start": "start", "combat.act": "act", "combat.turn": "turn", "combat.end": "end" };
@@ -167,9 +170,10 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
   const ops: Op[] = [];
   const r = (): number => rng.next();
   // Fights draw from a stream of their own, so every other op is generated as before; so do Dev's
-  // money openings (replies naming him, ✎ cash fixes on him).
+  // money openings (replies naming him, ✎ cash fixes on him) and what is removed while a reply streams.
   const fights = rng.fork(`fights:${depth}`);
   const opens = rng.fork(`opens:${depth}`);
+  const removals = rng.fork(`removals:${depth}`);
   for (let i = 0; i < length; i++) {
     const roll = r();
     if (roll < 0.22) ops.push({ op: "send", text: r(), reply: r(), createAtEnd: r() < 0.2, rerender: r() < 0.2, ...(r() < 0.35 ? { money: r() } : {}), ...(r() < 0.2 ? { toll: r() } : {}), ...(fights.next() < 0.3 ? { fight: fights.next() } : {}), ...(opens.next() < 0.15 ? { opens: opens.next() } : {}) });
@@ -192,7 +196,7 @@ export function generate(rng: Rng, length: number, depth = 0): Op[] {
     else if (roll < 0.84) ops.push({ op: "restart" });
     else if (roll < 0.87) ops.push({ op: "clobber", at: r(), echo: r() < 0.5 });
     else if (roll < 0.93 && depth === 0) ops.push({ op: "excursion", at: r(), inner: generateExcursion(rng, 1 + Math.floor(r() * 4)) });
-    else if (depth === 0) ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3), opens), stop: r() < 0.25, reply: r(), ...(opens.next() < 0.3 ? { opens: opens.next() } : {}) });
+    else if (depth === 0) ops.push({ op: "inFlight", type: r(), inner: generateInner(rng, 1 + Math.floor(r() * 3), opens, removals), stop: r() < 0.25, reply: r(), ...(opens.next() < 0.3 ? { opens: opens.next() } : {}) });
     else ops.push({ op: "write", kind: r(), a: r(), b: r() });
   }
   // Drawn from a stream of its own, so the sequence is otherwise as before.
@@ -212,8 +216,13 @@ function generateExcursion(rng: Rng, length: number): Op[] {
   return ops;
 }
 
-/** Operations interleaved while a reply streams (P2); `opens` is the generator's own stream for Dev's money. */
-function generateInner(rng: Rng, length: number, opens: Rng): Op[] {
+/**
+ * Operations interleaved while a reply streams (P2); `opens` and `removals` are the generator's own
+ * streams for Dev's money and for swipe deletions, swipe PUTs and message deletions. A removal
+ * often lands on the message the operation before it touched: navigating a message off a swipe,
+ * then deleting that swipe, is how a swipe the plan saw goes.
+ */
+function generateInner(rng: Rng, length: number, opens: Rng, removals: Rng): Op[] {
   const ops: Op[] = [];
   for (let i = 0; i < length; i++) {
     const roll = rng.next();
@@ -223,6 +232,13 @@ function generateInner(rng: Rng, length: number, opens: Rng): Op[] {
     else if (roll < 0.8) ops.push({ op: "editUser", at: rng.next(), text: rng.next() });
     else if (roll < 0.9) ops.push({ op: "addSwipe", at: rng.next() * 0.8, text: rng.next() });
     else ops.push({ op: "clobber", at: rng.next(), echo: rng.next() < 0.5 });
+    if (removals.next() >= 0.35) continue;
+    const last = ops.at(-1);
+    const at = last && "at" in last && removals.next() < 0.6 ? last.at : removals.next() * 0.8;
+    const kind = removals.next();
+    if (kind < 0.6) ops.push({ op: "deleteSwipe", at, swipe: removals.next() });
+    else if (kind < 0.85) ops.push({ op: "putSwipe", at, swipe: removals.next(), text: removals.next() });
+    else ops.push({ op: "deleteMessage", at: removals.next() });
   }
   return ops;
 }
@@ -258,6 +274,8 @@ export class Runner {
    * the save and open the P4 window early), so inner operations leave it alone.
    */
   private streaming: string | null = null;
+  /** The swipes (`swipeId`) and messages (`null`) this runner deleted, in order: an inFlight follows the plan's swipes through them. */
+  private readonly removed: { messageId: string; swipeId: number | null }[] = [];
   /** Chats an earlier build writes (`earlierBuild`). */
   private readonly earlier = new Set<ChatId>();
   /** Chats whose starting markers are journaled as the world writes them: an earlier build's, and their copies. */
@@ -405,10 +423,12 @@ export class Runner {
       case "deleteSwipe": {
         const target = this.earlierAssistant(op.at);
         if (!target || target.swipes.length < 2) return;
+        const swipeId = Math.floor(op.swipe * target.swipes.length);
         await this.noPause(async () => {
-          host.deleteSwipe(chat, target.id, Math.floor(op.swipe * target.swipes.length));
+          host.deleteSwipe(chat, target.id, swipeId);
           await host.settle();
         });
+        this.removed.push({ messageId: target.id, swipeId });
         return;
       }
       case "editAssistant": {
@@ -438,8 +458,10 @@ export class Runner {
       }
       case "deleteMessage": {
         const all = this.messages();
-        if (all.length < 2) return;
-        const target = pick(all.slice(1), op.at);
+        // Never the reply streaming during an inFlight.
+        const candidates = all.slice(1).filter((m) => m.id !== this.streaming);
+        if (candidates.length === 0) return;
+        const target = pick(candidates, op.at);
         const before = (await this.h.folds(chat)).optimized.state;
         const core = await this.h.core(chat);
         const index = all.findIndex((m) => m.id === target.id);
@@ -450,6 +472,7 @@ export class Runner {
           host.deleteMessage(chat, target.id);
           await host.settle();
         });
+        this.removed.push({ messageId: target.id, swipeId: null });
         // L19: a deleted message's live markers keep their effect (realism and time stay put).
         const after = (await this.h.folds(chat)).optimized.state;
         const laterAssistants = all.slice(index + 1).some((m) => !m.isUser);
@@ -556,6 +579,10 @@ export class Runner {
           return (await this.h.folds(chat)).reference.messages[index]?.parentPath;
         };
         const planned = await parentOfTarget();
+        const plan = this.messages()
+          .slice(0, Math.max(0, this.messages().findIndex((m) => m.id === g.messageId)))
+          .map((m) => ({ id: m.id, swipeId: m.swipeId }));
+        this.removed.length = 0;
         this.streaming = g.messageId ?? null;
         for (const inner of op.inner) {
           if (inner.op === "write") {
@@ -573,13 +600,15 @@ export class Runner {
         const reply = op.opens !== undefined ? pick(OPENING_REPLIES, op.opens) : pick(REPLIES, op.reply);
         if (op.stop) await host.stop(g, reply.slice(0, 6));
         else await host.finish(g, reply);
-        if (before && g.messageId && g.swipeId !== undefined) await this.checkRerun(chat, g.messageId, g.swipeId, before.ledger, before.tombstones);
+        const inForce = await parentOfTarget();
+        if (before && g.messageId && g.swipeId !== undefined) await this.checkRerun(chat, g.messageId, g.swipeId, before.ledger, before.tombstones, { planned, inForce });
         if (changed) {
           // An unplanned turn (under a pause) holds nothing made on the old chain; it commits where it lands.
           const target = this.messages().find((m) => m.id === g.messageId);
           const rec = target ? (await this.h.core(chat)).journal.messages[target.id]?.ledger.swipes[String(target.swipeId)] : undefined;
           const fold = (await this.h.folds(chat)).optimized.messages.find((m) => m.id === g.messageId)?.fold;
           if (rec && rec.seed !== "" && fold === "on_path") throw new InvariantError("L5", "a turn whose chain changed in flight committed on-path");
+          if (target && rec && rec.seed !== "") await this.checkPlanned(chat, target.id, plan, planned);
         }
         return;
       }
@@ -766,12 +795,44 @@ export class Runner {
   }
 
   /**
+   * L5: on the chain a turn was planned on, its swipes followed through what this runner deleted
+   * while the reply streamed, the turn's record folds on its path with nothing of it failing. That
+   * chain is gone once a message or swipe of it is deleted, or where it no longer folds to the
+   * planned path (a swipe's text replaced); a pause leaves the turn unread.
+   */
+  private async checkPlanned(chat: ChatId, messageId: string, plan: readonly { id: string; swipeId: number }[], planned: string | undefined): Promise<void> {
+    const swipes = plan.map((e) => ({ ...e }));
+    let shifted = false;
+    for (const r of this.removed) {
+      for (const e of swipes) {
+        if (e.id !== r.messageId) continue;
+        if (r.swipeId === null || e.swipeId === r.swipeId) return;
+        if (e.swipeId > r.swipeId) {
+          e.swipeId--;
+          shifted = true;
+        }
+      }
+    }
+    const core = await this.h.core(chat);
+    const chain = await this.h.chain(chat);
+    const index = chain.findIndex((m) => m.id === messageId);
+    if (core.journal.pauses.length > 0 || index !== swipes.length || swipes.some((e, i) => chain[i]?.id !== e.id)) return;
+    const rebuilt = chain.slice(0, index + 1).map((m, i) => ({ ...m, swipeId: swipes[i]?.swipeId ?? m.swipeId }));
+    const out = referenceFold({ worlds: (r) => this.h.worlds.get(r), revision: this.h.revision, chain: rebuilt, pauses: core.journal.pauses, tombstones: core.journal.tombstones }, this.h.registry);
+    const at = out.messages[index];
+    if (!at || at.parentPath !== planned) return;
+    if (shifted) this.coverage.shiftedPlans++;
+    const failed = out.violations.filter((v) => v.startsWith(`${messageId}:`));
+    if (at.fold !== "on_path" || failed.length > 0) throw new InvariantError("L5", `${chat}/${messageId}: on the chain it was planned on, the turn folds ${at.fold}${failed.length > 0 ? `: ${failed.join("; ")}` : ""}`);
+  }
+
+  /**
    * L43: a Re-run carries the live fixes of the swipe it was made from (the nearest earlier one
    * holding a record): each is on the new record with its seq, events (less a materialization the new
    * swipe already made) and undos, anchored at the record's path, or listed in its `dropped`; nothing
    * else is copied. A turn committed under a pause carries nothing.
    */
-  private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[]): Promise<void> {
+  private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[], inFlight?: { planned: string | undefined; inForce: string | undefined }): Promise<void> {
     let source: Rec | undefined;
     for (let s = swipeId - 1; s >= 0 && !source; s--) {
       const rec = before?.swipes[String(s)];
@@ -779,9 +840,11 @@ export class Runner {
     }
     const core = await this.h.core(chat);
     const made = core.journal.messages[messageId]?.ledger.swipes[String(swipeId)];
-    // The fixes in force on the path the Re-run was planned on (its record's), whatever chain is in force now.
     if (!source || !made || made.path === "" || core.journal.pauses.length > 0) return;
-    const parent = made.path;
+    // The fixes in force on the chain the Re-run was read on: the one it was planned on, which its
+    // record is anchored at, or, when it streamed while that chain went and the record is anchored
+    // elsewhere, the one in force at the commit.
+    const parent = inFlight && made.path !== inFlight.planned && inFlight.inForce !== undefined ? inFlight.inForce : made.path;
     const sourceUndone = source.undone;
     const off = (seq: number, index: number): boolean => sourceUndone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
     const live = source.post.filter((p) => p.kind === "fix" && isLive(p.at, parent, source.path !== "" ? source.path : null) && !p.events.every((_, i) => off(p.seq, i)));
@@ -1012,6 +1075,7 @@ export async function runSequence(make: () => Harness, ops: Op[], digest?: strin
       coverage.carryDrops += runner.coverage.carryDrops;
       coverage.stripped += runner.coverage.stripped;
       coverage.earlierCopies += runner.coverage.earlierCopies;
+      coverage.shiftedPlans += runner.coverage.shiftedPlans;
       for (const k of ["start", "act", "turn", "end"] as const) coverage.fights[k] += runner.coverage.fights[k];
     }
     return null;

@@ -5,8 +5,9 @@
 //  - stored snapshots (cold folds): a fold with no cached prefix finds the furthest stored
 //    state on its chain by path hash, rebuilds the outputs before it without state, and folds on
 //    from there; it stores a snapshot every SNAPSHOT_EVERY messages;
-//  - re-convergence: a rebased record whose running state equals the state its own path had
-//    on the original chain applies without re-validation (validation is a function of state).
+//  - re-convergence: a rebased record whose running state equals the state that same record, with
+//    the same markers, folded from on its own path with nothing failing applies without
+//    re-validation (validation is a function of state).
 // L1 holds when this equals referenceFold for every input; L42 checks snapshot-started folds.
 
 import { hashJson, hashParts } from "../../shared/hash";
@@ -61,8 +62,12 @@ export interface LedgerFoldOptions {
 
 export class LedgerFold {
   private readonly cache = new Map<string, Step>();
-  /** Hash of the state before each record, on the path it was folded on, for re-convergence. */
-  private readonly pathStates = new Map<PathHash, string>();
+  /**
+   * Per stored record and its message's markers: the hash of the state they folded from on the
+   * record's own path with nothing failing, for re-convergence. Keyed by record, not by path: the
+   * swipes of a message share their parent path, and one may hold what fails there.
+   */
+  private readonly settled = new Map<string, string>();
   private readonly every: number;
   private readonly fingerprint: string;
   private readonly capacity: number;
@@ -270,16 +275,17 @@ export class LedgerFold {
       for (const mk of liveMarkers) marker(mk);
     } else {
       const view = recPath !== null && recPath !== parent;
+      // Re-convergence is keyed by what this step folds besides the state: the record and its message's markers.
+      const settledKey = recPath === null ? "" : `${this.digest(this.digests.record, JSON.stringify(rec), () => hashJson(rec))}:${this.digest(this.digests.markers, JSON.stringify(m.ledger?.markers ?? []), () => hashJson(m.ledger?.markers ?? []))}`;
+      const before = recPath !== null && !view && !this.settled.has(settledKey) ? hashJson(state) : null;
       let converged = false;
       if (view) {
         // A view folds as its record did on its own path only from the same state and with the same
         // entries: a marker or post entry made on this branch (live here by its `at`, inert on the
         // record's path) can make a stored one fail, so then everything is re-validated.
         const asOnPath = liveMarkers.every((mk) => mk.at === null || mk.at === recPath) && livePost.every((p) => p.at === recPath);
-        const original = this.pathStates.get(recPath);
+        const original = this.settled.get(settledKey);
         converged = asOnPath && original !== undefined && original === hashJson(state);
-      } else if (recPath !== null && !this.pathStates.has(recPath)) {
-        this.pathStates.set(recPath, hashJson(state));
       }
       const converted = rec.keep?.[parent]?.convert ?? [];
       const record = rec;
@@ -361,6 +367,7 @@ export class LedgerFold {
         if ("marker" in item) marker(item.marker);
         else run(item.post.events, (index) => ({ in: "post", seq: item.post.seq, index }));
       }
+      if (before !== null && violations.length === 0) this.digest(this.settled, settledKey, () => before);
     }
     return { state, result: f.result, notes, keep, violations, paused: f.paused };
   }
