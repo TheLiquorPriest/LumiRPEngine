@@ -1,8 +1,8 @@
-// The ledger gate (DESIGN §14, §17): generated operation sequences on the fake host, with the
-// reference fold as oracle and the named invariants checked after every operation.
+// The ledger gate (DESIGN §14): generated operation sequences on the fake host, with the
+// reference fold as oracle and the ledger invariants checked after every operation.
 //
-//   LRE_PROPERTY_RUNS   sequences per run (CI: 10000; default 200)
-//   LRE_PROPERTY_OPS    longest sequence (CI: 200; default 60)
+//   LRE_PROPERTY_RUNS   sequences per run (default 200)
+//   LRE_PROPERTY_OPS    longest sequence (default 60)
 //   LRE_PROPERTY_SEED   replay one seed
 // Every failing seed is shrunk and must be added to test/ledger/regressions.json.
 

@@ -18,8 +18,7 @@ Section numbers are stable: code comments and docs cite them as `DESIGN §9.2`. 
 | `D1`–`D35` | Design decisions (§2) |
 | `G1`–`G9` | Gaps in the host that I plan to propose fixes for (§16) |
 | `P1`–`P4` | The four principles behind the per-chat ledger (§4.3) |
-| `L1`–`L46` | The named invariants the ledger property suite checks (§14) |
-| `B0`–`B9` | The internal build blocks (§17); `B0` is the throwaway spike whose checks are in §18 |
+| `L1`–`L46` | The ledger's named invariants (§14); a number is never reused, so a retired one leaves a gap |
 
 A few terms, in plain words:
 
@@ -59,7 +58,6 @@ A few terms, in plain words:
 - **One complete first deliverable (D16).**
 
 **Out of scope**
-- **Agentic WORK-mode turns.** The host excludes extensions from them.
 - **Background timers.** Simulation is turn-driven.
 
 ## 2. Decisions
@@ -80,8 +78,8 @@ A few terms, in plain words:
 | D12 | **UI:** a drawer tab (Play, Build, Settings), a HUD pill, chips, an input-bar palette and a fullscreen map widget. Preact plus host components. |
 | D13 | **Model use defaults to Standard.** Deterministic beats are the default outline. Amended: models no longer decide lore selection in the World Info interceptor. Lore handling is off for now (§6.1), so the interceptor makes no model call. |
 | D14 | A separate repository, `TheLiquorPriest/LumiRPEngine`. |
-| D15 | **Acceptance** is the test suite and type checks, visible checks on a reference Lumiverse instance at phone width, and my own live audit before release (§14). |
-| D16 | **One-shot delivery.** Build blocks (§17) are an internal order only; nothing is deferred. |
+| D15 | **Acceptance** is the test suite and type checks, visible checks on a reference Lumiverse instance at phone width, and a live check before each release (§14). |
+| D16 | **One-shot delivery.** The extension is delivered and checked as a whole; nothing is deferred (§17). |
 | D17 | **Granular realism on a sliding scale, made as deterministic as possible.** |
 | D18 | **Domain packs and two dials** (depth per domain × entity tier). **The representation is uniform: levels gate processes, rendering and extraction targets, never the data shape.** |
 | D19 | **Pinned constants (retired).** User entries stored `constant:true, disabled:false` were charged to the lore budget as pins, so they never displaced engine sections. With lore handling off the engine no longer touches user entries, and native World Info decides them (§6.1). |
@@ -99,7 +97,7 @@ A few terms, in plain words:
 | D31 | **Weak-model floor.** The small model I measured with is far weaker than the models people actually use.<br>- Its measurements are a **floor**, not the design target.<br>- No feature is cut or weakened, and no prompt or schema is dumbed down, because of weak-model results.<br>- Conservative defaults are one tap to change.<br>- Prompts and schemas stay model-agnostic and benefit from stronger models.<br>- Every model step runs on the connection and model the user chose for it. |
 | D32 | **Empty narrator reply:** the turn commits `degraded` with a **Retry** chip; the engine never regenerates on its own. A preset lint warns when max tokens are below 1,500 with a reasoning model, and when the active preset holds a JSON-ledger block (§13). Basis: 3 of 34 replies from the measured model came back empty. |
 | D33 | **Host chat-head bubbles** cover the drawer's right edge at 390 px; the layout keeps critical values clear of them, and nothing is proposed upstream (§12). |
-| D34 | **The engine-fold replay checks** (the Keep report; rebased views, including Discard surviving re-assert and restart; Upgrade and Re-narrate fold order; the rebased-view timing) run in the ledger property suite and in one live run (§17). |
+| D34 | **The engine-fold replay checks** (the Keep report; rebased views, including Discard surviving re-assert and restart; Upgrade and Re-narrate fold order; the rebased-view timing) run in the ledger property suite and in a live run on the reference host (D28). |
 | D35 | **The host's macro re-render of user messages** is accepted only inside that turn's generation window (P4). |
 
 ## 3. Shape: few concepts, strict module boundaries
@@ -807,9 +805,9 @@ Touch targets are at least 40 px (including a number stepper of our own with nam
 
 **Ledger property suite (the ledger gate)**
 
-I stopped reviewing the ledger on paper once repeated review rounds kept finding problems. Since then the ledger is accepted only by this executable suite (§17).
+The ledger is accepted by this executable suite, not by review on paper.
 - **Reference fold:** a small, obviously correct implementation of §4.3, kept in its own module and sharing only the pack effect handlers and validators with the optimized fold. It has no cache, overlay shortcut, snapshot or re-convergence, and re-folds every message from the world revision on every query.
-- **Fake host:** replays the host event orders and payloads recorded in the spike.
+- **Fake host:** replays the host event orders and payloads recorded on the reference host (§18).
   - Every generation runs `GENERATION_STARTED` → context handler → interceptor → `WORLD_INFO_ACTIVATED` (only when a book is attached) → `GENERATION_IN_PROGRESS` → tokens → save → `GENERATION_ENDED` or `GENERATION_STOPPED`.
   - A normal turn stages its reply empty with `MESSAGE_SENT` before `GENERATION_STARTED` and saves it with `MESSAGE_EDITED`, or creates it with `MESSAGE_SENT` at the save (P4). Regenerate, swipe and both Edit-and-Send modes stage with `MESSAGE_SWIPED` `added` and save with `updated`. A Continue saves with `MESSAGE_EDITED`, twice when its prefix re-renders.
   - `GENERATION_STOPPED` is `{generationId, chatId, content}`, with the suffix only for a Continue. Its save comes first.
@@ -889,12 +887,11 @@ I stopped reviewing the ledger on paper once repeated review rounds kept finding
 - no stale restore.
 
 **Live checks** (narrator and helper JSON on the chat connection; Decision steps on the Decision connection; the measured model is a floor, D31)
-- the spike's viability checks (§18);
-- per-block measurements.
+- the host and model viability checks (§18);
+- the performance measurements (§18.5).
 
 **Acceptance**
-- A visible check per block on the reference host (D28), at phone width, with screenshots.
-- Then my live audit of the complete extension.
+- Visible checks on the reference host (D28), at phone width, with screenshots, and a live check of the complete extension before a release.
 - Decision-API and live checks use the Decision connection (D27).
 
 ## 15. Reuse from Warp and the studio seam (D1, D23)
@@ -933,24 +930,11 @@ These are the places where Lumiverse itself would make LumiRPEngine simpler or s
 - Coexistence with other message-metadata writers (G2).
 - In world chats, other extensions' World Info interceptors cannot switch on an engine-book entry the engine left off. The engine doesn't touch user entries.
 
-## 17. Internal build order (D16)
-Blocks are for organization only; the extension is delivered and audited as a whole.
+## 17. Delivery (D16)
+The extension is delivered and checked as a whole: nothing is deferred to a later release. The ledger gate (§14) covers the ledger, the test suite and type checks cover the rest, and the visible checks on the reference host (D28) cover every surface at phone width.
 
-| Block | Scope | Acceptance check (reference host) |
-|---|---|---|
-| **B0 Spike** (throwaway) | §18 with **synthetic** volumes. | A note of verified assumptions; misses go to the maintainer. |
-| **B1 Core** | **First, the ledger property suite** (§14: reference fold, fake host with the spike's observed event order, operation generators, named invariants). Then engine concepts; ledger (events, `post` including `cont` and `narr`, markers, path tags, journal, overlay, in-flight windows, chain snapshot, rebased views, Keep report and overlays, tombstones, Upgrade); seeds; hooks; engine-managed book and slots; beats; **realism core** (levels, tiers, presets, level contracts, services, query functions, external economy); **visibility core**; **data-table core** (pinned versions); bounds; **after the ledger gate:** classifier, `interpret`, `extract` (strict rules, dedupe, D4 per-type modes), decision routing (D10) and narrator-reply handling (D32); Play basics, HUD, chips, palette; schema builder, entity and place editors; starter world. | **Ledger gate:** the ledger counts as accepted only when the §14 property suite passes at 10,000 generated sequences plus the fixed regression seed set, with every named invariant holding. Then, at 390 px: create a kind with a derived field and band. Act by palette and by typing. Re-run rerolls a 50% check and Re-narrate repeats it. Swipe, branch, delete, Edit-and-Send and import stay consistent. Switching swipes on an earlier message rebases with no pause: a Keep-report chip lists dropped events, switching back restores the original exactly, even after detail opened, a chip confirmed, a realism change and a turn on the switched path, and one tap Discards. Switching an earlier swipe while a reply streams lands that reply as a rebased view. Detail opened while a reply streams shows "pending" and lands after the reply. An earlier user-message edit pauses on Keep/Discard; editing an assistant reply keeps the world and offers Re-read edit. Stopping a Continue raises no pause. An empty reply shows Retry. Dry Run shows slots and commits nothing. Upgrade survives a Re-run, a Re-narrate and a deletion of the latest message. |
-| **B2 Context and pipeline** | Slot delivery and the engine-book vote; deliverability; activation check; inspector; presets, budgets, call meter; step editor. Lore selection (candidates, pins, the selection cache, links, adoption and suppression) and the Council warning were built here and later retired (§6.1). | The inspector matches Breakdown. User lore activates natively in a world chat while the sections still go in. Call counts are measured per preset. |
-| **B3 Calendar, space and travel** | Calendar, recurrence, time zones, the per-turn tick, **time controls** (ticks per scene type, time scale, clock pause, `time` markers), **Timelapse** (targets, interrupt policy, unit cap and segments, Montage), **Speed through**, backlog; routes, modes, grids, the map. | Conversation turns advance the clock by the tick. With the conversation tick at 10 min and the scale at 2×, the next turn's elapsed chip and Scene slot show 20 min, and earlier turns keep their recorded times; changing Settings → Time afterwards leaves this chat unchanged. Pausing the clock makes two turns advance 0 and the HUD shows ⏸. A palette Timelapse of 3 days stops at a seeded invitation, with a Montage and a narrated summary; with invitations set to `note`, a Re-run runs all 3 days and lists the same events before that point, and the narrated summary adds no time. "Until next shift" ends at the shift's start. With the unit cap lowered, a long timelapse ends a segment with Continue timelapse, and continuing reaches the requested date. Going to bed offers "Timelapse to 07:00"; with Sleep on `auto`, the same action, by palette or typed, runs the night. A narrated drive adds no time beyond its route time. A narrated "next morning" makes a Timelapse chip. A recurring shift lands on the right weekdays across a timelapse. A map tap and a typed walk both make validated moves. Marine and off-road routes. All at 390 px. |
-| **B4 Gear, vehicles, sheets** | Gear, kits, use grants, overdue handling; Vehicles; sheets and checks. | Owned vs worn vs lent. A toolbox shows 44 of 45 tools after one wrench is taken. A truck burns fuel by route. Assigned-to expiry flags the vehicle overdue and the owner plans retrieval; the vehicle returns to its home base. Shown odds equal logged faces. |
-| **B5 Economy** | The ledger at every level; accounts; flows with withholding; savings transfers; cards with statements, interest, minimum payments and autopay; investments; catalogs and category bands; purchase resolution and declines; wallet cash. | Payday posts net of withholding. A narrated off-catalog purchase is priced by category. A post-hoc decline chip appears. A statement closes with interest and a minimum payment. A savings transfer posts. Investments move. Wallet cash is lost with the wallet. The books balance after a 30-day timelapse. |
-| **B6 Cast life, relationships, weather** | Commitments, school terms, trips and vacations, planner, agendas, LOD1, encounters, needs; regard; climates. | A day plan shows its utility reasons. A school term and a vacation change the plans. A tie-zone invitation consults the model, and Re-run keeps the recorded choice only on Re-narrate. Regard shifts and decays. An NPC↔NPC encounter changes regard. An off-screen effect survives swipe and branch. Weather follows the climate. |
-| **B7 Story and secrets** | Tracks, rules and beats; visibility end to end; GM view previews. | A gate opens only on predicates. A puzzle solves by state, and by answer where authored. Secret truth and paraphrases are absent until reveal. The GM view records nothing. |
-| **B8 Authoring at scale** | Import from lore, Build/Refine with AI, data tables UI, realism promote/demote UI, templates, world import/export, Check world, Playtest, studio seam. | Import a multi-book chat into a reviewed world. Mixed tiers (cast at 4, background at 1). Demote Money 4→2, spend, promote 2→4: totals intact, nothing stale. Author end to end at 390 px. Lazily generated detail persists after viewing and after an extension update that changes a default table; the change reaches the chat only through Upgrade. A studio-API smoke test. |
-| **B9 Hardening and release** | Performance with the **real packs** (§18.5 gate), user guide, an independent adversarial review, visible checks, my live audit, publishing. | Caveats shown; `NOTICE`; license per D20. |
-
-## 18. Spike checks, thresholds and fallbacks
-**B0 was a throwaway spike** on the reference host (D28), with synthetic volumes and live model calls. It checked the assumptions the design rests on before any real code was written. Each check below has its threshold and its fallback.
+## 18. Host checks, thresholds and fallbacks
+The design rests on assumptions about the host and the models, checked on the reference host (D28) with synthetic volumes and live model calls. Each check below has its threshold and its fallback.
 
 | Check | Verdict |
 |---|---|
@@ -1003,7 +987,7 @@ Blocks are for organization only; the extension is delivered and audited as a wh
      - agreement with the helper path for D10, reported.
    - Classifier firing rate reported.
    - **Fallback:** recommend confirm-by-default for failing field types. Resolved as D4's per-type defaults.
-5. **Performance** (synthetic in the spike; real packs at B9):
+5. **Performance** (synthetic volumes first, then the real packs):
    - fold ≤ 50 ms at 1k turns and ≤ 250 ms at 5k with a level-4 ledger;
    - a rebased view after an earlier switch ≤ 250 ms over 1k later turns with a cold cache (re-validation plus re-convergence);
    - 30-day catch-up for 20 NPCs ≤ 2 s in process;
@@ -1012,7 +996,7 @@ Blocks are for organization only; the extension is delivered and audited as a wh
    - record size per preset; overflow chunking;
    - chat-open payload growth;
    - main-process assembly cost.
-   - **B9 results** (real packs at level 4):
+   - **Results with the real packs** (at level 4):
 
      | Gate | Result |
      |---|---|
@@ -1021,14 +1005,14 @@ Blocks are for organization only; the extension is delivered and audited as a wh
      | Rebased view, 1k later turns, cold cache (≤ 250 ms) | 20 ms median, 42.5 ms max. Pass. |
      | 30-day catch-up and timelapse, 20 NPCs (≤ 2 s) | Simulation: 160 ms. Level 4: 115 ms. Pass. |
      | Timelapse record (≤ 32 KB) | Simulation: 29.7 KB. Level 4: 30.1 KB. Pass. |
-     | Interceptor apply (≤ 20 ms) | Final release build, offline bench: at turn 1000, 11.8 ms median and 12.3 ms p95; at turn 500, 5.6 / 6.0; with the host's token counts fetched in the background (§6.3). Pass. |
+     | Interceptor apply (≤ 20 ms) | Offline bench: at turn 1000, 11.8 ms median and 12.3 ms p95; at turn 500, 5.6 / 6.0; with the host's token counts fetched in the background (§6.3). Pass. |
      | Record size per preset (mean / p95 / max bytes) | Story: 408 / 704 / 897. Grounded: 410 / 704 / 897. Simulation: 429 / 982 / 1874. Level 4: 429 / 982 / 1874. |
-     | Chat-open payload | Turn 0: 22.0 KB. Turns 100 to 1000: 30.7–30.9 KB, flat in the earlier run; 31.7 KB (31,730 bytes) at turn 1000 on the final release build. |
-     | Main-process assembly, 1,000-message chat | Live host, final release build, 17 October 2026 11:25Z: extension on 122 ms median (p95 131), off 99 ms (p95 103), re-enabled 124 ms. Overhead: +23 ms median (+22 to +23 ms in the earlier runs at 09:33Z, 10:30Z and 11:02Z). |
+     | Chat-open payload | Turn 0: 22.0 KB. Turns 100 to 1000: 30.7–31.7 KB, flat. |
+     | Main-process assembly, 1,000-message chat | Live host: extension on 122 ms median (p95 131), off 99 ms (p95 103), re-enabled 124 ms. Overhead: +23 ms median (+22 to +23 ms across runs). |
 
-     The 1k-turn pipeline build (1,000 turns through the runtime) fell from 36 s to 14 s once the fold memo landed; the 5k build took 956 s.
+     Building the 1,000-turn chat through the runtime takes 14 s with the fold memo; the 5,000-turn chat takes 956 s.
 
-     Release gates on the final release build: the full test suite passed three times at 892 pass / 2 skip / 0 fail, `tsc` was clean, a 2,000 × 60 property run passed (14 pass / 0 fail, 335.0 s), and the dist scan was clean.
+     A release passes the full test suite, `tsc`, a long property run and a scan of `dist`.
 6. **Published types** (the host pins 0.6.49; 0.6.50 adds only `ctx.client`): `registerDomDecorator`, `ctx.ui.geometry`, float-widget `setFullscreen`/`persistGeometry`, `entries.setExtension`, `inline_available`, `council.getSettings`, `backendProcesses` (spawn, messaging, heartbeat), `rpcPool`, the range slider.
 7. **UI.** Preact plus host components; the drawer at 326 px; the map widget; chips; the Money and Cast panels at 390 px.
 
@@ -1053,16 +1037,16 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 | Timelapse cost | Deterministic unit cap; slot-bounded segments that always advance; heartbeat chunks; utility-only NPC choices; no partial apply. |
 | Worlds not portable (D2) | `lre-world-v1` plus lore-book export. |
 
-## 20. Deviations from the original principles and plan
+## 20. Where the design yields to the host
 
-**Principles that had to bend.** My starting principles assumed the engine could be the authority over the chat. An extension cannot be the host, so three of them changed:
+**Principles an extension can't keep whole.** The engine can't be the authority over the chat, because an extension isn't the host, so three principles take a weaker form:
 1. **Authority.** LumiRPEngine is a namespaced proposal layer with a versioned export, not the owner of the chat.
 2. **Canonical plane.** The ledger rides on message metadata; the shadow journal compensates for the host's weaknesses there (§4.3).
 3. **Branching.** Re-narrate versus Re-run is re-render versus re-execute. A chat branch is "branch world state".
 
-**What the build changed from the plan.** The sections above already describe the shipped behavior; this table lists where it differs from what I first wrote.
+**Choices and their reasons.** The sections above describe the engine as it is; each row here names the more obvious design, what the engine does instead, and why.
 
-| Planned | Built | Why |
+| The obvious design | What the engine does | Why |
 |---|---|---|
 | Turn-critical simulation in a child *turn lane* (D9) | In the backend process, inside the context handler, bounded by the same unit caps; the child lane stays for Playtest, Check world, imports and Build with AI (§9.6) | A segment took 38 ms on a child process and 2.5 ms in process |
 | Re-narrate always copies its source (P3) | It falls back to a Re-run when the source cannot be reproduced (§4.3) | P3 cannot hold without the source's prefix |
@@ -1100,11 +1084,10 @@ Blocks are for organization only; the extension is delivered and audited as a wh
 | — | Not built: command-palette commands, replacing a data table with another region's, a per-proposal edit step in Import from lore, agenda and secret-track objectives in the starter worlds (they carry narrative to-dos only), installing a world from a studio-published `rpcPool` endpoint. | Documented in the user guide where a user would look for them; a studio's world comes in as an export file. |
 | D20 | The license. | None yet; all rights reserved. |
 
-## 22. Design history and accepted residual risks
+## 22. Accepted residual risks
 
-The design went through several rounds of independent review: paper reviews of the plan and of the host integration, a verification pass on the fixes, and adversarial reviews of the built extension, each followed by fixes that are folded into the sections above. The paper rounds kept finding problems in the ledger, so I stopped relying on them and made the ledger gate an executable property suite (§14): a reference fold, a fake host that replays the host's recorded event orders, randomized operation sequences and named invariants. An independent adversarial review at the end of the build remains part of the release process.
+The ledger is accepted by an executable property suite (§14): a reference fold, a fake host that replays the host's recorded event orders, randomized operation sequences and named invariants. These are the risks the design accepts.
 
-### Accepted residual risks
 1. If the backend stalls, the world's sections are missing from that turn; a turn it couldn't plan in time commits `degraded`.
 2. Rare plan interleaving falls back to the head render.
 3. The host-wide worker cost remains until G3.
