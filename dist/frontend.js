@@ -923,6 +923,39 @@ var ENGINE_VERSION = "0.1.0";
 var EFFECT_ONLY_FUNCTIONS = ["roll"];
 var BUILTIN_RELATIONS = ["in", "owns", "uses", "worn_by", "equipped", "knows", "member_of", "regard", "route"];
 var DEFAULT_CURRENCY = { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" };
+var DEFAULT_SPAWN_CAP = 24;
+var MAX_SPAWN_CAP = 500;
+function spawnCapOf(world) {
+  const cap = world.spawnCap;
+  return typeof cap === "number" && Number.isFinite(cap) ? Math.max(0, Math.min(MAX_SPAWN_CAP, Math.trunc(cap))) : DEFAULT_SPAWN_CAP;
+}
+var ALIVE = "alive";
+var BUILTIN_LIFE_STATES = {
+  alive: { label: "Alive", acts: true, reads: "is alive" },
+  dying: { label: "Dying", acts: false, reads: "is dying" },
+  dead: { label: "Dead", acts: false, reads: "lies dead" }
+};
+function ownLifeState(id, raw) {
+  const def = isRecord(raw) ? raw : {};
+  const label = typeof def.label === "string" && def.label.trim() !== "" ? def.label : id.replace(/_/g, " ");
+  return { label, acts: def.acts === true, reads: typeof def.reads === "string" && def.reads.trim() !== "" ? def.reads : `is ${label.toLowerCase()}` };
+}
+function lifeStatesOf(world) {
+  const own = isRecord(world.lifeStates) ? Object.keys(world.lifeStates).filter((id) => !hasOwn(BUILTIN_LIFE_STATES, id)).sort() : [];
+  return [...Object.entries(BUILTIN_LIFE_STATES), ...own.map((id) => [id, ownLifeState(id, world.lifeStates?.[id])])];
+}
+function isLifeState(world, id) {
+  return hasOwn(BUILTIN_LIFE_STATES, id) || isRecord(world.lifeStates) && hasOwn(world.lifeStates, id);
+}
+function lifeStateOf(world, id) {
+  const builtIn = hasOwn(BUILTIN_LIFE_STATES, id) ? BUILTIN_LIFE_STATES[id] : undefined;
+  if (builtIn)
+    return builtIn;
+  if (isRecord(world.lifeStates) && hasOwn(world.lifeStates, id))
+    return ownLifeState(id, world.lifeStates[id]);
+  const label = id.replace(/_/g, " ");
+  return { label, acts: false, reads: `is ${label}` };
+}
 function grouped(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
@@ -1483,7 +1516,7 @@ function issueTarget(path) {
 }
 function issuePart(path) {
   const head = path.split(".")[0];
-  return head === "spawnTier" ? "tiers" : PARTS.find((p) => p === head) ?? null;
+  return head === "spawnTier" ? "tiers" : head === "spawnCap" || head === "lifeStates" ? "meta" : PARTS.find((p) => p === head) ?? null;
 }
 function CheckView(props) {
   const app = useApp();
@@ -2572,6 +2605,12 @@ function classifyOp(entity, classes, tags) {
   const facets = new Set([...Object.keys(classes), ...Object.keys(entity.class)]);
   const unchanged = [...facets].every((f) => same(classes[f] ?? [], entity.class[f] ?? [])) && same(tags, entity.tags);
   return unchanged ? null : { op: "classify", entity: entity.id, class: Object.fromEntries(Object.entries(classes).filter(([, v]) => v.length > 0)), tags: [...tags] };
+}
+function lifeEditOp(entity, to, tell) {
+  const changes = to !== entity.life.state;
+  if (!changes && tell.length === 0)
+    return null;
+  return { op: "life", entity: entity.id, ...changes ? { to } : {}, ...tell.length > 0 ? { tell: [...tell] } : {} };
 }
 function relationFields(defs, inputs, held = {}) {
   const fields = Object.fromEntries(Object.entries(held).filter(([id]) => !defs.some((d) => d.id === id)));
@@ -3828,9 +3867,27 @@ var COLLECTION_SPECS = {
     },
     { kind: "levels", key: "levels", label: "Level overrides" },
     { kind: "agent", key: "agent", label: "Lives their own day (agendas and plans)" },
+    { kind: "life", key: "life", label: "Starts (life state)" },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
-    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } }
+    { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
+    {
+      kind: "list",
+      key: "cues",
+      label: "Cues: how they act while a secret stays hidden",
+      title: "text",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Cue",
+        fields: [
+          { kind: "text", key: "text", label: "What the narrator sees them do (never the secret itself)" },
+          { kind: "ref", key: "lore", label: "While this secret lore stays gated", collection: "lore", optional: true },
+          { kind: "ref", key: "track", label: "While this track keeps something hidden", collection: "tracks", optional: true },
+          { kind: "text", key: "flag", label: "Until this story flag is set", optional: true, hint: "Pick one of the three: the secret the cue stands for" }
+        ]
+      }
+    }
   ],
   places: [
     { kind: "text", key: "name", label: "Name" },
@@ -4118,6 +4175,23 @@ var PART_SPECS = {
     },
     { kind: "enum", key: "seedMode", label: "Re-run rolls", values: ["fresh", "same_roll"] },
     { kind: "bool", key: "lenientPricing", label: "Lenient pricing (accept narrated prices inside the band)" },
+    { kind: "number", key: "spawnCap", label: "People replies may introduce in a chat (0 for none)", min: 0, max: 500, step: 1 },
+    {
+      kind: "record",
+      key: "lifeStates",
+      label: "Life states (besides Alive, Dying and Dead)",
+      keyLabel: "State id",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Life state",
+        fields: [
+          { kind: "text", key: "label", label: "Label" },
+          { kind: "bool", key: "acts", label: "Still acts (follows schedules and plans, chooses, takes combat turns)" },
+          { kind: "text", key: "reads", label: "Reads to the narrator as", hint: "lies unconscious · is missing · walks again" }
+        ]
+      }
+    },
     {
       kind: "object",
       key: "currency",
@@ -5422,7 +5496,7 @@ function lintAt(lint, path) {
 function refOptions(doc, collection) {
   const source = doc[collection];
   const options = Object.entries(source).map(([id, entry]) => {
-    const label = isRecord(entry) ? typeof entry.name === "string" ? entry.name : typeof entry.label === "string" ? entry.label : id : id;
+    const label = isRecord(entry) ? typeof entry.name === "string" ? entry.name : typeof entry.label === "string" ? entry.label : typeof entry.title === "string" ? entry.title : id : id;
     const pack = (collection === "kinds" || collection === "relations") && isRecord(entry) && typeof entry.pack === "string" ? `, ${entry.pack} pack` : "";
     return { value: id, label: label === id && pack === "" ? id : `${label} (${id}${pack})` };
   });
@@ -6492,6 +6566,15 @@ function FieldInput(props) {
         ]
       }, undefined, true, undefined, this);
     }
+    case "life":
+      return /* @__PURE__ */ u3(SelectInput, {
+        label: spec.label,
+        value: props.value,
+        optional: true,
+        options: lifeStatesOf(ctx.doc).filter(([id]) => id !== ALIVE).map(([id, def]) => ({ value: id, label: def.acts ? def.label : `${def.label} (doesn't act)` })),
+        issues,
+        onChange: props.onChange
+      }, undefined, false, undefined, this);
     case "object": {
       if (spec.optional && !isRecord(props.value)) {
         return /* @__PURE__ */ u3("div", {
@@ -7055,7 +7138,7 @@ var PRE_REPLY_MAX_MS = CONTEXT_HANDLER_MAX_MS - PLAN_MARGIN_MS;
 var SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"];
 var SPEED_DEFAULT = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
 var SPEED_THRESHOLD_MINUTES = [1, 7 * 1440];
-var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn"];
+var EXTRACTION_TYPES = ["time_advance", "location", "condition", "knows", "give", "purchase", "transfer", "regard", "quantity", "spawn", "life"];
 var EXTRACTION_DEFAULTS = Object.freeze({
   time_advance: "auto",
   location: "auto",
@@ -7063,6 +7146,7 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   regard: "confirm",
   transfer: "confirm",
   spawn: "confirm",
+  life: "confirm",
   knows: "confirm",
   give: "confirm",
   purchase: "confirm"
@@ -11040,6 +11124,198 @@ function TiersEditor(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/shared/studio-bridge.ts
+var STUDIO_EXTENSION = "lumi_rp_engine_studio";
+var STATE_EVENT = "lre-state-v1";
+var STATE_REQUEST_EVENT = "lre-state-request-v1";
+var STUDIO_OFFER_EVENT = "lre-studio-offer-v1";
+var STUDIO_INSTALLED_EVENT = "lre-studio-installed-v1";
+var STUDIO_INBOUND = ["file", `rpc:${STUDIO_EXTENSION}.offer`];
+var encoder = new TextEncoder;
+
+// src/frontend/build/studio-offer.tsx
+function useStudioOffer(props) {
+  const app = useApp();
+  const view = useView();
+  const asked = useUi((ui) => ui.studioOffer);
+  const [offer, setOffer] = d2(null);
+  const [message, setMessage] = d2(null);
+  const [busy, run] = useBusy();
+  const load = () => run(async () => {
+    const result = await app.request({ type: "lre.studio", op: "offer" });
+    setOffer(result?.offer ?? null);
+    setMessage(result && !result.offer ? result.message ?? null : null);
+  });
+  A(() => {
+    if (asked > 0)
+      load();
+  }, [asked]);
+  const install = (reviewed) => run(async () => {
+    const result = await app.request({ type: "lre.studio", op: "install", offerId: reviewed.offerId });
+    const done = result?.installed;
+    if (!done)
+      return;
+    setOffer(null);
+    props.installed();
+    if (result.lint && result.lint.length > 0)
+      props.review({ worldId: done.worldId, name: done.name, issues: result.lint });
+    const detail = { offerId: done.offerId, mode: done.mode, worldId: done.worldId, revision: done.revision };
+    window.dispatchEvent(new CustomEvent(STUDIO_INSTALLED_EVENT, { detail }));
+    app.toast(done.mode === "new" ? `Installed “${done.name}” as a new world.` : `“${done.name}” has a new revision. Upgrade its chats in Settings → Pins and upgrade.`, "info");
+    if (!done.attachChatId)
+      return;
+    if (view?.chatId !== done.attachChatId) {
+      app.toast("Open the chat it was made for and attach it from Play.", "info");
+      return;
+    }
+    if (view.status !== "not_world") {
+      if (view.worldId !== done.worldId)
+        app.toast("This chat already plays another world, so it stays as it is.", "info");
+      return;
+    }
+    if (!await app.host.confirm("Attach world", `Attach “${done.name}” to this chat? The world starts at its current revision.`, "info", "Attach"))
+      return;
+    if (await app.request({ type: "lre.world", op: "attach", worldId: done.worldId, chatId: done.attachChatId }))
+      app.client.open(done.attachChatId);
+  });
+  return { offer, message, busy, load, dismiss: () => setOffer(null), install };
+}
+var COUNTED = [
+  ["entities", "entities"],
+  ["places", "places"],
+  ["routes", "routes"],
+  ["maps", "maps"],
+  ["tracks", "tracks"],
+  ["schedules", "schedules"],
+  ["lore", "lore entries"],
+  ["rules", "rules"],
+  ["actions", "actions"]
+];
+function StudioOfferReview(props) {
+  const { offer, busy } = props.state;
+  if (!offer)
+    return null;
+  const counts = COUNTED.flatMap(([key, label]) => offer.counts[key] ? [`${offer.counts[key]} ${label}`] : []);
+  const what = offer.mode === "new" ? "A new world" : offer.target?.name ? `The next revision of “${offer.target.name}”` : "A revision of a world you don't have";
+  return /* @__PURE__ */ u3(Card, {
+    title: "From LumiRPEngine Studio",
+    aside: offer.errors > 0 ? /* @__PURE__ */ u3("span", {
+      class: "lre-badge neg",
+      children: offer.errors
+    }, undefined, false, undefined, this) : null,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-studio-offer": true,
+      children: [
+        /* @__PURE__ */ u3("div", {
+          class: "lre-item",
+          style: { flexWrap: "wrap" },
+          children: /* @__PURE__ */ u3("span", {
+            class: "grow",
+            style: { minWidth: 0 },
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "title",
+                style: { overflowWrap: "anywhere" },
+                children: offer.name
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "sub",
+                children: [
+                  what,
+                  offer.attachChatId ? ", to attach to a chat" : ""
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, undefined, false, undefined, this),
+        counts.length > 0 ? /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: counts.join(" · ")
+        }, undefined, false, undefined, this) : null,
+        offer.installed ? /* @__PURE__ */ u3("div", {
+          class: "lre-banner info",
+          children: "Already installed."
+        }, undefined, false, undefined, this) : offer.blocked ? /* @__PURE__ */ u3("div", {
+          class: "lre-banner warn",
+          children: offer.blocked
+        }, undefined, false, undefined, this) : null,
+        offer.lint.length > 0 ? /* @__PURE__ */ u3("div", {
+          class: "lre-list",
+          children: [
+            offer.lint.slice(0, 8).map((issue, i) => /* @__PURE__ */ u3("div", {
+              class: "lre-item",
+              style: { flexWrap: "wrap" },
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: issue.severity === "error" ? "lre-badge neg" : "lre-badge warn",
+                  children: issue.severity
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  class: "grow",
+                  style: { flexBasis: "180px", minWidth: 0 },
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "title",
+                      style: { overflowWrap: "anywhere" },
+                      children: issue.message
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ u3("span", {
+                      class: "sub",
+                      children: issue.path
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, i, true, undefined, this)),
+            offer.lint.length > 8 ? /* @__PURE__ */ u3("span", {
+              class: "lre-small lre-muted",
+              children: [
+                "and ",
+                offer.lint.length - 8,
+                " more"
+              ]
+            }, undefined, true, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this) : null,
+        offer.macros.length > 0 ? /* @__PURE__ */ u3("div", {
+          class: "lre-banner warn",
+          children: [
+            "Its lore and templates hold ",
+            offer.macros.length,
+            " macro",
+            offer.macros.length === 1 ? "" : "s",
+            " that Lumiverse runs when it builds a prompt; after installing, review each before you play."
+          ]
+        }, undefined, true, undefined, this) : null,
+        offer.mode === "revision" && offer.blocked === null && !offer.installed ? /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: "Its chats stay on their revision until you Upgrade them in Settings → Pins and upgrade."
+        }, undefined, false, undefined, this) : null,
+        /* @__PURE__ */ u3("div", {
+          style: { display: "flex", gap: "8px", flexWrap: "wrap" },
+          children: [
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn primary",
+              disabled: busy || offer.blocked !== null || offer.installed !== null,
+              onClick: () => props.state.install(offer),
+              children: "Install"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn ghost",
+              disabled: busy,
+              onClick: props.state.dismiss,
+              children: "Not now"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+
 // src/frontend/build/build.tsx
 var COLLECTIONS2 = [
   { id: "entities", label: "Entities", hint: "People, things, vehicles" },
@@ -11216,6 +11492,7 @@ function Worlds() {
   const [review, setReview] = d2(null);
   const refresh = () => void app.request({ type: "lre.world", op: "list" }).then((result) => setWorlds(result?.worlds ?? []));
   A(refresh, []);
+  const studio = useStudioOffer({ installed: refresh, review: (next) => setReview({ ...next, from: "LumiRPEngine Studio" }) });
   const importFile = (file) => run(async () => {
     let parsed;
     try {
@@ -11228,7 +11505,7 @@ function Worlds() {
     if (result) {
       const issues = result.lint ?? [];
       app.toast(issues.length > 0 ? `Imported “${result.world?.name ?? "world"}”. Review ${issues.length} item(s) below before playing.` : `Imported “${result.world?.name ?? "world"}”.`, "info");
-      setReview(result.world && issues.length > 0 ? { worldId: result.world.id, name: result.world.name, issues } : null);
+      setReview(result.world && issues.length > 0 ? { worldId: result.world.id, name: result.world.name, issues, from: "a file" } : null);
       refresh();
     }
   });
@@ -11236,6 +11513,9 @@ function Worlds() {
     class: "lre-stack",
     "data-lre-section": "build",
     children: [
+      /* @__PURE__ */ u3(StudioOfferReview, {
+        state: studio
+      }, undefined, false, undefined, this),
       review ? /* @__PURE__ */ u3(Card, {
         title: "Review before playing",
         aside: /* @__PURE__ */ u3("span", {
@@ -11248,7 +11528,9 @@ function Worlds() {
             children: [
               "“",
               review.name,
-              "” came from a file. Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play."
+              "” came from ",
+              review.from,
+              ". Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play."
             ]
           }, undefined, true, undefined, this),
           /* @__PURE__ */ u3("div", {
@@ -11422,7 +11704,18 @@ function Worlds() {
                 importFile(file);
               event.currentTarget.value = "";
             }
-          }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn block",
+            disabled: studio.busy,
+            onClick: studio.load,
+            children: "Import from Studio"
+          }, undefined, false, undefined, this),
+          studio.message && !studio.offer ? /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: studio.message
+          }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this)
     ]
@@ -11952,7 +12245,7 @@ function partValue(doc, part) {
     case "time":
       return doc.time;
     case "meta":
-      return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) };
+      return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}), currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) };
   }
 }
 function PartView(props) {
@@ -12729,7 +13022,8 @@ var EXTRACTION_LABEL = {
   transfer: "Money transfers",
   regard: "Feelings toward others",
   quantity: "Quantities",
-  spawn: "New people"
+  spawn: "New people",
+  life: "Life and death (dying, dead, collapsed…)"
 };
 var MODE_OPTIONS = [
   { value: "auto", label: "Auto" },
@@ -12885,6 +13179,70 @@ function PinsSection() {
           }, id, false, undefined, this))
         ]
       }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+var BLOCK_STATE = {
+  missing: "Not in this preset",
+  empty: "Switched off, nothing written yet",
+  read: "Read for this helper",
+  enabled: "Switched on: it reaches the narrator in every chat, so the engine doesn't read it"
+};
+function PresetSection() {
+  const app = useApp();
+  const [card, setCard] = d2(null);
+  const [busy, run] = useBusy();
+  A(() => {
+    app.request({ type: "lre.preset", op: "get" }).then((result) => setCard(result?.card ?? null));
+  }, []);
+  if (!card)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "Reading the active preset…"
+    }, undefined, false, undefined, this);
+  const missing = card.blocks.some((b) => b.state === "missing");
+  const add = () => run(async () => {
+    const result = await app.request({ type: "lre.preset", op: "add" });
+    if (result)
+      setCard(result.card);
+  });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-preset-card": true,
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "Active preset",
+        v: card.preset?.name ?? "—",
+        sub: "The preset world chats assemble with now: your default connection's, else the active Loom preset."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: "Outlets"
+      }, undefined, false, undefined, this),
+      card.outlets.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "None: the world places every section."
+      }, undefined, false, undefined, this) : card.outlets.map((o) => /* @__PURE__ */ u3(Row, {
+        k: /* @__PURE__ */ u3("code", {
+          children: `{{outlet::${o.outlet}}}`
+        }, undefined, false, undefined, this),
+        v: o.label ?? "no section of that name",
+        tone: o.label ? undefined : "warn"
+      }, o.outlet, false, undefined, this)),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: "Guidance blocks"
+      }, undefined, false, undefined, this),
+      card.blocks.map((b) => /* @__PURE__ */ u3(Row, {
+        k: b.name,
+        v: BLOCK_STATE[b.state],
+        tone: b.state === "enabled" ? "warn" : b.state === "read" ? undefined : "muted"
+      }, b.target, false, undefined, this)),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn",
+        disabled: busy || !card.preset || !missing,
+        onClick: add,
+        children: "Add RPEngine blocks to this preset"
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -13075,6 +13433,31 @@ function Settings() {
           onChange: (swipeDefault) => patch({ swipeDefault })
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Fold, {
+        id: "preset",
+        title: "Preset",
+        summary: settings.hideJsonBlocks ? "JSON blocks hidden in world chats" : "JSON blocks shown",
+        ...fold,
+        children: [
+          /* @__PURE__ */ u3(PresetSection, {}, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            "data-lre-hide-json": true,
+            children: [
+              /* @__PURE__ */ u3(HostSwitch, {
+                label: "Hide JSON blocks in world chats",
+                checked: settings.hideJsonBlocks,
+                disabled: busy,
+                onChange: (hideJsonBlocks) => patch({ hideJsonBlocks })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-small lre-muted",
+                children: settings.hideJsonBlocks ? "A <json>…</json> block a reply carries (some presets ask for one) is hidden and kept out of World Info scanning, through a regex script each world chat keeps. The block stays as written, so anything that reads it still can." : "Replies show their <json> blocks, and World Info scans them like the rest of the reply."
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
       /* @__PURE__ */ u3(Fold, {
         id: "caveats",
         title: "Caveats",
@@ -15226,6 +15609,7 @@ function decodeCastView(value) {
       activity: optStr(p.activity),
       place: optStr(p.place),
       lastSeen: isRecord(p.lastSeen) ? { place: optStr(p.lastSeen.place), at: str(p.lastSeen.at) } : undefined,
+      life: optStr(p.life),
       regard: list(p.regard, (r) => ({ axis: str(r.axis), band: str(r.band), value: optNum(r.value) })),
       timeline: list(p.timeline, (s) => ({ start: str(s.start), end: str(s.end), label: str(s.label), kind: oneOf(s.kind, SLOT_KINDS, "other"), reasons: strings(s.reasons) })),
       agenda: list(p.agenda, (a) => ({ label: str(a.label), stage: str(a.stage) })),
@@ -15411,6 +15795,10 @@ function CastPanel(props) {
       aside: /* @__PURE__ */ u3("span", {
         class: "lre-inline",
         children: [
+          p.life ? /* @__PURE__ */ u3("span", {
+            class: "lre-badge neg",
+            children: p.life
+          }, undefined, false, undefined, this) : null,
           p.here ? /* @__PURE__ */ u3("span", {
             class: "lre-badge pos",
             children: "here"
@@ -15626,6 +16014,74 @@ var MATH = {
 };
 var MATH_FUNCTIONS = Object.keys(MATH);
 
+// src/engine/scope.ts
+function kindDef(reg, world, kind) {
+  return own(world.kinds, kind) ?? reg.kinds.get(kind);
+}
+function kindIs2(reg, world, kind, ancestor) {
+  let id = kind;
+  for (let guard = 0;id && guard < 32; guard++) {
+    if (id === ancestor)
+      return true;
+    id = kindDef(reg, world, id)?.extends;
+  }
+  return false;
+}
+function placeOfEntity(state, id) {
+  let cur = id;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const e = own(state.entities, cur);
+    if (!e)
+      return null;
+    const p = e.fields.place;
+    if (typeof p === "string" && p !== "")
+      return p;
+    cur = e.relations.find((r) => r.type === "in")?.to;
+  }
+  return null;
+}
+var GONE_FIELD = "gone";
+function isGone(state, id) {
+  let cur = id;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const e = own(state.entities, cur);
+    if (!e)
+      return false;
+    if (e.fields[GONE_FIELD] === true)
+      return true;
+    cur = e.relations.find((r) => r.type === "in")?.to;
+  }
+  return false;
+}
+
+// src/engine/seen.ts
+var PACK = "space";
+var SLICE = "seen";
+var PARTS3 = ["places", "people", "cells"];
+function writable(state, key) {
+  const seen = sliceRecord(state, PACK, SLICE);
+  const v = seen[key];
+  if (isRecord(v))
+    return v;
+  const fresh = {};
+  seen[key] = fresh;
+  return fresh;
+}
+function restoreObservations(state, data) {
+  for (const key of PARTS3) {
+    const diff = data[key];
+    if (!isRecord(diff))
+      continue;
+    const list = writable(state, key);
+    for (const [id, v] of Object.entries(diff)) {
+      if (v === null)
+        delete list[id];
+      else if (isRecord(v))
+        list[id] = structuredClone(v);
+    }
+  }
+}
+
 // src/engine/selector.ts
 function stringsIn(v) {
   return Array.isArray(v) ? v.filter((x) => typeof x === "string") : null;
@@ -15671,36 +16127,72 @@ function classOf(value) {
   return out;
 }
 
-// src/engine/seen.ts
-var PACK = "space";
-var SLICE = "seen";
-var PARTS3 = ["places", "people", "cells"];
-function writable(state, key) {
-  const seen = sliceRecord(state, PACK, SLICE);
-  const v = seen[key];
-  if (isRecord(v))
-    return v;
-  const fresh = {};
-  seen[key] = fresh;
-  return fresh;
-}
-function restoreObservations(state, data) {
-  for (const key of PARTS3) {
-    const diff = data[key];
-    if (!isRecord(diff))
-      continue;
-    const list = writable(state, key);
-    for (const [id, v] of Object.entries(diff)) {
-      if (v === null)
-        delete list[id];
-      else if (isRecord(v))
-        list[id] = structuredClone(v);
-    }
-  }
-}
-
 // src/engine/visibility.ts
 var HIDDEN_PLACE_NAME = "Somewhere";
+
+// src/engine/life.ts
+var PACK2 = "engine";
+var SLICE2 = "life";
+function lifeOf(state, id) {
+  return own(state.entities, id)?.life ?? ALIVE;
+}
+function entryOf(state, subject) {
+  const all = state.packs[PACK2]?.[SLICE2];
+  const entry = isRecord(all) ? own(all, subject) : undefined;
+  return isRecord(entry) && typeof entry.base === "string" && isRecord(entry.by) ? { base: entry.base, by: entry.by } : null;
+}
+function lifeKnownTo(state, subject, knower) {
+  const entry = knower === subject ? null : entryOf(state, subject);
+  if (!entry)
+    return lifeOf(state, subject);
+  const learned = own(entry.by, knower);
+  return typeof learned === "string" ? learned : entry.base;
+}
+function isPerson(reg, world, state, id) {
+  const e = own(state.entities, id);
+  return !!e && kindIs2(reg, world, e.kind, "person") && !isGone(state, id);
+}
+function learners(state, subject, base) {
+  const slice = state.packs[PACK2] ?? {};
+  state.packs[PACK2] = slice;
+  const all = isRecord(slice[SLICE2]) ? slice[SLICE2] : {};
+  slice[SLICE2] = all;
+  const found = own(all, subject);
+  if (isRecord(found) && typeof found.base === "string" && isRecord(found.by))
+    return found.by;
+  const by = {};
+  all[subject] = { base, by };
+  return by;
+}
+function peopleAt(reg, world, state, place) {
+  return Object.keys(state.entities).sort().filter((id) => placeOfEntity(state, id) === place && isPerson(reg, world, state, id));
+}
+function applyLife(state, ctx, subject, to) {
+  const e = own(state.entities, subject);
+  if (!e)
+    return;
+  const by = learners(state, subject, lifeOf(state, subject));
+  if (to === ALIVE)
+    delete e.life;
+  else
+    e.life = to;
+  const place = placeOfEntity(state, subject);
+  if (place !== null) {
+    for (const id of peopleAt(ctx.registry, ctx.world, state, place))
+      if (id !== subject)
+        by[id] = to;
+  }
+}
+function tellLife(state, subject, who) {
+  const entry = entryOf(state, subject);
+  if (!entry)
+    return;
+  const truth = lifeOf(state, subject);
+  const by = learners(state, subject, entry.base);
+  for (const id of who)
+    if (id !== subject && own(state.entities, id))
+      by[id] = truth;
+}
 
 // src/engine/engine-pack.ts
 var ENGINE_PACK = "engine";
@@ -15719,7 +16211,9 @@ var ENGINE_EVENTS = {
   entity: "engine.entity",
   classes: "engine.class",
   observed: "engine.observed",
-  adjudged: "engine.adjudged"
+  adjudged: "engine.adjudged",
+  life: "engine.life",
+  told: "engine.told"
 };
 function slice(state) {
   const s = state.packs[ENGINE_PACK] ?? {};
@@ -15971,6 +16465,47 @@ var events = [
       sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds"), ...typeof round === "string" ? { round } : {} };
     },
     describe: (e) => `${str2(e, "actor")}: ${str2(e, "action").replace(/_/g, " ")}, ${str2(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str2(e, "why")})`}`
+  },
+  {
+    type: ENGINE_EVENTS.life,
+    validate: (e, ctx) => {
+      const ent = own(ctx.state.entities, str2(e, "entity"));
+      if (!ent)
+        return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
+      if (!isLifeState(ctx.world, str2(e, "to")))
+        return { code: "bad_life", reason: `there's no life state ${str2(e, "to")}` };
+      return lifeOf(ctx.state, str2(e, "entity")) === str2(e, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str2(e, "to")).label.toLowerCase()}` } : null;
+    },
+    apply: (e, state, ctx) => applyLife(state, ctx, str2(e, "entity"), str2(e, "to")),
+    touches: (e) => [{ entity: str2(e, "entity"), aspect: "life" }],
+    describe: (e, ctx, viewer) => {
+      const id = str2(e, "entity");
+      const def = lifeStateOf(ctx.world, str2(e, "to"));
+      const name = own(ctx.state.entities, id)?.name ?? id;
+      if (viewer === undefined)
+        return `${name}: ${def.label}`;
+      if (lifeKnownTo(ctx.state, id, viewer) !== str2(e, "to"))
+        return "";
+      return id === viewer ? `You: ${def.label}` : `${name} ${def.reads}`;
+    }
+  },
+  {
+    type: ENGINE_EVENTS.told,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, str2(e, "entity")))
+        return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
+      const who = e.data.who;
+      return Array.isArray(who) && who.length > 0 && who.every((id) => typeof id === "string" && own(ctx.state.entities, id)) ? null : { code: "bad_event", reason: "told needs the people told" };
+    },
+    apply: (e, state) => tellLife(state, str2(e, "entity"), Array.isArray(e.data.who) ? e.data.who.filter((id) => typeof id === "string") : []),
+    describe: (e, ctx, viewer) => {
+      const id = str2(e, "entity");
+      const name = own(ctx.state.entities, id)?.name ?? id;
+      const who = Array.isArray(e.data.who) ? e.data.who.filter((x) => typeof x === "string") : [];
+      if (viewer === undefined)
+        return `${who.map((w) => own(ctx.state.entities, w)?.name ?? w).join(", ")} learn: ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+      return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
+    }
   }
 ];
 
@@ -19643,6 +20178,82 @@ function Classification(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function Life(props) {
+  const { entity, editor } = props;
+  const [to, setTo] = d2(entity.life.state);
+  const [tell, setTell] = d2([]);
+  const op = lifeEditOp(entity, to, tell);
+  const name = (id) => editor.gm.entities.find((e) => e.id === id)?.pov ? "You" : editor.gm.entities.find((e) => e.id === id)?.name ?? id;
+  const others = editor.gm.entities.filter((e) => e.id !== entity.id && !e.gone && !tell.includes(e.id));
+  const { everyone, aware, unaware } = entity.life;
+  return /* @__PURE__ */ u3(Card, {
+    title: "Life",
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "Known to",
+        v: everyone ? unaware.length > 0 ? `everyone but ${unaware.map((p) => name(p.id)).join(", ")}` : "everyone" : aware.length > 0 ? aware.map((p) => name(p.id)).join(", ") : "no one"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Life state"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            value: to,
+            onChange: (event) => setTo(event.currentTarget.value),
+            children: editor.gm.lifeStates.map((s) => /* @__PURE__ */ u3("option", {
+              value: s.id,
+              children: [
+                s.label,
+                s.acts ? "" : " (doesn't act)"
+              ]
+            }, s.id, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      tell.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        style: { flexWrap: "wrap" },
+        children: tell.map((id) => /* @__PURE__ */ u3("button", {
+          type: "button",
+          class: "lre-btn small",
+          "aria-label": `Don't tell ${name(id)}`,
+          onClick: () => setTell(tell.filter((t) => t !== id)),
+          children: [
+            name(id),
+            " ✕"
+          ]
+        }, id, true, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        value: "",
+        "aria-label": "Tell someone",
+        onChange: (event) => event.currentTarget.value ? setTell([...tell, event.currentTarget.value]) : undefined,
+        children: [
+          /* @__PURE__ */ u3("option", {
+            value: "",
+            children: "+ Tell someone…"
+          }, undefined, false, undefined, this),
+          others.map((e) => /* @__PURE__ */ u3("option", {
+            value: e.id,
+            children: e.pov ? "You" : e.name
+          }, e.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn primary",
+        disabled: editor.busy || op === null,
+        onClick: () => op && void editor.edit([op]),
+        children: "Save"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function relationDetail(r, gm) {
   const defs = gm.relationTypes.find((t) => t.id === r.type)?.fields ?? [];
   const parts = Object.entries(r.fields ?? {}).map(([id, v]) => `${defs.find((d) => d.id === id)?.label ?? id} ${typeof v === "string" ? v : JSON.stringify(v)}`);
@@ -19873,6 +20484,10 @@ function EntityEditor(props) {
               class: "lre-badge neg",
               children: "Removed"
             }, undefined, false, undefined, this) : null,
+            entity.life.state !== "alive" ? /* @__PURE__ */ u3("span", {
+              class: "lre-badge neg",
+              children: entity.life.label
+            }, undefined, false, undefined, this) : null,
             entity.visibility !== "public" ? /* @__PURE__ */ u3("span", {
               class: "lre-badge warn",
               children: entity.visibility.replace(/_/g, " ")
@@ -19966,6 +20581,10 @@ function EntityEditor(props) {
         entity,
         editor
       }, `${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`, false, undefined, this),
+      /* @__PURE__ */ u3(Life, {
+        entity,
+        editor
+      }, JSON.stringify(entity.life), false, undefined, this),
       /* @__PURE__ */ u3(Classification, {
         entity,
         editor
@@ -20115,6 +20734,10 @@ function Entities(props) {
               e.gone ? /* @__PURE__ */ u3("span", {
                 class: "lre-badge neg",
                 children: "Removed"
+              }, undefined, false, undefined, this) : null,
+              e.life.state !== "alive" ? /* @__PURE__ */ u3("span", {
+                class: "lre-badge neg",
+                children: e.life.label
               }, undefined, false, undefined, this) : null,
               e.spawned ? /* @__PURE__ */ u3("span", {
                 class: "lre-badge",
@@ -20617,6 +21240,10 @@ function ScenePanel(props) {
                     }, undefined, false, undefined, this)
                   ]
                 }, undefined, true, undefined, this),
+                person.life ? /* @__PURE__ */ u3("span", {
+                  class: "lre-badge neg",
+                  children: person.life
+                }, undefined, false, undefined, this) : null,
                 pending ? /* @__PURE__ */ u3("span", {
                   class: "lre-badge warn",
                   children: "pending"
@@ -20781,7 +21408,9 @@ var REQUEST_TYPES = {
   "lre.ui": true,
   "lre.map": true,
   "lre.job": true,
-  "lre.lore": true
+  "lre.lore": true,
+  "lre.studio": true,
+  "lre.preset": true
 };
 function isRequestType(value) {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(REQUEST_TYPES, value);
@@ -21235,17 +21864,22 @@ function setup(ctx) {
   cleanups.push(trackJobs(client));
   cleanups.push(client.subscribe((state) => setCurrency(state.view?.currency ?? null)));
   let announced = null;
-  const announce = (packs) => {
+  let packsInPlay = {};
+  const announce = (packs, again = false) => {
     const key = JSON.stringify(packs);
-    if (key === announced)
+    if (key === announced && !again)
       return;
     announced = key;
-    const detail = { engineVersion: ENGINE_VERSION, worldFormat: WORLD_FORMAT, packs, inbound: ["file"] };
-    window.dispatchEvent(new CustomEvent("lre-state-v1", { detail }));
+    packsInPlay = packs;
+    const detail = { engineVersion: ENGINE_VERSION, worldFormat: WORLD_FORMAT, packs, inbound: [...STUDIO_INBOUND] };
+    window.dispatchEvent(new CustomEvent(STATE_EVENT, { detail }));
   };
   announce({});
   cleanups.push(client.subscribe((state) => state.view ? announce(state.view.packs) : undefined));
-  const ui = createStore({ section: "play", playPanel: null, build: { view: "worlds" }, mapInDrawer: false, overlay: null });
+  const announceAgain = () => announce(packsInPlay, true);
+  window.addEventListener(STATE_REQUEST_EVENT, announceAgain);
+  cleanups.push(() => window.removeEventListener(STATE_REQUEST_EVENT, announceAgain));
+  const ui = createStore({ section: "play", playPanel: null, build: { view: "worlds" }, mapInDrawer: false, overlay: null, studioOffer: 0 });
   const toasts = createStore([]);
   let toastId = 0;
   const toast = (text, tone = "info") => {
@@ -21301,6 +21935,12 @@ function setup(ctx) {
     G(null, tab.root);
     tab.destroy();
   });
+  const reviewOffer = () => {
+    ui.update((state) => ({ ...state, section: "build", build: { view: "worlds" }, studioOffer: state.studioOffer + 1 }));
+    tab.activate();
+  };
+  window.addEventListener(STUDIO_OFFER_EVENT, reviewOffer);
+  cleanups.push(() => window.removeEventListener(STUDIO_OFFER_EVENT, reviewOffer));
   const hud = new HudFloat({
     viewport: () => host.viewport.get(),
     create(rect) {

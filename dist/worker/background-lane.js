@@ -1034,6 +1034,39 @@ function objectiveWhen(o) {
 function objectiveLabel(o) {
   return typeof o === "string" ? o : o.label;
 }
+var DEFAULT_SPAWN_CAP = 24;
+var MAX_SPAWN_CAP = 500;
+function spawnCapOf(world) {
+  const cap = world.spawnCap;
+  return typeof cap === "number" && Number.isFinite(cap) ? Math.max(0, Math.min(MAX_SPAWN_CAP, Math.trunc(cap))) : DEFAULT_SPAWN_CAP;
+}
+var ALIVE = "alive";
+var BUILTIN_LIFE_STATES = {
+  alive: { label: "Alive", acts: true, reads: "is alive" },
+  dying: { label: "Dying", acts: false, reads: "is dying" },
+  dead: { label: "Dead", acts: false, reads: "lies dead" }
+};
+function ownLifeState(id, raw) {
+  const def = isRecord(raw) ? raw : {};
+  const label = typeof def.label === "string" && def.label.trim() !== "" ? def.label : id.replace(/_/g, " ");
+  return { label, acts: def.acts === true, reads: typeof def.reads === "string" && def.reads.trim() !== "" ? def.reads : `is ${label.toLowerCase()}` };
+}
+function lifeStatesOf(world) {
+  const own = isRecord(world.lifeStates) ? Object.keys(world.lifeStates).filter((id) => !hasOwn(BUILTIN_LIFE_STATES, id)).sort() : [];
+  return [...Object.entries(BUILTIN_LIFE_STATES), ...own.map((id) => [id, ownLifeState(id, world.lifeStates?.[id])])];
+}
+function isLifeState(world, id) {
+  return hasOwn(BUILTIN_LIFE_STATES, id) || isRecord(world.lifeStates) && hasOwn(world.lifeStates, id);
+}
+function lifeStateOf(world, id) {
+  const builtIn = hasOwn(BUILTIN_LIFE_STATES, id) ? BUILTIN_LIFE_STATES[id] : undefined;
+  if (builtIn)
+    return builtIn;
+  if (isRecord(world.lifeStates) && hasOwn(world.lifeStates, id))
+    return ownLifeState(id, world.lifeStates[id]);
+  const label = id.replace(/_/g, " ");
+  return { label, acts: false, reads: `is ${label}` };
+}
 function grouped(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
@@ -1156,6 +1189,7 @@ var EXTRACTION_DEFAULTS = Object.freeze({
   regard: "confirm",
   transfer: "confirm",
   spawn: "confirm",
+  life: "confirm",
   knows: "confirm",
   give: "confirm",
   purchase: "confirm"
@@ -1207,262 +1241,6 @@ function facetTree(values) {
   for (const id of ids)
     visit(id, 0);
   return out;
-}
-
-// src/shared/hash.ts
-var C1 = 597399067;
-var C2 = 2869860233;
-var C3 = 951274213;
-var C4 = 2716044179;
-function rotl32(x, r) {
-  return x << r | x >>> 32 - r;
-}
-function fmix32(h) {
-  h ^= h >>> 16;
-  h = Math.imul(h, 2246822507);
-  h ^= h >>> 13;
-  h = Math.imul(h, 3266489909);
-  h ^= h >>> 16;
-  return h;
-}
-function mixK1(k) {
-  return Math.imul(rotl32(Math.imul(k, C1), 15), C2);
-}
-function mixK2(k) {
-  return Math.imul(rotl32(Math.imul(k, C2), 16), C3);
-}
-function mixK3(k) {
-  return Math.imul(rotl32(Math.imul(k, C3), 17), C4);
-}
-function mixK4(k) {
-  return Math.imul(rotl32(Math.imul(k, C4), 18), C1);
-}
-function hashBytes(bytes, seed = 0) {
-  const len = bytes.length;
-  const blocks = len >>> 4;
-  let h1 = seed | 0, h2 = seed | 0, h3 = seed | 0, h4 = seed | 0;
-  const word = (i) => bytes[i] | bytes[i + 1] << 8 | bytes[i + 2] << 16 | bytes[i + 3] << 24 | 0;
-  for (let b = 0;b < blocks; b++) {
-    const o = b << 4;
-    h1 ^= mixK1(word(o));
-    h1 = rotl32(h1, 19);
-    h1 = h1 + h2 | 0;
-    h1 = Math.imul(h1, 5) + 1444728091 | 0;
-    h2 ^= mixK2(word(o + 4));
-    h2 = rotl32(h2, 17);
-    h2 = h2 + h3 | 0;
-    h2 = Math.imul(h2, 5) + 197830471 | 0;
-    h3 ^= mixK3(word(o + 8));
-    h3 = rotl32(h3, 15);
-    h3 = h3 + h4 | 0;
-    h3 = Math.imul(h3, 5) + 2530024501 | 0;
-    h4 ^= mixK4(word(o + 12));
-    h4 = rotl32(h4, 13);
-    h4 = h4 + h1 | 0;
-    h4 = Math.imul(h4, 5) + 850148119 | 0;
-  }
-  const t = blocks << 4;
-  const rem = len & 15;
-  let k1 = 0, k2 = 0, k3 = 0, k4 = 0;
-  for (let i = rem - 1;i >= 12; i--)
-    k4 ^= bytes[t + i] << (i - 12 << 3);
-  for (let i = Math.min(rem, 12) - 1;i >= 8; i--)
-    k3 ^= bytes[t + i] << (i - 8 << 3);
-  for (let i = Math.min(rem, 8) - 1;i >= 4; i--)
-    k2 ^= bytes[t + i] << (i - 4 << 3);
-  for (let i = Math.min(rem, 4) - 1;i >= 0; i--)
-    k1 ^= bytes[t + i] << (i << 3);
-  if (rem > 12)
-    h4 ^= mixK4(k4);
-  if (rem > 8)
-    h3 ^= mixK3(k3);
-  if (rem > 4)
-    h2 ^= mixK2(k2);
-  if (rem > 0)
-    h1 ^= mixK1(k1);
-  h1 ^= len;
-  h2 ^= len;
-  h3 ^= len;
-  h4 ^= len;
-  h1 = h1 + h2 | 0;
-  h1 = h1 + h3 | 0;
-  h1 = h1 + h4 | 0;
-  h2 = h2 + h1 | 0;
-  h3 = h3 + h1 | 0;
-  h4 = h4 + h1 | 0;
-  h1 = fmix32(h1);
-  h2 = fmix32(h2);
-  h3 = fmix32(h3);
-  h4 = fmix32(h4);
-  h1 = h1 + h2 | 0;
-  h1 = h1 + h3 | 0;
-  h1 = h1 + h4 | 0;
-  h2 = h2 + h1 | 0;
-  h3 = h3 + h1 | 0;
-  h4 = h4 + h1 | 0;
-  return [h1 >>> 0, h2 >>> 0, h3 >>> 0, h4 >>> 0];
-}
-function encodeUtf8(s) {
-  const pairAt = (i) => (s.charCodeAt(i) & 64512) === 55296 && i + 1 < s.length && (s.charCodeAt(i + 1) & 64512) === 56320;
-  let size = 0;
-  for (let i = 0;i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c < 128)
-      size += 1;
-    else if (c < 2048)
-      size += 2;
-    else if (pairAt(i)) {
-      size += 4;
-      i++;
-    } else
-      size += 3;
-  }
-  const out = new Uint8Array(size);
-  let o = 0;
-  for (let i = 0;i < s.length; i++) {
-    let c = s.charCodeAt(i);
-    if (c < 128) {
-      out[o++] = c;
-      continue;
-    }
-    if (c < 2048) {
-      out[o++] = 192 | c >> 6;
-      out[o++] = 128 | c & 63;
-      continue;
-    }
-    if (pairAt(i)) {
-      c = 65536 + (c - 55296 << 10) + (s.charCodeAt(++i) - 56320);
-      out[o++] = 240 | c >> 18;
-      out[o++] = 128 | c >> 12 & 63;
-      out[o++] = 128 | c >> 6 & 63;
-      out[o++] = 128 | c & 63;
-      continue;
-    }
-    if (c >= 55296 && c <= 57343)
-      c = 65533;
-    out[o++] = 224 | c >> 12;
-    out[o++] = 128 | c >> 6 & 63;
-    out[o++] = 128 | c & 63;
-  }
-  return out;
-}
-var TAG_STRING = 115;
-var TAG_NUMBER = 110;
-var TAG_BOOLEAN = 98;
-var TAG_NULL = 122;
-function encodeParts(parts) {
-  const payloads = new Array(parts.length);
-  const tags = new Array(parts.length);
-  let size = 0;
-  for (let i = 0;i < parts.length; i++) {
-    const p = parts[i];
-    let payload;
-    if (typeof p === "string") {
-      tags[i] = TAG_STRING;
-      payload = encodeUtf8(p);
-    } else if (typeof p === "number") {
-      if (!Number.isFinite(p))
-        throw new TypeError(`hash part ${i} must be a finite number, got ${p}`);
-      tags[i] = TAG_NUMBER;
-      payload = encodeUtf8(String(p));
-    } else if (typeof p === "boolean") {
-      tags[i] = TAG_BOOLEAN;
-      payload = new Uint8Array([p ? 1 : 0]);
-    } else if (p === null) {
-      tags[i] = TAG_NULL;
-      payload = new Uint8Array(0);
-    } else
-      throw new TypeError(`hash part ${i} must be a string, number, boolean or null`);
-    payloads[i] = payload;
-    size += 5 + payload.length;
-  }
-  const out = new Uint8Array(size);
-  let o = 0;
-  for (let i = 0;i < parts.length; i++) {
-    const n = payloads[i].length;
-    out[o++] = tags[i];
-    out[o++] = n & 255;
-    out[o++] = n >>> 8 & 255;
-    out[o++] = n >>> 16 & 255;
-    out[o++] = n >>> 24 & 255;
-    out.set(payloads[i], o);
-    o += n;
-  }
-  return out;
-}
-function hashWords(...parts) {
-  return hashBytes(encodeParts(parts));
-}
-function hashParts(...parts) {
-  let s = "";
-  for (const w of hashWords(...parts))
-    s += w.toString(16).padStart(8, "0");
-  return s;
-}
-var MAX_JSON_DEPTH = 128;
-function canonicalJson(v, depth) {
-  if (v === null)
-    return "null";
-  switch (typeof v) {
-    case "string":
-      return JSON.stringify(v);
-    case "boolean":
-      return v ? "true" : "false";
-    case "number":
-      if (!Number.isFinite(v))
-        throw new TypeError(`hashJson: non-finite number ${v}`);
-      return String(v);
-    case "object": {
-      if (depth >= MAX_JSON_DEPTH)
-        throw new TypeError("hashJson: value is cyclic or nested deeper than 128");
-      if (Array.isArray(v)) {
-        let s = "[";
-        for (let i = 0;i < v.length; i++) {
-          if (i)
-            s += ",";
-          const item = v[i];
-          s += item === undefined ? "null" : canonicalJson(item, depth + 1);
-        }
-        return s + "]";
-      }
-      const proto = Object.getPrototypeOf(v);
-      if (proto !== Object.prototype && proto !== null)
-        throw new TypeError("hashJson: only plain objects and arrays are supported");
-      const rec = v;
-      const keys = Object.keys(rec).filter((k) => rec[k] !== undefined).sort();
-      let s = "{";
-      for (let i = 0;i < keys.length; i++) {
-        if (i)
-          s += ",";
-        s += JSON.stringify(keys[i]) + ":" + canonicalJson(rec[keys[i]], depth + 1);
-      }
-      return s + "}";
-    }
-    default:
-      throw new TypeError(`hashJson: unsupported ${typeof v} value`);
-  }
-}
-function hashJson(value) {
-  return hashParts("json", canonicalJson(value, 0));
-}
-
-// src/shared/lore.ts
-var LORE_AUDIENCE = Object.keys(STEP_OUTPUTS);
-var PROSE_STEPS = ["brief", "outline", "choices", "extract"];
-function loreIsSecret(entry) {
-  return entry.secret !== undefined && entry.secret !== false;
-}
-function lorePhrases(content) {
-  const out = [];
-  for (const part of content.split(/[.!?\u2026;:\n]+|\s[\u2014\u2013-]\s|\u2014/)) {
-    const phrase = part.replace(/^[\s"'\u201C\u201D\u2018\u2019()[\]*_]+|[\s"'\u201C\u201D\u2018\u2019()[\]*_,]+$/g, "").replace(/\s+/g, " ");
-    if (phrase.length >= 16 && phrase.split(" ").length >= 4 && !out.includes(phrase))
-      out.push(phrase);
-  }
-  return out;
-}
-function loreTerm(text) {
-  return text.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 // src/engine/pack-kit.ts
@@ -3229,6 +3007,160 @@ function evalArgs(args, env, bindings) {
   return out;
 }
 
+// src/engine/seen.ts
+var PACK = "space";
+var SLICE = "seen";
+var PARENT_DEPTH = 32;
+var PARTS = ["places", "people", "cells"];
+function entries(state, key) {
+  const seen = state.packs[PACK]?.[SLICE];
+  const list = isRecord(seen) ? seen[key] : undefined;
+  return isRecord(list) ? list : {};
+}
+function placeVisit(state, place) {
+  const v = own(entries(state, "places"), place);
+  return isRecord(v) && typeof v.first === "number" && typeof v.last === "number" ? { first: v.first, last: v.last } : null;
+}
+function lastSighting(state, id) {
+  const v = own(entries(state, "people"), id);
+  return isRecord(v) && typeof v.place === "string" && typeof v.at === "number" ? { place: v.place, at: v.at } : null;
+}
+function cellsSeen(state, scope, width) {
+  const v = own(entries(state, "cells"), scope);
+  return isRecord(v) && v.width === width && typeof v.bits === "string" ? v.bits : null;
+}
+function writable(state, key) {
+  const seen = sliceRecord(state, PACK, SLICE);
+  const v = seen[key];
+  if (isRecord(v))
+    return v;
+  const fresh = {};
+  seen[key] = fresh;
+  return fresh;
+}
+function observeCells(state, world) {
+  const settings = mapSettingsOf(world);
+  const pov = own(state.entities, world.pov);
+  if (!settings.grid.movement || !pov)
+    return;
+  const stand = standingGrid(world, placeOfEntity(state, world.pov));
+  const x = pov.fields.x;
+  const y = pov.fields.y;
+  if (!stand || typeof x !== "number" || typeof y !== "number" || cellIndex(stand.grid, { x, y }) === null)
+    return;
+  const before = cellsSeen(state, stand.scope, stand.grid.width);
+  const sight = sightCells(stand.grid, { x, y }, settings.grid.sightRadius);
+  if (before !== null && sight.every((cell) => hasCell(before, cell)))
+    return;
+  writable(state, "cells")[stand.scope] = { width: stand.grid.width, bits: addCells(before ?? "", sight) };
+}
+function visit(state, world, place, at) {
+  const places = writable(state, "places");
+  let cur = place;
+  for (let depth = 0;cur !== undefined && depth < PARENT_DEPTH && own(world.places, cur); depth++) {
+    places[cur] = { first: placeVisit(state, cur)?.first ?? at, last: at };
+    cur = own(world.places, cur)?.parent;
+  }
+}
+function company(state, ctx, sees) {
+  const pov = ctx.world.pov;
+  const here = placeOfEntity(state, pov);
+  if (here === null)
+    return { here, people: [] };
+  const people = [];
+  for (const [id, e] of Object.entries(state.entities)) {
+    if (id === pov || placeOfEntity(state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
+      continue;
+    if (sees(ctx.registry, ctx.world, state, pov, id))
+      people.push(id);
+  }
+  return { here, people };
+}
+function movesSomeone(e) {
+  if (e.type === "set")
+    return e.field === "place";
+  if (e.type === "link" || e.type === "unlink")
+    return e.rel === "in";
+  return e.type === "spawn";
+}
+function observing(def, sees) {
+  if (def.type !== "set" && def.type !== "link" && def.type !== "unlink" && def.type !== "spawn")
+    return def;
+  return {
+    ...def,
+    apply: (e, state, ctx) => {
+      if (!movesSomeone(e))
+        return def.apply(e, state, ctx);
+      const before = company(state, ctx, sees);
+      def.apply(e, state, ctx);
+      const after = company(state, ctx, sees);
+      const at = state.clock;
+      if (before.here !== after.here) {
+        if (before.here !== null)
+          visit(state, ctx.world, before.here, at);
+        if (after.here !== null)
+          visit(state, ctx.world, after.here, at);
+      }
+      const parted = before.here === null ? [] : before.people.filter((id) => !after.people.includes(id));
+      const met = after.here === null ? [] : after.people.filter((id) => before.here !== after.here || !before.people.includes(id));
+      if (parted.length === 0 && met.length === 0)
+        return;
+      const people = writable(state, "people");
+      for (const id of parted)
+        people[id] = { place: before.here, at };
+      for (const id of met)
+        people[id] = { place: after.here, at };
+    }
+  };
+}
+function seedObservations(world, state) {
+  const here = placeOfEntity(state, world.pov);
+  if (here !== null)
+    visit(state, world, here, state.clock);
+  observeCells(state, world);
+}
+function unobserved(state) {
+  const copy = structuredClone(state);
+  const slice = copy.packs[PACK];
+  if (slice) {
+    delete slice[SLICE];
+    if (Object.keys(slice).length === 0)
+      delete copy.packs[PACK];
+  }
+  return copy;
+}
+function lostObservations(full, coarse) {
+  const out = {};
+  for (const key of PARTS) {
+    const want = entries(full, key);
+    const got = entries(coarse, key);
+    const diff = {};
+    for (const [id, v] of Object.entries(want))
+      if (JSON.stringify(v) !== JSON.stringify(own(got, id)))
+        diff[id] = v;
+    for (const id of Object.keys(got))
+      if (!own(want, id))
+        diff[id] = null;
+    if (Object.keys(diff).length > 0)
+      out[key] = diff;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function restoreObservations(state, data) {
+  for (const key of PARTS) {
+    const diff = data[key];
+    if (!isRecord(diff))
+      continue;
+    const list = writable(state, key);
+    for (const [id, v] of Object.entries(diff)) {
+      if (v === null)
+        delete list[id];
+      else if (isRecord(v))
+        list[id] = structuredClone(v);
+    }
+  }
+}
+
 // src/engine/selector.ts
 var MEMBER_OF = "member_of";
 var GROUP_KIND = "group";
@@ -3398,158 +3330,260 @@ function classOf(value) {
   return out;
 }
 
-// src/engine/seen.ts
-var PACK = "space";
-var SLICE = "seen";
-var PARENT_DEPTH = 32;
-var PARTS = ["places", "people", "cells"];
-function entries(state, key) {
-  const seen = state.packs[PACK]?.[SLICE];
-  const list = isRecord(seen) ? seen[key] : undefined;
-  return isRecord(list) ? list : {};
+// src/shared/hash.ts
+var C1 = 597399067;
+var C2 = 2869860233;
+var C3 = 951274213;
+var C4 = 2716044179;
+function rotl32(x, r) {
+  return x << r | x >>> 32 - r;
 }
-function placeVisit(state, place) {
-  const v = own(entries(state, "places"), place);
-  return isRecord(v) && typeof v.first === "number" && typeof v.last === "number" ? { first: v.first, last: v.last } : null;
+function fmix32(h) {
+  h ^= h >>> 16;
+  h = Math.imul(h, 2246822507);
+  h ^= h >>> 13;
+  h = Math.imul(h, 3266489909);
+  h ^= h >>> 16;
+  return h;
 }
-function lastSighting(state, id) {
-  const v = own(entries(state, "people"), id);
-  return isRecord(v) && typeof v.place === "string" && typeof v.at === "number" ? { place: v.place, at: v.at } : null;
+function mixK1(k) {
+  return Math.imul(rotl32(Math.imul(k, C1), 15), C2);
 }
-function cellsSeen(state, scope, width) {
-  const v = own(entries(state, "cells"), scope);
-  return isRecord(v) && v.width === width && typeof v.bits === "string" ? v.bits : null;
+function mixK2(k) {
+  return Math.imul(rotl32(Math.imul(k, C2), 16), C3);
 }
-function writable(state, key) {
-  const seen = sliceRecord(state, PACK, SLICE);
-  const v = seen[key];
-  if (isRecord(v))
-    return v;
-  const fresh = {};
-  seen[key] = fresh;
-  return fresh;
+function mixK3(k) {
+  return Math.imul(rotl32(Math.imul(k, C3), 17), C4);
 }
-function observeCells(state, world) {
-  const settings = mapSettingsOf(world);
-  const pov = own(state.entities, world.pov);
-  if (!settings.grid.movement || !pov)
-    return;
-  const stand = standingGrid(world, placeOfEntity(state, world.pov));
-  const x = pov.fields.x;
-  const y = pov.fields.y;
-  if (!stand || typeof x !== "number" || typeof y !== "number" || cellIndex(stand.grid, { x, y }) === null)
-    return;
-  const before = cellsSeen(state, stand.scope, stand.grid.width);
-  const sight = sightCells(stand.grid, { x, y }, settings.grid.sightRadius);
-  if (before !== null && sight.every((cell) => hasCell(before, cell)))
-    return;
-  writable(state, "cells")[stand.scope] = { width: stand.grid.width, bits: addCells(before ?? "", sight) };
+function mixK4(k) {
+  return Math.imul(rotl32(Math.imul(k, C4), 18), C1);
 }
-function visit(state, world, place, at) {
-  const places = writable(state, "places");
-  let cur = place;
-  for (let depth = 0;cur !== undefined && depth < PARENT_DEPTH && own(world.places, cur); depth++) {
-    places[cur] = { first: placeVisit(state, cur)?.first ?? at, last: at };
-    cur = own(world.places, cur)?.parent;
+function hashBytes(bytes, seed = 0) {
+  const len = bytes.length;
+  const blocks = len >>> 4;
+  let h1 = seed | 0, h2 = seed | 0, h3 = seed | 0, h4 = seed | 0;
+  const word = (i) => bytes[i] | bytes[i + 1] << 8 | bytes[i + 2] << 16 | bytes[i + 3] << 24 | 0;
+  for (let b = 0;b < blocks; b++) {
+    const o = b << 4;
+    h1 ^= mixK1(word(o));
+    h1 = rotl32(h1, 19);
+    h1 = h1 + h2 | 0;
+    h1 = Math.imul(h1, 5) + 1444728091 | 0;
+    h2 ^= mixK2(word(o + 4));
+    h2 = rotl32(h2, 17);
+    h2 = h2 + h3 | 0;
+    h2 = Math.imul(h2, 5) + 197830471 | 0;
+    h3 ^= mixK3(word(o + 8));
+    h3 = rotl32(h3, 15);
+    h3 = h3 + h4 | 0;
+    h3 = Math.imul(h3, 5) + 2530024501 | 0;
+    h4 ^= mixK4(word(o + 12));
+    h4 = rotl32(h4, 13);
+    h4 = h4 + h1 | 0;
+    h4 = Math.imul(h4, 5) + 850148119 | 0;
   }
+  const t = blocks << 4;
+  const rem = len & 15;
+  let k1 = 0, k2 = 0, k3 = 0, k4 = 0;
+  for (let i = rem - 1;i >= 12; i--)
+    k4 ^= bytes[t + i] << (i - 12 << 3);
+  for (let i = Math.min(rem, 12) - 1;i >= 8; i--)
+    k3 ^= bytes[t + i] << (i - 8 << 3);
+  for (let i = Math.min(rem, 8) - 1;i >= 4; i--)
+    k2 ^= bytes[t + i] << (i - 4 << 3);
+  for (let i = Math.min(rem, 4) - 1;i >= 0; i--)
+    k1 ^= bytes[t + i] << (i << 3);
+  if (rem > 12)
+    h4 ^= mixK4(k4);
+  if (rem > 8)
+    h3 ^= mixK3(k3);
+  if (rem > 4)
+    h2 ^= mixK2(k2);
+  if (rem > 0)
+    h1 ^= mixK1(k1);
+  h1 ^= len;
+  h2 ^= len;
+  h3 ^= len;
+  h4 ^= len;
+  h1 = h1 + h2 | 0;
+  h1 = h1 + h3 | 0;
+  h1 = h1 + h4 | 0;
+  h2 = h2 + h1 | 0;
+  h3 = h3 + h1 | 0;
+  h4 = h4 + h1 | 0;
+  h1 = fmix32(h1);
+  h2 = fmix32(h2);
+  h3 = fmix32(h3);
+  h4 = fmix32(h4);
+  h1 = h1 + h2 | 0;
+  h1 = h1 + h3 | 0;
+  h1 = h1 + h4 | 0;
+  h2 = h2 + h1 | 0;
+  h3 = h3 + h1 | 0;
+  h4 = h4 + h1 | 0;
+  return [h1 >>> 0, h2 >>> 0, h3 >>> 0, h4 >>> 0];
 }
-function company(state, ctx, sees) {
-  const pov = ctx.world.pov;
-  const here = placeOfEntity(state, pov);
-  if (here === null)
-    return { here, people: [] };
-  const people = [];
-  for (const [id, e] of Object.entries(state.entities)) {
-    if (id === pov || placeOfEntity(state, id) !== here || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
+function encodeUtf8(s) {
+  const pairAt = (i) => (s.charCodeAt(i) & 64512) === 55296 && i + 1 < s.length && (s.charCodeAt(i + 1) & 64512) === 56320;
+  let size = 0;
+  for (let i = 0;i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 128)
+      size += 1;
+    else if (c < 2048)
+      size += 2;
+    else if (pairAt(i)) {
+      size += 4;
+      i++;
+    } else
+      size += 3;
+  }
+  const out = new Uint8Array(size);
+  let o = 0;
+  for (let i = 0;i < s.length; i++) {
+    let c = s.charCodeAt(i);
+    if (c < 128) {
+      out[o++] = c;
       continue;
-    if (sees(ctx.registry, ctx.world, state, pov, id))
-      people.push(id);
+    }
+    if (c < 2048) {
+      out[o++] = 192 | c >> 6;
+      out[o++] = 128 | c & 63;
+      continue;
+    }
+    if (pairAt(i)) {
+      c = 65536 + (c - 55296 << 10) + (s.charCodeAt(++i) - 56320);
+      out[o++] = 240 | c >> 18;
+      out[o++] = 128 | c >> 12 & 63;
+      out[o++] = 128 | c >> 6 & 63;
+      out[o++] = 128 | c & 63;
+      continue;
+    }
+    if (c >= 55296 && c <= 57343)
+      c = 65533;
+    out[o++] = 224 | c >> 12;
+    out[o++] = 128 | c >> 6 & 63;
+    out[o++] = 128 | c & 63;
   }
-  return { here, people };
+  return out;
 }
-function movesSomeone(e) {
-  if (e.type === "set")
-    return e.field === "place";
-  if (e.type === "link" || e.type === "unlink")
-    return e.rel === "in";
-  return e.type === "spawn";
+var TAG_STRING = 115;
+var TAG_NUMBER = 110;
+var TAG_BOOLEAN = 98;
+var TAG_NULL = 122;
+function encodeParts(parts) {
+  const payloads = new Array(parts.length);
+  const tags = new Array(parts.length);
+  let size = 0;
+  for (let i = 0;i < parts.length; i++) {
+    const p = parts[i];
+    let payload;
+    if (typeof p === "string") {
+      tags[i] = TAG_STRING;
+      payload = encodeUtf8(p);
+    } else if (typeof p === "number") {
+      if (!Number.isFinite(p))
+        throw new TypeError(`hash part ${i} must be a finite number, got ${p}`);
+      tags[i] = TAG_NUMBER;
+      payload = encodeUtf8(String(p));
+    } else if (typeof p === "boolean") {
+      tags[i] = TAG_BOOLEAN;
+      payload = new Uint8Array([p ? 1 : 0]);
+    } else if (p === null) {
+      tags[i] = TAG_NULL;
+      payload = new Uint8Array(0);
+    } else
+      throw new TypeError(`hash part ${i} must be a string, number, boolean or null`);
+    payloads[i] = payload;
+    size += 5 + payload.length;
+  }
+  const out = new Uint8Array(size);
+  let o = 0;
+  for (let i = 0;i < parts.length; i++) {
+    const n = payloads[i].length;
+    out[o++] = tags[i];
+    out[o++] = n & 255;
+    out[o++] = n >>> 8 & 255;
+    out[o++] = n >>> 16 & 255;
+    out[o++] = n >>> 24 & 255;
+    out.set(payloads[i], o);
+    o += n;
+  }
+  return out;
 }
-function observing(def, sees) {
-  if (def.type !== "set" && def.type !== "link" && def.type !== "unlink" && def.type !== "spawn")
-    return def;
-  return {
-    ...def,
-    apply: (e, state, ctx) => {
-      if (!movesSomeone(e))
-        return def.apply(e, state, ctx);
-      const before = company(state, ctx, sees);
-      def.apply(e, state, ctx);
-      const after = company(state, ctx, sees);
-      const at = state.clock;
-      if (before.here !== after.here) {
-        if (before.here !== null)
-          visit(state, ctx.world, before.here, at);
-        if (after.here !== null)
-          visit(state, ctx.world, after.here, at);
+function hashWords(...parts) {
+  return hashBytes(encodeParts(parts));
+}
+function hashParts(...parts) {
+  let s = "";
+  for (const w of hashWords(...parts))
+    s += w.toString(16).padStart(8, "0");
+  return s;
+}
+var MAX_JSON_DEPTH = 128;
+function canonicalJson(v, depth) {
+  if (v === null)
+    return "null";
+  switch (typeof v) {
+    case "string":
+      return JSON.stringify(v);
+    case "boolean":
+      return v ? "true" : "false";
+    case "number":
+      if (!Number.isFinite(v))
+        throw new TypeError(`hashJson: non-finite number ${v}`);
+      return String(v);
+    case "object": {
+      if (depth >= MAX_JSON_DEPTH)
+        throw new TypeError("hashJson: value is cyclic or nested deeper than 128");
+      if (Array.isArray(v)) {
+        let s = "[";
+        for (let i = 0;i < v.length; i++) {
+          if (i)
+            s += ",";
+          const item = v[i];
+          s += item === undefined ? "null" : canonicalJson(item, depth + 1);
+        }
+        return s + "]";
       }
-      const parted = before.here === null ? [] : before.people.filter((id) => !after.people.includes(id));
-      const met = after.here === null ? [] : after.people.filter((id) => before.here !== after.here || !before.people.includes(id));
-      if (parted.length === 0 && met.length === 0)
-        return;
-      const people = writable(state, "people");
-      for (const id of parted)
-        people[id] = { place: before.here, at };
-      for (const id of met)
-        people[id] = { place: after.here, at };
+      const proto = Object.getPrototypeOf(v);
+      if (proto !== Object.prototype && proto !== null)
+        throw new TypeError("hashJson: only plain objects and arrays are supported");
+      const rec = v;
+      const keys = Object.keys(rec).filter((k) => rec[k] !== undefined).sort();
+      let s = "{";
+      for (let i = 0;i < keys.length; i++) {
+        if (i)
+          s += ",";
+        s += JSON.stringify(keys[i]) + ":" + canonicalJson(rec[keys[i]], depth + 1);
+      }
+      return s + "}";
     }
-  };
-}
-function seedObservations(world, state) {
-  const here = placeOfEntity(state, world.pov);
-  if (here !== null)
-    visit(state, world, here, state.clock);
-  observeCells(state, world);
-}
-function unobserved(state) {
-  const copy = structuredClone(state);
-  const slice = copy.packs[PACK];
-  if (slice) {
-    delete slice[SLICE];
-    if (Object.keys(slice).length === 0)
-      delete copy.packs[PACK];
+    default:
+      throw new TypeError(`hashJson: unsupported ${typeof v} value`);
   }
-  return copy;
 }
-function lostObservations(full, coarse) {
-  const out = {};
-  for (const key of PARTS) {
-    const want = entries(full, key);
-    const got = entries(coarse, key);
-    const diff = {};
-    for (const [id, v] of Object.entries(want))
-      if (JSON.stringify(v) !== JSON.stringify(own(got, id)))
-        diff[id] = v;
-    for (const id of Object.keys(got))
-      if (!own(want, id))
-        diff[id] = null;
-    if (Object.keys(diff).length > 0)
-      out[key] = diff;
-  }
-  return Object.keys(out).length > 0 ? out : null;
+function hashJson(value) {
+  return hashParts("json", canonicalJson(value, 0));
 }
-function restoreObservations(state, data) {
-  for (const key of PARTS) {
-    const diff = data[key];
-    if (!isRecord(diff))
-      continue;
-    const list = writable(state, key);
-    for (const [id, v] of Object.entries(diff)) {
-      if (v === null)
-        delete list[id];
-      else if (isRecord(v))
-        list[id] = structuredClone(v);
-    }
+
+// src/shared/lore.ts
+var LORE_AUDIENCE = Object.keys(STEP_OUTPUTS);
+var PROSE_STEPS = ["brief", "outline", "choices", "extract"];
+function loreIsSecret(entry) {
+  return entry.secret !== undefined && entry.secret !== false;
+}
+function lorePhrases(content) {
+  const out = [];
+  for (const part of content.split(/[.!?\u2026;:\n]+|\s[\u2014\u2013-]\s|\u2014/)) {
+    const phrase = part.replace(/^[\s"'\u201C\u201D\u2018\u2019()[\]*_]+|[\s"'\u201C\u201D\u2018\u2019()[\]*_,]+$/g, "").replace(/\s+/g, " ");
+    if (phrase.length >= 16 && phrase.split(" ").length >= 4 && !out.includes(phrase))
+      out.push(phrase);
   }
+  return out;
+}
+function loreTerm(text) {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 // src/engine/visibility.ts
@@ -3782,8 +3816,15 @@ function secretLorePhrases(reg, world, state) {
       out.push(...lorePhrases(l.content));
   return out;
 }
+function secretLoreTitles(reg, world, state) {
+  const open = loreGateReader(reg, world, state);
+  return Object.values(world.lore).flatMap((l) => loreIsSecret(l) && typeof l.title === "string" && l.title.trim() !== "" && !open(l) ? [l.title] : []);
+}
 function unrevealedSecrets(reg, world, state) {
   return [...unrevealedTruths(world, state), ...secretLorePhrases(reg, world, state)];
+}
+function unseenPlaceNames(reg, world, state, pov) {
+  return Object.entries(world.places).flatMap(([id, p]) => typeof p.name === "string" && p.name.trim() !== "" && !canSeePlace(reg, world, state, pov, id) ? [p.name] : []);
 }
 function findLeaks(value, secrets) {
   const needles = secrets.map((s) => s.toLowerCase()).filter((s) => s.length > 0);
@@ -3802,9 +3843,214 @@ function findLeaks(value, secrets) {
   visit(value);
   return out;
 }
+function nameWords(text) {
+  return text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+}
+var FUNCTION_WORDS = { a: true, an: true, the: true, of: true, and: true, in: true, on: true, at: true, to: true, by: true, for: true, or: true, with: true, from: true };
+var WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
+function saysInOrder(said, words) {
+  const parts = words.map((w) => /^[a-z0-9]+$/.test(w) ? `(?<!${WORD_CHAR})${w}(?!${WORD_CHAR})` : w);
+  return new RegExp(parts.join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
+}
+function namesAny(text, people, labels = [], heard = "") {
+  const words = nameWords(text);
+  const said = words.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
+  const heardWords = nameWords(heard);
+  const known = heardWords.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
+  for (const name of people) {
+    for (const w of nameWords(name)) {
+      if (hasOwn(FUNCTION_WORDS, w) || w.length < 2 && /^[a-z0-9]+$/.test(w))
+        continue;
+      if (saysInOrder(said, [w]) && !saysInOrder(known, [w]))
+        return true;
+    }
+  }
+  for (const label of labels) {
+    const all = nameWords(label);
+    const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w));
+    const whole = named.length === 0;
+    const parts = whole ? all : named;
+    if (parts.length > 0 && saysInOrder(whole ? words.join(" ") : said, parts) && !saysInOrder(whole ? heardWords.join(" ") : known, parts))
+      return true;
+  }
+  return false;
+}
+
+// src/engine/life.ts
+var PACK2 = "engine";
+var SLICE2 = "life";
+function lifeOf(state, id) {
+  return own(state.entities, id)?.life ?? ALIVE;
+}
+function acts(world, state, id) {
+  return lifeStateOf(world, lifeOf(state, id)).acts;
+}
+function entryOf(state, subject) {
+  const all = state.packs[PACK2]?.[SLICE2];
+  const entry = isRecord(all) ? own(all, subject) : undefined;
+  return isRecord(entry) && typeof entry.base === "string" && isRecord(entry.by) ? { base: entry.base, by: entry.by } : null;
+}
+function lifeKnownTo(state, subject, knower) {
+  const entry = knower === subject ? null : entryOf(state, subject);
+  if (!entry)
+    return lifeOf(state, subject);
+  const learned = own(entry.by, knower);
+  return typeof learned === "string" ? learned : entry.base;
+}
+function povLife(world, state, subject) {
+  const id = lifeKnownTo(state, subject, world.pov);
+  return id === ALIVE ? null : { id, ...lifeStateOf(world, id) };
+}
+function isPerson(reg, world, state, id) {
+  const e = own(state.entities, id);
+  return !!e && kindIs(reg, world, e.kind, "person") && !isGone(state, id);
+}
+function learners(state, subject, base) {
+  const slice = state.packs[PACK2] ?? {};
+  state.packs[PACK2] = slice;
+  const all = isRecord(slice[SLICE2]) ? slice[SLICE2] : {};
+  slice[SLICE2] = all;
+  const found = own(all, subject);
+  if (isRecord(found) && typeof found.base === "string" && isRecord(found.by))
+    return found.by;
+  const by = {};
+  all[subject] = { base, by };
+  return by;
+}
+function peopleAt(reg, world, state, place) {
+  return Object.keys(state.entities).sort().filter((id) => placeOfEntity(state, id) === place && isPerson(reg, world, state, id));
+}
+function applyLife(state, ctx, subject, to) {
+  const e = own(state.entities, subject);
+  if (!e)
+    return;
+  const by = learners(state, subject, lifeOf(state, subject));
+  if (to === ALIVE)
+    delete e.life;
+  else
+    e.life = to;
+  const place = placeOfEntity(state, subject);
+  if (place !== null) {
+    for (const id of peopleAt(ctx.registry, ctx.world, state, place))
+      if (id !== subject)
+        by[id] = to;
+  }
+}
+function tellLife(state, subject, who) {
+  const entry = entryOf(state, subject);
+  if (!entry)
+    return;
+  const truth = lifeOf(state, subject);
+  const by = learners(state, subject, entry.base);
+  for (const id of who)
+    if (id !== subject && own(state.entities, id))
+      by[id] = truth;
+}
+function learnIn(reg, world, state, place) {
+  const all = state.packs[PACK2]?.[SLICE2];
+  if (!isRecord(all))
+    return;
+  const subjects = Object.keys(all).filter((s) => placeOfEntity(state, s) === place);
+  if (subjects.length === 0)
+    return;
+  const people = peopleAt(reg, world, state, place);
+  for (const s of subjects) {
+    const truth = lifeOf(state, s);
+    const stale = people.filter((id) => id !== s && lifeKnownTo(state, s, id) !== truth);
+    if (stale.length === 0)
+      continue;
+    const by = learners(state, s, truth);
+    for (const id of stale)
+      by[id] = truth;
+  }
+}
+function movedBy(e) {
+  if (e.type === "set")
+    return e.entity;
+  if (e.type === "link" || e.type === "unlink")
+    return e.from;
+  return e.type === "spawn" ? e.entity.id : null;
+}
+function knowing(def) {
+  if (def.type !== "set" && def.type !== "link" && def.type !== "unlink" && def.type !== "spawn")
+    return def;
+  return {
+    ...def,
+    apply: (e, state, ctx) => {
+      def.apply(e, state, ctx);
+      const moved = movesSomeone(e) ? movedBy(e) : null;
+      const place = moved === null ? null : placeOfEntity(state, moved);
+      if (place !== null)
+        learnIn(ctx.registry, ctx.world, state, place);
+    }
+  };
+}
+function listeners(ctx, raw) {
+  if (raw === undefined || raw === null || raw === "")
+    return [];
+  if (isRecord(raw)) {
+    const selector = knownBySelector(raw);
+    return selector ? selectEntities(ctx.registry, ctx.world, ctx.state, selector) : { code: "bad_args", reason: "tell names people by id or a selector" };
+  }
+  const ids = (Array.isArray(raw) ? raw : [raw]).map((v) => typeof v === "string" ? v : "");
+  const missing = ids.find((id) => !own(ctx.state.entities, id));
+  return missing === undefined ? ids : { code: "missing_entity", reason: `there's no ${labelOf(ctx, missing)} to tell` };
+}
+function lifeEffect(args, ctx) {
+  const subject = typeof args.entity === "string" ? args.entity : "";
+  if (!own(ctx.state.entities, subject))
+    return { code: "missing_entity", reason: `there's no ${labelOf(ctx, subject)}` };
+  if (isGone(ctx.state, subject))
+    return { code: "gone", reason: `${labelOf(ctx, subject)} has been removed` };
+  const given = args.to;
+  if (given !== undefined && given !== null && typeof given !== "string")
+    return { code: "bad_args", reason: "a life state is named by its id" };
+  const to = typeof given === "string" && given !== "" ? given : null;
+  if (to !== null && !isLifeState(ctx.world, to))
+    return { code: "bad_life", reason: `there's no life state ${to}` };
+  const who = listeners(ctx, args.tell);
+  if (!Array.isArray(who))
+    return who;
+  if (to === null && who.length === 0)
+    return { code: "bad_args", reason: "a life change needs a state to set or someone to tell" };
+  const now = lifeOf(ctx.state, subject);
+  const out = to !== null && to !== now ? [{ type: ENGINE_EVENTS.life, data: { entity: subject, to } }] : [];
+  const after = to ?? now;
+  const told = who.filter((id) => id !== subject && (out.length > 0 || lifeKnownTo(ctx.state, subject, id) !== after));
+  const pov = told.filter((id) => id === ctx.world.pov);
+  const others = told.filter((id) => id !== ctx.world.pov);
+  for (const group of [pov, others])
+    if (group.length > 0)
+      out.push({ type: ENGINE_EVENTS.told, data: { entity: subject, who: group } });
+  return out;
+}
+function stateNamed(world, said) {
+  const s = typeof said === "string" ? said.trim().toLowerCase() : "";
+  return lifeStatesOf(world).find(([id, def]) => id === s || def.label.toLowerCase() === s)?.[0] ?? null;
+}
+var lifeChannel = {
+  type: "life",
+  boundField: "life",
+  validate(p, ctx) {
+    const subject = typeof p.entity === "string" ? p.entity : "";
+    const e = own(ctx.state.entities, subject);
+    if (!e || isGone(ctx.state, subject))
+      return { code: "missing_entity", reason: "there's no one by that name" };
+    if (!kindIs(ctx.registry, ctx.world, e.kind, "person"))
+      return { code: "not_a_character", reason: "only people live and die" };
+    const to = stateNamed(ctx.world, p.state);
+    if (to === null)
+      return { code: "bad_life", reason: `there's no life state ${typeof p.state === "string" ? p.state : ""}`.trim() };
+    if (lifeKnownTo(ctx.state, subject, ctx.world.pov) === to)
+      return { code: "already", reason: `${e.name} already ${lifeStateOf(ctx.world, to).reads}` };
+    return null;
+  },
+  toEffects(p, ctx) {
+    return [{ type: "life", args: { entity: typeof p.entity === "string" ? p.entity : "", to: stateNamed(ctx.world, p.state) ?? ALIVE, tell: [ctx.world.pov] } }];
+  }
+};
 
 // src/engine/narration-channels.ts
-var SPAWN_CAP = 24;
 var SPAWNED_BY_NARRATION = "narration";
 var NAME_MAX = 60;
 var ROLE_MAX = 80;
@@ -3908,8 +4154,9 @@ var spawnChannel = {
     const lower = name.toLowerCase();
     if (hasOwn3(ctx.state.entities, spawnId(name)) || Object.values(ctx.state.entities).some((e) => e.name.trim().toLowerCase() === lower))
       return reject("duplicate", `${name} already exists`);
-    if (spawnedCount(ctx) >= SPAWN_CAP)
-      return reject("spawn_cap", `replies have introduced ${SPAWN_CAP} characters already`);
+    const cap = spawnCapOf(ctx.world);
+    if (spawnedCount(ctx) >= cap)
+      return reject("spawn_cap", cap === 0 ? "this world lets no reply introduce characters" : `replies have introduced ${cap} characters already`);
     return null;
   },
   toEffects(p, ctx) {
@@ -3941,7 +4188,9 @@ var ENGINE_EVENTS = {
   entity: "engine.entity",
   classes: "engine.class",
   observed: "engine.observed",
-  adjudged: "engine.adjudged"
+  adjudged: "engine.adjudged",
+  life: "engine.life",
+  told: "engine.told"
 };
 function readEngineSlice(state) {
   const s = state.packs[ENGINE_PACK] ?? {};
@@ -4232,6 +4481,47 @@ var events = [
       sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds"), ...typeof round === "string" ? { round } : {} };
     },
     describe: (e) => `${str2(e, "actor")}: ${str2(e, "action").replace(/_/g, " ")}, ${str2(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str2(e, "why")})`}`
+  },
+  {
+    type: ENGINE_EVENTS.life,
+    validate: (e, ctx) => {
+      const ent = own(ctx.state.entities, str2(e, "entity"));
+      if (!ent)
+        return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
+      if (!isLifeState(ctx.world, str2(e, "to")))
+        return { code: "bad_life", reason: `there's no life state ${str2(e, "to")}` };
+      return lifeOf(ctx.state, str2(e, "entity")) === str2(e, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str2(e, "to")).label.toLowerCase()}` } : null;
+    },
+    apply: (e, state, ctx) => applyLife(state, ctx, str2(e, "entity"), str2(e, "to")),
+    touches: (e) => [{ entity: str2(e, "entity"), aspect: "life" }],
+    describe: (e, ctx, viewer) => {
+      const id = str2(e, "entity");
+      const def = lifeStateOf(ctx.world, str2(e, "to"));
+      const name = own(ctx.state.entities, id)?.name ?? id;
+      if (viewer === undefined)
+        return `${name}: ${def.label}`;
+      if (lifeKnownTo(ctx.state, id, viewer) !== str2(e, "to"))
+        return "";
+      return id === viewer ? `You: ${def.label}` : `${name} ${def.reads}`;
+    }
+  },
+  {
+    type: ENGINE_EVENTS.told,
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, str2(e, "entity")))
+        return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
+      const who = e.data.who;
+      return Array.isArray(who) && who.length > 0 && who.every((id) => typeof id === "string" && own(ctx.state.entities, id)) ? null : { code: "bad_event", reason: "told needs the people told" };
+    },
+    apply: (e, state) => tellLife(state, str2(e, "entity"), Array.isArray(e.data.who) ? e.data.who.filter((id) => typeof id === "string") : []),
+    describe: (e, ctx, viewer) => {
+      const id = str2(e, "entity");
+      const name = own(ctx.state.entities, id)?.name ?? id;
+      const who = Array.isArray(e.data.who) ? e.data.who.filter((x) => typeof x === "string") : [];
+      if (viewer === undefined)
+        return `${who.map((w) => own(ctx.state.entities, w)?.name ?? w).join(", ")} learn: ${name} ${lifeStateOf(ctx.world, lifeOf(ctx.state, id)).reads}`;
+      return who.includes(viewer) ? `${name} ${lifeStateOf(ctx.world, lifeKnownTo(ctx.state, id, viewer)).reads}` : "";
+    }
   }
 ];
 function entityArg(ctx, v) {
@@ -4250,6 +4540,21 @@ var enginePack = {
       r.event(def);
     r.proposal(knowsChannel);
     r.proposal(spawnChannel);
+    r.proposal(lifeChannel);
+    r.effect({
+      type: "life",
+      args: ["entity", "to?", "tell?"],
+      resolve: (a, ctx) => {
+        const out = lifeEffect(a, ctx);
+        const subject = typeof a.entity === "string" ? a.entity : "";
+        const wakes = Array.isArray(out) && typeof a.to === "string" && out.some((e) => e.type === ENGINE_EVENTS.life) && own(ctx.state.entities, subject)?.agent === true && !acts(ctx.world, ctx.state, subject) && lifeStateOf(ctx.world, a.to).acts;
+        return wakes && Array.isArray(out) ? [...out, { type: ENGINE_EVENTS.caught, data: { agent: subject, slot: slotIndexAt(calendarOf(ctx.world), ctx.state.clock) } }] : out;
+      }
+    });
+    r.formula("life_of", (ctx, entity) => {
+      const hit = entityArg(ctx, entity);
+      return hit ? lifeOf(ctx.state, hit[0]) : "";
+    });
     r.formula("kind_is", (ctx, entity, kind) => {
       const hit = entityArg(ctx, entity);
       return hit !== null && kindIs(ctx.registry, ctx.world, hit[1].kind, String(kind ?? ""));
@@ -4275,13 +4580,13 @@ var enginePack = {
 };
 
 // src/engine/touched.ts
-var PACK2 = "engine";
-var SLICE2 = "touched";
+var PACK3 = "engine";
+var SLICE3 = "touched";
 function record(state) {
-  const v = state.packs[PACK2]?.[SLICE2];
+  const v = state.packs[PACK3]?.[SLICE3];
   return isRecord(v) ? v : undefined;
 }
-function entryOf(state, id) {
+function entryOf2(state, id) {
   const all = record(state);
   const v = all ? own(all, id) : undefined;
   return isRecord(v) ? v : undefined;
@@ -4295,9 +4600,9 @@ function objectAt(parent, key) {
   return fresh;
 }
 function writable2(state, id) {
-  const slice = state.packs[PACK2] ?? {};
-  state.packs[PACK2] = slice;
-  return objectAt(objectAt(slice, SLICE2), id);
+  const slice = state.packs[PACK3] ?? {};
+  state.packs[PACK3] = slice;
+  return objectAt(objectAt(slice, SLICE3), id);
 }
 function touch(state, t) {
   if (!own(state.entities, t.entity))
@@ -4311,11 +4616,11 @@ function touch(state, t) {
     e[t.aspect] = true;
 }
 function touchedAspect(state, id, aspect) {
-  return entryOf(state, id)?.[aspect] === true;
+  return entryOf2(state, id)?.[aspect] === true;
 }
 function forget(state, id, what) {
   const all = record(state);
-  const e = entryOf(state, id);
+  const e = entryOf2(state, id);
   if (!all || !e)
     return;
   if (what === "all")
@@ -4383,12 +4688,12 @@ function touching(def) {
   };
 }
 function dropTouches(state) {
-  const slice = state.packs[PACK2];
+  const slice = state.packs[PACK3];
   if (!slice)
     return;
-  delete slice[SLICE2];
+  delete slice[SLICE3];
   if (Object.keys(slice).length === 0)
-    delete state.packs[PACK2];
+    delete state.packs[PACK3];
 }
 
 // src/engine/player-events.ts
@@ -4487,6 +4792,13 @@ function trackShown(reg, world, state, pov, id) {
   if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0)
     return true;
   return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
+}
+function trackKeepsSecret(reg, world, state, pov, id) {
+  const t = own(world.tracks, id);
+  if (!t)
+    return false;
+  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
 }
 function refsOf(world, state, e) {
   const out = [];
@@ -4637,6 +4949,11 @@ function hiddenEntityNames(reg, world, state, pov) {
 function hiddenNames(reg, world, state, pov) {
   const { people, things } = hiddenEntityNames(reg, world, state, pov);
   return [...hiddenTrackLabels(reg, world, state, pov), ...people, ...things];
+}
+function hiddenNameCheck(reg, world, state, pov) {
+  const hidden = hiddenEntityNames(reg, world, state, pov);
+  const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
+  return (text) => namesAny(text, hidden.people, labels);
 }
 function rawLine(reg, world, state, pov, e, player) {
   const name = (id) => nameOf(world, state, pov, id);
@@ -5011,7 +5328,8 @@ function initialState(world, revision, types) {
       fields: structuredClone(e.fields),
       relations: structuredClone(e.relations),
       levels: clampLevels(e.levels ?? {}),
-      agent: agentOf(world, { id, tier: e.tier, agent: e.agent })
+      agent: agentOf(world, { id, tier: e.tier, agent: e.agent }),
+      ...typeof e.life === "string" && e.life !== ALIVE ? { life: e.life } : {}
     };
   }
   completeRelations(types, world, entities);
@@ -5704,7 +6022,7 @@ function createRegistry(packs) {
     }
   };
   for (const def of coreEventTypes(() => registry))
-    once(events, def.type, observing(def, canSeeEntity), "event type");
+    once(events, def.type, knowing(observing(def, canSeeEntity)), "event type");
   const seen = new Set;
   for (const pack of packs) {
     if (seen.has(pack.id))
@@ -6737,19 +7055,20 @@ function ownerRank(reg, world, state, schedule) {
 }
 function scheduleOwners(reg, world, state, schedule) {
   const owner = schedule.owner;
+  const acting = (ids) => ids.filter((id) => acts(world, state, id));
   if (isRecord(owner))
-    return selectEntities(reg, world, state, owner);
+    return acting(selectEntities(reg, world, state, owner));
   if (typeof owner !== "string" || owner === "")
     return [];
   const e = own(state.entities, owner);
   if (e) {
     if (isGone(state, owner))
       return [];
-    return kindIs(reg, world, e.kind, GROUP_KIND) ? membersOf(reg, world, state, owner) : [owner];
+    return acting(kindIs(reg, world, e.kind, GROUP_KIND) ? membersOf(reg, world, state, owner) : [owner]);
   }
   return Object.keys(state.entities).sort().filter((id) => {
     const x = own(state.entities, id);
-    return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id);
+    return !!x && kindIs(reg, world, x.kind, owner) && !isGone(state, id) && acts(world, state, id);
   });
 }
 function keyOf(v) {
@@ -7136,6 +7455,9 @@ function lintStructure(world, reg) {
   }
   if (world.spawnTier !== undefined && !tierOf(world, world.spawnTier))
     err("spawnTier", "unknown_tier", `New people would join tier "${world.spawnTier}", which isn't one of the world's tiers.`);
+  const cap = world.spawnCap;
+  if (cap !== undefined && !(typeof cap === "number" && Number.isInteger(cap) && cap >= 0 && cap <= MAX_SPAWN_CAP))
+    err("spawnCap", "spawn_cap", `The number of people replies may introduce must be a whole number from 0 to ${MAX_SPAWN_CAP}.`);
   for (const { path, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       if (spec.type !== "spawn")
@@ -7151,6 +7473,29 @@ function lintStructure(world, reg) {
       const problems = classes ? classProblems(world, classes, who) : [{ code: "unknown_facet", message: `${who} gives a class that isn't a facet \u2192 values map.` }];
       for (const p of problems)
         warn(`${path}.${i}`, p.code, `${p.message} The spawn is refused.`);
+    });
+  }
+  for (const [id, def] of Object.entries(isRecord(world.lifeStates) ? world.lifeStates : {})) {
+    const raw = def;
+    if (hasOwn(BUILTIN_LIFE_STATES, id))
+      err(`lifeStates.${id}`, "life_builtin", `"${id}" is a built-in life state; give yours another id.`);
+    else if (!isRecord(raw) || typeof raw.label !== "string" || raw.label.trim() === "")
+      warn(`lifeStates.${id}.label`, "life_label", `Life state ${id} has no label, so players see its id.`);
+    else if (typeof raw.reads !== "string" || raw.reads.trim() === "")
+      warn(`lifeStates.${id}.reads`, "life_reads", `Life state ${id} doesn't say how the narrator reads it, so it reads "is ${raw.label.toLowerCase()}".`);
+  }
+  for (const [id, e] of Object.entries(world.entities)) {
+    if (e.life !== undefined && !isLifeState(world, e.life))
+      err(`entities.${id}.life`, "unknown_life", `${e.name} starts in life state "${e.life}", which isn't one of the world's.`);
+  }
+  const downLife = world.ruleset?.combat?.down?.life;
+  if (downLife !== undefined && (typeof downLife !== "string" || !isLifeState(world, downLife)))
+    err("ruleset.combat.down.life", "unknown_life", `Combat's down rule names life state "${String(downLife)}", which isn't one of the world's.`);
+  for (const { path, effects } of effectLists(world)) {
+    effects.forEach((spec, i) => {
+      const to = spec.args.to;
+      if (spec.type === "life" && typeof to === "string" && !to.startsWith("=") && !isLifeState(world, to))
+        warn(`${path}.${i}`, "unknown_life", `A life change in ${path} names life state "${to}", which isn't one of the world's; it is refused.`);
     });
   }
   for (const [id, t] of Object.entries(world.tracks)) {
@@ -7638,8 +7983,7 @@ function weightedOrder(items, rng) {
 function outline(reg, world, state, input, rng, max = MAX_BEATS) {
   const pov = world.pov;
   const lines = [];
-  const r = input.resolution;
-  if (r) {
+  for (const r of input.resolutions ?? []) {
     const label = own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     if (!r.ok)
       lines.push(`${label} doesn't happen: ${r.failed?.reason ?? "not possible"}.`);
@@ -7677,8 +8021,11 @@ function outline(reg, world, state, input, rng, max = MAX_BEATS) {
       const e = own(state.entities, id);
       if (!e || id === pov || !e.agent || placeOfEntity(state, id) !== here || !canSeeEntity(reg, world, state, pov, id))
         continue;
+      const life = povLife(world, state, id);
       const act = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
-      if (typeof act === "string" && act !== "" && act !== "idle")
+      if (life)
+        lines.push(`${e.name} ${life.reads}.`);
+      else if (typeof act === "string" && act !== "" && act !== "idle")
         lines.push(`${e.name} is ${(shownActivity ? shownActivity(ctx, id, act) : act).replace(/_/g, " ")}.`);
     }
   }
@@ -8516,6 +8863,12 @@ function runRulesOnTick(reg, w, tick, opts) {
 
 // src/engine/tracks.ts
 var TRANSITION_CAP = 8;
+function currentStage(world, state, track) {
+  const def = own(world.tracks, track);
+  if (!def)
+    return null;
+  return own(state.tracks, track)?.stage ?? def.start;
+}
 function trackEnv(reg, w, track, trackId) {
   const stage = own(w.state.tracks, trackId)?.stage ?? track.start;
   const def = own(track.stages, stage);
@@ -8643,8 +8996,8 @@ function agendaFor(world, state, agent) {
 function processSeed(runSeed, process, entity, slotIndex) {
   return hashParts(runSeed, process, entity, slotIndex);
 }
-function lod1Agents(state) {
-  return Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id)).sort();
+function lod1Agents(world, state) {
+  return Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !isGone(state, id) && acts(world, state, id)).sort();
 }
 function agentCursor(world, state, agent) {
   const recorded = own(readEngineSlice(state).agents, agent);
@@ -8706,8 +9059,8 @@ function advance(reg, w, to, opts) {
   const slots = slotsEnding(cal, from, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
-  const agents = timelapse ? lod1Agents(w.state).filter((a) => a !== w.world.pov) : [];
-  if (timelapse && opts.includePov !== false && own(w.state.entities, w.world.pov))
+  const agents = timelapse ? lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov) : [];
+  if (timelapse && opts.includePov !== false && own(w.state.entities, w.world.pov) && acts(w.world, w.state, w.world.pov))
     agents.unshift(w.world.pov);
   const cursors = new Map(agents.map((a) => [a, agentCursor(w.world, w.state, a)]));
   let next = 0;
@@ -8801,7 +9154,7 @@ function advance(reg, w, to, opts) {
 function catchUp(reg, w, opts) {
   const cal = calendarOf(w.world);
   const done = completedSlot(w.world, w.state);
-  const all = lod1Agents(w.state).filter((a) => a !== w.world.pov);
+  const all = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
   const slice = readEngineSlice(w.state);
   const onScreen = (opts.onScreen ?? []).filter((a) => all.includes(a)).sort();
   const queue = all.filter((a) => !onScreen.includes(a));
@@ -9329,7 +9682,21 @@ function onScreen(w) {
   const here = placeOfEntity(w.state, w.world.pov);
   if (!here)
     return [];
-  return Object.keys(w.state.entities).filter((id) => id !== w.world.pov && own(w.state.entities, id)?.agent && placeOfEntity(w.state, id) === here && !isGone(w.state, id));
+  return Object.keys(w.state.entities).filter((id) => id !== w.world.pov && own(w.state.entities, id)?.agent && placeOfEntity(w.state, id) === here && !isGone(w.state, id) && acts(w.world, w.state, id));
+}
+function queueStop(w, res, since, scene, speeding) {
+  if (!res.ok || res.rejected.length > 0)
+    return "failure";
+  if (res.check || res.adjudged)
+    return "check";
+  if (speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene)
+    return "interruption";
+  const policy = interruptPolicy(w.state);
+  const signalled = w.events.slice(since).some((e) => {
+    const s = "data" in e ? signalOf(e) : null;
+    return s !== null && policy[s.class] === "stop" && signalVisible(w.reg, w.world, w.state, w.world.pov, s);
+  });
+  return signalled ? "interruption" : null;
 }
 function planTurn(input) {
   const reg = input.registry;
@@ -9340,9 +9707,10 @@ function planTurn(input) {
   materializeAll(reg, w, w.world.pov, input.runSeed);
   const from = w.state.clock;
   const intent = input.intent;
-  let resolution = null;
+  const resolutions = [];
+  let stopped = null;
   let timelapse = null;
-  let combat = [];
+  const combat = [];
   if (intent?.action === TIMELAPSE_ACTION) {
     const target = parseTarget(intent.params.target);
     const seg = intent.params.segment;
@@ -9352,43 +9720,61 @@ function planTurn(input) {
     else
       timelapse = outcome;
   } else {
-    const fight = optionalService(w.ctx, "combat.round")?.(w, rng.fork("combat"));
-    const mark = w.events.length;
-    const inFight = fightHoldsClock(w.ctx);
-    if (intent?.action) {
-      resolution = resolveAction(reg, w, { action: intent.action, params: intent.params }, rng, { runSeed: input.runSeed, judgement: intent.judgement ?? null });
-      if (resolution.events.length > 0)
-        runRulesOnEvents(reg, w, resolution.events, { seed: input.seed });
-    }
-    combat = fight?.after(resolution ? { resolution, params: intent?.params ?? {} } : null) ?? [];
-    if (resolution) {
-      let end = mark + resolution.events.length;
-      const groups = new Set(w.events.slice(mark, end).flatMap((e) => e.group !== undefined ? [e.group] : []));
-      for (;end < w.events.length; end++) {
-        const group = w.events[end]?.group;
-        if (group === undefined || !groups.has(group))
-          break;
+    const steps = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null }))] : [];
+    for (let i = 0;i < Math.max(1, steps.length); i++) {
+      const step = steps[i] ?? null;
+      const draws = i === 0 ? rng : rng.fork(`queue:${i}`);
+      const seed = i === 0 ? input.seed : hashParts(input.seed, "queue", i);
+      const fight = optionalService(w.ctx, "combat.round")?.(w, draws.fork("combat"));
+      const mark = w.events.length;
+      const inFight = fightHoldsClock(w.ctx);
+      let resolution = null;
+      let scene = sceneKey(w.world, w.state);
+      if (step) {
+        resolution = resolveAction(reg, w, { action: step.action, params: step.params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        scene = sceneKey(w.world, w.state);
+        if (resolution.events.length > 0)
+          runRulesOnEvents(reg, w, resolution.events, { seed });
       }
-      resolution = { ...resolution, events: w.events.slice(mark, end) };
-    }
-    const fighting = fightHoldsClock(w.ctx);
-    const elapsed = inFight && fighting ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
-    if (elapsed && elapsed.minutes > 0)
-      advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
-    const act = resolution?.activity;
-    if (act && elapsed && elapsed.source !== "paused" && !fighting) {
-      const remaining = act.until - w.state.clock;
-      const mode = speedThrough(w.state, act.type, remaining);
-      if (mode !== "elapse") {
-        const until = { type: "at", at: act.until };
-        if (mode === "auto") {
-          const outcome = runTimelapse(reg, w, until, { runSeed: input.runSeed });
-          if ("code" in outcome)
+      combat.push(...fight?.after(resolution ? { resolution, params: step?.params ?? {} } : null) ?? []);
+      if (resolution) {
+        let end = mark + resolution.events.length;
+        const groups = new Set(w.events.slice(mark, end).flatMap((e) => e.group !== undefined ? [e.group] : []));
+        for (;end < w.events.length; end++) {
+          const group = w.events[end]?.group;
+          if (group === undefined || !groups.has(group))
+            break;
+        }
+        resolution = { ...resolution, events: w.events.slice(mark, end) };
+        resolutions.push(resolution);
+      }
+      const fighting = fightHoldsClock(w.ctx);
+      const elapsed = inFight && fighting || i > 0 && !resolution?.ok ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
+      if (elapsed && elapsed.minutes > 0)
+        advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
+      const act = resolution?.activity;
+      let speeding = false;
+      if (act && elapsed && elapsed.source !== "paused" && !fighting) {
+        const remaining = act.until - w.state.clock;
+        const mode = speedThrough(w.state, act.type, remaining);
+        if (mode !== "elapse") {
+          speeding = true;
+          const until = { type: "at", at: act.until };
+          if (mode === "auto") {
+            const outcome = runTimelapse(reg, w, until, { runSeed: input.runSeed });
+            if ("code" in outcome)
+              chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+            else
+              timelapse = outcome;
+          } else
             chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
-          else
-            timelapse = outcome;
-        } else
-          chips.push({ kind: "timelapse_offer", activity: act.type, target: until, remaining });
+        }
+      }
+      const left = steps.length - 1 - i;
+      const cause = resolution && left > 0 ? queueStop(w, resolution, mark, scene, speeding) : null;
+      if (cause) {
+        stopped = { left, cause };
+        break;
       }
     }
   }
@@ -9403,11 +9789,12 @@ function planTurn(input) {
   return {
     events,
     elapsedMinutes: w.state.clock - from,
-    resolution,
+    resolutions,
+    stopped,
     timelapse,
     montage,
     chips,
-    outline: outline(reg, w.world, w.state, { resolution, timelapse, events: w.events }, rng.fork("beats")),
+    outline: outline(reg, w.world, w.state, { resolutions, timelapse, events: w.events }, rng.fork("beats")),
     combat
   };
 }
@@ -14928,6 +15315,21 @@ function voiceLine(ctx, who) {
   const detail = axesOf(ctx).map((a) => `${a.label.toLowerCase()} ${Math.round(axes[a.id] ?? 0)}`).join(", ");
   return `${name} is ${band} toward you (${detail}).`;
 }
+function regardWords(ctx, from, to) {
+  const level = ctx.levelOf(from, "relationships");
+  if (level === 0 || !relationOf(ctx.state, from, to))
+    return null;
+  const band = regardBand(ctx, from, to);
+  if (level <= 2)
+    return band;
+  const axes = regardAxes(ctx, from, to);
+  const bands = bandsOf(ctx);
+  const apart = axesOf(ctx).flatMap((a) => {
+    const word = bandOf(bands, axes[a.id] ?? 0)?.label ?? "neutral";
+    return word === band ? [] : [`${a.label.toLowerCase()}: ${word}`];
+  });
+  return apart.length > 0 ? `${band} (${apart.join(", ")})` : band;
+}
 var relationshipsPack = {
   id: "relationships",
   label: "Relationships",
@@ -14949,6 +15351,7 @@ var relationshipsPack = {
     r.query("regard_band", regardBand);
     r.query("relationships.faction_regard", groupRegard);
     r.query("relationships.view", regardView);
+    r.query("relationships.words", regardWords);
     r.formula("regard", (ctx, from, to, axis) => regardValue(ctx, String(from ?? ""), String(to ?? ""), typeof axis === "string" && axis !== "" ? axis : undefined));
     r.formula("regard_band", (ctx, from, to) => regardBand(ctx, String(from ?? ""), String(to ?? "")));
     r.formula("faction_regard", (ctx, group, to) => groupRegard(ctx, String(group ?? ""), String(to ?? "")));
@@ -15108,6 +15511,155 @@ function planDay(input) {
     t = end;
   }
   return { agent: input.agent, start: input.start, end: input.end, blocks, ties, tieZone };
+}
+
+// src/packs/castlife/core/cues.ts
+var SECRET_KINDS = ["lore", "track", "flag"];
+function readCue(raw) {
+  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "")
+    return null;
+  const keyed = SECRET_KINDS.filter((kind) => raw[kind] !== undefined);
+  const kind = keyed[0];
+  const id = kind === undefined ? undefined : raw[kind];
+  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
+}
+function cuesFor(ctx, who, safe) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const out = [];
+  const add = (text) => {
+    if (safe(text) && !out.includes(text))
+      out.push(text);
+  };
+  const gateHolds = loreGateReader(reg, world, state);
+  const flag = optionalQuery(ctx, "story.flag");
+  const cues = own(world.entities, who)?.cues;
+  for (const raw of Array.isArray(cues) ? cues : []) {
+    const cue = readCue(raw);
+    if (!cue)
+      continue;
+    const { kind, id } = cue.secret;
+    let kept = false;
+    if (kind === "lore") {
+      const entry = own(world.lore, id);
+      kept = entry !== undefined && loreIsSecret(entry) && !gateHolds(entry);
+    } else if (kind === "track")
+      kept = trackKeepsSecret(reg, world, state, pov, id);
+    else if (flag) {
+      const value = flag(ctx, id);
+      kept = value === null || value === false || value === 0 || value === "";
+    }
+    if (kept)
+      add(cue.text);
+  }
+  for (const id of Object.keys(world.tracks).sort()) {
+    const t = own(world.tracks, id);
+    if (t?.owner !== who || t.kind === "agenda" && visibilityOf(t.visibility) === "public")
+      continue;
+    const stage = currentStage(world, state, id);
+    const cue = stage === null ? undefined : own(t.stages, stage)?.cue;
+    if (typeof cue === "string" && cue.trim() !== "" && trackKeepsSecret(reg, world, state, pov, id))
+      add(cue.trim());
+  }
+  return out;
+}
+function personKind(world, kind) {
+  let id = kind;
+  for (let guard = 0;id !== undefined && guard < 32; guard++) {
+    if (id === "person")
+      return true;
+    id = own(world.kinds, id)?.extends;
+  }
+  return false;
+}
+function hiddenNames2(world) {
+  const out = [];
+  const label = (name, secret, entity) => void out.push({ name, secret, ...entity !== undefined ? { entity } : {}, said: (text) => namesAny(text, [], [name]) });
+  for (const e of Object.values(world.entities)) {
+    const v = visibilityOf(e.visibility);
+    if (v === "public")
+      continue;
+    if (personKind(world, e.kind))
+      out.push({ name: e.name, secret: v === "secret", entity: e.id, said: (text) => namesAny(text, [e.name]) });
+    else
+      label(e.name, v === "secret", e.id);
+  }
+  for (const p of Object.values(world.places))
+    if (visibilityOf(p.visibility) !== "public")
+      label(p.name, p.visibility === "secret");
+  for (const t of Object.values(world.tracks)) {
+    if (visibilityOf(t.visibility) === "public")
+      continue;
+    label(t.label, false);
+    for (const s of Object.values(t.stages))
+      if (s.label.length >= 6)
+        label(s.label, false);
+  }
+  for (const l of Object.values(world.lore))
+    if (loreIsSecret(l))
+      label(l.title, false);
+  return out.filter((h) => h.name.trim() !== "");
+}
+function cueIssues(world) {
+  const issues = [];
+  const issue = (severity, path, message) => void issues.push({ severity, path, code: "castlife.cues", message });
+  const secrets = [...Object.values(world.tracks).flatMap((t) => Object.values(t.stages).flatMap((s) => s.truth ? [s.truth] : [])), ...Object.values(world.lore).flatMap((l) => loreIsSecret(l) && typeof l.content === "string" ? lorePhrases(l.content) : [])];
+  const hidden = hiddenNames2(world);
+  for (const e of Object.values(world.entities)) {
+    if (e.cues === undefined)
+      continue;
+    const at = `entities.${e.id}.cues`;
+    if (!Array.isArray(e.cues)) {
+      issue("error", at, `${e.name}'s cues should be a list.`);
+      continue;
+    }
+    if (e.cues.length > 0 && !personKind(world, e.kind))
+      issue("warning", at, `${e.name} isn't a person, so its cues never show: the Stance section tells people.`);
+    e.cues.forEach((raw, i) => {
+      const path = `${at}.${i}`;
+      const text = isRecord(raw) && typeof raw.text === "string" ? raw.text.trim() : "";
+      if (text === "")
+        return issue("error", `${path}.text`, `A cue of ${e.name}'s has no text: say what the narrator sees them do.`);
+      const cue = readCue(raw);
+      if (!cue)
+        return issue("error", path, `${e.name}'s cue "${text}" needs exactly one secret it stands for: a lore entry, a track or a story flag.`);
+      const { kind, id } = cue.secret;
+      if (kind === "lore") {
+        const entry = own(world.lore, id);
+        if (!entry)
+          issue("error", `${path}.lore`, `${e.name}'s cue "${text}" is for lore "${id}", which this world doesn't have.`);
+        else if (!loreIsSecret(entry))
+          issue("warning", `${path}.lore`, `${e.name}'s cue "${text}" is for "${entry.title}", which isn't secret lore, so it never shows.`);
+      } else if (kind === "track") {
+        const track = own(world.tracks, id);
+        if (!track)
+          issue("error", `${path}.track`, `${e.name}'s cue "${text}" is for track "${id}", which this world doesn't have.`);
+        else if (visibilityOf(track.visibility) === "public" && !Object.values(track.stages).some((s) => s.truth))
+          issue("warning", `${path}.track`, `${e.name}'s cue "${text}" is for "${track.label}", a public track with no truth to reveal, so it never shows.`);
+      }
+      const lower = text.toLowerCase();
+      const secret = secrets.find((s) => s.trim() !== "" && lower.includes(s.toLowerCase()));
+      const named = secret === undefined ? hidden.find((h) => h.entity !== e.id && h.said(text)) : undefined;
+      if (secret !== undefined)
+        issue("error", `${path}.text`, `${e.name}'s cue "${text}" gives away a secret ("${secret}"): a cue says how they act, never what they hide.`);
+      else if (named)
+        issue("warning", `${path}.text`, `${e.name}'s cue "${text}" names "${named.name}", which the player may not know; it is left out while they don't.`);
+    });
+  }
+  for (const t of Object.values(world.tracks)) {
+    const owner = t.owner === undefined ? undefined : own(world.entities, t.owner);
+    if (!owner || !personKind(world, owner.kind))
+      continue;
+    for (const [stage, s] of Object.entries(t.stages)) {
+      if (typeof s.cue !== "string")
+        continue;
+      const cue = s.cue;
+      const named = hidden.find((h) => !h.secret && h.entity !== owner.id && h.said(cue));
+      if (named)
+        issue("warning", `tracks.${t.id}.stages.${stage}.cue`, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
+    }
+  }
+  return issues;
 }
 
 // src/packs/castlife/core/index.ts
@@ -15348,7 +15900,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
   const appraise = optionalService(ctx, "relationship.appraise");
   const g = rng.fork("encounters");
   if (appraise && block.place && g.next() < ENCOUNTER_CHANCE) {
-    const here = Object.keys(ctx.state.entities).sort().filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place && !isGone(ctx.state, other));
+    const here = Object.keys(ctx.state.entities).sort().filter((other) => other !== who && other !== pov && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person") && placeOfEntity(ctx.state, other) === block.place && acts2(ctx, other));
     const other = here[Math.floor(g.next() * here.length)];
     if (other) {
       const known = acquainted(ctx.state, who, other);
@@ -15385,7 +15937,7 @@ function stepTrips(slot, ctx) {
   for (const who of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, who);
     const trips = e?.fields.trips;
-    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || isGone(ctx.state, who))
+    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts2(ctx, who))
       continue;
     for (const raw of trips) {
       const t = objOf(raw);
@@ -15489,8 +16041,12 @@ function buildCastView(ctx) {
       classes,
       groups: membershipsOf(id).map((m) => ({ id: m.id, ...m.role !== undefined ? { role: m.role } : {} }))
     };
+    const life = povLife(ctx.world, ctx.state, id);
+    if (life)
+      p.life = life.label;
+    const still = life !== null && !life.acts;
     if (present) {
-      if (typeof e.fields.activity === "string" && sees("activity"))
+      if (typeof e.fields.activity === "string" && sees("activity") && !still)
         p.activity = shownActivity(ctx, id, e.fields.activity).replace(/_/g, " ");
       if (sees("place"))
         p.place = canSeePlace(ctx.registry, ctx.world, ctx.state, pov, place) ? own(ctx.world.places, place)?.name ?? place : HIDDEN_PLACE_NAME;
@@ -15502,7 +16058,7 @@ function buildCastView(ctx) {
     const regard = view ? view(ctx, id, pov) : [];
     if (regard.length > 0)
       p.regard = regard;
-    const plan = present && e.agent ? dayPlan(ctx, id) : null;
+    const plan = present && e.agent && !still ? dayPlan(ctx, id) : null;
     const blocks = plan?.blocks.map((b) => b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) ? { ...b, label: "Busy", reasons: ["their own business"] } : b);
     if (blocks && level >= 3)
       p.timeline = blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
@@ -15533,6 +16089,63 @@ function buildCastView(ctx) {
     mine: membershipsOf(pov).map((m) => ({ ...group(m.id), ...m.role !== undefined ? { role: m.role } : {}, ...m.rank !== undefined ? { rank: m.rank } : {}, ...m.since !== undefined ? { since: m.since } : {} })).sort(byName)
   };
 }
+function acts2(ctx, who) {
+  return !isGone(ctx.state, who) && acts(ctx.world, ctx.state, who);
+}
+function listed(label, clauses) {
+  const body = clauses.map((c) => c.replace(/\s+/g, " ").trim().replace(/[.;]$/, "")).join("; ");
+  return `${label}: ${body}${/[.!?\u2026]$/.test(body) ? "" : "."}`;
+}
+function decidedBlock(ctx, who) {
+  const cal = calendarOf(ctx.world);
+  const plan = dayPlan(ctx, who);
+  const dayStart = clockAt(cal, plan.day, 0);
+  const chosen = new Set(plan.ties.filter((t) => t.via === "recorded").map((t) => t.key));
+  const block = plan.blocks.find((b) => b.end > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
+  if (!block)
+    return null;
+  const label = block.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, block.option.slice(AGENDA_OPTION.length)) ? "Busy" : block.label;
+  return block.start <= ctx.state.clock ? label : `${label} at ${formatHHMM(dateAt(cal, block.start).minuteOfDay)}`;
+}
+function stanceLines(ctx) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const here = placeOfEntity(state, pov);
+  if (!here)
+    return [];
+  const secrets = unrevealedSecrets(reg, world, state);
+  const namesHidden = hiddenNameCheck(reg, world, state, pov);
+  const safe = (text) => findLeaks(text, secrets).length === 0 && !namesHidden(text);
+  const regard = optionalQuery(ctx, "relationships.words");
+  const lines = [];
+  for (const id of Object.keys(state.entities).sort()) {
+    const e = own(state.entities, id);
+    if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || !canSeeEntity(reg, world, state, pov, id) || !acts2(ctx, id))
+      continue;
+    const known = knows(state, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
+    const words = regard?.(ctx, id, pov) ?? null;
+    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words ? `; regard: ${words}` : ""}.`];
+    const activity = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
+    const doing = typeof activity === "string" && activity !== "idle" ? shownActivity(ctx, id, activity).replace(/_/g, " ") : "";
+    if (doing !== "" && safe(doing))
+      parts.push(listed("Doing", [doing]));
+    const agenda = agendaFor(world, state, id).filter((a) => publicTrack(world, a.track)).map((a) => {
+      const track = own(world.tracks, a.track);
+      const cue = track ? own(track.stages, a.stage)?.cue?.trim() : undefined;
+      return cue ? cue : a.stageLabel;
+    }).filter(safe);
+    if (agenda.length > 0)
+      parts.push(listed("Agenda", agenda));
+    const decided = e.agent && ctx.levelOf(id, "castlife") >= 3 ? decidedBlock(ctx, id) : null;
+    if (decided !== null && safe(decided))
+      parts.push(listed("Decided", [decided]));
+    lines.push(parts.join(" "));
+    const cues = cuesFor(ctx, id, safe);
+    if (cues.length > 0)
+      lines.push(listed(`${e.name}'s cues`, cues));
+  }
+  return lines;
+}
 var castlifePack = {
   id: "castlife",
   label: "Cast life",
@@ -15549,7 +16162,7 @@ var castlifePack = {
       const out = [];
       const decided = decisions(ctx.state);
       for (const id of Object.keys(ctx.state.entities).sort()) {
-        const plan = own(ctx.state.entities, id)?.agent && !isGone(ctx.state, id) ? dayPlan(ctx, id) : null;
+        const plan = own(ctx.state.entities, id)?.agent && acts2(ctx, id) ? dayPlan(ctx, id) : null;
         for (const t of plan?.ties ?? [])
           if (t.via === "seed" && !own(decided, t.key))
             out.push({ key: t.key, agent: id, options: t.options });
@@ -15615,8 +16228,9 @@ var castlifePack = {
             continue;
           if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id))
             continue;
+          const life = povLife(ctx.world, ctx.state, id);
           const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
-          lines.push(`${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
+          lines.push(life ? `${e.name} ${life.reads}.` : `${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
         }
         if (ctx.levelOf(pov, "castlife") >= 4) {
           const urgent = Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label);
@@ -15627,6 +16241,8 @@ var castlifePack = {
       }
     });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
+    r.renderer({ slot: "stance", render: stanceLines });
+    r.lint({ code: "castlife.cues", check: cueIssues });
     r.lint({
       code: "castlife.double_booking",
       check(world) {
@@ -16067,7 +16683,7 @@ var storyPack = {
 var core_default10 = storyPack;
 
 // src/packs/combat/core/model.ts
-var PACK3 = "combat";
+var PACK4 = "combat";
 var STALEMATE_ROUNDS = 3;
 var LOG_CAP = 24;
 var DEFAULT_WOUNDS = [
@@ -16090,7 +16706,7 @@ function numbers(v) {
   return out;
 }
 function encounterOf(state) {
-  const raw = sliceOf(state, PACK3).encounter;
+  const raw = sliceOf(state, PACK4).encounter;
   if (!isRecord(raw) || typeof raw.id !== "string" || !Array.isArray(raw.order))
     return null;
   const order = [];
@@ -16109,7 +16725,7 @@ function encounterOf(state) {
   return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };
 }
 function writeEncounter(state, enc) {
-  const slice = mutableSlice(state, PACK3);
+  const slice = mutableSlice(state, PACK4);
   if (enc)
     slice.encounter = enc;
   else {
@@ -16117,11 +16733,11 @@ function writeEncounter(state, enc) {
     delete slice.decisions;
   }
   if (Object.keys(slice).length === 0)
-    delete state.packs[PACK3];
+    delete state.packs[PACK4];
 }
 function decisionsOf(state) {
   const out = {};
-  for (const [k, v] of Object.entries(objOf(sliceOf(state, PACK3).decisions)))
+  for (const [k, v] of Object.entries(objOf(sliceOf(state, PACK4).decisions)))
     if (typeof v === "string")
       out[k] = v;
   return out;
@@ -16129,8 +16745,8 @@ function decisionsOf(state) {
 function fighterOf(enc, id) {
   return enc.order.find((f) => f.id === id);
 }
-function standing(state, enc, f) {
-  return !f.down && !isGone(state, f.id) && own(state.entities, f.id) !== undefined && placeOfEntity(state, f.id) === enc.place;
+function standing(at, enc, f) {
+  return !f.down && !isGone(at.state, f.id) && own(at.state.entities, f.id) !== undefined && acts(at.world, at.state, f.id) && placeOfEntity(at.state, f.id) === enc.place;
 }
 function engaged(state, world, id) {
   const enc = encounterOf(state);
@@ -16162,7 +16778,7 @@ function hpMaxOf(ctx, rules, id) {
 }
 function canFight(ctx, rules, id) {
   const e = own(ctx.state.entities, id);
-  return !!e && !isGone(ctx.state, id) && fieldDef(ctx.registry, ctx.world, e.kind, rules.hp) !== undefined;
+  return !!e && !isGone(ctx.state, id) && acts(ctx.world, ctx.state, id) && fieldDef(ctx.registry, ctx.world, e.kind, rules.hp) !== undefined;
 }
 function downHolds(ctx, rules, id) {
   if (rules.down?.when !== undefined)
@@ -16194,13 +16810,13 @@ function offTurnCost(rules, cost) {
   const budgets = Object.keys(cost);
   return budgets.length > 0 && budgets.every((b) => own(rules.economy, b)?.offTurn === true);
 }
-function standingOn(state, enc, side) {
-  return enc.order.filter((f) => f.side === side && standing(state, enc, f));
+function standingOn(at, enc, side) {
+  return enc.order.filter((f) => f.side === side && standing(at, enc, f));
 }
 function endHolds(ctx, rules, enc) {
   if (rules.end !== undefined)
     return truthy2(readFor(ctx, rules.end, {}, false));
-  return standingOn(ctx.state, enc, "party").length === 0 || standingOn(ctx.state, enc, "foes").length === 0;
+  return standingOn(ctx, enc, "party").length === 0 || standingOn(ctx, enc, "foes").length === 0;
 }
 function stalemateRounds(rules) {
   const n = rules.stalemate;
@@ -16217,9 +16833,9 @@ function stalledHolds(ctx, rules, enc) {
   const rounds = stalemateRounds(rules);
   return rounds > 0 && enc.calm.rounds >= rounds && !enc.calm.struck && sameHp(hpByFighter(ctx, rules, enc.order), enc.calm.hp);
 }
-function winnerOf(state, enc) {
-  const party = standingOn(state, enc, "party").length;
-  const foes = standingOn(state, enc, "foes").length;
+function winnerOf(at, enc) {
+  const party = standingOn(at, enc, "party").length;
+  const foes = standingOn(at, enc, "foes").length;
   return party > 0 && foes === 0 ? "party" : foes > 0 && party === 0 ? "foes" : null;
 }
 
@@ -16259,7 +16875,7 @@ function spendFor(ctx, actor, action) {
   const f = fighterOf(enc, actor);
   if (!f)
     return { code: "not_fighting", reason: you ? "you aren't in this fight" : `${labelOf(ctx, actor)} isn't in this fight` };
-  if (!standing(ctx.state, enc, f))
+  if (!standing(ctx, enc, f))
     return { code: "down", reason: you ? "you are out of the fight" : `${labelOf(ctx, actor)} is out of the fight` };
   const cost = costOf(action);
   if (enc.order[enc.turn]?.id !== actor && !offTurnCost(rules, cost))
@@ -16281,7 +16897,7 @@ function nextTurn(ctx, rules, enc) {
   for (let k = 1;k <= n; k++) {
     const index = (enc.turn + k) % n;
     const f = enc.order[index];
-    if (!f || !standing(ctx.state, enc, f))
+    if (!f || !standing(ctx, enc, f))
       continue;
     const round = enc.round + Math.floor((enc.turn + k) / n);
     const reset = {};
@@ -16415,6 +17031,7 @@ function settle(w, rules, rng, lines) {
   if (!enc || leave(w, rng.fork("left"), lines))
     return true;
   const condition = typeof rules.down?.condition === "string" && rules.down.condition.trim() !== "" ? rules.down.condition : DOWN_CONDITION;
+  const life = typeof rules.down?.life === "string" && isLifeState(w.world, rules.down.life) && rules.down.life !== ALIVE ? rules.down.life : null;
   for (const f of enc.order) {
     if (!own(w.state.entities, f.id))
       continue;
@@ -16423,7 +17040,10 @@ function settle(w, rules, rng, lines) {
     if (down === f.down || record2(w, [{ type: "combat.down", data: { encounter: enc.id, entity: f.id, down } }], rng.seed).length === 0)
       continue;
     const fall = rng.fork(`down:${f.id}`);
-    applyEffects(w.reg, w, [{ type: "sheets.condition", args: { who: f.id, condition, ...down ? { mod: 0 } : { clear: true } } }], { bindings: { self: f.id }, rng: fall });
+    const effects = [{ type: "sheets.condition", args: { who: f.id, condition, ...down ? { mod: 0 } : { clear: true } } }];
+    if (life !== null && (down || lifeOf(w.state, f.id) === life))
+      effects.push({ type: "life", args: { entity: f.id, to: down ? life : ALIVE } });
+    applyEffects(w.reg, w, effects, { bindings: { self: f.id }, rng: fall });
     asUnit2(w, from, fall.seed);
     const who = nameFor(w.ctx, f.id);
     if (who !== "someone")
@@ -16434,7 +17054,7 @@ function settle(w, rules, rng, lines) {
     return true;
   if (!endHolds(w.ctx, rules, now))
     return stalled(w, rules, rng.fork("calm"), lines);
-  const winner = winnerOf(w.state, now);
+  const winner = winnerOf(w, now);
   record2(w, [{ type: "combat.end", data: { encounter: now.id, reason: "over", winner, rounds: now.round } }], rng.seed);
   lines.push(`The fight is over${winner === "party" ? ": your side won" : winner === "foes" ? ": your side lost" : ""}.`);
   return encounterOf(w.state) === null;
@@ -16471,7 +17091,7 @@ function fightOptions(reg, world, state, actor) {
     const param = targetParam(action);
     if (action.combat?.start === true || param === undefined)
       continue;
-    const targets = param === null ? [null] : enc.order.filter((f) => f.id !== actor && standing(state, enc, f)).map((f) => f.id);
+    const targets = param === null ? [null] : enc.order.filter((f) => f.id !== actor && standing({ world, state }, enc, f)).map((f) => f.id);
     for (const target of targets) {
       const params = param !== null && target !== null ? { [param]: target } : {};
       const odds = actionOdds(reg, world, state, { action, actor, params });
@@ -16545,7 +17165,7 @@ function othersTurn(w, rules, rng, lines) {
   for (let n = 0;n < ACTS_PER_TURN; n++) {
     const enc = encounterOf(w.state);
     const f = enc ? fighterOf(enc, me.id) : undefined;
-    if (!enc || !f || enc.order[enc.turn]?.id !== me.id || enc.round !== start.round || !standing(w.state, enc, f))
+    if (!enc || !f || enc.order[enc.turn]?.id !== me.id || enc.round !== start.round || !standing(w, enc, f))
       return;
     const options = fightOptions(w.reg, w.world, w.state, me.id);
     const chosen = (n === 0 && decided !== undefined ? options.find((o) => optionKey(o) === decided) : undefined) ?? tacticFor(w.ctx, rules, enc, f, options);
@@ -16564,7 +17184,7 @@ function othersUntilPov(w, rules, rng, lines, steps) {
     const current = enc?.order[enc.turn];
     if (!enc || !current)
       return;
-    const live = standing(w.state, enc, current);
+    const live = standing(w, enc, current);
     if (current.id === w.world.pov && live)
       return;
     steps.left ??= enc.order.length;
@@ -16591,7 +17211,7 @@ function startLine(ctx, e) {
 function closing(ctx, rules, lines) {
   const enc = encounterOf(ctx.state);
   const me = enc ? fighterOf(enc, ctx.world.pov) : undefined;
-  if (enc && me && !standing(ctx.state, enc, me))
+  if (enc && me && !standing(ctx, enc, me))
     lines.push(`You are out of the fight; it goes on (round ${enc.round}).`, false);
   else if (enc && me && enc.order[enc.turn]?.id === me.id) {
     const left = Object.entries(rules.economy).flatMap(([budget, def]) => isRecord(def) ? [`${me.left[budget] ?? 0} ${typeof def.label === "string" && def.label !== "" ? def.label : budget}`] : []);
@@ -16659,7 +17279,7 @@ function fightChoices(ctx) {
     if (!f || f.id === ctx.world.pov)
       break;
     const key = turnKey(enc, enc.round + Math.floor((enc.turn + k) / n), f.id);
-    if (!standing(ctx.state, enc, f) || own(decided, key) !== undefined)
+    if (!standing(ctx, enc, f) || own(decided, key) !== undefined)
       continue;
     const state = structuredClone(ctx.state);
     writeEncounter(state, { ...enc, turn: index, order: enc.order.map((p) => p.id === f.id ? { ...p, left: { ...p.left, ...turnRefill(ctx, rules, p.id) } } : p) });
@@ -16705,7 +17325,7 @@ function combatEntries(ctx) {
     const param = targetParam(action);
     if (!fightOffers(ctx.world, ctx.state, action) || param === undefined)
       continue;
-    const targets = param === null ? [null] : enc ? enc.order.filter((f) => f.id !== ctx.world.pov && standing(ctx.state, enc, f) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, f.id)).map((f) => f.id) : paramCandidates(ctx.registry, ctx.world, ctx.state, action, param).slice(0, 24);
+    const targets = param === null ? [null] : enc ? enc.order.filter((f) => f.id !== ctx.world.pov && standing(ctx, enc, f) && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, f.id)).map((f) => f.id) : paramCandidates(ctx.registry, ctx.world, ctx.state, action, param).slice(0, 24);
     const options = targets.map((t) => optionOf(ctx, action, param !== null && t !== null ? { [param]: t } : {}, t !== null ? labelOf(ctx, t) : action.label));
     if (options.length > 0)
       entries.push({ action: action.id, label: action.label, group: "combat", options });
@@ -16752,7 +17372,7 @@ function buildEncounterView(ctx, opts = {}) {
       you: f.id === ctx.world.pov,
       current: i === enc.turn,
       down: f.down,
-      out: !f.down && !standing(ctx.state, enc, f),
+      out: !f.down && !standing(ctx, enc, f),
       init: name === null ? null : f.init,
       hp: seen && "current" in seen ? seen : null,
       wound: seen && "wound" in seen && seen.wound !== "" ? seen.wound : null,
@@ -16887,7 +17507,7 @@ var events2 = [
       return null;
     },
     apply(e, state, ctx) {
-      delete mutableSlice(state, PACK3).decisions;
+      delete mutableSlice(state, PACK4).decisions;
       const order = orderOf(e.data.order) ?? [];
       const rules = rulesOf(ctx.world);
       writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0, struck: false } });
@@ -16946,7 +17566,7 @@ var events2 = [
       const cost = counts(e.data.cost);
       if (!rules || !f || !cost || Object.values(cost).some((n) => n <= 0))
         return reject12("bad_event", "a spend needs a participant and what it spends");
-      if (!standing(ctx.state, enc, f))
+      if (!standing(ctx, enc, f))
         return reject12("down", `${labelOf(ctx, who)} is out of the fight`);
       if (enc.order[enc.turn]?.id !== who && !offTurnCost(rules, cost))
         return reject12("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
@@ -17020,7 +17640,7 @@ var events2 = [
     type: "combat.decision",
     validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject12("bad_event", "a decision needs a key and a choice"),
     apply: (e, state) => {
-      sliceRecord(state, PACK3, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
+      sliceRecord(state, PACK4, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
     describe: (e) => `decided ${strOf(e.data.choice)}`
   }
@@ -17031,7 +17651,7 @@ function fighterArg(ctx, v) {
   return enc && f ? { enc, f } : null;
 }
 var combatPack = {
-  id: PACK3,
+  id: PACK4,
   label: "Combat",
   version: 1,
   domain: null,
@@ -17047,7 +17667,7 @@ var combatPack = {
         const enc = encounterOf(ctx.state);
         if (!enc)
           return reject12("no_fight", "no fight is under way");
-        const winner = a.winner === "party" || a.winner === "foes" ? a.winner : winnerOf(ctx.state, enc);
+        const winner = a.winner === "party" || a.winner === "foes" ? a.winner : winnerOf(ctx, enc);
         return [{ type: "combat.end", data: { encounter: enc.id, reason: "effect", winner, rounds: enc.round } }];
       }
     });
@@ -17078,7 +17698,7 @@ var combatPack = {
       const enc = encounterOf(ctx.state);
       return enc ? `${enc.id}:${enc.round}` : null;
     });
-    r.relation({ id: "hostile", label: "Hostile to", from: "*", to: "*", cardinality: "many_many", symmetric: true, fields: {}, pack: PACK3 });
+    r.relation({ id: "hostile", label: "Hostile to", from: "*", to: "*", cardinality: "many_many", symmetric: true, fields: {}, pack: PACK4 });
     r.formula("can_fight", (ctx, e) => {
       const rules = rulesOf(ctx.world);
       return rules !== null && typeof e === "string" && canFight(ctx, rules, e);
@@ -17101,14 +17721,14 @@ var combatPack = {
     });
     r.formula("standing", (ctx, side) => {
       const enc = encounterOf(ctx.state);
-      return enc && (side === "party" || side === "foes") ? standingOn(ctx.state, enc, side).length : 0;
+      return enc && (side === "party" || side === "foes") ? standingOn(ctx, enc, side).length : 0;
     });
     r.formula("encounter_round", (ctx) => encounterOf(ctx.state)?.round ?? 0);
     r.formula("budget_left", (ctx, e, budget) => own(fighterArg(ctx, e)?.f.left ?? {}, String(budget ?? "")) ?? 0);
     r.action({
       id: "fight",
       label: "Fight",
-      pack: PACK3,
+      pack: PACK4,
       params: { target: { type: "ref", label: "Opponent" } },
       requires: ["can_fight(target)"],
       combat: { cost: {}, start: true },
@@ -17120,7 +17740,7 @@ var combatPack = {
     r.action({
       id: "end_turn",
       label: "End turn",
-      pack: PACK3,
+      pack: PACK4,
       params: {},
       requires: [],
       combat: { cost: {} },
@@ -26039,7 +26659,8 @@ var mystery_manor_default = {
           args: { who: "julian_ashcombe", place: "library", activity: "a late brandy with the host", minutes: 35 }
         },
         { type: "story.flag", args: { name: "alaric_alive", value: false } },
-        { type: "set", args: { entity: "sir_alaric", field: "place", value: "library" } }
+        { type: "set", args: { entity: "sir_alaric", field: "place", value: "library" } },
+        { type: "life", args: { entity: "sir_alaric", to: "dead" } }
       ],
       once: true
     },
@@ -26062,7 +26683,23 @@ var mystery_manor_default = {
       do: [
         { type: "castlife.override", args: { who: "nell_sparrow", place: "library", minutes: 180 } },
         { type: "story.flag", args: { name: "body_found", value: true } },
-        { type: "set", args: { entity: "sir_alaric", field: "activity", value: "dead" } },
+        {
+          type: "life",
+          args: {
+            entity: "sir_alaric",
+            tell: [
+              "pov",
+              "lady_honoria",
+              "rupert_thorne",
+              "verity_lorne",
+              "julian_ashcombe",
+              "dr_lionel_farrant",
+              "gideon_pell",
+              "mrs_marsh",
+              "nell_sparrow"
+            ]
+          }
+        },
         { type: "note", args: { text: "Nell screams; Pell is first on the scene, then Lady Honoria and the household." } }
       ],
       when: "not flag('alaric_alive')",
