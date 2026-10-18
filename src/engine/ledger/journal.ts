@@ -707,28 +707,34 @@ export class LedgerCore {
   }
 
   /**
-   * The chain a turn's post steps read against (P2, L7), and the path its record is anchored at: the
-   * chain it was planned on. Its record folds as stored only there, so what it reads, and what a
-   * Re-run carries, must validate there; on any other chain it is a rebased view, which re-validates
-   * them anyway. When an earlier swipe changed while the reply streamed, that chain is rebuilt from
-   * the messages as they stand with the swipes the plan saw, and taken once it folds to the turn's
-   * path again. One that can't be rebuilt (a message or swipe the plan saw is gone, or a swipe's text
-   * changed) is read on the chain in force, and the record is anchored at a path no chain reaches:
-   * the plan's path can come back (the deleted swipe's text added again), and what was read was
-   * never validated there.
+   * The fold a turn's post steps read on (P2, L7), up to its target, and the path its record is
+   * anchored at: the chain it was planned on. Its record folds as stored only there, so what it
+   * reads, and what a Re-run carries, must validate there; on any other chain it is a rebased view,
+   * which re-validates them anyway. When an earlier swipe changed while the reply streamed, that
+   * chain is rebuilt from the messages as they stand with the swipes the plan saw, and taken once it
+   * folds to the turn's path again. One that can't be rebuilt (a message or swipe the plan saw is
+   * gone, or a swipe's text changed) is read on the chain in force, and the record is anchored at a
+   * path no chain reaches: the plan's path can come back (the deleted swipe's text added again), and
+   * what was read was never validated there. An unplanned turn commits where it lands.
    */
-  private plannedChain(p: PendingTurn, observed: readonly ChainMessage[], index: number): { chain: readonly ChainMessage[]; path: PathHash } {
+  private plannedPrefix(p: PendingTurn, observed: readonly ChainMessage[], index: number): { out: FoldOutput; path: PathHash } {
+    const inForce = (path?: PathHash): { out: FoldOutput; path: PathHash } => {
+      const out = this.fold(observed.slice(0, index));
+      return { out, path: path ?? out.messages.at(-1)?.path ?? ROOT_PATH };
+    };
+    if (!p.planned) return inForce();
     const path = this.commitPath(p);
-    if (!p.planned || (p.chain.length === index && p.chain.every((e, i) => observed[i]?.id === e.id && observed[i]?.swipeId === e.swipeId))) return { chain: observed, path };
-    const gone = { chain: observed, path: hashParts("lre.gone", path) };
-    if (p.chain.length !== index) return gone;
+    if (p.chain.length === index && p.chain.every((e, i) => observed[i]?.id === e.id && observed[i]?.swipeId === e.swipeId)) return inForce(path);
+    const gone = hashParts("lre.gone", path);
+    if (p.chain.length !== index) return inForce(gone);
     const rebuilt: ChainMessage[] = [];
     for (const [i, e] of p.chain.entries()) {
       const m = observed[i];
-      if (!m || m.id !== e.id || e.swipeId === GONE_SWIPE || e.swipeId >= m.swipes.length) return gone;
+      if (!m || m.id !== e.id || e.swipeId === GONE_SWIPE || e.swipeId >= m.swipes.length) return inForce(gone);
       rebuilt.push({ ...m, swipeId: e.swipeId });
     }
-    return (this.fold(rebuilt).messages.at(-1)?.path ?? ROOT_PATH) === path ? { chain: [...rebuilt, ...observed.slice(index)], path } : gone;
+    const out = this.fold(rebuilt);
+    return (out.messages.at(-1)?.path ?? ROOT_PATH) === path ? { out, path } : inForce(gone);
   }
 
   /** What a Re-read edit or Retry read of an existing record reads against (its fold prefix plus `pre`). */
@@ -738,7 +744,7 @@ export class LedgerCore {
     if (!m) return null;
     const rec = activeRecord(m, this.journal.tombstones);
     if (!rec) return null;
-    const prefix = this.prefixState(observed, index, rec);
+    const prefix = this.prefixState(this.fold(observed.slice(0, index)), m, rec);
     return prefix ? { ...prefix, seed: rec.seed, pre: rec.events.slice(0, rec.pre) } : null;
   }
 
@@ -754,7 +760,7 @@ export class LedgerCore {
     if (planned) {
       const index = planned.messageId ? observed.findIndex((m) => m.id === planned.messageId) : observed.length;
       const at = index < 0 ? observed.length : index;
-      return this.prefixState(observed, at, { markersApplied: planned.markersApplied, events: planned.events, pre: planned.events.length, path: this.commitPath(planned), undone: [] }, planned.startMarkers);
+      return this.prefixState(this.fold(observed.slice(0, at)), this.chain(observed.slice(at, at + 1))[0], { markersApplied: planned.markersApplied, events: planned.events, pre: planned.events.length, path: this.commitPath(planned), undone: [] }, planned.startMarkers);
     }
     const out = this.fold(observed);
     const world = this.env.worlds(out.state.revision);
@@ -773,17 +779,15 @@ export class LedgerCore {
     const p = this.journal.pending[generationId];
     const index = observed.findIndex((m) => m.id === messageId);
     if (!p || index < 0 || this.pausedWithin(observed.slice(0, index))) return null;
-    const planned = this.plannedChain(p, observed, index);
-    const prefix = this.prefixState(planned.chain, index, { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: p.planned ? planned.path : "", undone: [] }, this.journal.started ? [] : p.startMarkers);
+    const at = this.plannedPrefix(p, observed, index);
+    const prefix = this.prefixState(at.out, this.chain(observed.slice(index, index + 1))[0], { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: at.path, undone: [] }, this.journal.started ? [] : p.startMarkers);
     return prefix ? { ...prefix, seed: p.seed, pre: [...p.events] } : null;
   }
 
-  /** State the turn's post steps validate against: its fold prefix (P2), plus a planned first turn's starting markers when given; and the target's parent path. */
-  private prefixState(observed: readonly ChainMessage[], targetIndex: number, rec: Pick<Rec, "markersApplied" | "events" | "pre" | "path" | "undone">, start: readonly Marker[] = []): { state: WorldState; world: WorldDoc; parent: PathHash } | null {
-    const out = this.fold(observed.slice(0, targetIndex));
+  /** State the turn's post steps validate against: its fold prefix (P2) from `out`, the fold before its target, plus a planned first turn's starting markers when given; and the target's parent path. */
+  private prefixState(out: FoldOutput, target: ChainMessage | undefined, rec: Pick<Rec, "markersApplied" | "events" | "pre" | "path" | "undone">, start: readonly Marker[] = []): { state: WorldState; world: WorldDoc; parent: PathHash } | null {
     const state = structuredClone(out.state);
-    const target = this.chain(observed)[targetIndex];
-    const parent = out.messages.length > 0 ? (out.messages[out.messages.length - 1]?.path ?? ROOT_PATH) : ROOT_PATH;
+    const parent = out.messages.at(-1)?.path ?? ROOT_PATH;
     for (const mk of [...(target?.ledger?.markers ?? [])].sort((a, b) => a.seq - b.seq)) {
       if (mk.seq <= rec.markersApplied && isLive(mk.at, parent, turnPath(rec))) applyMarker(state, mk, this.env);
     }
@@ -817,8 +821,13 @@ export class LedgerCore {
     // A pause that arrived while the reply streamed: the plan stands (it was made on its path), the
     // reply goes unread (there is no state to read it against) and the record is degraded.
     const paused = this.pausedWithin(observed.slice(0, index));
-    // Read against the chain the turn was planned on, which its record is anchored at.
-    const planned = this.plannedChain(p, observed, index);
+    const read = readReply && content !== "" && !paused;
+    // A Re-run reads its reply on its fold prefix, then carries its source's fixes after it.
+    const rerun = !p.copies && !paused && (p.kind === "swipe" || p.kind === "regenerate");
+    // Read against the chain the turn was planned on, which places its record; one that reads and
+    // carries nothing holds only what was validated where it was planned, and stays there.
+    const at = read || rerun || !p.planned ? this.plannedPrefix(p, observed, index) : null;
+    const [target] = this.chain(observed.slice(index, index + 1));
     // The chat's first record folds its starting markers ahead of its events, so it is read with them.
     const start = this.journal.started ? [] : p.startMarkers;
     const rec: Rec = {
@@ -826,7 +835,7 @@ export class LedgerCore {
       defHash: this.env.run.revision,
       seq: ++this.journal.seq,
       swipeHash: contentId(content),
-      path: p.planned ? planned.path : (this.fold(observed.slice(0, index)).messages.at(-1)?.path ?? ROOT_PATH),
+      path: at?.path ?? this.commitPath(p),
       seed: p.seed,
       pre: p.events.length,
       events: [...p.events],
@@ -843,32 +852,27 @@ export class LedgerCore {
       rec.post = structuredClone(p.copies).map((e) => ({ ...e, at: rec.path }));
       rec.undone = structuredClone(p.undone ?? []);
       if (p.dropped && p.dropped.length > 0) rec.dropped = structuredClone(p.dropped);
-      if (readReply && content !== "" && !paused) {
-        const prefix = this.prefixState(planned.chain, index, rec, start);
-        if (prefix) {
-          const target = this.chain(observed)[index];
-          const later: ({ seq: number; marker: Marker } | { seq: number; entry: PostEntry })[] = [
-            ...(target?.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, rec.path)).map((mk) => ({ seq: mk.seq, marker: mk })),
-            ...rec.post.map((e) => ({ seq: e.seq, entry: e })),
-          ].sort((a, b) => a.seq - b.seq);
-          for (const item of later) {
-            if ("marker" in item) applyMarker(prefix.state, item.marker, this.env);
-            else {
-              const live = item.entry.events.filter((_, i) => !rec.undone.some((u) => u.in === "post" && u.seq === item.entry.seq && u.index === i));
-              applyValidUnits(this.env.types, live, prefix.state, (s) => this.env.types.context(prefix.world, s));
-            }
+      const prefix = at && read ? this.prefixState(at.out, target, rec, start) : null;
+      if (prefix) {
+        const later: ({ seq: number; marker: Marker } | { seq: number; entry: PostEntry })[] = [
+          ...(target?.ledger?.markers ?? []).filter((mk) => mk.seq > rec.markersApplied && isLive(mk.at, prefix.parent, rec.path)).map((mk) => ({ seq: mk.seq, marker: mk })),
+          ...rec.post.map((e) => ({ seq: e.seq, entry: e })),
+        ].sort((a, b) => a.seq - b.seq);
+        for (const item of later) {
+          if ("marker" in item) applyMarker(prefix.state, item.marker, this.env);
+          else {
+            const live = item.entry.events.filter((_, i) => !rec.undone.some((u) => u.in === "post" && u.seq === item.entry.seq && u.index === i));
+            applyValidUnits(this.env.types, live, prefix.state, (s) => this.env.types.context(prefix.world, s));
           }
-          const events = this.read(prefix.state, prefix.world, `${p.seed}:narr`, content);
-          if (events.length > 0) rec.post.push({ seq: ++this.journal.seq, at: rec.path, kind: "narr", events });
         }
+        const events = this.read(prefix.state, prefix.world, `${p.seed}:narr`, content);
+        if (events.length > 0) rec.post.push({ seq: ++this.journal.seq, at: rec.path, kind: "narr", events });
       }
-    } else if (!paused) {
-      // A Re-run reads its reply on its fold prefix, then carries its source's fixes after it.
-      const rerun = p.kind === "swipe" || p.kind === "regenerate";
-      const prefix = (readReply && content !== "") || rerun ? this.prefixState(planned.chain, index, rec, start) : null;
-      if (prefix && readReply && content !== "") rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
+    } else if (at && (read || rerun)) {
+      const prefix = this.prefixState(at.out, target, rec, start);
+      if (prefix && read) rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
       // Starting markers land only on a record that holds events: one left with none folds its carried fixes without them.
-      if (prefix && rerun) this.carryFixes(rec, this.chain(observed)[index], swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(planned.chain, index, rec) ?? prefix) : prefix);
+      if (prefix && rerun) this.carryFixes(rec, target, swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(at.out, target, rec) ?? prefix) : prefix);
     }
     const ledger = this.ledgerFor(messageId, observed[index]);
     ledger.swipes[String(swipeId)] = rec;
@@ -1104,7 +1108,7 @@ export class LedgerCore {
           // A stopped reply was saved unread, so its Retry read reads everything saved now, a Continue
           // after it included, and replaces what was read meanwhile: the Continue's suffix read and the
           // proposals confirmed from that read's chips (like a Re-read).
-          const prefix = this.prefixState(observed, index, rec);
+          const prefix = this.prefixState(this.fold(observed.slice(0, index)), this.chain(observed.slice(index, index + 1))[0], rec);
           if (!prefix) return "unknown revision";
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, `${rec.seed}:read`, text)];
           rec.post = rec.post.filter((p) => p.kind !== "confirm" && p.kind !== "cont");
@@ -1122,7 +1126,7 @@ export class LedgerCore {
           const events = this.read(structuredClone(head.state), world, `${rec.seed}:cont:${j.seq + 1}`, text.slice(rec.swipeHash.len));
           if (events.length > 0) rec.post.push({ seq: ++j.seq, at: out.messages[index]?.parentPath ?? ROOT_PATH, kind: "cont", events });
         } else {
-          const prefix = this.prefixState(observed, index, rec);
+          const prefix = this.prefixState(this.fold(observed.slice(0, index)), this.chain(observed.slice(index, index + 1))[0], rec);
           if (!prefix) return "unknown revision";
           rec.events = [...rec.events.slice(0, rec.pre), ...this.read(prefix.state, prefix.world, `${rec.seed}:reread:${j.seq + 1}`, text)];
           // A Re-read replaces the whole read: its read events, the Continue suffix reads (the text it
