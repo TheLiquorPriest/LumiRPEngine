@@ -147,6 +147,8 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 | `userStorage/runs/<chatId>/outcome-notes.json` | `OutcomeNote[]`: notes for the next turn's Outcome slot, dropped once a later message has committed and another follows |
 | `userStorage/runs/<chatId>/prefs.json` | `{v: 1, mapDisplay?}`: the player's choices for the chat that aren't part of its world, such as the map's display mode (`lre.map`) |
 | `userStorage/runs/<chatId>/inspector.json` | `{v: 2, records, delivery}`: the last 10 interceptor runs and the last delivery check by slot, read when the chat is first viewed; a `v: 1` history is read with its lore traces' query text dropped, a trace that lists a secret entry isn't read at all, and an `npc.choose` trace is read without its lookups' text and its entries' titles |
+| `userStorage/worlds/<worldId>/draft.json` | `{base, doc}`: the Build editors' working copy and the revision it started from. `lre.editor get` resumes it after a reload or on a second device; `discard` and a commit remove it |
+| `userStorage/runs/<chatId>/snapshots.json` | The chat's fold snapshots, the newest 6, so a cold fold starts from the nearest one rather than the chat's start (L42); a snapshot made by another build never applies |
 
 ### 3.2 Ledger (`shared/ledger.ts`)
 
@@ -157,7 +159,7 @@ Other files the backend keeps, each written temp-then-move and read through `rea
 | `userStorage/runs/<chatId>/journal.json` | `Journal`: `seq`, chain snapshot, latest ledger per message, pauses, tombstones, held writes, refused writes (`refused`: the latest 8 held writes that didn't validate when their windows closed, with the reason, until dismissed), open windows, pending turns, `started` |
 
 - **Events** are concrete. Assignment events (`set`) carry final values; accumulator events (`add`, `post`) carry deltas. Pack events are `<packId>.<name>` with a JSON body.
-- **`Rec`** follows DESIGN §4.3. `accepted` is the identity of content accepted without being read: an assistant edit or an unread Continue. It is outside every hash, so accepting text never moves a path.
+- **`Rec`** follows DESIGN §4.3. `accepted` is the identity of content accepted without being read: an assistant edit or an unread Continue. `dropped` lists the entries a swipe didn't carry over, or a Re-read dropped, each with its reason; the folds report each as a `not_carried` Journal note. Both are outside every hash, so accepting text or dropping an entry never moves a path. `intents` is always empty: the reading of a turn's text is kept in memory by the backend's turn bridge, keyed by the text.
 - **`post` entries and markers** carry `seq` (chat-wide, from the journal counter) and `at` (P1). Starting markers have `at: null`. Marker bodies are `migrate{to}`, `resolve{domain, scope, to}`, `time{control, scope, to}` and `adjudicate{to}` (a whole policy), each checked by `validMarkerBody` on every path in.
 - **The journal is authoritative.** Metadata is its mirror, flushed per message once no generation is in flight, and re-asserted after clobbering.
 
@@ -208,8 +210,9 @@ Prompts and schemas stay model-agnostic (D31).
 ### 3.5 State view (`shared/state-view.ts`)
 
 `StateView` holds:
-- status (`not_world`, `idle`, `in_flight`, `paused`);
+- the chat, its world and revision (with `definitionsFrom` when an Upgrade left the chat's entity definitions on an older revision), and its status (`not_world`, `idle`, `in_flight`, `paused`);
 - HUD, scene, chips, Journal notes, the Keep report, `pending` marks and the call meter;
+- the palette (`PaletteView`: its entries, a fight's Combat heading and the Timelapse sheet), the controls Settings and Calendar edit for this chat (`ControlsView`: realism, time controls and the adjudication policy in force), the pack versions in play, and the world's currency;
 - `panels`: pack view models keyed `<packId>.<panel>`, each built by the pack core's `PanelViewDef` for the chat's `ViewPrefs` (the map's display, from `prefs.json`), so a display's hidden cells never leave the backend. The GM view is not among them: `lre.gm` builds it on request (`GmView`), everyone else's money included, from the economy pack's `economy.people_money` query.
 
 Player-facing content is already filtered to the POV's knowledge; the GM view's data is fetched separately, and only once its spoiler gate is open.
@@ -232,10 +235,11 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.marker` | `chatId`, then `resolve{domain, scope, to}` \| `time{control, scope, to}` \| `adjudicate{to}` \| `migrate{to, merge?}`; `preview` writes nothing | `{pending}`; with `preview`: `{preview}`, whose `upgrade` lists a migrate's definition changes with their default picks |
 | `lre.keep` | `chatId`, then `keep{messageId}` \| `discard{messageId}` \| `convert{messageId, parentPath, refs}` | `{pending}` |
 | `lre.settings.get` / `.set` | `patch` (deep merge) | `{settings}` |
-| `lre.editor` | `worldId, base`, then `put{collection, id, value}` \| `remove{collection, id}` \| `set{part, value}` \| `profile{profile, choices}` | `{draft, lint}`; `profile` applies a ruleset profile in one write, each conflict kept or taken by its path in `choices` |
+| `lre.editor` | `worldId, base`, then `get` \| `discard` \| `put{collection, id, value}` \| `remove{collection, id}` \| `set{part, value}` \| `profile{profile, choices}` | `{draft, lint, base, stored}`: `base` is the revision the draft started from (sent back with the next write) and `stored` whether a draft exists apart from the head; `get` returns the stored draft, or a fresh copy of the head, and ignores `base`; `discard` drops the draft; `profile` applies a ruleset profile in one write, each conflict kept or taken by its path in `choices` |
 | `lre.world` | `list` \| `get` \| `create` \| `delete` \| `commit` \| `import` \| `export` \| `lint` \| `attach` \| `upgrade{chatId, to, merge?}` \| `sheet{worldId, ruleset, entity?}` | `{worlds?, world?, revision?, lint?, file?, packKinds?, packRelations?, functions?, sheet?}`; `get` adds the packs' kinds and relation types and `functions`, every function a formula may call outside an effect argument (the expression editor's list); `upgrade` writes the `migrate` marker, with `merge` the owner's picks for the definition merge (DESIGN §4.3); `sheet` is the Sheet Designer's preview, the draft with the unsaved ruleset read on the POV (or `entity`) |
 | `lre.job` | `start{kind, worldId, input}` \| `cancel{jobId}` \| `list{worldId}` \| `dismiss{jobId}` | `{jobId}`; `list`: `{jobs}` (`JobSummary[]`, oldest first). Updates arrive as `lre.job.update {jobId, kind, status, progress, message?, result?}` |
 | `lre.lore` | `drift{worldId, id?}` \| `save{chatId, text?}` | `drift`: `{drift}`, the draft's book-sourced entries whose book entry changed (with its text and hash now) or is gone; `save`: `{worldId, id}` of the lore entry saved to the draft of the chat's world |
+| `lre.ui` | `close_drawer` | `{done}`; the frontend has no API to close the drawer, so the backend asks the host (the map opening on a narrow viewport) |
 
 **State push.** The backend keeps a push counter `rev` per (user, chat).
 - On `hello`, `resync` and chat open it sends `lre.state.snapshot {chatId, rev, view}`.
@@ -306,19 +310,22 @@ Raw sources in `data-src/us/*.json` are never imported. `scripts/tables/build.ts
 
 - **Conventions carried over:** money is integer cents; percentages are `pct` units; bands are `{min, typical, max}`; every source table keeps `approximate: true` and its `basis` in `source`.
 - **Regional scaling** (`cost_of_living_multiplier`) is applied by the economy pack at pricing time, never baked into rows.
-- **World creation** copies the enabled packs' default tables into the document and records `pins.tables[id] = revision`. Authors may edit their copies; edits produce new revisions.
+- **World creation:** the starter templates carry every enabled pack's default tables (`scripts/templates/build.ts` copies `defaultTables()` into each) and record `pins.tables[id] = revision`. A Blank world (`blankWorld`) and the studio's `newWorld` start with no tables: tables are read only from the world document, so a world that needs one adds it, as a recipe's fragment does, or starts from a template. Authors may edit their copies; edits produce new revisions.
 
 ## 7. Host port and fake host (`backend/host.ts`)
 
 `HostPort` covers:
 - chat messages and the whole `spindle_metadata` bag;
-- chat metadata and appending user messages;
-- user storage;
+- chat metadata, appending user messages and the chat the user has open;
+- user storage (read, write, move, remove and list);
 - events;
 - the context handler and interceptor;
 - quiet calls (with the tools a lore lookup offers, and the tool calls the model makes) and decision calls;
 - token counts from the host tokenizer;
-- frontend messaging and logging.
+- the world's lore book (create, check, list, add and delete entries) and a dry-run assembly of a chat's next prompt;
+- the active preset and the default connection;
+- the background lane's child process (spawn, messages, lifecycle);
+- frontend messaging, closing the drawer, and logging.
 
 Event payloads are exactly those the host emits (DESIGN §14). `userId` arrives as the handler's second argument.
 
@@ -351,7 +358,7 @@ Event payloads are exactly those the host emits (DESIGN §14). `userId` arrives 
 | `test/boundaries.test.ts`, `test/manifest.test.ts` | Structure |
 
 Volume knobs:
-- `LRE_PROPERTY_RUNS` (default 200 locally; CI 10,000), `LRE_PROPERTY_OPS` (longest sequence; default 60, CI 200) and `LRE_PROPERTY_SEED` (replay one seed).
+- `LRE_PROPERTY_RUNS` (sequences per run; default 200), `LRE_PROPERTY_OPS` (longest sequence; default 60), `LRE_PROPERTY_SEED` (replay one seed), `LRE_PROPERTY_BASE` (the seed base, `lre-fixed` by default, so every default run is the same; set another to explore new seeds) and `LRE_PROPERTY_FROM` (the first seed index, to split a long run into shards).
 - A failing seed is shrunk and appended to `regressions.json`. Every tenth sequence runs twice and must end byte-identical (L31).
 
 ## 9. Contributing

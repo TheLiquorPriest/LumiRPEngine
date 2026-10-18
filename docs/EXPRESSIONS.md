@@ -1,6 +1,6 @@
 # LumiRPEngine expressions
 
-A world's rules are data, and the parts that compute something are formulas: an action's requirements and duration, a check's modifier and DC, a derived field, a rule's condition, a quest stage's way forward, a sheet row. They are all written in one small language, adapted from Warp's (credited in `NOTICE`). It is safe and deterministic: a formula can't loop, can't call out, can't see anything the engine doesn't hand it, and on the same world state it always gives the same value. That is what lets the palette show exact odds before you choose, and lets a swipe or a Re-run replay a turn to the same result.
+A world's rules are data, and the parts that compute something are formulas: an action's requirements and duration, a check's modifier and DC, a derived field, a rule's condition, a quest stage's way forward, a sheet row. They are all written in one small language, adapted from Warp's (credited in `NOTICE`). It is safe and deterministic: a formula can't loop, can't call out, can't see anything the engine doesn't hand it, and on the same world state it always gives the same value. That is what lets the palette show exact odds before you choose, and lets every replay of a turn's recorded events reach the same state. A Re-run is a new attempt, not a replay: it rolls with a fresh seed, so its dice can land differently, unless the world sets `seedMode` to `same_roll`.
 
 This page is the language and the engine's own functions. The functions each pack adds are listed with their parameters in the [reference](REFERENCE.md), under each pack's **Formula functions**, and Build's expression editor offers every function a formula may call.
 
@@ -17,7 +17,8 @@ What a formula can read depends on where it sits: `self` is whoever it is about,
 | A derived field; a pool's `max` and `recover` | The entity that has the field | |
 | A rule's `when` and its effects | Whoever the event is about, for an `event`, `enter`, `zone` or `cell` trigger (an `enter` trigger fires for anyone who arrives: test `self == pov` when it matters); else the POV | `event.*` for those triggers |
 | A rule's `at` trigger | The POV | |
-| A track stage's `next`, `fail`, `gate` and objectives | The track's owner (else the POV), also as `owner` | `track.*` |
+| A track stage's `next`, `fail` and `gate` | The track's owner (else the POV), also as `owner` | `track.*` |
+| A track stage's objectives | The track's owner (else the POV) | Nothing more: write them with `self`, since `owner` and `track.*` aren't there |
 | A progression's `onLevel` effects | The entity that levelled up | `level` (the level reached) and `from` (the level before) |
 | A designed sheet's formula row | The entity whose sheet it is | |
 
@@ -61,7 +62,7 @@ A name is looked up in this order; the first that knows it answers.
 6. **The clock:** `clock` (game minutes since the calendar's epoch), `minute` (of the day), `hour`, `day` (days since the epoch's date), `weekday` (0 is Sunday), `date` (the day of the month), `month`, `year` and `daypart` (the id of the current part of the day).
 7. **Any entity or place by its id:** `npc_dev.mood`, `harbor.security`.
 
-**Parameters.** A scalar parameter reads by its bare name (`qty`) and as `params.qty`. One the player left out reads 0 by its bare name and null as `params.qty`, so an outcome can tell "none" from "zero": `params.days == null`. A ref parameter is a binding, so `target.cash` reads the target's cash.
+**Parameters.** A scalar parameter reads by its bare name (`qty`) and as `params.qty`. One the player left out reads 0 by its bare name and null as `params.qty`. Since `==` compares null as 0, `params.days == null` holds for zero days too; to tell "none" from zero, compare it as text: `params.days + '' == ''` holds only when it was left out. A ref parameter is a binding, so `target.cash` reads the target's cash.
 
 **The roll.** An action's outcome effects, and the outcomes of the `check` effect, see the check as `roll.natural` (the natural die, when the dice have one), `roll.total`, `roll.modifier`, `roll.dc`, `roll.margin` (the total minus the DC) and `roll.outcome`. When the adjudication policy settles a check without rolling it, `roll.outcome` is set and the total, natural die and margin are null.
 
@@ -82,7 +83,7 @@ So `{"type": "set", "args": {"entity": "self", "field": "mood", "value": "calm"}
 - **No chance outside effects.** `roll(notation)` is the language's only source of chance, and it works only in an effect's arguments. There it draws from the effect's own seeded generator and the event stores the result, so a replay reads the stored value and never rolls again. Anywhere else (a requirement, a modifier, a DC, a derived field, a rule's condition, a sheet row) `roll()` is a lint error and reads as null, so the odds the palette shows and every read stay fixed.
 - **No wall clock.** Time is the game clock, which only turns, timelapses and the engine move.
 - **Pinned tables.** `table()` and `table_step()` read the world's own copies of its data tables, pinned per revision, so they are deterministic and allowed anywhere.
-- **Hard limits.** A formula is at most 4,096 characters, 64 levels deep and 2,048 parts, and one evaluation takes at most 100,000 steps. A formula over a limit is refused like one that doesn't parse, and lint names the limit.
+- **Hard limits.** A formula is at most 4,096 characters, 64 levels deep and 2,048 parts, and one evaluation takes at most 100,000 steps. A formula over a limit is treated like one that doesn't parse. Lint names the problem, the limit included, in a check, a pool, a track's conditions, a sheet row and a combat rule. Anywhere else nothing flags it until it is read: a requirement or a rule's condition then reads as false and a number as 0, while a derived field's formula stops the read with an error. Try a world in Playtest before you play it.
 
 ## Functions
 
@@ -99,7 +100,7 @@ So `{"type": "set", "args": {"entity": "self", "field": "mood", "value": "calm"}
 | `knows(entity, subject)` | Whether the entity has a `knows` relation to the subject |
 | `place(entity)` | The place the entity is at, through whatever holds it |
 | `at(entity, place)` | Whether the entity is at the place or anywhere inside it |
-| `count_at(place, kind?)` | How many entities are at the place or inside it (of that kind, with inheritance) |
+| `count_at(place, kind?)` | How many entities are at the place or inside it (of that kind, with inheritance), counting people removed from the world |
 | `level(entity, domain)` | The entity's effective level in a realism domain |
 | `band(entity, field)` | The label of the band the field's value falls in, or `''` |
 | `stage(track)` | The track's current stage |

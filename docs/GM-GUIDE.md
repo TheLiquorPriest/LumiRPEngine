@@ -39,7 +39,7 @@ Open **Play → GM view** and tap **Show the GM view** past its spoiler gate. It
 
 Anything the GM view shows, you can change: a field (set it, or add to a number), a relation and its fields, where something is (at a place, inside a container, or out of it), money on an account (**Add** and **Take**), a track's stage, someone's tier, whether they live off-screen and their levels, and you can **Spawn** a new entity or **Remove from the world** an existing one.
 
-- **Checked, all or nothing.** Every save is checked as the change it makes: a number outside its range, a choice that isn't one of its values, a relation that breaks its kinds or how many it allows, is refused with the reason, and nothing in that save applies. Values are taken as typed, never as formulas.
+- **Checked, all or nothing.** Every save is checked as the change it makes: a value outside its range, a choice that isn't one of its values, a relation that breaks its kinds or how many it allows, is refused with the reason, and nothing in that save applies. **Add** to a number is the one exception: it keeps the result inside the field's range instead of refusing. Values are taken as typed, never as formulas.
 - **Locked fields** (🔒, the ones the AI never sees or writes) are writable here and nowhere else.
 - **Money stays balanced.** Adding or taking money posts against an outside **Correction** account, so the books still balance and the Money panel shows it as a correction.
 - **Remove, don't delete.** **Remove from the world** takes someone out of every scene, list, process and prompt, with whatever they hold, and drops their relations; **Restore** brings them back where they were. Undoing the removal brings the relations back too. Your own character can't be removed.
@@ -61,9 +61,9 @@ A **✎ fix** is the player's quick correction of a value, from the status pill:
 How a check is decided (when the dice roll, what the player's described approach is worth, who settles it, and when a failed try may be tried again) is a policy. The world sets one in **Build → World → Ruleset → How checks are decided**, a player sets their own for new chats, and a running chat can change its own in **Settings → Checks → This chat**: pick **Narrative-first**, **Balanced**, **Crunchy** or **Custom**, and tap **Apply to this chat**.
 
 - The change applies from the next turn and is recorded like a realism change, so it follows swipes and branches, and earlier turns keep the rules they were played under.
-- **Narrative-first** rolls only risky checks and lets the story settle them, with the exact odds as guidance; **Balanced** rolls every check except sure things and hopeless ones, counts the player's approach as a small bonus and flags close calls; **Crunchy** rolls everything and lets the dice settle it. **Custom** sets each value.
+- **Narrative-first** rolls only risky checks and lets the story settle them, with the exact odds as guidance (when no judgement of the player's approach is available, the dice settle them instead); **Balanced** rolls every check except sure things and hopeless ones, counts the player's approach as a small bonus and flags close calls; **Crunchy** rolls everything and lets the dice settle it. **Custom** sets each value.
 - **Marked checks.** With **When checks roll: only where marked**, a check rolls only for an action marked **Its check always rolls**, at a place marked **Checks roll here** (and the places inside it), or while a quest marked **Checks roll while it's in progress** is under way. Mark the dangerous moments in Build and let the rest of the story flow.
-- **What the table sees.** The palette shows the verdict before anyone commits (**No roll needed**, **Too hard to try**, **Retry needs a change**, **The story decides (odds 35%)**), and the **Roll** chip says what was rolled, or "No roll:" and why, with how the approach was rated and any close call. NPC checks rolled by the world's own rules always roll.
+- **What the table sees.** The palette shows the verdict before anyone commits (**No roll needed**, **Too hard to try**, **Retry needs a change**, **The story decides (odds 35%)**), and the **Roll** chip says what was rolled, or "No roll:" and why, with how the approach was rated and any close call. Other people's checks always roll, under narrative authority too.
 
 The full table of presets is in the user guide's [How checks are decided](USER-GUIDE.md#how-checks-are-decided).
 
@@ -77,7 +77,7 @@ Both are per chat once the chat has started, and both are recorded with the stor
 
 ## Upgrading a chat
 
-A chat stays on the world revision it started on. When the world has a newer revision (your commit in Build, an import, newer tables from an extension update), **Settings → Pins and upgrade** offers **Upgrade to the latest revision**, and shows what it brings into this chat, entity by entity, before anything changes.
+A chat stays on the world revision it started on. When you commit a newer revision of the world in Build, **Settings → Pins and upgrade** offers **Upgrade to the latest revision**, and shows what it brings into this chat, entity by entity, before anything changes. (Importing a world makes a new world, so it never upgrades an existing chat.) The world's other definitions, such as places, rules and actions, come with the revision without a pick.
 
 - **New** people and things are listed, and so are ones the revision no longer has: they stay in the chat unless you pick **Remove**.
 - **Each change** to the rest (a field, a name, a tier, classes, a relation, an account's opening balance) shows the chat's value, the revision's value and a pick. **Unchanged in play** (nothing in the chat touched it) starts on **Take**. **Changed in play** (a turn, a fix or a GM edit touched it, even if it later changed back) starts on **Keep**, so an Upgrade never overwrites what happened in the story unless you say so.
