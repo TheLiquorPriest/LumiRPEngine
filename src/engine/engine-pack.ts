@@ -366,18 +366,21 @@ const events: EventTypeDef<PackEvent>[] = [
       const ent = own(ctx.state.entities, str(e, "entity"));
       if (!ent) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
       if (!isLifeState(ctx.world, str(e, "to"))) return { code: "bad_life", reason: `there's no life state ${str(e, "to")}` };
+      const seen = e.data.witnesses;
+      if (seen !== undefined && !(Array.isArray(seen) && seen.every((id) => typeof id === "string"))) return { code: "bad_event", reason: "a life change's witnesses are entity ids" };
       return lifeOf(ctx.state, str(e, "entity")) === str(e, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str(e, "to")).label.toLowerCase()}` } : null;
     },
-    apply: (e, state, ctx) => applyLife(state, ctx, str(e, "entity"), str(e, "to")),
+    apply: (e, state, ctx) => applyLife(state, ctx, str(e, "entity"), str(e, "to"), witnessesOf(e)),
     touches: (e) => [{ entity: str(e, "entity"), aspect: "life" }],
     describe: (e, ctx, viewer) => {
       const id = str(e, "entity");
       const def = lifeStateOf(ctx.world, str(e, "to"));
       const name = own(ctx.state.entities, id)?.name ?? id;
       if (viewer === undefined) return `${name}: ${def.label}`;
-      // A player's line only once the POV knows it: a death it didn't see or hear of has none.
-      if (lifeKnownTo(ctx.state, id, viewer) !== str(e, "to")) return "";
-      return id === viewer ? `You: ${def.label}` : `${name} ${def.reads}`;
+      if (id === viewer) return `You: ${def.label}`;
+      // A player's line only for one who saw it change: one learned of later is the telling's news
+      // (`engine.told`), so the turn it happened on never dates it.
+      return witnessesOf(e)?.includes(viewer) === true ? `${name} ${def.reads}` : "";
     },
   },
   {
@@ -398,6 +401,12 @@ const events: EventTypeDef<PackEvent>[] = [
     },
   },
 ];
+
+/** Who an `engine.life` event records seeing the change; null on one recorded before witnesses were. */
+function witnessesOf(e: PackEvent): EntityId[] | null {
+  const seen = e.data.witnesses;
+  return Array.isArray(seen) ? seen.filter((id): id is string => typeof id === "string") : null;
+}
 
 /** A formula argument naming an entity in the state, with that entity; null otherwise. */
 function entityArg(ctx: ReadContext, v: Value | undefined): [EntityId, EntityState] | null {

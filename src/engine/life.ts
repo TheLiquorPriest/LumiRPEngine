@@ -107,15 +107,24 @@ function peopleAt(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, p
     .filter((id) => placeOfEntity(state, id) === place && isPerson(reg, world, state, id));
 }
 
-/** `engine.life`'s apply: the subject's new state, learned by everyone with it as it changes. */
-export function applyLife(state: WorldState, ctx: ReadContext, subject: EntityId, to: LifeStateId): void {
+/** The people with a subject as its state changes: who see it change. */
+function witnessesOf(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, subject: EntityId): EntityId[] {
+  const place = placeOfEntity(state, subject);
+  return place === null ? [] : peopleAt(reg, world, state, place).filter((id) => id !== subject);
+}
+
+/**
+ * `engine.life`'s apply: the subject's new state, learned by those who saw it change (`witnesses`,
+ * recorded as it resolved); an event recorded before witnesses were teaches whoever is with it.
+ */
+export function applyLife(state: WorldState, ctx: ReadContext, subject: EntityId, to: LifeStateId, witnesses: readonly EntityId[] | null): void {
   const e = own(state.entities, subject);
   if (!e) return;
   const by = learners(state, subject, lifeOf(state, subject));
+  const seen = witnesses ?? witnessesOf(ctx.registry, ctx.world, state, subject);
   if (to === ALIVE) delete e.life;
   else e.life = to;
-  const place = placeOfEntity(state, subject);
-  if (place !== null) for (const id of peopleAt(ctx.registry, ctx.world, state, place)) if (id !== subject) by[id] = to;
+  for (const id of seen) if (id !== subject && own(state.entities, id)) by[id] = to;
 }
 
 /** `engine.told`'s apply: those named learn the subject's state as it is. While it never changed in play, everyone knows it already. */
@@ -195,7 +204,7 @@ export function lifeEffect(args: Record<string, JsonValue>, ctx: ReadContext): L
   if (!Array.isArray(who)) return who;
   if (to === null && who.length === 0) return { code: "bad_args", reason: "a life change needs a state to set or someone to tell" };
   const now = lifeOf(ctx.state, subject);
-  const out: LedgerEvent[] = to !== null && to !== now ? [{ type: ENGINE_EVENTS.life, data: { entity: subject, to } }] : [];
+  const out: LedgerEvent[] = to !== null && to !== now ? [{ type: ENGINE_EVENTS.life, data: { entity: subject, to, witnesses: witnessesOf(ctx.registry, ctx.world, ctx.state, subject) } }] : [];
   const after = to ?? now;
   const told = who.filter((id) => id !== subject && (out.length > 0 || lifeKnownTo(ctx.state, subject, id) !== after));
   const pov = told.filter((id) => id === ctx.world.pov);

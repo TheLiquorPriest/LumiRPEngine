@@ -236,6 +236,8 @@ describe("life states: who knows", () => {
     life(w, { entity: "jordan", tell: [YOU] });
     expect(castLife(w, "jordan")).toBe("Dead");
     expect(playerLines(reg, w.world, w.state, YOU, w.events.slice(told))).toEqual(["Jordan Price lies dead"]);
+    // The turn it happened on stays without a line: the Journal never dates a death the POV only heard of.
+    expect(playerLines(reg, w.world, w.state, YOU, death)).toEqual([]);
     expect(buildGmWorld(reg, w.world, w.state).entities.find((e) => e.id === "jordan")?.life.aware.map((p) => p.id)).toEqual([YOU]);
 
     // Brought back while Alex is away: Alex still takes him for dead, with no hint, until it sees him.
@@ -245,6 +247,12 @@ describe("life states: who knows", () => {
     expect(castLife(w, "jordan")).toBeUndefined();
     expect(peopleLines(w).join(" ")).toContain("Jordan Price");
     expect(peopleLines(w).join(" ")).not.toContain("dead");
+
+    // Seen: a death in front of Alex is that turn's news, however much later the Journal is read.
+    const seen = w.events.length;
+    life(w, { entity: "jordan", to: "dead" });
+    move(w, YOU, "apartment");
+    expect(playerLines(reg, w.world, w.state, YOU, w.events.slice(seen, seen + 1))).toEqual(["Jordan Price lies dead"]);
   });
 });
 
