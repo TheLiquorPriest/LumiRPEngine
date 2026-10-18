@@ -8,7 +8,7 @@ import { hasOwn } from "../shared/json";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { InterruptClass, InterruptPolicy } from "../shared/ids";
 import type { TimeControl, TimeScope } from "../shared/ledger";
-import { SPEED_ACTIVITIES, SPEED_DEFAULT } from "../shared/settings";
+import { SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import { HostSlider, NumberStepper, Seg } from "./components";
 import { formatMinutes, humanize } from "./format";
 
@@ -119,8 +119,8 @@ export function TimeControlsEditor(props: { values: TimeValues; onChange(change:
             <NumberStepper
               label="When longer than (min)"
               value={policy?.thresholdMinutes ?? null}
-              min={0}
-              max={1440}
+              min={SPEED_THRESHOLD_MINUTES[0]}
+              max={SPEED_THRESHOLD_MINUTES[1]}
               step={5}
               integer
               disabled={props.disabled}

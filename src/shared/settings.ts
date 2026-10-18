@@ -73,6 +73,8 @@ export const PRE_REPLY_MAX_MS = CONTEXT_HANDLER_MAX_MS - PLAN_MARGIN_MS;
 /** The activities Speed through always lists (DESIGN §9.2), each offered as a timelapse past 30 minutes unless set otherwise; worlds may add more. */
 export const SPEED_ACTIVITIES = ["sleep", "work_shift", "travel", "waiting"] as const;
 export const SPEED_DEFAULT: Readonly<{ mode: "offer" | "auto"; thresholdMinutes: number }> = Object.freeze({ mode: "offer", thresholdMinutes: 30 });
+/** A Speed-through threshold's range in whole minutes, 1 minute to 7 days (DESIGN §9.2): what Settings keeps, the controls offer and the engine reads. */
+export const SPEED_THRESHOLD_MINUTES = [1, 7 * 1440] as const;
 
 export interface PhaseBudget {
   calls: number;

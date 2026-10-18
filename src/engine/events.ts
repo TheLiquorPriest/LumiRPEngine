@@ -9,6 +9,7 @@ import { readAdjudication } from "../shared/adjudication";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { DomainId, EntityId, Level } from "../shared/ids";
 import { BANDS, DOMAINS, INTERRUPT_CLASSES } from "../shared/ids";
+import { SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import type {
   AddEvent,
   ClockEvent,
@@ -285,8 +286,8 @@ export const TIME_CONTROLS: readonly TimeControl[] = ["tick", "scale", "pause", 
 /** Controls earlier builds wrote: a stored marker stays valid, with its body as it was clamped then (record paths hash it). */
 const RETIRED_TIME_CONTROLS: readonly RetiredTimeControl[] = ["npc_calls"];
 
-/** Bounds for time controls (DESIGN §9.2): minutes per tick, the time scale and the unit cap. */
-export const TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: [1, 10_080], agentDays: [1, 600], events: [1, 5000] } as const);
+/** Bounds for time controls (DESIGN §9.2): minutes per tick, the time scale, the Speed-through threshold and the unit cap. */
+export const TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: SPEED_THRESHOLD_MINUTES, agentDays: [1, 600], events: [1, 5000] } as const);
 
 function clamp(v: number, [lo, hi]: readonly [number, number], integer = true): number {
   const x = Math.min(hi, Math.max(lo, v));

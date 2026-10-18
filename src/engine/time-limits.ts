@@ -3,6 +3,7 @@
 // world document, an imported ledger or an intent can never ask for an unbounded run.
 
 import type { Level } from "../shared/ids";
+import { SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import { MINUTES_PER_DAY } from "./calendar";
 
 export const TIME_LIMITS = Object.freeze({
@@ -15,7 +16,7 @@ export const TIME_LIMITS = Object.freeze({
   /** The unit cap's ceiling per segment: the default cap. */
   unitCap: Object.freeze({ agentDays: 600, events: 5000 }),
   /** A Speed-through threshold's range, in minutes. */
-  thresholdMinutes: [1, 7 * MINUTES_PER_DAY] as const,
+  thresholdMinutes: SPEED_THRESHOLD_MINUTES,
 });
 
 function finite(v: unknown): number | null {

@@ -288,7 +288,7 @@ For long activities (sleep, a work shift, travel, waiting), the engine can skip 
 
 Your own settings give every listed activity a policy (offer, past 30 minutes), and a world can set its own for any activity. An activity without one (in a chat started before it had one, or a world's own activity that the world leaves unset) passes within the turn however long it takes: its row says *passes within the turn* and shows no mode or threshold, and picking either gives it a policy.
 
-When the narration implies an activity the engine hadn't seen start, you always get the offer chip, because the engine never starts a generation by itself. Activities shorter than the threshold simply elapse. The offer reads "Timelapse to 07:00 (8 h 55 min)?" (with the weekday when it is another day); the **Timelapse** button on it runs the Timelapse. A threshold can be anything from a minute to a week.
+When the narration implies an activity the engine hadn't seen start, you always get the offer chip, because the engine never starts a generation by itself. Activities shorter than the threshold simply elapse. The offer reads "Timelapse to 07:00 (8 h 55 min)?" (with the weekday when it is another day); the **Timelapse** button on it runs the Timelapse. A threshold can be anything from a minute to a week (1 to 10,080 on the stepper); a threshold outside that, such as a 0 an earlier version let you save, reads as the nearest end.
 
 ### When the story jumps ahead
 

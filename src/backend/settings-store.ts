@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, SPEED_ACTIVITIES, SPEED_DEFAULT } from "../shared/settings";
+import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import type { HostPort } from "./host";
@@ -160,8 +160,10 @@ const level = (v: unknown): Level | undefined => LEVELS.find((l) => l === v);
 function speedOf(x: unknown): TimeSettings["speedThrough"][string] | undefined {
   if (!isRecord(x)) return undefined;
   const mode = oneOf(x.mode, ["offer", "auto"] as const);
-  const thresholdMinutes = int(x.thresholdMinutes, 0, 525_600);
-  return mode && thresholdMinutes !== undefined ? { mode, thresholdMinutes } : undefined;
+  // Clamped, not refused: a threshold saved before the range held (0 from the old stepper) keeps its policy.
+  const [lo, hi] = SPEED_THRESHOLD_MINUTES;
+  const raw = real(x.thresholdMinutes, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY);
+  return mode && raw !== undefined ? { mode, thresholdMinutes: Math.round(Math.min(hi, Math.max(lo, raw))) } : undefined;
 }
 /** An open map's own, safe entries, each checked by `entry` (dropped when it returns undefined). */
 function entries<T>(v: unknown, max: number, entry: (value: unknown) => T | undefined): Record<string, T> {
