@@ -37,6 +37,15 @@ export function stepLoreOf(config: StepConfig | null | undefined): Readonly<Step
   return config?.lore ?? DEFAULT_STEP_LORE;
 }
 
+/**
+ * A step's saved settings, else what it runs with while none are saved: `puzzle.answer` is the
+ * author's opt-in, so it runs on every Answer unless the user turns it off; any other is off. The
+ * turn and Settings → Steps both read this, so the card shows what runs and its switch flips it.
+ */
+export function stepConfigOf(steps: Partial<Record<StepPurpose, StepConfig>>, purpose: StepPurpose): StepConfig {
+  return steps[purpose] ?? (purpose === "puzzle.answer" ? { enabled: true, signals: ["always"] } : { enabled: false, signals: [] });
+}
+
 export interface StepConfig {
   enabled: boolean;
   /** Signals that trigger the step (DESIGN §5.2). */

@@ -14,6 +14,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { LedgerEvent } from "../shared/ledger";
 import type { LookupLimits, ModelUseSettings, StepConfig } from "../shared/settings";
+import { stepConfigOf } from "../shared/settings";
 import type { StepSignal } from "../shared/steps";
 import type { ActionDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock } from "../engine/calendar";
@@ -254,12 +255,12 @@ function templatesFor(world: WorldDoc, purpose: StepPurpose): StepTemplateDef[] 
 
 /**
  * The runs of a purpose this phase: one per world template (its own signals, else the step's),
- * or the built-in prompt. The user's step settings decide whether the purpose runs at all;
- * `puzzle.answer` is the author's opt-in, so it runs unless the user turned it off.
+ * or the built-in prompt. The user's step settings decide whether the purpose runs at all
+ * (`stepConfigOf`: `puzzle.answer` is the author's opt-in, so it runs unless the user turned it off).
  */
 export function runsOf(modelUse: ModelUseSettings, world: WorldDoc, purpose: StepPurpose, facts: SignalFacts, output?: StepTemplateDef["output"]): StepRun[] {
-  const config = modelUse.steps[purpose] ?? (purpose === "puzzle.answer" ? { enabled: true, signals: ["always"] } : null);
-  if (!config?.enabled) return [];
+  const config = stepConfigOf(modelUse.steps, purpose);
+  if (!config.enabled) return [];
   const templates = templatesFor(world, purpose).filter((t) => output === undefined || t.output === output);
   if (templates.length === 0) return output === "effects" ? [] : fires(config.signals, facts) ? [{ purpose, config, template: null }] : [];
   return templates.filter((t) => fires(t.signals.length > 0 ? t.signals : config.signals, facts)).map((template) => ({ purpose, config, template }));

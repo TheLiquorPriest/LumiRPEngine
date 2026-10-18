@@ -8,7 +8,7 @@ import type { JsonObject } from "../../shared/json";
 import type { ModelUsePresetId } from "../../shared/ids";
 import { PROSE_STEPS } from "../../shared/lore";
 import type { LorePolicy, LoreTransport, ModelUseSettings, StepConfig } from "../../shared/settings";
-import { PRE_REPLY_MAX_MS, stepLoreOf } from "../../shared/settings";
+import { PRE_REPLY_MAX_MS, stepConfigOf, stepLoreOf } from "../../shared/settings";
 import type { CallMeterView } from "../../shared/state-view";
 import type { StepPurpose } from "../../shared/world";
 import { useApp } from "../app";
@@ -146,7 +146,7 @@ export function StepsSection(props: { modelUse: ModelUseSettings; patch(patch: J
   return (
     <div class="lre-list">
       {(Object.keys(STEP_LABEL) as StepPurpose[]).map((purpose) => {
-        const config: StepConfig = props.modelUse.steps[purpose] ?? { enabled: false, signals: [] };
+        const config = stepConfigOf(props.modelUse.steps, purpose);
         const route = config.route ?? { provider: purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
         const lowTokens = config.maxTokens !== undefined && config.maxTokens < 1500;
         const lore = stepLoreOf(config);
