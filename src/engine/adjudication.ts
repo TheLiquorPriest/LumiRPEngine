@@ -19,12 +19,14 @@ import { hashJson, hashParts } from "../shared/hash";
 import type { EntityId } from "../shared/ids";
 import { isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
+import type { PaletteOption } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, CheckAuthority, CheckDef, RetryRule, WorldDoc } from "../shared/world";
 import { bandOutcome, checkBands, NO_BAND, type CheckReading, type CheckShift, type ReadyCheck } from "./checks";
 import { readEngineSlice, type TryRecord } from "./engine-pack";
 import type { Value } from "./expr";
 import { own } from "./pack-kit";
 import type { Registry } from "./registry-impl";
+import type { Availability } from "./resolve";
 import type { Rng } from "./rng";
 import { placeOfEntity } from "./scope";
 import { placeVisit } from "./seen";
@@ -278,8 +280,12 @@ export function lintAdjudication(world: WorldDoc): LintIssue[] {
   if (policy.checks === "marked" && !marks) issues.push({ severity: "warning", path: `${at}.checks`, code: "adjudication_unmarked", message: "Checks roll only for marked actions, places and tracks, and nothing is marked: no check will ever roll." });
   // Every timing but `every`, a threshold and a retry rule read a check's success (a retry must tell a failure).
   const readsChance = policy.checks !== "every" || policy.trivialAt !== null || policy.impossibleAt !== null || policy.retry !== "free";
-  // Each check the world defines (by id or inline in an action), read with the bands it rolls with.
-  const checks: [string, CheckDef][] = [...Object.entries(world.checks).map(([id, c]): [string, CheckDef] => [`checks.${id}`, c]), ...Object.entries(world.actions).flatMap(([id, a]): [string, CheckDef][] => (typeof a.check === "object" && a.check !== null ? [[`actions.${id}.check`, a.check]] : []))];
+  // Each check the world defines (by id or inline in an action), read with the bands it rolls with. The
+  // combat rules' initiative rolls when a fight starts, never through the policy, unless an action takes it too.
+  const combat: unknown = isRecord(world.ruleset) ? world.ruleset.combat : undefined;
+  const initiative = isRecord(combat) && typeof combat.initiative === "string" ? combat.initiative : null;
+  const policyChecks = Object.entries(world.checks).filter(([id]) => id !== initiative || Object.values(world.actions).some((a) => a.check === id));
+  const checks: [string, CheckDef][] = [...policyChecks.map(([id, c]): [string, CheckDef] => [`checks.${id}`, c]), ...Object.entries(world.actions).flatMap(([id, a]): [string, CheckDef][] => (typeof a.check === "object" && a.check !== null ? [[`actions.${id}.check`, a.check]] : []))];
   for (const [path, check] of checks) {
     const bands = checkBands(check, check.dc !== undefined || check.vs !== undefined ? 0 : null);
     const known = new Set(bands.map((b) => b.outcome));
@@ -288,4 +294,20 @@ export function lintAdjudication(world: WorldDoc): LintIssue[] {
     if (readsChance && passOutcomes(check, bands).length === 0) issues.push({ severity: "info", path, code: "adjudication_success", message: "This check names no success (no success band and no pass list), so the policy can't tell its chance or grant it without a roll: it rolls whenever its action runs (under narrative authority the story decides, and the dice when it can't), and a failed try isn't remembered." });
   }
   return issues;
+}
+
+/**
+ * How an option's check reads in the palette and the Encounter card (DESIGN §11): what the
+ * adjudication policy makes of it when nothing rolls ("No roll needed", "Too hard to try", "Retry
+ * needs a change"), else advantage or disadvantage and the DC when it isn't an opposed roll (the
+ * option already names the opponent). The odds bar shows only for a check the dice roll or the story
+ * decides, where it is the guidance.
+ */
+export function checkView(a: Availability, retry: RetryRule): Pick<PaletteOption, "detail" | "odds"> {
+  const c = a.check;
+  const v = a.verdict;
+  const rolls = !v || v.roll;
+  const verdict = !v || v.roll ? null : v.why === "impossible" ? "Too hard to try" : v.why === "story" ? (v.chance === null ? "The story decides" : `The story decides (odds ${Math.round(v.chance * 100)}%)`) : v.why === "retry" ? (retry === "once" ? "Retry needs a new scene" : "Retry needs a change") : "No roll needed";
+  const parts = [verdict ?? "", c && rolls ? (c.advantage > 0 ? "with advantage" : c.advantage < 0 ? "with disadvantage" : "") : "", c && rolls && c.dc !== null && c.opponent === null ? `DC ${c.dc}` : ""].filter((p) => p !== "");
+  return { ...(parts.length > 0 ? { detail: parts.join(" · ") } : {}), ...(a.odds && (rolls || v?.why === "story") ? { odds: Object.entries(a.odds).map(([outcome, p]) => ({ outcome, p })) } : {}) };
 }

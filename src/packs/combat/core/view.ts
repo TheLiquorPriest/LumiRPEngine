@@ -8,9 +8,10 @@ import type { JsonObject } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { PaletteEncounter, PaletteEntry, PaletteOption } from "../../../shared/state-view";
 import type { ActionDef } from "../../../shared/world";
+import { checkView, policyFor } from "../../../engine/adjudication";
 import { labelOf, optionalQuery, own } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
-import { actionOdds, paramCandidates, type Availability } from "../../../engine/resolve";
+import { actionOdds, paramCandidates } from "../../../engine/resolve";
 import { isGone } from "../../../engine/scope";
 import { canSeeEntity } from "../../../engine/visibility";
 import { combatActions, hpSeen, targetParam } from "./flow";
@@ -54,20 +55,13 @@ function nameOf(ctx: ReadContext, id: EntityId, gm: boolean): string | null {
   return gm || canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? labelOf(ctx, id) : null;
 }
 
-/** How a check rolls beside its odds: advantage or disadvantage, and the DC when it isn't an opposed roll. */
-function detailOf(a: Availability): { detail?: string } {
-  const c = a.check;
-  const parts = c ? [c.advantage > 0 ? "with advantage" : c.advantage < 0 ? "with disadvantage" : "", c.dc !== null && c.opponent === null ? `DC ${c.dc}` : ""].filter((p) => p !== "") : [];
-  return parts.length > 0 ? { detail: parts.join(" · ") } : {};
-}
-
 function optionOf(ctx: ReadContext, action: ActionDef, params: JsonObject, label: string): PaletteOption {
   const odds = actionOdds(ctx.registry, ctx.world, ctx.state, { action, params });
   return {
     label,
     params,
-    ...detailOf(odds),
-    ...(odds.odds ? { odds: Object.entries(odds.odds).map(([outcome, p]) => ({ outcome, p })) } : {}),
+    // As every other check reads: an attack the policy settles without a roll shows no dice odds.
+    ...checkView(odds, policyFor(ctx.world, ctx.state, action).retry),
     ...(odds.duration > 0 ? { minutes: odds.duration } : {}),
     ...(odds.available ? {} : { disabled: odds.failed?.code === "requirement" ? "Not possible here and now" : (odds.failed?.reason ?? "Not available") }),
   };

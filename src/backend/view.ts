@@ -9,9 +9,9 @@ import { isRecord } from "../shared/json";
 import { bandTiers } from "../shared/tiers";
 import type { ChatRun, EventRef, HeldWrite, JournalNote, KeepLine, LedgerEvent, Rec } from "../shared/ledger";
 import type { CallMeterView, Chip, ControlsView, HudView, PaletteEntry, PaletteOption, PaletteView, PendingMark, SceneView, StateView, TimelapseView } from "../shared/state-view";
-import type { ActionDef, MapDisplay, RetryRule, WorldDoc } from "../shared/world";
+import type { ActionDef, MapDisplay, WorldDoc } from "../shared/world";
 import { tableChoices } from "../shared/tables";
-import { policyOf } from "../engine/adjudication";
+import { checkView, policyOf } from "../engine/adjudication";
 import { calendarOf, dayPartAt, formatClock, placeOffset } from "../engine/calendar";
 import { clockPaused, placeSceneType, sceneType } from "../engine/time";
 import { identifiers } from "../engine/expr";
@@ -23,7 +23,7 @@ import { playerDrop, playerLines, UNSEEN_DROP } from "../engine/player-events";
 import type { ReadContext } from "../engine/registry";
 import { presetOf } from "../engine/realism";
 import { levelFloors, type Registry } from "../engine/registry-impl";
-import { actionOdds, paramCandidates, type Availability } from "../engine/resolve";
+import { actionOdds, paramCandidates } from "../engine/resolve";
 import { isGone, kindIs, placeOfEntity } from "../engine/scope";
 import type { WorldState } from "../engine/state";
 import { definitionsLag } from "../engine/upgrade";
@@ -129,21 +129,6 @@ function scene(world: WorldDoc, state: WorldState, headElapsed: number, registry
 function unavailable(failed: { code: string; reason: string } | null | undefined): string {
   if (!failed) return "Not available";
   return failed.code === "requirement" ? "Not possible here and now" : failed.reason;
-}
-
-/**
- * How an option's check reads in the palette (DESIGN §11): what the adjudication policy makes of it
- * when nothing rolls ("No roll needed", "Too hard to try", "Retry needs a change"), else advantage or
- * disadvantage and the DC when it isn't an opposed roll (the option already names the opponent).
- * The odds bar shows only for a check the dice roll or the story decides, where it is the guidance.
- */
-function checkView(a: Availability, retry: RetryRule): Pick<PaletteOption, "detail" | "odds"> {
-  const c = a.check;
-  const v = a.verdict;
-  const rolls = !v || v.roll;
-  const verdict = !v || v.roll ? null : v.why === "impossible" ? "Too hard to try" : v.why === "story" ? (v.chance === null ? "The story decides" : `The story decides (odds ${Math.round(v.chance * 100)}%)`) : v.why === "retry" ? (retry === "once" ? "Retry needs a new scene" : "Retry needs a change") : "No roll needed";
-  const parts = [verdict ?? "", c && rolls ? (c.advantage > 0 ? "with advantage" : c.advantage < 0 ? "with disadvantage" : "") : "", c && rolls && c.dc !== null && c.opponent === null ? `DC ${c.dc}` : ""].filter((p) => p !== "");
-  return { ...(parts.length > 0 ? { detail: parts.join(" · ") } : {}), ...(a.odds && (rolls || v?.why === "story") ? { odds: Object.entries(a.odds).map(([outcome, p]) => ({ outcome, p })) } : {}) };
 }
 
 /** A param's label for a palette step: its own, else its ref kind's ("Person"), else its name in words ("Days"). */

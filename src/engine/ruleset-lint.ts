@@ -5,6 +5,7 @@
 
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
+import { defaultAdjudication, readAdjudication } from "../shared/adjudication";
 import { DOMAINS } from "../shared/ids";
 import type { LintIssue } from "../shared/protocol";
 import type { CheckDef, EffectSpec, Expr, ProgressionDef, WorldDoc } from "../shared/world";
@@ -311,6 +312,12 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
     else if (hpDef && !hpDef.pool) warn("ruleset.combat.hp", "combat", `${hp} isn't a pool, so damage has no floor and HP shows no max.`);
     if (combat.endTurn !== undefined && combat.endTurn !== "spent" && combat.endTurn !== "manual") err("ruleset.combat.endTurn", "combat", "The POV's turn ends once it's spent, or only on End turn (manual).");
     if (combat.adjudicate !== undefined && combat.adjudicate !== "dice" && combat.adjudicate !== "policy") err("ruleset.combat.adjudicate", "combat", "A fight's checks are settled by the dice, or by the adjudication policy (policy).");
+    if (combat.adjudicate === "policy") {
+      // Everyone else's turns have no judge, and the same attack comes round every turn (DESIGN §11).
+      const policy = readAdjudication(isRecord(world.ruleset) ? world.ruleset.adjudication : undefined) ?? defaultAdjudication();
+      if (policy.authority === "narrative") warn("ruleset.combat.adjudicate", "combat", "Fights follow the policy, and under narrative authority only your own attacks get the judge: everyone else's are settled without one.");
+      if (policy.retry !== "free") warn("ruleset.combat.adjudicate", "combat", `Fights follow the policy, and its retry rule refuses the same attack after a miss until ${policy.retry === "once" ? "a new scene" : "something changes"}: a missed attack can't simply be tried again next round.`);
+    }
     if (combat.showHp !== undefined && combat.showHp !== "wounds" && combat.showHp !== "exact") err("ruleset.combat.showHp", "combat", "Others' HP shows as wounds or as exact numbers.");
     if (combat.wounds !== undefined && (!Array.isArray(combat.wounds) || combat.wounds.some((b) => !isRecord(b) || typeof b.label !== "string"))) err("ruleset.combat.wounds", "combat", "Wounds are bands with labels over the HP left, in percent.");
     const sites = exprSites(world);
