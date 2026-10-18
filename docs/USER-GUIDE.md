@@ -528,7 +528,7 @@ Some presets ask the AI to end every reply with a block of JSON between `<json>`
 
 ### Your preset
 
-Your preset can have a say in world chats while it is active. A block of it holding `{{outlet::lre_scene}}` (or `lre_outcome`, `lre_people` and so on) puts that section there instead of where the world places it; switched-off blocks named **RPEngine · extract**, **RPEngine · brief** and so on give that helper of the engine style and rules for your preset; and a switched-off **RPEngine · narrator** block gives the narrator rules in world chats only. **Settings → Preset** shows the preset in use, which of these it has, and **Add RPEngine blocks to this preset**, which adds the missing guidance blocks, switched off and holding notes on what each is for, under an **RPEngine** category.
+Your preset can have a say in world chats while it is active. A block of it holding `{{outlet::lre_scene}}` (or `lre_outcome`, `lre_people` and so on) puts that section there instead of where the world places it; switched-off blocks named **RPEngine · extract**, **RPEngine · brief** and so on give that helper of the engine style and rules for your preset; and a switched-off **RPEngine · narrator** block gives the narrator rules in world chats only. **Settings → Preset** shows the preset in use, which of these it has, and **Add RPEngine blocks to this preset**, which adds the missing guidance blocks, switched off and holding notes on what each is for, under an **RPEngine** category. [Presets and RPEngine](PRESETS.md) has every outlet, the guidance each helper takes, and examples.
 
 ### Delivery verification
 

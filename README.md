@@ -26,6 +26,7 @@ The full walkthrough is in the [user guide](docs/USER-GUIDE.md).
 ## Documentation
 
 - **[User guide](docs/USER-GUIDE.md):** playing, tuning and building, every button explained.
+- **[Presets and RPEngine](docs/PRESETS.md):** for preset authors: the section outlets, placement precedence, guidance blocks for the engine's helpers and the narrator, with examples.
 - **[GM guide](docs/GM-GUIDE.md):** running a chat: who sees what, the GM view and its edits, fixes and Undo, checks, realism and time in one chat, Upgrade, and the Context inspector.
 - **[Recipes](docs/RECIPES.md):** small worlds that each show one thing working, from XP and levels to a family's schedule, every one checked by a test.
 - **[Expressions](docs/EXPRESSIONS.md):** the formula language for requirements, checks, derived fields and rules.
