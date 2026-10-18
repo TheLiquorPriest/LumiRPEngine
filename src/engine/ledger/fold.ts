@@ -5,9 +5,9 @@
 //  - stored snapshots (cold folds): a fold with no cached prefix finds the furthest stored
 //    state on its chain by path hash, rebuilds the outputs before it without state, and folds on
 //    from there; it stores a snapshot every SNAPSHOT_EVERY messages;
-//  - re-convergence: a rebased record whose running state equals the state that same record, with
-//    the same markers, folded from on its own path with nothing failing applies without
-//    re-validation (validation is a function of state).
+//  - re-convergence: a rebased record whose running state equals the state a record folding the
+//    same (events, post entries, undos, Keep overlays, path and markers) folded from on its own
+//    path with nothing failing applies without re-validation (validation is a function of state).
 // L1 holds when this equals referenceFold for every input; L42 checks snapshot-started folds.
 
 import { hashJson, hashParts } from "../../shared/hash";
@@ -63,9 +63,11 @@ export interface LedgerFoldOptions {
 export class LedgerFold {
   private readonly cache = new Map<string, Step>();
   /**
-   * Per stored record and its message's markers: the hash of the state they folded from on the
-   * record's own path with nothing failing, for re-convergence. Keyed by record, not by path: the
-   * swipes of a message share their parent path, and one may hold what fails there.
+   * Per record fold (what a step folds besides the state: the record's events, `markersApplied`,
+   * post entries, undos, Keep overlays and path, and its message's markers): the hash of the state
+   * it folded from on the record's own path with nothing failing, for re-convergence. Keyed by
+   * record, not by path: the swipes of a message share their parent path, and one may hold what
+   * fails there. What the step never reads (an accepted edit, the status) leaves it as it was.
    */
   private readonly settled = new Map<string, string>();
   private readonly every: number;
@@ -74,11 +76,12 @@ export class LedgerFold {
   /** Cache keys whose state copy exists only because they ended a fold (demoted when they age out). */
   private readonly tails: string[] = [];
   /**
-   * Digests of message texts, stored records and markers, keyed by their exact text (a warm
-   * fold's prefix walk then hashes only what changed; the lookup is the host's string hashing).
-   * Records and markers come from parsed JSON, so their JSON text determines their canonical digest.
+   * Digests of message texts, stored records, markers and record folds, keyed by their exact text
+   * (a warm fold's prefix walk then hashes only what changed; the lookup is the host's string
+   * hashing). Records and markers come from parsed JSON, so their JSON text determines their
+   * canonical digest.
    */
-  private readonly digests = { content: new Map<string, string>(), record: new Map<string, string>(), markers: new Map<string, string>(), key: new Map<string, string>() };
+  private readonly digests = { content: new Map<string, string>(), record: new Map<string, string>(), markers: new Map<string, string>(), folds: new Map<string, string>(), key: new Map<string, string>() };
 
   constructor(
     private readonly types: FoldTypes,
@@ -275,8 +278,9 @@ export class LedgerFold {
       for (const mk of liveMarkers) marker(mk);
     } else {
       const view = f.result.fold === "view";
-      // Re-convergence is keyed by what this step folds besides the state: the record and its message's markers.
-      const settledKey = recPath === null ? "" : `${this.digest(this.digests.record, JSON.stringify(rec), () => hashJson(rec))}:${this.digest(this.digests.markers, JSON.stringify(m.ledger?.markers ?? []), () => hashJson(m.ledger?.markers ?? []))}`;
+      // Re-convergence is keyed by what this step folds besides the state.
+      const folds = recPath === null ? null : [rec.events, rec.markersApplied, rec.post, rec.undone, rec.keep ?? null, rec.path, m.ledger?.markers ?? []];
+      const settledKey = folds === null ? "" : this.digest(this.digests.folds, JSON.stringify(folds), () => hashJson(folds));
       const before = recPath !== null && !view && !this.settled.has(settledKey) ? hashJson(state) : null;
       let converged = false;
       if (view) {

@@ -7,7 +7,7 @@ import type { EventRef, LedgerEvent, Marker, PostEntry, Rec } from "../../src/sh
 import type { ChainMessage, FoldInput, FoldOutput } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
 import { computePaths, contentId, storedRecordHash } from "../../src/engine/ledger/path";
-import { referenceFold } from "../../src/engine/ledger/reference";
+import { referenceFold, type FoldTypes } from "../../src/engine/ledger/reference";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { POV, testPack, testWorlds } from "../support/test-pack";
 
@@ -187,5 +187,42 @@ describe("reference fold", () => {
     const out = both({ chain });
     expect(out.messages[2]?.fold).toBe("plain");
     expect(cashOf(out)).toBe(103);
+  });
+
+  test("re-convergence: a view from the state its record had on its own path skips re-validation, an accepted edit of it included", () => {
+    let validations = 0;
+    const counted: FoldTypes = {
+      relations: registry.relations,
+      context: registry.context,
+      get: (type) => {
+        const def = registry.get(type);
+        return def && { ...def, validate: (e, ctx) => (validations++, def.validate(e, ctx)) };
+      },
+    };
+    const tick: LedgerEvent = { type: "clock", minutes: 2, cause: "tick" };
+    const chain = [reply("a0", "Morning."), user("u1", "walk"), reply("a1", "Walked.", "Strolled."), user("u2", "look"), reply("a2", "Saw.")];
+    // Both swipes of a1 leave the same state, so a2 is a view from its own path's state on either.
+    const a1 = chain[2];
+    if (!a1) throw new Error("no a1");
+    record(chain, 2, [tick]);
+    a1.swipeId = 1;
+    record(chain, 2, [tick]);
+    a1.swipeId = 0;
+    const a2 = record(chain, 4, [tick]);
+    // Every step keeps its state, so a re-fold runs only from the first message that changed.
+    const folder = new LedgerFold(counted, { snapshotEvery: 1 });
+    const fold = (): FoldOutput => folder.fold({ worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain });
+    fold();
+    a1.swipeId = 1;
+    validations = 0;
+    expect(fold().messages[4]?.fold).toBe("view");
+    // a1's new swipe is validated on its path; a2 converges.
+    expect(validations).toBe(1);
+    // An assistant edit of the view changes nothing a fold reads.
+    a2.accepted = contentId("Saw, edited.");
+    validations = 0;
+    const edited = fold();
+    expect(validations).toBe(0);
+    expect(hashJson(edited.state)).toBe(hashJson(referenceFold({ worlds: (r) => worlds.get(r), revision, pauses: [], tombstones: [], chain }, registry).state));
   });
 });
