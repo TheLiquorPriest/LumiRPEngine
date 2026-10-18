@@ -77,7 +77,7 @@ export function LoreList(props: { worldId: string }) {
   return (
     <div class="lre-stack" data-lre-lore-list>
       <div class="lre-h2">Lore</div>
-      <span class="lre-small lre-muted">Kept in the world; it isn't delivered to the AI yet.</span>
+      <span class="lre-small lre-muted">Kept in the world. The engine's helpers read it; the narrator doesn't get it yet.</span>
       <div class="lre-list">
         <button type="button" class="lre-item" onClick={() => go(app, { view: "part", worldId: draft.worldId, part: "loreIndex" })}>
           <span class="grow">
