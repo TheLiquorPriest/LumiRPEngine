@@ -71,6 +71,8 @@ export interface BookEntries {
   slots: Map<SlotId, string>;
   /** Each section's outlet twin, outlet-only at `{{outlet::lre_<slot>}}`, for a preset that places the section itself (DESIGN §6.8). */
   twins: Map<SlotId, string>;
+  /** The sections whose own entry was last placed for an outlet Position (the head revision's): it lands only where that outlet stands. */
+  atOutlet: Set<SlotId>;
   /** The preset's narrator rules: their own entry (before the character) and their twin at `{{outlet::lre_narrator}}`. */
   narrator: string | null;
   narratorOutlet: string | null;
@@ -78,7 +80,7 @@ export interface BookEntries {
 
 /** The engine's entries among a book's, with the Position each slot entry was placed for, and the lore copies an earlier build left. */
 function sortEntries(all: readonly HostBookEntry[]): { found: BookEntries; slots: Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>; leftoverLore: string[] } {
-  const found: BookEntries = { slots: new Map(), twins: new Map(), narrator: null, narratorOutlet: null };
+  const found: BookEntries = { slots: new Map(), twins: new Map(), atOutlet: new Set(), narrator: null, narratorOutlet: null };
   const slots = new Map<SlotId, { id: string; placed: string | null; extensions: JsonObject }>();
   const leftoverLore: string[] = [];
   for (const e of all) {
@@ -86,6 +88,7 @@ function sortEntries(all: readonly HostBookEntry[]): { found: BookEntries; slots
     const slot = slotOfEntry(e.extensions);
     if (slot) {
       found.slots.set(slot, e.id);
+      if (isRecord(ns) && typeof ns.placed === "string" && ns.placed.startsWith("outlet:")) found.atOutlet.add(slot);
       slots.set(slot, { id: e.id, placed: isRecord(ns) && typeof ns.placed === "string" ? ns.placed : null, extensions: e.extensions });
     } else if (isRecord(ns) && typeof ns.twin === "string") found.twins.set(ns.twin, e.id);
     else if (isRecord(ns) && ns.narrator === "rules") found.narrator = e.id;
@@ -131,6 +134,8 @@ export class EngineBook {
       // A move in the host's editor stands until the Position changes; a native entry an earlier
       // build made (none recorded) keeps its place.
       else if (known.placed !== placed && !(known.placed === null && p.type === "native")) await this.host.books.place(known.id, entryPlacement(p), extensions, userId);
+      if (p.type === "outlet") found.atOutlet.add(section.id);
+      else found.atOutlet.delete(section.id);
       if (!found.twins.has(section.id)) found.twins.set(section.id, await this.host.books.createEntry(bookId, { ...blank, comment: `LRE · ${section.label} (preset outlet)`, position: 8, depth: 4, role: "system", outlet: outletOf(section.id), order: 100 + section.rank, extensions: { [LEDGER_NAMESPACE]: { twin: section.id } } }, userId));
     }
     found.narrator ??= await this.host.books.createEntry(bookId, { ...blank, comment: "LRE · Narrator rules", position: 0, depth: 4, role: "system", order: 99, extensions: { [LEDGER_NAMESPACE]: { narrator: "rules" } } }, userId);

@@ -44,7 +44,7 @@ import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
 import type { PresetCard } from "../shared/protocol";
-import { DEFAULT_SECTIONS, EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
+import { type BookEntries, DEFAULT_SECTIONS, EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, type StoredChip } from "./chips";
 import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./host";
@@ -1549,7 +1549,7 @@ export class Runtime implements TurnHooks {
     const settings = await this.settings.get(input.userId);
     const result: InterceptorResult = { disabled: [], enabled: [], forced: [], mutated: [] };
     const bookId = index?.loreBookId ?? null;
-    const entries = bookId ? await this.book.entriesOf(bookId, input.userId) : { slots: new Map<string, string>(), twins: new Map<string, string>(), narrator: null, narratorOutlet: null };
+    const entries: BookEntries = bookId ? await this.book.entriesOf(bookId, input.userId) : { slots: new Map(), twins: new Map(), atOutlet: new Set(), narrator: null, narratorOutlet: null };
     const slotIds = entries.slots;
     const present = new Set(input.entries.filter((e) => e.bookId === bookId).map((e) => e.id));
     const ctx = this.registry.context(world, state);
@@ -1592,7 +1592,10 @@ export class Runtime implements TurnHooks {
       // (DESIGN §6.8): its outlet twin is filled instead, and the world's placement waits.
       const twin = entries.twins.get(section.id);
       const routed = twin !== undefined && present.has(twin) && preset.outlets.has(outletOf(section.id)) && !(misses?.preset === presetKey && misses.slots.has(section.id));
-      const entryId = routed ? twin : slotIds.get(section.id);
+      // A later revision may have moved the section's own entry to an outlet while this chat's revision
+      // places it in the chat: filled, that entry would land at both, so its twin takes the placement.
+      const astray = !routed && section.position.type === "chat_depth" && entries.atOutlet.has(section.id) && twin !== undefined && present.has(twin);
+      const entryId = routed || astray ? twin : slotIds.get(section.id);
       if (!entryId || !present.has(entryId)) continue;
       const lines: string[] = [];
       const hints: string[] = [];

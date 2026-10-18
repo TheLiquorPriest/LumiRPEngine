@@ -90,4 +90,22 @@ describe("a section's entry follows its Position", () => {
     await rig.turn(later, "I wait.", "Nothing moves.");
     expect(rig.host.lastInterceptor?.mutated.find((m) => m.id === id)?.placement).toEqual({ type: "chat_depth", role: "system", depth: 1, direction: "from_start" });
   });
+
+  test("a chat on an older revision that places the section in the chat gets it there once after a later revision moves it to an outlet", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld();
+    await placeScene(rig, worldId, { type: "chat_depth", role: "system", depth: 1, direction: "from_end" });
+    const chatId = rig.host.createChat("Morning, Sam.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const id = await sceneEntry(rig, worldId);
+    // The head moves the section's own entry to an outlet; the chat stays on its revision.
+    await placeScene(rig, worldId, { type: "outlet", name: "my_scene" });
+    expect(rig.host.storedEntry(id)?.outlet).toBe("my_scene");
+    await rig.turn(chatId, "I look around.", "The square is quiet.");
+    const mutated = rig.host.lastInterceptor?.mutated ?? [];
+    expect(mutated.some((m) => m.id === id)).toBe(false);
+    const scene = mutated.filter((m) => (m.content ?? "").startsWith("[Scene]\n"));
+    expect(scene).toHaveLength(1);
+    expect(scene[0]?.placement).toEqual({ type: "chat_depth", role: "system", depth: 1, direction: "from_end" });
+  });
 });
