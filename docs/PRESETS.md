@@ -19,6 +19,7 @@ Each section the engine fills has an outlet named `lre_` and its slot. Put `{{ou
 | `vehicles` | Vehicles | `{{outlet::lre_vehicles}}` |
 | `quest` | Quest: the stories and goals you can see | `{{outlet::lre_quest}}` |
 | `outline` | Outline: the engine's beats for the reply, with the brief and prose outline | `{{outlet::lre_outline}}` |
+| `stance` | Stance: how the people here behave, with the cues their secrets give | `{{outlet::lre_stance}}` |
 | — | The narrator rules (below) | `{{outlet::lre_narrator}}` |
 
 A world may define sections of its own (Build → Sections); each one's outlet is `lre_` and its id, so a section `weather` goes to `{{outlet::lre_weather}}`. Outlet names are matched without regard to case, as Lumiverse matches them.
