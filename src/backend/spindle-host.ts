@@ -3,8 +3,9 @@
 // event payloads carry no userId; handlers receive it as the second argument) and maps the port's
 // calls onto `lumiverse-spindle-types` 0.6.49 plus the local augmentation.
 
-import type { PromptBlockCreateDTO, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
+import type { PromptBlockDTO, PromptBlockSnapshotDTO, WorldBookEntryCreateDTO } from "lumiverse-spindle-types";
 import type { HostSpindleAPI, RegexScriptInput } from "../spindle-augment";
+import type { HostPresetBlockInput } from "./host";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { ChatId, UserId } from "../shared/ids";
@@ -484,10 +485,12 @@ export function createSpindleHost(): HostPort {
           categoryMode: b.categoryMode === "radio" || b.categoryMode === "checkbox" ? b.categoryMode : null,
         }));
       },
-      async addBlock(presetId, block, index, userId) {
-        // A guidance block is never sent to the narrator: it stays switched off, and the engine reads it.
-        const input: PromptBlockCreateDTO = block.kind === "category" ? { name: block.name, marker: "category", categoryMode: "checkbox", content: "" } : { name: block.name, content: block.content, enabled: false, role: "system", position: "pre_history" };
-        await spindle.presets.blocks.create(presetId, input, { ...(index !== null ? { index } : {}), userId });
+      async insertBlocks(presetId, revision, at, blocks, userId) {
+        // One write of the stored blocks as they are (`spliceBlocks`), at the revision they were read at.
+        const preset = await spindle.presets.get(presetId, userId);
+        if (!preset) throw new Error("the preset is gone");
+        if (preset.cache_revision !== revision) throw new Error("the preset changed while the blocks were being added; try again");
+        await spindle.presets.update(presetId, { prompt_order: spliceBlocks(preset.prompt_order, at, blocks, () => crypto.randomUUID()), expected_cache_revision: revision }, userId);
       },
     },
     connections: {
@@ -559,4 +562,17 @@ export function createSpindleHost(): HostPort {
       diagnostics.add(level, message, userId);
     },
   };
+}
+
+/**
+ * The preset's stored blocks with `blocks` inserted at `at` (null: the end). Each stored block is kept
+ * exactly as stored: written through the host's block API instead, every block goes through its
+ * normalizer, which drops what it doesn't know, a sealed block's protection among it. The new ones are
+ * complete, as that normalizer would make them, and a guidance block stays switched off: the engine
+ * reads it, the narrator never does.
+ */
+export function spliceBlocks(stored: readonly PromptBlockSnapshotDTO[], at: number | null, blocks: readonly HostPresetBlockInput[], newId: () => string): PromptBlockSnapshotDTO[] {
+  const added = blocks.map((b): PromptBlockDTO => ({ id: newId(), name: b.name, content: b.kind === "text" ? b.content : "", role: "system", enabled: b.kind === "category", position: "pre_history", depth: 0, marker: b.kind === "category" ? "category" : null, isLocked: false, color: null, injectionTrigger: [], group: null, categoryMode: b.kind === "category" ? "checkbox" : null }));
+  const index = at === null ? stored.length : Math.max(0, Math.min(stored.length, at));
+  return [...stored.slice(0, index), ...added, ...stored.slice(index)];
 }

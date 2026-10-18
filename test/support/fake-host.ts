@@ -147,6 +147,9 @@ export class FakeHost implements HostPort {
   /** The connection the context handler is given (`connectionId`). */
   contextConnectionId: string | null = null;
 
+  /** How many times a preset was written. */
+  presetWrites = 0;
+
   presets: HostPort["presets"] = {
     get: async (presetId) => {
       if (presetId === "preset-1") return { id: presetId, name: this.preset.name, revision: this.presetRevision };
@@ -159,11 +162,15 @@ export class FakeHost implements HostPort {
       this.blockReads++;
       return structuredClone(presetId === "preset-1" ? this.presetBlocks : (this.otherPresets.get(presetId)?.blocks ?? []));
     },
-    addBlock: async (_presetId, block, index) => {
-      const id = this.newId("block");
-      const created: HostPresetBlock = block.kind === "category" ? { id, name: block.name, content: "", enabled: true, marker: "category", injectionTrigger: [], characterTagTrigger: [], categoryMode: "checkbox" } : { id, name: block.name, content: block.content, enabled: false, marker: null, injectionTrigger: [], characterTagTrigger: [], categoryMode: null };
-      this.presetBlocks.splice(index ?? this.presetBlocks.length, 0, created);
+    insertBlocks: async (presetId, revision, at, blocks) => {
+      if (presetId !== "preset-1" || revision !== this.presetRevision) throw new Error("the preset changed while the blocks were being added; try again");
+      const created = blocks.map((block): HostPresetBlock => {
+        const id = this.newId("block");
+        return block.kind === "category" ? { id, name: block.name, content: "", enabled: true, marker: "category", injectionTrigger: [], characterTagTrigger: [], categoryMode: "checkbox" } : { id, name: block.name, content: block.content, enabled: false, marker: null, injectionTrigger: [], characterTagTrigger: [], categoryMode: null };
+      });
+      this.presetBlocks.splice(at ?? this.presetBlocks.length, 0, ...created);
       this.presetRevision++;
+      this.presetWrites++;
     },
   };
 

@@ -393,8 +393,8 @@ export interface HostPort {
     lastUsed(chatId: ChatId, userId: UserId): Promise<string | null>;
     /** The preset's blocks, in order. */
     blocks(presetId: string, userId: UserId): Promise<HostPresetBlock[]>;
-    /** Adds a block at `index` (null: the end). */
-    addBlock(presetId: string, block: HostPresetBlockInput, index: number | null, userId: UserId): Promise<void>;
+    /** Inserts blocks at `at` (null: the end) in one write of the preset's stored blocks as they are, while it is still at `revision`. */
+    insertBlocks(presetId: string, revision: number, at: number | null, blocks: readonly HostPresetBlockInput[], userId: UserId): Promise<void>;
   };
   connections: {
     /** The user's default connection: the one a generation without its own route uses. */

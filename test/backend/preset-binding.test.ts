@@ -121,10 +121,13 @@ describe("the preset's guidance", () => {
     const added = rig.host.presetBlocks.slice(3);
     expect(added.map((b) => b.name)).toEqual(["interpret", "extract", "brief", "outline", "choices", "npc.choose", "contradiction", "puzzle.answer", "narrator"].map((t) => `RPEngine · ${t}`));
     expect(added.every((b) => !b.enabled && b.content.split("\n").every((line) => line === "" || line.startsWith("//")))).toBe(true);
+    // One write of the preset, however many blocks it adds.
+    expect(rig.host.presetWrites).toBe(1);
     expect(card.blocks.find((b) => b.target === "judge")?.state).toBe("read");
     expect(card.blocks.find((b) => b.target === "extract")?.state).toBe("empty");
     rig.body(await rig.send({ type: "lre.preset", op: "add" }));
     expect(rig.host.presetBlocks.map((b) => b.name)).toEqual(names);
+    expect(rig.host.presetWrites).toBe(1);
   });
 });
 

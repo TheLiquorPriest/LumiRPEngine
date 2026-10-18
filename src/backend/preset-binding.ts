@@ -208,12 +208,9 @@ export class PresetBinding {
     if (missing.length > 0) {
       const category = blocks.findIndex((b) => b.marker === "category" && b.name.trim() === GUIDANCE_CATEGORY);
       const next = category < 0 ? -1 : blocks.findIndex((b, i) => i > category && b.marker === "category");
-      let at = next < 0 ? null : next;
-      if (category < 0) await this.host.presets.addBlock(preset.id, { kind: "category", name: GUIDANCE_CATEGORY }, null, userId);
-      for (const target of missing) {
-        await this.host.presets.addBlock(preset.id, { kind: "text", name: `${GUIDANCE_PREFIX}${target}`, content: starterText(target) }, at, userId);
-        if (at !== null) at++;
-      }
+      const added = missing.map((target) => ({ kind: "text" as const, name: `${GUIDANCE_PREFIX}${target}`, content: starterText(target) }));
+      // One write: a new category at the end with the blocks after it, or the blocks after the category's last one.
+      await this.host.presets.insertBlocks(preset.id, preset.revision, category < 0 || next < 0 ? null : next, category < 0 ? [{ kind: "category", name: GUIDANCE_CATEGORY }, ...added] : added, userId);
     }
     return this.current(chatId, userId);
   }
