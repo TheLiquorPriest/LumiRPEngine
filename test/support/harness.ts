@@ -7,16 +7,24 @@ import type { ChatId } from "../../src/shared/ids";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { ChatRun, HeldWrite } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
+import type { UserSettings } from "../../src/shared/settings";
 import type { WorldDoc } from "../../src/shared/world";
 import type { ChainMessage, FoldOutput } from "../../src/engine/ledger/chain";
 import { LedgerFold } from "../../src/engine/ledger/fold";
-import type { LedgerCore } from "../../src/engine/ledger/journal";
+import type { LedgerCore, TurnModel } from "../../src/engine/ledger/journal";
 import { referenceFold, type FoldTypes } from "../../src/engine/ledger/reference";
-import type { EventTypeDef } from "../../src/engine/registry";
+import type { EventTypeDef, PackDef } from "../../src/engine/registry";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import combatPack from "../../src/packs/combat/core/index";
 import { FakeHost } from "./fake-host";
 import { testModel, testPack, testWorlds } from "./test-pack";
+
+/** What a test may change about the harness's chats: packs beside the test and combat packs, the turn model, and the user's settings. */
+export interface HarnessOptions {
+  packs?: readonly PackDef[];
+  model?: TurnModel;
+  settings?: UserSettings;
+}
 
 export interface Folds {
   reference: FoldOutput;
@@ -32,15 +40,20 @@ export const HARNESS_SNAPSHOT_EVERY = 3;
 
 export class Harness {
   readonly host = new FakeHost();
-  readonly registry: Registry = createRegistry([testPack, combatPack]);
+  readonly registry: Registry;
   readonly worlds: Map<string, WorldDoc>;
   readonly revisions: string[];
   service!: LedgerService;
   private seeds = 0;
   /** Makes the next swipe or regenerate a Re-narrate (P3), as the swipe-option chip does. */
   renarrateNext = false;
+  private readonly model: TurnModel;
+  private readonly settings: UserSettings;
 
-  constructor(seedMode: WorldDoc["seedMode"] = "fresh") {
+  constructor(seedMode: WorldDoc["seedMode"] = "fresh", options: HarnessOptions = {}) {
+    this.registry = createRegistry([testPack, combatPack, ...(options.packs ?? [])]);
+    this.model = options.model ?? testModel;
+    this.settings = options.settings ?? defaultSettings();
     this.worlds = testWorlds(seedMode, true);
     this.revisions = [...this.worlds.keys()];
     this.boot();
@@ -66,10 +79,10 @@ export class Harness {
           types: this.registry,
           worlds: (r) => this.worlds.get(r),
           run,
-          model: testModel,
+          model: this.model,
           // As a new chat starts in play: the world's own realism and time defaults, the user's
           // settings filling in, through the code production uses (half-minute ticks included).
-          startMarkers: () => startMarkersFrom(defaultSettings(), world, run.revision),
+          startMarkers: () => startMarkersFrom(this.settings, world, run.revision),
           newSeed: () => `seed-${++this.seeds}`,
         };
       },

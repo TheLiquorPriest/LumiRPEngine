@@ -10,11 +10,12 @@ import { hashJson } from "../../src/shared/hash";
 import type { ChatId, MessageId } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import type { Journal, LedgerEvent, Marker } from "../../src/shared/ledger";
+import type { Journal, LedgerEvent, Marker, PackEvent } from "../../src/shared/ledger";
 import { LEDGER_NAMESPACE } from "../../src/shared/ledger";
 import { EXTERNAL_ACCOUNT_PREFIX, validMarkerBody } from "../../src/engine/events";
+import type { EventTypeDef } from "../../src/engine/registry";
 import { Harness } from "../support/harness";
-import { balanceOf, openMoney, POV } from "../support/test-pack";
+import { balanceOf, openMoney, POV, testModel } from "../support/test-pack";
 
 async function cash(h: Harness, chatId: string): Promise<number> {
   const { optimized } = await h.folds(chatId);
@@ -84,6 +85,27 @@ describe("ledger scenarios", () => {
     const head = h.host.head(chat);
     const core = await h.core(chat);
     expect(JSON.stringify(head?.bag[LEDGER_NAMESPACE])).toBe(JSON.stringify(head ? core.journal.messages[head.id]?.ledger : undefined));
+    await expectAgree(h, chat);
+  });
+
+  test("the chat's first reply is read with its starting markers in force, as its record folds (L7)", async () => {
+    // "Use my settings" at Money 3 on a world at Money 1. The overdraw stands in for the economy's
+    // post guard, which declines only from Money 2.
+    const overdraw: EventTypeDef<PackEvent> = { type: "x.overdraw", validate: (_e, ctx) => (ctx.levelOf(POV, "money") < 2 ? null : { code: "declined", reason: "declined from Money 2" }), apply: () => undefined, describe: () => "overdrew" };
+    const read: LedgerEvent = { type: "x.overdraw", data: {} };
+    const mine = defaultSettings();
+    const h = new Harness("fresh", {
+      packs: [{ id: "x", label: "Overdraws", version: 1, domain: null, requires: [], register: (r) => r.event(overdraw) }],
+      model: { plan: (input) => testModel.plan(input), read: (input) => [...(input.text.includes("[overdraw]") ? [read] : []), ...testModel.read(input)] },
+      settings: { ...mine, overrideWorldDefaults: true, realism: { ...mine.realism, levels: { ...mine.realism.levels, money: 3 } } },
+    });
+    const chat = await h.newChat();
+    await h.send(chat, "look around", "You overspend. [overdraw]");
+    await h.send(chat, "look around", "You overspend again. [overdraw]");
+    expect((await h.folds(chat)).reference.state.realism.levels.money).toBe(3);
+    // Both replies are read at Money 3, where both records fold: neither holds the declined overdraw.
+    const events = (await h.chain(chat)).flatMap((m) => m.ledger?.swipes[String(m.swipeId)]?.events ?? []);
+    expect(events.filter((e) => e.type === "x.overdraw")).toEqual([]);
     await expectAgree(h, chat);
   });
 

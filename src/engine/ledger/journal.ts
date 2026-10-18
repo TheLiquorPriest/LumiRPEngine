@@ -752,7 +752,7 @@ export class LedgerCore {
     const p = this.journal.pending[generationId];
     const index = observed.findIndex((m) => m.id === messageId);
     if (!p || index < 0 || this.pausedWithin(observed.slice(0, index))) return null;
-    const prefix = this.prefixState(this.plannedChain(p, observed, index), index, { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: p.planned ? this.commitPath(p) : "", undone: [] });
+    const prefix = this.prefixState(this.plannedChain(p, observed, index), index, { markersApplied: p.markersApplied, events: p.events, pre: p.events.length, path: p.planned ? this.commitPath(p) : "", undone: [] }, this.journal.started ? [] : p.startMarkers);
     return prefix ? { ...prefix, seed: p.seed, pre: [...p.events] } : null;
   }
 
@@ -795,6 +795,8 @@ export class LedgerCore {
     const paused = this.pausedWithin(observed.slice(0, index));
     // Read against the chain the turn was planned on, which its record is anchored at.
     const planned = this.plannedChain(p, observed, index);
+    // The chat's first record folds its starting markers ahead of its events, so it is read with them.
+    const start = this.journal.started ? [] : p.startMarkers;
     const rec: Rec = {
       v: 1,
       defHash: this.env.run.revision,
@@ -817,7 +819,7 @@ export class LedgerCore {
       rec.undone = structuredClone(p.undone ?? []);
       if (p.dropped && p.dropped.length > 0) rec.dropped = structuredClone(p.dropped);
       if (readReply && content !== "" && !paused) {
-        const prefix = this.prefixState(planned, index, rec);
+        const prefix = this.prefixState(planned, index, rec, start);
         if (prefix) {
           const target = this.chain(observed)[index];
           const later: ({ seq: number; marker: Marker } | { seq: number; entry: PostEntry })[] = [
@@ -838,9 +840,10 @@ export class LedgerCore {
     } else if (!paused) {
       // A Re-run reads its reply on its fold prefix, then carries its source's fixes after it.
       const rerun = p.kind === "swipe" || p.kind === "regenerate";
-      const prefix = (readReply && content !== "") || rerun ? this.prefixState(planned, index, rec) : null;
+      const prefix = (readReply && content !== "") || rerun ? this.prefixState(planned, index, rec, start) : null;
       if (prefix && readReply && content !== "") rec.events.push(...this.read(prefix.state, prefix.world, `${p.seed}:read`, content));
-      if (prefix && rerun) this.carryFixes(rec, this.chain(observed)[index], swipeId, prefix);
+      // Starting markers land only on a record that holds events: one left with none folds its carried fixes without them.
+      if (prefix && rerun) this.carryFixes(rec, this.chain(observed)[index], swipeId, start.length > 0 && rec.events.length === 0 ? (this.prefixState(planned, index, rec) ?? prefix) : prefix);
     }
     const ledger = this.ledgerFor(messageId, observed[index]);
     ledger.swipes[String(swipeId)] = rec;
