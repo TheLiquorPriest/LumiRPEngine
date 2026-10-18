@@ -10,13 +10,13 @@ import type { LedgerEvent, TimelapseEvent, TimelapseTarget } from "../shared/led
 import type { WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, formatClock, MINUTES_PER_DAY, nextTimeOfDay, shortestSlot, slotIndexAt, slotStart } from "./calendar";
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
-import type { Rejection } from "./registry";
+import type { ReadContext, Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { allSchedules, nextStartFor, scheduleOwners } from "./schedules";
 import { bandOf, fieldDef, placeOfEntity } from "./scope";
 import { advance, ALL_NOTE, lod1Agents, type AdvanceResult } from "./simulate";
 import type { WorldState } from "./state";
-import { own } from "./pack-kit";
+import { optionalQuery, own } from "./pack-kit";
 import { playerEventVisible, playerKnows } from "./player-events";
 import { canSeeField } from "./visibility";
 import type { Working } from "./working";
@@ -59,6 +59,17 @@ export function clockPaused(world: WorldDoc, state: Readonly<WorldState>): boole
   const scene = readEngineSlice(state).pauseScene;
   return scene === null || scene === sceneKey(world, state);
 }
+
+/**
+ * Whether a fight holds the clock: the POV is in one under way (the combat pack's `combat.engaged`),
+ * and its rounds take no clock time (DESIGN §11), so no skip ahead, told or asked for, applies.
+ */
+export function fightHoldsClock(ctx: ReadContext): boolean {
+  return optionalQuery(ctx, "combat.engaged")?.(ctx, ctx.world.pov) === true;
+}
+
+/** Why nothing skips ahead during a fight, as the player reads it. */
+export const IN_FIGHT = "a fight is under way";
 
 /** Bookkeeping that pins a fresh pause to the current scene, or clears a lifted one. */
 export function pauseBookkeeping(world: WorldDoc, state: Readonly<WorldState>): LedgerEvent[] {
@@ -302,8 +313,8 @@ export function minimumUnitCap(world: WorldDoc, state: Readonly<WorldState>): nu
 
 export interface AdvanceOutcome {
   applied: boolean;
-  /** Why it became a Timelapse chip instead. */
-  reason: "over_cap" | "unit_cap" | null;
+  /** Why it became a Timelapse chip instead, or (`in_fight`) why it was dropped: a fight holds the clock. */
+  reason: "over_cap" | "unit_cap" | "in_fight" | null;
   chip: { kind: "timelapse_offer"; target: TimelapseTarget; overrides: Record<InterruptClass, InterruptPolicy> } | null;
 }
 
@@ -311,12 +322,14 @@ export interface AdvanceOutcome {
  * An extracted `time.advance` (DESIGN §9.2, §9.4): `minutes` beyond what the swipe already applied.
  * Under `capMinutes` it applies whole, with its catch-up run like a timelapse segment with every
  * interrupt class at `note`; over the cap, or when the catch-up exceeds the unit cap, nothing is
- * applied and it becomes a Timelapse chip to that time.
+ * applied and it becomes a Timelapse chip to that time. During a fight nothing is applied and
+ * nothing is offered, so no one in the fight or outside it moves.
  */
 export function applyTimeAdvance(reg: Registry, w: Working, minutes: number, opts: { runSeed: string; capMinutes: number; unitCap?: { agentDays: number; events: number } }): AdvanceOutcome {
   const target: TimelapseTarget = { type: "duration", minutes };
   const chip = { kind: "timelapse_offer" as const, target, overrides: { ...ALL_NOTE } };
   if (!(minutes > 0)) return { applied: false, reason: null, chip: null };
+  if (fightHoldsClock(w.ctx)) return { applied: false, reason: "in_fight", chip: null };
   // Beyond the timelapse reach there is nothing to offer: a narrated "ten years later" changes nothing.
   if (minutes > TIME_LIMITS.timelapseMinutes) return { applied: false, reason: "over_cap", chip: null };
   if (minutes > opts.capMinutes) return { applied: false, reason: "over_cap", chip };

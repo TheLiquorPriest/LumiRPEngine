@@ -24,7 +24,7 @@ import { runRulesOnEvents, runRulesOnTick } from "./rules";
 import { isGone, placeOfEntity } from "./scope";
 import { advance, catchUp, coarsen } from "./simulate";
 import type { PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
-import { buildMontage, pauseBookkeeping, parseOverrides, parseTarget, runTimelapse, speedThrough, turnElapsed, type Montage, type TimelapseOutcome } from "./time";
+import { buildMontage, fightHoldsClock, IN_FIGHT, pauseBookkeeping, parseOverrides, parseTarget, runTimelapse, speedThrough, turnElapsed, type Montage, type TimelapseOutcome } from "./time";
 import { stepTracks } from "./tracks";
 import { Working } from "./working";
 import { optionalQuery, optionalService, own } from "./pack-kit";
@@ -76,8 +76,8 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     // A fight's rounds take no clock time (DESIGN §11), so nothing skips ahead while the POV is in one.
     const outcome = !target
       ? { code: "bad_target", reason: "no timelapse target" }
-      : optionalQuery(w.ctx, "combat.engaged")?.(w.ctx, w.world.pov) === true
-        ? { code: "in_fight", reason: "a fight is under way" }
+      : fightHoldsClock(w.ctx)
+        ? { code: "in_fight", reason: IN_FIGHT }
         : runTimelapse(reg, w, target, { runSeed: input.runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 });
     if ("code" in outcome) w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
     else timelapse = outcome;

@@ -1,6 +1,7 @@
 // Narrated-change channels and their bounds (DESIGN §9.4): a time skip under `confirm` waits on a
-// confirm chip and applies whole on Apply; a reply's regard moves each axis of a pair by at most 10
-// in all, the later proposals cut down or refused in order.
+// confirm chip and applies whole on Apply, as auto applies it, paused clock or not; none applies
+// during a fight; a reply's regard moves each axis of a pair by at most 10 in all, the later
+// proposals cut down or refused in order.
 
 import { describe, expect, test } from "bun:test";
 import { toChain } from "../../src/backend/ledger-io";
@@ -11,10 +12,18 @@ import { Rig } from "../support/rig";
 
 const EXTRACT_MARK = "propose concrete state changes";
 
-/** A fresh Port Alder chat whose next reply the extractor reads as `proposals`, with `extraction` settings applied first. */
-async function chat(proposals: JsonObject[], extraction: JsonObject) {
+/**
+ * A fresh Port Alder chat whose next reply the extractor reads as `proposals`, with `extraction`
+ * settings applied first. With `fights` the world has the Modern profile's combat; `ready` runs
+ * after a first turn, before that reply's turn, and `before` is the clock then.
+ */
+async function chat(proposals: JsonObject[], extraction: JsonObject, opts: { fights?: boolean; ready?: (rig: Rig, chatId: string) => Promise<void> } = {}) {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+  if (opts.fights) {
+    rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "profile", profile: "modern", choices: {} }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  }
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction } }));
@@ -33,10 +42,25 @@ async function chat(proposals: JsonObject[], extraction: JsonObject) {
   // A first turn reads nothing, so the clock and regard start from a played turn.
   rig.host.quietReply = () => "{}";
   await rig.turn(chatId, "I look around.", "The shop is quiet.");
+  await opts.ready?.(rig, chatId);
+  const before = (await state()).clock;
   rig.host.quietReply = (req) => ((req.messages[0]?.content ?? "").includes(EXTRACT_MARK) ? JSON.stringify({ proposals }) : "{}");
   await rig.turn(chatId, "I sit with Danny.", "An hour later, Danny trusts you a good deal more.");
   const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
-  return { rig, chatId, state, danny, chips };
+  return { rig, chatId, state, danny, chips, before };
+}
+
+/** Pauses the chat's clock, as the HUD's Pause clock does. */
+async function pause(rig: Rig, chatId: string): Promise<void> {
+  rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "pause", scope: { all: true }, to: true }));
+}
+
+/** Starts a fight with Danny from the palette; the POV is made too tough for one round of his blows to put down. */
+async function fight(rig: Rig, chatId: string): Promise<void> {
+  rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "set", entity: "pov", field: "con", value: 30 }] }));
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "fight", params: { target: "danny_okafor" }, source: "palette" }));
+  const g = await rig.host.start(chatId, { type: "normal" });
+  await rig.host.finish(g, "Danny squares up to you.");
 }
 
 describe("a narrated time skip under confirm", () => {
@@ -68,6 +92,39 @@ describe("a narrated time skip under confirm", () => {
     const offer = got.chips.find((c) => c.kind === "timelapse_offer" && c.label.includes("skipped ahead"));
     expect(offer).toBeDefined();
     expect(offer?.actions.map((a) => a.id)).toEqual(["timelapse"]);
+  });
+});
+
+describe("a narrated time skip, auto or confirm", () => {
+  test("with the clock paused, Apply does what auto does: the skip applies whole", async () => {
+    const auto = await chat([{ type: "time_advance", minutes: 45 }], { time_advance: { mode: "auto" } }, { ready: pause });
+    expect((await auto.state()).clock - auto.before).toBe(45);
+    const asked = await chat([{ type: "time_advance", minutes: 45 }], { time_advance: { mode: "confirm" } }, { ready: pause });
+    const confirm = asked.chips.find((c) => c.kind === "confirm");
+    if (!confirm) throw new Error("no confirm chip");
+    expect((await asked.state()).clock).toBe(asked.before);
+    asked.rig.body(await asked.rig.send({ type: "lre.chip", chatId: asked.chatId, chip: confirm.id, choice: "confirm" }));
+    expect((await asked.state()).clock - asked.before).toBe(45);
+    for (const got of [auto, asked]) expect(got.rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("during a fight none applies, in either mode: it is declined with a note, and Apply on an earlier chip is refused", async () => {
+    for (const mode of ["auto", "confirm"]) {
+      const got = await chat([{ type: "time_advance", minutes: 20 }], { time_advance: { mode } }, { fights: true, ready: fight });
+      expect((await got.state()).clock).toBe(got.before);
+      expect(got.chips.filter((c) => c.kind === "confirm" || c.kind === "timelapse_offer")).toEqual([]);
+      expect(got.chips.find((c) => c.kind === "decline")).toMatchObject({ label: "Didn't apply: +20 min", detail: expect.stringContaining("a fight is under way") });
+      expect(got.rig.rt.ledger.errors).toEqual([]);
+    }
+    // A chip offered before the fight: Apply is refused, and the clock stays.
+    const got = await chat([], { time_advance: { mode: "confirm" } }, { fights: true, ready: fight });
+    const head = got.rig.host.head(got.chatId);
+    if (!head) throw new Error("no reply");
+    const proposal = { type: "time_advance", minutes: 45 };
+    await got.rig.rt.chips.add(got.chatId, got.rig.host.userId, [{ id: "confirm:earlier", kind: "confirm", messageId: head.id, swipeId: head.swipeId, label: "+45 min", actions: [{ id: "confirm", label: "Apply" }], expires: "next_send", payload: { type: "time_advance", connection: "active", proposal } }]);
+    const reply = await got.rig.send({ type: "lre.chip", chatId: got.chatId, chip: "confirm:earlier", choice: "confirm" });
+    expect(reply).toMatchObject({ type: "lre.error", message: expect.stringContaining("a fight is under way") });
+    expect((await got.state()).clock).toBe(got.before);
   });
 });
 

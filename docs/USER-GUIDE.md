@@ -464,7 +464,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 
 | Type in Settings (as a Mode change chip names it) | What it covers | Starting mode |
 |---|---|---|
-| **Time passing** (Time skips) · `time_advance` | The story jumps ahead ("three hours later"). Up to 4 hours applies with the world caught up (under confirm, when you tap **Apply**); a longer jump becomes a **Run timelapse** chip in either mode | auto |
+| **Time passing** (Time skips) · `time_advance` | The story jumps ahead ("three hours later"). Up to 4 hours applies with the world caught up (under confirm, when you tap **Apply**), whether or not the clock is paused; a longer jump becomes a **Run timelapse** chip in either mode. During a fight none applies: a **Didn't apply** chip says so, and **Apply** on an earlier chip is refused | auto |
 | **Moving somewhere** (Moves) · `location` | Someone moves | auto |
 | **Conditions (hurt, tired…)** (Condition changes) · `condition` | A status changes (tired, injured, soaked) | auto |
 | **Learning a fact** (New facts) · `knows` | You learn a public fact, or hear of a place you didn't know (never a secret one) | confirm |

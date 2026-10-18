@@ -241,8 +241,9 @@ export class TurnBridge implements TurnModel {
         continue;
       }
       const minutes = typeof p.minutes === "number" ? Math.round(p.minutes) : 0;
+      // During a fight it applies nothing and offers nothing: the read's preparation declined it already.
       const outcome = applyTimeAdvance(this.registry, w, minutes, { runSeed: this.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
-      if (outcome.chip) chips.push({ target: outcome.chip.target, reason: outcome.reason ?? "over_cap" });
+      if (outcome.chip) chips.push({ target: outcome.chip.target, reason: outcome.reason === "unit_cap" ? "unit_cap" : "over_cap" });
     }
     applyProposals(this.registry, w, proposals, input.seed, this.runSeed);
     if (prepared?.post !== false) {

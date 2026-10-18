@@ -21,7 +21,7 @@ import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
 import { materializeIfNeeded } from "../engine/materialize";
 import { optionalService } from "../engine/pack-kit";
-import { applyTimeAdvance, parseOverrides, parseTarget } from "../engine/time";
+import { applyTimeAdvance, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
 import { timelapseIntent } from "../engine/turn";
 import { definitionsLag, planUpgrade } from "../engine/upgrade";
 import { actionOdds } from "../engine/resolve";
@@ -584,9 +584,10 @@ export class Dispatcher {
         let events: LedgerEvent[];
         if (proposal.type === "time_advance") {
           // A narrated time skip applies as it would have automatically (DESIGN §9.4): whole, with its
-          // catch-up, from the clock the head stands at now, or not at all.
+          // catch-up, from the clock the head stands at now, or not at all; never while a fight holds
+          // the clock, which may have started since the chip was offered.
           const advance = applyTimeAdvance(this.rt.registry, w, typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: this.runSeedOf(chatId), capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
-          if (!advance.applied) throw new RequestError("validation", advance.reason === "unit_cap" ? "too much happens in between to run it inside the turn" : "the time skip no longer applies");
+          if (!advance.applied) throw new RequestError("validation", advance.reason === "unit_cap" ? "too much happens in between to run it inside the turn" : advance.reason === "in_fight" ? `${IN_FIGHT}, and its rounds take no clock time` : "the time skip no longer applies");
           events = [...w.events];
         } else {
           // The seed the chip's check used, so a purchase charges the amount its label shows.

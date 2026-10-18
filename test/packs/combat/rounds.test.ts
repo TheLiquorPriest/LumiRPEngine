@@ -4,6 +4,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { Runtime } from "../../../src/backend/runtime";
+import { TIME_ADVANCE_CAP } from "../../../src/backend/turn-model";
+import { applyTimeAdvance } from "../../../src/engine/time";
 import { presetAdjudication, readAdjudication } from "../../../src/shared/adjudication";
 import { hashJson } from "../../../src/shared/hash";
 import type { Level } from "../../../src/shared/ids";
@@ -150,6 +152,21 @@ describe("the clock in a fight", () => {
     expect(caught(late)).toBe(place);
     const over = fold(registry, world, late, [{ type: "combat.end", data: { encounter: encounterOf(late)?.id ?? "", reason: "effect", winner: null, rounds: 1 } }]);
     expect(caught(over)).not.toBe(place);
+  });
+
+  test("a time skip the narration tells applies nothing during a fight and offers no Timelapse, so no one moves; after it, it applies", () => {
+    const { registry, world, state } = starterFight();
+    const places = (s: Readonly<WorldState>) => Object.keys(s.entities).map((id) => placeOfEntity(s, id));
+    for (const minutes of [20, 600]) {
+      const w = new Working(registry, world, state);
+      expect(applyTimeAdvance(registry, w, minutes, { runSeed: "run", capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap })).toEqual({ applied: false, reason: "in_fight", chip: null });
+      expect(w.events).toEqual([]);
+      expect(places(w.state)).toEqual(places(state));
+    }
+    const over = fold(registry, world, state, [{ type: "combat.end", data: { encounter: encounterOf(state)?.id ?? "", reason: "effect", winner: null, rounds: 1 } }]);
+    const w = new Working(registry, world, over);
+    expect(applyTimeAdvance(registry, w, 20, { runSeed: "run", capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap }).applied).toBe(true);
+    expect(w.state.clock - over.clock).toBe(20);
   });
 });
 

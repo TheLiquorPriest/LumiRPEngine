@@ -21,7 +21,7 @@ import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
 import type { EngineTurnPlan } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
-import { applyTimeAdvance, parseOverrides, parseTarget } from "../engine/time";
+import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
 import { boundProposal } from "../engine/bounds";
 import { calendarOf, dateAt, formatClock, formatHHMM, nextTimeOfDay, weekdayName, type Calendar } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
@@ -1106,6 +1106,10 @@ export class Runtime implements TurnHooks {
     // down, and one with nothing left is refused like any change past its bound.
     const regard = regardBudget();
     const spent: JsonObject[] = [];
+    // A fight holds the clock (DESIGN §11): a time skip narrated during one applies in neither mode;
+    // it is declined like any refused change, and the next reply is told so.
+    const fighting = fightHoldsClock(ctx);
+    const held: JsonObject[] = [];
     for (const p of proposals) {
       const type = EXTRACTION_TYPES.find((t) => t === p.type);
       if (!type) continue;
@@ -1114,6 +1118,10 @@ export class Runtime implements TurnHooks {
       const field = typeof p.field === "string" ? p.field : undefined;
       const bounded = boundProposal(this.registry, context.world, context.state, { type, ...(entity ? { entity } : {}), ...(field ? { field } : {}), ...(typeof p.delta === "number" ? { delta: p.delta } : {}) }, { typeMode, ...(settings.extraction[type]?.maxDelta !== undefined ? { typeMaxDelta: settings.extraction[type]?.maxDelta } : {}) });
       if (bounded.mode === "never") continue;
+      if (type === "time_advance" && fighting) {
+        held.push(p);
+        continue;
+      }
       const fitted = regard(bounded.delta !== undefined ? { ...p, delta: bounded.delta } : p);
       if (!fitted) {
         if (bounded.mode === "auto") spent.push(p);
@@ -1134,7 +1142,7 @@ export class Runtime implements TurnHooks {
     const w = new Working(this.registry, context.world, context.state);
     const outcomes = applyProposals(this.registry, w, auto.filter((p) => p.type !== "time_advance"), `${context.seed}:preview`, bridge.runSeed);
     const stored: StoredChip[] = [];
-    const declines: { proposal: JsonObject; reason: string; payment: boolean; unpriced: boolean }[] = spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, payment: false, unpriced: false }));
+    const declines: { proposal: JsonObject; reason: string; payment: boolean; unpriced: boolean }[] = [...spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, payment: false, unpriced: false })), ...held.map((proposal) => ({ proposal, reason: IN_FIGHT, payment: false, unpriced: false }))];
     outcomes.forEach((o, i) => {
       if (o.rejection) {
         if (o.rejection.code !== "declined") this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: ${describeProposal(o.proposal)} didn't apply (${o.rejection.code}: ${o.rejection.reason})`, input.userId);
@@ -1162,7 +1170,7 @@ export class Runtime implements TurnHooks {
       // Apply; a longer one, or one whose catch-up can't run whole, gets the Timelapse chip instead.
       if (proposal.type === "time_advance") {
         const advance = applyTimeAdvance(this.registry, new Working(this.registry, context.world, w.state), typeof proposal.minutes === "number" ? Math.round(proposal.minutes) : 0, { runSeed: bridge.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
-        if (advance.chip) stored.push(skipAheadChip(`adv:${messageId}:${swipeId}:c${i}`, { messageId, swipeId }, advance.chip.target, advance.reason ?? "over_cap"));
+        if (advance.chip) stored.push(skipAheadChip(`adv:${messageId}:${swipeId}:c${i}`, { messageId, swipeId }, advance.chip.target, advance.reason === "unit_cap" ? "unit_cap" : "over_cap"));
         else if (advance.applied) {
           stored.push({
             id: `confirm:${input.messageId}:${input.generationId}:${i}`,
