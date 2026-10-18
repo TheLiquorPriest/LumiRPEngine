@@ -135,7 +135,7 @@ describe("the Studio bridge", () => {
     const next = structuredClone(read.world);
     next.id = "the-studio-draft";
     next.places.pier = { id: "pier", name: "The pier", fields: {} };
-    offer(rig, { offerId: "offer-2", doc: doc(next), mode: "revision", worldId, attachChatId: chatId, createdAt: 7 });
+    offer(rig, { offerId: "offer-2", doc: doc(next), mode: "revision", worldId, baseRevision: read.revision, attachChatId: chatId, createdAt: 7 });
 
     rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "places", id: "shed", value: { id: "shed", name: "The shed", fields: {} } }));
     expect(String((await review(rig)).blocked)).toContain("unsaved changes");
@@ -180,5 +180,25 @@ describe("the Studio bridge", () => {
     expect(String(body.message)).toContain("LumiRPEngine Studio");
     const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-1" });
     expect(refused.type === "lre.error" && refused.code).toBe("not_found");
+  });
+
+  test("a revision whose world moved in Build since the Studio took it is flagged, and installs only when the player confirms", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld("Harbor");
+    const taken = await studioRead<StudioWorldRead>(rig, worldChannel(rig.host.userId, worldId));
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "places", id: "shed", value: { id: "shed", name: "The shed", fields: {} } }));
+    const moved = String(rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null })).revision);
+    const next = structuredClone(taken.world);
+    next.places.pier = { id: "pier", name: "The pier", fields: {} };
+    offer(rig, { offerId: "offer-5", doc: doc(next), mode: "revision", worldId, baseRevision: taken.revision, createdAt: 9 });
+    expect((await review(rig)).headMoved).toEqual({ base: taken.revision, head: moved });
+    const refused = await rig.send({ type: "lre.studio", op: "install", offerId: "offer-5" });
+    expect(refused.type === "lre.error" && refused.code).toBe("conflict");
+    const installed = rig.body(await rig.send({ type: "lre.studio", op: "install", offerId: "offer-5", acceptMovedHead: true }));
+    if (!isRecord(installed.installed)) throw new Error("not installed");
+    expect(installed.installed.worldId).toBe(worldId);
+    // An offer taken from the head as it is now isn't flagged.
+    offer(rig, { offerId: "offer-6", doc: doc(next), mode: "revision", worldId, baseRevision: String(installed.installed.revision), createdAt: 10 });
+    expect((await review(rig)).headMoved).toBeNull();
   });
 });

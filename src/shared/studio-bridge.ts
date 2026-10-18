@@ -79,6 +79,11 @@ export interface StudioOffer {
   mode: "new" | "revision";
   worldId?: WorldId;
   attachChatId?: ChatId;
+  /**
+   * For a revision: the revision of `worldId` the document was taken from (its head then), so Build
+   * can tell when the world has moved on since. Absent when the Studio doesn't know it.
+   */
+  baseRevision?: RevisionId;
   createdAt: number;
 }
 
@@ -95,6 +100,7 @@ export function readOffer(value: unknown): StudioOffer | null {
     mode: value.mode,
     ...(value.mode === "revision" ? { worldId: value.worldId as WorldId } : {}),
     ...(typeof value.attachChatId === "string" ? { attachChatId: value.attachChatId } : {}),
+    ...(value.mode === "revision" && typeof value.baseRevision === "string" && value.baseRevision !== "" ? { baseRevision: value.baseRevision } : {}),
     createdAt,
   };
 }

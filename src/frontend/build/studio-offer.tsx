@@ -40,7 +40,7 @@ export function useStudioOffer(props: { installed(): void; review(next: { worldI
   }, [asked]);
   const install = (reviewed: StudioOfferView) =>
     run(async () => {
-      const result = await app.request({ type: "lre.studio", op: "install", offerId: reviewed.offerId });
+      const result = await app.request({ type: "lre.studio", op: "install", offerId: reviewed.offerId, ...(reviewed.headMoved ? { acceptMovedHead: true } : {}) });
       const done = result?.installed;
       if (!done) return;
       setOffer(null);
@@ -117,9 +117,14 @@ export function StudioOfferReview(props: { state: StudioOfferState }) {
           </div>
         ) : null}
         {offer.mode === "revision" && offer.blocked === null && !offer.installed ? <span class="lre-small lre-muted">Its chats stay on their revision until you Upgrade them in Settings → Pins and upgrade.</span> : null}
+        {offer.headMoved && offer.blocked === null && !offer.installed ? (
+          <div class="lre-banner warn">
+            “{offer.target?.name ?? "This world"}” changed in Build since LumiRPEngine Studio took it. Installing makes this the new head without what was committed since; that revision stays, and so do its chats. To keep both, take the world into the Studio again.
+          </div>
+        ) : null}
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button type="button" class="lre-btn primary" disabled={busy || offer.blocked !== null || offer.installed !== null} onClick={() => props.state.install(offer)}>
-            Install
+            {offer.headMoved ? "Install anyway" : "Install"}
           </button>
           <button type="button" class="lre-btn ghost" disabled={busy} onClick={props.state.dismiss}>
             Not now

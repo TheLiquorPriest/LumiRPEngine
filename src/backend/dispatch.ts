@@ -356,6 +356,7 @@ export class Dispatcher {
     if (offer.offerId !== r.offerId) throw new RequestError("conflict", "LumiRPEngine Studio offers something else now; review it again.");
     if (view.installed) throw new RequestError("conflict", "This offer is already installed.");
     if (view.blocked !== null || world === null) throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
+    if (view.headMoved && r.acceptMovedHead !== true) throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
     const store = this.rt.worlds;
     const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId).then((created) => ({ ...created, lint: macroReview(created.world) }));
     await this.syncBook(done.world.id, userId);
@@ -379,6 +380,7 @@ export class Dispatcher {
       attachChatId: offer.attachChatId ?? null,
       blocked: null,
       installed: installed ? { worldId: installed.worldId, revision: installed.revision } : null,
+      headMoved: null,
     };
     if (!isWorldDoc(offer.doc)) return { view: { ...view, blocked: `It isn't an ${WORLD_FORMAT} document.` }, world: null };
     let world: WorldDoc;
@@ -403,6 +405,7 @@ export class Dispatcher {
       view.target = { worldId: offer.worldId, name: index?.name ?? null };
       if (!index) view.blocked ??= "The world it's a revision of isn't one of your worlds.";
       else if (await this.rt.worlds.hasDraft(offer.worldId, userId)) view.blocked ??= `Build has unsaved changes to “${index.name}”: commit or discard them first.`;
+      if (index && offer.baseRevision !== index.head) view.headMoved = { base: offer.baseRevision ?? null, head: index.head };
     }
     return { view, world };
   }

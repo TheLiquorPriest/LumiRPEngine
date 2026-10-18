@@ -372,7 +372,12 @@ export type LoreDrift = { status: "changed"; content: string; hash: string } | {
  * it, installing nothing; `install` installs the offer reviewed as `offerId`: a new world, or the
  * next revision of one of the user's worlds.
  */
-export type StudioRequest = Request<"lre.studio"> & ({ op: "offer" } | { op: "install"; offerId: string });
+export type StudioRequest = Request<"lre.studio"> &
+  (
+    | { op: "offer" }
+    /** `acceptMovedHead`: install a revision though its world's head moved since the Studio took it (`StudioOfferView.headMoved`). */
+    | { op: "install"; offerId: string; acceptMovedHead?: boolean }
+  );
 
 /** A Studio offer as Build reviews it before anything is installed. */
 export interface StudioOfferView {
@@ -395,6 +400,12 @@ export interface StudioOfferView {
   blocked: string | null;
   /** The world revision it became, once installed. */
   installed: { worldId: WorldId; revision: RevisionId } | null;
+  /**
+   * A revision whose world's head isn't the one the Studio took it from: that base (null when the
+   * Studio gave none) and the head now. Installing makes the offer the new head without what was
+   * committed since, so Build warns and Install must confirm it (`acceptMovedHead`).
+   */
+  headMoved: { base: RevisionId | null; head: RevisionId } | null;
 }
 
 /** Settings → Preset (DESIGN §6.8): `get` reads the active preset's card; `add` adds the RPEngine blocks it lacks, then reads it. */
