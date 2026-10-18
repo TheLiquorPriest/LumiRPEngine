@@ -42,8 +42,8 @@ export type Guidance = Readonly<Partial<Record<GuidanceTarget, string>>>;
 export type GuidanceState = "missing" | "empty" | "read" | "enabled";
 
 export interface PresetConfig {
-  /** The preset world chats assemble with; null when the engine can't tell. */
-  preset: { id: string; name: string } | null;
+  /** The preset world chats assemble with and the revision read; null when the engine can't tell. */
+  preset: { id: string; name: string; revision: number } | null;
   /** The `lre_` outlets its enabled blocks hold, lowercase, as the host matches them. */
   outlets: ReadonlySet<string>;
   guidance: Guidance;
@@ -75,23 +75,37 @@ export function guidanceText(content: string): string {
   return neutralizeMacros(text.slice(0, space > GUIDANCE_MAX_CHARS / 2 ? space : GUIDANCE_MAX_CHARS).trimEnd());
 }
 
-/** What a preset's blocks say (pure). The first block of a guidance name counts. */
+/**
+ * What a preset's blocks say (pure). The first block of a guidance name counts. A section is routed
+ * only to an outlet in a block the host assembles in every prompt: switched on, for every generation
+ * type and every character, and under a radio category only its first switched-on block, the one the
+ * host keeps. A section routed to an outlet some prompts leave out would go missing from them.
+ */
 export function readPreset(blocks: readonly HostPresetBlock[]): Omit<PresetConfig, "preset"> {
   const outlets = new Set<string>();
   const guidance: Partial<Record<GuidanceTarget, string>> = {};
   const states = { ...MISSING };
+  let radio = false;
+  let chosen = false;
   for (const b of blocks) {
-    // A block limited to some generation types is missing from the others' prompts, and a section
-    // routed to its outlet would go missing with it: only blocks every generation assembles count.
-    if (b.enabled && b.marker !== "category" && b.injectionTrigger.length === 0) {
-      for (const m of b.content.matchAll(OUTLET)) {
-        const name = (m[1] ?? "").trim().toLowerCase();
-        if (name.startsWith("lre_")) outlets.add(name);
+    if (b.marker === "category") {
+      radio = b.categoryMode === "radio";
+      chosen = false;
+      continue;
+    }
+    if (b.enabled) {
+      const assembled = !(radio && chosen) && b.injectionTrigger.length === 0 && b.characterTagTrigger.length === 0;
+      if (radio) chosen = true;
+      if (assembled) {
+        for (const m of b.content.matchAll(OUTLET)) {
+          const name = (m[1] ?? "").trim().toLowerCase();
+          if (name.startsWith("lre_")) outlets.add(name);
+        }
       }
     }
     const name = b.name.trim().replace(/\s+/g, " ").toLowerCase();
     const target = GUIDANCE_TARGETS.find((t) => name === `${GUIDANCE_PREFIX}${t}`.toLowerCase());
-    if (!target || states[target] !== "missing" || b.marker === "category") continue;
+    if (!target || states[target] !== "missing") continue;
     // A switched-on block already reaches the narrator in every chat; the engine reads only switched-off ones.
     if (b.enabled) {
       states[target] = "enabled";
@@ -166,7 +180,7 @@ export class PresetBinding {
         this.said.set(key, said);
         if (this.said.size > 64) this.said.delete(this.said.keys().next().value ?? "");
       }
-      const config = { preset: { id: preset.id, name: preset.name }, ...said };
+      const config = { preset, ...said };
       this.latest.set(userId, config);
       if (this.latest.size > 256) this.latest.delete(this.latest.keys().next().value ?? "");
       return config;

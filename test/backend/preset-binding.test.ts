@@ -13,7 +13,7 @@ import { Rig } from "../support/rig";
 
 const EXTRACT_MARK = "You read a narrator's roleplay reply";
 
-const block = (name: string, content: string, enabled: boolean, more: Partial<HostPresetBlock> = {}): HostPresetBlock => ({ id: `b_${name}`, name, content, enabled, marker: null, injectionTrigger: [], ...more });
+const block = (name: string, content: string, enabled: boolean, more: Partial<HostPresetBlock> = {}): HostPresetBlock => ({ id: `b_${name}`, name, content, enabled, marker: null, injectionTrigger: [], characterTagTrigger: [], categoryMode: null, ...more });
 
 /** The engine-book entry whose extension data has `key` set to `value` (a twin, the narrator rules). */
 async function entryWith(rig: Rig, chatId: string, key: string, value: string): Promise<string> {
@@ -160,5 +160,43 @@ describe("which preset counts", () => {
     rig.body(await rig.send({ type: "lre.preset", op: "active", presetId: "loom" }));
     const card = rig.body(await rig.send({ type: "lre.preset", op: "get" })).card as { preset: { name: string } | null };
     expect(card.preset?.name).toBe("Loom");
+  });
+});
+
+describe("outlets the host won't assemble", () => {
+  test("a block limited to some characters' tags, or a radio category's second choice, places nothing; the first choice does", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const twin = await entryWith(rig, chatId, "twin", "scene");
+    const routed = async (blocks: HostPresetBlock[]): Promise<boolean> => {
+      rig.host.presetBlocks = blocks;
+      rig.host.presetRevision++;
+      await rig.turn(chatId, "I look around.", "Quiet.");
+      return rig.host.lastInterceptor?.enabled.includes(twin) === true;
+    };
+    expect(await routed([block("Tagged", "{{outlet::lre_scene}}", true, { characterTagTrigger: ["rpg"] })])).toBe(false);
+    const styles = block("Styles", "", true, { marker: "category", categoryMode: "radio" });
+    expect(await routed([styles, block("Plain", "Write plainly.", true), block("Fancy", "{{outlet::lre_scene}}", true)])).toBe(false);
+    expect(await routed([styles, block("Fancy", "{{outlet::lre_scene}}", true), block("Plain", "Write plainly.", true)])).toBe(true);
+    expect(await routed([{ ...styles, categoryMode: "checkbox" }, block("Plain", "Write plainly.", true), block("Fancy", "{{outlet::lre_scene}}", true)])).toBe(true);
+  });
+
+  test("a routed section the test build doesn't find goes back to the world's placement while that preset revision stands", async () => {
+    const rig = new Rig();
+    const chatId = await rig.worldChat();
+    const twin = await entryWith(rig, chatId, "twin", "scene");
+    rig.host.presetBlocks = [block("Story", "{{outlet::lre_scene}}", true)];
+    // The host leaves the block out (a profile switched it off, say): no assembled prompt holds the outlet.
+    rig.host.assembledOutlets = new Set();
+    await rig.turn(chatId, "I look around.", "Quiet.");
+    expect(rig.host.lastInterceptor?.enabled).toContain(twin);
+    rig.body(await rig.send({ type: "lre.view.open", chatId, panel: "core.context", entity: null }));
+    await rig.turn(chatId, "I wait.", "Quiet.");
+    expect(rig.host.lastInterceptor?.enabled).not.toContain(twin);
+    expect(rig.host.lastInterceptor?.mutated.find((m) => m.id !== twin && m.content?.startsWith("[Scene]"))?.placement).toEqual({ type: "chat_depth", role: "system", depth: 1, direction: "from_end" });
+    // The preset's next revision is tried again.
+    rig.host.presetRevision++;
+    await rig.turn(chatId, "I wait more.", "Quiet.");
+    expect(rig.host.lastInterceptor?.enabled).toContain(twin);
   });
 });

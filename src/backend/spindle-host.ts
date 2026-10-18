@@ -472,7 +472,17 @@ export function createSpindleHost(): HostPort {
         return reply ? ((await spindle.generate.getBreakdown(reply.id, userId))?.presetId ?? null) : null;
       },
       async blocks(presetId, userId) {
-        return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({ id: b.id, name: b.name, content: b.content, enabled: b.enabled, marker: b.marker, injectionTrigger: [...(b.injectionTrigger ?? [])] }));
+        return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({
+          id: b.id,
+          name: b.name,
+          content: b.content,
+          enabled: b.enabled,
+          marker: b.marker,
+          injectionTrigger: [...(b.injectionTrigger ?? [])],
+          // The host keeps a block's character tag trigger beside the published fields.
+          characterTagTrigger: "characterTagTrigger" in b && Array.isArray(b.characterTagTrigger) ? b.characterTagTrigger.filter((t): t is string => typeof t === "string") : [],
+          categoryMode: b.categoryMode === "radio" || b.categoryMode === "checkbox" ? b.categoryMode : null,
+        }));
       },
       async addBlock(presetId, block, index, userId) {
         // A guidance block is never sent to the narrator: it stays switched off, and the engine reads it.

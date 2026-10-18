@@ -161,7 +161,7 @@ export class FakeHost implements HostPort {
     },
     addBlock: async (_presetId, block, index) => {
       const id = this.newId("block");
-      const created: HostPresetBlock = block.kind === "category" ? { id, name: block.name, content: "", enabled: true, marker: "category", injectionTrigger: [] } : { id, name: block.name, content: block.content, enabled: false, marker: null, injectionTrigger: [] };
+      const created: HostPresetBlock = block.kind === "category" ? { id, name: block.name, content: "", enabled: true, marker: "category", injectionTrigger: [], characterTagTrigger: [], categoryMode: "checkbox" } : { id, name: block.name, content: block.content, enabled: false, marker: null, injectionTrigger: [], characterTagTrigger: [], categoryMode: null };
       this.presetBlocks.splice(index ?? this.presetBlocks.length, 0, created);
       this.presetRevision++;
     },
@@ -525,10 +525,19 @@ export class FakeHost implements HostPort {
     if (this.contextHandler) await this.contextHandler({ chatId, userId: this.userId, generationType: "normal", dryRun: true, connectionId: null, personaId: null }, new AbortController().signal);
     const result = await this.runInterceptor(chatId);
     const lore: string[] = [];
-    for (const m of result?.mutated ?? []) if (m.content !== undefined && (result?.enabled.includes(m.id) || result?.forced.includes(m.id))) lore.push(m.content);
+    for (const m of result?.mutated ?? []) {
+      if (m.content === undefined || !(result?.enabled.includes(m.id) || result?.forced.includes(m.id))) continue;
+      // An outlet-only entry with no placement of its own reaches the prompt only where an assembled block holds its outlet.
+      const stored = this.storedEntry(m.id);
+      if (stored?.position === 8 && !m.placement && this.assembledOutlets !== null && !this.assembledOutlets.has(stored.outlet ?? "")) continue;
+      lore.push(m.content);
+    }
     const chat = this.chat(chatId).messages.filter((m) => m.isUser || (m.swipes[m.swipeId] ?? "") !== "").map((m) => ({ role: m.isUser ? "user" : "assistant", content: m.swipes[m.swipeId] ?? "" }));
     return { messages: [...lore.map((content) => ({ role: "system", content })), ...chat], blocks: structuredClone(this.preset.blocks), maxTokens: this.preset.maxTokens, model: this.preset.model };
   }
+
+  /** The outlets a test build's prompt holds (null: every outlet an entry names). */
+  assembledOutlets: Set<string> | null = null;
 
   private async runInterceptor(chatId: ChatId): Promise<InterceptorResult | null> {
     if (!this.interceptor) return null;

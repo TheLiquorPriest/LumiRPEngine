@@ -286,6 +286,10 @@ export interface HostPresetBlock {
   marker: string | null;
   /** The generation types the block assembles for; empty for every one. */
   injectionTrigger: string[];
+  /** The character tags the block assembles for (any one of them); empty for every character. */
+  characterTagTrigger: string[];
+  /** On a category header: `radio` keeps only the first switched-on block under it, `checkbox` each one. */
+  categoryMode: "radio" | "checkbox" | null;
 }
 
 /** A block the engine adds to a preset: a category header, or text that stays switched off. */

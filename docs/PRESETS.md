@@ -23,7 +23,7 @@ Each section the engine fills has an outlet named `lre_` and its slot. Put `{{ou
 
 A world may define sections of its own (Build → Sections); each one's outlet is `lre_` and its id, so a section `weather` goes to `{{outlet::lre_weather}}`. Outlet names are matched without regard to case, as Lumiverse matches them.
 
-Only enabled blocks that assemble for every generation count. A block that is switched off, or limited to some generation types (its injection trigger), places nothing: the section would go missing from the prompts that block isn't in, so the world's placement stands instead.
+Only blocks Lumiverse assembles in every prompt count. A block that is switched off, limited to some generation types (its injection trigger) or to characters with certain tags (its character tag trigger), or a second switched-on block under a radio category (Lumiverse keeps only the first one), places nothing: the section would go missing from the prompts that block isn't in, so the world's placement stands instead. A block Lumiverse leaves out for reasons the engine can't see, such as a preset profile's block states or a prompt-activation regex script, is caught when you open the Context panel: its test prompt build looks for each section the preset placed, and a section it doesn't find goes back to the world's placement until the preset changes.
 
 ## Placement precedence
 

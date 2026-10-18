@@ -479,6 +479,10 @@ export class Runtime implements TurnHooks {
   private readonly lastWorldChat = new Map<UserId, ChatId>();
   /** The D32 preset caveats each chat's last dry run found (shown in the inspector). */
   private readonly presetWarnings = new Map<ChatId, string[]>();
+  /** The sections each chat's last interceptor run sent to the preset's outlets, with the preset revision it read (`preset \0 revision`). */
+  private readonly routedLast = new Map<ChatId, { preset: string; slots: Set<string> }>();
+  /** Per chat, a preset revision whose outlets a delivery check didn't find some routed sections at, and those sections: the world places them again (DESIGN §6.8). */
+  private readonly outletMisses = new Map<ChatId, { preset: string; slots: Set<string> }>();
   /** Each open chat's pinned world revisions, by `user \0 chat`. */
   private readonly pins = new Map<string, Map<RevisionId, WorldDoc>>();
   /** The pre-phase call budget per generation, shared by `beforePlan` and `afterPlan`. */
@@ -1547,6 +1551,9 @@ export class Runtime implements TurnHooks {
     const prose = turnPlan && plan ? this.bridges.get(input.chatId)?.proseFor(plan.seed) : undefined;
     // What the active preset says this generation: the one its pre phase read, else read now (a dry run).
     const preset = (plan ? this.prePhase.get(plan.generationId)?.preset : undefined) ?? (await this.presets.current(input.chatId, input.userId));
+    const presetKey = preset.preset ? `${preset.preset.id}\u0000${preset.preset.revision}` : "";
+    const misses = this.outletMisses.get(input.chatId);
+    const routedSlots = new Set<string>();
     // A plan the bridge no longer holds (a restart, or 64 newer plans) comes back from storage.
     const kept = plan && !turnPlan ? await this.planNotes.get(input.chatId, input.userId, plan.seed) : null;
     const outline = turnPlan ? planOutline(turnPlan, prose) : (kept?.outline ?? []);
@@ -1574,9 +1581,9 @@ export class Runtime implements TurnHooks {
     const hinted: { entry: { content?: string }; label: string; template: string; lines: string[]; hints: string[]; cost: number }[] = [];
     for (const section of sectionsOf(world)) {
       // The preset places the section itself when an enabled block holds `{{outlet::lre_<slot>}}`
-      // (DESIGN §6.7): its outlet twin is filled instead, and the world's placement waits.
+      // (DESIGN §6.8): its outlet twin is filled instead, and the world's placement waits.
       const twin = entries.twins.get(section.id);
-      const routed = twin !== undefined && present.has(twin) && preset.outlets.has(outletOf(section.id));
+      const routed = twin !== undefined && present.has(twin) && preset.outlets.has(outletOf(section.id)) && !(misses?.preset === presetKey && misses.slots.has(section.id));
       const entryId = routed ? twin : slotIds.get(section.id);
       if (!entryId || !present.has(entryId)) continue;
       const lines: string[] = [];
@@ -1611,6 +1618,7 @@ export class Runtime implements TurnHooks {
       record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
       if (clipped) continue;
       budget -= cost;
+      if (routed) routedSlots.add(section.id);
       const placement = routed ? null : placementOf(section);
       result.enabled.push(entryId);
       result.forced.push(entryId);
@@ -1648,6 +1656,7 @@ export class Runtime implements TurnHooks {
     const picked = new Set([...result.enabled, ...result.forced]);
     for (const e of input.entries) if (e.bookId === bookId && !picked.has(e.id)) result.disabled.push(e.id);
     record.forced = [...result.forced];
+    lruSet(this.routedLast, input.chatId, { preset: presetKey, slots: routedSlots }, 256);
     // Only real turns enter the history; a dry run (inspector check, preview) records nothing.
     if (plan) {
       await this.inspector.add(input.chatId, input.userId, record);
@@ -1681,6 +1690,15 @@ export class Runtime implements TurnHooks {
     const last = log.records.at(-1);
     const out: Record<string, "verified" | "unverified"> = {};
     for (const s of last?.sections ?? []) if (!s.clipped && !hasOwn(TURN_ONLY_SLOTS, s.slot)) out[s.slot] = text.includes(`[${neutralizeMacros(s.label)}]`) ? "verified" : "unverified";
+    // A section the preset's outlet should have held but the test build didn't find goes back to the
+    // world's placement while that preset revision stands: the host left the outlet's block out (a
+    // profile's block states, an activation script), so the section would stay missing there.
+    const routed = this.routedLast.get(chatId);
+    const missed = routed ? [...routed.slots].filter((slot) => out[slot] === "unverified") : [];
+    if (routed && missed.length > 0) {
+      const earlier = this.outletMisses.get(chatId);
+      lruSet(this.outletMisses, chatId, { preset: routed.preset, slots: new Set([...(earlier?.preset === routed.preset ? earlier.slots : []), ...missed]) }, 256);
+    }
     log.delivery = out;
     for (const s of last?.sections ?? []) s.delivery = s.clipped ? "unchecked" : (out[s.slot] ?? s.delivery);
     this.inspector.save(chatId);
