@@ -9,7 +9,7 @@
 //   combat.start     {encounter, place, order: [{id, side, init, left}]}   initiative rolled at the effect
 //   combat.turn      {encounter, round, turn, actor, reset}                 the next turn and its refills (a new round extends or restarts the calm)
 //   combat.spend     {encounter, who, cost}                                 a combat action's cost
-//   combat.act       {encounter, actor, action, label, target?, outcome?}  who did what (Journal, the card's log)
+//   combat.act       {encounter, actor, action, label, target?, outcome?}  who did what (Journal, the card's log); an attack breaks the round's calm
 //   combat.down      {encounter, entity, down}                              re-checked against the down rule
 //   combat.end       {encounter, reason, winner, rounds}                    `over` re-checks the end rule, `left` that the POV
 //                                                                           isn't where the fight is, `stalemate` the calm
@@ -35,7 +35,7 @@ import { selectorMatches } from "../../../engine/selector";
 import { knownBySelector } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
 import { fightChoices, hpLine, nextTurn, openRound, spendFor, type FightRound } from "./flow";
-import { canFight, downHolds, encounterOf, endHolds, engaged, fighterOf, fits, fullEconomy, hpByFighter, LOG_CAP, offTurnCost, PACK, povLeft, readFor, rulesOf, sameHp, STALEMATE_ROUNDS, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
+import { attacks, canFight, downHolds, encounterOf, endHolds, engaged, fighterOf, fits, fullEconomy, hpByFighter, LOG_CAP, offTurnCost, PACK, povLeft, readFor, rulesOf, sameHp, stalemateRounds, stalledHolds, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
 import { buildEncounterView, type EncounterView } from "./view";
 
 declare module "../../../engine/registry" {
@@ -173,7 +173,7 @@ const events: EventTypeDef<PackEvent>[] = [
       delete mutableSlice(state, PACK).decisions;
       const order = orderOf(e.data.order) ?? [];
       const rules = rulesOf(ctx.world);
-      writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0 } });
+      writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0, struck: false } });
     },
     describe: (e) => `A fight: ${describeSide(e, "party")} against ${describeSide(e, "foes")}`,
   },
@@ -197,9 +197,10 @@ const events: EventTypeDef<PackEvent>[] = [
       const round = numOf(e.data.round, enc.round);
       const reset = objOf(e.data.reset);
       const rules = rulesOf(ctx.world);
-      // A new round with everyone's HP as it was when the calm began makes the calm longer; any change starts a new one.
+      // A new round ends the one under way: a calm one (no attack in it, everyone's HP as when the calm
+      // began) makes the calm longer; anything else starts a new one.
       const now = round > enc.round && rules ? hpByFighter(ctx, rules, enc.order) : null;
-      const calm = !now ? enc.calm : sameHp(now, enc.calm.hp) ? { hp: enc.calm.hp, rounds: enc.calm.rounds + (round - enc.round) } : { hp: now, rounds: 0 };
+      const calm = !now ? enc.calm : !enc.calm.struck && sameHp(now, enc.calm.hp) ? { hp: enc.calm.hp, rounds: enc.calm.rounds + (round - enc.round), struck: false } : { hp: now, rounds: 0, struck: false };
       writeEncounter(state, {
         ...enc,
         round,
@@ -239,11 +240,14 @@ const events: EventTypeDef<PackEvent>[] = [
       if ("code" in enc) return enc;
       return fighterOf(enc, strOf(e.data.actor)) ? null : reject("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
     },
-    apply(e, state) {
+    apply(e, state, ctx) {
       const enc = encounterOf(state);
       if (!enc) return;
-      const entry = { round: enc.round, actor: strOf(e.data.actor), action: strOf(e.data.label, strOf(e.data.action)), target: typeof e.data.target === "string" ? e.data.target : null, outcome: typeof e.data.outcome === "string" ? e.data.outcome : null };
-      writeEncounter(state, { ...enc, log: [...enc.log, entry].slice(-LOG_CAP) });
+      const target = typeof e.data.target === "string" ? e.data.target : null;
+      const entry = { round: enc.round, actor: strOf(e.data.actor), action: strOf(e.data.label, strOf(e.data.action)), target, outcome: typeof e.data.outcome === "string" ? e.data.outcome : null };
+      // An attack, hit or miss, keeps the round under way from counting toward a stalemate.
+      const struck = enc.calm.struck || attacks(ctx, enc, entry.actor, strOf(e.data.action), target);
+      writeEncounter(state, { ...enc, log: [...enc.log, entry].slice(-LOG_CAP), calm: { ...enc.calm, struck } });
     },
     describe: (e) => `${strOf(e.data.actor)}: ${strOf(e.data.label, strOf(e.data.action))}${typeof e.data.target === "string" ? ` → ${e.data.target}` : ""}${typeof e.data.outcome === "string" ? ` (${e.data.outcome.replace(/_/g, " ")})` : ""}`,
   },
@@ -271,9 +275,9 @@ const events: EventTypeDef<PackEvent>[] = [
       if ("code" in enc) return enc;
       const rules = rulesOf(ctx.world);
       if (e.data.reason === "over" && (!rules || !endHolds(ctx, rules, enc))) return reject("not_over", "the fight isn't over");
-      // Both re-read the state, so a view where the POV stayed, or someone was hurt, keeps the fight.
+      // Each re-reads the state, so a view where the POV stayed, or someone attacked or was hurt, keeps the fight.
       if (e.data.reason === "left" && !povLeft(ctx.state, ctx.world, enc)) return reject("not_left", "you are still in the fight");
-      if (e.data.reason === "stalemate" && (!rules || enc.calm.rounds < STALEMATE_ROUNDS || !sameHp(hpByFighter(ctx, rules, enc.order), enc.calm.hp))) return reject("not_stalemate", "someone has been hurt since");
+      if (e.data.reason === "stalemate" && (!rules || !stalledHolds(ctx, rules, enc))) return reject("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
       return null;
     },
     apply: (_e, state) => writeEncounter(state, null),

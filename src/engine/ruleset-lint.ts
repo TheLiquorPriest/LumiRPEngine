@@ -310,6 +310,7 @@ export function lintRuleset(world: WorldDoc, reg: Registry): LintIssue[] {
     if (!hp) err("ruleset.combat.hp", "combat", "A fight needs the HP field: a pool on the kind of those who fight.");
     else if (pov && !hpDef) err("ruleset.combat.hp", "combat", `The point of view's kind has no field ${hp}.`);
     else if (hpDef && !hpDef.pool) warn("ruleset.combat.hp", "combat", `${hp} isn't a pool, so damage has no floor and HP shows no max.`);
+    if (combat.stalemate !== undefined && !(typeof combat.stalemate === "number" && Number.isInteger(combat.stalemate) && combat.stalemate >= 0)) err("ruleset.combat.stalemate", "combat", "A stalemate is a whole number of rounds, 0 or more: that many rounds in a row with no attack and no one hurt end a fight, and 0 never does.");
     if (combat.endTurn !== undefined && combat.endTurn !== "spent" && combat.endTurn !== "manual") err("ruleset.combat.endTurn", "combat", "The POV's turn ends once it's spent, or only on End turn (manual).");
     if (combat.adjudicate !== undefined && combat.adjudicate !== "dice" && combat.adjudicate !== "policy") err("ruleset.combat.adjudicate", "combat", "A fight's checks are settled by the dice, or by the adjudication policy (policy).");
     if (combat.adjudicate === "policy") {

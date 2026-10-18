@@ -529,7 +529,7 @@ function ProgressionEditor(props: { value: Record<string, ProgressionDef>; doc: 
   );
 }
 
-/** The combat part (DESIGN §11), schema-driven: initiative, the action economy, HP, who is down, the sides and when a fight is over. */
+/** The combat part (DESIGN §11), schema-driven: initiative, the action economy, HP, who is down, the sides, when a fight is over and when it peters out. */
 const COMBAT: FieldSpec = {
   kind: "object",
   key: "combat",
@@ -559,6 +559,7 @@ const COMBAT: FieldSpec = {
     { kind: "object", key: "down", label: "Down", optional: true, fields: [{ kind: "expr", key: "when", label: "When (default: no HP left)", optional: true }, { kind: "text", key: "condition", label: "Condition it applies (default down)", optional: true }] },
     { kind: "object", key: "sides", label: "Sides", optional: true, fields: [{ kind: "expr", key: "hostile", label: "Hostile, with self and other (default: a hostile relation)", optional: true }, { kind: "expr", key: "ally", label: "Fights beside, with self and other", optional: true }] },
     { kind: "expr", key: "end", label: "Over when (default: one side has no one standing)", optional: true },
+    { kind: "number", key: "stalemate", label: "Peters out after this many rounds in a row with no attack and no one hurt (default 3; 0: never)", min: 0, step: 1, optional: true },
     { kind: "enum", key: "endTurn", label: "The player's turn ends", values: ["spent", "manual"], optional: true },
     { kind: "enum", key: "adjudicate", label: "Attacks and other fight checks are settled by (dice: always rolled; policy: the adjudication policy)", values: ["dice", "policy"], optional: true },
     { kind: "object", key: "tactics", label: "Everyone else's tactics", optional: true, fields: [{ kind: "expr", key: "threat", label: "A target's threat, with self and target (default its HP)", optional: true }, { kind: "expr", key: "lowHp", label: "Defends when (default a quarter of its HP or less)", optional: true }] },

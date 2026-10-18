@@ -37,10 +37,15 @@ export interface LogEntry {
   outcome: string | null;
 }
 
-/** A run of rounds in which no one's HP changed: HP as it stood when it began, and how many whole rounds it has lasted. */
+/**
+ * A run of calm rounds: whole rounds in which no one attacked (hit or miss) and no one's HP changed.
+ * HP as it stood when the run began, how many whole rounds it has lasted, and whether someone has
+ * attacked in the round under way, which ends the run when that round does.
+ */
 export interface Calm {
   hp: Record<EntityId, number>;
   rounds: number;
+  struck: boolean;
 }
 
 export interface Encounter {
@@ -58,7 +63,7 @@ export interface Encounter {
   calm: Calm;
 }
 
-/** How many whole rounds in a row with no one's HP changing end a fight as a stalemate. */
+/** How many calm rounds in a row end a fight as a stalemate when the rules don't say. */
 export const STALEMATE_ROUNDS = 3;
 
 /** How many acts the log keeps. */
@@ -103,7 +108,7 @@ export function encounterOf(state: Readonly<WorldState>): Encounter | null {
     log.push({ round: numOf(e.round), actor: e.actor, action: strOf(e.action), target: typeof e.target === "string" ? e.target : null, outcome: typeof e.outcome === "string" ? e.outcome : null });
   }
   const calm = objOf(raw.calm);
-  return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers(calm.hp), rounds: Math.max(0, numOf(calm.rounds)) } };
+  return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };
 }
 
 /** Writes the fight back inside an event reducer; null ends it (and its recorded decisions). */
@@ -230,6 +235,30 @@ export function standingOn(state: Readonly<WorldState>, enc: Encounter, side: Si
 export function endHolds(ctx: ReadContext, rules: CombatDef, enc: Encounter): boolean {
   if (rules.end !== undefined) return truthy(readFor(ctx, rules.end, {}, false));
   return standingOn(ctx.state, enc, "party").length === 0 || standingOn(ctx.state, enc, "foes").length === 0;
+}
+
+/** How many calm rounds in a row end a fight as a stalemate: the rules' `stalemate` as a whole number from 0 (none ever does), else 3. */
+export function stalemateRounds(rules: Pick<CombatDef, "stalemate">): number {
+  const n = rules.stalemate;
+  return typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : STALEMATE_ROUNDS;
+}
+
+/**
+ * Whether an act is an attack, hit or miss: its action has the attack role, or it is aimed at
+ * someone on the other side. A round with one in it isn't calm, so turtling against a foe who keeps
+ * swinging never ends a fight as a stalemate.
+ */
+export function attacks(ctx: ReadContext, enc: Encounter, actor: EntityId, action: string, target: EntityId | null): boolean {
+  if ((own(ctx.world.actions, action) ?? ctx.registry.actions.get(action))?.combat?.role === "attack") return true;
+  const by = fighterOf(enc, actor);
+  const at = target !== null ? fighterOf(enc, target) : undefined;
+  return by !== undefined && at !== undefined && by.side !== at.side;
+}
+
+/** Whether a fight has petered out: its rules end one at all, its calm has lasted that many whole rounds, and no one has attacked or been hurt since. */
+export function stalledHolds(ctx: ReadContext, rules: CombatDef, enc: Encounter): boolean {
+  const rounds = stalemateRounds(rules);
+  return rounds > 0 && enc.calm.rounds >= rounds && !enc.calm.struck && sameHp(hpByFighter(ctx, rules, enc.order), enc.calm.hp);
 }
 
 /** Which side won: the only one with anyone standing, else none. */

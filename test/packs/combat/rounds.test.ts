@@ -49,15 +49,15 @@ function allyWorld(patch: (w: WorldDoc) => void = () => undefined): WorldDoc {
   });
 }
 
-/** The Modern profile on the modern starter with Danny as the only foe at the POV's home; the rest of his household is out. */
-function starterFight(): { registry: Registry; world: WorldDoc; state: WorldState } {
+/** The Modern profile on the modern starter with Danny as the only foe at the POV's home; the rest of his household is out. `seed` starts the fight. */
+function starterFight(seed = "start"): { registry: Registry; world: WorldDoc; state: WorldState } {
   const registry = createRegistry(ALL_PACKS);
   const make = STARTER_WORLDS.modern_slice_of_life;
   if (!make) throw new Error("no starter");
   const world = applyProfile(make("s", "s"), PROFILES.modern, Object.fromEntries(registry.kinds));
   for (const other of ["maddie_kowalczyk", "helen_kowalczyk", "jess_kowalczyk"]) world.entities[other]!.fields = { ...world.entities[other]!.fields, place: "port_alder" };
   const w = new Working(registry, world, initialState(world, hashJson(world), registry));
-  w.applyAll(planTurn({ registry, world, state: w.state, runSeed: "run", seed: "start", kind: "normal", userTexts: ["fight"], intent: { action: "fight", params: { target: "danny_okafor" }, probabilities: { fight: 1 } } }).events);
+  w.applyAll(planTurn({ registry, world, state: w.state, runSeed: "run", seed, kind: "normal", userTexts: ["fight"], intent: { action: "fight", params: { target: "danny_okafor" }, probabilities: { fight: 1 } } }).events);
   if (!encounterOf(w.state)) throw new Error("no fight");
   return { registry, world, state: w.state };
 }
@@ -151,30 +151,89 @@ describe("the clock in a fight", () => {
   });
 });
 
+/** A fight in which no strike lands; `quiet` takes Strike's attack role away, so no one but the POV ever attacks. */
+function missWorld(quiet: boolean, patch: (w: WorldDoc) => void = () => undefined): WorldDoc {
+  return fightWorld((w) => {
+    povFirst(w);
+    w.kinds.person!.fields.ac = { type: "number", default: 100 };
+    if (quiet) delete w.actions.strike!.combat!.role;
+    patch(w);
+  });
+}
+
+/** Up to `turns` turns of the POV taking `action` from the fight's start: every event, and the state after. */
+function playOut(world: WorldDoc, action: string, turns: number, params: Record<string, string> = {}): { events: LedgerEvent[]; state: WorldState } {
+  let state = started(world).state;
+  const events: LedgerEvent[] = [];
+  for (let turn = 0; turn < turns && encounterOf(state); turn++) {
+    const p = plan(world, state, action, params, `calm${turn}`);
+    events.push(...p.events);
+    state = fold(reg, world, state, p.events);
+  }
+  return { events, state };
+}
+
+const endsOf = (events: readonly LedgerEvent[]) => events.filter((e) => e.type === "combat.end").map(dataOf);
+
 describe("no fight stalls", () => {
-  test("rounds in a row in which no one is hurt end the fight as a stalemate, re-checked when it folds", () => {
-    const world = fightWorld((w) => {
-      povFirst(w);
-      // No strike can land.
-      w.kinds.person!.fields.ac = { type: "number", default: 100 };
-    });
-    let state = started(world).state;
-    const events: LedgerEvent[] = [];
-    for (let turn = 0; turn < 8 && encounterOf(state); turn++) {
-      const p = plan(world, state, "end_turn", {}, `calm${turn}`);
-      events.push(...p.events);
-      state = fold(reg, world, state, p.events);
-    }
+  test("rounds in a row in which no one attacks or is hurt end the fight as a stalemate, re-checked when it folds", () => {
+    const world = missWorld(true);
+    const { events, state } = playOut(world, "end_turn", 8);
     expect(encounterOf(state)).toBeNull();
-    const end = events.find((e) => e.type === "combat.end");
-    expect(dataOf(end)).toMatchObject({ reason: "stalemate", winner: null });
-    expect(events.filter((e) => e.type === "combat.act").length).toBeGreaterThan(0);
-    // Where someone was hurt since, the fight goes on.
-    const before = started(world).state;
-    const unfolded = fold(reg, world, before, events.slice(0, events.indexOf(end as LedgerEvent)));
+    expect(endsOf(events)).toMatchObject([{ reason: "stalemate", winner: null, rounds: 4 }]);
+    // Where someone attacked or was hurt since, the fight goes on.
+    const end = events.find((e) => e.type === "combat.end") as LedgerEvent;
+    const unfolded = fold(reg, world, started(world).state, events.slice(0, events.indexOf(end)));
+    const id = encounterOf(unfolded)?.id ?? "";
     expect(reg.get("combat.end")?.validate(end as never, reg.context(world, unfolded))).toBeNull();
+    const swung = fold(reg, world, unfolded, [{ type: "combat.act", data: { encounter: id, actor: "goblin", action: "strike", label: "Strike", target: POV, outcome: "miss" } }]);
+    expect(reg.get("combat.end")?.validate(end as never, reg.context(world, swung))?.code).toBe("not_stalemate");
     const hurt = fold(reg, world, unfolded, [{ type: "set", entity: "goblin", field: "hp", value: 3 }]);
     expect(reg.get("combat.end")?.validate(end as never, reg.context(world, hurt))?.code).toBe("not_stalemate");
+  });
+
+  test("missed attacks aren't calm: a foe who keeps swinging never lets a fight peter out, and the author's own end rule ends it", () => {
+    const { events, state } = playOut(missWorld(false), "end_turn", 12);
+    expect(encounterOf(state)).not.toBeNull();
+    expect(endsOf(events)).toEqual([]);
+    expect(events.filter((e) => e.type === "combat.act" && dataOf(e).outcome === "miss").length).toBeGreaterThan(8);
+    const ruled = playOut(missWorld(false, (w) => (w.ruleset!.combat!.end = "encounter_round() > 8")), "end_turn", 12);
+    expect(endsOf(ruled.events)).toMatchObject([{ reason: "over", rounds: 9 }]);
+    // The POV's own attack counts too, with no attack role: it is aimed at a foe.
+    const swinging = playOut(missWorld(true, (w) => delete w.actions.step), "strike", 8, { target: "goblin" });
+    expect(encounterOf(swinging.state)).not.toBeNull();
+    expect(endsOf(swinging.events)).toEqual([]);
+  });
+
+  test("turtling on a starter never ends a fight as a stalemate while the foe keeps attacking", () => {
+    const reasons: string[] = [];
+    for (let fight = 0; fight < 8; fight++) {
+      const { registry, world, state: start } = starterFight(`f${fight}`);
+      let state = start;
+      for (let turn = 0; turn < 30 && encounterOf(state); turn++) {
+        const enc = encounterOf(state);
+        const mine = enc?.order[enc.turn]?.id === world.pov;
+        const p = withoutAmbient(() => planTurn({ registry, world, state, runSeed: "run", seed: `f${fight}t${turn}`, kind: "normal", userTexts: ["I keep my guard up"], intent: mine ? { action: "total_defense", params: {}, probabilities: { total_defense: 1 } } : null }));
+        for (const e of p.events) if (e.type === "combat.end") reasons.push(String(dataOf(e).reason));
+        state = fold(registry, world, state, p.events);
+      }
+    }
+    expect(reasons.length).toBeGreaterThan(0);
+    expect(reasons).not.toContain("stalemate");
+  });
+
+  test("the ruleset sets how many calm rounds end a fight, and 0 never does", () => {
+    const two = playOut(missWorld(true, (w) => (w.ruleset!.combat!.stalemate = 2)), "end_turn", 8);
+    expect(endsOf(two.events)).toMatchObject([{ reason: "stalemate", rounds: 3 }]);
+    const never = missWorld(true, (w) => (w.ruleset!.combat!.stalemate = 0));
+    const off = playOut(never, "end_turn", 8);
+    expect(encounterOf(off.state)?.round).toBe(9);
+    expect(endsOf(off.events)).toEqual([]);
+    const id = encounterOf(off.state)?.id ?? "";
+    expect(reg.get("combat.end")?.validate({ type: "combat.end", data: { encounter: id, reason: "stalemate", winner: null, rounds: 9 } } as never, reg.context(never, off.state))?.code).toBe("not_stalemate");
+    const issues = (stalemate: number) => lintStructure(missWorld(true, (w) => (w.ruleset!.combat!.stalemate = stalemate)), reg).filter((i) => i.path === "ruleset.combat.stalemate");
+    for (const bad of [-1, 1.5]) expect(issues(bad).map((i) => i.severity)).toEqual(["error"]);
+    for (const good of [0, 4]) expect(issues(good)).toEqual([]);
   });
 
   test("two hurt fighters don't guard forever while the POV is down", () => {

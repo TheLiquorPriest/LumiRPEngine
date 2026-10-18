@@ -5,7 +5,8 @@
 // with the rule events it fires, so a rebased view keeps or drops it whole.
 //
 // A fight is fought where it started: the POV leaving that place ends it (`left`), and rounds in a
-// row in which no one's HP changes end it as a stalemate, so no fight goes on unseen or stalls.
+// row in which no one attacks and no one's HP changes end it as a stalemate (the rules' `stalemate`,
+// 3 by default; 0 never), so no fight goes on unseen or stalls.
 //
 // Everyone but the POV fights by deterministic tactics: defend when hurt (the ruleset's `lowHp`) and
 // a foe acted against it this round or the last, if a defensive action is offered, else attack the
@@ -31,7 +32,7 @@ import { bandOf, fieldDef, placeOfEntity, truthy } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeeField } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
-import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, povLeft, readFor, rulesOf, STALEMATE_ROUNDS, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
+import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, povLeft, readFor, rulesOf, stalemateRounds, stalledHolds, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
 
 /** How many actions anyone but the POV takes in one turn, at most. */
 const ACTS_PER_TURN = 4;
@@ -243,11 +244,11 @@ function leave(w: Working, rng: Rng, lines: FightLines): boolean {
   return true;
 }
 
-/** Ends a fight in which no one's HP has changed for `STALEMATE_ROUNDS` whole rounds (the calm the fold keeps). True when it did. */
-function stalled(w: Working, rng: Rng, lines: FightLines): boolean {
+/** Ends a fight that has petered out (`stalledHolds`, over the calm the fold keeps). True when it did. */
+function stalled(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boolean {
   const enc = encounterOf(w.state);
-  if (!enc || enc.calm.rounds < STALEMATE_ROUNDS || record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "stalemate", winner: null, rounds: enc.round } }], rng.seed).length === 0) return false;
-  lines.push(`No one has been hurt in ${STALEMATE_ROUNDS} rounds: the fight peters out.`);
+  if (!enc || !stalledHolds(w.ctx, rules, enc) || record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "stalemate", winner: null, rounds: enc.round } }], rng.seed).length === 0) return false;
+  lines.push(`No one has attacked or been hurt in ${stalemateRounds(rules)} rounds: the fight peters out.`);
   return true;
 }
 
@@ -273,7 +274,7 @@ function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): bool
   }
   const now = encounterOf(w.state);
   if (!now) return true;
-  if (!endHolds(w.ctx, rules, now)) return stalled(w, rng.fork("calm"), lines);
+  if (!endHolds(w.ctx, rules, now)) return stalled(w, rules, rng.fork("calm"), lines);
   const winner = winnerOf(w.state, now);
   record(w, [{ type: "combat.end", data: { encounter: now.id, reason: "over", winner, rounds: now.round } }], rng.seed);
   lines.push(`The fight is over${winner === "party" ? ": your side won" : winner === "foes" ? ": your side lost" : ""}.`);
@@ -299,7 +300,7 @@ function advance(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): voi
   if (!enc || !next || record(w, [next], rng.seed).length === 0) return;
   lines.happened = true;
   const now = encounterOf(w.state);
-  if (now && now.round > enc.round && !stalled(w, rng.fork("calm"), lines) && now.order[now.turn]?.id !== w.world.pov) lines.push(`Round ${now.round}.`);
+  if (now && now.round > enc.round && !stalled(w, rules, rng.fork("calm"), lines) && now.order[now.turn]?.id !== w.world.pov) lines.push(`Round ${now.round}.`);
 }
 
 /** One option of a participant's turn: an action and the participant it targets, with its odds. */

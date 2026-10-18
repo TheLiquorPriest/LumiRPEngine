@@ -877,6 +877,8 @@ export interface CombatDef {
   sides?: { hostile?: Expr; ally?: Expr };
   /** When the fight is over (default: one side has no one standing). */
   end?: Expr;
+  /** How many whole rounds in a row in which no one attacks (hit or miss) and no one's HP changes end a fight as a stalemate (default 3); 0: a fight never peters out. */
+  stalemate?: number;
   /** The POV's turn ends once none of its combat actions fits what is left (`spent`, the default), or only on End turn (`manual`). */
   endTurn?: "spent" | "manual";
   /**

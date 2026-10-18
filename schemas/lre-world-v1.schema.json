@@ -892,7 +892,13 @@
         },
         "minLevels": { "$ref": "#/$defs/domainLevels", "description": "the lowest effective level each domain plays at, whatever the realism settings" },
         "adjudication": { "$ref": "#/$defs/adjudication" },
-        "combat": { "type": "object", "description": "Combat and encounters; its parts are checked by the engine's lint." },
+        "combat": {
+          "type": "object",
+          "description": "Combat and encounters; its parts are checked by the engine's lint.",
+          "properties": {
+            "stalemate": { "type": "integer", "minimum": 0, "description": "whole rounds in a row with no attack and no one hurt that end a fight as a stalemate (default 3; 0: never)" }
+          }
+        },
         "profile": { "type": "string", "minLength": 1, "description": "the profile the ruleset last started from (Build → Ruleset → Start from a profile)" }
       }
     },
