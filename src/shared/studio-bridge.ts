@@ -151,7 +151,9 @@ export interface StudioChatSummary {
   clock: { minutes: number; label: string; dayPart: string } | null;
   /** The POV's cash as the HUD shows it: a band, or the amount in the world's currency. */
   cash: string | null;
-  present: { id: EntityId; name: string; label: string }[];
+  /** The people present the POV sees; `life`: their life state as the POV knows it, when that isn't alive. */
+  present: { id: EntityId; name: string; label: string; life?: string }[];
+  /** A secret the quest log masks goes with an opaque id (`hidden-1`, …): its own is the author's, and may name the secret. */
   quests: { id: TrackId; kind: string; label: string; stage: string; cue: string | null }[];
   /** Epoch ms of the state it was read from. */
   at: number;
@@ -176,7 +178,7 @@ export function chatSummary(view: StateView, at: number): StudioChatSummary | nu
     place: hud?.place ? { id: hud.place.id, name: hud.place.name } : null,
     clock: hud ? { minutes: hud.clock.minutes, label: hud.clock.label, dayPart: hud.clock.dayPart } : null,
     cash,
-    present: (view.scene?.present ?? []).slice(0, PRESENT_CAP).map((p) => ({ id: p.id, name: p.name, label: p.label })),
+    present: (view.scene?.present ?? []).slice(0, PRESENT_CAP).map((p) => ({ id: p.id, name: p.name, label: p.label, ...(p.life ? { life: p.life } : {}) })),
     quests: openQuests(view.panels["story.quests"]),
     at,
   };
@@ -186,10 +188,13 @@ export function chatSummary(view: StateView, at: number): StudioChatSummary | nu
 function openQuests(panel: JsonValue | undefined): StudioChatSummary["quests"] {
   if (!isRecord(panel) || !Array.isArray(panel.active)) return [];
   const out: StudioChatSummary["quests"] = [];
+  let hidden = 0;
   for (const t of panel.active) {
     if (out.length >= QUEST_CAP) break;
     if (!isRecord(t) || typeof t.id !== "string" || typeof t.label !== "string") continue;
-    out.push({ id: t.id, kind: typeof t.kind === "string" ? t.kind : "quest", label: t.label, stage: typeof t.stage === "string" ? t.stage : "", cue: typeof t.cue === "string" ? t.cue : null });
+    // The quest log masks a secret track until one of its truths is out: a generic label and no stage.
+    const masked = t.stage === "" && (!Array.isArray(t.truths) || t.truths.length === 0);
+    out.push({ id: masked ? `hidden-${++hidden}` : t.id, kind: typeof t.kind === "string" ? t.kind : "quest", label: t.label, stage: typeof t.stage === "string" ? t.stage : "", cue: typeof t.cue === "string" ? t.cue : null });
   }
   return out;
 }
