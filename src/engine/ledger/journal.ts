@@ -1085,8 +1085,8 @@ export class LedgerCore {
         if (!rec) return "nothing to undo";
         // Undo changes the record, so like a read it runs only where the record folds as stored (L2),
         // which one read elsewhere never does.
-        if (rec.readElsewhere) return "read on another chain: a rebased view everywhere";
-        if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH)) return "a rebased view: switch back to undo";
+        if (rec.readElsewhere) return "an earlier swipe this reply was planned on was deleted while it streamed, so it is a rebased view on every timeline: switching back won't help; Re-run the reply to play the turn again on this timeline";
+        if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH)) return "a rebased view: switch back to the timeline this reply was made on to undo it";
         const before = [...rec.undone];
         for (const ref of w.refs) if (!rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref))) rec.undone.push(ref);
         // Later on-path events that need the undone one (using an item it bought) would stop
@@ -1182,9 +1182,9 @@ export class LedgerCore {
     // A read writes path-bound events, so it runs only where the record folds as stored: on its
     // path (never, for one read elsewhere), or on a bare record, which the read anchors here (it
     // becomes this turn's record).
-    if (rec.readElsewhere) return "read on another chain: a rebased view everywhere";
+    if (rec.readElsewhere) return "an earlier swipe this reply was planned on was deleted while it streamed, so it is a rebased view on every timeline: switching back won't help; Re-run the reply to play the turn again on this timeline";
     const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
-    if (rec.path !== "" && rec.path !== parent) return "a rebased view: switch back to read it";
+    if (rec.path !== "" && rec.path !== parent) return "a rebased view: switch back to the timeline this reply was made on to read it";
     if (w.kind === "retry_read" && rec.status === "stopped") return index === headIndex ? null : "not the head";
     if (!rec.accepted) return "nothing to read";
     if (w.kind === "retry_read") {

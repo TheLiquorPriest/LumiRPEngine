@@ -362,7 +362,12 @@ describe("ledger scenarios", () => {
     expect(reference.notes.filter((n) => n.kind === "inert")).toEqual([]);
     await expectAgree(h, chat);
     // It never folds as stored, so nothing on it is undone.
-    expect((await h.write(chat, { kind: "undo", id: "u1", messageId: a2.id, swipeId: g.swipeId, refs: [{ in: "events", index: 0 }] })).reason).toBe("read on another chain: a rebased view everywhere");
+    const before = await h.folds(chat);
+    const undo = await h.write(chat, { kind: "undo", id: "u1", messageId: a2.id, swipeId: g.swipeId, refs: [{ in: "events", index: 0 }] });
+    expect(undo.applied).toBe(false);
+    expect(undo.reason).toBeTruthy();
+    expect((await h.core(chat)).journal.messages[a2.id]?.ledger.swipes[String(g.swipeId)]?.undone).toEqual([]);
+    expect((await h.folds(chat)).reference.state).toEqual(before.reference.state);
   });
 
   test("a reply whose own swipe is deleted while it streams is not read, and records nothing", async () => {

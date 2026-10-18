@@ -208,7 +208,7 @@ Everything is reversible: switch back to the original swipe and the world is exa
 
 Fixing a typo, a name or a trimmed line is routine, and the world doesn't care. **When you edit an AI reply, the world stays as it was**: nothing pauses and nothing is re-read. If the edit changes what *happened*, tap **Re-read edit** on that reply and the engine re-reads the new text, replacing what it had read from the old one. A change you had already applied from the old read's chips is undone with it and offered again from the new text, if the new text still tells it, so nothing is charged twice. While the chat is paused, or when the message is a switched-away view, the read is refused without calling a model and the chips stay as they were; Keep or Discard, or switch back, first. Keeping is the default.
 
-Re-read edit runs only on a reply that is on its own timeline. If you have swiped away from it (so it's a rebased view), the chip asks you to switch back first.
+Re-read edit and **Undo** run only on a reply that is on its own timeline. If you have swiped away from it (so it's a rebased view), they are refused and ask you to switch back to the timeline the reply was made on first. One case can't be fixed by switching back: if an earlier swipe the reply was planned on was deleted while the reply streamed, the reply is read on the timeline in force and stays a rebased view on every timeline, so Re-read edit and Undo are always refused on it. To change what it did, **Re-run** the reply: that plays the turn again on the current timeline.
 
 ### Editing an earlier message of yours
 
