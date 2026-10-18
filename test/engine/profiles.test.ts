@@ -15,6 +15,7 @@ import type { WorldDoc } from "../../src/shared/world";
 import { lintWorld, previewSheet } from "../../src/engine/authoring";
 import { applyEffects } from "../../src/engine/effects";
 import { createRegistry } from "../../src/engine/registry-impl";
+import { evaluate } from "../../src/engine/expr";
 import { actionOdds, resolveAction } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import { kindIs, placeOfEntity, scopeEnv } from "../../src/engine/scope";
@@ -266,5 +267,15 @@ describe("a profile in an authored world", () => {
     const hard = new Working(reg, world, start);
     const heroic = resolveAction(reg, hard, { action: "push_skill", params: { skill: "athletics", difficulty: "heroic" } }, createRng("heroic"));
     expect([heroic.check, heroic.adjudged?.why, ap(hard)]).toEqual([null, "impossible", full]);
+  });
+
+  test("a push whose roll totals exactly 0 still spends its Action Point; one settled without a roll doesn't", () => {
+    const delta = PROFILES.modern.actions?.push_skill?.outcomes.failure?.[0]?.args.delta;
+    if (typeof delta !== "string" || !delta.startsWith("=")) throw new Error("no Action Point charge");
+    // What the outcome's effects see as `roll`, rolled or not (resolve's roll variables).
+    const charge = (roll: Record<string, number | null>) => evaluate(delta.slice(1), { lookup: (path) => (path[0] === "roll" && path.length === 2 ? (roll[path[1] ?? ""] ?? null) : undefined) });
+    expect(charge({ natural: 1, total: 0 })).toBe(-1);
+    expect(charge({ natural: 12, total: 15 })).toBe(-1);
+    expect(charge({ natural: null, total: null })).toBe(0);
   });
 });
