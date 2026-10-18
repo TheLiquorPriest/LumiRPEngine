@@ -88,6 +88,8 @@ declare module "../../../engine/registry" {
     "relationships.faction_regard": (ctx: ReadContext, group: EntityId, to: EntityId) => number;
     /** Regard for panels at the regarding party's level: one band (1), one value (2), each axis (3+). */
     "relationships.view": (ctx: ReadContext, from: EntityId, to: EntityId) => { axis: string; band: string; value?: number }[];
+    /** Regard in the world's band words alone, for the narrator's Stance (`regardWords`); null without regard. */
+    "relationships.words": (ctx: ReadContext, from: EntityId, to: EntityId) => string | null;
   }
 }
 
@@ -292,6 +294,25 @@ export function voiceLine(ctx: ReadContext, who: EntityId): string | null {
   return `${name} is ${band} toward you (${detail}).`;
 }
 
+/**
+ * A's regard toward B in the world's band words, never numbers (the Stance section, DESIGN §6.6):
+ * the overall band and, from level 3, each axis whose band differs from it ("warm (trust: cold)"),
+ * so axes that agree cost nothing. Null at level 0 or without a regard relation.
+ */
+export function regardWords(ctx: ReadContext, from: EntityId, to: EntityId): string | null {
+  const level = ctx.levelOf(from, "relationships");
+  if (level === 0 || !relationOf(ctx.state, from, to)) return null;
+  const band = regardBand(ctx, from, to);
+  if (level <= 2) return band;
+  const axes = regardAxes(ctx, from, to);
+  const bands = bandsOf(ctx);
+  const apart = axesOf(ctx).flatMap((a) => {
+    const word = bandOf(bands, axes[a.id] ?? 0)?.label ?? "neutral";
+    return word === band ? [] : [`${a.label.toLowerCase()}: ${word}`];
+  });
+  return apart.length > 0 ? `${band} (${apart.join(", ")})` : band;
+}
+
 export const relationshipsPack: PackDef = {
   id: "relationships",
   label: "Relationships",
@@ -311,6 +332,7 @@ export const relationshipsPack: PackDef = {
     r.query("regard_band", regardBand);
     r.query("relationships.faction_regard", groupRegard);
     r.query("relationships.view", regardView);
+    r.query("relationships.words", regardWords);
     r.formula("regard", (ctx, from, to, axis) => regardValue(ctx, String(from ?? ""), String(to ?? ""), typeof axis === "string" && axis !== "" ? axis : undefined));
     r.formula("regard_band", (ctx, from, to) => regardBand(ctx, String(from ?? ""), String(to ?? "")));
     // Group regard, under the name worlds already use.

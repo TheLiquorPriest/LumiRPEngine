@@ -16,7 +16,7 @@ import type { Registry } from "./registry-impl";
 import { bandOf, fieldDef, GONE_FIELD, kindIs } from "./scope";
 import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
-import { canSeeEntity, canSeePlace, eventVisible, findLeaks, knows, trackKnown, unrevealedSecrets, visibilityOf } from "./visibility";
+import { canSeeEntity, canSeePlace, eventVisible, findLeaks, knows, namesAny, secretLoreTitles, trackKnown, unrevealedSecrets, unseenPlaceNames, visibilityOf } from "./visibility";
 
 /** Event types that are engine or pack bookkeeping: never player-facing lines. */
 const BOOKKEEPING = new Set<string>([
@@ -123,6 +123,18 @@ function trackShown(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
   if (visibility === "public") return true;
   if ((own(readEngineSlice(state).revealed, id) ?? []).length > 0) return true;
   return visibility === "known_by" && trackKnown(reg, world, state, pov, t);
+}
+
+/**
+ * Whether a track still keeps something from the POV: a stage truth not yet revealed, or the track
+ * itself, which may not be named to it (`trackShown`). Its cue is a hint the narrator may play while
+ * this holds (DESIGN §6.6); after that there is nothing left for the cue to hint at.
+ */
+export function trackKeepsSecret(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, id: string): boolean {
+  const t = own(world.tracks, id);
+  if (!t) return false;
+  const revealed = own(readEngineSlice(state).revealed, id) ?? [];
+  return Object.entries(t.stages).some(([stage, s]) => !!s.truth && !revealed.includes(stage)) || !trackShown(reg, world, state, pov, id);
 }
 
 type Ref = { kind: "entity" | "place" | "track"; id: string };
@@ -267,6 +279,24 @@ export function hiddenEntityNames(reg: Registry, world: WorldDoc, state: Readonl
 export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
   const { people, things } = hiddenEntityNames(reg, world, state, pov);
   return [...hiddenTrackLabels(reg, world, state, pov), ...people, ...things];
+}
+
+/**
+ * A check for text the player or the narrator reads (DESIGN §7, `namesAny`): whether it names
+ * someone or something `pov` can't see, or a secret lore entry. A hidden person counts by any word of
+ * their name ("Vex is watching" names Vex Morrow, while a hidden Dan doesn't make "dangerous" a
+ * leak); a hidden place or thing, a track's label and a secret entry's title only by all their words
+ * in order. The names are gathered once, so one check reads many texts.
+ */
+export function hiddenNameCheck(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): (text: string) => boolean {
+  const hidden = hiddenEntityNames(reg, world, state, pov);
+  const labels = [...hidden.things, ...unseenPlaceNames(reg, world, state, pov), ...hiddenTrackLabels(reg, world, state, pov), ...secretLoreTitles(reg, world, state)];
+  return (text) => namesAny(text, hidden.people, labels);
+}
+
+/** Whether text the player reads names anything the world's POV can't see (`hiddenNameCheck`). */
+export function namesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, text: string): boolean {
+  return hiddenNameCheck(reg, world, state, world.pov)(text);
 }
 
 /** An event's line, worded for `pov` when it is a player's (`player`), else for the GM or the author. */

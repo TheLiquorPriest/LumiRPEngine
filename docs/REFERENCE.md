@@ -132,6 +132,7 @@ The slots a world gets when it defines none, kept in rank order on the section b
 | `vehicles` | Vehicles | 6 |
 | `quest` | Quest | 7 |
 | `outline` | Outline | 8 |
+| `stance` | Stance | 9 |
 
 ### Realism
 
@@ -225,7 +226,7 @@ Its own: `castlife.decision`, `castlife.invitation`, `castlife.need`.
 
 ### Panels and slots
 
-Panels: `castlife.cast`. Slots it writes: `people`.
+Panels: `castlife.cast`. Slots it writes: `people`, `stance`.
 
 ### Simulation
 
@@ -236,7 +237,7 @@ Panels: `castlife.cast`. Slots it writes: `people`.
 
 ### Lint codes
 
-`castlife.double_booking`.
+`castlife.cues`, `castlife.double_booking`.
 
 ## Combat pack (`combat`)
 

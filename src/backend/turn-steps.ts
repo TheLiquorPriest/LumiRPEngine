@@ -34,7 +34,11 @@ import { inMinorUnits, type Steps } from "./steps";
 
 // ---------------------------------------------------------------- facts the steps see
 
-/** Player-visible fact lines (the engine's slot renders, minus the turn's own), leak-checked. */
+/**
+ * Player-visible fact lines (the engine's slot renders, minus the turn's own), leak-checked. Stance
+ * is left out: its cues are hints for the narrator to play, and a prose helper given one could state
+ * it (DESIGN §6.6).
+ */
 export function factLines(registry: Registry, world: WorldDoc, state: Readonly<WorldState>, secrets: readonly string[]): string[] {
   const ctx = registry.context(world, state);
   const out: string[] = [];
@@ -43,7 +47,7 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
   const place = povPlace(registry, world, state);
   out.push(`${pov?.name ?? world.pov} is ${place === null ? "at an unknown place" : place.id === null ? "somewhere" : `at ${place.name}`}; it is ${formatClock(calendarOf(world), state.clock)}.`);
   for (const r of registry.renderers) {
-    if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline") continue;
+    if (r.slot === "outcome" || r.slot === "montage" || r.slot === "outline" || r.slot === "stance") continue;
     try {
       for (const line of r.render(ctx)) if (findLeaks(line, secrets).length === 0 && !out.includes(line)) out.push(line);
     } catch {

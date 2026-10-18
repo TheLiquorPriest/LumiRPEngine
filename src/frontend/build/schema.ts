@@ -9,7 +9,7 @@ import type { WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnTierOf } from "../../shared/tiers";
 import type { WorldDoc } from "../../shared/world";
 
-export type RefCollection = "kinds" | "relations" | "entities" | "places" | "grids" | "checks" | "tracks" | "tables";
+export type RefCollection = "kinds" | "relations" | "entities" | "places" | "grids" | "checks" | "tracks" | "tables" | "lore";
 
 export type FieldSpec =
   | { kind: "text"; key: string; label: string; multiline?: boolean; optional?: boolean; readonly?: boolean; hint?: string }
@@ -154,6 +154,23 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
     { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
+    {
+      kind: "list",
+      key: "cues",
+      label: "Cues: how they act while a secret stays hidden",
+      title: "text",
+      item: {
+        kind: "object",
+        key: "",
+        label: "Cue",
+        fields: [
+          { kind: "text", key: "text", label: "What the narrator sees them do (never the secret itself)" },
+          { kind: "ref", key: "lore", label: "While this secret lore stays gated", collection: "lore", optional: true },
+          { kind: "ref", key: "track", label: "While this track keeps something hidden", collection: "tracks", optional: true },
+          { kind: "text", key: "flag", label: "Until this story flag is set", optional: true, hint: "Pick one of the three: the secret the cue stands for" },
+        ],
+      },
+    },
   ],
   places: [
     { kind: "text", key: "name", label: "Name" },

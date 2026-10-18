@@ -38,7 +38,7 @@ export function lintAt(lint: readonly LintIssue[], path: string): LintIssue[] {
 export function refOptions(doc: WorldDoc, collection: RefCollection): { value: string; label: string }[] {
   const source: Record<string, unknown> = doc[collection];
   const options = Object.entries(source).map(([id, entry]) => {
-    const label = isRecord(entry) ? (typeof entry.name === "string" ? entry.name : typeof entry.label === "string" ? entry.label : id) : id;
+    const label = isRecord(entry) ? (typeof entry.name === "string" ? entry.name : typeof entry.label === "string" ? entry.label : typeof entry.title === "string" ? entry.title : id) : id;
     const pack = (collection === "kinds" || collection === "relations") && isRecord(entry) && typeof entry.pack === "string" ? `, ${entry.pack} pack` : "";
     return { value: id, label: label === id && pack === "" ? id : `${label} (${id}${pack})` };
   });

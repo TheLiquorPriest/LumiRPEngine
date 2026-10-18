@@ -256,8 +256,17 @@
         "tags": { "$ref": "#/$defs/strings" },
         "class": { "type": "object", "description": "facet → values", "additionalProperties": { "$ref": "#/$defs/ids" } },
         "sources": { "$ref": "#/$defs/strings" },
-        "assumed": { "$ref": "#/$defs/strings" }
+        "assumed": { "$ref": "#/$defs/strings" },
+        "cues": { "type": "array", "description": "what the narrator sees them do while a secret of theirs stays hidden (the Stance section)", "items": { "$ref": "#/$defs/cue" } }
       }
+    },
+    "cue": {
+      "description": "behaviour, never the secret; it stands for one secret: a lore entry, a track or a story flag",
+      "anyOf": [
+        { "title": "a cue for lore (text and lore)", "type": "object", "required": ["text", "lore"], "additionalProperties": false, "properties": { "text": { "type": "string", "minLength": 1 }, "lore": { "$ref": "#/$defs/id" } } },
+        { "title": "a cue for a track (text and track)", "type": "object", "required": ["text", "track"], "additionalProperties": false, "properties": { "text": { "type": "string", "minLength": 1 }, "track": { "$ref": "#/$defs/id" } } },
+        { "title": "a cue for a story flag (text and flag)", "type": "object", "required": ["text", "flag"], "additionalProperties": false, "properties": { "text": { "type": "string", "minLength": 1 }, "flag": { "type": "string", "minLength": 1 } } }
+      ]
     },
     "point": {
       "type": "object",

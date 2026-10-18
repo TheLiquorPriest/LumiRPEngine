@@ -188,6 +188,19 @@ export interface RelationInstance {
   until?: GameMinutes;
 }
 
+/**
+ * Behaviour the narrator sees while one secret stays hidden (the Stance section, DESIGN §6.6): how
+ * someone acts ("evasive about the cellar"), never the secret itself. It stands for exactly one
+ * secret: a lore entry (while it is secret and its gate doesn't hold), a track (while it keeps
+ * something from the POV) or a story flag (until it is set). One keyed to none or several never shows.
+ */
+export interface EntityCue {
+  text: string;
+  lore?: string;
+  track?: TrackId;
+  flag?: string;
+}
+
 export interface EntityDef {
   id: EntityId;
   kind: KindId;
@@ -213,6 +226,8 @@ export interface EntityDef {
   sources?: string[];
   /** What the engine filled in rather than the lore, for review (DESIGN §9.7 "assumed"): fields from a data table, and `kind` when the lore named none. */
   assumed?: string[];
+  /** What the narrator sees them do while a secret of theirs stays hidden (DESIGN §6.6). Read live from the world. */
+  cues?: EntityCue[];
 }
 
 export type FacetId = string;

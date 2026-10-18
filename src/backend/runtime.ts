@@ -37,8 +37,8 @@ import { actionOdds, findAction, type Resolution } from "../engine/resolve";
 import type { InterpretOutput } from "../engine/steps";
 import { checkAnswer } from "../engine/tracks";
 import { secretLoreNames } from "../engine/lore";
-import { hiddenEntityNames, hiddenTrackLabels, playerKnows } from "../engine/player-events";
-import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, secretLoreTitles, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
+import { namesHidden, playerKnows } from "../engine/player-events";
+import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
@@ -1721,17 +1721,6 @@ const REQUIREMENT_WORDS: readonly [RegExp, string][] = [
   [/\bat\(|\bplace\([^)]*\)\s*==\s*here|==\s*here\b/, "it has to be here"],
   [/>\s*0\b/, "it needs an amount"],
 ];
-
-/**
- * Whether model text the player reads names someone or something the POV can't see, or a secret
- * lore entry (DESIGN §7, `namesAny`): a hidden person by any word of their name ("Vex is watching"
- * names Vex Morrow, while a hidden Dan doesn't make "dangerous" a leak); a hidden place or thing, a
- * track's label and a secret entry's title only by all their words in order.
- */
-function namesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, text: string): boolean {
-  const hidden = hiddenEntityNames(reg, world, state, world.pov);
-  return namesAny(text, hidden.people, [...hidden.things, ...unseenPlaceNames(reg, world, state, world.pov), ...hiddenTrackLabels(reg, world, state, world.pov), ...secretLoreTitles(reg, world, state)]);
-}
 
 /**
  * Whether text a chip shows from `interpret`'s read names anything hidden: what `namesHidden` finds,

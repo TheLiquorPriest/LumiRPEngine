@@ -151,6 +151,11 @@ describe("Build kind pickers", () => {
   test("a world kind extending a pack kind shows the pack's fields", () => {
     expect(Object.keys(kindFields(doc, "crate")).sort()).toEqual(["capacity_l", "label", "stock"]);
   });
+
+  test("a cue's lore picker names each entry by its title", () => {
+    const lore = baseWorld({ lore: { toledo: { id: "toledo", title: "The Toledo years", content: "Before Riverton.", keys: [], links: [], secret: true, gate: "false" } } });
+    expect(refOptions(lore, "lore")).toEqual([{ value: "toledo", label: "The Toledo years (toledo)" }]);
+  });
 });
 
 describe("time settings patches", () => {

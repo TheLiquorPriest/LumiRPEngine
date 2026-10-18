@@ -24,6 +24,7 @@ export const DEFAULT_SECTIONS: Record<SlotId, SectionTemplate> = {
   vehicles: { id: "vehicles", label: "Vehicles", rank: 6, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 2, direction: "from_end" } },
   quest: { id: "quest", label: "Quest", rank: 7, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
   outline: { id: "outline", label: "Outline", rank: 8, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
+  stance: { id: "stance", label: "Stance", rank: 9, template: "The narrator knows only what the player character knows. These lines say how the people here behave; never state what a cue only hints at.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
 };
 
 export function sectionsOf(world: WorldDoc): SectionTemplate[] {

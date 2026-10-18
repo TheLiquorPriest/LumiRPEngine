@@ -70,4 +70,10 @@ describe("world schema", () => {
     expect(problems(withValue(world, ["lore", "harbor_history", "visibility"], "public"))).toEqual([]);
     expect(problems(withValue(world, ["lore", "harbor_history", "visibility"], "secret"))).toEqual(['lore.harbor_history.visibility: should be "public" or "known_by"']);
   });
+
+  test("an entity's cues each stand for one secret: a lore entry, a track or a story flag", () => {
+    expect(problems(withValue(world, ["entities", "pov", "cues"], [{ text: "hums", lore: "harbor_history" }, { text: "hums", track: "t" }, { text: "hums", flag: "seen" }]))).toEqual([]);
+    // A cue standing for two secrets, or for none, is reported where it sits.
+    expect(problems(withValue(world, ["entities", "pov", "cues"], [{ text: "hums", flag: "seen", track: "t" }, { text: "hums" }])).map((p) => p.split(": ")[0])).toEqual(["entities.pov.cues[0]", "entities.pov.cues[1]"]);
+  });
 });

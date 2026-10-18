@@ -1,6 +1,7 @@
 // Cast life pack (DESIGN §8, §9.3): commitments (jobs, school terms and timetables, appointments,
 // trips and vacations, chores), needs and drives, agendas, the day planner, off-screen LOD1
-// execution, NPC↔NPC encounters and invitations.
+// execution, NPC↔NPC encounters and invitations, and the narrator's Stance section (§6.6): how the
+// people with the POV stand toward it, what they are about, and the cues for their secrets.
 //
 // Commitments are data the planner treats as fixed blocks: activity schedules (shifts, school
 // timetables; terms are recurrence `from`/`until`), and the person fields `appointments`
@@ -25,7 +26,7 @@ import type { LedgerEvent, PackEvent } from "../../../shared/ledger";
 import { calendarOf, clockAt, dateAt, formatClock, formatHHMM, MINUTES_PER_DAY } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { labelOf, mutableSlice, numOf, objOf, optionalQuery, optionalService, sliceOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
-import { planDay, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
+import { planDay, tieKey, type FixedBlock, type PlanBlock, type PlanOption } from "../../../engine/plan-day";
 import type { EventTypeDef, PackDef, ReadContext, SlotInfo } from "../../../engine/registry";
 import { createRng, type Rng } from "../../../engine/rng";
 import { hashParts } from "../../../shared/hash";
@@ -35,8 +36,9 @@ import { classValues, isGroup, isMemberOf, MEMBER_OF } from "../../../engine/sel
 import type { WorldState } from "../../../engine/state";
 import { agendaFor } from "../../../engine/tracks";
 import { lastSighting } from "../../../engine/seen";
-import { playerKnows } from "../../../engine/player-events";
-import { canSeeEntity, canSeeField, canSeePlace, HIDDEN_PLACE_NAME, visibilityOf } from "../../../engine/visibility";
+import { hiddenNameCheck, playerKnows } from "../../../engine/player-events";
+import { canSeeEntity, canSeeField, canSeePlace, findLeaks, HIDDEN_PLACE_NAME, knows, unrevealedSecrets, visibilityOf } from "../../../engine/visibility";
+import { cueIssues, cuesFor } from "./cues";
 
 // ---------------------------------------------------------------- needs
 
@@ -590,6 +592,82 @@ export function buildCastView(ctx: ReadContext): CastView {
   };
 }
 
+// ---------------------------------------------------------------- the Stance section
+
+/**
+ * Whether someone acts, and so has a stance to tell (DESIGN §6.6): today, anyone still in the world.
+ * The one test for it, so a person's life state can decide it in one place.
+ */
+export function acts(ctx: ReadContext, who: EntityId): boolean {
+  return !isGone(ctx.state, who);
+}
+
+/** "Label: one; two." Clauses as one sentence: whitespace collapsed, each without its own full stop. */
+function listed(label: string, clauses: readonly string[]): string {
+  const body = clauses.map((c) => c.replace(/\s+/g, " ").trim().replace(/[.;]$/, "")).join("; ");
+  return `${label}: ${body}${/[.!?…]$/.test(body) ? "" : "."}`;
+}
+
+/**
+ * The block of today's plan that `who`'s own recorded choice settled (`npc.choose`, or an author's
+ * `castlife.decide`), the one under way or the next, named as Cast names the day: a block of an
+ * agenda that isn't public is "Busy". Null when no such block is left today.
+ */
+function decidedBlock(ctx: ReadContext, who: EntityId): string | null {
+  const cal = calendarOf(ctx.world);
+  const plan = dayPlan(ctx, who);
+  const dayStart = clockAt(cal, plan.day, 0);
+  const chosen = new Set(plan.ties.filter((t) => t.via === "recorded").map((t) => t.key));
+  const block = plan.blocks.find((b) => b.end > ctx.state.clock && chosen.has(tieKey(who, dayStart, b.start)));
+  if (!block) return null;
+  const label = block.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, block.option.slice(AGENDA_OPTION.length)) ? "Busy" : block.label;
+  return block.start <= ctx.state.clock ? label : `${label} at ${formatHHMM(dateAt(cal, block.start).minuteOfDay)}`;
+}
+
+/**
+ * The Stance section (DESIGN §6.6): for each person here the POV can see who acts, a line on what
+ * they know of the POV and what they are about, and a line of their cues. Each piece that would carry
+ * an unrevealed secret or name something the POV can't see is left out on its own.
+ */
+export function stanceLines(ctx: ReadContext): string[] {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const here = placeOfEntity(state, pov);
+  if (!here) return [];
+  const secrets = unrevealedSecrets(reg, world, state);
+  const namesHidden = hiddenNameCheck(reg, world, state, pov);
+  const safe = (text: string): boolean => findLeaks(text, secrets).length === 0 && !namesHidden(text);
+  const regard = optionalQuery(ctx, "relationships.words");
+  const lines: string[] = [];
+  for (const id of Object.keys(state.entities).sort()) {
+    const e = own(state.entities, id);
+    if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || !canSeeEntity(reg, world, state, pov, id) || !acts(ctx, id)) continue;
+    // Nobody regards a stranger: regard toward the POV is knowing it as much as a `knows` relation.
+    const known = knows(state, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
+    const words = regard?.(ctx, id, pov) ?? null;
+    const parts = [`${e.name} ${known ? "knows" : "doesn't know"} you${words ? `; regard: ${words}` : ""}.`];
+    const activity = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
+    const doing = typeof activity === "string" && activity !== "idle" ? shownActivity(ctx, id, activity).replace(/_/g, " ") : "";
+    if (doing !== "" && safe(doing)) parts.push(listed("Doing", [doing]));
+    // A public agenda's current stage, in its cue's words where the author wrote one, else its label as Cast shows it.
+    const agenda = agendaFor(world, state, id)
+      .filter((a) => publicTrack(world, a.track))
+      .map((a) => {
+        const track = own(world.tracks, a.track);
+        const cue = track ? own(track.stages, a.stage)?.cue?.trim() : undefined;
+        return cue ? cue : a.stageLabel;
+      })
+      .filter(safe);
+    if (agenda.length > 0) parts.push(listed("Agenda", agenda));
+    const decided = e.agent && ctx.levelOf(id, "castlife") >= 3 ? decidedBlock(ctx, id) : null;
+    if (decided !== null && safe(decided)) parts.push(listed("Decided", [decided]));
+    lines.push(parts.join(" "));
+    const cues = cuesFor(ctx, id, safe);
+    if (cues.length > 0) lines.push(listed(`${e.name}'s cues`, cues));
+  }
+  return lines;
+}
+
 declare module "../../../engine/registry" {
   interface QueryMap {
     /** Ties the planner left to the seed and invitations not yet decided: inputs for `npc.choose`. */
@@ -687,6 +765,8 @@ export const castlifePack: PackDef = {
       },
     });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) as unknown as JsonValue });
+    r.renderer({ slot: "stance", render: stanceLines });
+    r.lint({ code: "castlife.cues", check: cueIssues });
 
     // Two schedules setting the same field of the same person at once are the engine's
     // `schedule_overlap`; this rule covers what a schedule can't express: dated appointments and trips.
