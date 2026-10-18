@@ -11,6 +11,8 @@
 // for the part, else one for its whole entity, overrides that:
 //   - an entity new to the chat is created as a chat's first state creates it, its symmetric and
 //     inverse relations two-sided, an agent caught up to now, a thing a map lays in a cell lying there;
+//   - where an entity is (its place and cell) is one part, read as a chat starting on each revision
+//     holds it, so a map that newly lays a thing in a cell, or moves its cell, moves it;
 //   - an entity gone from the revision stays, holding the classes, tags and visibility it had,
 //     unless picked `remove`: then it leaves the world and is unlinked, as a GM's Remove does;
 //   - kind, name, tier, agent flag, level overrides, classes and tags, and each field;
@@ -24,7 +26,7 @@
 import { arrivalCell, cellIndex, placedItems, standingGrid } from "../shared/grid";
 import { hashJson } from "../shared/hash";
 import type { EntityId, FieldId, RelationTypeId, RevisionId, StageId, TrackId } from "../shared/ids";
-import type { JsonValue } from "../shared/json";
+import type { JsonObject, JsonValue } from "../shared/json";
 import { safeKey } from "../shared/json";
 import { mapSettingsOf } from "../shared/maps";
 import type { EntityPicks, LedgerEvent, MarkerBody, UpgradeAspect, UpgradePick, UpgradePicks } from "../shared/ledger";
@@ -61,6 +63,9 @@ const OPENING = "opening";
 const PACK = "engine";
 /** The revision the chat's definitions come from, while an Upgrade without picks has left them behind. */
 const LAG = "definitions";
+
+/** Where something is: its place and its cell there. An Upgrade takes or keeps them as one part. */
+export const PLACEMENT_FIELDS: readonly FieldId[] = ["place", "x", "y"];
 
 /** One part of an entity that differs between the revisions: the chat's value now, the revision's, and whether play wrote it. */
 export interface PartDiff<V = unknown> {
@@ -163,6 +168,15 @@ function heldDef(id: EntityId, e: EntityState): EntityDef {
 }
 
 /**
+ * An entity's fields as a chat starting on a revision holds them: a thing that revision's maps lay
+ * in a cell (`placedItems`) lies there, unless it starts inside something.
+ */
+function laidFields(def: EntityDef, laid: { place: string; cell: { x: number; y: number } } | undefined, relations: readonly RelationInstance[] | undefined): JsonObject {
+  if (!laid || (relations ?? []).some((r) => r.type === "in")) return def.fields;
+  return { ...def.fields, place: laid.place, x: laid.cell.x, y: laid.cell.y };
+}
+
+/**
  * What an Upgrade to `to` would change in this chat: every entity new to it, gone from the
  * revision or changed, part by part, with whether play touched each part, and the tracks whose
  * stage the revision dropped. The preview lists it; the fold applies it with the picks.
@@ -174,6 +188,8 @@ export function planUpgrade(state: Readonly<WorldState>, env: MarkerEnv, to: Rev
   const after = revisionDoc(env, to);
   const oldRel = startRelations(env.types, before);
   const newRel = startRelations(env.types, after);
+  const oldLaid = new Map(placedItems(before).map((item) => [item.id, item]));
+  const newLaid = new Map(placedItems(after).map((item) => [item.id, item]));
   // An entity gone from the revision decides its own relations, and one new to the chat brings its own.
   const leaving = (id: string): boolean => own(before.entities, id) !== undefined && own(after.entities, id) === undefined && own(state.entities, id) !== undefined;
   const arriving = (id: string): boolean => own(after.entities, id) !== undefined && own(state.entities, id) === undefined;
@@ -221,13 +237,22 @@ export function planUpgrade(state: Readonly<WorldState>, env: MarkerEnv, to: Rev
     // Classes and tags are read live from the revision in force, so the chat's are those, unless it holds its own.
     const held = now.class !== undefined || now.tags !== undefined ? classesOf(now) : classesOf(own(inForce.entities, id) ?? base);
     part("class", held, classesOf(next), held, false);
+    // Fields as a chat starting on each revision holds them, so where a map lays a thing counts.
+    const earlier = was ? laidFields(was, oldLaid.get(id), own(oldRel, id)) : base.fields;
+    const later = laidFields(next, newLaid.get(id), own(newRel, id));
     const fields: Record<FieldId, PartDiff<JsonValue | undefined>> = {};
-    for (const f of [...new Set([...Object.keys(base.fields), ...Object.keys(next.fields)])].filter(safeKey).sort()) {
-      const later = own(next.fields, f);
-      if (same(own(base.fields, f), later)) continue;
+    for (const f of [...new Set([...Object.keys(earlier), ...Object.keys(later)])].filter((f) => safeKey(f) && !PLACEMENT_FIELDS.includes(f)).sort()) {
+      const value = own(later, f);
+      if (same(own(earlier, f), value)) continue;
       // A balance that moved in play holds the opening it started from, so a new opening is play's call too.
       const touched = whole || touchedField(state, id, f) || (f === OPENING && touchedAspect(state, id, "posted"));
-      fields[f] = { now: own(now.fields, f), next: later, touched };
+      fields[f] = { now: own(now.fields, f), next: value, touched };
+    }
+    // Its place and cell are one part: a move in play keeps all of it, and taking any of it takes the
+    // revision's place and cell together, so a cell never lands in another place than its own.
+    if (PLACEMENT_FIELDS.some((f) => !same(own(earlier, f), own(later, f)))) {
+      const touched = whole || PLACEMENT_FIELDS.some((f) => touchedField(state, id, f));
+      for (const f of PLACEMENT_FIELDS) if (!same(own(now.fields, f), own(later, f))) fields[f] = { now: own(now.fields, f), next: own(later, f), touched };
     }
     const olds = byKey(was ? (own(oldRel, id) ?? []) : now.relations);
     const nexts = byKey(own(newRel, id) ?? []);
@@ -372,8 +397,13 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
       }
       if (aspect === "tier" || aspect === "agent" || aspect === "levels") forget(state, d.id, { aspect });
     }
+    // The place and cell go together: taken only when every one of them that differs is taken.
+    const placed = PLACEMENT_FIELDS.every((f) => {
+      const diff = own(d.fields, f);
+      return !diff || takes(p, p?.fields ? own(p.fields, f) : undefined, diff.touched);
+    });
     for (const [f, diff] of Object.entries(d.fields)) {
-      if (!takes(p, p?.fields ? own(p.fields, f) : undefined, diff.touched)) continue;
+      if (!(PLACEMENT_FIELDS.includes(f) ? placed : takes(p, p?.fields ? own(p.fields, f) : undefined, diff.touched))) continue;
       if (diff.next === undefined) delete e.fields[f];
       else e.fields[f] = structuredClone(diff.next);
       forget(state, d.id, { field: f });

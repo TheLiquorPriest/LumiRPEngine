@@ -2,6 +2,7 @@
 // from the two revisions, the touched record and the owner's picks.
 
 import { describe, expect, test } from "bun:test";
+import { upgradePreview } from "../../src/backend/upgrade-preview";
 import { hashJson } from "../../src/shared/hash";
 import type { UpgradePicks } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
@@ -70,6 +71,18 @@ function chat(edit: (w: WorldDoc) => void, base: (w: WorldDoc) => void = () => u
 
 /** The inn's ground floor as a grid map: a taproom, a kitchen behind a door and a back hall below. */
 const INN_LAYOUT = ["############", "#ttttt#kkkk#", "#ttttt+kkkk#", "#ttttL#kkkk#", "##+#########", "#hhhhhhhhhh#", "#####+######"];
+/** The same floor with the `L` cell moved to the taproom's corner, and to the kitchen. */
+const CORNER_LAYOUT = ["############", "#Ltttt#kkkk#", "#ttttt+kkkk#", "#ttttt#kkkk#", "##+#########", "#hhhhhhhhhh#", "#####+######"];
+const KITCHEN_LAYOUT = ["############", "#ttttt#kkLk#", "#ttttt+kkkk#", "#ttttt#kkkk#", "##+#########", "#hhhhhhhhhh#", "#####+######"];
+
+/** A lantern in the inn, which the map lays on its `L` cell when `laid`, on `layout`. */
+const lantern =
+  (laid: boolean, layout = INN_LAYOUT) =>
+  (w: WorldDoc): void => {
+    w.entities.lantern = { id: "lantern", kind: "item", name: "Lantern", tier: "background", fields: {}, relations: [] };
+    const map = w.maps.inn_ground;
+    if (map) Object.assign(map, { layout, legend: laid ? { ...map.legend, L: { item: "lantern" } } : map.legend });
+  };
 
 /** A revision of the inn, the POV in its taproom, with the grid system on unless `movement` is false; `edit` runs before its map compiles. */
 function inn(edit: (w: WorldDoc) => void = () => undefined, movement = true): WorldDoc {
@@ -388,15 +401,45 @@ describe("the merge on a grid", () => {
   });
 
   test("a thing a new revision's map lays in a cell arrives lying there, as in a new chat", () => {
-    const lantern = (w: WorldDoc): void => {
-      w.entities.lantern = { id: "lantern", kind: "item", name: "Lantern", tier: "background", fields: {}, relations: [] };
-      const map = w.maps.inn_ground;
-      if (map) map.legend = { ...map.legend, L: { item: "lantern" } };
-    };
-    const c = between(inn(), inn(lantern));
+    const c = between(inn(), inn(lantern(true)));
     upgrade(c);
     expect(c.state.entities.lantern?.fields).toMatchObject({ place: "taproom", x: 5, y: 3 });
     expect(c.state.entities.lantern?.fields).toEqual(initialState(c.b, c.rb, reg).entities.lantern?.fields);
+  });
+
+  test("a thing already in the chat follows where a new revision's map lays it, or moves its cell, as in a new chat", () => {
+    for (const c of [between(inn(lantern(false)), inn(lantern(true))), between(inn(lantern(true)), inn(lantern(true, CORNER_LAYOUT)))]) {
+      const fresh = initialState(c.b, c.rb, reg).entities.lantern?.fields;
+      const plan = planUpgrade(c.state, c.env, c.rb);
+      const preview = upgradePreview(reg, plan, c.state, c.b, c.a).entities.find((r) => r.entity === "lantern");
+      // One Placement row, taken by default since play never moved it.
+      expect(preview?.changes).toMatchObject([{ label: "Placement", to: `Taproom at ${String(fresh?.x)}, ${String(fresh?.y)}`, pick: "take", why: "unchanged" }]);
+      upgrade(c);
+      expect(c.state.entities.lantern?.fields).toEqual(fresh);
+    }
+  });
+
+  test("a thing play moved keeps its place and cell; taking its placement takes all of it", () => {
+    const moved = (): Chat => {
+      const c = between(inn(lantern(true)), inn(lantern(true, KITCHEN_LAYOUT)));
+      // Nudged a cell in play, as the space pack writes a position.
+      play(c, [{ type: "space.pos", data: { entity: "lantern", at: { scope: "inn", x: 4, y: 3 }, from: { scope: "inn", x: 5, y: 3 } } }]);
+      return c;
+    };
+    const kept = moved();
+    const row = upgradePreview(reg, planUpgrade(kept.state, kept.env, kept.rb), kept.state, kept.b, kept.a).entities.find((r) => r.entity === "lantern")?.changes;
+    expect(row).toMatchObject([{ label: "Placement", from: "Taproom at 4, 3", pick: "keep", why: "changed in play" }]);
+    expect(row?.[0]?.targets.map((t) => (t.part === "field" ? t.field : t.part)).sort()).toEqual(["place", "x", "y"]);
+    upgrade(kept);
+    expect(kept.state.entities.lantern?.fields).toMatchObject({ place: "taproom", x: 4, y: 3 });
+    // A pick for the place alone never puts the cell it was moved to in another place.
+    const partial = moved();
+    upgrade(partial, { lantern: { fields: { place: "take" } } });
+    expect(partial.state.entities.lantern?.fields).toMatchObject({ place: "taproom", x: 4, y: 3 });
+    const taken = moved();
+    upgrade(taken, { lantern: { fields: { place: "take", x: "take", y: "take" } } });
+    expect(taken.state.entities.lantern?.fields).toEqual(initialState(taken.b, taken.rb, reg).entities.lantern?.fields);
+    expect(taken.state.entities.lantern?.fields.place).toBe("kitchen");
   });
 
   test("an Upgrade that turns the grid system on puts the POV on a cell, sees from there, and can walk", () => {

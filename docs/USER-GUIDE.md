@@ -743,7 +743,7 @@ You edit a world as a draft: the world bar in **Build** shows **unsaved draft** 
 
 Upgrade moves a chat to the newer revision from the next turn forward. It is recorded like any other change, so it works with swipes, branches and Re-narrate. Detail that has already been shown stays as it was; the new tables and generators apply to anything not yet shown. Nothing ever changes silently.
 
-**Upgrade to the latest revision** first shows what the revision brings into the chat, entity by entity: people and things that are new, ones the revision no longer has, and each change to the rest. That covers fields such as appointments, home or employer, plus name, tier, classes, relations and an account's opening balance. Each change shows the chat's value, the revision's, and why it is set the way it is:
+**Upgrade to the latest revision** first shows what the revision brings into the chat, entity by entity: people and things that are new, ones the revision no longer has, and each change to the rest. That covers fields such as appointments, home or employer, plus name, tier, classes, relations, an account's opening balance, and **Placement**: where something is and the map cell it lies on, taken or kept as one, so a thing a new map lays in a cell, or moves, goes there. Each change shows the chat's value, the revision's, and why it is set the way it is:
 
 - **Unchanged in play:** nothing in the chat has touched it, so it's set to **Take**.
 - **Changed in play:** a turn, a fix or a GM edit changed it, so it's set to **Keep**. That holds even if it later changed back.

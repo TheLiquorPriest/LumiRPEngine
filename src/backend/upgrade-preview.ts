@@ -18,7 +18,7 @@ import type { Registry } from "../engine/registry-impl";
 import { relationDef } from "../engine/relations";
 import { fieldDef, kindDef } from "../engine/scope";
 import type { WorldState } from "../engine/state";
-import type { PartDiff, RelationDiff, UpgradePlan } from "../engine/upgrade";
+import { PLACEMENT_FIELDS, type PartDiff, type RelationDiff, type UpgradePlan } from "../engine/upgrade";
 import { canSeeEntity, canSeePlace, trackKnown, visibilityOf } from "../engine/visibility";
 
 const ASPECT_LABEL: Record<UpgradeAspect, string> = { kind: "Kind", name: "Name", tier: "Tier", agent: "Lives off-screen", levels: "Level overrides", class: "Classes and tags" };
@@ -107,8 +107,23 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
         if (diff) row.changes.push(marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] }));
       }
       for (const [field, diff] of Object.entries(d.fields)) {
+        if (PLACEMENT_FIELDS.includes(field)) continue;
         const def = fieldDef(reg, after, d.def.kind, field);
         row.changes.push(marked({ id: `${d.id}:field:${field}`, label: def?.label ?? field.replace(/_/g, " "), from: valueText(diff.now, def), to: valueText(diff.next, def), ...byDefault(diff.touched), targets: [{ entity: d.id, part: "field", field }] }));
+      }
+      // Its place and cell are one part: one row, picked for each of them that changes.
+      const placement = PLACEMENT_FIELDS.filter((f) => own(d.fields, f) !== undefined);
+      if (placement.length > 0) {
+        const where = (side: "now" | "next"): string => {
+          const value = (f: string): unknown => {
+            const diff = own(d.fields, f);
+            return diff ? diff[side] : held?.fields[f];
+          };
+          const [place, x, y] = PLACEMENT_FIELDS.map(value);
+          if (typeof place !== "string") return valueText(undefined);
+          return typeof x === "number" && typeof y === "number" ? `${valueText(place)} at ${x}, ${y}` : valueText(place);
+        };
+        row.changes.push(marked({ id: `${d.id}:placement`, label: "Placement", from: where("now"), to: where("next"), ...byDefault(placement.some((f) => own(d.fields, f)?.touched === true)), targets: placement.map((field) => ({ entity: d.id, part: "field", field })) }));
       }
       for (const r of d.relations) {
         const key = `${d.id}\u0000${r.rel}\u0000${r.to}`;
