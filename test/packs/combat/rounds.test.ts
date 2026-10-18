@@ -152,6 +152,39 @@ describe("the clock in a fight", () => {
     expect(goblinAfterAnHour(started(world).state)).toBe("home");
   });
 
+  test("no trip takes anyone out of a fight under way, or brings them home from it; they go once it's over", () => {
+    const { registry, world: starter, state } = starterFight();
+    // Danny's own schedules would take him to work as soon as he's free: without them, only his trips move him.
+    const world: WorldDoc = { ...starter, schedules: Object.fromEntries(Object.entries(starter.schedules).filter(([id]) => !id.startsWith("danny_okafor"))) };
+    const place = placeOfEntity(state, world.pov);
+    const over = (s: WorldState) => fold(registry, world, s, [{ type: "combat.end", data: { encounter: encounterOf(s)?.id ?? "", reason: "effect", winner: null, rounds: 1 } }]);
+    // Where Danny is after six hours as an action that starts a fight plays them, with the fight
+    // under way (or, with `after`, after the fight ends and another half day).
+    const played = (s: WorldState, trip: (w: Working) => void, after = false): string | null => {
+      const w = new Working(registry, world, s);
+      trip(w);
+      advance(registry, w, w.state.clock + 6 * 60, { runSeed: "run", mode: "turn" });
+      if (!after) return placeOfEntity(w.state, "danny_okafor");
+      const v = new Working(registry, world, over(w.state));
+      advance(registry, v, v.state.clock + 12 * 60, { runSeed: "run", mode: "turn" });
+      return placeOfEntity(v.state, "danny_okafor");
+    };
+    // Danny leaves on a trip within those hours: the fight holds him, as it holds a day plan.
+    const leaves = (w: Working): void => {
+      w.state.entities.danny_okafor!.fields.trips = [{ from: w.state.clock + 1, until: w.state.clock + 3 * 24 * 60, place: "port_alder", label: "Fishing trip" }];
+    };
+    expect(played(state, leaves)).toBe(place);
+    expect(played(over(state), leaves)).toBe("port_alder");
+    // Danny is away here on a trip that ends within those hours: he fights on, and once the fight is
+    // over the trip brings him home.
+    const returns = (w: Working): void => {
+      const until = w.state.clock + 60;
+      w.state.entities.danny_okafor!.fields = { ...w.state.entities.danny_okafor!.fields, home: "port_alder", holds: { place: until, activity: until }, trips: [{ from: w.state.clock - 24 * 60, until, place, label: "Visit" }] };
+    };
+    expect(played(state, returns)).toBe(place);
+    expect(played(state, returns, true)).toBe("port_alder");
+  });
+
   test("on a starter, talking or using a skill through a fight moves no clock, and no day plan takes the foe away", () => {
     const { registry, world, state: start } = starterFight();
     const place = placeOfEntity(start, world.pov);

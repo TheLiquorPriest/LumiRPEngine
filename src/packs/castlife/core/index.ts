@@ -387,14 +387,18 @@ function invitationText(ctx: ReadContext, agent: EntityId, place: PlaceId | null
 /**
  * Trips and vacations hold people away (LOD0, every person who still acts, Cast life ≥ 1). A slot
  * is stepped when it completes, so a trip under way at the slot's end takes the person away then
- * (once: the hold marks it), and one ending within the slot brings them home.
+ * (once: the hold marks it), and one ending within the slot brings them home. No one in a fight
+ * under way leaves for a trip or comes home from one, as no day plan walks them out of it (the
+ * combat pack's `combat.engaged`); someone still held away by a trip that has ended (the fight, or a
+ * state that didn't act, kept them) comes home at the first slot they can.
  */
 function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
+  const engaged = optionalQuery(ctx, "combat.engaged");
   for (const who of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, who);
     const trips = e?.fields.trips;
-    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts(ctx, who)) continue;
+    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts(ctx, who) || engaged?.(ctx, who) === true) continue;
     for (const raw of trips) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
@@ -405,7 +409,7 @@ function stepTrips(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
         out.push({ type: "set", entity: who, field: "holds", value: { ...objOf(e.fields.holds), place: until, activity: until } }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
       }
       const home = homeOf(ctx, who);
-      if (until > slot.start && until <= slot.end && home) out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
+      if (until <= slot.end && (until > slot.start || away) && home) out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
     }
   }
   return out;
