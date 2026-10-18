@@ -1,7 +1,8 @@
 // A fight's turns (DESIGN §11): the spend a combat action makes, the next turn and the refills it
 // brings, who goes down or gets back up, when it's over, and everyone else's turns around the POV's.
 // All of it is applied through the plan's working state, so it lands as events in the same turn:
-// swipes, Keep and Re-run treat a round like any other turn.
+// swipes, Keep and Re-run treat a round like any other turn. Each act, fall and end is one event group
+// with the rule events it fires, so a rebased view keeps or drops it whole.
 //
 // A fight is fought where it started: the POV leaving that place ends it (`left`), and rounds in a
 // row in which no one's HP changes end it as a stalemate, so no fight goes on unseen or stalls.
@@ -13,6 +14,7 @@
 // generator by round and participant.
 
 import type { JsonObject } from "../../../shared/json";
+import { hashParts } from "../../../shared/hash";
 import { isRecord } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
@@ -210,10 +212,26 @@ class FightLines {
 
 // ---------------------------------------------------------------- settling, acts and turns
 
-/** Applies events and fires the rules they trigger (a rule may award XP when a fight ends). */
+/**
+ * Makes the events applied since `from` one event group (DESIGN §4.3): an act's spend, outcome, rule
+ * events and record, or a fall with its condition, land whole or not at all. A rebased view where
+ * the fight is another one drops the damage with the turn and the spend, not the record alone.
+ */
+function asUnit(w: Working, from: number, seed: string): void {
+  if (w.events.length - from < 2) return;
+  const group = `combat:${hashParts(seed, JSON.stringify(w.events.slice(from))).slice(0, 10)}`;
+  for (let i = from; i < w.events.length; i++) {
+    const e = w.events[i];
+    if (e) w.events[i] = { ...e, group };
+  }
+}
+
+/** Applies events and fires the rules they trigger (a rule may award XP when a fight ends), as one unit. */
 function record(w: Working, events: readonly LedgerEvent[], seed: string): LedgerEvent[] {
+  const from = w.events.length;
   const applied = w.applyAll(events);
   if (applied.length > 0) runRulesOnEvents(w.reg, w, applied, { seed });
+  asUnit(w, from, seed);
   return applied;
 }
 
@@ -245,8 +263,11 @@ function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): bool
   for (const f of enc.order) {
     if (!own(w.state.entities, f.id)) continue;
     const down = downHolds(w.ctx, rules, f.id);
+    const from = w.events.length;
     if (down === f.down || record(w, [{ type: "combat.down", data: { encounter: enc.id, entity: f.id, down } }], rng.seed).length === 0) continue;
-    applyEffects(w.reg, w, [{ type: "sheets.condition", args: { who: f.id, condition, ...(down ? { mod: 0 } : { clear: true }) } }], { bindings: { self: f.id }, rng: rng.fork(`down:${f.id}`) });
+    const fall = rng.fork(`down:${f.id}`);
+    applyEffects(w.reg, w, [{ type: "sheets.condition", args: { who: f.id, condition, ...(down ? { mod: 0 } : { clear: true }) } }], { bindings: { self: f.id }, rng: fall });
+    asUnit(w, from, fall.seed);
     const who = nameFor(w.ctx, f.id);
     if (who !== "someone") lines.push(`${capital(who)} ${f.id === w.world.pov ? "are" : "is"} ${down ? "down" : "back up"}.`);
   }
@@ -261,10 +282,11 @@ function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): bool
 
 /**
  * The record of one act (`combat.act`): who did what to whom, and the check's outcome when it rolled
- * one. None for an action that starts a fight (its start says it) or only ends a turn.
+ * one. None for an action that starts a fight (its start says it) or only ends a turn; a stance
+ * (Total defense, Dodge) changes nothing but what it spends, so spending something is an act too.
  */
 function actEvents(enc: Encounter, actor: EntityId, action: ActionDef, params: JsonObject, res: Resolution): LedgerEvent[] {
-  const acts = action.combat?.start !== true && Object.values(action.outcomes).some((list) => list.some((fx) => fx.type !== "combat.end_turn"));
+  const acts = action.combat?.start !== true && (Object.keys(costOf(action)).length > 0 || Object.values(action.outcomes).some((list) => list.some((fx) => fx.type !== "combat.end_turn")));
   if (!acts) return [];
   const target = targetOf(action, params);
   return [{ type: "combat.act", data: { encounter: enc.id, actor, action: action.id, label: action.label, ...(target ? { target } : {}), ...(res.check && res.outcome ? { outcome: res.outcome } : {}) } }];
@@ -367,11 +389,13 @@ function act(w: Working, rules: CombatDef, actor: EntityId, chosen: FightOption,
   const enc = encounterOf(w.state);
   if (!enc) return false;
   const before = hpAround(w.ctx, rules);
+  const from = w.events.length;
   const res = resolveAction(w.reg, w, { action: chosen.action, actor, params: chosen.params }, rng);
   if (!res.ok) return false;
   if (res.events.length > 0) runRulesOnEvents(w.reg, w, res.events, { seed: rng.seed });
   const recorded = actEvents(enc, actor, chosen.action, chosen.params, res);
   record(w, recorded, rng.seed);
+  asUnit(w, from, rng.seed);
   if (recorded.length > 0) lines.push(`${capital(nameFor(w.ctx, actor))}: ${chosen.action.label}${chosen.target ? ` → ${nameFor(w.ctx, chosen.target)}` : ""}${res.check && res.outcome ? ` (${res.outcome.replace(/_/g, " ")})` : ""}.`);
   lines.changes(w.ctx, before);
   return true;
@@ -471,7 +495,9 @@ export function openRound(w: Working, rng: Rng): FightRound | null {
       const enc = encounterOf(w.state);
       if (!enc) return closing(w.ctx, rules, lines);
       if (res && action) {
-        if (action.combat) record(w, actEvents(enc, res.actor, action, acted?.params ?? {}, res), rng.seed);
+        // The POV's act from its first event past the participants' materialization, with its record: one group.
+        const start = w.events.findIndex((e, i) => i >= from && e.type !== "materialize");
+        if (action.combat && record(w, actEvents(enc, res.actor, action, acted?.params ?? {}, res), rng.seed).length > 0 && start >= 0) asUnit(w, start, rng.fork("act").seed);
         lines.changes(w.ctx, before);
       }
       // Anything may have changed who is down (a potion, a narrated blow before this turn), so the fight settles every turn.
