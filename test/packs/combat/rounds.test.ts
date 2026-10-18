@@ -81,7 +81,7 @@ describe("leaving a fight", () => {
     expect(buildEncounterView(reg.context(world, after))).toBeNull();
   });
 
-  test("a POV moved off between turns sees no card or tab, and the next turn ends the fight before anyone acts", () => {
+  test("a POV moved off between turns sees no card and none of the fight's actions, and the next turn ends the fight before anyone acts", () => {
     const world = allyWorld();
     const w = started(world);
     // As a GM edit or a narrated move would put it.
@@ -89,7 +89,8 @@ describe("leaving a fight", () => {
     const ctx = reg.context(world, w.state);
     expect(buildEncounterView(ctx)).toBeNull();
     expect(paletteEncounter(ctx)).toBeNull();
-    expect(combatEntries(ctx)).toEqual([]);
+    // Only a new fight is offered: this one is over for the POV.
+    expect(combatEntries(ctx).filter((e) => e.action !== "fight")).toEqual([]);
     expect(buildEncounterView(ctx, { gm: true })?.order.map((r) => r.id)).toContain("goblin");
     const p = plan(world, w.state, null);
     expect(p.events.some((e) => e.type === "combat.act")).toBe(false);
@@ -418,7 +419,7 @@ describe("what the Combat tab offers", () => {
     })).toEqual([]);
   });
 
-  test("a start only outside a fight, every other combat action only in one the POV is in", () => {
+  test("a start only outside a fight or one the POV has left, every other combat action only in one the POV is in", () => {
     const world = fightWorld(povFirst);
     const combatIds = (state: Readonly<WorldState>) =>
       [...reg.actions.values(), ...Object.values(world.actions)]
@@ -428,8 +429,17 @@ describe("what the Combat tab offers", () => {
     expect(combatIds(startState(world, reg))).toEqual(["fight"]);
     const fight = started(world);
     expect(combatIds(fight.state)).toEqual(["end_turn", "guard", "step", "strike"]);
+    // Moved off between turns (a narrated move, a GM edit), with the bandit following: the fight is
+    // over for the POV before the next turn writes its end, and the tab offers a new one at once.
     fight.apply({ type: "set", entity: POV, field: "place", value: "cafe" });
-    expect(combatIds(fight.state)).toEqual([]);
+    fight.apply({ type: "set", entity: "bandit", field: "place", value: "cafe" });
+    expect(combatIds(fight.state)).toEqual(["fight"]);
+    const offer = combatEntries(reg.context(world, fight.state)).find((e) => e.action === "fight")?.options.find((o) => o.params.target === "bandit");
+    expect(offer).toBeDefined();
+    expect(offer?.disabled).toBeUndefined();
+    const p = plan(world, fight.state, "fight", { target: "bandit" });
+    expect(p.resolution?.ok).toBe(true);
+    expect(encounterOf(fold(reg, world, fight.state, p.events))?.order.map((f) => f.id).sort()).toEqual(["bandit", POV]);
   });
 
   test("a budget that isn't one leaves the plan and the tab working", () => {

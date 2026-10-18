@@ -59,16 +59,17 @@ function targetOf(action: ActionDef, params: JsonObject): EntityId | null {
 
 /**
  * What a combat action costs its actor now, as events, or why it can't be taken (DESIGN §11, the
- * `combat.spend` service). A starting action needs no fight under way; any other needs one, the
- * actor in it and standing, its turn (unless it spends only off-turn budgets) and enough left.
- * Nothing for other actions.
+ * `combat.spend` service). A starting action needs no fight under way, a fight the POV has left
+ * counting as none (the turn ends it before its action runs); any other needs one, the actor in it
+ * and standing, its turn (unless it spends only off-turn budgets) and enough left. Nothing for
+ * other actions.
  */
 export function spendFor(ctx: ReadContext, actor: EntityId, action: Pick<ActionDef, "combat">): LedgerEvent[] | Rejection {
   if (!action.combat) return [];
   const rules = rulesOf(ctx.world);
   if (!rules) return { code: "no_combat", reason: "this world has no combat" };
   const enc = encounterOf(ctx.state);
-  if (action.combat.start === true) return enc ? { code: "in_fight", reason: "a fight is already under way" } : [];
+  if (action.combat.start === true) return enc && !povLeft(ctx.state, ctx.world, enc) ? { code: "in_fight", reason: "a fight is already under way" } : [];
   if (!enc) return { code: "no_fight", reason: "no fight is under way" };
   const you = actor === ctx.world.pov;
   const f = fighterOf(enc, actor);

@@ -71,13 +71,15 @@ function optionOf(ctx: ReadContext, action: ActionDef, params: JsonObject, label
 
 /**
  * Whether an action suits the fight's state for the POV (DESIGN §11): a combat action that starts a
- * fight only when none is under way, any other only in a fight the POV is in (one it has left is
- * over for it); any other action always. The Combat tab and interpret's catalog both read it.
+ * fight only when none is under way for the POV (one it has left is over for it, though its end is
+ * written on the next turn), any other only in a fight the POV is in; any other action always. The
+ * Combat tab, interpret's catalog and typed text all read it.
  */
 export function fightOffers(world: Pick<WorldDoc, "pov">, state: Readonly<WorldState>, action: Pick<ActionDef, "combat">): boolean {
   if (!action.combat) return true;
   const enc = encounterOf(state);
-  return action.combat.start === true ? enc === null : enc !== null && !povLeft(state, world, enc);
+  const fighting = enc !== null && !povLeft(state, world, enc);
+  return action.combat.start === true ? !fighting : fighting;
 }
 
 /**
@@ -87,7 +89,9 @@ export function fightOffers(world: Pick<WorldDoc, "pov">, state: Readonly<WorldS
  * state rules out (`fightOffers`: a start in a fight, an attack outside one) isn't listed.
  */
 export function combatEntries(ctx: ReadContext): PaletteEntry[] {
-  const enc = encounterOf(ctx.state);
+  const found = encounterOf(ctx.state);
+  // A fight the POV has left is over for it: the tab offers what it offers outside one.
+  const enc = found && !povLeft(ctx.state, ctx.world, found) ? found : null;
   const entries: PaletteEntry[] = [];
   for (const action of combatActions(ctx.registry, ctx.world)) {
     const param = targetParam(action);
