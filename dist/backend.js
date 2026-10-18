@@ -3787,34 +3787,58 @@ function findLeaks(value, secrets) {
   visit(value);
   return out;
 }
-function nameWords(text) {
-  return text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+var ACCENTS = /[\u0300-\u036f]/g;
+var PLAIN_LETTERS = { \u{f8}: "o", \u{e6}: "ae", \u{153}: "oe", \u{df}: "ss", \u{111}: "d", \u{142}: "l", \u{131}: "i", \u{f0}: "d", \u{fe}: "th" };
+function unaccented(text) {
+  return text.normalize("NFD").replace(ACCENTS, "").normalize("NFC");
+}
+function spellings(text) {
+  return (text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).map((written) => ({ written, plain: unaccented(written).replace(/[\u00F8\u00E6\u0153\u00DF\u0111\u0142\u0131\u00F0\u00FE]/g, (c) => PLAIN_LETTERS[c] ?? c) }));
 }
 var FUNCTION_WORDS = { a: true, an: true, the: true, of: true, and: true, in: true, on: true, at: true, to: true, by: true, for: true, or: true, with: true, from: true };
 var WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
 function saysInOrder(said, words) {
-  const parts = words.map((w) => /^[a-z0-9]+$/.test(w) ? `(?<!${WORD_CHAR})${w}(?!${WORD_CHAR})` : w);
+  const parts = words.map((w) => {
+    if (!/^[a-z0-9]+$/.test(w))
+      return w;
+    const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
+    return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
+  });
   return new RegExp(parts.join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
 }
+function sayings(text) {
+  const words = spellings(text);
+  const joined = (key, all) => words.filter((w) => all || !hasOwn(FUNCTION_WORDS, w.plain)).map((w) => w[key]).join(" ");
+  const texts = { written: joined("written", false), plain: joined("plain", false), writtenAll: joined("written", true), plainAll: joined("plain", true) };
+  const cased = unaccented(text);
+  return {
+    says: (parts, all) => saysInOrder(all ? texts.plainAll : texts.plain, parts.map((p) => p.plain)) || saysInOrder(all ? texts.writtenAll : texts.written, parts.map((p) => p.written)),
+    capital: (letter) => new RegExp(`(?<!${WORD_CHAR})${letter}(?!${WORD_CHAR})`, "u").test(cased)
+  };
+}
 function namesAny(text, people, labels = [], heard = "") {
-  const words = nameWords(text);
-  const said = words.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
-  const heardWords = nameWords(heard);
-  const known = heardWords.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
+  const said = sayings(text);
+  const known = sayings(heard);
   for (const name of people) {
-    for (const w of nameWords(name)) {
-      if (hasOwn(FUNCTION_WORDS, w) || w.length < 2 && /^[a-z0-9]+$/.test(w))
-        continue;
-      if (saysInOrder(said, [w]) && !saysInOrder(known, [w]))
+    const words = spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
+    const counted = words.filter((w) => !/^[a-z0-9]$/.test(w.plain));
+    for (const w of counted)
+      if (said.says([w], false) && !known.says([w], false))
+        return true;
+    if (counted.length > 0)
+      continue;
+    for (const w of words) {
+      const letter = w.plain.toUpperCase();
+      if (/^[B-HJ-Z]$/.test(letter) && said.capital(letter) && !known.capital(letter))
         return true;
     }
   }
   for (const label of labels) {
-    const all = nameWords(label);
-    const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w));
+    const all = spellings(label);
+    const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
     const whole = named.length === 0;
     const parts = whole ? all : named;
-    if (parts.length > 0 && saysInOrder(whole ? words.join(" ") : said, parts) && !saysInOrder(whole ? heardWords.join(" ") : known, parts))
+    if (parts.length > 0 && said.says(parts, whole) && !known.says(parts, whole))
       return true;
   }
   return false;
@@ -3874,20 +3898,33 @@ function learners(state, subject, base) {
 function peopleAt(reg, world, state, place) {
   return Object.keys(state.entities).sort().filter((id) => placeOfEntity(state, id) === place && isPerson(reg, world, state, id));
 }
-function applyLife(state, ctx, subject, to) {
+function witnessesOf(reg, world, state, subject) {
+  const place = placeOfEntity(state, subject);
+  return place === null ? [] : peopleAt(reg, world, state, place).filter((id) => id !== subject);
+}
+function applyLife(state, ctx, subject, to, witnesses) {
   const e = own(state.entities, subject);
   if (!e)
     return;
   const by = learners(state, subject, lifeOf(state, subject));
+  const seen = witnesses ?? witnessesOf(ctx.registry, ctx.world, state, subject);
   if (to === ALIVE)
     delete e.life;
   else
     e.life = to;
-  const place = placeOfEntity(state, subject);
-  if (place !== null) {
-    for (const id of peopleAt(ctx.registry, ctx.world, state, place))
-      if (id !== subject)
-        by[id] = to;
+  for (const id of seen)
+    if (id !== subject && own(state.entities, id))
+      by[id] = to;
+}
+function seedLife(world, state) {
+  for (const [id, def] of Object.entries(world.entities)) {
+    const start = lifeOf(state, id);
+    if (!def.lifeKnownBy?.length || start === ALIVE)
+      continue;
+    const by = learners(state, id, ALIVE);
+    for (const knower of def.lifeKnownBy)
+      if (knower !== id && own(state.entities, knower))
+        by[knower] = start;
   }
 }
 function tellLife(state, subject, who) {
@@ -3968,7 +4005,7 @@ function lifeEffect(args, ctx) {
   if (to === null && who.length === 0)
     return { code: "bad_args", reason: "a life change needs a state to set or someone to tell" };
   const now = lifeOf(ctx.state, subject);
-  const out = to !== null && to !== now ? [{ type: ENGINE_EVENTS.life, data: { entity: subject, to } }] : [];
+  const out = to !== null && to !== now ? [{ type: ENGINE_EVENTS.life, data: { entity: subject, to, witnesses: witnessesOf(ctx.registry, ctx.world, ctx.state, subject) } }] : [];
   const after = to ?? now;
   const told = who.filter((id) => id !== subject && (out.length > 0 || lifeKnownTo(ctx.state, subject, id) !== after));
   const pov = told.filter((id) => id === ctx.world.pov);
@@ -4449,9 +4486,12 @@ var events = [
         return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
       if (!isLifeState(ctx.world, str2(e, "to")))
         return { code: "bad_life", reason: `there's no life state ${str2(e, "to")}` };
+      const seen = e.data.witnesses;
+      if (seen !== undefined && !(Array.isArray(seen) && seen.every((id) => typeof id === "string")))
+        return { code: "bad_event", reason: "a life change's witnesses are entity ids" };
       return lifeOf(ctx.state, str2(e, "entity")) === str2(e, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str2(e, "to")).label.toLowerCase()}` } : null;
     },
-    apply: (e, state, ctx) => applyLife(state, ctx, str2(e, "entity"), str2(e, "to")),
+    apply: (e, state, ctx) => applyLife(state, ctx, str2(e, "entity"), str2(e, "to"), witnessesOf2(e)),
     touches: (e) => [{ entity: str2(e, "entity"), aspect: "life" }],
     describe: (e, ctx, viewer) => {
       const id = str2(e, "entity");
@@ -4459,9 +4499,9 @@ var events = [
       const name = own(ctx.state.entities, id)?.name ?? id;
       if (viewer === undefined)
         return `${name}: ${def.label}`;
-      if (lifeKnownTo(ctx.state, id, viewer) !== str2(e, "to"))
-        return "";
-      return id === viewer ? `You: ${def.label}` : `${name} ${def.reads}`;
+      if (id === viewer)
+        return `You: ${def.label}`;
+      return witnessesOf2(e)?.includes(viewer) === true ? `${name} ${def.reads}` : "";
     }
   },
   {
@@ -4483,6 +4523,10 @@ var events = [
     }
   }
 ];
+function witnessesOf2(e) {
+  const seen = e.data.witnesses;
+  return Array.isArray(seen) ? seen.filter((id) => typeof id === "string") : null;
+}
 function entityArg(ctx, v) {
   const id = typeof v === "string" ? v : "";
   const e = own(ctx.state.entities, id);
@@ -4791,6 +4835,8 @@ function playerEventVisible(reg, world, state, pov, e) {
     if (POV_ONLY.has(e.type) && (e.data.agent ?? e.data.entity ?? e.data.who) !== pov)
       return false;
   }
+  if (e.type === "set" && e.entity !== pov && (e.field === "place" || e.field === "activity" || [...Object.values(world.schedules), ...reg.schedules].some((s) => s.target === e.field)) && kindIs(reg, world, own(state.entities, e.entity)?.kind ?? "", "person"))
+    return false;
   if (e.type === "stage" && !trackShown(reg, world, state, pov, e.track))
     return false;
   for (const r of refsOf(world, state, e)) {
@@ -5360,6 +5406,7 @@ function initialState(world, revision, types) {
     packs: {}
   };
   seedObservations(world, state);
+  seedLife(world, state);
   return state;
 }
 
@@ -6127,6 +6174,7 @@ function applyUpgrade(state, plan, picks, env) {
   const agents = [];
   const openings = [];
   const minor = (v) => typeof v === "number" && Number.isFinite(v) ? Math.round(v) : 0;
+  const idle = Object.keys(state.entities).filter((id) => own(state.entities, id)?.agent === true && !acts(inForce, state, id));
   for (const d of plan.entities) {
     if (d.status !== "new" || pickOf(d.id)?.entity === "keep")
       continue;
@@ -6287,6 +6335,9 @@ function applyUpgrade(state, plan, picks, env) {
     if (def && visibilityOf(def.visibility) === "public")
       notes.push(`${def.label}: back to ${own(def.stages, t.start)?.label ?? "its start"}, since this revision of the world no longer has the stage it was at`);
   }
+  for (const id of idle)
+    if (own(state.entities, id)?.agent === true && acts(after, state, id) && !agents.includes(id))
+      agents.push(id);
   const slot = slotIndexAt(calendarOf(after), state.clock);
   for (const id of agents)
     sliceRecord(state, PACK4, "agents")[id] = slot;
@@ -7970,6 +8021,9 @@ function emitter(reg, w, seed, rules) {
     }
   };
 }
+function stillActs(w, id) {
+  return !isGone(w.state, id) && acts(w.world, w.state, id);
+}
 function clockTo(w, at, cause, e) {
   const minutes = at - w.state.clock;
   if (minutes > 0)
@@ -7990,10 +8044,19 @@ function advance(reg, w, to, opts) {
   const slots = slotsEnding(cal, from, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
-  const agents = timelapse ? lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov) : [];
-  if (timelapse && opts.includePov !== false && own(w.state.entities, w.world.pov) && acts(w.world, w.state, w.world.pov))
-    agents.unshift(w.world.pov);
-  const cursors = new Map(agents.map((a) => [a, agentCursor(w.world, w.state, a)]));
+  const stepping = () => {
+    if (!timelapse)
+      return [];
+    const list = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+    if (opts.includePov !== false && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov))
+      list.unshift(w.world.pov);
+    return list;
+  };
+  const settle = (agent, slot) => {
+    if (slot !== agentCursor(w.world, w.state, agent))
+      w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot } });
+  };
+  let cursors = new Map;
   let next = 0;
   const applyInstants = (until) => {
     while (next < instants.length && (instants[next]?.at ?? Infinity) <= until) {
@@ -8013,12 +8076,20 @@ function advance(reg, w, to, opts) {
     return out;
   };
   for (const slot of slots) {
+    const agents = stepping();
+    for (const [agent, cursor] of [...cursors]) {
+      if (agents.includes(agent))
+        continue;
+      settle(agent, cursor);
+      cursors.delete(agent);
+    }
     const slotDays = agents.length * (slot.end - slot.start) / MINUTES_PER_DAY;
     if (timelapse && result.slots > 0 && result.agentDays + slotDays > cap.agentDays) {
       result.stop = "cap";
       break;
     }
     const mark = timelapse && result.slots > 0 ? w.mark() : null;
+    const held = mark ? new Map(cursors) : null;
     const before = w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
@@ -8031,13 +8102,14 @@ function advance(reg, w, to, opts) {
       e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
     }
     for (const agent of agents) {
-      const cursor = cursors.get(agent) ?? slot.index - 1;
-      for (let k = cursor + 1;k <= slot.index; k++) {
+      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
+      while (k < slot.index && stillActs(w, agent)) {
+        k++;
         const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed);
         if (applied.length > 0)
           result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
-      cursors.set(agent, slot.index);
+      cursors.set(agent, k);
     }
     const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
     const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
@@ -8047,6 +8119,8 @@ function advance(reg, w, to, opts) {
     result.tracks.push(...stepTracks(reg, w, tickSeed));
     if (mark && w.events.length - startEvents > cap.events) {
       w.restore(mark);
+      if (held)
+        cursors = held;
       result.rules.length = rulesBefore;
       result.tracks.length = tracksBefore;
       result.stop = "cap";
@@ -8056,9 +8130,9 @@ function advance(reg, w, to, opts) {
     result.agentDays += slotDays;
     for (const s of signalsSince(before)) {
       const p = own(policy, s.class);
-      if (p === "stop" && timelapse)
+      if (p === "stop" && timelapse && signalVisible(reg, w.world, w.state, w.world.pov, s))
         result.stops.push(s);
-      else if (p === "note" || p === "stop" && !timelapse)
+      else if (p === "note" || p === "stop")
         result.notes.push(s);
     }
     if (timelapse && result.stops.length > 0) {
@@ -8076,8 +8150,7 @@ function advance(reg, w, to, opts) {
     clockTo(w, to, cause, e);
   }
   for (const [agent, slot] of cursors)
-    if (slot !== agentCursor(w.world, w.state, agent))
-      w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot } });
+    settle(agent, slot);
   result.to = w.state.clock;
   result.events = w.events.length - startEvents;
   return result;
@@ -8101,13 +8174,13 @@ function catchUp(reg, w, opts) {
     if (taken >= opts.agents || budget <= 0)
       break;
     const cursor = agentCursor(w.world, w.state, agent);
-    if (cursor >= done)
+    if (cursor >= done || !stillActs(w, agent))
       continue;
     taken++;
     if (!onScreen.includes(agent))
       advancedQueue = rotated.indexOf(agent) + 1;
     let k = cursor;
-    while (k < done && budget > 0) {
+    while (k < done && budget > 0 && stillActs(w, agent)) {
       k++;
       const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed);
       if (applied.length > 0)
@@ -8120,8 +8193,9 @@ function catchUp(reg, w, opts) {
   if (queue.length > 0 && advancedQueue > 0)
     w.apply({ type: ENGINE_EVENTS.cursor, data: { rr: (rr + advancedQueue) % queue.length } });
   let backlog = 0;
-  for (const agent of all)
-    backlog += Math.max(0, done - agentCursor(w.world, w.state, agent));
+  for (const agent of lod1Agents(w.world, w.state))
+    if (agent !== w.world.pov)
+      backlog += Math.max(0, done - agentCursor(w.world, w.state, agent));
   return { stepped, backlog };
 }
 var FIELD_TRANSPARENT = new Set(["clock", "post", "timelapse", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught, ENGINE_EVENTS.fired]);
@@ -9833,10 +9907,19 @@ var spacePack = {
           return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place))
           return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
+        const name = labelOf(ctx, entity);
+        const truth = lifeOf(ctx.state, entity);
+        const stopped = !acts(ctx.world, ctx.state, entity);
+        const known = povLife(ctx.world, ctx.state, entity);
+        if (known && !known.acts && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, entity)) {
+          return { code: "not_moved", reason: `${name} ${known.reads}; that move didn't happen`, gm: stopped ? `${name} is ${truth} and doesn't act` : `${name} is ${truth}, which the POV hasn't learned; it takes them as ${known.id}` };
+        }
+        if (stopped)
+          return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
         const from = placeOfEntity(ctx.state, entity);
         const named = (id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
         if (from && !reachable(ctx, from, place))
-          return { code: "declined", reason: `There's no way from ${named(from)} to ${named(place)}.` };
+          return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
         return null;
       },
       toEffects: (p, ctx) => [{ type: "move", args: { entity: typeof p.entity === "string" ? p.entity : ctx.world.pov, to: typeof p.place === "string" ? p.place : "" } }]
@@ -14245,6 +14328,9 @@ var relationshipsPack = {
             continue;
           if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id))
             continue;
+          const life = povLife(ctx.world, ctx.state, id);
+          if (life && !life.acts)
+            continue;
           const line = voiceLine(ctx, id);
           if (line)
             lines.push(line);
@@ -14442,9 +14528,9 @@ function hiddenNames2(world) {
     if (v === "public")
       continue;
     if (personKind(world, e.kind))
-      out.push({ name: e.name, secret: v === "secret", entity: e.id, said: (text) => namesAny(text, [e.name]) });
+      out.push({ name: e.name, secret: e.visibility === "secret", entity: e.id, said: (text) => namesAny(text, [e.name]) });
     else
-      label(e.name, v === "secret", e.id);
+      label(e.name, e.visibility === "secret", e.id);
   }
   for (const p of Object.values(world.places))
     if (visibilityOf(p.visibility) !== "public")
@@ -14516,9 +14602,15 @@ function cueIssues(world) {
       if (typeof s.cue !== "string")
         continue;
       const cue = s.cue;
-      const named = hidden.find((h) => !h.secret && h.entity !== owner.id && h.said(cue));
-      if (named)
-        issue("warning", `tracks.${t.id}.stages.${stage}.cue`, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
+      const lower = cue.toLowerCase();
+      const named = hidden.find((h) => h.entity !== owner.id && h.said(cue) && !(h.secret && h.name.length > 3 && lower.includes(h.name.toLowerCase()) && lower !== h.name.toLowerCase()));
+      if (!named)
+        continue;
+      const path = `tracks.${t.id}.stages.${stage}.cue`;
+      if (named.secret)
+        issue("error", path, `The cue of "${t.label}" at "${s.label}" gives away a secret ("${named.name}"): a cue says how someone acts, never who or what is hidden.`);
+      else
+        issue("warning", path, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
     }
   }
   return issues;
@@ -14719,7 +14811,7 @@ function acquainted(state, a, b) {
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
   const e = own(ctx.state.entities, who);
-  if (!e)
+  if (!e || !acts2(ctx, who))
     return out;
   const level = ctx.levelOf(who, "castlife");
   const cal = calendarOf(ctx.world);
@@ -14773,7 +14865,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
   }
   const regard = optionalQuery(ctx, "regard");
   const hour = dateAt(cal, slot.start).minuteOfDay / 60;
-  if (regard && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
+  if (regard && acts2(ctx, pov) && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
     const key = `${who}:invite:${slot.index}`;
     const invite = 1 + needValue(ctx, who, "social", slot.start) / 50 + regard(ctx, who, pov) / 50;
     const stay = 2;
@@ -14796,23 +14888,34 @@ function invitationText(ctx, agent, place, at, viewer) {
 }
 function stepTrips(slot, ctx) {
   const out = [];
+  const engaged = optionalQuery(ctx, "combat.engaged");
   for (const who of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, who);
     const trips = e?.fields.trips;
-    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts2(ctx, who))
+    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts2(ctx, who) || engaged?.(ctx, who) === true)
       continue;
+    let holds = objOf(e.fields.holds);
     for (const raw of trips) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
       const until = numOf(t.until, NaN);
       const place = strOf(t.place);
-      const away = objOf(e.fields.holds).place === until && e.fields.place === place;
+      const holding = objOf(e.fields.holds).place === until;
+      const away = holding && e.fields.place === place;
       if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place)) {
-        out.push({ type: "set", entity: who, field: "holds", value: { ...objOf(e.fields.holds), place: until, activity: until } }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
+        holds = { ...holds, place: until, activity: until };
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
       }
+      if (!(until <= slot.end && (until > slot.start || holding)))
+        continue;
       const home = homeOf(ctx, who);
-      if (until > slot.start && until <= slot.end && home)
+      if ((until > slot.start || away) && home)
         out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
+      const kept = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
+      if (Object.keys(kept).length < Object.keys(holds).length) {
+        holds = kept;
+        out.push({ type: "set", entity: who, field: "holds", value: holds });
+      }
     }
   }
   return out;
@@ -14969,20 +15072,31 @@ function decidedBlock(ctx, who) {
   const label = block.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, block.option.slice(AGENDA_OPTION.length)) ? "Busy" : block.label;
   return block.start <= ctx.state.clock ? label : `${label} at ${formatHHMM(dateAt(cal, block.start).minuteOfDay)}`;
 }
-function stanceLines(ctx) {
+function stanceCast(ctx) {
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state, pov);
-  if (!here)
-    return [];
-  const secrets = unrevealedSecrets(reg, world, state);
-  const namesHidden = hiddenNameCheck(reg, world, state, pov);
-  const safe = (text) => findLeaks(text, secrets).length === 0 && !namesHidden(text);
+  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false);
+  let check = null;
+  const safe = (text) => {
+    if (!check) {
+      const secrets = unrevealedSecrets(reg, world, state);
+      const namesHidden = hiddenNameCheck(reg, world, state, pov);
+      check = (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
+    }
+    return check(text);
+  };
+  return { people, safe };
+}
+function stanceLines(ctx) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const { people, safe } = stanceCast(ctx);
   const regard = optionalQuery(ctx, "relationships.words");
   const lines = [];
-  for (const id of Object.keys(state.entities).sort()) {
+  for (const id of people) {
     const e = own(state.entities, id);
-    if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || !canSeeEntity(reg, world, state, pov, id) || !acts2(ctx, id))
+    if (!e)
       continue;
     const known = knows(state, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
     const words = regard?.(ctx, id, pov) ?? null;
@@ -15002,11 +15116,15 @@ function stanceLines(ctx) {
     if (decided !== null && safe(decided))
       parts.push(listed("Decided", [decided]));
     lines.push(parts.join(" "));
-    const cues = cuesFor(ctx, id, safe);
-    if (cues.length > 0)
-      lines.push(listed(`${e.name}'s cues`, cues));
   }
   return lines;
+}
+function stanceCues(ctx) {
+  const { people, safe } = stanceCast(ctx);
+  return people.flatMap((id) => {
+    const cues = cuesFor(ctx, id, safe);
+    return cues.length > 0 ? [listed(`${own(ctx.state.entities, id)?.name ?? id}'s cues`, cues)] : [];
+  });
 }
 var castlifePack = {
   id: "castlife",
@@ -15032,6 +15150,8 @@ var castlifePack = {
       return out;
     });
     r.formula("invited", (ctx, host) => {
+      if (povLife(ctx.world, ctx.state, String(host ?? ""))?.acts === false)
+        return false;
       const list = sliceOf(ctx.state, "castlife").invitations;
       const now = ctx.state.clock;
       return Array.isArray(list) && list.some((raw) => {
@@ -15104,6 +15224,7 @@ var castlifePack = {
     });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
     r.renderer({ slot: "stance", render: stanceLines });
+    r.renderer({ slot: "stance", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
     r.lint({
       code: "castlife.double_booking",
@@ -41502,7 +41623,7 @@ function queueStop(w, res, since, scene, speeding) {
     return "failure";
   if (res.check || res.adjudged)
     return "check";
-  if (speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene)
+  if (!acts(w.world, w.state, w.world.pov) || speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene)
     return "interruption";
   const policy = interruptPolicy(w.state);
   const signalled = w.events.slice(since).some((e) => {
@@ -42478,6 +42599,11 @@ function lintStructure(world, reg) {
   for (const [id, e] of Object.entries(world.entities)) {
     if (e.life !== undefined && !isLifeState(world, e.life))
       err(`entities.${id}.life`, "unknown_life", `${e.name} starts in life state "${e.life}", which isn't one of the world's.`);
+    for (const knower of e.lifeKnownBy ?? [])
+      if (!own(world.entities, knower))
+        err(`entities.${id}.lifeKnownBy`, "refs", `${e.name}'s starting life state is known to an unknown "${knower}".`);
+    if ((e.lifeKnownBy ?? []).length > 0 && (e.life ?? ALIVE) === ALIVE)
+      warn(`entities.${id}.lifeKnownBy`, "life_known_by", `${e.name} starts alive, so who knows how they start changes nothing.`);
   }
   const downLife = world.ruleset?.combat?.down?.life;
   if (downLife !== undefined && (typeof downLife !== "string" || !isLifeState(world, downLife)))
@@ -46983,49 +47109,102 @@ ${problemLines(answer.problems.slice(0, 6))}`);
 }
 
 // src/backend/json-hiding.ts
-var JSON_WRAP_OPEN = "<div hidden wi-exclude>";
-var JSON_WRAP_CLOSE = "</div>";
+var EXCLUDE_OPEN = "<span wi-exclude>";
+var EXCLUDE_CLOSE = "</span>";
+var OLD_OPEN = "<div hidden wi-exclude>";
+var FIRST = -1e5;
+var LAST = 1e5;
 var JSON_BLOCK = String.raw`<[Jj][Ss][Oo][Nn]>(?:"(?:[^"\\]|\\[\s\S])*"|[^"<]|<(?!\/?[Jj][Ss][Oo][Nn]>))*<\/[Jj][Ss][Oo][Nn]>`;
-var HIDDEN_JSON = new RegExp(`${JSON_WRAP_OPEN}${JSON_BLOCK}${JSON_WRAP_CLOSE}`, "g");
-function withoutHiddenJson(text) {
-  return text.includes(JSON_WRAP_OPEN) ? text.replace(HIDDEN_JSON, " ") : text;
+var OLD_WRAPPED = `${OLD_OPEN}\\s*${JSON_BLOCK}\\s*</div>`;
+var SHOWN_HIDDEN = new RegExp(`${OLD_WRAPPED}|${EXCLUDE_OPEN}${JSON_BLOCK}${EXCLUDE_CLOSE}|${JSON_BLOCK}`, "g");
+var OLD_HIDDEN = new RegExp(OLD_WRAPPED, "g");
+function readableReply(text, hiding, from = 0) {
+  let out = "";
+  let at = from;
+  for (const m of text.matchAll(hiding ? SHOWN_HIDDEN : OLD_HIDDEN)) {
+    const end = m.index + m[0].length;
+    if (end <= at)
+      continue;
+    out += `${text.slice(at, Math.max(at, m.index))} `;
+    at = end;
+  }
+  return out + text.slice(at);
 }
-function jsonHidingScript(chatId, worldId) {
+function worldChatScripts(chatId, worldId) {
   return {
-    name: "LumiRPEngine \xB7 Hide JSON blocks",
-    scriptId: `lre_json_${chatId}`,
-    chatId,
-    findRegex: `(?<!${JSON_WRAP_OPEN})${JSON_BLOCK}`,
-    replaceString: `${JSON_WRAP_OPEN}$&${JSON_WRAP_CLOSE}`,
-    flags: "g",
-    placement: ["ai_output"],
-    targets: ["response", "display"],
-    runOnEdit: true,
-    description: "Hides the <json> blocks in this LumiRPEngine world chat's replies and keeps them out of World Info scanning; each block stays as written. LumiRPEngine manages it: turn it off in its Settings \u2192 Preset.",
-    folder: "LumiRPEngine",
-    metadata: { [LEDGER_NAMESPACE]: { json: "hide", worldId } }
+    exclude: {
+      name: "LumiRPEngine \xB7 JSON blocks out of World Info",
+      scriptId: `lre_jsonx_${chatId}`,
+      chatId,
+      findRegex: `(?<!${EXCLUDE_OPEN}|${OLD_OPEN})${JSON_BLOCK}`,
+      replaceString: `${EXCLUDE_OPEN}$&${EXCLUDE_CLOSE}`,
+      flags: "g",
+      placement: ["ai_output"],
+      targets: ["response"],
+      runOnEdit: true,
+      sortOrder: LAST,
+      description: `Saves each <json> block of this LumiRPEngine world chat's replies inside <span wi-exclude>, which World Info doesn't scan, after your other response scripts. LumiRPEngine's "JSON blocks as written" scripts take the span off again before anything else reads the reply. LumiRPEngine manages it.`,
+      folder: "LumiRPEngine",
+      metadata: { [LEDGER_NAMESPACE]: { json: "exclude", worldId } }
+    },
+    hide: {
+      name: "LumiRPEngine \xB7 Hide JSON blocks",
+      scriptId: `lre_json_${chatId}`,
+      chatId,
+      findRegex: JSON_BLOCK,
+      replaceString: "<span hidden>$&</span>",
+      flags: "g",
+      placement: ["ai_output"],
+      targets: ["display"],
+      runOnEdit: false,
+      sortOrder: LAST,
+      description: "Hides the <json> blocks still showing in this LumiRPEngine world chat's replies, after your other display scripts, so a tracker one of them draws from a block stays. LumiRPEngine manages it: turn it off in its Settings \u2192 Preset.",
+      folder: "LumiRPEngine",
+      metadata: { [LEDGER_NAMESPACE]: { json: "hide", worldId } }
+    }
   };
 }
-function engineScript(s) {
+function unwrapScript(target) {
+  return {
+    name: `LumiRPEngine \xB7 JSON blocks as written (${target})`,
+    scriptId: `lre_json_unwrap_${target}`,
+    chatId: null,
+    findRegex: `${EXCLUDE_OPEN}(${JSON_BLOCK})${EXCLUDE_CLOSE}`,
+    replaceString: "$1",
+    flags: "g",
+    placement: ["ai_output"],
+    targets: [target],
+    runOnEdit: false,
+    sortOrder: FIRST,
+    description: `Takes off the <span wi-exclude> LumiRPEngine saves around the <json> blocks of its world chats' replies (it keeps them out of World Info) before your other ${target} scripts run, so they and ${target === "display" ? "the chat" : "the AI"} read each reply as the AI wrote it. It changes nothing else. LumiRPEngine manages it.`,
+    folder: "LumiRPEngine",
+    metadata: { [LEDGER_NAMESPACE]: { json: `unwrap.${target}` } }
+  };
+}
+function roleOf(s) {
   const ns = s.metadata[LEDGER_NAMESPACE];
-  return s.mine && isRecord(ns) && ns.json === "hide";
+  const role = isRecord(ns) ? ns.json : undefined;
+  return s.mine && (role === "exclude" || role === "hide" || role === "unwrap.display" || role === "unwrap.prompt") ? role : null;
 }
 function upToDate(s, want) {
   const ns = s.metadata[LEDGER_NAMESPACE];
   const wanted = want.metadata[LEDGER_NAMESPACE];
   const placement = s.placement.length === want.placement.length && want.placement.every((p) => s.placement.includes(p));
   const targets = s.targets.length === want.targets.length && want.targets.every((t) => s.targets.includes(t));
-  return s.findRegex === want.findRegex && s.replaceString === want.replaceString && s.flags === want.flags && s.runOnEdit === want.runOnEdit && placement && targets && isRecord(ns) && isRecord(wanted) && ns.worldId === wanted.worldId;
+  return s.findRegex === want.findRegex && s.replaceString === want.replaceString && s.flags === want.flags && s.runOnEdit === want.runOnEdit && s.sortOrder === want.sortOrder && placement && targets && isRecord(ns) && isRecord(wanted) && ns.worldId === wanted.worldId;
 }
 
 class JsonHiding {
   host;
   hides;
+  worldExists;
   checked = new Set;
+  unwrapped = new Set;
   queues = new Map;
-  constructor(host, hides) {
+  constructor(host, hides, worldExists) {
     this.host = host;
     this.hides = hides;
+    this.worldExists = worldExists;
   }
   queued(key, step) {
     const next = (this.queues.get(key) ?? Promise.resolve()).then(step);
@@ -47039,18 +47218,30 @@ class JsonHiding {
     });
     return next;
   }
+  async sync(kept, roles, want, userId) {
+    for (const role of roles) {
+      const copies = kept.filter((s) => roleOf(s) === role);
+      const wanted = want[role];
+      const [first] = copies;
+      if (wanted && !first)
+        await this.host.regex.write(null, wanted, userId);
+      else if (wanted && first && !upToDate(first, wanted))
+        await this.host.regex.write(first.id, wanted, userId);
+      for (const s of wanted ? copies.slice(1) : copies)
+        await this.host.regex.remove(s.id, userId);
+    }
+  }
   ensure(chatId, worldId, userId) {
     return this.queued(`${userId}\x00${chatId}`, async () => {
-      if (!await this.hides(userId))
+      if (!await this.worldExists(worldId, userId))
         return;
-      const want = jsonHidingScript(chatId, worldId);
-      const [kept, ...extra] = (await this.host.regex.chatScripts(chatId, userId)).filter((s) => s.chatId === chatId && engineScript(s));
-      if (!kept)
-        await this.host.regex.write(null, want, userId);
-      else if (!upToDate(kept, want))
-        await this.host.regex.write(kept.id, want, userId);
-      for (const s of extra)
-        await this.host.regex.remove(s.id, userId);
+      if (!this.unwrapped.has(userId)) {
+        await this.queued(`${userId}\x00`, async () => this.sync(await this.host.regex.globalScripts(userId), ["unwrap.display", "unwrap.prompt"], { "unwrap.display": unwrapScript("display"), "unwrap.prompt": unwrapScript("prompt") }, userId));
+        this.unwrapped.add(userId);
+      }
+      const want = worldChatScripts(chatId, worldId);
+      const kept = (await this.host.regex.chatScripts(chatId, userId)).filter((s) => s.chatId === chatId);
+      await this.sync(kept, ["exclude", "hide"], await this.hides(userId) ? want : { exclude: want.exclude }, userId);
     });
   }
   seen(chatId, worldId, userId) {
@@ -47062,25 +47253,28 @@ class JsonHiding {
       this.checked.delete(this.checked.values().next().value ?? "");
     this.ensure(chatId, worldId, userId).catch((error) => {
       this.checked.delete(key);
-      this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the JSON-hiding regex script wasn't written (${error instanceof Error ? error.message : String(error)})`, userId);
+      this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the JSON regex scripts weren't written (${error instanceof Error ? error.message : String(error)})`, userId);
     });
   }
   async removeWhere(userId, which) {
     for (const s of await this.host.regex.chatScripts(null, userId)) {
-      if (engineScript(s) && which(s))
+      if (roleOf(s) !== null && which(s))
         await this.queued(`${userId}\x00${s.chatId}`, () => this.host.regex.remove(s.id, userId));
     }
   }
-  async removeAll(userId) {
-    for (const key of [...this.checked])
-      if (key.startsWith(`${userId}\x00`))
-        this.checked.delete(key);
-    await this.removeWhere(userId, () => true);
+  async removeHiding(userId) {
+    this.forget(userId);
+    await this.removeWhere(userId, (s) => roleOf(s) === "hide");
   }
   forget(userId) {
     for (const key of [...this.checked])
       if (key.startsWith(`${userId}\x00`))
         this.checked.delete(key);
+    this.unwrapped.delete(userId);
+  }
+  async removeChat(chatId, userId) {
+    this.checked.delete(`${userId}\x00${chatId}`);
+    await this.removeWhere(userId, (s) => s.chatId === chatId);
   }
   async removeWorld(worldId, userId) {
     await this.removeWhere(userId, (s) => {
@@ -47121,7 +47315,7 @@ function savedTitle(text) {
   const words = (first ?? "").split(/\s+/).filter((w) => w !== "");
   return words.length === 0 ? "Saved from a chat" : words.length > 8 ? `${words.slice(0, 8).join(" ")}\u2026` : words.join(" ");
 }
-async function saveFromChat(host, worlds, chatId, worldId, userId, excerpt) {
+async function saveFromChat(host, worlds, chatId, worldId, userId, hiding, excerpt) {
   const messages = await host.chats.messages(chatId, userId);
   const reply = messages.filter((m) => !m.isUser && m.content.trim() !== "").at(-1);
   const plain = (s) => s.replace(/\s+/g, " ").trim().toLowerCase();
@@ -47129,7 +47323,7 @@ async function saveFromChat(host, worlds, chatId, worldId, userId, excerpt) {
   const from = wanted === "" ? reply : messages.filter((m) => plain(m.content).includes(wanted)).at(-1) ?? reply;
   if (!from)
     throw new WorldError("not_found", "the chat has no reply to save yet");
-  const content = (wanted === "" ? withoutHiddenJson(from.content) : excerpt ?? "").trim().slice(0, SAVED_MAX_CHARS);
+  const content = (wanted === "" ? readableReply(from.content, hiding) : excerpt ?? "").trim().slice(0, SAVED_MAX_CHARS);
   const draft = await worlds.working(worldId, userId);
   const title = savedTitle(content);
   const base = `lore_${topicIdOf(title.split(/\s+/).slice(0, 5).join(" ")) || "saved"}`;
@@ -47784,17 +47978,29 @@ function readPreset(blocks) {
   const outlets = new Set;
   const guidance = {};
   const states = { ...MISSING };
+  let radio = false;
+  let chosen = false;
   for (const b of blocks) {
-    if (b.enabled && b.marker !== "category" && b.injectionTrigger.length === 0) {
-      for (const m of b.content.matchAll(OUTLET)) {
-        const name = (m[1] ?? "").trim().toLowerCase();
-        if (name.startsWith("lre_"))
-          outlets.add(name);
+    if (b.marker === "category") {
+      radio = b.categoryMode === "radio";
+      chosen = false;
+      continue;
+    }
+    if (b.enabled) {
+      const assembled = !(radio && chosen) && b.injectionTrigger.length === 0 && b.characterTagTrigger.length === 0;
+      if (radio)
+        chosen = true;
+      if (assembled) {
+        for (const m of b.content.matchAll(OUTLET)) {
+          const name = (m[1] ?? "").trim().toLowerCase();
+          if (name.startsWith("lre_"))
+            outlets.add(name);
+        }
       }
     }
     const name = b.name.trim().replace(/\s+/g, " ").toLowerCase();
     const target = GUIDANCE_TARGETS.find((t) => name === `${GUIDANCE_PREFIX}${t}`.toLowerCase());
-    if (!target || states[target] !== "missing" || b.marker === "category")
+    if (!target || states[target] !== "missing")
       continue;
     if (b.enabled) {
       states[target] = "enabled";
@@ -47829,12 +48035,29 @@ class PresetBinding {
   host;
   said = new Map;
   latest = new Map;
+  loom = new Map;
   constructor(host) {
     this.host = host;
   }
-  async current(chatId, userId) {
+  useLoom(userId, presetId) {
+    this.loom.delete(userId);
+    this.loom.set(userId, presetId);
+    if (this.loom.size > 1024)
+      this.loom.delete(this.loom.keys().next().value ?? "");
+  }
+  async resolve(chatId, userId, connectionId) {
+    const candidates = [async () => this.loom.get(userId) ?? null, async () => connectionId ? this.host.presets.ofConnection(connectionId, userId) : null, async () => chatId ? this.host.presets.lastUsed(chatId, userId) : null];
+    for (const candidate of candidates) {
+      const id = await candidate();
+      const preset = id ? await this.host.presets.get(id, userId) : null;
+      if (preset)
+        return preset;
+    }
+    return null;
+  }
+  async current(chatId, userId, connectionId = null) {
     try {
-      const preset = await this.host.presets.active(chatId, userId);
+      const preset = await this.resolve(chatId, userId, connectionId);
       if (!preset)
         return NO_PRESET;
       const key = `${userId}\x00${preset.id}\x00${preset.revision}`;
@@ -47845,7 +48068,7 @@ class PresetBinding {
         if (this.said.size > 64)
           this.said.delete(this.said.keys().next().value ?? "");
       }
-      const config = { preset: { id: preset.id, name: preset.name }, ...said };
+      const config = { preset, ...said };
       this.latest.set(userId, config);
       if (this.latest.size > 256)
         this.latest.delete(this.latest.keys().next().value ?? "");
@@ -47859,7 +48082,7 @@ class PresetBinding {
     return this.latest.get(userId) ?? NO_PRESET;
   }
   async addBlocks(chatId, userId) {
-    const preset = await this.host.presets.active(chatId, userId);
+    const preset = await this.resolve(chatId, userId, null);
     if (!preset)
       return null;
     const blocks = await this.host.presets.blocks(preset.id, userId);
@@ -47867,14 +48090,8 @@ class PresetBinding {
     if (missing.length > 0) {
       const category = blocks.findIndex((b) => b.marker === "category" && b.name.trim() === GUIDANCE_CATEGORY);
       const next = category < 0 ? -1 : blocks.findIndex((b, i) => i > category && b.marker === "category");
-      let at = next < 0 ? null : next;
-      if (category < 0)
-        await this.host.presets.addBlock(preset.id, { kind: "category", name: GUIDANCE_CATEGORY }, null, userId);
-      for (const target of missing) {
-        await this.host.presets.addBlock(preset.id, { kind: "text", name: `${GUIDANCE_PREFIX}${target}`, content: starterText(target) }, at, userId);
-        if (at !== null)
-          at++;
-      }
+      const added = missing.map((target) => ({ kind: "text", name: `${GUIDANCE_PREFIX}${target}`, content: starterText(target) }));
+      await this.host.presets.insertBlocks(preset.id, preset.revision, category < 0 || next < 0 ? null : next, category < 0 ? [{ kind: "category", name: GUIDANCE_CATEGORY }, ...added] : added, userId);
     }
     return this.current(chatId, userId);
   }
@@ -47918,7 +48135,7 @@ function loreOfEntry(extensions) {
   return isRecord(ns) && typeof ns.lore === "string" ? ns.lore : null;
 }
 function sortEntries(all) {
-  const found = { slots: new Map, twins: new Map, narrator: null, narratorOutlet: null };
+  const found = { slots: new Map, twins: new Map, atOutlet: new Set, narrator: null, narratorOutlet: null };
   const slots = new Map;
   const leftoverLore = [];
   for (const e of all) {
@@ -47926,6 +48143,8 @@ function sortEntries(all) {
     const slot = slotOfEntry(e.extensions);
     if (slot) {
       found.slots.set(slot, e.id);
+      if (isRecord(ns) && typeof ns.placed === "string" && ns.placed.startsWith("outlet:"))
+        found.atOutlet.add(slot);
       slots.set(slot, { id: e.id, placed: isRecord(ns) && typeof ns.placed === "string" ? ns.placed : null, extensions: e.extensions });
     } else if (isRecord(ns) && typeof ns.twin === "string")
       found.twins.set(ns.twin, e.id);
@@ -47964,6 +48183,10 @@ class EngineBook {
         found.slots.set(section.id, await this.host.books.createEntry(bookId, { ...blank, comment: `LRE \xB7 ${section.label}`, ...entryPlacement(p), order: 100 + section.rank, extensions }, userId));
       else if (known.placed !== placed && !(known.placed === null && p.type === "native"))
         await this.host.books.place(known.id, entryPlacement(p), extensions, userId);
+      if (p.type === "outlet")
+        found.atOutlet.add(section.id);
+      else
+        found.atOutlet.delete(section.id);
       if (!found.twins.has(section.id))
         found.twins.set(section.id, await this.host.books.createEntry(bookId, { ...blank, comment: `LRE \xB7 ${section.label} (preset outlet)`, position: 8, depth: 4, role: "system", outlet: outletOf(section.id), order: 100 + section.rank, extensions: { [LEDGER_NAMESPACE]: { twin: section.id } } }, userId));
     }
@@ -48152,6 +48375,40 @@ class ChipStore {
     this.chips.set(this.key(chatId, userId), kept);
     await this.save(chatId, userId);
   }
+  async shiftSwipes(chatId, userId, messageId, deleted) {
+    const list = await this.list(chatId, userId);
+    const dropped = new Set;
+    let changed = false;
+    for (let i = list.length - 1;i >= 0; i--) {
+      const c = list[i];
+      if (!c || c.messageId !== messageId || c.swipeId === undefined || c.swipeId < deleted)
+        continue;
+      changed = true;
+      if (c.swipeId === deleted) {
+        dropped.add(c.id);
+        list.splice(i, 1);
+      } else
+        list[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
+    }
+    if (changed)
+      await this.save(chatId, userId);
+    return dropped;
+  }
+}
+function idAfterSwipeDelete(id, messageId, deleted) {
+  const head = `:${messageId}:`;
+  for (let at = id.indexOf(head);at >= 0; at = id.indexOf(head, at + 1)) {
+    const from = at + head.length;
+    const digits = /^\d+/.exec(id.slice(from))?.[0];
+    const end = from + (digits?.length ?? 0);
+    if (digits === undefined || end < id.length && id[end] !== ":")
+      continue;
+    const swipe = Number(digits);
+    if (swipe < deleted)
+      return id;
+    return swipe === deleted ? null : `${id.slice(0, from)}${swipe - 1}${id.slice(end)}`;
+  }
+  return id;
 }
 
 // src/backend/push.ts
@@ -49716,7 +49973,7 @@ function applyProposals(registry, w, proposals, seed, runSeed) {
     const rejection = channel.validate(proposal, w.ctx);
     if (rejection) {
       w.restore(mark);
-      out.push({ proposal, events: [], materialized: [], rejection });
+      out.push(rejection.unseen ? { proposal, events: [], materialized: [], rejection: null, dropped: rejection.gm ?? rejection.reason } : { proposal, events: [], materialized: [], rejection });
       return;
     }
     const result = applyEffects(registry, w, channel.toEffects(proposal, w.ctx), { bindings: { self: w.world.pov }, rng: createRng(`${seed}:proposal:${i}`) });
@@ -49975,14 +50232,20 @@ function factLines(registry, world, state, secrets) {
   }
   return out.slice(0, 40);
 }
-function presentNames(registry, world, state) {
+function presentAgents(registry, world, state) {
   const here = placeOfEntity(state, world.pov);
   if (!here)
     return [];
-  return Object.entries(state.entities).filter(([id, e]) => id !== world.pov && e.agent && placeOfEntity(state, id) === here && canSeeEntity(registry, world, state, world.pov, id)).map(([id, e]) => {
+  return Object.entries(state.entities).filter(([id, e]) => id !== world.pov && e.agent && placeOfEntity(state, id) === here && canSeeEntity(registry, world, state, world.pov, id));
+}
+function presentNames(registry, world, state) {
+  return presentAgents(registry, world, state).map(([id, e]) => {
     const life = povLife(world, state, id);
     return life ? `${e.name} (${life.reads})` : e.name;
   });
+}
+function agentsActHere(registry, world, state) {
+  return presentAgents(registry, world, state).some(([id]) => povLife(world, state, id)?.acts !== false);
 }
 function tiesOf(ctx, world, state) {
   const all = optionalQuery(ctx, "castlife.tie_zones")?.(ctx) ?? [];
@@ -50685,7 +50948,7 @@ function derivedChips(chain, fold, keepReport, core, registry, world) {
     if (i !== headIndex)
       return;
     const text = m.swipes[m.swipeId] ?? "";
-    if (rec.status === "stopped")
+    if (rec.status === "stopped" && !rec.readElsewhere)
       chips.push({ id: `retry_read:${m.id}:${m.swipeId}`, kind: "retry_read", messageId: m.id, label: "Retry read", detail: "The reply stopped early; read what was saved.", actions: [{ id: "retry_read", label: "Retry read" }], expires: "never" });
     if (rec.status === "degraded" && text.trim() === "")
       chips.push({ id: `retry:${m.id}:${m.swipeId}`, kind: "retry", messageId: m.id, label: "Retry", detail: "The narrator returned an empty reply.", actions: [{ id: "regenerate", label: "Retry", style: "primary" }], expires: "next_send" });
@@ -50854,6 +51117,7 @@ function readOffer(value) {
     mode: value.mode,
     ...value.mode === "revision" ? { worldId: value.worldId } : {},
     ...typeof value.attachChatId === "string" ? { attachChatId: value.attachChatId } : {},
+    ...value.mode === "revision" && typeof value.baseRevision === "string" && value.baseRevision !== "" ? { baseRevision: value.baseRevision } : {},
     createdAt
   };
 }
@@ -50871,7 +51135,7 @@ function chatSummary(view, at) {
     place: hud?.place ? { id: hud.place.id, name: hud.place.name } : null,
     clock: hud ? { minutes: hud.clock.minutes, label: hud.clock.label, dayPart: hud.clock.dayPart } : null,
     cash,
-    present: (view.scene?.present ?? []).slice(0, PRESENT_CAP).map((p) => ({ id: p.id, name: p.name, label: p.label })),
+    present: (view.scene?.present ?? []).slice(0, PRESENT_CAP).map((p) => ({ id: p.id, name: p.name, label: p.label, ...p.life ? { life: p.life } : {} })),
     quests: openQuests(view.panels["story.quests"]),
     at
   };
@@ -50880,12 +51144,14 @@ function openQuests(panel) {
   if (!isRecord(panel) || !Array.isArray(panel.active))
     return [];
   const out = [];
+  let hidden = 0;
   for (const t of panel.active) {
     if (out.length >= QUEST_CAP)
       break;
     if (!isRecord(t) || typeof t.id !== "string" || typeof t.label !== "string")
       continue;
-    out.push({ id: t.id, kind: typeof t.kind === "string" ? t.kind : "quest", label: t.label, stage: typeof t.stage === "string" ? t.stage : "", cue: typeof t.cue === "string" ? t.cue : null });
+    const masked = t.stage === "" && (!Array.isArray(t.truths) || t.truths.length === 0);
+    out.push({ id: masked ? `hidden-${++hidden}` : t.id, kind: typeof t.kind === "string" ? t.kind : "quest", label: t.label, stage: typeof t.stage === "string" ? t.stage : "", cue: typeof t.cue === "string" ? t.cue : null });
   }
   return out;
 }
@@ -50975,7 +51241,7 @@ class StudioBridge {
     if (raw === null || raw === undefined)
       return { offer: null, reason: "LumiRPEngine Studio has no world waiting for you." };
     const offer = readOffer(raw);
-    return offer ? { offer } : { offer: null, reason: "LumiRPEngine Studio sent an offer this engine can't read." };
+    return offer ? { offer, hash: hashJson(offer) } : { offer: null, reason: "LumiRPEngine Studio sent an offer this engine can't read." };
   }
   async installedAs(userId, offerId) {
     return (await this.installed(userId)).find((i) => i.offerId === offerId) ?? null;
@@ -50984,6 +51250,22 @@ class StudioBridge {
     const kept = [...(await this.installed(userId)).filter((i) => i.offerId !== entry.offerId), entry].slice(-INSTALLED_CAP);
     await this.host.storage.write(`${INSTALLED_FILE}.tmp`, JSON.stringify({ v: 1, offers: kept }), userId);
     await this.host.storage.move(`${INSTALLED_FILE}.tmp`, INSTALLED_FILE, userId);
+  }
+  installs = new Map;
+  async installing(userId, work) {
+    const run = (this.installs.get(userId) ?? Promise.resolve()).then(work);
+    const settled = run.then(() => {
+      return;
+    }, () => {
+      return;
+    });
+    this.installs.set(userId, settled);
+    try {
+      return await run;
+    } finally {
+      if (this.installs.get(userId) === settled)
+        this.installs.delete(userId);
+    }
   }
   async installed(userId) {
     const raw = await readStoredJson(this.host, INSTALLED_FILE, userId, "Studio installs", (v) => isRecord(v) && Array.isArray(v.offers));
@@ -51301,6 +51583,8 @@ class Runtime {
   tokenCounts = new Map;
   lastWorldChat = new Map;
   presetWarnings = new Map;
+  routedLast = new Map;
+  outletMisses = new Map;
   pins = new Map;
   preBudgets = new Map;
   lastPlace = new Map;
@@ -51319,12 +51603,12 @@ class Runtime {
     this.inspector = new InspectorLog(this.host);
     this.chatPrefs = new ChatPrefs(this.host);
     this.book = new EngineBook(this.host, this.worlds);
-    this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks);
+    this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks, async (worldId, userId) => await this.worlds.index(worldId, userId) !== null);
     this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792347040" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792355873" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -51341,7 +51625,15 @@ class Runtime {
       if (e.message.isUser && userId)
         this.lapse(e.chatId, userId);
     });
+    this.host.on("MESSAGE_SWIPED", (e, userId) => {
+      if (e.action === "deleted" && userId)
+        this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
+    });
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
+    this.host.on("CHAT_DELETED", (e, userId) => {
+      if (userId)
+        this.jsonHiding.removeChat(e.chatId, userId).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: its JSON regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
+    });
   }
   async runOf(chatId, userId) {
     const key = `${userId}\x00${chatId}`;
@@ -51415,7 +51707,7 @@ class Runtime {
       return;
     const settings = await this.settings.get(input.userId);
     lruSet(this.settingsCache, input.userId, settings, 256);
-    const preset = await this.presets.current(input.chatId, input.userId);
+    const preset = await this.presets.current(input.chatId, input.userId, input.connectionId);
     const target = p.messageId ? input.observed.findIndex((m) => m.id === p.messageId) : input.observed.length;
     const before = input.observed.slice(0, target < 0 ? input.observed.length : target);
     const lastUser = before.findLast((m) => m.isUser);
@@ -51437,7 +51729,7 @@ class Runtime {
       typed,
       classifier: typed && classifyTyped(text, render.world, [...all.flatMap((a) => a.lexicon ?? []), ...TIMELAPSE_LEXICON]),
       sceneChange: this.lastPlace.has(input.chatId) && this.lastPlace.get(input.chatId) !== placeOfEntity(render.state, render.world.pov),
-      agentsPresent: presentNames(this.registry, render.world, render.state).length > 0,
+      agentsPresent: agentsActHere(this.registry, render.world, render.state),
       present: ties.present.length > 0,
       offscreen: ties.offscreen.length > 0,
       tieZone: ties.present.length > 0,
@@ -51822,17 +52114,19 @@ ${answer}`, links: owner ? [owner] : [] }));
       const at = input.core.commitContext(input.generationId, input.messageId, input.observed);
       context = at ? { ...at, recent } : null;
     }
+    const full = input.kind === "continue" ? input.observed[index]?.swipes[input.swipeId] ?? "" : "";
+    const before = full.endsWith(input.content) ? full.slice(0, full.length - input.content.length) : "";
     if (context)
-      await this.prepareRead(input.chatId, input.userId, input.messageId, input.swipeId, input.generationId, input.content, context, input.kind !== "continue");
+      await this.prepareRead(input.chatId, input.userId, input.messageId, input.swipeId, input.generationId, input.content, context, input.kind !== "continue", false, before);
   }
-  async prepareRead(chatId, userId, messageId, swipeId, key, content, context, post, replace = false) {
-    const text = withoutHiddenJson(content);
+  async prepareRead(chatId, userId, messageId, swipeId, key, content, context, post, replace = false, before = "") {
+    const settings = await this.settings.get(userId);
+    const text = readableReply(before + content, settings.hideJsonBlocks, before.length);
     if (replace)
       await this.chips.removeWhere(chatId, userId, (c) => c.messageId === messageId && c.swipeId === swipeId && READ_CHIP_KINDS.has(c.kind) && c.id !== unfitId(messageId, swipeId));
     const bridge = this.bridges.get(chatId);
     if (!bridge)
       return;
-    const settings = await this.settings.get(userId);
     const input = { chatId, userId, messageId, generationId: key, content };
     const pre = this.prePhase.get(key);
     const guidance = (pre?.preset ?? this.presets.last(userId)).guidance;
@@ -51932,8 +52226,11 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         declines.push({ proposal: o.proposal, reason: o.rejection.reason, payment: o.rejection.code === "declined", unpriced: o.rejection.code === "unpriced" });
         return;
       }
-      if (o.events.length === 0)
+      if (o.events.length === 0) {
+        if (o.dropped)
+          this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(o.proposal)} (${o.dropped})`, input.userId);
         return;
+      }
       const type = String(o.proposal.type);
       const quote = purchaseQuote(o.proposal, o.events, context.world);
       stored.push({
@@ -51974,6 +52271,10 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       }
       const also = unsure.has(proposal);
       const [check] = applyProposals(this.registry, new Working(this.registry, context.world, w.state), [proposal], `${context.seed}:check`, bridge.runSeed);
+      if (check?.rejection && proposal.type === "location") {
+        declines.push({ proposal, reason: check.rejection.reason, payment: false, unpriced: false });
+        return;
+      }
       if (check?.rejection?.code === "declined" && !also) {
         declines.push({ proposal, reason: check.rejection.reason, payment: true, unpriced: false });
         return;
@@ -51993,7 +52294,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         return;
       }
       if (!check || check.rejection || check.events.length === 0) {
-        this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(proposal)} (${check?.rejection?.reason ?? "no change"})`, input.userId);
+        this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(proposal)} (${check?.dropped ?? check?.rejection?.reason ?? "no change"})`, input.userId);
         return;
       }
       const quote = purchaseQuote(proposal, check.events, context.world);
@@ -52136,6 +52437,19 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         n.toldTo = messageId;
     await this.outcomeNotes.save(chatId, userId, kept);
   }
+  async swipeDeleted(chatId, userId, messageId, deleted) {
+    const dropped = await this.chips.shiftSwipes(chatId, userId, messageId, deleted);
+    const notes = await this.outcomeNotes.list(chatId, userId);
+    const kept = notes.flatMap((n) => {
+      if (n.messageId !== messageId)
+        return [n];
+      const id = dropped.has(n.id) ? null : idAfterSwipeDelete(n.id, messageId, deleted);
+      return id === null ? [] : [id === n.id ? n : { ...n, id }];
+    });
+    if (kept.length !== notes.length || kept.some((n, i) => n !== notes[i]))
+      await this.outcomeNotes.save(chatId, userId, kept);
+    this.changed(chatId, userId);
+  }
   changed(chatId, userId) {
     this.push.changed(chatId, userId);
   }
@@ -52202,7 +52516,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const settings = await this.settings.get(input.userId);
     const result = { disabled: [], enabled: [], forced: [], mutated: [] };
     const bookId = index?.loreBookId ?? null;
-    const entries = bookId ? await this.book.entriesOf(bookId, input.userId) : { slots: new Map, twins: new Map, narrator: null, narratorOutlet: null };
+    const entries = bookId ? await this.book.entriesOf(bookId, input.userId) : { slots: new Map, twins: new Map, atOutlet: new Set, narrator: null, narratorOutlet: null };
     const slotIds = entries.slots;
     const present = new Set(input.entries.filter((e) => e.bookId === bookId).map((e) => e.id));
     const ctx = this.registry.context(world, state);
@@ -52211,6 +52525,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const turnPlan = plan ? this.bridges.get(input.chatId)?.planFor(plan.seed) : undefined;
     const prose = turnPlan && plan ? this.bridges.get(input.chatId)?.proseFor(plan.seed) : undefined;
     const preset = (plan ? this.prePhase.get(plan.generationId)?.preset : undefined) ?? await this.presets.current(input.chatId, input.userId);
+    const presetKey = preset.preset ? `${preset.preset.id}\x00${preset.preset.revision}` : "";
+    const misses = this.outletMisses.get(input.chatId);
+    const routedSlots = new Set;
     const kept = plan && !turnPlan ? await this.planNotes.get(input.chatId, input.userId, plan.seed) : null;
     const outline = turnPlan ? planOutline(turnPlan, prose) : kept?.outline ?? [];
     const planned = turnPlan ? planLines(turnPlan, world, this.registry) : kept ? { outcome: kept.outcome, montage: kept.montage } : { outcome: [], montage: [] };
@@ -52234,18 +52551,21 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     let budget = settings.modelUse.tokens.sections;
     const { delivery } = await this.inspector.load(input.chatId, input.userId);
     const uncounted = [];
+    const hinted = [];
     for (const section of sectionsOf(world)) {
       const twin = entries.twins.get(section.id);
-      const routed = twin !== undefined && present.has(twin) && preset.outlets.has(outletOf(section.id));
-      const entryId = routed ? twin : slotIds.get(section.id);
+      const routed = twin !== undefined && present.has(twin) && preset.outlets.has(outletOf(section.id)) && !(misses?.preset === presetKey && misses.slots.has(section.id));
+      const astray = !routed && section.position.type === "chat_depth" && entries.atOutlet.has(section.id) && twin !== undefined && present.has(twin);
+      const entryId = routed || astray ? twin : slotIds.get(section.id);
       if (!entryId || !present.has(entryId))
         continue;
       const lines = [];
+      const hints = [];
       for (const r of this.registry.renderers) {
         if (r.slot !== section.id)
           continue;
         try {
-          lines.push(...r.render(ctx));
+          (r.hint ? hints : lines).push(...r.render(ctx));
         } catch (error) {
           this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
         }
@@ -52274,10 +52594,16 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       if (clipped)
         continue;
       budget -= cost;
+      if (routed)
+        routedSlots.add(section.id);
       const placement = routed ? null : placementOf(section);
       result.enabled.push(entryId);
       result.forced.push(entryId);
-      result.mutated.push({ id: entryId, content, ...placement ? { placement } : {} });
+      const entry = { id: entryId, content, ...placement ? { placement } : {} };
+      result.mutated.push(entry);
+      const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
+      if (safeHints.length > 0)
+        hinted.push({ entry, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
     }
     const rules = preset.guidance.narrator;
     const rulesAt = entries.narratorOutlet !== null && present.has(entries.narratorOutlet) && preset.outlets.has(NARRATOR_OUTLET) ? entries.narratorOutlet : entries.narrator;
@@ -52287,13 +52613,25 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       result.mutated.push({ id: rulesAt, content: `[Narrator rules]
 ${rules}` });
     }
-    this.countLater(input.userId, uncounted);
     record.budget.used = settings.modelUse.tokens.sections - budget;
+    for (const h of hinted) {
+      const content = renderSection(h.label, h.template, [...h.lines, ...h.hints]);
+      const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content));
+      if (counted === undefined)
+        uncounted.push(content);
+      const extra = Math.max(0, (counted ?? sectionTokens(content)) - h.cost);
+      if (extra > budget)
+        continue;
+      budget -= extra;
+      h.entry.content = content;
+    }
+    this.countLater(input.userId, uncounted);
     const picked = new Set([...result.enabled, ...result.forced]);
     for (const e of input.entries)
       if (e.bookId === bookId && !picked.has(e.id))
         result.disabled.push(e.id);
     record.forced = [...result.forced];
+    lruSet(this.routedLast, input.chatId, { preset: presetKey, slots: routedSlots }, 256);
     if (plan) {
       await this.inspector.add(input.chatId, input.userId, record);
       this.push.changed(input.chatId, input.userId);
@@ -52322,6 +52660,12 @@ ${rules}` });
     for (const s of last?.sections ?? [])
       if (!s.clipped && !hasOwn(TURN_ONLY_SLOTS, s.slot))
         out[s.slot] = text.includes(`[${neutralizeMacros(s.label)}]`) ? "verified" : "unverified";
+    const routed = this.routedLast.get(chatId);
+    const missed = routed ? [...routed.slots].filter((slot) => out[slot] === "unverified") : [];
+    if (routed && missed.length > 0) {
+      const earlier = this.outletMisses.get(chatId);
+      lruSet(this.outletMisses, chatId, { preset: routed.preset, slots: new Set([...earlier?.preset === routed.preset ? earlier.slots : [], ...missed]) }, 256);
+    }
     log.delivery = out;
     for (const s of last?.sections ?? [])
       s.delivery = s.clipped ? "unchecked" : out[s.slot] ?? s.delivery;
@@ -52349,7 +52693,7 @@ ${rules}` });
   async hidingChanged(userId, hides) {
     try {
       if (!hides) {
-        await this.jsonHiding.removeAll(userId);
+        await this.jsonHiding.removeHiding(userId);
         return;
       }
       this.jsonHiding.forget(userId);
@@ -52377,7 +52721,7 @@ ${rules}` });
     const found = presetCaveats(assembly, null);
     if (found.length === 0)
       return found;
-    const preset = await this.host.presets.active(chatId, userId).catch(() => null);
+    const preset = (await this.presets.current(chatId, userId)).preset;
     return preset ? presetCaveats(assembly, preset.name) : found;
   }
   inspectorRecords(chatId) {
@@ -52827,6 +53171,7 @@ function upgradePreview(reg, plan, state, after, inForce) {
     const held = own(state.entities, d.id);
     const kind = kindDef(reg, after, d.def.kind)?.label ?? kindDef(reg, inForce, d.def.kind)?.label ?? d.def.kind;
     const row = { entity: d.id, name: held?.name ?? d.def.name, kind, status: d.status, changes: [], ...secret ? { secret: true } : {} };
+    const unheard = [];
     const whole = [{ entity: d.id, part: "entity" }];
     if (d.status === "new") {
       const place = typeof d.def.fields.place === "string" ? nameOf(d.def.fields.place) : undefined;
@@ -52839,9 +53184,11 @@ function upgradePreview(reg, plan, state, after, inForce) {
         const diff = d.aspects[aspect];
         if (!diff)
           continue;
-        if (aspect === "life" && diff.now !== lifeKnownTo(state, d.id, pov))
-          spoils = true;
-        row.changes.push(marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] }));
+        const change = marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] });
+        if (aspect === "life" && !secret && diff.now !== lifeKnownTo(state, d.id, pov))
+          unheard.push({ ...change, secret: true });
+        else
+          row.changes.push(change);
       }
       for (const [field, diff] of Object.entries(d.fields)) {
         if (PLACEMENT_FIELDS.includes(field))
@@ -52879,8 +53226,10 @@ function upgradePreview(reg, plan, state, after, inForce) {
     }
     if (row.changes.length > 0)
       rows.push(row);
+    if (unheard.length > 0)
+      rows.push({ ...row, changes: unheard, secret: true });
   }
-  rows.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  rows.sort((a, b) => Number(a.secret === true) - Number(b.secret === true) || STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const tracks = plan.tracks.map((t) => {
     const def = own(after.tracks, t.track);
     const was = own(own(inForce.tracks, t.track)?.stages ?? {}, t.stage)?.label ?? t.stage;
@@ -53103,6 +53452,8 @@ class Dispatcher {
       case "lre.hello":
       case "lre.state.resync": {
         reply(r.type, { accepted: true });
+        if (r.type === "lre.hello" && r.presetId !== undefined)
+          this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null);
         if (r.chatId) {
           const run = await this.rt.runOf(r.chatId, userId);
           if (run) {
@@ -53280,6 +53631,8 @@ class Dispatcher {
         return;
       }
       case "lre.preset": {
+        if (r.op === "active")
+          this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null);
         const card = await this.rt.presetCard(userId, r.op === "add");
         if (!card)
           throw new RequestError("not_found", "There is no active preset to add the blocks to.");
@@ -53291,7 +53644,7 @@ class Dispatcher {
           const run = await this.rt.runOf(r.chatId, userId);
           if (!run)
             throw new RequestError("not_world_chat", "this chat is not attached to a world");
-          reply("lre.lore", await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, typeof r.text === "string" ? r.text : undefined));
+          reply("lre.lore", await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, (await this.rt.settings.get(userId)).hideJsonBlocks, typeof r.text === "string" ? r.text : undefined));
           return;
         }
         const world = await this.rt.worlds.working(r.worldId, userId);
@@ -53307,29 +53660,32 @@ class Dispatcher {
     }
   }
   async studio(r, userId) {
-    const read = await this.rt.studio.offer(userId);
-    if (!read.offer) {
-      if (r.op === "offer")
-        return { offer: null, message: read.reason };
-      throw new RequestError("not_found", read.reason);
+    if (r.op === "offer") {
+      const read = await this.rt.studio.offer(userId);
+      return read.offer ? { offer: (await this.reviewOffer(read.offer, read.hash, userId)).view } : { offer: null, message: read.reason };
     }
-    const offer = read.offer;
-    const { view, world } = await this.reviewOffer(offer, userId);
-    if (r.op === "offer")
-      return { offer: view };
-    if (offer.offerId !== r.offerId)
-      throw new RequestError("conflict", "LumiRPEngine Studio offers something else now; review it again.");
-    if (view.installed)
-      throw new RequestError("conflict", "This offer is already installed.");
-    if (view.blocked !== null || world === null)
-      throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
-    const store = this.rt.worlds;
-    const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId).then((created) => ({ ...created, lint: macroReview(created.world) }));
-    await this.syncBook(done.world.id, userId);
-    await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
-    return { installed: { offerId: offer.offerId, mode: offer.mode, worldId: done.world.id, name: done.world.name, revision: done.revision, attachChatId: offer.attachChatId ?? null }, lint: done.lint };
+    return this.rt.studio.installing(userId, async () => {
+      const read = await this.rt.studio.offer(userId);
+      if (!read.offer)
+        throw new RequestError("not_found", read.reason);
+      const offer = read.offer;
+      const { view, world } = await this.reviewOffer(offer, read.hash, userId);
+      if (offer.offerId !== r.offerId || read.hash !== r.hash)
+        throw new RequestError("conflict", "LumiRPEngine Studio offers something else now; review it again.");
+      if (view.installed)
+        throw new RequestError("conflict", "This offer is already installed.");
+      if (view.blocked !== null || world === null)
+        throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
+      if (view.headMoved && r.acceptMovedHead !== true)
+        throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
+      const store = this.rt.worlds;
+      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId).then((created) => ({ ...created, lint: macroReview(created.world) }));
+      await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
+      await this.syncBook(done.world.id, userId);
+      return { installed: { offerId: offer.offerId, mode: offer.mode, worldId: done.world.id, name: done.world.name, revision: done.revision, attachChatId: offer.attachChatId ?? null }, lint: done.lint };
+    });
   }
-  async reviewOffer(offer, userId) {
+  async reviewOffer(offer, hash, userId) {
     const installed = await this.rt.studio.installedAs(userId, offer.offerId);
     const view = {
       offerId: offer.offerId,
@@ -53343,7 +53699,9 @@ class Dispatcher {
       macros: [],
       attachChatId: offer.attachChatId ?? null,
       blocked: null,
-      installed: installed ? { worldId: installed.worldId, revision: installed.revision } : null
+      installed: installed ? { worldId: installed.worldId, revision: installed.revision } : null,
+      headMoved: null,
+      hash
     };
     if (!isWorldDoc(offer.doc))
       return { view: { ...view, blocked: `It isn't an ${WORLD_FORMAT} document.` }, world: null };
@@ -53373,6 +53731,8 @@ class Dispatcher {
         view.blocked ??= "The world it's a revision of isn't one of your worlds.";
       else if (await this.rt.worlds.hasDraft(offer.worldId, userId))
         view.blocked ??= `Build has unsaved changes to \u201C${index.name}\u201D: commit or discard them first.`;
+      if (index && offer.baseRevision !== index.head)
+        view.headMoved = { base: offer.baseRevision ?? null, head: index.head };
     }
     return { view, world };
   }
@@ -53428,7 +53788,7 @@ class Dispatcher {
           this.rt.forgetChat(r.chatId);
           await this.rt.ledger.open(r.chatId, userId);
         }
-        await this.rt.jsonHiding.ensure(r.chatId, r.worldId, userId).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] chat ${r.chatId}: the JSON-hiding regex script wasn't written (${error instanceof Error ? error.message : String(error)})`, userId));
+        await this.rt.jsonHiding.ensure(r.chatId, r.worldId, userId).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] chat ${r.chatId}: the JSON regex scripts weren't written (${error instanceof Error ? error.message : String(error)})`, userId));
         await this.rt.push.snapshot(r.chatId, userId);
         return { revision: existing ? existing.revision : revision };
       }
@@ -53586,7 +53946,10 @@ class Dispatcher {
       const chip = (await this.rt.chips.list(chatId, userId)).find((c) => c.id === id);
       if (!chip)
         throw new RequestError("not_found", "the chip has lapsed");
-      const result = await this.storedChip(chatId, userId, id, choice, chip, toChain(await this.rt.host.chats.messages(chatId, userId)), payload);
+      const now = toChain(await this.rt.host.chats.messages(chatId, userId));
+      if (chip.swipeId !== undefined && now.find((m) => m.id === chip.messageId)?.swipeId !== chip.swipeId)
+        throw new RequestError("not_found", "the chip belongs to a swipe that isn't shown");
+      const result = await this.storedChip(chatId, userId, id, choice, chip, now, payload);
       await this.rt.takeChip(chatId, userId, id);
       return result;
     });
@@ -53905,7 +54268,7 @@ function decodeMessage(raw, chatId) {
 }
 var SWIPE_ACTIONS = { added: "added", navigated: "navigated", updated: "updated", deleted: "deleted" };
 function decodeEvent(event, p) {
-  const chatId = str5(p, "chatId");
+  const chatId = str5(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId)
     return null;
   switch (event) {
@@ -53965,6 +54328,8 @@ function decodeEvent(event, p) {
       const previousSwipeId = num3(p, "previousSwipeId");
       return { chatId, message, action, swipeId: num3(p, "swipeId") ?? message.swipeId, ...previousSwipeId !== undefined ? { previousSwipeId } : {} };
     }
+    case "CHAT_DELETED":
+      return { chatId };
     case "MESSAGE_DELETED": {
       const messageId = str5(p, "messageId");
       return messageId ? { chatId, messageId } : null;
@@ -54066,15 +54431,23 @@ class DiagnosticsLog {
     }, 1000);
   }
 }
+async function listScripts(options, userId) {
+  const out = [];
+  for (let offset = 0;offset < 1e5; offset += 200) {
+    const page = await spindle.regex_scripts.list({ ...options, limit: 200, offset, userId });
+    for (const s of page.data) {
+      const chatId = s.scope === "chat" ? s.scope_id : null;
+      if (s.scope !== options.scope || s.scope === "chat" && !chatId)
+        continue;
+      out.push({ id: s.id, chatId, mine: s.can_mutate, findRegex: s.find_regex, replaceString: s.replace_string, flags: s.flags, placement: [...s.placement], targets: Array.isArray(s.target) ? [...s.target] : [s.target], runOnEdit: s.run_on_edit, sortOrder: s.sort_order, metadata: toJsonObject(s.metadata) });
+    }
+    if (page.data.length < 200 || offset + page.data.length >= page.total)
+      break;
+  }
+  return out;
+}
 function createSpindleHost() {
   const diagnostics = new DiagnosticsLog;
-  const activePreset = new Map;
-  const learn = (userId, presetId) => {
-    if (userId && typeof presetId === "string" && presetId !== "")
-      activePreset.set(userId, presetId);
-  };
-  spindle.on("PRESET_CHANGED", (payload, userId) => learn(userId, isRecord(payload) ? payload.presetId : null));
-  spindle.on("SETTINGS_UPDATED", (payload, userId) => learn(userId, isRecord(payload) && payload.key === "activeLoomPresetId" ? payload.value : null));
   return {
     chats: {
       async messages(chatId) {
@@ -54289,30 +54662,36 @@ function createSpindleHost() {
       };
     },
     presets: {
-      async active(chatId, userId) {
-        const connection = (await spindle.connections.list(userId)).find((c) => c.is_default);
-        let presetId = connection?.preset_id ?? activePreset.get(userId) ?? null;
-        if (!presetId && chatId) {
-          const rows = await spindle.chat.getMessages(chatId);
-          for (let i = rows.length - 1;i >= 0 && !presetId; i--) {
-            const row = rows[i];
-            if (!row || row.is_user)
-              continue;
-            presetId = (await spindle.generate.getBreakdown(row.id, userId))?.presetId ?? null;
-            break;
-          }
-        }
-        if (!presetId)
-          return null;
+      async get(presetId, userId) {
         const preset = await spindle.presets.get(presetId, userId);
         return preset ? { id: preset.id, name: preset.name, revision: preset.cache_revision } : null;
       },
-      async blocks(presetId, userId) {
-        return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({ id: b.id, name: b.name, content: b.content, enabled: b.enabled, marker: b.marker, injectionTrigger: [...b.injectionTrigger ?? []] }));
+      async ofConnection(connectionId, userId) {
+        return (await spindle.connections.list(userId)).find((c) => c.id === connectionId)?.preset_id ?? null;
       },
-      async addBlock(presetId, block, index, userId) {
-        const input = block.kind === "category" ? { name: block.name, marker: "category", categoryMode: "checkbox", content: "" } : { name: block.name, content: block.content, enabled: false, role: "system", position: "pre_history" };
-        await spindle.presets.blocks.create(presetId, input, { ...index !== null ? { index } : {}, userId });
+      async lastUsed(chatId, userId) {
+        const reply = (await spindle.chat.getMessages(chatId)).findLast((row) => !row.is_user);
+        return reply ? (await spindle.generate.getBreakdown(reply.id, userId))?.presetId ?? null : null;
+      },
+      async blocks(presetId, userId) {
+        return (await spindle.presets.blocks.list(presetId, userId)).map((b) => ({
+          id: b.id,
+          name: b.name,
+          content: b.content,
+          enabled: b.enabled,
+          marker: b.marker,
+          injectionTrigger: [...b.injectionTrigger ?? []],
+          characterTagTrigger: "characterTagTrigger" in b && Array.isArray(b.characterTagTrigger) ? b.characterTagTrigger.filter((t) => typeof t === "string") : [],
+          categoryMode: b.categoryMode === "radio" || b.categoryMode === "checkbox" ? b.categoryMode : null
+        }));
+      },
+      async insertBlocks(presetId, revision, at, blocks, userId) {
+        const preset = await spindle.presets.get(presetId, userId);
+        if (!preset)
+          throw new Error("the preset is gone");
+        if (preset.cache_revision !== revision)
+          throw new Error("the preset changed while the blocks were being added; try again");
+        await spindle.presets.update(presetId, { prompt_order: spliceBlocks(preset.prompt_order, at, blocks, () => crypto.randomUUID()), expected_cache_revision: revision }, userId);
       }
     },
     connections: {
@@ -54323,18 +54702,10 @@ function createSpindleHost() {
     },
     regex: {
       async chatScripts(chatId, userId) {
-        const out = [];
-        for (let offset = 0;offset < 1e5; offset += 200) {
-          const page = await spindle.regex_scripts.list({ scope: "chat", ...chatId ? { scopeId: chatId } : {}, limit: 200, offset, userId });
-          for (const s of page.data) {
-            if (s.scope !== "chat" || !s.scope_id)
-              continue;
-            out.push({ id: s.id, chatId: s.scope_id, mine: s.can_mutate, findRegex: s.find_regex, replaceString: s.replace_string, flags: s.flags, placement: [...s.placement], targets: Array.isArray(s.target) ? [...s.target] : [s.target], runOnEdit: s.run_on_edit, metadata: toJsonObject(s.metadata) });
-          }
-          if (page.data.length < 200 || offset + page.data.length >= page.total)
-            break;
-        }
-        return out;
+        return listScripts({ scope: "chat", ...chatId ? { scopeId: chatId } : {} }, userId);
+      },
+      async globalScripts(userId) {
+        return listScripts({ scope: "global" }, userId);
       },
       async write(id, script, userId) {
         const input = {
@@ -54345,9 +54716,10 @@ function createSpindleHost() {
           flags: script.flags,
           placement: [...script.placement],
           target: [...script.targets],
-          scope: "chat",
+          scope: script.chatId === null ? "global" : "chat",
           scope_id: script.chatId,
           run_on_edit: script.runOnEdit,
+          sort_order: script.sortOrder,
           substitute_macros: "none",
           description: script.description,
           folder: script.folder,
@@ -54388,6 +54760,11 @@ function createSpindleHost() {
       diagnostics.add(level, message, userId);
     }
   };
+}
+function spliceBlocks(stored, at, blocks, newId) {
+  const added = blocks.map((b) => ({ id: newId(), name: b.name, content: b.kind === "text" ? b.content : "", role: "system", enabled: b.kind === "category", position: "pre_history", depth: 0, marker: b.kind === "category" ? "category" : null, isLocked: false, color: null, injectionTrigger: [], group: null, categoryMode: b.kind === "category" ? "checkbox" : null }));
+  const index = at === null ? stored.length : Math.max(0, Math.min(stored.length, at));
+  return [...stored.slice(0, index), ...added, ...stored.slice(index)];
 }
 
 // src/backend/main.ts

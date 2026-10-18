@@ -3868,6 +3868,7 @@ var COLLECTION_SPECS = {
     { kind: "levels", key: "levels", label: "Level overrides" },
     { kind: "agent", key: "agent", label: "Lives their own day (agendas and plans)" },
     { kind: "life", key: "life", label: "Starts (life state)" },
+    { kind: "refs", key: "lifeKnownBy", label: "Who knows how it starts (none: everyone)", collections: ["entities"] },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
     { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },
@@ -11151,7 +11152,7 @@ function useStudioOffer(props) {
       load();
   }, [asked]);
   const install = (reviewed) => run(async () => {
-    const result = await app.request({ type: "lre.studio", op: "install", offerId: reviewed.offerId });
+    const result = await app.request({ type: "lre.studio", op: "install", offerId: reviewed.offerId, hash: reviewed.hash, ...reviewed.headMoved ? { acceptMovedHead: true } : {} });
     const done = result?.installed;
     if (!done)
       return;
@@ -11292,6 +11293,14 @@ function StudioOfferReview(props) {
           class: "lre-small lre-muted",
           children: "Its chats stay on their revision until you Upgrade them in Settings → Pins and upgrade."
         }, undefined, false, undefined, this) : null,
+        offer.headMoved && offer.blocked === null && !offer.installed ? /* @__PURE__ */ u3("div", {
+          class: "lre-banner warn",
+          children: [
+            "“",
+            offer.target?.name ?? "This world",
+            "” changed in Build since LumiRPEngine Studio took it. Installing makes this the new head without what was committed since; that revision stays, and so do its chats. To keep both, take the world into the Studio again."
+          ]
+        }, undefined, true, undefined, this) : null,
         /* @__PURE__ */ u3("div", {
           style: { display: "flex", gap: "8px", flexWrap: "wrap" },
           children: [
@@ -11300,7 +11309,7 @@ function StudioOfferReview(props) {
               class: "lre-btn primary",
               disabled: busy || offer.blocked !== null || offer.installed !== null,
               onClick: () => props.state.install(offer),
-              children: "Install"
+              children: offer.headMoved ? "Install anyway" : "Install"
             }, undefined, false, undefined, this),
             /* @__PURE__ */ u3("button", {
               type: "button",
@@ -12942,7 +12951,7 @@ function UpgradePanel(props) {
               }, c.id, true, undefined, this);
             })
           ]
-        }, row.entity, true, undefined, this);
+        }, `${row.entity}:${row.secret === true ? "hidden" : "shown"}`, true, undefined, this);
       }),
       props.preview.tracks.map((line, i) => /* @__PURE__ */ u3("span", {
         class: "lre-small",
@@ -13212,7 +13221,7 @@ function PresetSection() {
       /* @__PURE__ */ u3(Row, {
         k: "Active preset",
         v: card.preset?.name ?? "—",
-        sub: "The preset world chats assemble with now: your default connection's, else the active Loom preset."
+        sub: "The preset world chats assemble with now: the active Loom preset, else the one the chat's connection links, else the one the last reply was assembled with."
       }, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-h",
@@ -13452,7 +13461,7 @@ function Settings() {
               }, undefined, false, undefined, this),
               /* @__PURE__ */ u3("span", {
                 class: "lre-small lre-muted",
-                children: settings.hideJsonBlocks ? "A <json>…</json> block a reply carries (some presets ask for one) is hidden and kept out of World Info scanning, through a regex script each world chat keeps. The block stays as written, so anything that reads it still can." : "Replies show their <json> blocks, and World Info scans them like the rest of the reply."
+                children: settings.hideJsonBlocks ? "A <json>…</json> block a reply carries (some presets ask for one) is hidden once your preset's own display scripts have run, so a tracker your preset draws from it still shows. World Info skips the block either way, and it stays as written, so anything that reads it still can." : "Replies show their <json> blocks as the AI wrote them. World Info still skips the blocks."
               }, undefined, false, undefined, this)
             ]
           }, undefined, true, undefined, this)
@@ -16167,21 +16176,23 @@ function learners(state, subject, base) {
 function peopleAt(reg, world, state, place) {
   return Object.keys(state.entities).sort().filter((id) => placeOfEntity(state, id) === place && isPerson(reg, world, state, id));
 }
-function applyLife(state, ctx, subject, to) {
+function witnessesOf(reg, world, state, subject) {
+  const place = placeOfEntity(state, subject);
+  return place === null ? [] : peopleAt(reg, world, state, place).filter((id) => id !== subject);
+}
+function applyLife(state, ctx, subject, to, witnesses) {
   const e = own(state.entities, subject);
   if (!e)
     return;
   const by = learners(state, subject, lifeOf(state, subject));
+  const seen = witnesses ?? witnessesOf(ctx.registry, ctx.world, state, subject);
   if (to === ALIVE)
     delete e.life;
   else
     e.life = to;
-  const place = placeOfEntity(state, subject);
-  if (place !== null) {
-    for (const id of peopleAt(ctx.registry, ctx.world, state, place))
-      if (id !== subject)
-        by[id] = to;
-  }
+  for (const id of seen)
+    if (id !== subject && own(state.entities, id))
+      by[id] = to;
 }
 function tellLife(state, subject, who) {
   const entry = entryOf(state, subject);
@@ -16474,9 +16485,12 @@ var events = [
         return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
       if (!isLifeState(ctx.world, str2(e, "to")))
         return { code: "bad_life", reason: `there's no life state ${str2(e, "to")}` };
+      const seen = e.data.witnesses;
+      if (seen !== undefined && !(Array.isArray(seen) && seen.every((id) => typeof id === "string")))
+        return { code: "bad_event", reason: "a life change's witnesses are entity ids" };
       return lifeOf(ctx.state, str2(e, "entity")) === str2(e, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str2(e, "to")).label.toLowerCase()}` } : null;
     },
-    apply: (e, state, ctx) => applyLife(state, ctx, str2(e, "entity"), str2(e, "to")),
+    apply: (e, state, ctx) => applyLife(state, ctx, str2(e, "entity"), str2(e, "to"), witnessesOf2(e)),
     touches: (e) => [{ entity: str2(e, "entity"), aspect: "life" }],
     describe: (e, ctx, viewer) => {
       const id = str2(e, "entity");
@@ -16484,9 +16498,9 @@ var events = [
       const name = own(ctx.state.entities, id)?.name ?? id;
       if (viewer === undefined)
         return `${name}: ${def.label}`;
-      if (lifeKnownTo(ctx.state, id, viewer) !== str2(e, "to"))
-        return "";
-      return id === viewer ? `You: ${def.label}` : `${name} ${def.reads}`;
+      if (id === viewer)
+        return `You: ${def.label}`;
+      return witnessesOf2(e)?.includes(viewer) === true ? `${name} ${def.reads}` : "";
     }
   },
   {
@@ -16508,6 +16522,10 @@ var events = [
     }
   }
 ];
+function witnessesOf2(e) {
+  const seen = e.data.witnesses;
+  return Array.isArray(seen) ? seen.filter((id) => typeof id === "string") : null;
+}
 
 // src/engine/player-events.ts
 var BOOKKEEPING = new Set([
@@ -21462,9 +21480,10 @@ class ProtocolClient {
     this.jobListeners.add(listener);
     return () => this.jobListeners.delete(listener);
   }
+  presetId = undefined;
   open(chatId) {
     this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0 });
-    const reply = this.request({ type: "lre.hello", chatId });
+    const reply = this.request({ type: "lre.hello", chatId, ...this.presetId !== undefined ? { presetId: this.presetId } : {} });
     reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
         this.update({ ...this.state, status: "closed" });
@@ -22061,6 +22080,13 @@ function setup(ctx) {
     client.open(chatId);
   };
   if (ctx.state) {
+    client.presetId = ctx.state.get("loom.activePresetId") ?? null;
+    cleanups.push(ctx.state.subscribe("loom.activePresetId", (presetId) => {
+      if ((presetId ?? null) === client.presetId)
+        return;
+      client.presetId = presetId ?? null;
+      app.request({ type: "lre.preset", op: "active", presetId: client.presetId });
+    }));
     cleanups.push(ctx.state.subscribe("chat.active", (value) => openActive(value.chatId)));
   } else {
     for (const event of ["CHAT_CHANGED", "CHAT_SWITCHED"])

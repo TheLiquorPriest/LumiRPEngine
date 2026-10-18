@@ -3843,34 +3843,58 @@ function findLeaks(value, secrets) {
   visit(value);
   return out;
 }
-function nameWords(text) {
-  return text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+var ACCENTS = /[\u0300-\u036f]/g;
+var PLAIN_LETTERS = { \u{f8}: "o", \u{e6}: "ae", \u{153}: "oe", \u{df}: "ss", \u{111}: "d", \u{142}: "l", \u{131}: "i", \u{f0}: "d", \u{fe}: "th" };
+function unaccented(text) {
+  return text.normalize("NFD").replace(ACCENTS, "").normalize("NFC");
+}
+function spellings(text) {
+  return (text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []).map((written) => ({ written, plain: unaccented(written).replace(/[\u00F8\u00E6\u0153\u00DF\u0111\u0142\u0131\u00F0\u00FE]/g, (c) => PLAIN_LETTERS[c] ?? c) }));
 }
 var FUNCTION_WORDS = { a: true, an: true, the: true, of: true, and: true, in: true, on: true, at: true, to: true, by: true, for: true, or: true, with: true, from: true };
 var WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
 function saysInOrder(said, words) {
-  const parts = words.map((w) => /^[a-z0-9]+$/.test(w) ? `(?<!${WORD_CHAR})${w}(?!${WORD_CHAR})` : w);
+  const parts = words.map((w) => {
+    if (!/^[a-z0-9]+$/.test(w))
+      return w;
+    const plural = /[^aeiou]y$/.test(w) ? `(?:${w}(?:e?s)?|${w.slice(0, -1)}ies)` : `${w}(?:e?s)?`;
+    return `(?<!${WORD_CHAR})${plural}(?!${WORD_CHAR})`;
+  });
   return new RegExp(parts.join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
 }
+function sayings(text) {
+  const words = spellings(text);
+  const joined = (key, all) => words.filter((w) => all || !hasOwn(FUNCTION_WORDS, w.plain)).map((w) => w[key]).join(" ");
+  const texts = { written: joined("written", false), plain: joined("plain", false), writtenAll: joined("written", true), plainAll: joined("plain", true) };
+  const cased = unaccented(text);
+  return {
+    says: (parts, all) => saysInOrder(all ? texts.plainAll : texts.plain, parts.map((p) => p.plain)) || saysInOrder(all ? texts.writtenAll : texts.written, parts.map((p) => p.written)),
+    capital: (letter) => new RegExp(`(?<!${WORD_CHAR})${letter}(?!${WORD_CHAR})`, "u").test(cased)
+  };
+}
 function namesAny(text, people, labels = [], heard = "") {
-  const words = nameWords(text);
-  const said = words.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
-  const heardWords = nameWords(heard);
-  const known = heardWords.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
+  const said = sayings(text);
+  const known = sayings(heard);
   for (const name of people) {
-    for (const w of nameWords(name)) {
-      if (hasOwn(FUNCTION_WORDS, w) || w.length < 2 && /^[a-z0-9]+$/.test(w))
-        continue;
-      if (saysInOrder(said, [w]) && !saysInOrder(known, [w]))
+    const words = spellings(name).filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
+    const counted = words.filter((w) => !/^[a-z0-9]$/.test(w.plain));
+    for (const w of counted)
+      if (said.says([w], false) && !known.says([w], false))
+        return true;
+    if (counted.length > 0)
+      continue;
+    for (const w of words) {
+      const letter = w.plain.toUpperCase();
+      if (/^[B-HJ-Z]$/.test(letter) && said.capital(letter) && !known.capital(letter))
         return true;
     }
   }
   for (const label of labels) {
-    const all = nameWords(label);
-    const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w));
+    const all = spellings(label);
+    const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w.plain));
     const whole = named.length === 0;
     const parts = whole ? all : named;
-    if (parts.length > 0 && saysInOrder(whole ? words.join(" ") : said, parts) && !saysInOrder(whole ? heardWords.join(" ") : known, parts))
+    if (parts.length > 0 && said.says(parts, whole) && !known.says(parts, whole))
       return true;
   }
   return false;
@@ -3920,20 +3944,33 @@ function learners(state, subject, base) {
 function peopleAt(reg, world, state, place) {
   return Object.keys(state.entities).sort().filter((id) => placeOfEntity(state, id) === place && isPerson(reg, world, state, id));
 }
-function applyLife(state, ctx, subject, to) {
+function witnessesOf(reg, world, state, subject) {
+  const place = placeOfEntity(state, subject);
+  return place === null ? [] : peopleAt(reg, world, state, place).filter((id) => id !== subject);
+}
+function applyLife(state, ctx, subject, to, witnesses) {
   const e = own(state.entities, subject);
   if (!e)
     return;
   const by = learners(state, subject, lifeOf(state, subject));
+  const seen = witnesses ?? witnessesOf(ctx.registry, ctx.world, state, subject);
   if (to === ALIVE)
     delete e.life;
   else
     e.life = to;
-  const place = placeOfEntity(state, subject);
-  if (place !== null) {
-    for (const id of peopleAt(ctx.registry, ctx.world, state, place))
-      if (id !== subject)
-        by[id] = to;
+  for (const id of seen)
+    if (id !== subject && own(state.entities, id))
+      by[id] = to;
+}
+function seedLife(world, state) {
+  for (const [id, def] of Object.entries(world.entities)) {
+    const start = lifeOf(state, id);
+    if (!def.lifeKnownBy?.length || start === ALIVE)
+      continue;
+    const by = learners(state, id, ALIVE);
+    for (const knower of def.lifeKnownBy)
+      if (knower !== id && own(state.entities, knower))
+        by[knower] = start;
   }
 }
 function tellLife(state, subject, who) {
@@ -4014,7 +4051,7 @@ function lifeEffect(args, ctx) {
   if (to === null && who.length === 0)
     return { code: "bad_args", reason: "a life change needs a state to set or someone to tell" };
   const now = lifeOf(ctx.state, subject);
-  const out = to !== null && to !== now ? [{ type: ENGINE_EVENTS.life, data: { entity: subject, to } }] : [];
+  const out = to !== null && to !== now ? [{ type: ENGINE_EVENTS.life, data: { entity: subject, to, witnesses: witnessesOf(ctx.registry, ctx.world, ctx.state, subject) } }] : [];
   const after = to ?? now;
   const told = who.filter((id) => id !== subject && (out.length > 0 || lifeKnownTo(ctx.state, subject, id) !== after));
   const pov = told.filter((id) => id === ctx.world.pov);
@@ -4490,9 +4527,12 @@ var events = [
         return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
       if (!isLifeState(ctx.world, str2(e, "to")))
         return { code: "bad_life", reason: `there's no life state ${str2(e, "to")}` };
+      const seen = e.data.witnesses;
+      if (seen !== undefined && !(Array.isArray(seen) && seen.every((id) => typeof id === "string")))
+        return { code: "bad_event", reason: "a life change's witnesses are entity ids" };
       return lifeOf(ctx.state, str2(e, "entity")) === str2(e, "to") ? { code: "no_change", reason: `${ent.name} is already ${lifeStateOf(ctx.world, str2(e, "to")).label.toLowerCase()}` } : null;
     },
-    apply: (e, state, ctx) => applyLife(state, ctx, str2(e, "entity"), str2(e, "to")),
+    apply: (e, state, ctx) => applyLife(state, ctx, str2(e, "entity"), str2(e, "to"), witnessesOf2(e)),
     touches: (e) => [{ entity: str2(e, "entity"), aspect: "life" }],
     describe: (e, ctx, viewer) => {
       const id = str2(e, "entity");
@@ -4500,9 +4540,9 @@ var events = [
       const name = own(ctx.state.entities, id)?.name ?? id;
       if (viewer === undefined)
         return `${name}: ${def.label}`;
-      if (lifeKnownTo(ctx.state, id, viewer) !== str2(e, "to"))
-        return "";
-      return id === viewer ? `You: ${def.label}` : `${name} ${def.reads}`;
+      if (id === viewer)
+        return `You: ${def.label}`;
+      return witnessesOf2(e)?.includes(viewer) === true ? `${name} ${def.reads}` : "";
     }
   },
   {
@@ -4524,6 +4564,10 @@ var events = [
     }
   }
 ];
+function witnessesOf2(e) {
+  const seen = e.data.witnesses;
+  return Array.isArray(seen) ? seen.filter((id) => typeof id === "string") : null;
+}
 function entityArg(ctx, v) {
   const id = typeof v === "string" ? v : "";
   const e = own(ctx.state.entities, id);
@@ -4861,6 +4905,8 @@ function playerEventVisible(reg, world, state, pov, e) {
     if (POV_ONLY.has(e.type) && (e.data.agent ?? e.data.entity ?? e.data.who) !== pov)
       return false;
   }
+  if (e.type === "set" && e.entity !== pov && (e.field === "place" || e.field === "activity" || [...Object.values(world.schedules), ...reg.schedules].some((s) => s.target === e.field)) && kindIs(reg, world, own(state.entities, e.entity)?.kind ?? "", "person"))
+    return false;
   if (e.type === "stage" && !trackShown(reg, world, state, pov, e.track))
     return false;
   for (const r of refsOf(world, state, e)) {
@@ -5379,6 +5425,7 @@ function initialState(world, revision, types) {
     packs: {}
   };
   seedObservations(world, state);
+  seedLife(world, state);
   return state;
 }
 
@@ -7487,6 +7534,11 @@ function lintStructure(world, reg) {
   for (const [id, e] of Object.entries(world.entities)) {
     if (e.life !== undefined && !isLifeState(world, e.life))
       err(`entities.${id}.life`, "unknown_life", `${e.name} starts in life state "${e.life}", which isn't one of the world's.`);
+    for (const knower of e.lifeKnownBy ?? [])
+      if (!own(world.entities, knower))
+        err(`entities.${id}.lifeKnownBy`, "refs", `${e.name}'s starting life state is known to an unknown "${knower}".`);
+    if ((e.lifeKnownBy ?? []).length > 0 && (e.life ?? ALIVE) === ALIVE)
+      warn(`entities.${id}.lifeKnownBy`, "life_known_by", `${e.name} starts alive, so who knows how they start changes nothing.`);
   }
   const downLife = world.ruleset?.combat?.down?.life;
   if (downLife !== undefined && (typeof downLife !== "string" || !isLifeState(world, downLife)))
@@ -9039,6 +9091,9 @@ function emitter(reg, w, seed, rules) {
     }
   };
 }
+function stillActs(w, id) {
+  return !isGone(w.state, id) && acts(w.world, w.state, id);
+}
 function clockTo(w, at, cause, e) {
   const minutes = at - w.state.clock;
   if (minutes > 0)
@@ -9059,10 +9114,19 @@ function advance(reg, w, to, opts) {
   const slots = slotsEnding(cal, from, to);
   const e = emitter(reg, w, opts.runSeed, result.rules);
   const timelapse = opts.mode === "timelapse";
-  const agents = timelapse ? lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov) : [];
-  if (timelapse && opts.includePov !== false && own(w.state.entities, w.world.pov) && acts(w.world, w.state, w.world.pov))
-    agents.unshift(w.world.pov);
-  const cursors = new Map(agents.map((a) => [a, agentCursor(w.world, w.state, a)]));
+  const stepping = () => {
+    if (!timelapse)
+      return [];
+    const list = lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+    if (opts.includePov !== false && own(w.state.entities, w.world.pov) && stillActs(w, w.world.pov))
+      list.unshift(w.world.pov);
+    return list;
+  };
+  const settle = (agent, slot) => {
+    if (slot !== agentCursor(w.world, w.state, agent))
+      w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot } });
+  };
+  let cursors = new Map;
   let next = 0;
   const applyInstants = (until) => {
     while (next < instants.length && (instants[next]?.at ?? Infinity) <= until) {
@@ -9082,12 +9146,20 @@ function advance(reg, w, to, opts) {
     return out;
   };
   for (const slot of slots) {
+    const agents = stepping();
+    for (const [agent, cursor] of [...cursors]) {
+      if (agents.includes(agent))
+        continue;
+      settle(agent, cursor);
+      cursors.delete(agent);
+    }
     const slotDays = agents.length * (slot.end - slot.start) / MINUTES_PER_DAY;
     if (timelapse && result.slots > 0 && result.agentDays + slotDays > cap.agentDays) {
       result.stop = "cap";
       break;
     }
     const mark = timelapse && result.slots > 0 ? w.mark() : null;
+    const held = mark ? new Map(cursors) : null;
     const before = w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
@@ -9100,13 +9172,14 @@ function advance(reg, w, to, opts) {
       e.emit(def.step(info, w.ctx, rngFactory(opts.runSeed, def.id, slot.index)));
     }
     for (const agent of agents) {
-      const cursor = cursors.get(agent) ?? slot.index - 1;
-      for (let k = cursor + 1;k <= slot.index; k++) {
+      let k = cursors.get(agent) ?? agentCursor(w.world, w.state, agent);
+      while (k < slot.index && stillActs(w, agent)) {
+        k++;
         const applied = stepAgent(reg, w, agent, k === slot.index ? slot : slotOf(cal, k), opts.runSeed);
         if (applied.length > 0)
           result.rules.push(...runRulesOnEvents(reg, w, applied, { seed: hashParts(opts.runSeed, "agent", agent, k) }));
       }
-      cursors.set(agent, slot.index);
+      cursors.set(agent, k);
     }
     const dayEnds = (slot.index + 1) % cal.partStarts.length === 0;
     const tickSeed = hashParts(opts.runSeed, "tick", slot.index);
@@ -9116,6 +9189,8 @@ function advance(reg, w, to, opts) {
     result.tracks.push(...stepTracks(reg, w, tickSeed));
     if (mark && w.events.length - startEvents > cap.events) {
       w.restore(mark);
+      if (held)
+        cursors = held;
       result.rules.length = rulesBefore;
       result.tracks.length = tracksBefore;
       result.stop = "cap";
@@ -9125,9 +9200,9 @@ function advance(reg, w, to, opts) {
     result.agentDays += slotDays;
     for (const s of signalsSince(before)) {
       const p = own(policy, s.class);
-      if (p === "stop" && timelapse)
+      if (p === "stop" && timelapse && signalVisible(reg, w.world, w.state, w.world.pov, s))
         result.stops.push(s);
-      else if (p === "note" || p === "stop" && !timelapse)
+      else if (p === "note" || p === "stop")
         result.notes.push(s);
     }
     if (timelapse && result.stops.length > 0) {
@@ -9145,8 +9220,7 @@ function advance(reg, w, to, opts) {
     clockTo(w, to, cause, e);
   }
   for (const [agent, slot] of cursors)
-    if (slot !== agentCursor(w.world, w.state, agent))
-      w.apply({ type: ENGINE_EVENTS.caught, data: { agent, slot } });
+    settle(agent, slot);
   result.to = w.state.clock;
   result.events = w.events.length - startEvents;
   return result;
@@ -9170,13 +9244,13 @@ function catchUp(reg, w, opts) {
     if (taken >= opts.agents || budget <= 0)
       break;
     const cursor = agentCursor(w.world, w.state, agent);
-    if (cursor >= done)
+    if (cursor >= done || !stillActs(w, agent))
       continue;
     taken++;
     if (!onScreen.includes(agent))
       advancedQueue = rotated.indexOf(agent) + 1;
     let k = cursor;
-    while (k < done && budget > 0) {
+    while (k < done && budget > 0 && stillActs(w, agent)) {
       k++;
       const applied = stepAgent(reg, w, agent, slotOf(cal, k), opts.runSeed);
       if (applied.length > 0)
@@ -9189,8 +9263,9 @@ function catchUp(reg, w, opts) {
   if (queue.length > 0 && advancedQueue > 0)
     w.apply({ type: ENGINE_EVENTS.cursor, data: { rr: (rr + advancedQueue) % queue.length } });
   let backlog = 0;
-  for (const agent of all)
-    backlog += Math.max(0, done - agentCursor(w.world, w.state, agent));
+  for (const agent of lod1Agents(w.world, w.state))
+    if (agent !== w.world.pov)
+      backlog += Math.max(0, done - agentCursor(w.world, w.state, agent));
   return { stepped, backlog };
 }
 var FIELD_TRANSPARENT = new Set(["clock", "post", "timelapse", ENGINE_EVENTS.signal, ENGINE_EVENTS.note, ENGINE_EVENTS.beat, ENGINE_EVENTS.cursor, ENGINE_EVENTS.choice, ENGINE_EVENTS.caught, ENGINE_EVENTS.fired]);
@@ -9689,7 +9764,7 @@ function queueStop(w, res, since, scene, speeding) {
     return "failure";
   if (res.check || res.adjudged)
     return "check";
-  if (speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene)
+  if (!acts(w.world, w.state, w.world.pov) || speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene)
     return "interruption";
   const policy = interruptPolicy(w.state);
   const signalled = w.events.slice(since).some((e) => {
@@ -11020,10 +11095,19 @@ var spacePack = {
           return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place))
           return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
+        const name = labelOf(ctx, entity);
+        const truth = lifeOf(ctx.state, entity);
+        const stopped = !acts(ctx.world, ctx.state, entity);
+        const known = povLife(ctx.world, ctx.state, entity);
+        if (known && !known.acts && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, entity)) {
+          return { code: "not_moved", reason: `${name} ${known.reads}; that move didn't happen`, gm: stopped ? `${name} is ${truth} and doesn't act` : `${name} is ${truth}, which the POV hasn't learned; it takes them as ${known.id}` };
+        }
+        if (stopped)
+          return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
         const from = placeOfEntity(ctx.state, entity);
         const named = (id) => canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? own(ctx.world.places, id)?.name ?? id : "somewhere";
         if (from && !reachable(ctx, from, place))
-          return { code: "declined", reason: `There's no way from ${named(from)} to ${named(place)}.` };
+          return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
         return null;
       },
       toEffects: (p, ctx) => [{ type: "move", args: { entity: typeof p.entity === "string" ? p.entity : ctx.world.pov, to: typeof p.place === "string" ? p.place : "" } }]
@@ -15383,6 +15467,9 @@ var relationshipsPack = {
             continue;
           if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") || !canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id))
             continue;
+          const life = povLife(ctx.world, ctx.state, id);
+          if (life && !life.acts)
+            continue;
           const line = voiceLine(ctx, id);
           if (line)
             lines.push(line);
@@ -15580,9 +15667,9 @@ function hiddenNames2(world) {
     if (v === "public")
       continue;
     if (personKind(world, e.kind))
-      out.push({ name: e.name, secret: v === "secret", entity: e.id, said: (text) => namesAny(text, [e.name]) });
+      out.push({ name: e.name, secret: e.visibility === "secret", entity: e.id, said: (text) => namesAny(text, [e.name]) });
     else
-      label(e.name, v === "secret", e.id);
+      label(e.name, e.visibility === "secret", e.id);
   }
   for (const p of Object.values(world.places))
     if (visibilityOf(p.visibility) !== "public")
@@ -15654,9 +15741,15 @@ function cueIssues(world) {
       if (typeof s.cue !== "string")
         continue;
       const cue = s.cue;
-      const named = hidden.find((h) => !h.secret && h.entity !== owner.id && h.said(cue));
-      if (named)
-        issue("warning", `tracks.${t.id}.stages.${stage}.cue`, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
+      const lower = cue.toLowerCase();
+      const named = hidden.find((h) => h.entity !== owner.id && h.said(cue) && !(h.secret && h.name.length > 3 && lower.includes(h.name.toLowerCase()) && lower !== h.name.toLowerCase()));
+      if (!named)
+        continue;
+      const path = `tracks.${t.id}.stages.${stage}.cue`;
+      if (named.secret)
+        issue("error", path, `The cue of "${t.label}" at "${s.label}" gives away a secret ("${named.name}"): a cue says how someone acts, never who or what is hidden.`);
+      else
+        issue("warning", path, `The cue of "${t.label}" at "${s.label}" names "${named.name}", which the player may not know; ${owner.name}'s Stance leaves it out while they don't.`);
     }
   }
   return issues;
@@ -15857,7 +15950,7 @@ function acquainted(state, a, b) {
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
   const e = own(ctx.state.entities, who);
-  if (!e)
+  if (!e || !acts2(ctx, who))
     return out;
   const level = ctx.levelOf(who, "castlife");
   const cal = calendarOf(ctx.world);
@@ -15911,7 +16004,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
   }
   const regard = optionalQuery(ctx, "regard");
   const hour = dateAt(cal, slot.start).minuteOfDay / 60;
-  if (regard && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
+  if (regard && acts2(ctx, pov) && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
     const key = `${who}:invite:${slot.index}`;
     const invite = 1 + needValue(ctx, who, "social", slot.start) / 50 + regard(ctx, who, pov) / 50;
     const stay = 2;
@@ -15934,23 +16027,34 @@ function invitationText(ctx, agent, place, at, viewer) {
 }
 function stepTrips(slot, ctx) {
   const out = [];
+  const engaged = optionalQuery(ctx, "combat.engaged");
   for (const who of Object.keys(ctx.state.entities).sort()) {
     const e = own(ctx.state.entities, who);
     const trips = e?.fields.trips;
-    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts2(ctx, who))
+    if (!e || !Array.isArray(trips) || ctx.levelOf(who, "castlife") < 1 || !acts2(ctx, who) || engaged?.(ctx, who) === true)
       continue;
+    let holds = objOf(e.fields.holds);
     for (const raw of trips) {
       const t = objOf(raw);
       const from = numOf(t.from, NaN);
       const until = numOf(t.until, NaN);
       const place = strOf(t.place);
-      const away = objOf(e.fields.holds).place === until && e.fields.place === place;
+      const holding = objOf(e.fields.holds).place === until;
+      const away = holding && e.fields.place === place;
       if (from <= slot.end && slot.end < until && !away && own(ctx.world.places, place)) {
-        out.push({ type: "set", entity: who, field: "holds", value: { ...objOf(e.fields.holds), place: until, activity: until } }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
+        holds = { ...holds, place: until, activity: until };
+        out.push({ type: "set", entity: who, field: "holds", value: holds }, { type: "set", entity: who, field: "place", value: place }, { type: "set", entity: who, field: "activity", value: "trip" });
       }
+      if (!(until <= slot.end && (until > slot.start || holding)))
+        continue;
       const home = homeOf(ctx, who);
-      if (until > slot.start && until <= slot.end && home)
+      if ((until > slot.start || away) && home)
         out.push({ type: "set", entity: who, field: "place", value: home }, { type: "set", entity: who, field: "activity", value: "idle" });
+      const kept = Object.fromEntries(Object.entries(holds).filter(([target, at]) => !((target === "place" || target === "activity") && at === until)));
+      if (Object.keys(kept).length < Object.keys(holds).length) {
+        holds = kept;
+        out.push({ type: "set", entity: who, field: "holds", value: holds });
+      }
     }
   }
   return out;
@@ -16107,20 +16211,31 @@ function decidedBlock(ctx, who) {
   const label = block.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, block.option.slice(AGENDA_OPTION.length)) ? "Busy" : block.label;
   return block.start <= ctx.state.clock ? label : `${label} at ${formatHHMM(dateAt(cal, block.start).minuteOfDay)}`;
 }
-function stanceLines(ctx) {
+function stanceCast(ctx) {
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state, pov);
-  if (!here)
-    return [];
-  const secrets = unrevealedSecrets(reg, world, state);
-  const namesHidden = hiddenNameCheck(reg, world, state, pov);
-  const safe = (text) => findLeaks(text, secrets).length === 0 && !namesHidden(text);
+  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false);
+  let check = null;
+  const safe = (text) => {
+    if (!check) {
+      const secrets = unrevealedSecrets(reg, world, state);
+      const namesHidden = hiddenNameCheck(reg, world, state, pov);
+      check = (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
+    }
+    return check(text);
+  };
+  return { people, safe };
+}
+function stanceLines(ctx) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const { people, safe } = stanceCast(ctx);
   const regard = optionalQuery(ctx, "relationships.words");
   const lines = [];
-  for (const id of Object.keys(state.entities).sort()) {
+  for (const id of people) {
     const e = own(state.entities, id);
-    if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || !canSeeEntity(reg, world, state, pov, id) || !acts2(ctx, id))
+    if (!e)
       continue;
     const known = knows(state, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
     const words = regard?.(ctx, id, pov) ?? null;
@@ -16140,11 +16255,15 @@ function stanceLines(ctx) {
     if (decided !== null && safe(decided))
       parts.push(listed("Decided", [decided]));
     lines.push(parts.join(" "));
-    const cues = cuesFor(ctx, id, safe);
-    if (cues.length > 0)
-      lines.push(listed(`${e.name}'s cues`, cues));
   }
   return lines;
+}
+function stanceCues(ctx) {
+  const { people, safe } = stanceCast(ctx);
+  return people.flatMap((id) => {
+    const cues = cuesFor(ctx, id, safe);
+    return cues.length > 0 ? [listed(`${own(ctx.state.entities, id)?.name ?? id}'s cues`, cues)] : [];
+  });
 }
 var castlifePack = {
   id: "castlife",
@@ -16170,6 +16289,8 @@ var castlifePack = {
       return out;
     });
     r.formula("invited", (ctx, host) => {
+      if (povLife(ctx.world, ctx.state, String(host ?? ""))?.acts === false)
+        return false;
       const list = sliceOf(ctx.state, "castlife").invitations;
       const now = ctx.state.clock;
       return Array.isArray(list) && list.some((raw) => {
@@ -16242,6 +16363,7 @@ var castlifePack = {
     });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) });
     r.renderer({ slot: "stance", render: stanceLines });
+    r.renderer({ slot: "stance", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
     r.lint({
       code: "castlife.double_booking",
