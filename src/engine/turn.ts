@@ -78,15 +78,16 @@ interface TurnStep {
 /**
  * Whether the action queue stops after an action (DESIGN §11), and why: a failure (it couldn't run,
  * or part of it was refused), a check (resolved, then the player sees how it fell), or an
- * interruption: a fight (one starting, or one under way, where each turn is one act), a long
- * activity Speed through offers or runs, a change of place or scene the action's own effects didn't
- * make, or a signal the POV can see whose class stops a timelapse. A signal the POV can't see never
- * stops it, since stopping would give it away.
+ * interruption: the POV no longer acting (dying, dead, any state that doesn't act), a fight (one
+ * starting, or one under way, where each turn is one act), a long activity Speed through offers or
+ * runs, a change of place or scene the action's own effects didn't make, or a signal the POV can see
+ * whose class stops a timelapse. A signal the POV can't see never stops it, since stopping would give
+ * it away.
  */
 function queueStop(w: Working, res: Resolution, since: number, scene: string, speeding: boolean): QueueStop | null {
   if (!res.ok || res.rejected.length > 0) return "failure";
   if (res.check || res.adjudged) return "check";
-  if (speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene) return "interruption";
+  if (!acts(w.world, w.state, w.world.pov) || speeding || fightHoldsClock(w.ctx) || sceneKey(w.world, w.state) !== scene) return "interruption";
   const policy = interruptPolicy(w.state);
   const signalled = w.events.slice(since).some((e) => {
     const s = "data" in e ? signalOf(e) : null;

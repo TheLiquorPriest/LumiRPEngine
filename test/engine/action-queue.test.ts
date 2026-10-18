@@ -13,7 +13,7 @@ import { baseWorld, fold, POV, registryOf, startState } from "../packs/support";
 
 const reg = registryOf();
 
-/** Sam at home: a 15-minute walk to the cafe, a 5-minute drink that steadies the hands (skill +1), a climb with a check on skill, a splurge Sam can't afford, and alarms that raise an incident, one of them hidden. */
+/** Sam at home: a 15-minute walk to the cafe, a 5-minute drink that steadies the hands (skill +1), a climb with a check on skill, a splurge Sam can't afford, alarms that raise an incident, one of them hidden, and a trap that leaves Sam dying. */
 function queueWorld(): WorldDoc {
   const world = baseWorld();
   world.checks.climb = { id: "climb", dice: "d20", modifier: "self.skill", dc: "12" };
@@ -23,6 +23,7 @@ function queueWorld(): WorldDoc {
   world.actions.splurge = { id: "splurge", label: "Splurge", params: {}, requires: ["self.cash >= 1000000"], outcomes: { default: [] }, duration: "30" };
   world.actions.alarm = { id: "alarm", label: "Trip the alarm", params: {}, requires: [], outcomes: { default: [{ type: "signal", args: { class: "incident", text: "An alarm goes off." } }] }, duration: "1" };
   world.actions.silent = { id: "silent", label: "Trip a silent alarm", params: {}, requires: [], outcomes: { default: [{ type: "signal", args: { class: "incident", text: "A silent alarm calls the guards.", visibility: "secret" } }] }, duration: "1" };
+  world.actions.trap = { id: "trap", label: "Spring the trap", params: {}, requires: [], outcomes: { default: [{ type: "life", args: { entity: "self", to: "dying" } }] }, duration: "1" };
   return world;
 }
 
@@ -96,5 +97,14 @@ describe("a message's actions in one turn", () => {
     const noting = startState(world);
     applyMarker(noting, { kind: "time", control: "interrupt", scope: { interrupt: "incident" }, to: "note" });
     expect(plan(world, noting, "walk", "alarm", "drink").resolutions.map((r) => r.action)).toEqual(["walk", "alarm", "drink"]);
+  });
+
+  test("stop when the POV can't act any more: what it does after going down never plays", () => {
+    const world = queueWorld();
+    const state = startState(world);
+    const p = plan(world, state, "walk", "trap", "drink");
+    expect(p.resolutions.map((r) => r.action)).toEqual(["walk", "trap"]);
+    expect(p.stopped).toEqual({ left: 1, cause: "interruption" });
+    expect(fold(reg, world, state, p.events).entities[POV]?.fields.skill).toBe(2);
   });
 });
