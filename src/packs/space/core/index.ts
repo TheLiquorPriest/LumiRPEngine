@@ -24,10 +24,10 @@ import type { LintIssue } from "../../../shared/protocol";
 import type { GridDef, GridTrigger, KindDef, WorldDoc } from "../../../shared/world";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { GRID_SPACE_FLOOR } from "../../../engine/registry-impl";
-import { acts, lifeOf } from "../../../engine/life";
+import { acts, lifeOf, povLife } from "../../../engine/life";
 import { placeOfEntity, placeWithin } from "../../../engine/scope";
 import { observeCells } from "../../../engine/seen";
-import { canSeePlace, HIDDEN_PLACE_NAME, knownBySelector, povPlace } from "../../../engine/visibility";
+import { canSeeEntity, canSeePlace, HIDDEN_PLACE_NAME, knownBySelector, povPlace } from "../../../engine/visibility";
 import type { PackEvent } from "../../../shared/ledger";
 import { labelOf, sliceRecord, strOf, own } from "../../../engine/pack-kit";
 import { arrivalEvents, entered, layEvents, POS_EVENT, povGround, reach, spotData, spotOf, stepEvents } from "./positions";
@@ -320,14 +320,21 @@ export const spacePack: PackDef = {
         const place = typeof p.place === "string" ? p.place : "";
         if (!own(ctx.state.entities, entity)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place)) return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
-        // Someone who doesn't act walks nowhere: the body stays where it lies. The narrator takes them
-        // for what the POV does, so the refusal reads like any other; only the GM sees why.
-        if (!acts(ctx.world, ctx.state, entity)) return { code: "declined", reason: "That move didn't happen.", gm: `${labelOf(ctx, entity)} is ${lifeOf(ctx.state, entity)} and doesn't act` };
+        // Someone who doesn't act walks nowhere: the body stays where it lies. A body the POV knows of
+        // is declined in what the POV takes it to be; any other such move is refused unseen (dropped as
+        // a change that changed nothing), since a refusal no living person gets would tell the player
+        // of a death it hasn't heard of. Only the log says why (`gm`).
+        if (!acts(ctx.world, ctx.state, entity)) {
+          const gm = `${labelOf(ctx, entity)} is ${lifeOf(ctx.state, entity)} and doesn't act`;
+          const known = povLife(ctx.world, ctx.state, entity);
+          if (known && !known.acts && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, entity)) return { code: "not_moved", reason: `${labelOf(ctx, entity)} ${known.reads}; that move didn't happen`, gm };
+          return { code: "not_moved", reason: "that move didn't happen", gm, unseen: true };
+        }
         const from = placeOfEntity(ctx.state, entity);
         // A narrated move across a gap no route spans (off an island with no boat leg back) didn't
         // happen. The reason reaches the player: a place the POV can't see is somewhere.
         const named = (id: PlaceId): string => (canSeePlace(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? (own(ctx.world.places, id)?.name ?? id) : "somewhere");
-        if (from && !reachable(ctx, from, place)) return { code: "declined", reason: `There's no way from ${named(from)} to ${named(place)}.` };
+        if (from && !reachable(ctx, from, place)) return { code: "no_route", reason: `There's no way from ${named(from)} to ${named(place)}` };
         return null;
       },
       toEffects: (p, ctx) => [{ type: "move", args: { entity: typeof p.entity === "string" ? p.entity : ctx.world.pov, to: typeof p.place === "string" ? p.place : "" } }],

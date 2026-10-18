@@ -76,7 +76,8 @@ describe("space: routes", () => {
     expect(ch?.toEffects({ entity: "you", place: "cafe" }, ctx)).toEqual([{ type: "move", args: { entity: "you", to: "cafe" } }]);
     world.places.islet = { id: "islet", name: "The islet", fields: {} };
     s.entities.you!.fields.place = "islet";
-    expect(ch?.validate({ entity: "you", place: "cafe" }, reg.context(world, s))).toEqual({ code: "declined", reason: `There's no way from The islet to ${world.places.cafe?.name}.` });
+    // A move's own refusal, never a payment's decline (`declined`): its chip ends the sentence.
+    expect(ch?.validate({ entity: "you", place: "cafe" }, reg.context(world, s))).toEqual({ code: "no_route", reason: `There's no way from The islet to ${world.places.cafe?.name}` });
   });
 
   test("a POV stranded where no route leads home stays put through a timelapse; its routine resumes once it can get there", () => {

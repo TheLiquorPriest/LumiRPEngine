@@ -1263,7 +1263,12 @@ export class Runtime implements TurnHooks {
         declines.push({ proposal: o.proposal, reason: o.rejection.reason, payment: o.rejection.code === "declined", unpriced: o.rejection.code === "unpriced" });
         return;
       }
-      if (o.events.length === 0) return;
+      // A change refused unseen comes back as one that changed nothing: no chip, and the next reply
+      // hears nothing of it; the log says why.
+      if (o.events.length === 0) {
+        if (o.dropped) this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(o.proposal)} (${o.dropped})`, input.userId);
+        return;
+      }
       const type = String(o.proposal.type);
       const quote = purchaseQuote(o.proposal, o.events, context.world);
       stored.push({
@@ -1307,6 +1312,12 @@ export class Runtime implements TurnHooks {
       // prices asks for a price; anything else that can't validate (an unknown item) is logged and dropped.
       const also = unsure.has(proposal);
       const [check] = applyProposals(this.registry, new Working(this.registry, context.world, w.state), [proposal], `${context.seed}:check`, bridge.runSeed);
+      // A move that can't happen (no way there, or a body the POV knows of) is declined in plain words,
+      // as under auto; one refused unseen comes back as no change and is dropped below.
+      if (check?.rejection && proposal.type === "location") {
+        declines.push({ proposal, reason: check.rejection.reason, payment: false, unpriced: false });
+        return;
+      }
       // One that may be the Buy told again declines into nothing: the Buy itself was paid.
       if (check?.rejection?.code === "declined" && !also) {
         declines.push({ proposal, reason: check.rejection.reason, payment: true, unpriced: false });
@@ -1327,7 +1338,7 @@ export class Runtime implements TurnHooks {
         return;
       }
       if (!check || check.rejection || check.events.length === 0) {
-        this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(proposal)} (${check?.rejection?.reason ?? "no change"})`, input.userId);
+        this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: dropped ${describeProposal(proposal)} (${check?.dropped ?? check?.rejection?.reason ?? "no change"})`, input.userId);
         return;
       }
       const quote = purchaseQuote(proposal, check.events, context.world);

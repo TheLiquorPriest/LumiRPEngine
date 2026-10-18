@@ -34,6 +34,12 @@ export interface Rejection {
   reason: string;
   /** The raw reason, naming everyone, when `reason` leaves someone out: for the GM view only. */
   gm?: string;
+  /**
+   * A refusal the player mustn't learn of, since no living person would get one (a body the POV
+   * doesn't know is one, DESIGN §8): the change comes back as one that changed nothing, and only the
+   * log says why (`gm`).
+   */
+  unseen?: true;
 }
 
 /** Read access to the pinned tables of the world revision in force. */

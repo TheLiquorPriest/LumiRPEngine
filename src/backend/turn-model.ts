@@ -40,6 +40,8 @@ export interface ProposalOutcome {
   /** Detail sampled for the people it names before it applied (a payer's accounts), recorded with it. */
   materialized: LedgerEvent[];
   rejection: Rejection | null;
+  /** Why a change refused unseen (`Rejection.unseen`) was dropped: for the log only, never a chip or a note. */
+  dropped?: string;
 }
 
 /** The proposal fields that name the people a change reads (a payer's accounts, a recipient's pockets). */
@@ -66,7 +68,8 @@ export function applyProposals(registry: Registry, w: Working, proposals: readon
     const rejection = channel.validate(proposal, w.ctx);
     if (rejection) {
       w.restore(mark);
-      out.push({ proposal, events: [], materialized: [], rejection });
+      // An unseen refusal reads as a change that changed nothing: no rejection for a chip or a note to word.
+      out.push(rejection.unseen ? { proposal, events: [], materialized: [], rejection: null, dropped: rejection.gm ?? rejection.reason } : { proposal, events: [], materialized: [], rejection });
       return;
     }
     const result = applyEffects(registry, w, channel.toEffects(proposal, w.ctx), { bindings: { self: w.world.pov }, rng: createRng(`${seed}:proposal:${i}`) });
