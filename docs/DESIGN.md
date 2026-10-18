@@ -596,7 +596,7 @@ Each pack ships a pure `core` (kinds, relations, level contract, services, query
 | `extract` → `knows` | Public facts only: a public entity, or a `known_by` or `discoverable` place the POV can't see yet (by id or name); never a secret one (§7). |
 | `extract` → NPC presence or location | Validated against routes: a move no route reaches is declined. Schedules aren't consulted. |
 | `extract` → purchases and transfers | Priced from catalog or category bands; bounds per field; declines (§9.5). A transfer's two sides are people or their own cash, checking, savings or card accounts (§9.5). |
-| `extract` → regard | Each proposal moves an axis by at most 10. |
+| `extract` → regard | A reply moves each axis of a pair by at most 10 in all, net (a proposal without an axis moves every axis). In the reply's order, a later proposal for the pair is cut down to what is left; one with nothing left is refused like any change past its bound (an automatic one gets a *Didn't apply* chip and its Outcome note). |
 | `extract` → condition, quantities | A condition needs a person and a name. A quantity changes by a whole number up to the item kind's `qty` bound (10 by default); a larger step is refused. |
 | `npc.choose` | Picks only from engine-enumerated valid actions; recorded. |
 | Prompted `effects` | Same validation and bounds as extraction. |

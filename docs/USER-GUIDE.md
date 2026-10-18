@@ -471,7 +471,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Giving things** (Handovers) · `give` | A handover between two characters | confirm |
 | **Purchases** · `purchase` | A narrated purchase, priced from the catalog | confirm |
 | **Money transfers** (Payments) · `transfer` | Money moves between people, or between someone's own accounts | confirm |
-| **Feelings toward others** (Feelings) · `regard` | Someone's feelings change | confirm |
+| **Feelings toward others** (Feelings) · `regard` | Someone's feelings change: by at most 10 on each feeling per reply, however often the reply says so | confirm |
 | **Quantities** · `quantity` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
 | **New people** (New characters) · `spawn` | A new character appears (capped, and duplicates are removed) | confirm |
 

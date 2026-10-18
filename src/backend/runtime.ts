@@ -40,6 +40,7 @@ import { secretLoreNames } from "../engine/lore";
 import { hiddenEntityNames, hiddenTrackLabels, playerKnows } from "../engine/player-events";
 import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, secretLoreTitles, unrevealedSecrets, unseenPlaceNames } from "../engine/visibility";
 import { openPuzzle } from "../packs/story/core/index";
+import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
 import { EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
 import { ChatPrefs } from "./chat-prefs";
@@ -327,6 +328,35 @@ export interface ReadInput {
   world: WorldDoc;
   seed: string;
   pre: LedgerEvent[];
+}
+
+/** Why a regard proposal past its pair's budget for the reply is refused. */
+const REGARD_SPENT = `a reply moves each regard axis of a pair by at most ${REGARD_CHANNEL_CAP}`;
+
+/**
+ * One reply's regard budget (DESIGN §9.4): across the reply's proposals, in their order, each axis
+ * of a pair moves by at most `REGARD_CHANNEL_CAP` in all, net. A proposal without an axis moves
+ * every axis, so it counts against each. A later proposal is cut down to what is left, and one with
+ * nothing left is refused (null). Anything but a regard proposal passes as it is.
+ */
+export function regardBudget(): (p: JsonObject) => JsonObject | null {
+  // Net delta so far per pair and axis; "" is the axis-less share every axis carries.
+  const moved = new Map<string, Map<string, number>>();
+  return (p) => {
+    if (p.type !== "regard" || typeof p.delta !== "number" || p.delta === 0 || typeof p.from !== "string" || typeof p.to !== "string") return p;
+    const pair = `${p.from.trim()}\u0000${p.to.trim()}`;
+    const axes = moved.get(pair) ?? new Map<string, number>();
+    const shared = axes.get("") ?? 0;
+    const axis = typeof p.axis === "string" ? p.axis : "";
+    const sums = axis !== "" ? [(axes.get(axis) ?? 0) + shared] : [shared, ...[...axes].filter(([a]) => a !== "").map(([, v]) => v + shared)];
+    const up = p.delta > 0;
+    const room = up ? Math.min(REGARD_CHANNEL_CAP, ...sums.map((s) => REGARD_CHANNEL_CAP - s)) : Math.min(REGARD_CHANNEL_CAP, ...sums.map((s) => REGARD_CHANNEL_CAP + s));
+    if (room <= 0) return null;
+    const delta = up ? Math.min(p.delta, room) : Math.max(p.delta, -room);
+    axes.set(axis, (axes.get(axis) ?? 0) + delta);
+    moved.set(pair, axes);
+    return delta === p.delta ? p : { ...p, delta };
+  };
 }
 
 /** The Timelapse chip for a narrated time skip that can't apply inside the turn (DESIGN §9.4), with every interrupt class at `note`. */
@@ -1055,6 +1085,10 @@ export class Runtime implements TurnHooks {
     const connection = extractRun?.config.route?.connectionId ?? pre?.connectionId ?? (await this.activeConnectionId(userId));
     const auto: JsonObject[] = [];
     const confirm: JsonObject[] = [];
+    // A pair's regard moves by at most the channel cap a reply, so later proposals for it are cut
+    // down, and one with nothing left is refused like any change past its bound.
+    const regard = regardBudget();
+    const spent: JsonObject[] = [];
     for (const p of proposals) {
       const type = EXTRACTION_TYPES.find((t) => t === p.type);
       if (!type) continue;
@@ -1062,8 +1096,13 @@ export class Runtime implements TurnHooks {
       const entity = typeof p.entity === "string" ? p.entity : typeof p.who === "string" ? p.who : typeof p.from === "string" ? p.from : undefined;
       const field = typeof p.field === "string" ? p.field : undefined;
       const bounded = boundProposal(this.registry, context.world, context.state, { type, ...(entity ? { entity } : {}), ...(field ? { field } : {}), ...(typeof p.delta === "number" ? { delta: p.delta } : {}) }, { typeMode, ...(settings.extraction[type]?.maxDelta !== undefined ? { typeMaxDelta: settings.extraction[type]?.maxDelta } : {}) });
-      const fitted: JsonObject = bounded.delta !== undefined ? { ...p, delta: bounded.delta } : p;
       if (bounded.mode === "never") continue;
+      const fitted = regard(bounded.delta !== undefined ? { ...p, delta: bounded.delta } : p);
+      if (!fitted) {
+        if (bounded.mode === "auto") spent.push(p);
+        else this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${describeProposal(p)} (${REGARD_SPENT})`, userId);
+        continue;
+      }
       if (unsure.has(p)) unsure.add(fitted);
       if (bounded.mode === "auto" && !unsure.has(p)) auto.push(fitted);
       else confirm.push(fitted);
@@ -1078,7 +1117,7 @@ export class Runtime implements TurnHooks {
     const w = new Working(this.registry, context.world, context.state);
     const outcomes = applyProposals(this.registry, w, auto.filter((p) => p.type !== "time_advance"), `${context.seed}:preview`, bridge.runSeed);
     const stored: StoredChip[] = [];
-    const declines: { proposal: JsonObject; reason: string; payment: boolean; unpriced: boolean }[] = [];
+    const declines: { proposal: JsonObject; reason: string; payment: boolean; unpriced: boolean }[] = spent.map((proposal) => ({ proposal, reason: REGARD_SPENT, payment: false, unpriced: false }));
     outcomes.forEach((o, i) => {
       if (o.rejection) {
         if (o.rejection.code !== "declined") this.host.log("info", `[LumiRPEngine] read ${input.messageId.slice(0, 8)}: ${describeProposal(o.proposal)} didn't apply (${o.rejection.code}: ${o.rejection.reason})`, input.userId);

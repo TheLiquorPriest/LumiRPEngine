@@ -70,7 +70,7 @@ export const APPRAISALS: Readonly<Record<string, Readonly<Record<string, number>
 /** Half-life of regard decay at level 4, in days (world config `halfLifeDays`). */
 export const DEFAULT_HALF_LIFE_DAYS = 30;
 const HISTORY = 8;
-/** The most one extracted `regard` proposal may move one axis (DESIGN §9.4: capped per pair per turn). */
+/** The most one reply's extracted regard may move an axis of a pair, net across its proposals (DESIGN §9.4); each proposal is clamped to it too. */
 export const REGARD_CHANNEL_CAP = 10;
 
 export type AppraiseService = (ctx: ReadContext, from: EntityId, to: EntityId, appraisal: string | Record<string, number>, why?: string, mutual?: boolean) => LedgerEvent[];
