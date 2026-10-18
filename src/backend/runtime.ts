@@ -61,7 +61,7 @@ import { JsonHiding, withoutHiddenJson } from "./json-hiding";
 import { GUIDANCE_PREFIX, GUIDANCE_TARGETS, NARRATOR_OUTLET, outletOf, PresetBinding, type Guidance, type PresetConfig } from "./preset-binding";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
-import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
+import { agentsActHere, contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
@@ -648,7 +648,7 @@ export class Runtime implements TurnHooks {
       typed,
       classifier: typed && classifyTyped(text, render.world, [...all.flatMap((a) => a.lexicon ?? []), ...TIMELAPSE_LEXICON]),
       sceneChange: this.lastPlace.has(input.chatId) && this.lastPlace.get(input.chatId) !== placeOfEntity(render.state, render.world.pov),
-      agentsPresent: presentNames(this.registry, render.world, render.state).length > 0,
+      agentsPresent: agentsActHere(this.registry, render.world, render.state),
       present: ties.present.length > 0,
       offscreen: ties.offscreen.length > 0,
       tieZone: ties.present.length > 0,

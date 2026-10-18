@@ -216,6 +216,8 @@ export interface EntityDef {
   agent?: boolean;
   /** The life state it starts in (DESIGN §8): one of the world's life states. Unset: alive. */
   life?: LifeStateId;
+  /** Who knows the life state it starts in, besides itself (DESIGN §8); everyone else takes it for alive. Unset or empty: everyone. */
+  lifeKnownBy?: EntityId[];
   /** Lumiverse character id, for group chats. */
   characterId?: string;
   visibility?: Visibility;

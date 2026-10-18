@@ -10,7 +10,7 @@ import type { LintIssue } from "../shared/protocol";
 import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, WorldDoc } from "../shared/world";
-import { BUILTIN_LIFE_STATES, isLifeState, MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
+import { ALIVE, BUILTIN_LIFE_STATES, isLifeState, MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
 import { compile } from "./expr";
 import { frozenPredicates } from "./realism";
 import { rulesetFloor, type Registry } from "./registry-impl";
@@ -175,6 +175,8 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
   }
   for (const [id, e] of Object.entries(world.entities)) {
     if (e.life !== undefined && !isLifeState(world, e.life)) err(`entities.${id}.life`, "unknown_life", `${e.name} starts in life state "${e.life}", which isn't one of the world's.`);
+    for (const knower of e.lifeKnownBy ?? []) if (!own(world.entities, knower)) err(`entities.${id}.lifeKnownBy`, "refs", `${e.name}'s starting life state is known to an unknown "${knower}".`);
+    if ((e.lifeKnownBy ?? []).length > 0 && (e.life ?? ALIVE) === ALIVE) warn(`entities.${id}.lifeKnownBy`, "life_known_by", `${e.name} starts alive, so who knows how they start changes nothing.`);
   }
   const downLife: unknown = world.ruleset?.combat?.down?.life;
   if (downLife !== undefined && (typeof downLife !== "string" || !isLifeState(world, downLife))) err("ruleset.combat.down.life", "unknown_life", `Combat's down rule names life state "${String(downLife)}", which isn't one of the world's.`);

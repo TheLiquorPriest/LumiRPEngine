@@ -31,7 +31,11 @@ import { fightWorld, plan, povFirst, reg as combatReg, started } from "../packs/
 import { modernUsWorld } from "../packs/riverton";
 import { fold, POV, startState, baseWorld } from "../packs/support";
 import { Play, registry as templateReg } from "../packs/templates/play";
+import { agentsActHere } from "../../src/backend/turn-steps";
+import { stanceLines } from "../../src/packs/castlife/core/index";
 import { hashJson } from "../../src/shared/hash";
+import { upgradePreview } from "../../src/backend/upgrade-preview";
+import { planUpgrade } from "../../src/engine/upgrade";
 import { applyMarker } from "../../src/engine/events";
 import { initialState } from "../../src/engine/world-state";
 
@@ -346,5 +350,55 @@ describe("life states: People and an Upgrade", () => {
       return playerLines(reg, w.world, w.state, YOU, w.events.slice(from)).filter((l) => l.includes("Jordan"));
     };
     expect(journal(true)).toEqual(journal(false));
+  });
+});
+
+describe("life states: how a world starts, and who reads as acting", () => {
+  test("someone who starts dead is known so only by those the world names; everyone else takes them for alive", () => {
+    const w = riverton(1, (wd) => {
+      wd.entities.jordan!.life = "dead";
+      wd.entities.jordan!.lifeKnownBy = ["rosa"];
+    });
+    w.apply({ type: "link", rel: "knows", from: YOU, to: "jordan" });
+    expect([lifeOf(w.state, "jordan"), lifeKnownTo(w.state, "jordan", "rosa"), lifeKnownTo(w.state, "jordan", YOU)]).toEqual(["dead", "dead", "alive"]);
+    expect(castLife(w, "jordan")).toBeUndefined();
+    move(w, YOU, "office");
+    expect(castLife(w, "jordan")).toBe("Dead");
+  });
+
+  test("Stance reads who acts as People does: from what the POV knows", () => {
+    const w = riverton(1, (wd) => {
+      wd.entities.jordan!.life = "dead";
+      wd.entities.jordan!.lifeKnownBy = ["rosa"];
+      wd.entities.jordan!.fields.place = wd.entities[YOU]!.fields.place;
+    });
+    const named = (lines: string[]): boolean => lines.some((l) => l.includes("Jordan"));
+    expect(named(peopleLines(w))).toBe(true);
+    expect(named(stanceLines(w.ctx))).toBe(named(peopleLines(w)));
+  });
+
+  test("a known body here doesn't count as someone present who may act", () => {
+    const w = riverton(1);
+    move(w, "maya", placeOfEntity(w.state, YOU) ?? "");
+    expect(agentsActHere(reg, w.world, w.state)).toBe(true);
+    life(w, { entity: "maya", to: "dead" });
+    expect(agentsActHere(reg, w.world, w.state)).toBe(false);
+  });
+
+  test("an Upgrade preview names no one with a life change the player hasn't heard of", () => {
+    const a = baseWorld();
+    const b = structuredClone(a);
+    b.lifeStates = { missing: { label: "Missing", acts: false, reads: "is missing" } };
+    b.entities.dev!.life = "missing";
+    b.name = `${a.name}, revised`;
+    const [ra, rb] = [hashJson(a), hashJson(b)];
+    const docs = new Map([[ra, a], [rb, b]]);
+    const state = fold(reg, a, initialState(a, ra, reg), [{ type: "engine.life", data: { entity: "dev", to: "dead", witnesses: [] } }]);
+    const rows = upgradePreview(reg, planUpgrade(state, { worlds: (r) => docs.get(r), types: reg }, rb), state, b, a).entities;
+    // Shown rows say nothing of it; the change sits in a hidden row after every shown one.
+    expect(rows.filter((r) => r.secret !== true && r.changes.some((c) => c.secret === true))).toEqual([]);
+    const hidden = rows.findIndex((r) => r.secret === true);
+    expect(rows[hidden]?.changes.map((c) => c.id)).toEqual(["dev:life"]);
+    expect(rows.slice(hidden).every((r) => r.secret === true)).toBe(true);
   });
 });

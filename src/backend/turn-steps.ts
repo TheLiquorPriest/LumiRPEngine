@@ -60,16 +60,24 @@ export function factLines(registry: Registry, world: WorldDoc, state: Readonly<W
   return out.slice(0, 40);
 }
 
-/** People at the POV's place that it can see (by name), for prompts: a hidden or removed one is never named, and a life state the POV knows follows the name ("Sir Alaric (lies dead)"). */
-export function presentNames(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+/** Agents at the POV's place that it can see: a hidden or removed one is never among them. */
+function presentAgents(registry: Registry, world: WorldDoc, state: Readonly<WorldState>) {
   const here = placeOfEntity(state, world.pov);
   if (!here) return [];
-  return Object.entries(state.entities)
-    .filter(([id, e]) => id !== world.pov && e.agent && placeOfEntity(state, id) === here && canSeeEntity(registry, world, state, world.pov, id))
-    .map(([id, e]) => {
-      const life = povLife(world, state, id);
-      return life ? `${e.name} (${life.reads})` : e.name;
-    });
+  return Object.entries(state.entities).filter(([id, e]) => id !== world.pov && e.agent && placeOfEntity(state, id) === here && canSeeEntity(registry, world, state, world.pov, id));
+}
+
+/** People at the POV's place that it can see (by name), for prompts; a life state the POV knows follows the name ("Sir Alaric (lies dead)"). */
+export function presentNames(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): string[] {
+  return presentAgents(registry, world, state).map(([id, e]) => {
+    const life = povLife(world, state, id);
+    return life ? `${e.name} (${life.reads})` : e.name;
+  });
+}
+
+/** Whether anyone here may act, as far as the POV knows (the `agents_present` signal): a body it knows of doesn't count. */
+export function agentsActHere(registry: Registry, world: WorldDoc, state: Readonly<WorldState>): boolean {
+  return presentAgents(registry, world, state).some(([id]) => povLife(world, state, id)?.acts !== false);
 }
 
 /**

@@ -260,6 +260,7 @@
         "levels": { "$ref": "#/$defs/domainLevels" },
         "agent": { "type": "boolean" },
         "life": { "$ref": "#/$defs/id", "description": "the life state it starts in; absent: alive" },
+        "lifeKnownBy": { "$ref": "#/$defs/ids", "description": "who knows the life state it starts in, besides itself; everyone else takes it for alive. Absent or empty: everyone" },
         "characterId": { "type": "string" },
         "visibility": { "$ref": "#/$defs/visibility" },
         "knownBy": { "$ref": "#/$defs/selector" },

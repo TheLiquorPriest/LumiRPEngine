@@ -353,10 +353,11 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     }
   }
 
-  // Invitations: a fond agent with free evening time may invite the POV (a tie-zone decision).
+  // Invitations: a fond agent with free evening time may invite the POV, while it still acts (a
+  // tie-zone decision).
   const regard = optionalQuery(ctx, "regard");
   const hour = dateAt(cal, slot.start).minuteOfDay / 60;
-  if (regard && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
+  if (regard && acts(ctx, pov) && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
     const key = `${who}:invite:${slot.index}`;
     const invite = 1 + needValue(ctx, who, "social", slot.start) / 50 + regard(ctx, who, pov) / 50;
     const stay = 2;
@@ -641,7 +642,8 @@ function stanceCast(ctx: ReadContext): { people: EntityId[]; safe: (text: string
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state, pov);
-  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && acts(ctx, id));
+  // Who acts as far as the POV knows, as People and Cast read it: a body it hasn't found reads as them.
+  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false);
   let check: ((text: string) => boolean) | null = null;
   const safe = (text: string): boolean => {
     if (!check) {
@@ -733,8 +735,10 @@ export const castlifePack: PackDef = {
       }
       return out;
     });
-    // An invitation from `host` still open: its meeting time is at most 3 hours past and at most a day ahead.
+    // An invitation from `host` still open: its meeting time is at most 3 hours past and at most a day
+    // ahead, from a host the POV doesn't know to have stopped acting.
     r.formula("invited", (ctx, host) => {
+      if (povLife(ctx.world, ctx.state, String(host ?? ""))?.acts === false) return false;
       const list = sliceOf(ctx.state, "castlife").invitations;
       const now = ctx.state.clock;
       return Array.isArray(list) && list.some((raw) => {

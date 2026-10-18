@@ -70,7 +70,7 @@ export function UpgradePanel(props: { chatId: string; preview: UpgradePreview; o
       {rows.map((row, index) => {
         const rowHidden = row.secret === true && !spoilers;
         return (
-          <section key={row.entity} class="lre-card" data-lre-upgrade-entity={rowHidden ? `hidden-${index}` : row.entity}>
+          <section key={`${row.entity}:${row.secret === true ? "hidden" : "shown"}`} class="lre-card" data-lre-upgrade-entity={rowHidden ? `hidden-${index}` : row.entity}>
             {rowHidden ? <Row k={<strong>{HIDDEN}</strong>} v="" /> : <Row k={<strong>{row.name}</strong>} v={<span class="lre-badge">{STATUS_LABEL[row.status]}</span>} sub={row.kind} />}
             {row.changes.map((c, i) => {
               const hidden = rowHidden || (c.secret === true && !spoilers);

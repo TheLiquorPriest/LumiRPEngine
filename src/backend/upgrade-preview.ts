@@ -96,6 +96,7 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
     const held = own(state.entities, d.id);
     const kind = kindDef(reg, after, d.def.kind)?.label ?? kindDef(reg, inForce, d.def.kind)?.label ?? d.def.kind;
     const row: UpgradeEntityRow = { entity: d.id, name: held?.name ?? d.def.name, kind, status: d.status, changes: [], ...(secret ? { secret: true } : {}) };
+    const unheard: UpgradeChange[] = [];
     const whole: UpgradeTarget[] = [{ entity: d.id, part: "entity" }];
     if (d.status === "new") {
       const place = typeof d.def.fields.place === "string" ? nameOf(d.def.fields.place) : undefined;
@@ -107,9 +108,11 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
       for (const aspect of UPGRADE_ASPECTS) {
         const diff: PartDiff | undefined = d.aspects[aspect];
         if (!diff) continue;
-        // A life state the player hasn't heard of is the GM's: the row stays behind the gate.
-        if (aspect === "life" && diff.now !== lifeKnownTo(state, d.id, pov)) spoils = true;
-        row.changes.push(marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] }));
+        const change = marked({ id: `${d.id}:${aspect}`, label: ASPECT_LABEL[aspect], from: aspectText(aspect, diff.now), to: aspectText(aspect, diff.next), ...byDefault(diff.touched), targets: [{ entity: d.id, part: aspect }] });
+        // A life change the player hasn't heard of is the GM's: it goes to a hidden row of its own, so
+        // this row shows nothing of it, not even that something here is hidden.
+        if (aspect === "life" && !secret && diff.now !== lifeKnownTo(state, d.id, pov)) unheard.push({ ...change, secret: true });
+        else row.changes.push(change);
       }
       for (const [field, diff] of Object.entries(d.fields)) {
         if (PLACEMENT_FIELDS.includes(field)) continue;
@@ -145,8 +148,10 @@ export function upgradePreview(reg: Registry, plan: UpgradePlan, state: Readonly
       }
     }
     if (row.changes.length > 0) rows.push(row);
+    if (unheard.length > 0) rows.push({ ...row, changes: unheard, secret: true });
   }
-  rows.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  // Hidden rows go last, so where one falls among the names says nothing of whose it is.
+  rows.sort((a, b) => Number(a.secret === true) - Number(b.secret === true) || STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const tracks = plan.tracks.map((t) => {
     const def = own(after.tracks, t.track);
     const was = own(own(inForce.tracks, t.track)?.stages ?? {}, t.stage)?.label ?? t.stage;

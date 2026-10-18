@@ -12,6 +12,7 @@ import { ALIVE, type WorldDoc } from "../shared/world";
 import { own } from "./pack-kit";
 import { completeRelations, type RelationTypes } from "./relations";
 import { placeOfEntity } from "./scope";
+import { seedLife } from "./life";
 import { seedObservations } from "./seen";
 import type { EntityState, TrackState, WorldState } from "./state";
 import { clampLevel, clampThreshold, clampTick, clampUnitCap } from "./time-limits";
@@ -103,5 +104,6 @@ export function initialState(world: WorldDoc, revision: RevisionId, types: Relat
     packs: {},
   };
   seedObservations(world, state);
+  seedLife(world, state);
   return state;
 }

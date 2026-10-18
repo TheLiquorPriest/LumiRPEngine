@@ -154,6 +154,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "levels", key: "levels", label: "Level overrides" },
     { kind: "agent", key: "agent", label: "Lives their own day (agendas and plans)" },
     { kind: "life", key: "life", label: "Starts (life state)" },
+    { kind: "refs", key: "lifeKnownBy", label: "Who knows how it starts (none: everyone)", collections: ["entities"] },
     { kind: "text", key: "characterId", label: "Lumiverse character id", optional: true },
     { kind: "enum", key: "visibility", label: "Visibility", values: VISIBILITY, optional: true },
     { kind: "selector", key: "knownBy", label: "Known by (besides a knows relation)", optional: true, when: { key: "visibility", values: ["known_by"] } },

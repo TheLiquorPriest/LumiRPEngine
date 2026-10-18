@@ -127,6 +127,19 @@ export function applyLife(state: WorldState, ctx: ReadContext, subject: EntityId
   for (const id of seen) if (id !== subject && own(state.entities, id)) by[id] = to;
 }
 
+/**
+ * A chat's first state: someone whose world names who knows the life state they start in
+ * (`lifeKnownBy`) is known so by those alone; everyone else takes them for alive until they see or hear.
+ */
+export function seedLife(world: WorldDoc, state: WorldState): void {
+  for (const [id, def] of Object.entries(world.entities)) {
+    const start = lifeOf(state, id);
+    if (!def.lifeKnownBy?.length || start === ALIVE) continue;
+    const by = learners(state, id, ALIVE);
+    for (const knower of def.lifeKnownBy) if (knower !== id && own(state.entities, knower)) by[knower] = start;
+  }
+}
+
 /** `engine.told`'s apply: those named learn the subject's state as it is. While it never changed in play, everyone knows it already. */
 export function tellLife(state: WorldState, subject: EntityId, who: readonly EntityId[]): void {
   const entry = entryOf(state, subject);
