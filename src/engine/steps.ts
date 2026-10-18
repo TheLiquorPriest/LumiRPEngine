@@ -94,7 +94,7 @@ export interface ExtractOutput {
 export interface TurnPlanInput {
   registry: Registry;
   world: WorldDoc;
-  /** The fold prefix with the target's live markers applied (DESIGN §5.1 step 2.1). */
+  /** The fold prefix with the target's live markers applied (DESIGN §5.1 step 2). */
   state: Readonly<WorldState>;
   runSeed: string;
   /** The action seed: fresh per Re-run, or `hash(runSeed, parent path, action)` in same-roll worlds. */

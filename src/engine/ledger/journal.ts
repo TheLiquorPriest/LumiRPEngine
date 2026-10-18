@@ -467,7 +467,7 @@ export class LedgerCore {
     j.pending[input.generationId] = pending;
   }
 
-  /** The context handler (DESIGN §5.1 step 2): plan the turn and store it (no plan for Continue, Impersonate or a dry run). */
+  /** The context handler (DESIGN §5.1 step 2): plan the turn and store it. Continue, Impersonate and a turn under a pause get no plan; a dry run's is returned, never stored. */
   plan(generationId: GenerationId, observed: readonly ChainMessage[], dryRun: boolean): LedgerEvent[] {
     const p = this.journal.pending[generationId];
     if (!p || p.kind === "continue" || p.kind === "impersonate") return [];
@@ -478,7 +478,7 @@ export class LedgerCore {
     const out = this.fold(prefix);
     const state = structuredClone(out.state);
     const parentPath = out.messages.length > 0 ? (out.messages[out.messages.length - 1]?.path ?? ROOT_PATH) : ROOT_PATH;
-    // The target's own live markers fold before the plan (DESIGN §5.1 step 2.1).
+    // The target's own live markers fold before the plan (DESIGN §5.1 step 2).
     const target = targetIndex >= 0 ? this.chain(observed)[targetIndex] : undefined;
     const targetRec = target ? activeRecord(target, this.journal.tombstones) : null;
     const liveTarget = (target?.ledger?.markers ?? []).filter((mk) => isLive(mk.at, parentPath, turnPath(targetRec))).sort((a, b) => a.seq - b.seq);

@@ -362,7 +362,7 @@ export interface RefusedWrite {
 
 export type GenerationKind = "normal" | "regenerate" | "swipe" | "continue" | "impersonate" | "renarrate";
 
-/** The shadow `pending` entry of one in-flight turn (DESIGN §5.1 step 2.3). */
+/** The shadow `pending` entry of one in-flight turn (DESIGN §5.1 steps 1 and 2). */
 export interface PendingTurn {
   generationId: GenerationId;
   kind: GenerationKind;
