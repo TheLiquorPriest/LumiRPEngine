@@ -103,7 +103,8 @@ export function referenceFold(input: FoldInput, types: FoldTypes): FoldOutput {
       for (const mk of liveMarkers) marker(m.id, mk);
       fold = tombstoned ? "tombstoned" : "plain";
     } else {
-      const view = recPath !== null && recPath !== parent;
+      // A record read on another chain (its planned one gone) never folds on its own path.
+      const view = recPath !== null && (recPath !== parent || rec.readElsewhere === true);
       const converted = rec.keep?.[parent]?.convert ?? [];
       const record = rec;
       const event = (ev: LedgerEvent, ref: EventRef): void => {

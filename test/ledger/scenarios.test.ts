@@ -335,6 +335,36 @@ describe("ledger scenarios", () => {
     await expectAgree(h, chat);
   });
 
+  test("a Re-run read elsewhere, its planned swipe deleted while it streamed, keeps the markers made where it was planned (L7)", async () => {
+    const h = new Harness();
+    const rev1 = h.revisions[1] ?? "";
+    const chat = await h.newChat();
+    await h.send(chat, "earn:5", "Okay.");
+    const a1 = h.host.head(chat);
+    if (!a1) throw new Error("no head");
+    await h.host.finish(await h.host.start(chat, { type: "swipe", messageId: a1.id }), "Nothing happens.");
+    await h.send(chat, "look around", "Okay.");
+    const a2 = h.host.head(chat);
+    if (!a2) throw new Error("no head");
+    // An Upgrade on the head, then a Re-run of it planned with the Upgrade in force.
+    await h.write(chat, { kind: "marker", id: "up", target: "head", body: { kind: "migrate", to: rev1 } });
+    const g = await h.host.start(chat, { type: "swipe", messageId: a2.id });
+    h.host.navigate(chat, a1.id, 0);
+    await h.host.settle();
+    h.host.deleteSwipe(chat, a1.id, 1);
+    await h.host.settle();
+    await h.host.finish(g, "Okay.");
+    const rec = (await h.core(chat)).journal.messages[a2.id]?.ledger.swipes[String(g.swipeId)];
+    expect(rec?.readElsewhere).toBe(true);
+    const { reference } = await h.folds(chat);
+    expect(reference.messages.at(-1)?.fold).toBe("view");
+    expect(reference.state.revision).toBe(rev1);
+    expect(reference.notes.filter((n) => n.kind === "inert")).toEqual([]);
+    await expectAgree(h, chat);
+    // It never folds as stored, so nothing on it is undone.
+    expect((await h.write(chat, { kind: "undo", id: "u1", messageId: a2.id, swipeId: g.swipeId, refs: [{ in: "events", index: 0 }] })).reason).toBe("read on another chain: a rebased view everywhere");
+  });
+
   test("a grouped purchase rebased onto a poorer branch drops whole: no payment, no item (L41)", async () => {
     const h = new Harness();
     const chat = await h.newChat();

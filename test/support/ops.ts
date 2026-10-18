@@ -26,6 +26,7 @@ import { defaultSettings } from "../../src/backend/settings-store";
 import { startMarkersFrom } from "../../src/backend/start-markers";
 import { applyEvent, applyMarker, eventUnits, EXTERNAL_ACCOUNT_PREFIX, validateEvent, validMarkerBody } from "../../src/engine/events";
 import { touchedField } from "../../src/engine/touched";
+import type { FoldOutput } from "../../src/engine/ledger/chain";
 import { isLive, isTombstoned } from "../../src/engine/ledger/path";
 import { referenceFold } from "../../src/engine/ledger/reference";
 import { createRng, type Rng } from "../../src/engine/rng";
@@ -601,14 +602,22 @@ export class Runner {
         if (op.stop) await host.stop(g, reply.slice(0, 6));
         else await host.finish(g, reply);
         const inForce = await parentOfTarget();
-        if (before && g.messageId && g.swipeId !== undefined) await this.checkRerun(chat, g.messageId, g.swipeId, before.ledger, before.tombstones, { planned, inForce });
+        const onPlan = changed && g.messageId ? await this.onPlannedChain(chat, g.messageId, plan, planned) : null;
+        // A Re-run reads on the chain it was planned on while that still leads to its path, else on the one in force.
+        if (before && g.messageId && g.swipeId !== undefined) await this.checkRerun(chat, g.messageId, g.swipeId, before.ledger, before.tombstones, onPlan || !changed ? planned : inForce);
         if (changed) {
           // An unplanned turn (under a pause) holds nothing made on the old chain; it commits where it lands.
           const target = this.messages().find((m) => m.id === g.messageId);
           const rec = target ? (await this.h.core(chat)).journal.messages[target.id]?.ledger.swipes[String(target.swipeId)] : undefined;
           const fold = (await this.h.folds(chat)).optimized.messages.find((m) => m.id === g.messageId)?.fold;
           if (rec && rec.seed !== "" && fold === "on_path") throw new InvariantError("L5", "a turn whose chain changed in flight committed on-path");
-          if (target && rec && rec.seed !== "") await this.checkPlanned(chat, target.id, plan, planned);
+          // L5: back on the chain it was planned on, it folds on its path with nothing of it failing.
+          const at = onPlan?.out.messages[onPlan.index];
+          if (target && rec && rec.seed !== "" && onPlan && at) {
+            if (onPlan.shifted) this.coverage.shiftedPlans++;
+            const failed = onPlan.out.violations.filter((v) => v.startsWith(`${target.id}:`));
+            if (at.fold !== "on_path" || failed.length > 0) throw new InvariantError("L5", `${chat}/${target.id}: on the chain it was planned on, the turn folds ${at.fold}${failed.length > 0 ? `: ${failed.join("; ")}` : ""}`);
+          }
         }
         return;
       }
@@ -795,18 +804,18 @@ export class Runner {
   }
 
   /**
-   * L5: on the chain a turn was planned on, its swipes followed through what this runner deleted
-   * while the reply streamed, the turn's record folds on its path with nothing of it failing. That
-   * chain is gone once a message or swipe of it is deleted, or where it no longer folds to the
-   * planned path (a swipe's text replaced); a pause leaves the turn unread.
+   * The chain a turn was planned on, its swipes followed through what this runner deleted while the
+   * reply streamed, folded by the reference fold up to the turn's message. Null once a message or
+   * swipe of it is deleted, under a pause, or where it no longer folds to the planned path (a
+   * swipe's text replaced).
    */
-  private async checkPlanned(chat: ChatId, messageId: string, plan: readonly { id: string; swipeId: number }[], planned: string | undefined): Promise<void> {
+  private async onPlannedChain(chat: ChatId, messageId: string, plan: readonly { id: string; swipeId: number }[], planned: string | undefined): Promise<{ out: FoldOutput; index: number; shifted: boolean } | null> {
     const swipes = plan.map((e) => ({ ...e }));
     let shifted = false;
     for (const r of this.removed) {
       for (const e of swipes) {
         if (e.id !== r.messageId) continue;
-        if (r.swipeId === null || e.swipeId === r.swipeId) return;
+        if (r.swipeId === null || e.swipeId === r.swipeId) return null;
         if (e.swipeId > r.swipeId) {
           e.swipeId--;
           shifted = true;
@@ -816,14 +825,10 @@ export class Runner {
     const core = await this.h.core(chat);
     const chain = await this.h.chain(chat);
     const index = chain.findIndex((m) => m.id === messageId);
-    if (core.journal.pauses.length > 0 || index !== swipes.length || swipes.some((e, i) => chain[i]?.id !== e.id)) return;
+    if (core.journal.pauses.length > 0 || index !== swipes.length || swipes.some((e, i) => chain[i]?.id !== e.id)) return null;
     const rebuilt = chain.slice(0, index + 1).map((m, i) => ({ ...m, swipeId: swipes[i]?.swipeId ?? m.swipeId }));
     const out = referenceFold({ worlds: (r) => this.h.worlds.get(r), revision: this.h.revision, chain: rebuilt, pauses: core.journal.pauses, tombstones: core.journal.tombstones }, this.h.registry);
-    const at = out.messages[index];
-    if (!at || at.parentPath !== planned) return;
-    if (shifted) this.coverage.shiftedPlans++;
-    const failed = out.violations.filter((v) => v.startsWith(`${messageId}:`));
-    if (at.fold !== "on_path" || failed.length > 0) throw new InvariantError("L5", `${chat}/${messageId}: on the chain it was planned on, the turn folds ${at.fold}${failed.length > 0 ? `: ${failed.join("; ")}` : ""}`);
+    return out.messages[index]?.parentPath === planned ? { out, index, shifted } : null;
   }
 
   /**
@@ -832,7 +837,7 @@ export class Runner {
    * swipe already made) and undos, anchored at the record's path, or listed in its `dropped`; nothing
    * else is copied. A turn committed under a pause carries nothing.
    */
-  private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[], inFlight?: { planned: string | undefined; inForce: string | undefined }): Promise<void> {
+  private async checkRerun(chat: ChatId, messageId: string, swipeId: number, before: MessageLedger | undefined, tombstones: Tombstone[], readOn?: string): Promise<void> {
     let source: Rec | undefined;
     for (let s = swipeId - 1; s >= 0 && !source; s--) {
       const rec = before?.swipes[String(s)];
@@ -842,9 +847,9 @@ export class Runner {
     const made = core.journal.messages[messageId]?.ledger.swipes[String(swipeId)];
     if (!source || !made || made.path === "" || core.journal.pauses.length > 0) return;
     // The fixes in force on the chain the Re-run was read on: the one it was planned on, which its
-    // record is anchored at, or, when it streamed while that chain went and the record is anchored
-    // elsewhere, the one in force at the commit.
-    const parent = inFlight && made.path !== inFlight.planned && inFlight.inForce !== undefined ? inFlight.inForce : made.path;
+    // record is anchored at, or, when it streamed while that chain went (the record then reads as
+    // read elsewhere), the one in force at the commit.
+    const parent = readOn ?? made.path;
     const sourceUndone = source.undone;
     const off = (seq: number, index: number): boolean => sourceUndone.some((u) => u.in === "post" && u.seq === seq && u.index === index);
     const live = source.post.filter((p) => p.kind === "fix" && isLive(p.at, parent, source.path !== "" ? source.path : null) && !p.events.every((_, i) => off(p.seq, i)));

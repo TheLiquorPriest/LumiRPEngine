@@ -270,6 +270,12 @@ export interface Rec {
   swipeHash: ContentId;
   /** The parent path the turn was planned at; "" on a bare record (no turn: it holds only an accepted identity or player entries). */
   path: PathHash;
+  /**
+   * Read on another chain: the one the turn was planned on was gone when it committed (DESIGN
+   * §4.3). It keeps `path`, so what was made there travels with it, but folds as a rebased view
+   * everywhere, on that path too.
+   */
+  readElsewhere?: true;
   seed: string;
   /** How many leading `events` were planned before the reply. */
   pre: number;

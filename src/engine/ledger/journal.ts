@@ -707,34 +707,34 @@ export class LedgerCore {
   }
 
   /**
-   * The fold a turn's post steps read on (P2, L7), up to its target, and the path its record is
-   * anchored at: the chain it was planned on. Its record folds as stored only there, so what it
-   * reads, and what a Re-run carries, must validate there; on any other chain it is a rebased view,
-   * which re-validates them anyway. When an earlier swipe changed while the reply streamed, that
-   * chain is rebuilt from the messages as they stand with the swipes the plan saw, and taken once it
-   * folds to the turn's path again. One that can't be rebuilt (a message or swipe the plan saw is
-   * gone, or a swipe's text changed) is read on the chain in force, and the record is anchored at a
-   * path no chain reaches: the plan's path can come back (the deleted swipe's text added again), and
-   * what was read was never validated there. An unplanned turn commits where it lands.
+   * The fold a turn's post steps read on (P2, L7), up to its target, and where its record is
+   * anchored: the chain it was planned on. Its record folds as stored only there, so what it reads,
+   * and what a Re-run carries, must validate there; on any other chain it is a rebased view, which
+   * re-validates them anyway. When an earlier swipe changed while the reply streamed, that chain is
+   * rebuilt from the messages as they stand with the swipes the plan saw, and taken once it folds to
+   * the turn's path again. One that can't be rebuilt (a message or swipe the plan saw is gone, or a
+   * swipe's text changed) is read on the chain in force, and the record is read elsewhere: it keeps
+   * the planned path, so what was made there still travels with it, but never folds as stored, since
+   * what was read was never validated there and that path can come back (the deleted swipe's text
+   * added again). An unplanned turn commits where it lands.
    */
-  private plannedPrefix(p: PendingTurn, observed: readonly ChainMessage[], index: number): { out: FoldOutput; path: PathHash } {
-    const inForce = (path?: PathHash): { out: FoldOutput; path: PathHash } => {
+  private plannedPrefix(p: PendingTurn, observed: readonly ChainMessage[], index: number): { out: FoldOutput; path: PathHash; elsewhere: boolean } {
+    const inForce = (path?: PathHash, elsewhere = false): { out: FoldOutput; path: PathHash; elsewhere: boolean } => {
       const out = this.fold(observed.slice(0, index));
-      return { out, path: path ?? out.messages.at(-1)?.path ?? ROOT_PATH };
+      return { out, path: path ?? out.messages.at(-1)?.path ?? ROOT_PATH, elsewhere };
     };
     if (!p.planned) return inForce();
     const path = this.commitPath(p);
     if (p.chain.length === index && p.chain.every((e, i) => observed[i]?.id === e.id && observed[i]?.swipeId === e.swipeId)) return inForce(path);
-    const gone = hashParts("lre.gone", path);
-    if (p.chain.length !== index) return inForce(gone);
+    if (p.chain.length !== index) return inForce(path, true);
     const rebuilt: ChainMessage[] = [];
     for (const [i, e] of p.chain.entries()) {
       const m = observed[i];
-      if (!m || m.id !== e.id || e.swipeId === GONE_SWIPE || e.swipeId >= m.swipes.length) return inForce(gone);
+      if (!m || m.id !== e.id || e.swipeId === GONE_SWIPE || e.swipeId >= m.swipes.length) return inForce(path, true);
       rebuilt.push({ ...m, swipeId: e.swipeId });
     }
     const out = this.fold(rebuilt);
-    return (out.messages.at(-1)?.path ?? ROOT_PATH) === path ? { out, path } : inForce(gone);
+    return (out.messages.at(-1)?.path ?? ROOT_PATH) === path ? { out, path, elsewhere: false } : inForce(path, true);
   }
 
   /** What a Re-read edit or Retry read of an existing record reads against (its fold prefix plus `pre`). */
@@ -845,6 +845,7 @@ export class LedgerCore {
       undone: [],
       intents: {},
     };
+    if (at?.elsewhere) rec.readElsewhere = true;
     if (p.copies) {
       // P3: the copies keep their seqs and undos and travel with the record; the new narration's
       // post-step events are one `narr` entry, read against the same prefix the narration rendered
@@ -1081,7 +1082,9 @@ export class LedgerCore {
         if (!m || m.swipeId !== w.swipeId) return "not the active swipe";
         const rec = this.ledgerFor(m.id, observed[index]).swipes[String(w.swipeId)];
         if (!rec) return "nothing to undo";
-        // Undo changes the record, so like a read it runs only where the record folds as stored (L2).
+        // Undo changes the record, so like a read it runs only where the record folds as stored (L2),
+        // which one read elsewhere never does.
+        if (rec.readElsewhere) return "read on another chain: a rebased view everywhere";
         if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH)) return "a rebased view: switch back to undo";
         const before = [...rec.undone];
         for (const ref of w.refs) if (!rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref))) rec.undone.push(ref);
@@ -1176,7 +1179,9 @@ export class LedgerCore {
     const rec = this.journal.messages[m.id]?.ledger.swipes[String(w.swipeId)] ?? m.ledger?.swipes[String(w.swipeId)];
     if (!rec) return "nothing to read";
     // A read writes path-bound events, so it runs only where the record folds as stored: on its
-    // path, or on a bare record, which the read anchors here (it becomes this turn's record).
+    // path (never, for one read elsewhere), or on a bare record, which the read anchors here (it
+    // becomes this turn's record).
+    if (rec.readElsewhere) return "read on another chain: a rebased view everywhere";
     const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
     if (rec.path !== "" && rec.path !== parent) return "a rebased view: switch back to read it";
     if (w.kind === "retry_read" && rec.status === "stopped") return index === headIndex ? null : "not the head";

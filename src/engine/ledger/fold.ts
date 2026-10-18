@@ -274,7 +274,7 @@ export class LedgerFold {
     } else if (!rec) {
       for (const mk of liveMarkers) marker(mk);
     } else {
-      const view = recPath !== null && recPath !== parent;
+      const view = f.result.fold === "view";
       // Re-convergence is keyed by what this step folds besides the state: the record and its message's markers.
       const settledKey = recPath === null ? "" : `${this.digest(this.digests.record, JSON.stringify(rec), () => hashJson(rec))}:${this.digest(this.digests.markers, JSON.stringify(m.ledger?.markers ?? []), () => hashJson(m.ledger?.markers ?? []))}`;
       const before = recPath !== null && !view && !this.settled.has(settledKey) ? hashJson(state) : null;
@@ -401,7 +401,8 @@ export class LedgerFold {
       }
       for (const d of rec.dropped ?? []) notes.push({ kind: "not_carried", messageId: m.id, ref: { in: "post", seq: d.seq, index: 0 }, text: d.reason });
     }
-    const view = recPath !== null && recPath !== parent;
+    // A record read elsewhere is a view on its own path too.
+    const view = recPath !== null && (recPath !== parent || rec?.readElsewhere === true);
     const fold: MessageResult["fold"] = paused ? "paused" : !rec ? (tombstoned ? "tombstoned" : "plain") : recPath === null ? "plain" : view ? "view" : "on_path";
     const content = rec ? rec.swipeHash.hash : contentId(activeText(m)).hash;
     const path = stepPath(parent, false, content, recordHash(rec, livePost, parent), markersHash(liveMarkers));
