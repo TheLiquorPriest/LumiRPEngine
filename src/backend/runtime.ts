@@ -60,6 +60,7 @@ import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge, type UnfitAction } from "./turn-model";
 import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
+import { StudioBridge } from "./studio";
 import { WorldStore } from "./worlds";
 
 export interface RuntimeOptions {
@@ -448,6 +449,8 @@ export class Runtime implements TurnHooks {
   readonly toolSupport: ToolSupport;
   readonly ledger: LedgerService;
   readonly push: StatePush;
+  /** What LumiRPEngine Studio may read, and its offers (DESIGN §15). */
+  readonly studio: StudioBridge;
   readonly templates: Record<string, (id: string, name: string) => WorldDoc>;
   private readonly pipeline: EnginePipeline;
   /** Runs by `user \0 chat`. */
@@ -497,7 +500,14 @@ export class Runtime implements TurnHooks {
     this.toolSupport = new ToolSupport(this.host);
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }));
-    this.push = new StatePush(this.host, (chatId, userId) => this.view(chatId, userId));
+    this.studio = new StudioBridge(this.host, this.worlds);
+    this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
+    // Every view pushed to a chat also refreshes the summary the Studio reads of it.
+    this.push = new StatePush(this.host, async (chatId, userId) => {
+      const view = await this.view(chatId, userId);
+      this.studio.seen(userId, view);
+      return view;
+    });
   }
 
   start(): void {

@@ -80,6 +80,8 @@ export class WorldStore {
    * user's request read another's cached world). Least recently used first; an entry is never replaced.
    */
   private readonly revisions = new Map<string, WorldDoc>();
+  /** Told once a world's revisions change (a commit, an import, a deletion), so the Studio bridge publishes them (DESIGN §15). */
+  onChange: ((worldId: WorldId, userId: UserId) => Promise<void>) | null = null;
 
   constructor(
     private readonly host: HostPort,
@@ -182,6 +184,7 @@ export class WorldStore {
     const index = await this.index(doc.id, userId);
     const revisions = index ? [...index.revisions.filter((r) => r !== rev), rev] : [rev];
     await this.writeJson(`${worldDir(doc.id)}index.json`, { id: doc.id, name: doc.name, head: rev, loreBookId: index?.loreBookId ?? loreBookId, revisions }, userId);
+    await this.onChange?.(doc.id, userId);
     return rev;
   }
 
@@ -200,6 +203,7 @@ export class WorldStore {
 
   async remove(worldId: WorldId, userId: UserId): Promise<void> {
     for (const path of await this.host.storage.list(worldDir(worldId), userId)) await this.host.storage.remove(path, userId);
+    await this.onChange?.(worldId, userId);
   }
 
   private async draft(worldId: WorldId, userId: UserId): Promise<Draft & { stored: boolean }> {
@@ -256,13 +260,32 @@ export class WorldStore {
     return { revision, lint: lintWorld(draft.doc, this.registry) };
   }
 
-  /** Imports a world file; macros in its lore and templates come back as warnings for review. */
+  /** Imports a world file as a new world; macros in its lore and templates come back as warnings for review. */
   async importFile(file: JsonValue, userId: UserId): Promise<{ world: WorldDoc; revision: RevisionId; lint: LintIssue[] }> {
     const doc = isRecord(file) && isWorldDoc(file.world) ? file.world : file;
     if (!isWorldDoc(doc)) throw new WorldError("bad_request", `not a ${WORLD_FORMAT} document`);
     const created = await this.create(doc.name, migrateWorld(doc), userId);
-    const lint: LintIssue[] = macrosIn(created.world).map((m) => ({ severity: "warning", path: m.path, code: "import_macro", message: `Review this macro before playing: ${m.macro}` }));
-    return { ...created, lint };
+    return { ...created, lint: macroReview(created.world) };
+  }
+
+  /**
+   * A document from LumiRPEngine Studio as the next revision of one of the user's worlds (DESIGN
+   * §15): it keeps the world's id, so its chats stay on their revisions until an Upgrade. Refused
+   * while Build holds an unsaved draft of the world, which a later Commit would otherwise put back
+   * over it.
+   */
+  async commitRevision(worldId: WorldId, doc: WorldDoc, userId: UserId): Promise<{ world: WorldDoc; revision: RevisionId; lint: LintIssue[] }> {
+    const index = await this.index(worldId, userId);
+    if (!index) throw new WorldError("not_found", `world ${worldId} not found`);
+    if (await this.hasDraft(worldId, userId)) throw new WorldError("conflict", `Build has unsaved changes to “${index.name}”: commit or discard them first`);
+    const world = migrateWorld({ ...structuredClone(doc), id: worldId });
+    const revision = await this.commitDoc(world, userId, null);
+    return { world, revision, lint: macroReview(world) };
+  }
+
+  /** Whether Build keeps an unsaved draft of the world. */
+  async hasDraft(worldId: WorldId, userId: UserId): Promise<boolean> {
+    return (await this.host.storage.read(`${worldDir(worldId)}draft.json`, userId)) !== null;
   }
 
   async exportFile(worldId: WorldId, userId: UserId, revision?: RevisionId): Promise<JsonValue> {
@@ -273,6 +296,11 @@ export class WorldStore {
   lint(world: WorldDoc): LintIssue[] {
     return lintWorld(world, this.registry);
   }
+}
+
+/** The macros in a world from outside (a file, LumiRPEngine Studio), as warnings to review before playing it. */
+export function macroReview(world: WorldDoc): LintIssue[] {
+  return macrosIn(world).map((m) => ({ severity: "warning", path: m.path, code: "import_macro", message: `Review this macro before playing: ${m.macro}` }));
 }
 
 /** A collection of the document as a mutable JSON record (the editors write raw JSON values). */

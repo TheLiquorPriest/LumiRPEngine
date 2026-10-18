@@ -24,6 +24,7 @@ import { LoreEditor, LoreList } from "./lore-editor";
 import { TableEditor } from "./table-editor";
 import { RulesetEditor } from "./ruleset-editor";
 import { TiersEditor } from "./tiers-editor";
+import { StudioOfferReview, useStudioOffer } from "./studio-offer";
 
 const COLLECTIONS: { id: WorldCollection; label: string; hint: string }[] = [
   { id: "entities", label: "Entities", hint: "People, things, vehicles" },
@@ -178,9 +179,10 @@ function Worlds() {
   const [busy, run] = useBusy();
   const fileInput = useRef<HTMLInputElement>(null);
   // What an import flagged (macros in lore and templates), kept on screen until dismissed.
-  const [review, setReview] = useState<{ worldId: string; name: string; issues: LintIssue[] } | null>(null);
+  const [review, setReview] = useState<{ worldId: string; name: string; issues: LintIssue[]; from: string } | null>(null);
   const refresh = () => void app.request({ type: "lre.world", op: "list" }).then((result) => setWorlds(result?.worlds ?? []));
   useEffect(refresh, []);
+  const studio = useStudioOffer({ installed: refresh, review: (next) => setReview({ ...next, from: "LumiRPEngine Studio" }) });
   const importFile = (file: File) =>
     run(async () => {
       let parsed: unknown;
@@ -194,16 +196,17 @@ function Worlds() {
       if (result) {
         const issues = result.lint ?? [];
         app.toast(issues.length > 0 ? `Imported “${result.world?.name ?? "world"}”. Review ${issues.length} item(s) below before playing.` : `Imported “${result.world?.name ?? "world"}”.`, "info");
-        setReview(result.world && issues.length > 0 ? { worldId: result.world.id, name: result.world.name, issues } : null);
+        setReview(result.world && issues.length > 0 ? { worldId: result.world.id, name: result.world.name, issues, from: "a file" } : null);
         refresh();
       }
     });
   return (
     <div class="lre-stack" data-lre-section="build">
+      <StudioOfferReview state={studio} />
       {review ? (
         <Card title="Review before playing" aside={<span class="lre-badge warn">{review.issues.length}</span>}>
           <div class="lre-banner warn">
-            “{review.name}” came from a file. Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play.
+            “{review.name}” came from {review.from}. Its lore and templates contain macros that Lumiverse runs when it builds a prompt; open each one and check it before you play.
           </div>
           <div class="lre-list" data-lre-import-review>
             {review.issues.map((issue, i) => {
@@ -320,6 +323,10 @@ function Worlds() {
             event.currentTarget.value = "";
           }}
         />
+        <button type="button" class="lre-btn block" disabled={studio.busy} onClick={studio.load}>
+          Import from Studio
+        </button>
+        {studio.message && !studio.offer ? <span class="lre-small lre-muted">{studio.message}</span> : null}
       </Card>
     </div>
   );

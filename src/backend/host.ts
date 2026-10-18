@@ -325,6 +325,22 @@ export interface HostPort {
     onLifecycle(handler: (event: ProcessEvent) => void): () => void;
   };
   /**
+   * The shared RPC pool (`spindle.rpcPool`, DESIGN §15). A read carries no request and no user,
+   * so this extension serves per-user endpoints and reads another's the same way.
+   */
+  rpc: {
+    /**
+     * Serves `<this extension>.<channel>` on demand, replacing what was there. The handler learns
+     * which extension reads; `requires` is the read policy (the permissions both sides must hold,
+     * and the only ones the handler's calls may use). What it returns is structured-cloned to the
+     * reader, so it may hand over a cached document.
+     */
+    handle(channel: string, requires: readonly string[], handler: (requester: string) => Promise<unknown>): void;
+    unregister(channel: string): void;
+    /** Reads another extension's `<extension>.<channel>`; rejects when nothing is registered there or its handler throws. */
+    read(endpoint: string): Promise<unknown>;
+  };
+  /**
    * A log line. With `userId` it concerns that user's chats: the diagnostics mirror keeps it in
    * their own storage, never in the extension-wide file.
    */

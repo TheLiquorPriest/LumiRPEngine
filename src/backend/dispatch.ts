@@ -9,12 +9,14 @@ import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { EventRef, HeldWrite, LedgerEvent, MarkerBody } from "../shared/ledger";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import type { RulesetDef, WorldDoc } from "../shared/world";
-import { previewSheet } from "../engine/authoring";
+import { WORLD_FORMAT } from "../shared/world";
+import type { StudioOffer } from "../shared/studio-bridge";
+import { isWorldDoc, migrateWorld, previewSheet } from "../engine/authoring";
 import { parseEditOps, resolveEdit } from "../engine/edits";
 import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
-import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, UpgradePreview } from "../shared/protocol";
+import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, StudioOfferView, UpgradePreview } from "../shared/protocol";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import { EXTRACTION_TYPES } from "../shared/settings";
 import type { TimelapseTarget } from "../shared/ledger";
@@ -39,7 +41,7 @@ import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
 import { recentLines, TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
-import { newChatRun, WorldError } from "./worlds";
+import { macroReview, newChatRun, WORLD_COLLECTIONS, WorldError } from "./worlds";
 
 export class RequestError extends Error {
   constructor(
@@ -89,6 +91,8 @@ export class Dispatcher {
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.result", reqId: raw.reqId, request, body } as never, userId, session);
     };
     try {
+      // The Studio bridge serves each user from their first request on (DESIGN §15).
+      await this.rt.studio.serve(userId);
       await this.route(raw, userId, session, reply);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
@@ -317,7 +321,76 @@ export class Dispatcher {
         reply("lre.lore", { drift: await bookDrift(this.rt.host, world, userId, r.id) });
         return;
       }
+      case "lre.studio": {
+        reply("lre.studio", await this.studio(r, userId));
+        return;
+      }
     }
+  }
+
+  /** LumiRPEngine Studio's offer (DESIGN §15): reviewed on `offer`, installed only on the player's `install`. */
+  private async studio(r: Extract<FrontendToBackend, { type: "lre.studio" }>, userId: UserId): Promise<ResultBodies["lre.studio"]> {
+    const read = await this.rt.studio.offer(userId);
+    if (!read.offer) {
+      if (r.op === "offer") return { offer: null, message: read.reason };
+      throw new RequestError("not_found", read.reason);
+    }
+    const offer = read.offer;
+    const { view, world } = await this.reviewOffer(offer, userId);
+    if (r.op === "offer") return { offer: view };
+    // The player confirmed what they reviewed: anything the Studio offered since is reviewed first.
+    if (offer.offerId !== r.offerId) throw new RequestError("conflict", "LumiRPEngine Studio offers something else now; review it again.");
+    if (view.installed) throw new RequestError("conflict", "This offer is already installed.");
+    if (view.blocked !== null || world === null) throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
+    const store = this.rt.worlds;
+    const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId).then((created) => ({ ...created, lint: macroReview(created.world) }));
+    await this.syncBook(done.world.id, userId);
+    await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
+    return { installed: { offerId: offer.offerId, mode: offer.mode, worldId: done.world.id, name: done.world.name, revision: done.revision, attachChatId: offer.attachChatId ?? null }, lint: done.lint };
+  }
+
+  /** An offer as Build reviews it: the document as this engine reads it, its lint and macros, and what keeps it from installing. */
+  private async reviewOffer(offer: StudioOffer, userId: UserId): Promise<{ view: StudioOfferView; world: WorldDoc | null }> {
+    const installed = await this.rt.studio.installedAs(userId, offer.offerId);
+    const view: StudioOfferView = {
+      offerId: offer.offerId,
+      mode: offer.mode,
+      name: isRecord(offer.doc) && typeof offer.doc.name === "string" ? offer.doc.name : "(unnamed)",
+      createdAt: offer.createdAt,
+      target: null,
+      counts: {},
+      lint: [],
+      errors: 0,
+      macros: [],
+      attachChatId: offer.attachChatId ?? null,
+      blocked: null,
+      installed: installed ? { worldId: installed.worldId, revision: installed.revision } : null,
+    };
+    if (!isWorldDoc(offer.doc)) return { view: { ...view, blocked: `It isn't an ${WORLD_FORMAT} document.` }, world: null };
+    let world: WorldDoc;
+    let lint: LintIssue[];
+    try {
+      world = migrateWorld(structuredClone(offer.doc));
+      lint = this.rt.worlds.lint(world);
+    } catch (error) {
+      return { view: { ...view, blocked: `This engine can't read it: ${error instanceof Error ? error.message : String(error)}` }, world: null };
+    }
+    const rank = { error: 0, warning: 1, info: 2 };
+    view.lint = [...lint].sort((a, b) => rank[a.severity] - rank[b.severity]).slice(0, 50);
+    view.errors = lint.filter((i) => i.severity === "error").length;
+    view.macros = macroReview(world);
+    for (const [collection, items] of Object.entries(world)) {
+      const count = hasOwn(WORLD_COLLECTIONS, collection) && isRecord(items) ? Object.keys(items).length : 0;
+      if (count > 0) view.counts[collection] = count;
+    }
+    if (view.errors > 0) view.blocked = `It has ${view.errors} error${view.errors === 1 ? "" : "s"}; fix ${view.errors === 1 ? "it" : "them"} in LumiRPEngine Studio first.`;
+    if (offer.mode === "revision" && offer.worldId !== undefined) {
+      const index = pathSafe(offer.worldId) ? await this.rt.worlds.index(offer.worldId, userId) : null;
+      view.target = { worldId: offer.worldId, name: index?.name ?? null };
+      if (!index) view.blocked ??= "The world it's a revision of isn't one of your worlds.";
+      else if (await this.rt.worlds.hasDraft(offer.worldId, userId)) view.blocked ??= `Build has unsaved changes to “${index.name}”: commit or discard them first.`;
+    }
+    return { view, world };
   }
 
   private async world(r: Extract<FrontendToBackend, { type: "lre.world" }>, userId: UserId): Promise<ResultBodies["lre.world"]> {

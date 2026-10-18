@@ -59,11 +59,11 @@ describe("studio seam", () => {
     expect(check.turns.every((t) => !t.notes.some((n) => n.startsWith("failed")))).toBe(true);
   });
 
-  test("versions and the lre-state-v1 payload", () => {
-    const state = studioState(["file"]);
+  test("versions and the lre-state-v1 payload, which lists the Studio's offer endpoint beside files", () => {
+    const state = studioState();
     expect(state.engineVersion).toBe(ENGINE_VERSION);
     expect(state.worldFormat).toBe(WORLD_FORMAT);
     expect(isRecord(state.packs) && Object.keys(state.packs).length).toBe(Object.keys(PACK_VERSIONS).length);
-    expect(state.inbound).toEqual(["file"]);
+    expect(state.inbound).toEqual(["file", "rpc:lumi_rp_engine_studio.offer"]);
   });
 });

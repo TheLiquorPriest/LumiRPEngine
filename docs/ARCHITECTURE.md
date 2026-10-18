@@ -19,6 +19,7 @@ This is the contract between the modules. Behavior is specified in [DESIGN.md](D
 | `src/shared/state-view.ts` | The state view the frontend renders |
 | `src/shared/settings.ts` | User settings, the D4 cold-start extraction modes and per-connection learning (`ExtractionLearning`, `userStorage/extraction-learning.json`) |
 | `src/shared/protocol.ts` | Frontend ↔ backend messages |
+| `src/shared/studio-bridge.ts` | The Studio bridge ([STUDIO.md](STUDIO.md#the-studio-bridge)): endpoint names, payloads, the offer and the window events LumiRPEngine Studio shares |
 | `src/engine/state.ts` | The folded `WorldState` |
 | `src/engine/registry.ts` | `PackDef`, `CoreRegistry` and the pure contexts packs receive |
 | `src/engine/steps.ts` | `StepPort` and the model-step shapes |
@@ -98,6 +99,7 @@ Backend layout:
 - `backend/start-markers.ts`: a new chat's starting markers (the revision, every domain level and band cap, every time control and the adjudication policy), written with the first record that holds events.
 - `backend/upgrade-preview.ts`: the Upgrade preview (`lre.marker` with `preview`): the plan the fold would apply, entity by entity, each change with its default pick and why, and `secret` on the rows, changes and track lines that would give a secret away, for Settings' spoiler gate.
 - `backend/chat-prefs.ts`: the player's choices for how a chat looks (`prefs.json`: the map display), kept beside the chat and out of its ledger.
+- `backend/studio.ts`: the Studio bridge's engine side: per-user shared RPC endpoints only LumiRPEngine Studio may read (the worlds, each world's head and revisions, the world chats' summaries from what their views were pushed), the read of the Studio's offer, and the offers installed (`studio/installed.json`).
 
 Shared helpers (pure, beside the contract files):
 - `shared/grid.ts`: cells, A* with a hard cap, walking minutes, line of sight, and where someone stands on a grid.
@@ -240,6 +242,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.world` | `list` \| `get` \| `create` \| `delete` \| `commit` \| `import` \| `export` \| `lint` \| `attach` \| `upgrade{chatId, to, merge?}` \| `sheet{worldId, ruleset, entity?}` | `{worlds?, world?, revision?, lint?, file?, packKinds?, packRelations?, functions?, sheet?}`; `get` adds the packs' kinds and relation types and `functions`, every function a formula may call outside an effect argument (the expression editor's list); `upgrade` writes the `migrate` marker, with `merge` the owner's picks for the definition merge (DESIGN §4.3); `sheet` is the Sheet Designer's preview, the draft with the unsaved ruleset read on the POV (or `entity`) |
 | `lre.job` | `start{kind, worldId, input}` \| `cancel{jobId}` \| `list{worldId}` \| `dismiss{jobId}` | `{jobId}`; `list`: `{jobs}` (`JobSummary[]`, oldest first). Updates arrive as `lre.job.update {jobId, kind, status, progress, message?, result?}` |
 | `lre.lore` | `drift{worldId, id?}` \| `save{chatId, text?}` | `drift`: `{drift}`, the draft's book-sourced entries whose book entry changed (with its text and hash now) or is gone; `save`: `{worldId, id}` of the lore entry saved to the draft of the chat's world |
+| `lre.studio` | `offer` \| `install{offerId}` | `offer`: `{offer}`, LumiRPEngine Studio's offer as Build reviews it (counts, lint, macros, what blocks it), or `{offer: null, message}`; nothing is installed. `install`: `{installed, lint}`, the reviewed offer as a new world, or as the next revision of its world under the world's id, with its macros to review |
 | `lre.ui` | `close_drawer` | `{done}`; the frontend has no API to close the drawer, so the backend asks the host (the map opening on a narrow viewport) |
 
 **State push.** The backend keeps a push counter `rev` per (user, chat).
@@ -326,7 +329,10 @@ Raw sources in `data-src/us/*.json` are never imported. `scripts/tables/build.ts
 - the world's lore book (create, check, list, add and delete entries) and a dry-run assembly of a chat's next prompt;
 - the active preset and the default connection;
 - the background lane's child process (spawn, messages, lifecycle);
-- frontend messaging, closing the drawer, and logging.
+- frontend messaging, closing the drawer, and logging;
+- the shared RPC pool: serving this extension's endpoints (with the reader's id and a read policy) and reading another extension's.
+
+`test/support/fake-rpc.ts` plays the host's pool for both extensions: endpoint names checked as the host checks them, a read of an unregistered endpoint rejected, the read policy's permissions held by both sides, and every value structured-cloned to the reader.
 
 Event payloads are exactly those the host emits (DESIGN §14). `userId` arrives as the handler's second argument.
 

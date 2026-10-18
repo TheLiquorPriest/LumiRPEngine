@@ -13,6 +13,8 @@ import { MAP_SCHEMA } from "./shared/maps";
 import { checkSchema, pathText, type JsonPath, type Schema, type SchemaProblem } from "./shared/schema-check";
 import type { MapDoc, RulesetDef, StudioState, WorldDoc } from "./shared/world";
 import { ENGINE_VERSION, EXPORT_FORMAT, WORLD_FORMAT } from "./shared/world";
+import { channelId, chatsChannel, engineEndpoint, ENGINE_EXTENSION, offerEndpoint, readOffer, STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_EXTENSION, STUDIO_INBOUND, STUDIO_INSTALLED_EVENT, STUDIO_OFFER_EVENT, worldChannel, worldsChannel } from "./shared/studio-bridge";
+import type { StudioChats, StudioChatSummary, StudioInstalled, StudioOffer, StudioWorldEntry, StudioWorldList, StudioWorldRead } from "./shared/studio-bridge";
 import { blankWorld, checkWorldDay, isWorldDoc, lintWorld, migrateWorld, playtestStart, playtestTurn, previewSheet, type PlaytestTurn } from "./engine/authoring";
 import { createRegistry, type Registry } from "./engine/registry-impl";
 import type { WorldState } from "./engine/state";
@@ -21,6 +23,9 @@ import { ALL_PACKS } from "./packs/index";
 
 export { checkSchema, ENGINE_VERSION, EXPORT_FORMAT, MAP_SCHEMA, pathText, WORLD_FORMAT };
 export type { JsonPath, LintIssue, MapDoc, PlaytestTurn, RulesetDef, Schema, SchemaProblem, SheetSectionView, StudioState, WorldDoc };
+// The Studio bridge contract (docs/STUDIO.md "The Studio bridge"): endpoint names, payloads and window events.
+export { channelId, chatsChannel, engineEndpoint, ENGINE_EXTENSION, offerEndpoint, readOffer, STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_EXTENSION, STUDIO_INBOUND, STUDIO_INSTALLED_EVENT, STUDIO_OFFER_EVENT, worldChannel, worldsChannel };
+export type { StudioChats, StudioChatSummary, StudioInstalled, StudioOffer, StudioWorldEntry, StudioWorldList, StudioWorldRead };
 
 /** Every pack this engine ships, by id, with its version. */
 export const PACK_VERSIONS: Readonly<Record<string, number>> = Object.fromEntries(ALL_PACKS.map((p) => [p.id, p.version]));
@@ -164,7 +169,7 @@ export function checkWorld(world: WorldDoc, days = 3, runSeed = "studio"): RunRe
   return { turns: out, lint: lint(world) };
 }
 
-/** The `lre-state-v1` window event payload the frontend announces for a studio to discover (DESIGN §15). */
-export function studioState(inbound: readonly string[]): StudioState {
-  return { engineVersion: ENGINE_VERSION, worldFormat: WORLD_FORMAT, packs: { ...PACK_VERSIONS }, inbound: [...inbound] };
+/** The `lre-state-v1` window event payload the frontend announces for a studio to discover (DESIGN §15), with the ways a world comes in. */
+export function studioState(): StudioState {
+  return { engineVersion: ENGINE_VERSION, worldFormat: WORLD_FORMAT, packs: { ...PACK_VERSIONS }, inbound: [...STUDIO_INBOUND] };
 }

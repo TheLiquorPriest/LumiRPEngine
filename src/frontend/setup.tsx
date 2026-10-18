@@ -20,6 +20,7 @@ import type { OverlaySet } from "./overlays";
 import { UI_PACKS } from "./packs";
 import { ProtocolClient } from "./protocol-client";
 import type { FrontendToBackend } from "../shared/protocol";
+import { STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_INBOUND, STUDIO_OFFER_EVENT } from "../shared/studio-bridge";
 import type { StudioState } from "../shared/world";
 import { ENGINE_VERSION, WORLD_FORMAT } from "../shared/world";
 import { timeMarker } from "./requests";
@@ -41,19 +42,25 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(trackJobs(client));
   // Before any component's subscription, so amounts render in the new state's currency.
   cleanups.push(client.subscribe((state) => setCurrency(state.view?.currency ?? null)));
-  // The studio seam (DESIGN §15): announce the engine on load and again whenever the pack set changes.
+  // The studio seam (DESIGN §15): announce the engine on load, again whenever the pack set changes,
+  // and again when a studio that loaded later asks.
   let announced: string | null = null;
-  const announce = (packs: Record<string, number>) => {
+  let packsInPlay: Record<string, number> = {};
+  const announce = (packs: Record<string, number>, again = false) => {
     const key = JSON.stringify(packs);
-    if (key === announced) return;
+    if (key === announced && !again) return;
     announced = key;
-    const detail: StudioState = { engineVersion: ENGINE_VERSION, worldFormat: WORLD_FORMAT, packs, inbound: ["file"] };
-    window.dispatchEvent(new CustomEvent("lre-state-v1", { detail }));
+    packsInPlay = packs;
+    const detail: StudioState = { engineVersion: ENGINE_VERSION, worldFormat: WORLD_FORMAT, packs, inbound: [...STUDIO_INBOUND] };
+    window.dispatchEvent(new CustomEvent(STATE_EVENT, { detail }));
   };
   announce({});
   cleanups.push(client.subscribe((state) => (state.view ? announce(state.view.packs) : undefined)));
+  const announceAgain = () => announce(packsInPlay, true);
+  window.addEventListener(STATE_REQUEST_EVENT, announceAgain);
+  cleanups.push(() => window.removeEventListener(STATE_REQUEST_EVENT, announceAgain));
 
-  const ui = createStore<UiState>({ section: "play", playPanel: null, build: { view: "worlds" }, mapInDrawer: false, overlay: null });
+  const ui = createStore<UiState>({ section: "play", playPanel: null, build: { view: "worlds" }, mapInDrawer: false, overlay: null, studioOffer: 0 });
   const toasts = createStore<Toast[]>([]);
   let toastId = 0;
   const toast = (text: string, tone: Toast["tone"] = "info") => {
@@ -108,6 +115,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     render(null, tab.root);
     tab.destroy();
   });
+  // LumiRPEngine Studio has a world waiting (DESIGN §15): open Build's world list, where it's reviewed before anything installs.
+  const reviewOffer = () => {
+    ui.update((state) => ({ ...state, section: "build", build: { view: "worlds" }, studioOffer: state.studioOffer + 1 }));
+    tab.activate();
+  };
+  window.addEventListener(STUDIO_OFFER_EVENT, reviewOffer);
+  cleanups.push(() => window.removeEventListener(STUDIO_OFFER_EVENT, reviewOffer));
 
   // ------------------------------------------------------------ HUD pill
   const hud = new HudFloat<SpindleFloatWidgetHandle>({

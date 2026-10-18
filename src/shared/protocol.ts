@@ -367,6 +367,36 @@ export type LoreRequest = Request<"lre.lore"> & ({ op: "drift"; worldId: WorldId
 /** A book-sourced lore entry whose World Info entry changed since it was indexed (with its text now), or is gone. */
 export type LoreDrift = { status: "changed"; content: string; hash: string } | { status: "missing" };
 
+/**
+ * LumiRPEngine Studio's offer (DESIGN §15). `offer` reads the world the Studio offers and reviews
+ * it, installing nothing; `install` installs the offer reviewed as `offerId`: a new world, or the
+ * next revision of one of the user's worlds.
+ */
+export type StudioRequest = Request<"lre.studio"> & ({ op: "offer" } | { op: "install"; offerId: string });
+
+/** A Studio offer as Build reviews it before anything is installed. */
+export interface StudioOfferView {
+  offerId: string;
+  mode: "new" | "revision";
+  name: string;
+  createdAt: number;
+  /** A revision's world: its id, and its name (null when the user has no such world). */
+  target: { worldId: WorldId; name: string | null } | null;
+  /** Items per collection, the collections that have any. */
+  counts: Record<string, number>;
+  /** The engine's lint of the document, errors first (at most 50). */
+  lint: LintIssue[];
+  errors: number;
+  /** Macros in its lore and templates, to review before playing it. */
+  macros: LintIssue[];
+  /** The chat the Studio wants it attached to, once installed. */
+  attachChatId: ChatId | null;
+  /** Why it can't be installed as it is (not a world, errors, a missing world, Build's unsaved draft); null when it can. */
+  blocked: string | null;
+  /** The world revision it became, once installed. */
+  installed: { worldId: WorldId; revision: RevisionId } | null;
+}
+
 export type FrontendToBackend =
   | HelloRequest
   | ResyncRequest
@@ -385,7 +415,8 @@ export type FrontendToBackend =
   | UiRequest
   | MapRequest
   | JobRequest
-  | LoreRequest;
+  | LoreRequest
+  | StudioRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -445,6 +476,11 @@ export interface ResultBodies {
   "lre.job": { jobId?: string; jobs?: JobSummary[] };
   /** `drift`: book-sourced entries whose book entry changed or is gone, by lore id (unchanged ones are left out); `save`: the world and the new entry's id. */
   "lre.lore": { drift?: Record<string, LoreDrift>; worldId?: WorldId; id?: string };
+  /**
+   * `offer`: the offer under review, or null and why there is none (`message`). `install`: what it
+   * became, with the macros to review before playing it (`lint`).
+   */
+  "lre.studio": { offer?: StudioOfferView | null; message?: string; installed?: { offerId: string; mode: "new" | "revision"; worldId: WorldId; name: string; revision: RevisionId; attachChatId: ChatId | null }; lint?: LintIssue[] };
 }
 
 export type ResultMessage = {

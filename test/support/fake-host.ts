@@ -26,6 +26,8 @@ import type {
   QuietRequest,
   QuietToolCall,
 } from "../../src/backend/host";
+import { ENGINE_EXTENSION, STUDIO_EXTENSION } from "../../src/shared/studio-bridge";
+import { FakeRpcPool } from "./fake-rpc";
 
 export interface FakeMessage {
   id: MessageId;
@@ -96,7 +98,15 @@ export class FakeHost implements HostPort {
 
   constructor(private readonly options: { wiBook: boolean } = { wiBook: true }) {}
 
+  /** The shared RPC pool both extensions use, with each one's manifest permissions granted. */
+  readonly rpcPool = new FakeRpcPool({
+    [ENGINE_EXTENSION]: ["generation", "context_handler", "chats", "chat_mutation", "world_books", "presets", "decisions", "ui_panels"],
+    [STUDIO_EXTENSION]: ["generation", "chats", "chat_mutation", "characters", "world_books", "personas"],
+  });
+
   // ------------------------------------------------------------------ HostPort
+
+  rpc: HostPort["rpc"] = this.rpcPool.port(ENGINE_EXTENSION);
 
   chats: HostPort["chats"] = {
     messages: async (chatId) => this.chat(chatId).messages.map((m, index) => this.toHost(chatId, m, index)),
@@ -396,6 +406,7 @@ export class FakeHost implements HostPort {
     this.frontendHandlers.clear();
     this.processHandlers.clear();
     this.lifecycleHandlers.clear();
+    this.rpcPool.dropOwner(ENGINE_EXTENSION);
   }
 
   // ------------------------------------------------------------------ generations

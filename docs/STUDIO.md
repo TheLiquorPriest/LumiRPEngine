@@ -1,6 +1,6 @@
 # LumiRPEngine studio contract
 
-This is the contract for a world-building studio that authors worlds for LumiRPEngine outside Lumiverse: the `lumi-rp-engine/studio` export, the file formats, the published JSON Schemas and the versioning rules. I fixed this seam early (DESIGN §15, D23) so a studio never needs a breaking change from the engine. Everything here is pure: no host, no storage, no clock and no model calls. The same engine code runs in the studio and in Lumiverse, so a world lints the same in both, and Playtest and Check world play it with the engine a chat uses. They make no model calls, though: nothing reads typed text, judges a player's approach or decides an NPC's close call, so a typed line is matched to an action by its words, checks roll, and close calls go by the numbers. A chat with those helper steps on can play the same world differently.
+This is the contract for a world-building studio that authors worlds for LumiRPEngine: the `lumi-rp-engine/studio` export, the file formats, the published JSON Schemas, the versioning rules, and the bridge through which LumiRPEngine Studio hands worlds over inside Lumiverse. I fixed this seam early (DESIGN §15, D23) so a studio never needs a breaking change from the engine. The API is pure: no host, no storage, no clock and no model calls. The same engine code runs in the studio and in Lumiverse, so a world lints the same in both, and Playtest and Check world play it with the engine a chat uses. They make no model calls, though: nothing reads typed text, judges a player's approach or decides an NPC's close call, so a typed line is matched to an action by its words, checks roll, and close calls go by the numbers. A chat with those helper steps on can play the same world differently.
 
 For what the parts of a world mean, read the [design](DESIGN.md) (§4.1 for the document, §10 for tracks and rules, §11 for actions, checks and the ruleset). Every kind, effect, formula function and lint code the packs register is in the [reference](REFERENCE.md), the formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), and [RECIPES.md](RECIPES.md) has small worlds to start from.
 
@@ -30,9 +30,9 @@ The API imports only the engine and the packs' pure cores; `test/boundaries.test
 | `playtest(world, turns, runSeed?)` | Plays typed turns through the engine from the world's start, with no narrator and no model. Each turn is `{user, reply, notes}`: `reply` is what the player would see, and `notes` start with the minutes it took and the action it was read as (`read as Go to`, or `not an action`), followed by any dropped events. Also returns `lint`. The same world, turns and seed always give the same result. |
 | `checkWorld(world, days?, runSeed?)` | Plays 1 to 14 days (3 by default) as one-day timelapses, every interrupt at `note`. Each day is `{user: "Day 1", reply, notes}`: the author's view of every event, secrets and unmet people included, then the event count, dropped events, failures and any secret that leaked into a section (`leak in scene: "…"`). |
 | `sheetPreview(world, entity?)` | The designed sheet (`ruleset.sheet`) as the entity (the POV by default) has it when a chat starts, or `null` without a designed sheet: what Build's Sheet Designer previews. |
-| `studioState(inbound)` | The `lre-state-v1` payload (below) for this engine and the given install paths. |
+| `studioState()` | The `lre-state-v1` payload (below): this engine's versions and the ways a world comes in. |
 
-The constants: `WORLD_FORMAT` (`"lre-world-v1"`), `EXPORT_FORMAT` (`"lre-world-export-v1"`), `ENGINE_VERSION` and `PACK_VERSIONS`. The schema reader is exported too: `checkSchema(schema, value, others?)`, `pathText(path)` and `MAP_SCHEMA`. The types are `WorldDoc`, `MapDoc`, `RulesetDef`, `LintIssue`, `PlaytestTurn`, `SheetSectionView`, `StudioState`, `Schema`, `SchemaProblem` and `JsonPath`.
+The constants: `WORLD_FORMAT` (`"lre-world-v1"`), `EXPORT_FORMAT` (`"lre-world-export-v1"`), `ENGINE_VERSION` and `PACK_VERSIONS`. The schema reader is exported too: `checkSchema(schema, value, others?)`, `pathText(path)` and `MAP_SCHEMA`. The types are `WorldDoc`, `MapDoc`, `RulesetDef`, `LintIssue`, `PlaytestTurn`, `SheetSectionView`, `StudioState`, `Schema`, `SchemaProblem` and `JsonPath`. The [Studio bridge](#the-studio-bridge)'s names and payloads come from the same import: `ENGINE_EXTENSION`, `STUDIO_EXTENSION`, `STUDIO_INBOUND`, the event names `STATE_EVENT`, `STATE_REQUEST_EVENT`, `STUDIO_OFFER_EVENT` and `STUDIO_INSTALLED_EVENT`, the channel helpers `channelId`, `worldsChannel`, `worldChannel`, `chatsChannel`, `offerEndpoint` and `engineEndpoint`, `readOffer`, and the types `StudioOffer`, `StudioInstalled`, `StudioWorldList`, `StudioWorldEntry`, `StudioWorldRead`, `StudioChats` and `StudioChatSummary`.
 
 ## File formats
 
@@ -105,13 +105,40 @@ if (loaded.ok) {
 
 ## Lumiverse discovery
 
-While LumiRPEngine runs, its frontend dispatches a `lre-state-v1` window event (a `CustomEvent`) when it loads and again whenever the set of packs in play changes. Its `detail` is what `studioState` returns:
+While LumiRPEngine runs, its frontend dispatches a `lre-state-v1` window event (a `CustomEvent`) when it loads, again whenever the set of packs in play changes, and again whenever it sees a `lre-state-request-v1` window event, so a studio whose frontend loaded later asks for it. Its `detail` is what `studioState` returns, with the packs of the open chat's world:
 
 ```json
-{ "engineVersion": "0.1.0", "worldFormat": "lre-world-v1", "packs": { "engine": 1, "calendar": 1, "…": 1 }, "inbound": ["file"] }
+{ "engineVersion": "0.1.0", "worldFormat": "lre-world-v1", "packs": { "engine": 1, "calendar": 1, "…": 1 }, "inbound": ["file", "rpc:lumi_rp_engine_studio.offer"] }
 ```
 
-`inbound` lists the ways a world can come in. Today that is `file`: the player imports an export file in Build, which makes a new world. A studio-published endpoint (`rpc:<endpoint>`) is not built yet.
+`inbound` lists the ways a world can come in: `file`, an export file the player imports in Build, which makes a new world; and `rpc:lumi_rp_engine_studio.offer`, the Studio bridge below.
+
+## The Studio bridge
+
+[LumiRPEngine Studio](https://github.com/TheLiquorPriest/LumiRPEngineStudio) (`lumi_rp_engine_studio`) is a Lumiverse extension whose assistant builds worlds and converts chats and lore into them. It hands them over through Lumiverse's shared RPC pool. A read there carries no request and no user, so nothing on the bridge is a command: each side publishes endpoints per user and the other pulls, and a world installs only when the player confirms it in LumiRPEngine.
+
+**Channels.** An endpoint is `<extension>.<channel>`, and a channel segment takes only `[a-z0-9_-]`. User and world ids are mixed case, so a channel names one by `channelId(id)`, its UTF-8 bytes in lowercase hex (`channelId("AbC")` is `"416243"`). A revision id, 32 hex digits, is a segment as it is.
+
+**What the engine publishes.** A user's endpoints exist from the first request their LumiRPEngine frontend makes, and a world's from when it's created; a deleted world's go with it. Each answers `lumi_rp_engine_studio` and refuses any other reader. The read policy names the permissions the host requires of both sides.
+
+| Endpoint | Read policy | Value |
+|---|---|---|
+| `lumi_rp_engine.studio-worlds.<user>` | none | `StudioWorldList`: `{v: 1, worlds: [{id, name, head, revisions, revisionCount}]}`, with each world's newest 32 revisions |
+| `lumi_rp_engine.studio-world.<user>.<world>` | none | `StudioWorldRead`: `{v: 1, worldId, name, head, revision, world}`, the head as it is when read |
+| `lumi_rp_engine.studio-world.<user>.<world>.<revision>` | none | The same, for that revision |
+| `lumi_rp_engine.studio-chats.<user>` | `chats` | `StudioChats`: `{v: 1, chats: [StudioChatSummary]}` |
+
+A chat summary is built from the state the engine last pushed to that chat's view, so it says only what the player sees: the world and its revision (and `definitionsFrom` when an Upgrade left the chat's definitions behind), the POV's place, the clock, the cash as the HUD shows it, the people present and the open quests. It covers the world chats LumiRPEngine has shown since it started, the 24 most recent, newest first. The world document holds the rest.
+
+**What the Studio publishes.** `lumi_rp_engine_studio.offer.<user>`, which answers the engine only: the user's pending offer, `StudioOffer` = `{offerId, doc, mode, worldId?, attachChatId?, createdAt}`, or `null` when nothing waits. `mode` is `new` (a new world) or `revision` (the next revision of the user's world `worldId`), and `attachChatId` names a chat to attach it to. `readOffer` checks the shape; the document itself is checked in the review.
+
+**Installing.**
+
+1. The Studio stores the offer, and its frontend dispatches a `lre-studio-offer-v1` window event with `{offerId}`. LumiRPEngine's frontend opens Build's world list, which reads the offer; **Import from Studio** there reads it too.
+2. Build reviews it: its name and what it would become, its items per collection, the engine's lint with errors first, the macros in its lore and templates, and what keeps it from installing (errors, a revision of a world the user doesn't have, or Build's unsaved draft of that world). Nothing is written.
+3. **Install** installs the offer reviewed, named by its `offerId`, so anything the Studio offered since is reviewed first. A new world goes in as an import does: a new id, and its macros listed for review before anyone plays it. A revision is committed onto its world under the world's own id; the world's chats stay on their revisions until the player Upgrades them in **Settings → Pins and upgrade**. An offer installs once (`userStorage/studio/installed.json`).
+4. With `attachChatId`, when that chat is the open one and plays no world yet, Build offers Play's **Attach**, with its confirmation: the world starts at its current revision from the chat's current message.
+5. The frontend dispatches a `lre-studio-installed-v1` window event with `StudioInstalled`, `{offerId, mode, worldId, revision}`, so the Studio knows what its offer became.
 
 ## Examples
 

@@ -35,6 +35,8 @@ export interface UiState {
   mapInDrawer: boolean;
   /** The float overlay that is open; one at a time. */
   overlay: "map" | "palette" | null;
+  /** Bumped each time LumiRPEngine Studio says an offer is waiting (DESIGN §15), so Build reviews it. */
+  studioOffer: number;
 }
 
 export type PaletteTab = "actions" | "combat" | "buy" | "pay" | "transfer" | "drive" | "lend" | "timelapse";
