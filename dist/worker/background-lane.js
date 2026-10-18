@@ -1167,6 +1167,48 @@ var EXTRACTION_LEARNING = Object.freeze({
   demoteUndoRate: 0.1
 });
 
+// src/shared/classes.ts
+var NESTING_DEPTH = 16;
+function withinValue(values, value, ancestor) {
+  let current = value;
+  for (let depth = 0;current !== undefined && depth < NESTING_DEPTH; depth++) {
+    if (current === ancestor)
+      return true;
+    current = hasOwn(values, current) ? values[current]?.parent : undefined;
+  }
+  return false;
+}
+function facetsInOrder(world) {
+  if (!isRecord(world.classifications))
+    return [];
+  const rank = (f) => typeof f.order === "number" && Number.isFinite(f.order) ? f.order : Number.MAX_SAFE_INTEGER;
+  const name = (id, f) => typeof f.label === "string" ? f.label : id;
+  return Object.entries(world.classifications).filter(([, f]) => isRecord(f) && isRecord(f.values)).sort(([a, fa], [b, fb]) => rank(fa) - rank(fb) || name(a, fa).localeCompare(name(b, fb)) || a.localeCompare(b));
+}
+function facetTree(values) {
+  const ids = Object.keys(values);
+  const out = [];
+  const seen = new Set;
+  const visit = (id, depth) => {
+    const value = values[id];
+    if (!value || seen.has(id))
+      return;
+    seen.add(id);
+    out.push({ id, value, depth });
+    for (const child of ids)
+      if (values[child]?.parent === id)
+        visit(child, depth + 1);
+  };
+  for (const id of ids) {
+    const parent = values[id]?.parent;
+    if (parent === undefined || !hasOwn(values, parent))
+      visit(id, 0);
+  }
+  for (const id of ids)
+    visit(id, 0);
+  return out;
+}
+
 // src/shared/hash.ts
 var C1 = 597399067;
 var C2 = 2869860233;
@@ -3187,48 +3229,6 @@ function evalArgs(args, env, bindings) {
   return out;
 }
 
-// src/shared/classes.ts
-var NESTING_DEPTH = 16;
-function withinValue(values, value, ancestor) {
-  let current = value;
-  for (let depth = 0;current !== undefined && depth < NESTING_DEPTH; depth++) {
-    if (current === ancestor)
-      return true;
-    current = hasOwn(values, current) ? values[current]?.parent : undefined;
-  }
-  return false;
-}
-function facetsInOrder(world) {
-  if (!isRecord(world.classifications))
-    return [];
-  const rank = (f) => typeof f.order === "number" && Number.isFinite(f.order) ? f.order : Number.MAX_SAFE_INTEGER;
-  const name = (id, f) => typeof f.label === "string" ? f.label : id;
-  return Object.entries(world.classifications).filter(([, f]) => isRecord(f) && isRecord(f.values)).sort(([a, fa], [b, fb]) => rank(fa) - rank(fb) || name(a, fa).localeCompare(name(b, fb)) || a.localeCompare(b));
-}
-function facetTree(values) {
-  const ids = Object.keys(values);
-  const out = [];
-  const seen = new Set;
-  const visit = (id, depth) => {
-    const value = values[id];
-    if (!value || seen.has(id))
-      return;
-    seen.add(id);
-    out.push({ id, value, depth });
-    for (const child of ids)
-      if (values[child]?.parent === id)
-        visit(child, depth + 1);
-  };
-  for (const id of ids) {
-    const parent = values[id]?.parent;
-    if (parent === undefined || !hasOwn(values, parent))
-      visit(id, 0);
-  }
-  for (const id of ids)
-    visit(id, 0);
-  return out;
-}
-
 // src/engine/selector.ts
 var MEMBER_OF = "member_of";
 var GROUP_KIND = "group";
@@ -3281,11 +3281,11 @@ function isGroup(reg, world, state, id) {
   return !!e && kindIs(reg, world, e.kind, GROUP_KIND);
 }
 function membersOf(reg, world, state, group) {
-  return Object.keys(state.entities).sort().filter((id) => id !== group && !isGroup(reg, world, state, id) && isMemberOf(state, id, group));
+  return Object.keys(state.entities).sort().filter((id) => id !== group && !isGroup(reg, world, state, id) && !isGone(state, id) && isMemberOf(state, id, group));
 }
 function selectorMatches(reg, world, state, selector, id) {
   const entity = hasOwn(state.entities, id) ? state.entities[id] : undefined;
-  if (!entity)
+  if (!entity || isGone(state, id))
     return false;
   if (selector.ids && !selector.ids.includes(id))
     return false;
@@ -3939,6 +3939,7 @@ var ENGINE_EVENTS = {
   pause: "engine.pause",
   check: "engine.check",
   entity: "engine.entity",
+  classes: "engine.class",
   observed: "engine.observed",
   adjudged: "engine.adjudged"
 };
@@ -3968,7 +3969,7 @@ function readEngineSlice(state) {
   const tries = {};
   for (const [k, v] of Object.entries(rec(s.tries))) {
     if (isRecord(v) && typeof v.at === "number" && (typeof v.place === "string" || v.place === null) && typeof v.outcome === "string" && typeof v.failed === "boolean" && typeof v.odds === "string")
-      tries[k] = { at: v.at, place: v.place, outcome: v.outcome, failed: v.failed, odds: v.odds };
+      tries[k] = { at: v.at, place: v.place, outcome: v.outcome, failed: v.failed, odds: v.odds, ...typeof v.round === "string" ? { round: v.round } : {} };
   }
   return {
     fired,
@@ -3998,6 +3999,12 @@ function sub(state, key) {
 function str2(e, key) {
   const v = e.data[key];
   return typeof v === "string" ? v : "";
+}
+function tagList(v) {
+  if (!Array.isArray(v))
+    return null;
+  const tags = v.filter((t) => typeof t === "string" && t.trim() !== "");
+  return tags.length === v.length ? tags : null;
 }
 function need(e, ...keys) {
   for (const k of keys)
@@ -4163,6 +4170,52 @@ var events = [
     }
   },
   {
+    type: ENGINE_EVENTS.classes,
+    validate: (e, ctx) => {
+      const ent = own(ctx.state.entities, str2(e, "entity"));
+      if (!ent)
+        return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
+      const classes = classOf(e.data.class);
+      if (!classes)
+        return { code: "bad_event", reason: "a classification is facet \u2192 values" };
+      const problem = classProblems(ctx.world, classes, ent.name)[0];
+      if (problem)
+        return { code: problem.code, reason: problem.message };
+      if (e.data.was !== undefined && !classOf(e.data.was))
+        return { code: "bad_event", reason: "the classification before is facet \u2192 values" };
+      return tagList(e.data.tags) ? null : { code: "bad_event", reason: "tags are a list of words" };
+    },
+    apply: (e, state) => {
+      const ent = own(state.entities, str2(e, "entity"));
+      if (!ent)
+        return;
+      ent.class = classOf(e.data.class) ?? {};
+      ent.tags = tagList(e.data.tags) ?? [];
+    },
+    touches: (e) => [{ entity: str2(e, "entity"), aspect: "class" }],
+    describe: (e, ctx, viewer) => {
+      const classes = classOf(e.data.class) ?? {};
+      const name = own(ctx.state.entities, str2(e, "entity"))?.name ?? str2(e, "entity");
+      const valuesOf = (f, values) => values.length > 0 ? values.map((v) => own(f.values, v)?.label ?? v).join(", ") : "none";
+      if (viewer !== undefined) {
+        const was = classOf(e.data.was);
+        if (!was)
+          return "";
+        const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+        const changed = facetsInOrder(ctx.world).filter(([id, f]) => f.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? [])).map(([id, f]) => `${f.label} ${valuesOf(f, own(classes, id) ?? [])}`);
+        return changed.length > 0 ? `${name}: ${changed.join("; ")}` : "";
+      }
+      const parts = facetsInOrder(ctx.world).flatMap(([id, f]) => {
+        const values = own(classes, id) ?? [];
+        return values.length > 0 ? [`${f.label} ${valuesOf(f, values)}`] : [];
+      });
+      const tags = tagList(e.data.tags) ?? [];
+      if (tags.length > 0)
+        parts.push(`tags ${tags.join(", ")}`);
+      return parts.length > 0 ? `${name}: ${parts.join("; ")}` : `${name}: no classification or tags`;
+    }
+  },
+  {
     type: ENGINE_EVENTS.observed,
     validate: (e) => Object.values(e.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" },
     apply: (e, state) => restoreObservations(state, e.data),
@@ -4175,8 +4228,8 @@ var events = [
       const key = e.data.key;
       if (typeof key !== "string" || !safeKey(key))
         return;
-      const place = e.data.place;
-      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds") };
+      const { place, round } = e.data;
+      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds"), ...typeof round === "string" ? { round } : {} };
     },
     describe: (e) => `${str2(e, "actor")}: ${str2(e, "action").replace(/_/g, " ")}, ${str2(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str2(e, "why")})`}`
   }
@@ -5932,8 +5985,11 @@ var PARENT_DEPTH2 = 32;
 function policyOf(world, state) {
   return state.adjudication ?? readAdjudication(world.ruleset?.adjudication) ?? defaultAdjudication();
 }
-function policyFor(world, state, action) {
-  return action.combat !== undefined && world.ruleset?.combat?.adjudicate !== "policy" ? defaultAdjudication() : policyOf(world, state);
+function policyFor(world, state, action, actor) {
+  return action.combat !== undefined && (actor !== world.pov || world.ruleset?.combat?.adjudicate !== "policy") ? defaultAdjudication() : policyOf(world, state);
+}
+function fightRound(ctx) {
+  return optionalQuery(ctx, "combat.round_key")?.(ctx) ?? null;
 }
 function passOutcomes(check, bands) {
   if (Array.isArray(check.pass) && check.pass.length > 0)
@@ -5992,7 +6048,7 @@ function markedFor(registry, world, state, action, actor) {
   }
   return false;
 }
-function changedSince(policy, world, state, actor, ready, prior) {
+function changedSince(policy, registry, world, state, actor, ready, prior) {
   const here = placeOfEntity(state, actor);
   if (here !== prior.place)
     return true;
@@ -6000,6 +6056,8 @@ function changedSince(policy, world, state, actor, ready, prior) {
     return true;
   if (policy.retry === "once")
     return false;
+  if (prior.round !== undefined && fightRound(registry.context(world, state)) !== prior.round)
+    return true;
   return state.clock - prior.at >= policy.retryAfter || oddsSignature(ready) !== prior.odds;
 }
 function verdictOf(policy, input) {
@@ -6009,7 +6067,7 @@ function verdictOf(policy, input) {
   const unrolled = (why, outcome, prior = null) => ({ roll: false, why, outcome, chance, pass, prior });
   if (policy.retry !== "free" && pass.length > 0) {
     const prior = own(readEngineSlice(state).tries, tryKey(actor, action.id, input.params));
-    if (prior?.failed && !changedSince(policy, world, state, actor, ready, prior))
+    if (prior?.failed && !changedSince(policy, registry, world, state, actor, ready, prior))
       return unrolled("retry", prior.outcome, prior);
   }
   if (chance !== null && policy.impossibleAt !== null && chance <= policy.impossibleAt)
@@ -6469,10 +6527,8 @@ function lintRuleset(world, reg) {
       err("ruleset.combat.adjudicate", "combat", "A fight's checks are settled by the dice, or by the adjudication policy (policy).");
     if (combat.adjudicate === "policy") {
       const policy = readAdjudication(isRecord(world.ruleset) ? world.ruleset.adjudication : undefined) ?? defaultAdjudication();
-      if (policy.authority === "narrative")
-        warn("ruleset.combat.adjudicate", "combat", "Fights follow the policy, and under narrative authority only your own attacks get the judge: everyone else's are settled without one.");
-      if (policy.retry !== "free")
-        warn("ruleset.combat.adjudicate", "combat", `Fights follow the policy, and its retry rule refuses the same attack after a miss until ${policy.retry === "once" ? "a new scene" : "something changes"}: a missed attack can't simply be tried again next round.`);
+      if (policy.retry === "once")
+        warn("ruleset.combat.adjudicate", "combat", "Fights follow the policy, and its retry rule refuses the same attack after a miss until a new scene: a missed attack can't be tried again in the same fight.");
     }
     if (combat.showHp !== undefined && combat.showHp !== "wounds" && combat.showHp !== "exact")
       err("ruleset.combat.showHp", "combat", "Others' HP shows as wounds or as exact numbers.");
@@ -6682,14 +6738,14 @@ function ownerRank(reg, world, state, schedule) {
 function scheduleOwners(reg, world, state, schedule) {
   const owner = schedule.owner;
   if (isRecord(owner))
-    return selectEntities(reg, world, state, owner).filter((id) => !isGone(state, id));
+    return selectEntities(reg, world, state, owner);
   if (typeof owner !== "string" || owner === "")
     return [];
   const e = own(state.entities, owner);
   if (e) {
-    if (kindIs(reg, world, e.kind, GROUP_KIND))
-      return membersOf(reg, world, state, owner).filter((id) => !isGone(state, id));
-    return isGone(state, owner) ? [] : [owner];
+    if (isGone(state, owner))
+      return [];
+    return kindIs(reg, world, e.kind, GROUP_KIND) ? membersOf(reg, world, state, owner) : [owner];
   }
   return Object.keys(state.entities).sort().filter((id) => {
     const x = own(state.entities, id);
@@ -8125,7 +8181,7 @@ function actionOdds(reg, world, state, req) {
     modifier: usable?.modifier ?? 0,
     check: usable ? { notation: usable.notation, advantage: usable.advantage, dc: usable.dc, opponent: usable.opponent } : null,
     duration: Math.max(0, Math.round(Number(evalExpr(p.action.duration, env, 0)) || 0)),
-    verdict: usable && odds ? verdictOf(policyFor(world, state, p.action), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null
+    verdict: usable && odds ? verdictOf(policyFor(world, state, p.action, p.actor), { registry: reg, world, state, action: p.action, actor: p.actor, params: p.params, ready: usable, odds }) : null
   };
 }
 function resolveAction(reg, w, req, rng, opts = {}) {
@@ -8177,7 +8233,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
   let adjudged = null;
   if (checkDef && ready) {
     const odds = checkOdds(ready);
-    const policy = policyFor(w.world, w.state, p.action);
+    const policy = policyFor(w.world, w.state, p.action, p.actor);
     const verdict = verdictOf(policy, { registry: reg, world: w.world, state: w.state, action: p.action, actor: p.actor, params: p.params, ready, odds });
     const judgement = opts.judgement ?? null;
     const place = placeOfEntity(w.state, p.actor);
@@ -8203,6 +8259,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
       const approach = judgement && (policy.authority === "narrative" ? why === "story" : verdict.roll && policy.description.weight !== "none") ? { rating: ratingOf(policy, judgement), max: policy.description.max, reason: judgement.reason } : null;
       adjudged = { rolled: rolls, why, chance: verdict.chance, pass: verdict.pass, authority: policy.authority, retry: policy.retry, approach, close };
       const tracked = policy.retry !== "free" && verdict.pass.length > 0 && verdict.why !== "retry";
+      const round = tracked ? fightRound(w.ctx) : null;
       w.apply({
         type: ENGINE_EVENTS.adjudged,
         data: {
@@ -8214,7 +8271,7 @@ function resolveAction(reg, w, req, rng, opts = {}) {
           ...why ? { why } : {},
           ...approach ? { rating: approach.rating, max: approach.max, reason: approach.reason.slice(0, 240) } : {},
           ...close ? { close: close.outcome } : {},
-          ...tracked ? { key: tryKey(p.actor, p.action.id, p.params), place, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready) } : {}
+          ...tracked ? { key: tryKey(p.actor, p.action.id, p.params), place, failed: !verdict.pass.includes(outcome), odds: oddsSignature(ready), ...round !== null ? { round } : {} } : {}
         }
       });
     }
@@ -9944,6 +10001,8 @@ function stepEvents(ctx, entity, to) {
   const e = own(ctx.state.entities, entity);
   if (!e)
     return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
+  if (isGone(ctx.state, entity))
+    return { code: "gone", reason: `${labelOf(ctx, entity)} has been removed` };
   const here = placeOfEntity(ctx.state, entity);
   const stand = standingGrid(ctx.world, here);
   const index = stand ? cellIndex(stand.grid, to) : null;
@@ -10009,7 +10068,7 @@ function entered(ctx, on, e) {
     return false;
   const at = spotData(e.data.at);
   const entity = strOf(e.data.entity);
-  if (!at || on.in !== undefined && on.in !== at.scope)
+  if (!at || on.in !== undefined && on.in !== at.scope || isGone(ctx.state, entity))
     return false;
   const who = on.who === undefined ? null : knownBySelector(on.who);
   if (on.who === undefined ? entity !== ctx.world.pov : who === null || !selectorMatches(ctx.registry, ctx.world, ctx.state, who, entity))
@@ -13980,7 +14039,7 @@ var VEHICLE = {
   extends: "container",
   pack: "vehicles",
   fields: {
-    class: { type: "text", label: "Class" },
+    class: { type: "text", label: "Vehicle class" },
     status: { type: "enum", label: "Status", values: ["ok", "needs_service", "broken"], default: "ok", domain: "vehicles", level: 1, bound: { mode: "confirm" } },
     fuel_pct: { type: "number", label: "Fuel %", min: 0, max: 100, domain: "vehicles", level: 2, bound: { mode: "auto", maxDelta: 30 } },
     odometer_mi: { type: "number", label: "Odometer (mi)", min: 0, domain: "vehicles", level: 3, locked: true },
@@ -16626,7 +16685,7 @@ function optionOf(ctx, action, params, label) {
   return {
     label,
     params,
-    ...checkView(odds, policyFor(ctx.world, ctx.state, action).retry),
+    ...checkView(odds, policyFor(ctx.world, ctx.state, action, ctx.world.pov).retry),
     ...odds.duration > 0 ? { minutes: odds.duration } : {},
     ...odds.available ? {} : { disabled: odds.failed?.code === "requirement" ? "Not possible here and now" : odds.failed?.reason ?? "Not available" }
   };
@@ -17015,6 +17074,10 @@ var combatPack = {
     r.query("combat.hp_line", hpLine);
     r.query("combat.engaged", (ctx, id) => engaged(ctx.state, ctx.world, id));
     r.query("combat.offers", (ctx, action) => fightOffers(ctx.world, ctx.state, action));
+    r.query("combat.round_key", (ctx) => {
+      const enc = encounterOf(ctx.state);
+      return enc ? `${enc.id}:${enc.round}` : null;
+    });
     r.relation({ id: "hostile", label: "Hostile to", from: "*", to: "*", cardinality: "many_many", symmetric: true, fields: {}, pack: PACK3 });
     r.formula("can_fight", (ctx, e) => {
       const rules = rulesOf(ctx.world);

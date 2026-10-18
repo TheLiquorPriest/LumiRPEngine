@@ -1475,11 +1475,15 @@ function obj(value) {
 
 // src/frontend/build/check.tsx
 var COLLECTIONS = ["kinds", "relations", "entities", "places", "maps", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "packs", "lore", "classifications"];
-var PARTS = ["calendar", "realism", "time", "ruleset", "loreIndex"];
+var PARTS = ["calendar", "realism", "tiers", "time", "ruleset", "loreIndex"];
 function issueTarget(path) {
   const [head, id] = path.split(".");
   const collection = COLLECTIONS.find((c) => c === head);
   return collection && id ? { collection, id } : null;
+}
+function issuePart(path) {
+  const head = path.split(".")[0];
+  return head === "spawnTier" ? "tiers" : PARTS.find((p) => p === head) ?? null;
 }
 function CheckView(props) {
   const app = useApp();
@@ -1534,7 +1538,7 @@ function CheckView(props) {
           /* @__PURE__ */ u3(Card, {
             children: shown.map((issue, i) => {
               const target = issueTarget(issue.path);
-              const part = target ? undefined : PARTS.find((p) => p === issue.path.split(".")[0]);
+              const part = issuePart(issue.path);
               return /* @__PURE__ */ u3("div", {
                 class: "lre-lint",
                 children: [
@@ -2562,6 +2566,12 @@ function entityStateOp(entity, tier, agent, levels) {
   if (tier === entity.tier && agent === entity.agent && !levelsChanged)
     return null;
   return { op: "entity", entity: entity.id, ...tier !== entity.tier ? { tier } : {}, ...agent !== entity.agent ? { agent } : {}, ...levelsChanged ? { levels: changed } : {} };
+}
+function classifyOp(entity, classes, tags) {
+  const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+  const facets = new Set([...Object.keys(classes), ...Object.keys(entity.class)]);
+  const unchanged = [...facets].every((f) => same(classes[f] ?? [], entity.class[f] ?? [])) && same(tags, entity.tags);
+  return unchanged ? null : { op: "classify", entity: entity.id, class: Object.fromEntries(Object.entries(classes).filter(([, v]) => v.length > 0)), tags: [...tags] };
 }
 function relationFields(defs, inputs, held = {}) {
   const fields = Object.fromEntries(Object.entries(held).filter(([id]) => !defs.some((d) => d.id === id)));
@@ -9502,7 +9512,7 @@ function policyLines(p) {
   };
   const retry = {
     free: "Retry a failed check whenever you like.",
-    changed: `A failed try stands until something changes: another way, better odds, a new place, or ${p.retryAfter} minutes.`,
+    changed: `A failed try stands until something changes: another way, better odds, a new place, a new round of a fight (or its end), or ${p.retryAfter} minutes.`,
     once: "A failed try stands until the scene changes."
   };
   return [
@@ -9683,7 +9693,7 @@ function AdjudicationForm(props) {
           }, undefined, false, undefined, this) : null,
           /* @__PURE__ */ u3(Choice, {
             label: "Retrying a failed check",
-            help: "After a change: the same try fails again until time passes, the odds change, the player tries another way or goes somewhere else. Once per scene: until they leave and come back.",
+            help: "After a change: the same try fails again until time passes, a fight moves to a new round or ends, the odds change, the player tries another way or goes somewhere else. Once per scene: until they leave and come back.",
             value: p.retry,
             labels: RETRY,
             disabled: props.disabled,
@@ -10594,10 +10604,10 @@ var COMBAT = {
     { kind: "object", key: "sides", label: "Sides", optional: true, fields: [{ kind: "expr", key: "hostile", label: "Hostile, with self and other (default: a hostile relation)", optional: true }, { kind: "expr", key: "ally", label: "Fights beside, with self and other", optional: true }] },
     { kind: "expr", key: "end", label: "Over when (default: one side has no one standing)", optional: true },
     { kind: "number", key: "stalemate", label: "Peters out after this many rounds in a row with no attack and no one hurt (default 3; 0: never)", min: 0, step: 1, optional: true },
-    { kind: "enum", key: "endTurn", label: "The player's turn ends", values: ["spent", "manual"], optional: true },
-    { kind: "enum", key: "adjudicate", label: "Attacks and other fight checks are settled by (dice: always rolled; policy: the adjudication policy)", values: ["dice", "policy"], optional: true },
+    { kind: "enum", key: "endTurn", label: "The player's turn ends (default: once it's spent; manual: only on End turn)", values: ["spent", "manual"], optional: true },
+    { kind: "enum", key: "adjudicate", label: "Attacks and other fight checks are settled by (default: dice, always rolled; policy: the adjudication policy for the player's own, while everyone else's always roll)", values: ["dice", "policy"], optional: true },
     { kind: "object", key: "tactics", label: "Everyone else's tactics", optional: true, fields: [{ kind: "expr", key: "threat", label: "A target's threat, with self and target (default its HP)", optional: true }, { kind: "expr", key: "lowHp", label: "Defends when (default a quarter of its HP or less)", optional: true }] },
-    { kind: "enum", key: "showHp", label: "Others' HP shows as", values: ["wounds", "exact"], optional: true },
+    { kind: "enum", key: "showHp", label: "Others' HP shows as (default: wounds, a band with no number; exact: the numbers)", values: ["wounds", "exact"], optional: true },
     { kind: "json", key: "wounds", label: "Wound bands over the HP left in percent", optional: true, hint: '[{"label": "hurt", "min": 50, "max": 100}, …]' }
   ]
 };
@@ -15616,6 +15626,51 @@ var MATH = {
 };
 var MATH_FUNCTIONS = Object.keys(MATH);
 
+// src/engine/selector.ts
+function stringsIn(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : null;
+}
+function classProblems(world, value, who) {
+  if (value === undefined)
+    return [];
+  if (!isRecord(value))
+    return [{ code: "unknown_facet", message: `${who}'s classification isn't a facet → values map.` }];
+  const out = [];
+  for (const [facet, raw] of Object.entries(value)) {
+    const def = hasOwn(world.classifications, facet) ? world.classifications[facet] : undefined;
+    if (!def) {
+      out.push({ code: "unknown_facet", message: `${who} is classed under "${facet}", which isn't one of the world's classifications.` });
+      continue;
+    }
+    const values = stringsIn(raw);
+    if (values === null || values.length !== (Array.isArray(raw) ? raw.length : -1)) {
+      out.push({ code: "unknown_class", message: `${who}'s ${def.label} isn't a list of values.` });
+      continue;
+    }
+    for (const v of values)
+      if (!hasOwn(def.values, v))
+        out.push({ code: "unknown_class", message: `${who} is classed as "${v}", which isn't a value of ${def.label}.` });
+    if (!def.multiple && values.length > 1)
+      out.push({ code: "single_class", message: `${who} holds ${values.length} ${def.label} values; ${def.label} takes one.` });
+  }
+  return out;
+}
+function classOf(value) {
+  if (!isRecord(value))
+    return null;
+  const out = {};
+  for (const [facet, raw] of Object.entries(value)) {
+    if (!safeKey(facet))
+      return null;
+    const values = typeof raw === "string" ? [raw] : stringsIn(raw);
+    if (values === null)
+      return null;
+    if (values.length > 0)
+      out[facet] = [...new Set(values)];
+  }
+  return out;
+}
+
 // src/engine/seen.ts
 var PACK = "space";
 var SLICE = "seen";
@@ -15662,6 +15717,7 @@ var ENGINE_EVENTS = {
   pause: "engine.pause",
   check: "engine.check",
   entity: "engine.entity",
+  classes: "engine.class",
   observed: "engine.observed",
   adjudged: "engine.adjudged"
 };
@@ -15682,6 +15738,12 @@ function sub(state, key) {
 function str2(e, key) {
   const v = e.data[key];
   return typeof v === "string" ? v : "";
+}
+function tagList(v) {
+  if (!Array.isArray(v))
+    return null;
+  const tags = v.filter((t) => typeof t === "string" && t.trim() !== "");
+  return tags.length === v.length ? tags : null;
 }
 function need(e, ...keys) {
   for (const k of keys)
@@ -15847,6 +15909,52 @@ var events = [
     }
   },
   {
+    type: ENGINE_EVENTS.classes,
+    validate: (e, ctx) => {
+      const ent = own(ctx.state.entities, str2(e, "entity"));
+      if (!ent)
+        return { code: "missing_entity", reason: `no entity ${str2(e, "entity")}` };
+      const classes = classOf(e.data.class);
+      if (!classes)
+        return { code: "bad_event", reason: "a classification is facet → values" };
+      const problem = classProblems(ctx.world, classes, ent.name)[0];
+      if (problem)
+        return { code: problem.code, reason: problem.message };
+      if (e.data.was !== undefined && !classOf(e.data.was))
+        return { code: "bad_event", reason: "the classification before is facet → values" };
+      return tagList(e.data.tags) ? null : { code: "bad_event", reason: "tags are a list of words" };
+    },
+    apply: (e, state) => {
+      const ent = own(state.entities, str2(e, "entity"));
+      if (!ent)
+        return;
+      ent.class = classOf(e.data.class) ?? {};
+      ent.tags = tagList(e.data.tags) ?? [];
+    },
+    touches: (e) => [{ entity: str2(e, "entity"), aspect: "class" }],
+    describe: (e, ctx, viewer) => {
+      const classes = classOf(e.data.class) ?? {};
+      const name = own(ctx.state.entities, str2(e, "entity"))?.name ?? str2(e, "entity");
+      const valuesOf = (f, values) => values.length > 0 ? values.map((v) => own(f.values, v)?.label ?? v).join(", ") : "none";
+      if (viewer !== undefined) {
+        const was = classOf(e.data.was);
+        if (!was)
+          return "";
+        const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+        const changed = facetsInOrder(ctx.world).filter(([id, f]) => f.shown === true && !same(own(classes, id) ?? [], own(was, id) ?? [])).map(([id, f]) => `${f.label} ${valuesOf(f, own(classes, id) ?? [])}`);
+        return changed.length > 0 ? `${name}: ${changed.join("; ")}` : "";
+      }
+      const parts = facetsInOrder(ctx.world).flatMap(([id, f]) => {
+        const values = own(classes, id) ?? [];
+        return values.length > 0 ? [`${f.label} ${valuesOf(f, values)}`] : [];
+      });
+      const tags = tagList(e.data.tags) ?? [];
+      if (tags.length > 0)
+        parts.push(`tags ${tags.join(", ")}`);
+      return parts.length > 0 ? `${name}: ${parts.join("; ")}` : `${name}: no classification or tags`;
+    }
+  },
+  {
     type: ENGINE_EVENTS.observed,
     validate: (e) => Object.values(e.data).every(isRecord) ? null : { code: "bad_event", reason: "observed needs places and people" },
     apply: (e, state) => restoreObservations(state, e.data),
@@ -15859,8 +15967,8 @@ var events = [
       const key = e.data.key;
       if (typeof key !== "string" || !safeKey(key))
         return;
-      const place = e.data.place;
-      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds") };
+      const { place, round } = e.data;
+      sub(state, "tries")[key] = { at: state.clock, place: typeof place === "string" ? place : null, outcome: str2(e, "outcome"), failed: e.data.failed === true, odds: str2(e, "odds"), ...typeof round === "string" ? { round } : {} };
     },
     describe: (e) => `${str2(e, "actor")}: ${str2(e, "action").replace(/_/g, " ")}, ${str2(e, "outcome").replace(/_/g, " ")}${e.data.rolled === true ? "" : ` (no roll: ${str2(e, "why")})`}`
   }
@@ -19504,6 +19612,37 @@ function EntityState(props) {
     ]
   }, undefined, true, undefined, this);
 }
+function Classification(props) {
+  const { entity, editor } = props;
+  const [classes, setClasses] = d2(entity.class);
+  const [tags, setTags] = d2(entity.tags);
+  const op = classifyOp(entity, classes, tags);
+  const suggestions = [...new Set(editor.gm.entities.flatMap((e) => e.tags))].sort((a, b) => a.localeCompare(b));
+  return /* @__PURE__ */ u3(Card, {
+    title: "Classification",
+    children: [
+      /* @__PURE__ */ u3(ClassesInput, {
+        label: "Classes",
+        value: classes,
+        doc: editor.gm,
+        onChange: (next) => setClasses(next ?? {})
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TagListInput, {
+        label: "Tags",
+        value: tags,
+        suggestions,
+        onChange: setTags
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn primary",
+        disabled: editor.busy || op === null,
+        onClick: () => op && void editor.edit([op]),
+        children: "Save"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function relationDetail(r, gm) {
   const defs = gm.relationTypes.find((t) => t.id === r.type)?.fields ?? [];
   const parts = Object.entries(r.fields ?? {}).map(([id, v]) => `${defs.find((d) => d.id === id)?.label ?? id} ${typeof v === "string" ? v : JSON.stringify(v)}`);
@@ -19826,7 +19965,11 @@ function EntityEditor(props) {
       /* @__PURE__ */ u3(EntityState, {
         entity,
         editor
-      }, `${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`, false, undefined, this)
+      }, `${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`, false, undefined, this),
+      /* @__PURE__ */ u3(Classification, {
+        entity,
+        editor
+      }, JSON.stringify([entity.class, entity.tags]), false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
@@ -20175,7 +20318,7 @@ function Body(props) {
         type: "button",
         class: "lre-btn ghost",
         onClick: () => app.ui.update((ui) => ({ ...ui, section: "build" })),
-        children: "Kinds, classifications, tags and places are the world's: edit them in Build"
+        children: "Kinds and places are the world's: edit them in Build"
       }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
