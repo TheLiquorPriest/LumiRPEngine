@@ -77,7 +77,7 @@ export function LoreList(props: { worldId: string }) {
   return (
     <div class="lre-stack" data-lre-lore-list>
       <div class="lre-h2">Lore</div>
-      <span class="lre-small lre-muted">Kept in the world. The engine's helpers read it; the narrator doesn't get it yet.</span>
+      <span class="lre-small lre-muted">Kept in the world. The engine's helpers read it. The narrator gets no lore section, but the brief and the prose outline draw on public entries in what they write for its Outline.</span>
       <div class="lre-list">
         <button type="button" class="lre-item" onClick={() => go(app, { view: "part", worldId: draft.worldId, part: "loreIndex" })}>
           <span class="grow">

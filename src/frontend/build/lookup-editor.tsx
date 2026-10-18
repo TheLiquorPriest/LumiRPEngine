@@ -246,7 +246,7 @@ export function LookupTableEditor(props: { doc: WorldDoc; lint: readonly LintIss
   return (
     <div class="lre-stack" data-lre-editor="part:loreIndex">
       <div class="lre-h2">Lore lookup table</div>
-      <span class="lre-small lre-muted">Terms lead the engine's lore lookups to entries; topics are its table of contents. Like the entries, it isn't sent to the narrator.</span>
+      <span class="lre-small lre-muted">Terms lead the engine's lore lookups to entries; topics are its table of contents. It steers the helpers' searches, including the brief's and the outline's, which draw on public entries for the narrator's Outline.</span>
       <Seg<"terms" | "topics">
         label="Show"
         value={tab}
