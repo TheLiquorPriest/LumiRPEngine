@@ -37,9 +37,15 @@ export interface LogEntry {
   outcome: string | null;
 }
 
+/** A run of rounds in which no one's HP changed: HP as it stood when it began, and how many whole rounds it has lasted. */
+export interface Calm {
+  hp: Record<EntityId, number>;
+  rounds: number;
+}
+
 export interface Encounter {
   id: string;
-  /** Where it is fought: anyone who isn't there any more is out of it. */
+  /** Where it is fought: anyone who isn't there any more is out of it, and the POV leaving ends it. */
   place: string | null;
   round: number;
   /** Index into `order` of whose turn it is. */
@@ -48,7 +54,12 @@ export interface Encounter {
   order: Fighter[];
   /** This round's and the last round's acts, oldest first. */
   log: LogEntry[];
+  /** Kept by the fold at each new round, so a stalemate is read from the state, never from a plan. */
+  calm: Calm;
 }
+
+/** How many whole rounds in a row with no one's HP changing end a fight as a stalemate. */
+export const STALEMATE_ROUNDS = 3;
 
 /** How many acts the log keeps. */
 export const LOG_CAP = 24;
@@ -91,7 +102,8 @@ export function encounterOf(state: Readonly<WorldState>): Encounter | null {
     if (!isRecord(e) || typeof e.actor !== "string") continue;
     log.push({ round: numOf(e.round), actor: e.actor, action: strOf(e.action), target: typeof e.target === "string" ? e.target : null, outcome: typeof e.outcome === "string" ? e.outcome : null });
   }
-  return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log };
+  const calm = objOf(raw.calm);
+  return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers(calm.hp), rounds: Math.max(0, numOf(calm.rounds)) } };
 }
 
 /** Writes the fight back inside an event reducer; null ends it (and its recorded decisions). */
@@ -123,6 +135,20 @@ export function standing(state: Readonly<WorldState>, enc: Encounter, f: Fighter
   return !f.down && !isGone(state, f.id) && own(state.entities, f.id) !== undefined && placeOfEntity(state, f.id) === enc.place;
 }
 
+/**
+ * Whether someone is in the fight under way and still where it is fought, down or not, while the
+ * POV is there too (one it has left is over): day plans and schedules leave them where they are.
+ */
+export function engaged(state: Readonly<WorldState>, world: Pick<WorldDoc, "pov">, id: EntityId): boolean {
+  const enc = encounterOf(state);
+  return enc !== null && !povLeft(state, world, enc) && fighterOf(enc, id) !== undefined && !isGone(state, id) && placeOfEntity(state, id) === enc.place;
+}
+
+/** Whether the POV has left the fight: it isn't where the fight is, so the fight is over for it. */
+export function povLeft(state: Readonly<WorldState>, world: Pick<WorldDoc, "pov">, enc: Pick<Encounter, "place">): boolean {
+  return placeOfEntity(state, world.pov) !== enc.place;
+}
+
 /** A formula read with these bindings; `fallback` when it is unset or doesn't read. */
 export function readFor(ctx: ReadContext, expr: Value | undefined, bindings: Record<string, EntityId>, fallback: Value): Value {
   if (expr === undefined || expr === null) return fallback;
@@ -133,6 +159,16 @@ export function readFor(ctx: ReadContext, expr: Value | undefined, bindings: Rec
 export function hpOf(ctx: ReadContext, rules: CombatDef, id: EntityId): number {
   const v = scopeEnv({ reg: ctx.registry, ctx, bindings: { self: id } }).lookup(["self", rules.hp]);
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+/** Every participant's HP, by id: what a calm compares round by round. */
+export function hpByFighter(ctx: ReadContext, rules: CombatDef, order: readonly Pick<Fighter, "id">[]): Record<EntityId, number> {
+  return Object.fromEntries(order.map((f) => [f.id, hpOf(ctx, rules, f.id)]));
+}
+
+export function sameHp(a: Readonly<Record<EntityId, number>>, b: Readonly<Record<EntityId, number>>): boolean {
+  const ids = Object.keys(a);
+  return ids.length === Object.keys(b).length && ids.every((id) => own(b, id) === a[id]);
 }
 
 /** A participant's HP max: the pool's evaluated max, else null. */

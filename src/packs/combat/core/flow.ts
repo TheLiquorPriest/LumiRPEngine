@@ -3,10 +3,14 @@
 // All of it is applied through the plan's working state, so it lands as events in the same turn:
 // swipes, Keep and Re-run treat a round like any other turn.
 //
-// Everyone but the POV fights by deterministic tactics: defend when hurt (the ruleset's `lowHp`),
-// if a defensive action is offered, else attack the most threatening foe it can reach (`threat`),
-// with the action most likely to land. An `npc.choose` decision recorded for its turn wins while it
-// is still a legal choice. Every roll forks the plan's generator by round and participant.
+// A fight is fought where it started: the POV leaving that place ends it (`left`), and rounds in a
+// row in which no one's HP changes end it as a stalemate, so no fight goes on unseen or stalls.
+//
+// Everyone but the POV fights by deterministic tactics: defend when hurt (the ruleset's `lowHp`) and
+// a foe acted against it this round or the last, if a defensive action is offered, else attack the
+// most threatening foe it can reach (`threat`), with the action most likely to land. An `npc.choose`
+// decision recorded for its turn wins while it is still a legal choice. Every roll forks the plan's
+// generator by round and participant.
 
 import type { JsonObject } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
@@ -25,7 +29,7 @@ import { bandOf, fieldDef, placeOfEntity, truthy } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
 import { canSeeEntity, canSeeField } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
-import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, readFor, rulesOf, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
+import { budgetCount, canFight, costOf, decisionsOf, DEFAULT_WOUNDS, DOWN_CONDITION, downHolds, encounterOf, endHolds, fighterOf, fits, hpMaxOf, hpOf, offTurnCost, povLeft, readFor, rulesOf, STALEMATE_ROUNDS, standing, winnerOf, writeEncounter, type Encounter, type Fighter } from "./model";
 
 /** How many actions anyone but the POV takes in one turn, at most. */
 const ACTS_PER_TURN = 4;
@@ -213,14 +217,30 @@ function record(w: Working, events: readonly LedgerEvent[], seed: string): Ledge
   return applied;
 }
 
+/** Ends the fight once the POV isn't where it is (DESIGN §11): over for the POV, with no winner, so no one fights on unseen. True when it did. */
+function leave(w: Working, rng: Rng, lines: FightLines): boolean {
+  const enc = encounterOf(w.state);
+  if (!enc || !povLeft(w.state, w.world, enc) || record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "left", winner: null, rounds: enc.round } }], rng.seed).length === 0) return false;
+  lines.push("You leave the fight.");
+  return true;
+}
+
+/** Ends a fight in which no one's HP has changed for `STALEMATE_ROUNDS` whole rounds (the calm the fold keeps). True when it did. */
+function stalled(w: Working, rng: Rng, lines: FightLines): boolean {
+  const enc = encounterOf(w.state);
+  if (!enc || enc.calm.rounds < STALEMATE_ROUNDS || record(w, [{ type: "combat.end", data: { encounter: enc.id, reason: "stalemate", winner: null, rounds: enc.round } }], rng.seed).length === 0) return false;
+  lines.push(`No one has been hurt in ${STALEMATE_ROUNDS} rounds: the fight peters out.`);
+  return true;
+}
+
 /**
- * After anything happened in a fight: who went down or got back up (with the rules' condition,
- * through the Sheets pack's `sheets.condition` where it's loaded), then whether it's over. True
- * when no fight is under way any more.
+ * After anything happened in a fight: whether the POV has left it, who went down or got back up
+ * (with the rules' condition, through the Sheets pack's `sheets.condition` where it's loaded), then
+ * whether it's over or has stalled. True when no fight is under way any more.
  */
 function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): boolean {
   const enc = encounterOf(w.state);
-  if (!enc) return true;
+  if (!enc || leave(w, rng.fork("left"), lines)) return true;
   const condition = typeof rules.down?.condition === "string" && rules.down.condition.trim() !== "" ? rules.down.condition : DOWN_CONDITION;
   for (const f of enc.order) {
     if (!own(w.state.entities, f.id)) continue;
@@ -232,7 +252,7 @@ function settle(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): bool
   }
   const now = encounterOf(w.state);
   if (!now) return true;
-  if (!endHolds(w.ctx, rules, now)) return false;
+  if (!endHolds(w.ctx, rules, now)) return stalled(w, rng.fork("calm"), lines);
   const winner = winnerOf(w.state, now);
   record(w, [{ type: "combat.end", data: { encounter: now.id, reason: "over", winner, rounds: now.round } }], rng.seed);
   lines.push(`The fight is over${winner === "party" ? ": your side won" : winner === "foes" ? ": your side lost" : ""}.`);
@@ -250,14 +270,14 @@ function actEvents(enc: Encounter, actor: EntityId, action: ActionDef, params: J
   return [{ type: "combat.act", data: { encounter: enc.id, actor, action: action.id, label: action.label, ...(target ? { target } : {}), ...(res.check && res.outcome ? { outcome: res.outcome } : {}) } }];
 }
 
-/** Moves the fight to its next turn, saying so when a round begins (the closing line says it when that turn is the POV's). */
+/** Moves the fight to its next turn, saying so when a round begins (the closing line says it when that turn is the POV's); a new round may find it stalled. */
 function advance(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): void {
   const enc = encounterOf(w.state);
   const next = enc ? nextTurn(w.ctx, rules, enc) : null;
   if (!enc || !next || record(w, [next], rng.seed).length === 0) return;
   lines.happened = true;
   const now = encounterOf(w.state);
-  if (now && now.round > enc.round && now.order[now.turn]?.id !== w.world.pov) lines.push(`Round ${now.round}.`);
+  if (now && now.round > enc.round && !stalled(w, rng.fork("calm"), lines) && now.order[now.turn]?.id !== w.world.pov) lines.push(`Round ${now.round}.`);
 }
 
 /** One option of a participant's turn: an action and the participant it targets, with its odds. */
@@ -315,17 +335,19 @@ function greater(a: readonly number[], b: readonly number[]): boolean {
 
 /**
  * The engine's own pick for a participant (DESIGN §11): a defensive action when it's hurt (the
- * rules' `lowHp`, else a quarter of its HP or less), if one is offered; else an attack on the foe
- * with the highest threat (ties: the POV, then initiative order) with the action most likely to
- * land (ties: action id). Only actions that spend something, so a free one never repeats forever.
+ * rules' `lowHp`, else a quarter of its HP or less) and a foe acted against it this round or the
+ * last, if one is offered; else an attack on the foe with the highest threat (ties: the POV, then
+ * initiative order) with the action most likely to land (ties: action id). Only actions that spend
+ * something, so a free one never repeats forever, and two hurt fighters don't guard forever.
  */
 export function tacticFor(ctx: ReadContext, rules: CombatDef, enc: Encounter, me: Fighter, options: readonly FightOption[]): FightOption | null {
   const costly = options.filter((o) => Object.keys(costOf(o.action)).length > 0);
   const max = hpMaxOf(ctx, rules, me.id);
   const low = rules.tactics?.lowHp !== undefined ? truthy(readFor(ctx, rules.tactics.lowHp, { self: me.id }, false)) : max !== null && max > 0 && hpOf(ctx, rules, me.id) * 4 <= max;
-  const defend = low ? costly.find((o) => o.action.combat?.role === "defend" && o.target === null) : undefined;
-  if (defend) return defend;
   const foes = new Set(enc.order.filter((f) => f.side !== me.side).map((f) => f.id));
+  const pressed = enc.log.some((l) => l.target === me.id && foes.has(l.actor) && l.round >= enc.round - 1);
+  const defend = low && pressed ? costly.find((o) => o.action.combat?.role === "defend" && o.target === null) : undefined;
+  if (defend) return defend;
   const rank = new Map(enc.order.map((f, i) => [f.id, i]));
   let best: { o: FightOption; key: number[] } | null = null;
   for (const o of costly) {
@@ -375,15 +397,17 @@ function othersTurn(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): 
   if (enc && enc.order[enc.turn]?.id === me.id && enc.round === start.round) advance(w, rules, rng.fork("advance"), lines);
 }
 
-/** Runs everyone else's turns until the POV's comes round, one round at most (a POV who is down sees a round per turn). */
-function othersUntilPov(w: Working, rules: CombatDef, rng: Rng, lines: FightLines): void {
-  const steps = encounterOf(w.state)?.order.length ?? 0;
-  for (let i = 0; i < steps; i++) {
+/** Everyone else's turns until the POV's comes round, within the turn's budget of one round across both passes (a POV who is down sees a round per turn). */
+function othersUntilPov(w: Working, rules: CombatDef, rng: Rng, lines: FightLines, steps: { left: number | null }): void {
+  for (;;) {
     const enc = encounterOf(w.state);
     const current = enc?.order[enc.turn];
     if (!enc || !current) return;
     const live = standing(w.state, enc, current);
     if (current.id === w.world.pov && live) return;
+    steps.left ??= enc.order.length;
+    if (steps.left <= 0) return;
+    steps.left--;
     const step = rng.fork(`turn:${enc.round}:${enc.turn}`);
     if (live) othersTurn(w, rules, step, lines);
     else advance(w, rules, step, lines);
@@ -429,7 +453,11 @@ export function openRound(w: Working, rng: Rng): FightRound | null {
   const rules = rulesOf(w.world);
   if (!rules) return null;
   const lines = new FightLines(rules);
-  othersUntilPov(w, rules, rng.fork("due"), lines);
+  // At most one round's worth of turns for the whole turn: the passes before and after the POV's action share it.
+  const steps: { left: number | null } = { left: null };
+  // A POV moved off since the last turn (a GM edit, a narrated move) has left the fight before anyone acts.
+  leave(w, rng.fork("left"), lines);
+  othersUntilPov(w, rules, rng.fork("due"), lines, steps);
   const from = w.events.length;
   const before = hpAround(w.ctx, rules);
   return {
@@ -457,7 +485,7 @@ export function openRound(w: Working, rng: Rng): FightRound | null {
         }) : false;
         if (now && me && now.order[now.turn]?.id === me.id && rules.endTurn !== "manual" && !more) advance(w, rules, rng.fork("end"), lines);
       }
-      othersUntilPov(w, rules, rng.fork("others"), lines);
+      othersUntilPov(w, rules, rng.fork("others"), lines, steps);
       return closing(w.ctx, rules, lines);
     },
   };
@@ -467,7 +495,7 @@ export function openRound(w: Working, rng: Rng): FightRound | null {
 export function fightChoices(ctx: ReadContext): { key: string; agent: EntityId; options: string[]; labels: Record<string, string> }[] {
   const rules = rulesOf(ctx.world);
   const enc = encounterOf(ctx.state);
-  if (!rules || !enc || enc.order[enc.turn]?.id !== ctx.world.pov) return [];
+  if (!rules || !enc || enc.order[enc.turn]?.id !== ctx.world.pov || povLeft(ctx.state, ctx.world, enc)) return [];
   const decided = decisionsOf(ctx.state);
   const out: { key: string; agent: EntityId; options: string[]; labels: Record<string, string> }[] = [];
   const n = enc.order.length;

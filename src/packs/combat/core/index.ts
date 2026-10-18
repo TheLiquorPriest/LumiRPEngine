@@ -7,11 +7,12 @@
 //
 // Events (all concrete; the fold never rolls):
 //   combat.start     {encounter, place, order: [{id, side, init, left}]}   initiative rolled at the effect
-//   combat.turn      {encounter, round, turn, actor, reset}                 the next turn and its refills
+//   combat.turn      {encounter, round, turn, actor, reset}                 the next turn and its refills (a new round extends or restarts the calm)
 //   combat.spend     {encounter, who, cost}                                 a combat action's cost
 //   combat.act       {encounter, actor, action, label, target?, outcome?}  who did what (Journal, the card's log)
 //   combat.down      {encounter, entity, down}                              re-checked against the down rule
-//   combat.end       {encounter, reason, winner, rounds}                    `over` re-checks the end rule
+//   combat.end       {encounter, reason, winner, rounds}                    `over` re-checks the end rule, `left` that the POV
+//                                                                           isn't where the fight is, `stalemate` the calm
 //   combat.decision  {key, choice}                                          an `npc.choose` pick for a turn
 //
 // Effects: `combat.start {foes?}` (ids, a selector, or everyone hostile here), `combat.end
@@ -33,7 +34,7 @@ import { selectorMatches } from "../../../engine/selector";
 import { knownBySelector } from "../../../engine/visibility";
 import type { Working } from "../../../engine/working";
 import { fightChoices, hpLine, nextTurn, openRound, spendFor, type FightRound } from "./flow";
-import { canFight, downHolds, encounterOf, endHolds, fighterOf, fits, fullEconomy, LOG_CAP, offTurnCost, PACK, readFor, rulesOf, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
+import { canFight, downHolds, encounterOf, endHolds, engaged, fighterOf, fits, fullEconomy, hpByFighter, LOG_CAP, offTurnCost, PACK, povLeft, readFor, rulesOf, sameHp, STALEMATE_ROUNDS, standing, standingOn, winnerOf, writeEncounter, type Encounter, type Fighter, type Side } from "./model";
 import { buildEncounterView, type EncounterView } from "./view";
 
 declare module "../../../engine/registry" {
@@ -50,6 +51,8 @@ declare module "../../../engine/registry" {
     "combat.gm": (ctx: ReadContext) => EncounterView | null;
     /** A player's line for a change to someone else's HP that the POV sees as a wound band (`hpLine`): no number; undefined for any other event. */
     "combat.hp_line": (ctx: ReadContext, e: LedgerEvent) => string | null | undefined;
+    /** Whether someone is in the fight under way, where it is fought: no day plan or schedule moves them, and the clock waits. */
+    "combat.engaged": (ctx: ReadContext, id: EntityId) => boolean;
   }
 }
 
@@ -165,9 +168,11 @@ const events: EventTypeDef<PackEvent>[] = [
       if (order.find((f) => f.id === ctx.world.pov)?.side !== "party" || !order.some((f) => f.side === "foes")) return reject("bad_event", "a fight is the POV's side against foes");
       return null;
     },
-    apply(e, state) {
+    apply(e, state, ctx) {
       delete mutableSlice(state, PACK).decisions;
-      writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order: orderOf(e.data.order) ?? [], log: [] });
+      const order = orderOf(e.data.order) ?? [];
+      const rules = rulesOf(ctx.world);
+      writeEncounter(state, { id: strOf(e.data.encounter), place: typeof e.data.place === "string" ? e.data.place : null, round: 1, turn: 0, order, log: [], calm: { hp: rules ? hpByFighter(ctx, rules, order) : {}, rounds: 0 } });
     },
     describe: (e) => `A fight: ${describeSide(e, "party")} against ${describeSide(e, "foes")}`,
   },
@@ -185,17 +190,22 @@ const events: EventTypeDef<PackEvent>[] = [
       for (const [id, budgets] of Object.entries(reset)) if (!fighterOf(enc, id) || !counts(budgets)) return reject("bad_event", "a refill names a participant and its budgets");
       return null;
     },
-    apply(e, state) {
+    apply(e, state, ctx) {
       const enc = encounterOf(state);
       if (!enc) return;
       const round = numOf(e.data.round, enc.round);
       const reset = objOf(e.data.reset);
+      const rules = rulesOf(ctx.world);
+      // A new round with everyone's HP as it was when the calm began makes the calm longer; any change starts a new one.
+      const now = round > enc.round && rules ? hpByFighter(ctx, rules, enc.order) : null;
+      const calm = !now ? enc.calm : sameHp(now, enc.calm.hp) ? { hp: enc.calm.hp, rounds: enc.calm.rounds + (round - enc.round) } : { hp: now, rounds: 0 };
       writeEncounter(state, {
         ...enc,
         round,
         turn: numOf(e.data.turn, enc.turn),
         order: enc.order.map((f) => ({ ...f, left: { ...f.left, ...(counts(own(reset, f.id)) ?? {}) } })),
         log: enc.log.filter((l) => l.round >= round - 1),
+        calm,
       });
     },
     describe: (e) => `${strOf(e.data.actor)}'s turn`,
@@ -260,10 +270,13 @@ const events: EventTypeDef<PackEvent>[] = [
       if ("code" in enc) return enc;
       const rules = rulesOf(ctx.world);
       if (e.data.reason === "over" && (!rules || !endHolds(ctx, rules, enc))) return reject("not_over", "the fight isn't over");
+      // Both re-read the state, so a view where the POV stayed, or someone was hurt, keeps the fight.
+      if (e.data.reason === "left" && !povLeft(ctx.state, ctx.world, enc)) return reject("not_left", "you are still in the fight");
+      if (e.data.reason === "stalemate" && (!rules || enc.calm.rounds < STALEMATE_ROUNDS || !sameHp(hpByFighter(ctx, rules, enc.order), enc.calm.hp))) return reject("not_stalemate", "someone has been hurt since");
       return null;
     },
     apply: (_e, state) => writeEncounter(state, null),
-    describe: (e) => `The fight is over${e.data.winner === "party" ? ": your side won" : e.data.winner === "foes" ? ": your side lost" : ""}`,
+    describe: (e) => (e.data.reason === "left" ? "You left the fight" : e.data.reason === "stalemate" ? "The fight petered out" : `The fight is over${e.data.winner === "party" ? ": your side won" : e.data.winner === "foes" ? ": your side lost" : ""}`),
   },
   {
     type: "combat.decision",
@@ -321,6 +334,7 @@ export const combatPack: PackDef = {
     r.query("combat.choices", fightChoices);
     r.query("combat.gm", (ctx) => buildEncounterView(ctx, { gm: true }));
     r.query("combat.hp_line", hpLine);
+    r.query("combat.engaged", (ctx, id) => engaged(ctx.state, ctx.world, id));
 
     // What formulas read of the fight: a requirement `is_foe(self, target)` keeps an attack to foes.
     r.formula("can_fight", (ctx, e) => {

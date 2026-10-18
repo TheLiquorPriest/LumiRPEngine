@@ -3,7 +3,8 @@
 // plan (pre-reply, fold order):
 //   pause bookkeeping → the action (materialization, requirements, check, effects, event rules)
 //   with a fight's turns around it (`combat.round`) → the elapsed time through `advance` (world
-//   processes, schedules, slot rules, tracks) → a timelapse (explicit, or Speed through `auto`)
+//   processes, schedules, slot rules, tracks; none while a fight is still under way, whose rounds
+//   take no clock time) → a timelapse (explicit, or Speed through `auto`; never in a fight)
 //   → off-screen catch-up when time moved.
 // post (after extraction): catch-up when time didn't move in plan, turn rules and tracks.
 //
@@ -26,7 +27,7 @@ import type { PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./ste
 import { buildMontage, pauseBookkeeping, parseOverrides, parseTarget, runTimelapse, speedThrough, turnElapsed, type Montage, type TimelapseOutcome } from "./time";
 import { stepTracks } from "./tracks";
 import { Working } from "./working";
-import { optionalService, own } from "./pack-kit";
+import { optionalQuery, optionalService, own } from "./pack-kit";
 
 export const TIMELAPSE_ACTION = "timelapse";
 /** Off-screen agents caught up per turn (K) and their agent-day budget. */
@@ -71,9 +72,12 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   if (intent?.action === TIMELAPSE_ACTION) {
     const target = parseTarget(intent.params.target);
     const seg = intent.params.segment;
-    const outcome = target
-      ? runTimelapse(reg, w, target, { runSeed: input.runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 })
-      : { code: "bad_target", reason: "no timelapse target" };
+    // A fight's rounds take no clock time (DESIGN §11), so nothing skips ahead while the POV is in one.
+    const outcome = !target
+      ? { code: "bad_target", reason: "no timelapse target" }
+      : optionalQuery(w.ctx, "combat.engaged")?.(w.ctx, w.world.pov) === true
+        ? { code: "in_fight", reason: "a fight is under way" }
+        : runTimelapse(reg, w, target, { runSeed: input.runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 });
     if ("code" in outcome) w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
     else timelapse = outcome;
   } else {
@@ -84,10 +88,12 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       if (resolution.events.length > 0) runRulesOnEvents(reg, w, resolution.events, { seed: input.seed });
     }
     combat = fight?.after(resolution ? { resolution, params: intent?.params ?? {} } : null) ?? [];
-    const elapsed = turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
-    if (elapsed.minutes > 0) advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
+    // A fight still under way is seconds long: the turn moves no clock, whatever the action took, so
+    // no day plan or schedule runs mid-fight (the combat pack also holds its participants in place).
+    const elapsed = optionalQuery(w.ctx, "combat.engaged")?.(w.ctx, w.world.pov) === true ? null : turnElapsed(w.world, w.state, resolution?.ok ? resolution.duration : null);
+    if (elapsed && elapsed.minutes > 0) advance(reg, w, w.state.clock + elapsed.minutes, { runSeed: input.runSeed, mode: "turn", cause: elapsed.source === "action" ? "action" : "tick" });
     const act = resolution?.activity;
-    if (act && elapsed.source !== "paused") {
+    if (act && elapsed && elapsed.source !== "paused") {
       const remaining = act.until - w.state.clock;
       const mode = speedThrough(w.state, act.type, remaining);
       if (mode !== "elapse") {

@@ -297,8 +297,9 @@ function stepAgent(slot: SlotInfo, ctx: ReadContext, rngFor: (entity: EntityId) 
     }
   }
   const activity = block.activity.startsWith("retrieve:") ? "errand" : block.activity;
-  // The POV's routine leaves it where it is when it is stranded or can't reach the block's place.
-  const stays = routineStays(ctx, who, block.place);
+  // The POV's routine leaves it where it is when it is stranded or can't reach the block's place, and
+  // no one in a fight under way walks out of it to keep a day plan (the combat pack's `combat.engaged`).
+  const stays = routineStays(ctx, who, block.place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true;
   if (!stays && !held(ctx.state, who, "place", slot.end) && block.place && own(ctx.world.places, block.place) && placeOfEntity(ctx.state, who) !== block.place) {
     out.push({ type: "set", entity: who, field: "place", value: block.place });
     if (who !== pov && block.place === povPlace) out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });

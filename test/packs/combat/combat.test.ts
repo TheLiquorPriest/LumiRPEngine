@@ -227,7 +227,7 @@ describe("everyone else's turns", () => {
     expect(plan(manual, started(manual).state, "strike", { target: "goblin" }).events.filter((e) => e.type === "combat.act")).toHaveLength(1);
   });
 
-  test("tactics: attack the most threatening foe; a hurt fighter guards instead", () => {
+  test("tactics: attack the most threatening foe; a hurt fighter a foe is after guards instead", () => {
     const world = fightWorld((w) => {
       initiative(w, "self.dex * 10");
       w.entities.dev!.fields = { ...w.entities.dev!.fields, place: "home" };
@@ -244,8 +244,11 @@ describe("everyone else's turns", () => {
       initiative(w2, "self.dex * 10");
       w2.entities.goblin!.fields.hp = 1;
     });
-    const q = plan(hurt, started(hurt, ["goblin"]).state, null);
-    expect(q.events.find((e) => e.type === "combat.act")).toMatchObject({ data: { actor: "goblin", action: "guard" } });
+    const fresh = started(hurt, ["goblin"]);
+    // Hurt but with no foe after it, it fights on; once a foe went for it this round or the last, it guards.
+    expect(plan(hurt, fresh.state, null).events.find((e) => e.type === "combat.act")).toMatchObject({ data: { actor: "goblin", action: "strike" } });
+    fresh.apply({ type: "combat.act", data: { encounter: encounterOf(fresh.state)?.id ?? "", actor: POV, action: "strike", label: "Strike", target: "goblin", outcome: "miss" } });
+    expect(plan(hurt, fresh.state, null).events.find((e) => e.type === "combat.act")).toMatchObject({ data: { actor: "goblin", action: "guard" } });
   });
 
   test("a recorded npc.choose pick wins while it's legal", () => {

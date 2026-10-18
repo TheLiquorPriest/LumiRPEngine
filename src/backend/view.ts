@@ -269,7 +269,8 @@ function palette(world: WorldDoc, state: WorldState, registry: Registry): Palett
   const calendar = ctx.levelOf(world.pov, "calendar");
   const timelapse: TimelapseView = {
     action: TIMELAPSE_ACTION,
-    blocked: calendar < 1 ? "Calendar is off" : clockPaused(world, state) ? "Resume the clock first" : null,
+    // A fight's rounds take no clock time, so neither does skipping ahead in one (DESIGN §11).
+    blocked: calendar < 1 ? "Calendar is off" : clockPaused(world, state) ? "Resume the clock first" : optionalQuery(ctx, "combat.engaged")?.(ctx, world.pov) === true ? "Not during a fight" : null,
     durations: [30, 60, 180, 480, 1440, 10080],
     until: [
       ...world.calendar.dayParts.map((d) => ({ label: d.label, target: { type: "day_part" as const, dayPart: d.id } })),

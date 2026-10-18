@@ -233,6 +233,8 @@ export function instantEvents(reg: Registry, ctx: ReadContext, instant: Schedule
     if (domain && ctx.levelOf(entity, domain) < 1) continue;
     if (held(ctx.state, entity, schedule.target, instant.at)) continue;
     if (opts.povRoutine === false && entity === ctx.world.pov && (schedule.target === "place" || schedule.target === "activity")) continue;
+    // No one in a fight under way leaves it, or stops fighting, for a schedule (the combat pack).
+    if ((schedule.target === "place" || schedule.target === "activity") && optionalQuery(ctx, "combat.engaged")?.(ctx, entity) === true) continue;
     const mine = rivals.filter((r) => runsFor(ctx, r, entity));
     // A more specific slot is running: this edge gives way to it.
     if (rank !== null && mine.some((r) => r.rank < rank)) continue;

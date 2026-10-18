@@ -14,7 +14,7 @@ import { actionOdds, paramCandidates, type Availability } from "../../../engine/
 import { isGone } from "../../../engine/scope";
 import { canSeeEntity } from "../../../engine/visibility";
 import { combatActions, hpSeen, targetParam } from "./flow";
-import { budgetCount, encounterOf, fighterOf, rulesOf, standing, type Encounter, type Side } from "./model";
+import { budgetCount, encounterOf, fighterOf, povLeft, rulesOf, standing, type Encounter, type Side } from "./model";
 
 export interface EncounterRow {
   /** Null for someone the POV can't see. */
@@ -92,11 +92,11 @@ export function combatEntries(ctx: ReadContext): PaletteEntry[] {
   return entries;
 }
 
-/** The fight as the palette heads its Combat tab: round, whose turn, and the POV's economy; null without one. */
+/** The fight as the palette heads its Combat tab: round, whose turn, and the POV's economy; null without one, or once the POV has left it. */
 export function paletteEncounter(ctx: ReadContext): PaletteEncounter | null {
   const rules = rulesOf(ctx.world);
   const enc = encounterOf(ctx.state);
-  if (!rules || !enc) return null;
+  if (!rules || !enc || povLeft(ctx.state, ctx.world, enc)) return null;
   const current = enc.order[enc.turn]?.id;
   const me = fighterOf(enc, ctx.world.pov);
   return {
@@ -115,12 +115,15 @@ function logLines(ctx: ReadContext, enc: Encounter, gm: boolean): string[] {
   });
 }
 
-/** The Encounter card (DESIGN §11), as the POV sees it or, with `gm`, everything; null without a fight. */
+/**
+ * The Encounter card (DESIGN §11), as the POV sees it or, with `gm`, everything; null without a
+ * fight, and for the player once the POV has left it.
+ */
 export function buildEncounterView(ctx: ReadContext, opts: { gm?: boolean } = {}): EncounterView | null {
   const rules = rulesOf(ctx.world);
   const enc = encounterOf(ctx.state);
-  if (!rules || !enc) return null;
   const gm = opts.gm === true;
+  if (!rules || !enc || (!gm && povLeft(ctx.state, ctx.world, enc))) return null;
   const head = paletteEncounter(ctx);
   const conditionsOf = optionalQuery(ctx, "sheets.conditions");
   const order = enc.order.map((f, i): EncounterRow => {
