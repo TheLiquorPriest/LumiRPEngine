@@ -365,7 +365,8 @@ describe("ledger scenarios", () => {
     const before = await h.folds(chat);
     const undo = await h.write(chat, { kind: "undo", id: "u1", messageId: a2.id, swipeId: g.swipeId, refs: [{ in: "events", index: 0 }] });
     expect(undo.applied).toBe(false);
-    expect(undo.reason).toBeTruthy();
+    // It is the latest reply, so the refusal offers a Re-run.
+    expect(undo.reason).toContain("Re-run");
     expect((await h.core(chat)).journal.messages[a2.id]?.ledger.swipes[String(g.swipeId)]?.undone).toEqual([]);
     expect((await h.folds(chat)).reference.state).toEqual(before.reference.state);
   });

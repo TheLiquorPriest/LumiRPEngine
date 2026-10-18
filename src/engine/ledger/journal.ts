@@ -84,6 +84,11 @@ const REFUSED_KEPT = 8;
 /** A swipe an in-flight turn names by index (its plan's, or its target), deleted while the reply streamed. */
 const GONE_SWIPE = -1;
 
+/** Why a read-elsewhere record refuses Undo and reads. Only the latest reply can be Re-run, so only it is offered one. */
+function readElsewhereRefusal(latest: boolean): string {
+  const cause = "This reply was written while an earlier message or swipe it depended on changed, so switching back can't restore it.";
+  return latest ? `${cause} Re-run it to play the turn again.` : `${cause} It can't be undone or read again.`;
+}
 export class LedgerCore {
   /** Whether this open has checked the starting markers against the chain's stored paths (`restoreStartMarkers`). */
   private startsChecked = false;
@@ -1085,7 +1090,7 @@ export class LedgerCore {
         if (!rec) return "nothing to undo";
         // Undo changes the record, so like a read it runs only where the record folds as stored (L2),
         // which one read elsewhere never does.
-        if (rec.readElsewhere) return "This reply was read after an earlier swipe it depended on was deleted, so switching back can't restore it. Re-run it to play the turn again.";
+        if (rec.readElsewhere) return readElsewhereRefusal(index === headIndex);
         if (rec.path !== "" && rec.path !== (out.messages[index]?.parentPath ?? ROOT_PATH)) return "You've swiped away from the timeline this reply was made on. Switch back to undo it.";
         const before = [...rec.undone];
         for (const ref of w.refs) if (!rec.undone.some((u) => JSON.stringify(u) === JSON.stringify(ref))) rec.undone.push(ref);
@@ -1182,7 +1187,7 @@ export class LedgerCore {
     // A read writes path-bound events, so it runs only where the record folds as stored: on its
     // path (never, for one read elsewhere), or on a bare record, which the read anchors here (it
     // becomes this turn's record).
-    if (rec.readElsewhere) return "This reply was read after an earlier swipe it depended on was deleted, so switching back can't restore it. Re-run it to play the turn again.";
+    if (rec.readElsewhere) return readElsewhereRefusal(index === headIndex);
     const parent = this.fold(observed).messages[index]?.parentPath ?? ROOT_PATH;
     if (rec.path !== "" && rec.path !== parent) return "You've swiped away from the timeline this reply was made on. Switch back to read it.";
     if (w.kind === "retry_read" && rec.status === "stopped") return index === headIndex ? null : "not the head";
