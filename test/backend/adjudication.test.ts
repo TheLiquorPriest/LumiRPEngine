@@ -39,13 +39,14 @@ describe("a new chat's policy", () => {
 });
 
 /** A test-world chat with a coin-flip check (d20 against 11) under `policy`; the helper answers `judge` with `judgement` and reads nothing from replies. */
-async function climbChat(rig: Rig, policy: AdjudicationDef, judgement: JsonObject, lore: Record<string, JsonObject> = {}, entities: Record<string, JsonObject> = {}): Promise<string> {
+async function climbChat(rig: Rig, policy: AdjudicationDef, judgement: JsonObject, lore: Record<string, JsonObject> = {}, entities: Record<string, JsonObject> = {}, places: Record<string, JsonObject> = {}): Promise<string> {
   const worldId = await rig.newWorld();
   const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
   const action: JsonObject = { id: "climb", label: "Climb the wall", lexicon: ["climb"], params: {}, requires: [], check: { id: "climb", dice: "d20", dc: "11" }, outcomes: { success: [], failure: [] }, duration: "5" };
   rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "actions", id: "climb", value: action }));
   for (const [id, value] of Object.entries(lore)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "lore", id, value }));
   for (const [id, value] of Object.entries(entities)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "entities", id, value }));
+  for (const [id, value] of Object.entries(places)) rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "places", id, value }));
   rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: draft.base, part: "ruleset", value: { adjudication: policy as unknown as JsonObject } }));
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
   rig.host.quietReply = (request) => (request.messages.some((m) => m.content.includes("Rate the approach")) ? JSON.stringify(judgement) : JSON.stringify({ proposals: [] }));
@@ -265,11 +266,11 @@ describe("the judge step and people the POV can't see", () => {
     expect(adjudged).toMatchObject({ data: { rating: 1, reason: "" } });
   });
 
-  /** The reason a judged climb kept, with the hidden Vex and Dan where the POV is. */
-  const keptReason = async (reason: string, lore: Record<string, JsonObject> = {}): Promise<unknown> => {
+  /** The reason a judged climb kept, with the hidden Vex and Dan (and `extra`'s people and places) where the POV is. */
+  const keptReason = async (reason: string, extra: { lore?: Record<string, JsonObject>; people?: Record<string, JsonObject>; places?: Record<string, JsonObject> } = {}): Promise<unknown> => {
     const rig = new Rig();
     const dan: JsonObject = { id: "dan", kind: "person", name: "Dan", tier: "background", visibility: "secret", fields: { place: "home" }, relations: [] };
-    const chatId = await climbChat(rig, presetAdjudication("balanced"), { rating: 1, reason }, lore, { ...people, dan });
+    const chatId = await climbChat(rig, presetAdjudication("balanced"), { rating: 1, reason }, extra.lore, { ...people, dan, ...extra.people }, extra.places);
     await climbTurn(rig, chatId, "I climb carefully, keeping low.");
     const chain = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
     const adjudged = chain.flatMap((m) => Object.values(m.ledger?.swipes ?? {}).flatMap((r) => r.events)).find((e) => e.type === "engine.adjudged");
@@ -281,17 +282,39 @@ describe("the judge step and people the POV can't see", () => {
     expect(await keptReason("The ledge looks dangerous, but it holds")).toBe("The ledge looks dangerous, but it holds");
   });
 
-  test("a reason that names a secret lore entry by its title is dropped", async () => {
-    const lore = { rot: { id: "rot", title: "Rotten mortar", content: "The east wall was never repointed after the flood, and it crumbles under any weight.", keys: ["wall"], links: [], secret: true, gate: "self.cash > 100000", audience: ["judge"] } };
-    expect(await keptReason("Rotten mortar makes this climb risky", lore)).toBe("");
+  test("a hidden name written without spaces or inflected drops the reason; a secret place counts only by all its words", async () => {
+    const hidden = (id: string, name: string): JsonObject => ({ id, kind: "person", name, tier: "background", visibility: "secret", fields: { place: "home" }, relations: [] });
+    const people = { li_lei: hidden("li_lei", "李雷"), veks: hidden("veks", "Векс") };
+    expect(await keptReason("李雷在监视你", { people })).toBe("");
+    expect(await keptReason("За Вексом наблюдают, лезь тише", { people })).toBe("");
+    const places = { crypt: { id: "crypt", name: "Under the Chapel", fields: {}, visibility: "secret" } };
+    expect(await keptReason("You slip under the guard's arm, quick and low", { places })).toBe("You slip under the guard's arm, quick and low");
+    expect(await keptReason("Whoever waits under the chapel will hear you", { places })).toBe("");
   });
 
-  test("names are matched by their words of two or more letters, labels and titles only whole", () => {
+  test("a reason that names a secret lore entry by its title is dropped", async () => {
+    const lore = { rot: { id: "rot", title: "Rotten mortar", content: "The east wall was never repointed after the flood, and it crumbles under any weight.", keys: ["wall"], links: [], secret: true, gate: "self.cash > 100000", audience: ["judge"] } };
+    expect(await keptReason("Rotten mortar makes this climb risky", { lore })).toBe("");
+  });
+
+  test("a person is named by any word of their name; a place, a thing, a label or a title only by all its words in order", () => {
     expect(namesAny("Vex's knife glints", ["Vex Morrow"])).toBe(true);
+    expect(namesAny("Morrow's men are near", ["Vex Morrow"])).toBe(true);
     expect(namesAny("It looks dangerous", ["Dan"])).toBe(false);
-    expect(namesAny("The vault is dark", ["The Vault of Sorrows"])).toBe(true);
-    expect(namesAny("The old door creaks", ["The Vault of Sorrows"])).toBe(false);
+    // A word in another script counts anywhere in the text: no spaces, a vowel sign, an inflection.
+    expect(namesAny("李雷在监视你", ["李雷"])).toBe(true);
+    expect(namesAny("राम देख रहा है", ["राम"])).toBe(true);
+    expect(namesAny("За Вексом наблюдают", ["Векс"])).toBe(true);
+    expect(namesAny("Он смотрит на дверь", ["Векс"])).toBe(false);
+    // Anything else: all its words in order, with words like "the" and "of" left aside.
+    expect(namesAny("You slip under the guard's arm, quick and low", [], ["Under the Chapel"])).toBe(false);
+    expect(namesAny("The chapel steps are slick", [], ["Under the Chapel"])).toBe(false);
+    expect(namesAny("Someone waits under a chapel", [], ["Under the Chapel"])).toBe(true);
+    expect(namesAny("The vault is dark", [], ["The Vault of Sorrows"])).toBe(false);
+    expect(namesAny("Past the vault of the sorrows", [], ["The Vault of Sorrows"])).toBe(true);
     expect(namesAny("He means to poison the mayor", [], ["Poison the mayor"])).toBe(true);
     expect(namesAny("The mayor frowns", [], ["Poison the mayor"])).toBe(false);
+    expect(namesAny("他在龙门客栈等你", [], ["龙门 客栈"])).toBe(true);
+    expect(namesAny("The brass key glints", [], ["Silver Key"])).toBe(false);
   });
 });

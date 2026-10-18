@@ -13,7 +13,7 @@ import type { WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
 import { ENGINE_EVENTS, readEngineSlice } from "./engine-pack";
 import type { Registry } from "./registry-impl";
-import { bandOf, fieldDef, GONE_FIELD } from "./scope";
+import { bandOf, fieldDef, GONE_FIELD, kindIs } from "./scope";
 import type { WorldState } from "./state";
 import { optionalQuery, own } from "./pack-kit";
 import { canSeeEntity, canSeePlace, eventVisible, findLeaks, knows, trackKnown, unrevealedSecrets, visibilityOf } from "./visibility";
@@ -253,14 +253,20 @@ export function hiddenTrackLabels(reg: Registry, world: WorldDoc, state: Readonl
   return out;
 }
 
-/** The names of the people and things the POV can't see. */
-export function hiddenEntityNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
-  return Object.entries(state.entities).flatMap(([id, e]) => (canSeeEntity(reg, world, state, pov, id) ? [] : [e.name]));
+/**
+ * The names of the people and the things the POV can't see, apart: a person is named by any word of
+ * their name, a thing only by its whole name (`namesAny`).
+ */
+export function hiddenEntityNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): { people: string[]; things: string[] } {
+  const out: { people: string[]; things: string[] } = { people: [], things: [] };
+  for (const [id, e] of Object.entries(state.entities)) if (!canSeeEntity(reg, world, state, pov, id)) (kindIs(reg, world, e.kind, "person") ? out.people : out.things).push(e.name);
+  return out;
 }
 
 /** Names only the GM may see: hidden tracks' labels and stage labels, and the names of people and things the POV can't see. */
 export function hiddenNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
-  return [...hiddenTrackLabels(reg, world, state, pov), ...hiddenEntityNames(reg, world, state, pov)];
+  const { people, things } = hiddenEntityNames(reg, world, state, pov);
+  return [...hiddenTrackLabels(reg, world, state, pov), ...people, ...things];
 }
 
 /** An event's line, worded for `pov` when it is a player's (`player`), else for the GM or the author. */

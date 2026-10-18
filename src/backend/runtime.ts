@@ -871,11 +871,12 @@ export class Runtime implements TurnHooks {
     }
     const typed = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typed.includes(s.toLowerCase()));
-    // Names are matched word for word: "Vex is watching" names a hidden Vex Morrow, while a hidden
-    // Dan doesn't make "dangerous" a leak. A hidden track's label and a secret entry's title count
-    // only whole.
+    // A hidden person counts by any word of their name ("Vex is watching" names Vex Morrow, while a
+    // hidden Dan doesn't make "dangerous" a leak); a hidden place or thing, a track's label and a
+    // secret entry's title only by all their words in order.
     const { world: w, state: s } = render;
-    const leaks = findLeaks(judgement.reason, secrets).length > 0 || namesAny(judgement.reason, [...hiddenEntityNames(this.registry, w, s, w.pov), ...unseenPlaceNames(this.registry, w, s, w.pov)], [...hiddenTrackLabels(this.registry, w, s, w.pov), ...secretLoreTitles(this.registry, w, s)]);
+    const hidden = hiddenEntityNames(this.registry, w, s, w.pov);
+    const leaks = findLeaks(judgement.reason, secrets).length > 0 || namesAny(judgement.reason, hidden.people, [...hidden.things, ...unseenPlaceNames(this.registry, w, s, w.pov), ...hiddenTrackLabels(this.registry, w, s, w.pov), ...secretLoreTitles(this.registry, w, s)]);
     if (leaks) this.host.log("info", `[LumiRPEngine] judge: the reason for ${action.id} carried an unrevealed secret or a hidden name; it isn't shown`, userId);
     bridge.setIntent(text, { ...intent, judgement: leaks ? { ...judgement, reason: "" } : judgement }, bridge.wasInterpreted(text));
   }

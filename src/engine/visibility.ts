@@ -315,10 +315,14 @@ export function unrevealedSecrets(reg: Registry, world: WorldDoc, state: Readonl
 
 /**
  * The names of the places the POV can't see: free text the player reads (a model's reason, a lore
- * trace) must not carry one. Names shorter than three characters would match almost anything.
+ * trace) must not carry one. A name of ASCII characters shorter than three would match almost
+ * anything ("Ox" in "box"), while two letters of another script make a name (北京).
  */
 export function unseenPlaceNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
-  return Object.entries(world.places).flatMap(([id, p]) => (typeof p.name === "string" && p.name.trim().length >= 3 && !canSeePlace(reg, world, state, pov, id) ? [p.name] : []));
+  return Object.entries(world.places).flatMap(([id, p]) => {
+    const name = typeof p.name === "string" ? p.name.trim() : "";
+    return name.length >= (/^[\x00-\x7f]*$/.test(name) ? 3 : 2) && !canSeePlace(reg, world, state, pov, id) ? [p.name] : [];
+  });
 }
 
 /** Strings in a JSON value that contain any of `secrets` (case-insensitive): a leak check for views and slots. */
@@ -336,26 +340,47 @@ export function findLeaks(value: JsonValue | string | undefined, secrets: readon
   return out;
 }
 
-/** A text's words as name checks compare them: lowercase runs of letters and digits ("Vex's" is "vex" and "s"). */
+/**
+ * A text's words as name checks compare them: lowercase runs of letters, marks and digits ("Vex's"
+ * is "vex" and "s"; "राम" keeps its vowel sign), composed alike however they were typed.
+ */
 function nameWords(text: string): string[] {
-  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return text.normalize("NFC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
 }
 
-/** Words too common to stand for a name on their own: "The Vault of Sorrows" is named by "vault" or "sorrows". */
-const FUNCTION_WORDS: Record<string, true> = { the: true, of: true, and: true, an: true, in: true, on: true, at: true, to: true, by: true, for: true, or: true, with: true, from: true };
+/** Words too common to name anything on their own: "The Vault of Sorrows" is said by "vault" and "sorrows". */
+const FUNCTION_WORDS: Record<string, true> = { a: true, an: true, the: true, of: true, and: true, in: true, on: true, at: true, to: true, by: true, for: true, or: true, with: true, from: true };
+
+const WORD_CHAR = "[\\p{L}\\p{M}\\p{N}]";
 
 /**
- * Whether a model's free text (a judge's reason) names any of `names` or says any of `phrases`, word
- * for word and ignoring case: a name by any of its words of two or more letters ("Vex is watching"
- * names Vex Morrow, "dangerous" doesn't name Dan), a phrase (a track's label, a lore title) only whole.
+ * Whether `words` come in `said` (a text's words joined by spaces) in order, each later in the same
+ * word as the one before or in the next. A word of ASCII letters and digits counts only whole, so
+ * "dangerous" doesn't say "dan"; one with any other letter counts anywhere, since a script written
+ * without spaces (李雷在监视你) or an inflected form (Вексом for Векс) has no word end to find.
+ * Words are runs of letters, marks and digits, so none needs escaping in the pattern.
  */
-export function namesAny(text: string, names: readonly string[], phrases: readonly string[] = []): boolean {
+function saysInOrder(said: string, words: readonly string[]): boolean {
+  const parts = words.map((w) => (/^[a-z0-9]+$/.test(w) ? `(?<!${WORD_CHAR})${w}(?!${WORD_CHAR})` : w));
+  return new RegExp(parts.join(`${WORD_CHAR}*(?: ${WORD_CHAR}*)?`), "u").test(said);
+}
+
+/**
+ * Whether a model's free text (a judge's reason) names any of `people` or says any of `labels`,
+ * ignoring case and the words that name nothing on their own ("the", "of"), each word read as
+ * `saysInOrder` reads it. A person counts by any word of two or more letters of their name ("Vex is
+ * watching" names Vex Morrow); anything else (a place, a thing, a track's label, a lore title) only
+ * by all its words in order, so "under the chapel" says Under the Chapel and "under" alone doesn't.
+ */
+export function namesAny(text: string, people: readonly string[], labels: readonly string[] = []): boolean {
   const words = nameWords(text);
-  const said = new Set(words);
-  for (const name of names) for (const w of nameWords(name)) if (w.length >= 2 && !hasOwn(FUNCTION_WORDS, w) && said.has(w)) return true;
-  for (const phrase of phrases) {
-    const p = nameWords(phrase);
-    if (p.length > 0 && words.some((_, i) => p.every((w, j) => words[i + j] === w))) return true;
+  const said = words.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
+  for (const name of people) for (const w of nameWords(name)) if (w.length >= 2 && !hasOwn(FUNCTION_WORDS, w) && saysInOrder(said, [w])) return true;
+  for (const label of labels) {
+    const all = nameWords(label);
+    const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w));
+    // A label of nothing but such words ("On and On") counts only as it is.
+    if (named.length > 0 ? saysInOrder(said, named) : all.length > 0 && saysInOrder(words.join(" "), all)) return true;
   }
   return false;
 }
