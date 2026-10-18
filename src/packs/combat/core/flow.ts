@@ -438,10 +438,14 @@ function othersUntilPov(w: Working, rules: CombatDef, rng: Rng, lines: FightLine
   }
 }
 
-/** "A fight starts. Initiative: Goblin 17, you 12." */
+/** "A fight starts. Initiative: Goblin 17, you 12." Someone the POV can't see has no total. */
 function startLine(ctx: ReadContext, e: LedgerEvent): string {
   const order = "data" in e && Array.isArray(e.data.order) ? e.data.order : [];
-  const names = order.flatMap((f) => (isRecord(f) && typeof f.id === "string" ? [`${nameFor(ctx, f.id)}${typeof f.init === "number" ? ` ${f.init}` : ""}`] : []));
+  const names = order.flatMap((f) => {
+    if (!isRecord(f) || typeof f.id !== "string") return [];
+    const name = nameFor(ctx, f.id);
+    return [`${name}${name !== "someone" && typeof f.init === "number" ? ` ${f.init}` : ""}`];
+  });
   return `A fight starts. Initiative: ${names.join(", ")}.`;
 }
 
@@ -451,7 +455,7 @@ function closing(ctx: ReadContext, rules: CombatDef, lines: FightLines): string[
   const me = enc ? fighterOf(enc, ctx.world.pov) : undefined;
   if (enc && me && !standing(ctx.state, enc, me)) lines.push(`You are out of the fight; it goes on (round ${enc.round}).`, false);
   else if (enc && me && enc.order[enc.turn]?.id === me.id) {
-    const left = Object.entries(rules.economy).map(([budget, def]) => `${me.left[budget] ?? 0} ${def.label}`);
+    const left = Object.entries(rules.economy).flatMap(([budget, def]) => (isRecord(def) ? [`${me.left[budget] ?? 0} ${typeof def.label === "string" && def.label !== "" ? def.label : budget}`] : []));
     lines.push(`Round ${enc.round}, your turn${left.length > 0 ? `: ${left.join(", ")} left` : ""}.`, false);
   }
   if (lines.happened) lines.push("Narrate the fight in this order; add no other attacks, hits or damage.", false);

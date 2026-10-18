@@ -5,6 +5,7 @@
 // GM's version shows everyone, exactly.
 
 import type { JsonObject } from "../../../shared/json";
+import { isRecord } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { PaletteEncounter, PaletteEntry, PaletteOption } from "../../../shared/state-view";
 import type { ActionDef, WorldDoc } from "../../../shared/world";
@@ -109,7 +110,8 @@ export function paletteEncounter(ctx: ReadContext): PaletteEncounter | null {
     round: enc.round,
     turn: current ? (nameOf(ctx, current, false) ?? "someone") : "no one",
     yours: current === ctx.world.pov,
-    economy: Object.entries(rules.economy).map(([id, def]) => ({ id, label: def.label || id, left: me?.left[id] ?? 0, of: budgetCount(ctx, def, ctx.world.pov) })),
+    // A budget that isn't one (a hand-edited file; lint says so) has nothing to show.
+    economy: Object.entries(rules.economy).flatMap(([id, def]) => (isRecord(def) ? [{ id, label: typeof def.label === "string" && def.label !== "" ? def.label : id, left: me?.left[id] ?? 0, of: budgetCount(ctx, def, ctx.world.pov) }] : [])),
   };
 }
 
