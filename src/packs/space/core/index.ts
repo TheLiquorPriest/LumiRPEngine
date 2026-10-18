@@ -320,16 +320,20 @@ export const spacePack: PackDef = {
         const place = typeof p.place === "string" ? p.place : "";
         if (!own(ctx.state.entities, entity)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place)) return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
-        // Someone who doesn't act walks nowhere: the body stays where it lies. A body the POV knows of
-        // is declined in what the POV takes it to be; any other such move is refused unseen (dropped as
-        // a change that changed nothing), since a refusal no living person gets would tell the player
-        // of a death it hasn't heard of. Only the log says why (`gm`).
-        if (!acts(ctx.world, ctx.state, entity)) {
-          const gm = `${labelOf(ctx, entity)} is ${lifeOf(ctx.state, entity)} and doesn't act`;
-          const known = povLife(ctx.world, ctx.state, entity);
-          if (known && !known.acts && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, entity)) return { code: "not_moved", reason: `${labelOf(ctx, entity)} ${known.reads}; that move didn't happen`, gm };
-          return { code: "not_moved", reason: "that move didn't happen", gm, unseen: true };
+        // Someone who doesn't act walks nowhere: the body stays where it lies. What the POV knows decides
+        // how a move is refused, so the refusal never tells of a change it hasn't learned of: a body it
+        // knows of is declined as that body, even one since brought back out of its sight (a revival it
+        // hasn't seen still reads as death, DESIGN §8); someone it takes to act who doesn't is refused
+        // unseen (dropped as a change that changed nothing), as no living person's move is refused. Only
+        // the log says why (`gm`).
+        const name = labelOf(ctx, entity);
+        const truth = lifeOf(ctx.state, entity);
+        const stopped = !acts(ctx.world, ctx.state, entity);
+        const known = povLife(ctx.world, ctx.state, entity);
+        if (known && !known.acts && canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, entity)) {
+          return { code: "not_moved", reason: `${name} ${known.reads}; that move didn't happen`, gm: stopped ? `${name} is ${truth} and doesn't act` : `${name} is ${truth}, which the POV hasn't learned; it takes them as ${known.id}` };
         }
+        if (stopped) return { code: "not_moved", reason: "that move didn't happen", gm: `${name} is ${truth} and doesn't act`, unseen: true };
         const from = placeOfEntity(ctx.state, entity);
         // A narrated move across a gap no route spans (off an island with no boat leg back) didn't
         // happen. The reason reaches the player: a place the POV can't see is somewhere.
