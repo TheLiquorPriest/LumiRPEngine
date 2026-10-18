@@ -9,7 +9,7 @@ You choose how deep it goes. On the lowest setting it is a light layer that trac
 ## What you get
 
 - **A world you can build.** Kinds with typed fields and derived values, entities and relationships, places, routes and grids, inventories and ownership, character sheets. A schema-driven editor for all of it, and three starter worlds to begin from: Brindlemere (a fantasy town), Harrowmere Hall (a mystery manor) and Port Alder (a modern slice-of-life town).
-- **Deterministic actions.** Move, take, give, buy, pay, drive, lend, wear, sleep, wait and more. Checks use dice with exact odds, shown before you choose, and the result is decided before the narrator writes a word. How much the dice decide is up to the world and to you: every check, only risky ones or only marked ones; how much your described approach counts; and whether the roll or the story settles it.
+- **Deterministic actions.** Go places, take, give, wear, use, eat, rest, sleep, buy, pay, drive, lend, let time pass and more. Checks use dice with exact odds, shown before you choose, and the result is decided before the narrator writes a word. How much the dice decide is up to the world and to you: every check, only risky ones or only marked ones; how much your described approach counts; and whether the roll or the story settles it.
 - **Ready-made rulesets.** Start a world's ruleset from a profile: Modern, Classic or Fifth, three takes on d20 play, each with abilities, skills, saves, HP, levels from XP, a character sheet and combat; or Custom, the least to grow from (one stat, one check, an HP pool, a plain attack and a single level). All of it is editable data. The profiles are original implementations of common tabletop mechanics, with no rules text.
 - **NPCs that live.** Schedules and agendas for everyone, day planning and needs for the people who matter, and encounters between NPCs, on screen and off. The AI is consulted only on close calls.
 - **Quests, puzzles, secrets and triggers.** Stages, objectives, hints and rules. Secrets stay out of what you see until they are revealed.
@@ -47,12 +47,12 @@ LumiRPEngine asks for eight permissions. Here is why each one is there:
 
 - `generation`: to follow each reply from start to finish, to run the World Info interceptor that puts the world's sections into the prompt, and to make its own small helper calls.
 - `context_handler`: to plan each turn (elapsed time, what your action does, what the world did in the meantime) before the reply is generated.
-- `chats`: to read your chat, its messages and swipes, so the world stays in step with every swipe, edit and branch.
-- `chat_mutation`: to save the world's record on each reply, and to add your palette, chip and map actions to the chat as messages.
+- `chats`: to read your chats and their metadata, where a world chat records the world it plays, and to know which chat is open.
+- `chat_mutation`: to read each chat's messages and swipes, so the world stays in step with every swipe, edit and branch; to save the world's record on each reply; and to add your palette, chip and map actions to the chat as messages.
 - `world_books`: to create and maintain the world's own lore book, which holds its sections, attach it to the chat, read the books you pick for **Import from lore** or **Index a World Info book**, and tell you when a book that lore was indexed from has changed.
 - `presets`: to read your active preset, so it can check where the world's sections will land in the prompt and warn you about settings that cause trouble.
 - `decisions`: to use Lumiverse's Decisions API for the probability questions the engine asks, such as what an NPC does on a close call.
-- `ui_panels`: for the drawer tab, the status pill and the map.
+- `ui_panels`: for the status pill and the map, which float over the chat. The drawer tab needs no permission.
 
 LumiRPEngine deliberately does **not** request the `characters` permission. Character cards stay out of its reach. Where it needs to know whether the world's sections really reach the prompt, it checks with a test prompt build instead, and a section the build didn't find shows as "not delivered".
 
@@ -67,7 +67,7 @@ LumiRPEngine deliberately does **not** request the `characters` permission. Char
 
 These are the known limits of this release. Most of them need a change in Lumiverse itself, which I plan to propose after release.
 
-- **Prompt assembly moves to the main process, for everyone.** While LumiRPEngine is enabled, Lumiverse builds prompts for all users on the host on its main process instead of a separate worker. On the live host, with a 1,000-message chat, that added about 23 ms per prompt build (121 ms with LumiRPEngine enabled against 98 ms without). On a shared host, tell the people you share it with.
+- **Prompt assembly moves to the main process, for everyone.** While LumiRPEngine is enabled, Lumiverse builds prompts for all users on the host on its main process instead of a separate worker. On the live host, with a 1,000-message chat, that added about 23 ms per prompt build (122 ms with LumiRPEngine enabled against 99 ms without). On a shared host, tell the people you share it with.
 - **Other extensions that write message metadata.** Lumiverse replaces a message's whole metadata when something saves it, so another extension can overwrite LumiRPEngine's records and LumiRPEngine can overwrite theirs. LumiRPEngine keeps a second copy of its records and restores them, but I cannot promise the other extension does the same.
 - **Other extensions' World Info interceptors.** They cannot switch on an entry in the world's own book that LumiRPEngine has left off. Everything they do to your own lore books works as usual.
 - **If the engine stalls,** the world's sections are missing from that turn's prompt; a turn it couldn't plan in time is marked *Not fully simulated*.
