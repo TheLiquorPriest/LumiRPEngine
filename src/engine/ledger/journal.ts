@@ -444,7 +444,6 @@ export class LedgerCore {
       parentPath: ROOT_PATH,
       events: [],
       startMarkers: [],
-      slotHeld: false,
     };
     if (input.kind === "continue") {
       const head = [...observed].reverse().find((m) => !m.isUser);

@@ -2,7 +2,7 @@
 // The randomized gate is properties.test.ts; these name the cases a reader checks first.
 
 import { describe, expect, test } from "bun:test";
-import { decodeLedger, journalPath } from "../../src/backend/ledger-io";
+import { decodeJournal, decodeLedger, journalPath } from "../../src/backend/ledger-io";
 import { defaultSettings } from "../../src/backend/settings-store";
 import { startMarkersFrom } from "../../src/backend/start-markers";
 import { presetAdjudication } from "../../src/shared/adjudication";
@@ -345,6 +345,36 @@ describe("ledger scenarios", () => {
     const core = await h.core(chat);
     expect(core.journal.windows).toEqual([]);
     expect(core.journal.pending).toEqual({});
+    expect(hashJson((await h.folds(chat)).optimized.state)).toBe(hashJson(before.optimized.state));
+    await expectAgree(h, chat);
+  });
+
+  test("a journal an earlier build stored mid-generation, its pending turn carrying slotHeld, decodes and recovers; this build never writes the key", async () => {
+    const h = new Harness();
+    const chat = await h.newChat();
+    await h.send(chat, "earn:10", "Payday.");
+    const before = await h.folds(chat);
+    h.host.sendUser(chat, "earn:5");
+    await h.host.settle();
+    await h.host.start(chat, { type: "normal" });
+    const file = `${h.host.userId}/${journalPath(chat)}`;
+    const text = h.host.files.get(file) ?? "";
+    const stored = JSON.parse(text) as Journal;
+    if (!stored.run) throw new Error("no run stamp");
+    expect(Object.keys(stored.pending).length).toBe(1);
+    expect(text).not.toContain("slotHeld");
+    // As the earlier build stored it: every pending turn with the flag, always false.
+    const old = JSON.stringify({ ...stored, pending: Object.fromEntries(Object.entries(stored.pending).map(([id, p]) => [id, { ...p, slotHeld: false }])) });
+    const decoded = decodeJournal(old, chat, stored.run);
+    expect(decoded.reset).toBeNull();
+    expect(Object.keys(decoded.journal.pending)).toEqual(Object.keys(stored.pending));
+    expect(JSON.stringify(decoded.journal)).not.toContain("slotHeld");
+    // Restart recovery opens the chat on that journal, not a fresh one, and closes the turn.
+    h.host.files.set(file, old);
+    await h.restart();
+    expect(h.service.notices(chat, h.host.userId)).toEqual([]);
+    expect((await h.core(chat)).journal.pending).toEqual({});
+    expect(h.host.files.get(file)).not.toContain("slotHeld");
     expect(hashJson((await h.folds(chat)).optimized.state)).toBe(hashJson(before.optimized.state));
     await expectAgree(h, chat);
   });

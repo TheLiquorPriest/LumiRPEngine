@@ -227,7 +227,7 @@ function isHeldWrite(w: unknown): boolean {
 
 function isPendingTurn(p: unknown): boolean {
   if (!isRecord(p) || typeof p.generationId !== "string" || !(p.kind === "renarrate" || Object.values<unknown>(KIND).includes(p.kind)) || !(p.messageId === null || typeof p.messageId === "string") || !(p.swipeId === null || isInt(p.swipeId))) return false;
-  if (typeof p.planned !== "boolean" || typeof p.saved !== "boolean" || typeof p.slotHeld !== "boolean" || typeof p.seed !== "string" || !isInt(p.markersApplied) || typeof p.parentPath !== "string") return false;
+  if (typeof p.planned !== "boolean" || typeof p.saved !== "boolean" || typeof p.seed !== "string" || !isInt(p.markersApplied) || typeof p.parentPath !== "string") return false;
   if (!Array.isArray(p.chain) || !p.chain.every(isChainEntry) || !Array.isArray(p.events) || !Array.isArray(p.startMarkers) || !p.startMarkers.every(isRecord)) return false;
   if (![p.userMessages, p.rerendered].every((m) => isRecord(m) && Object.values(m).every(isContent))) return false;
   if (p.continueHead !== undefined && typeof p.continueHead !== "string") return false;
@@ -274,6 +274,9 @@ export function decodeJournal(text: string | null, chatId: ChatId, run: Pick<Cha
   }
   if (!isJournal(raw, chatId)) return { journal: fresh(), reset: "malformed" };
   if (raw.run && (raw.run.worldId !== run.worldId || raw.run.runSeed !== run.runSeed)) return { journal: fresh(), reset: "from another run of this chat" };
+  // An earlier build stored each pending turn with `slotHeld`, a flag nothing ever set: it is
+  // dropped, so a journal this build writes never carries it.
+  for (const p of Object.values(raw.pending)) Reflect.deleteProperty(p, "slotHeld");
   return { journal: { ...raw, run: stamp }, reset: null };
 }
 

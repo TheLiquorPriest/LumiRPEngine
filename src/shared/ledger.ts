@@ -398,8 +398,6 @@ export interface PendingTurn {
   undone?: EventRef[];
   /** Re-narrate: copies that failed re-validation (P3). */
   dropped?: CarryDrop[];
-  /** Set when the applied-plan slot held this plan (DESIGN §5.1 step 5, `ok`). */
-  slotHeld: boolean;
 }
 
 /** Latest journal state of one message's ledger. */
