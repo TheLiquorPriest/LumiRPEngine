@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { JsonValue } from "../../src/shared/json";
+import { applyProposals } from "../../src/backend/turn-model";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
 import { calendarOf, clockAt, dateAt } from "../../src/engine/calendar";
@@ -253,6 +254,17 @@ describe("life states: who knows", () => {
     life(w, { entity: "jordan", to: "dead" });
     move(w, YOU, "apartment");
     expect(playerLines(reg, w.world, w.state, YOU, w.events.slice(seen, seen + 1))).toEqual(["Jordan Price lies dead"]);
+  });
+
+  test("a reply can't carry a body somewhere, and its refusal says nothing of why", () => {
+    const w = riverton(1);
+    w.apply({ type: "link", rel: "knows", from: YOU, to: "jordan" });
+    life(w, { entity: "jordan", to: "dead" });
+    const [outcome] = applyProposals(reg, w, [{ type: "location", entity: "jordan", place: "apartment" }], "seed", "run");
+    expect(outcome?.rejection).toBeDefined();
+    expect((outcome?.rejection?.reason ?? "").toLowerCase()).not.toContain("dead");
+    expect(placeOfEntity(w.state, "jordan")).toBe("office");
+    expect(lifeKnownTo(w.state, "jordan", YOU)).toBe("alive");
   });
 });
 

@@ -24,6 +24,7 @@ import type { LintIssue } from "../../../shared/protocol";
 import type { GridDef, GridTrigger, KindDef, WorldDoc } from "../../../shared/world";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
 import { GRID_SPACE_FLOOR } from "../../../engine/registry-impl";
+import { acts, lifeOf } from "../../../engine/life";
 import { placeOfEntity, placeWithin } from "../../../engine/scope";
 import { observeCells } from "../../../engine/seen";
 import { canSeePlace, HIDDEN_PLACE_NAME, knownBySelector, povPlace } from "../../../engine/visibility";
@@ -319,6 +320,9 @@ export const spacePack: PackDef = {
         const place = typeof p.place === "string" ? p.place : "";
         if (!own(ctx.state.entities, entity)) return { code: "missing_entity", reason: `no entity ${labelOf(ctx, entity)}` };
         if (!own(ctx.world.places, place)) return { code: "missing_place", reason: `no place ${labelOf(ctx, place)}` };
+        // Someone who doesn't act walks nowhere: the body stays where it lies. The narrator takes them
+        // for what the POV does, so the refusal reads like any other; only the GM sees why.
+        if (!acts(ctx.world, ctx.state, entity)) return { code: "declined", reason: "That move didn't happen.", gm: `${labelOf(ctx, entity)} is ${lifeOf(ctx.state, entity)} and doesn't act` };
         const from = placeOfEntity(ctx.state, entity);
         // A narrated move across a gap no route spans (off an island with no boat leg back) didn't
         // happen. The reason reaches the player: a place the POV can't see is somewhere.
