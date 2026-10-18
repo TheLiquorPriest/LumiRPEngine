@@ -18,7 +18,8 @@ import type { Rejection } from "./registry";
 import type { Registry } from "./registry-impl";
 import { kindDef, kindIs } from "./scope";
 import type { WorldState } from "./state";
-import { canSeeEntity, canSeePlace } from "./visibility";
+import { playerKnows } from "./player-events";
+import { canSeePlace } from "./visibility";
 
 /** What relation lookups need from the registry; a fold's event types are the registry. */
 export interface RelationTypes {
@@ -83,13 +84,14 @@ function endOf(state: Readonly<WorldState>, id: EntityId): End | null {
 
 /**
  * Why `a → b` may not be linked with this type in this state: the kinds, or the cardinality. The
- * reason reaches a decline chip and the narrator's Outcome, so it names only those the POV can see
- * ("someone" for anyone else, DESIGN §7); the raw one, naming everyone, is kept for the GM view.
+ * reason reaches a decline chip and the narrator's Outcome, so it names only those the player
+ * knows, as a Journal line does (`playerKnows`: seen and met; "someone" for anyone else, DESIGN
+ * §7); the raw one, naming everyone, is kept for the GM view.
  */
 function linkProblem(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, def: RelationTypeDef, a: End, b: End): Rejection | null {
   const worded = (code: string, say: (name: (end: Pick<End, "id" | "name">) => string) => string): Rejection => {
     const sentence = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
-    const reason = sentence(say((end) => (canSeeEntity(reg, world, state, world.pov, end.id) ? end.name : "someone")));
+    const reason = sentence(say((end) => (playerKnows(reg, world, state, world.pov, end.id) ? end.name : "someone")));
     const gm = sentence(say((end) => end.name));
     return reason === gm ? reject(code, reason) : { code, reason, gm };
   };
