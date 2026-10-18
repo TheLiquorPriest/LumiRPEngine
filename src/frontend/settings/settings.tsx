@@ -181,7 +181,7 @@ function PresetSection() {
     });
   return (
     <div class="lre-stack" data-lre-preset-card>
-      <Row k="Active preset" v={card.preset?.name ?? "—"} sub="The preset world chats assemble with now: your default connection's, else the active Loom preset." />
+      <Row k="Active preset" v={card.preset?.name ?? "—"} sub="The preset world chats assemble with now: the active Loom preset, else the one the chat's connection links, else the one the last reply was assembled with." />
       <div class="lre-h">Outlets</div>
       {card.outlets.length === 0 ? <Empty>None: the world places every section.</Empty> : card.outlets.map((o) => <Row key={o.outlet} k={<code>{`{{outlet::${o.outlet}}}`}</code>} v={o.label ?? "no section of that name"} tone={o.label ? undefined : "warn"} />)}
       <div class="lre-h">Guidance blocks</div>

@@ -2,7 +2,7 @@
 
 This page is for people who write Lumiverse presets and want them to play well with LumiRPEngine. A preset needs nothing special to work in a world chat: the engine puts its sections into the prompt where the world places them. What follows lets a preset place those sections itself, give the engine's helpers style and rules of its own, and give the narrator rules for world chats only. All of it applies while the preset is active, and only in world chats.
 
-The preset that counts is the one prompts assemble with: your default connection's linked preset, else the active Loom preset. **Settings → Preset** shows which one that is, what of the below it has, and a button that adds the guidance blocks for you.
+The preset that counts is the one prompts assemble with, as far as the engine can tell: the active Loom preset, else the preset the chat's connection links, else the one the last reply was assembled with. A preset bound to a chat, persona or character, and a preset profile's block states, are invisible to the engine; the delivery check (below) catches a section they leave out. **Settings → Preset** shows which preset counts, what of the below it has, and a button that adds the guidance blocks for you.
 
 ## Section slots and their outlets
 
