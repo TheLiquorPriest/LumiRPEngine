@@ -70,7 +70,7 @@ Every ✎ fix is checked before it is saved: a value outside the field's range (
 
 ### Chips
 
-Chips are the small buttons and notes under a reply. They tell you what the engine did, and give you a chance to change it.
+Chips are the small buttons and notes under a reply. They tell you what the engine did, and give you a chance to change it. A reply's chips belong to the swipe they came with: they show, and act, only while that swipe is shown, and they go when you delete it, along with what they would have told the next reply.
 
 | Chip | What it does |
 |---|---|

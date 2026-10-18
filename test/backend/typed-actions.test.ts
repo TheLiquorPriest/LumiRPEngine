@@ -169,6 +169,48 @@ describe("a typed action that names nothing in the world", () => {
     expect((await nextTurn(rig, chatId, "I look around.")).split("\n").find((line) => line.includes("Pay"))).toContain("Rena");
     expect(rig.rt.ledger.errors).toEqual([]);
   });
+
+  test("after a swipe delete, the next reply is told only of the reply left, and its decline still rewords that note", async () => {
+    // What the next reply is told after one reply whose decline was answered Remove it.
+    const once = await chat();
+    reading(once.rig, pay("rena"));
+    await once.rig.turn(once.chatId, "I pay Rena for the latte.", "You look around for Rena.");
+    const decline = (await replyChips(once.rig, once.chatId)).find((c) => c.kind === "decline");
+    expect(once.rig.body(await once.rig.send({ type: "lre.chip", chatId: once.chatId, chip: decline?.id, choice: "remove" })).applied).toBe(true);
+    const removed = (await nextTurn(once.rig, once.chatId, "I look around.")).split("\n").filter((line) => line.includes("Pay"));
+    expect(removed).toHaveLength(1);
+
+    // Two swipes of the same reply, each with its decline and its note; the first goes.
+    const { rig, chatId } = await chat();
+    reading(rig, pay("rena"));
+    await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
+    const head = rig.host.head(chatId)?.id ?? "";
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe", messageId: head }), "You look around for Rena.");
+    rig.host.deleteSwipe(chatId, head, 0);
+    await rig.host.settle();
+    const left = (await replyChips(rig, chatId)).filter((c) => c.kind === "decline");
+    expect(left).toHaveLength(1);
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: left[0]?.id, choice: "remove" })).applied).toBe(true);
+    expect((await nextTurn(rig, chatId, "I look around.")).split("\n").filter((line) => line.includes("Pay"))).toEqual(removed);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("after a swipe delete, a swipe made later at the old index doesn't take the decline of the reply that moved", async () => {
+    const { rig, chatId } = await chat();
+    reading(rig, pay("rena"));
+    await rig.turn(chatId, "I pay Rena for the latte.", "You hand Rena a few bills.");
+    const head = rig.host.head(chatId)?.id ?? "";
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe", messageId: head }), "You look around for Rena.");
+    rig.host.deleteSwipe(chatId, head, 0);
+    await rig.host.settle();
+    // A new swipe takes the index the reply left had before the delete.
+    await rig.host.finish(await rig.host.start(chatId, { type: "swipe", messageId: head }), "Rena isn't here.");
+    expect((await replyChips(rig, chatId)).filter((c) => c.kind === "decline")).toHaveLength(1);
+    rig.host.navigate(chatId, head, 0);
+    await rig.host.settle();
+    expect((await replyChips(rig, chatId)).filter((c) => c.kind === "decline")).toHaveLength(1);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
 });
 
 describe("a second action in the same message", () => {

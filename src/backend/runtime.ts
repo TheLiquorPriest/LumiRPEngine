@@ -46,7 +46,7 @@ import { Working } from "../engine/working";
 import type { PresetCard } from "../shared/protocol";
 import { type BookEntries, DEFAULT_SECTIONS, EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
 import { ChatPrefs } from "./chat-prefs";
-import { ChipStore, type StoredChip } from "./chips";
+import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
 import type { DryRun, HostPort, InterceptorInput, InterceptorResult } from "./host";
 import { LedgerService, toChain, type TurnContext, type TurnHooks } from "./ledger-io";
 import { StatePush } from "./push";
@@ -531,6 +531,10 @@ export class Runtime implements TurnHooks {
     this.host.registerInterceptor((input) => this.intercept(input), 50);
     this.host.on("MESSAGE_SENT", (e, userId) => {
       if (e.message.isUser && userId) void this.lapse(e.chatId, userId);
+    });
+    // The host shifts a message's swipes down when one is deleted; the chips shown by swipe follow.
+    this.host.on("MESSAGE_SWIPED", (e, userId) => {
+      if (e.action === "deleted" && userId) this.swipeDeleted(e.chatId, userId, e.message.id, e.swipeId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] chat ${e.chatId}: chips didn't follow a deleted swipe (${error instanceof Error ? error.message : String(error)})`, userId));
     });
     this.host.on("WORLD_INFO_ACTIVATED", (e) => this.onActivated(e.chatId, e.entries.map((x) => x.id)));
     // The host keeps a deleted chat's chat-scoped regex scripts, so the engine removes its own (DESIGN §6.7).
@@ -1481,6 +1485,24 @@ export class Runtime implements TurnHooks {
     const kept = notes.filter((n) => n.messageId === messageId || n.toldTo === undefined || n.toldTo === messageId);
     for (const n of kept) if (n.messageId !== messageId) n.toldTo = messageId;
     await this.outcomeNotes.save(chatId, userId, kept);
+  }
+
+  /**
+   * A swipe deleted on a message (DESIGN §4.3 swipe identity): its chips go and the later swipes'
+   * move down, as the ledger's records do, so none shows, or applies, on the swipe that takes its
+   * index. The Outcome notes tied to its chips (an unfit action's, a refused change's) go with them,
+   * and those of the later swipes move down with theirs.
+   */
+  private async swipeDeleted(chatId: ChatId, userId: UserId, messageId: MessageId, deleted: number): Promise<void> {
+    const dropped = await this.chips.shiftSwipes(chatId, userId, messageId, deleted);
+    const notes = await this.outcomeNotes.list(chatId, userId);
+    const kept = notes.flatMap((n) => {
+      if (n.messageId !== messageId) return [n];
+      const id = dropped.has(n.id) ? null : idAfterSwipeDelete(n.id, messageId, deleted);
+      return id === null ? [] : [id === n.id ? n : { ...n, id }];
+    });
+    if (kept.length !== notes.length || kept.some((n, i) => n !== notes[i])) await this.outcomeNotes.save(chatId, userId, kept);
+    this.changed(chatId, userId);
   }
 
   changed(chatId: ChatId, userId: UserId): void {

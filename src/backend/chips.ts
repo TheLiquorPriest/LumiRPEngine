@@ -113,4 +113,49 @@ export class ChipStore {
     this.chips.set(this.key(chatId, userId), kept);
     await this.save(chatId, userId);
   }
+
+  /**
+   * A swipe of `messageId` was deleted (the host shifts the swipes after it down; DESIGN §4.3 swipe
+   * identity): its chips go, and the chips of the swipes after it move down with them, as the
+   * ledger's records do. A turn's chip names its swipe in its id, so that id moves too
+   * (`idAfterSwipeDelete`) and a chip a later swipe makes at the old index can't replace it. Returns
+   * the ids of the chips that went, for the notes tied to them.
+   */
+  async shiftSwipes(chatId: ChatId, userId: UserId, messageId: MessageId, deleted: number): Promise<Set<ChipId>> {
+    const list = await this.list(chatId, userId);
+    const dropped = new Set<ChipId>();
+    let changed = false;
+    // Changed in place: an `add` or `take` already holding this list keeps writing to the same one.
+    for (let i = list.length - 1; i >= 0; i--) {
+      const c = list[i];
+      if (!c || c.messageId !== messageId || c.swipeId === undefined || c.swipeId < deleted) continue;
+      changed = true;
+      if (c.swipeId === deleted) {
+        dropped.add(c.id);
+        list.splice(i, 1);
+      } else list[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
+    }
+    if (changed) await this.save(chatId, userId);
+    return dropped;
+  }
+}
+
+/**
+ * A chip's or a note's id after a swipe of `messageId` was deleted. An id that names one of its swipes
+ * (`<kind>:<message>:<swipe>`, then `:…` or nothing, as a turn's chips and an unfit decline's note
+ * do): null for the deleted swipe, the swipe before it for a later one. Any other id (one keyed by
+ * its generation) stays as it is.
+ */
+export function idAfterSwipeDelete(id: string, messageId: MessageId, deleted: number): string | null {
+  const head = `:${messageId}:`;
+  for (let at = id.indexOf(head); at >= 0; at = id.indexOf(head, at + 1)) {
+    const from = at + head.length;
+    const digits = /^\d+/.exec(id.slice(from))?.[0];
+    const end = from + (digits?.length ?? 0);
+    if (digits === undefined || (end < id.length && id[end] !== ":")) continue;
+    const swipe = Number(digits);
+    if (swipe < deleted) return id;
+    return swipe === deleted ? null : `${id.slice(0, from)}${swipe - 1}${id.slice(end)}`;
+  }
+  return id;
 }

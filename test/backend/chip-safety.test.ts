@@ -75,3 +75,69 @@ describe("stored chips act once", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 });
+
+describe("chips follow a swipe delete", () => {
+  /** A chat whose head reply has a swipe per text, each read in turn (a lamp in the text is a $30 purchase to confirm); the last one is shown. */
+  async function swipes(texts: readonly string[]): Promise<{ rig: Rig; chatId: string; head: string }> {
+    const rig = new Rig();
+    rig.host.quietReply = (req) => (req.messages[0]?.content.includes(EXTRACT_MARK) ? JSON.stringify({ proposals: (req.messages[1]?.content ?? "").includes("lamp") ? [LAMP] : [] }) : "{}");
+    const chatId = await rig.worldChat();
+    const [first, ...rest] = texts;
+    await rig.turn(chatId, "I look around the shop.", first ?? "");
+    const head = rig.host.head(chatId)?.id ?? "";
+    for (const text of rest) await rig.host.finish(await rig.host.start(chatId, { type: "swipe", messageId: head }), text);
+    return { rig, chatId, head };
+  }
+  const lamps = async (rig: Rig, chatId: string) => (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "confirm" && `${c.label} ${c.detail ?? ""}`.includes("lamp"));
+
+  test("a deleted reply's confirm chip doesn't show on the swipe that takes its index, and a tap on it charges nothing", async () => {
+    const { rig, chatId, head } = await swipes(["She rings up the lamp: thirty dollars.", "Nothing catches your eye."]);
+    // On the lamp's swipe, its chip; on the other, none.
+    rig.host.navigate(chatId, head, 0);
+    await rig.host.settle();
+    const [chip] = await lamps(rig, chatId);
+    if (!chip) throw new Error("no lamp chip");
+    rig.host.navigate(chatId, head, 1);
+    await rig.host.settle();
+    expect(await lamps(rig, chatId)).toEqual([]);
+    const start = Number(await rig.cashOf(chatId));
+    // The lamp's swipe goes: the one left takes its index.
+    rig.host.deleteSwipe(chatId, head, 0);
+    await rig.host.settle();
+    expect(await lamps(rig, chatId)).toEqual([]);
+    const reply = await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "confirm" });
+    expect(reply.type === "lre.error" && reply.code).toBe("not_found");
+    expect(Number(await rig.cashOf(chatId))).toBe(start);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("the chips of the swipes after it move down with them: shown on their own reply, applied once", async () => {
+    const { rig, chatId, head } = await swipes(["Nothing catches your eye.", "She rings up the lamp: thirty dollars.", "Still nothing."]);
+    rig.host.deleteSwipe(chatId, head, 0);
+    await rig.host.settle();
+    // The last reply is shown, now swipe 1: the lamp isn't on it.
+    expect(await lamps(rig, chatId)).toEqual([]);
+    rig.host.navigate(chatId, head, 0);
+    await rig.host.settle();
+    const [chip] = await lamps(rig, chatId);
+    if (!chip) throw new Error("the lamp's chip didn't move with its reply");
+    const start = Number(await rig.cashOf(chatId));
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "confirm" })).applied).toBe(true);
+    expect(Number(await rig.cashOf(chatId))).toBe(start - 30);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("a tap on a swipe's chip while another swipe is shown applies nothing", async () => {
+    const { rig, chatId, head } = await swipes(["She rings up the lamp: thirty dollars.", "Nothing catches your eye."]);
+    rig.host.navigate(chatId, head, 0);
+    await rig.host.settle();
+    const [chip] = await lamps(rig, chatId);
+    if (!chip) throw new Error("no lamp chip");
+    rig.host.navigate(chatId, head, 1);
+    await rig.host.settle();
+    const start = Number(await rig.cashOf(chatId));
+    const reply = await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "confirm" });
+    expect(reply.type === "lre.error" && reply.code).toBe("not_found");
+    expect(Number(await rig.cashOf(chatId))).toBe(start);
+  });
+});

@@ -629,7 +629,11 @@ export class Dispatcher {
     return this.locked(`${userId}\u0000${chatId}`, async () => {
       const chip = (await this.rt.chips.list(chatId, userId)).find((c) => c.id === id);
       if (!chip) throw new RequestError("not_found", "the chip has lapsed");
-      const result = await this.storedChip(chatId, userId, id, choice, chip, toChain(await this.rt.host.chats.messages(chatId, userId)), payload);
+      const now = toChain(await this.rt.host.chats.messages(chatId, userId));
+      // A swipe's chip acts only while that swipe is shown, as the view shows it: a tap from a view of
+      // another swipe would apply what that swipe's reply said to the one shown.
+      if (chip.swipeId !== undefined && now.find((m) => m.id === chip.messageId)?.swipeId !== chip.swipeId) throw new RequestError("not_found", "the chip belongs to a swipe that isn't shown");
+      const result = await this.storedChip(chatId, userId, id, choice, chip, now, payload);
       await this.rt.takeChip(chatId, userId, id);
       return result;
     });
