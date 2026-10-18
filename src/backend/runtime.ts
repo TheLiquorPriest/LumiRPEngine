@@ -923,12 +923,15 @@ export class Runtime implements TurnHooks {
     };
     const reader = { reg: this.registry, world, state, tokens: (text: string) => this.tokenCounts.get(hashParts("lre.tokens", userId, text)) ?? sectionTokens(text) };
     // The trace is shown to the player (§6.5, §7): it names no secret, no one the player hasn't met
-    // and nowhere the POV can't see, and no lookup names a secret entry. Words the player has seen
-    // said this turn are left alone: withholding them would only show which of them are secret.
+    // and nowhere the POV can't see, and no lookup names a secret entry. Names are read as a judge's
+    // reason is (`namesAny`), however short, in any script. Words the player has seen said this turn
+    // are left alone: withholding them would only show which of them are secret.
     const said = at.said.toLowerCase();
     const unsaid = (s: string): boolean => !said.includes(s.toLowerCase());
-    const people = Object.entries(state.entities).flatMap(([id, e]) => (povMayKnow(this.registry, world, state, id) || e.name.trim().length < 3 ? [] : [e.name]));
-    const withheld = { text: [...unrevealedSecrets(this.registry, world, state), ...people, ...unseenPlaceNames(this.registry, world, state, world.pov)].filter(unsaid), names: secretLoreNames(this.registry, world, state).filter(unsaid) };
+    const people: string[] = [];
+    const labels = unseenPlaceNames(this.registry, world, state, world.pov);
+    for (const [id, e] of Object.entries(state.entities)) if (!povMayKnow(this.registry, world, state, id)) (kindIs(this.registry, world, e.kind, "person") ? people : labels).push(e.name);
+    const withheld = { text: unrevealedSecrets(this.registry, world, state).filter(unsaid), people, labels, said: at.said, names: secretLoreNames(this.registry, world, state).filter(unsaid) };
     const lore = new StepLore(run.purpose, setting, reader, at.phase, withheld, { effects, counted: (texts) => this.countLater(userId, texts), lookups: { budget: at.budget.lookup, transport, refused }, privateInputs: inputs.shown !== undefined });
     lore.prefetch(inputs);
     if (inputs.shown !== null) lruSet(this.loreTraces, at.key, [...(this.loreTraces.get(at.key) ?? []), lore.trace], 64);

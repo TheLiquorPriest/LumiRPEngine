@@ -315,14 +315,10 @@ export function unrevealedSecrets(reg: Registry, world: WorldDoc, state: Readonl
 
 /**
  * The names of the places the POV can't see: free text the player reads (a model's reason, a lore
- * trace) must not carry one. A name of ASCII characters shorter than three would match almost
- * anything ("Ox" in "box"), while two letters of another script make a name (北京).
+ * trace) must not say one, as `namesAny` reads a label.
  */
 export function unseenPlaceNames(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId): string[] {
-  return Object.entries(world.places).flatMap(([id, p]) => {
-    const name = typeof p.name === "string" ? p.name.trim() : "";
-    return name.length >= (/^[\x00-\x7f]*$/.test(name) ? 3 : 2) && !canSeePlace(reg, world, state, pov, id) ? [p.name] : [];
-  });
+  return Object.entries(world.places).flatMap(([id, p]) => (typeof p.name === "string" && p.name.trim() !== "" && !canSeePlace(reg, world, state, pov, id) ? [p.name] : []));
 }
 
 /** Strings in a JSON value that contain any of `secrets` (case-insensitive): a leak check for views and slots. */
@@ -366,21 +362,32 @@ function saysInOrder(said: string, words: readonly string[]): boolean {
 }
 
 /**
- * Whether a model's free text (a judge's reason) names any of `people` or says any of `labels`,
- * ignoring case and the words that name nothing on their own ("the", "of"), each word read as
- * `saysInOrder` reads it. A person counts by any word of two or more letters of their name ("Vex is
- * watching" names Vex Morrow); anything else (a place, a thing, a track's label, a lore title) only
- * by all its words in order, so "under the chapel" says Under the Chapel and "under" alone doesn't.
+ * Whether a model's free text (a judge's reason, a lore trace's search) names any of `people` or
+ * says any of `labels`, ignoring case and the words that name nothing on their own ("the", "of"),
+ * each word read as `saysInOrder` reads it. A person counts by any word of their name ("Vex is
+ * watching" names Vex Morrow): one of ASCII letters from two letters, one in another script however
+ * short (李雷). Anything else (a place, a thing, a track's label, a lore title) counts only by all its
+ * words in order, so "under the chapel" says Under the Chapel and "under" alone doesn't. A word or
+ * label `heard` says too doesn't count: whoever reads the text has seen it said.
  */
-export function namesAny(text: string, people: readonly string[], labels: readonly string[] = []): boolean {
+export function namesAny(text: string, people: readonly string[], labels: readonly string[] = [], heard = ""): boolean {
   const words = nameWords(text);
   const said = words.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
-  for (const name of people) for (const w of nameWords(name)) if (w.length >= 2 && !hasOwn(FUNCTION_WORDS, w) && saysInOrder(said, [w])) return true;
+  const heardWords = nameWords(heard);
+  const known = heardWords.filter((w) => !hasOwn(FUNCTION_WORDS, w)).join(" ");
+  for (const name of people) {
+    for (const w of nameWords(name)) {
+      if (hasOwn(FUNCTION_WORDS, w) || (w.length < 2 && /^[a-z0-9]+$/.test(w))) continue;
+      if (saysInOrder(said, [w]) && !saysInOrder(known, [w])) return true;
+    }
+  }
   for (const label of labels) {
     const all = nameWords(label);
     const named = all.filter((w) => !hasOwn(FUNCTION_WORDS, w));
     // A label of nothing but such words ("On and On") counts only as it is.
-    if (named.length > 0 ? saysInOrder(said, named) : all.length > 0 && saysInOrder(words.join(" "), all)) return true;
+    const whole = named.length === 0;
+    const parts = whole ? all : named;
+    if (parts.length > 0 && saysInOrder(whole ? words.join(" ") : said, parts) && !saysInOrder(whole ? heardWords.join(" ") : known, parts)) return true;
   }
   return false;
 }

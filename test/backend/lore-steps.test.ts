@@ -57,8 +57,8 @@ function decide(req: DecideRequest): Answers {
   return out;
 }
 
-/** A world chat whose world has `lore`, with an open tie for Dev (with Sam) and for Kim (elsewhere). */
-async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject> = LORE, actions: Record<string, JsonObject> = {}, places: Record<string, JsonObject> = {}): Promise<{ rig: Rig; chatId: string }> {
+/** A world chat whose world has `lore`, with an open tie for Dev (with Sam) and for Kim (elsewhere), and `entities` added. */
+async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject> = LORE, actions: Record<string, JsonObject> = {}, places: Record<string, JsonObject> = {}, entities: Record<string, JsonObject> = {}): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig();
   for (const patch of settings) rig.body(await rig.send({ type: "lre.settings.set", patch }));
   const worldId = await rig.newWorld("Harbor");
@@ -76,6 +76,7 @@ async function loreChat(settings: JsonObject[], lore: Record<string, JsonObject>
   for (const [id, value] of Object.entries(lore)) await put("lore", id, value);
   for (const [id, value] of Object.entries(actions)) await put("actions", id, value);
   for (const [id, value] of Object.entries(places)) await put("places", id, value);
+  for (const [id, value] of Object.entries(entities)) await put("entities", id, value);
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning, Sam.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
@@ -372,6 +373,23 @@ describe("the inspector's lore traces", () => {
     }
   });
 
+  test("a lookup naming someone the player hasn't met is withheld by any word of their name, in any script and however short; a word said this turn is not", async () => {
+    const unmet = (id: string, name: string): JsonObject => ({ id, kind: "person", name, tier: "background", fields: {}, relations: [] });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE }, {}, {}, { li_lei: unmet("li_lei", "李雷"), vex: unmet("vex", "Vex Morrow") });
+    const calls: QuietToolCall[] = [
+      { name: "lore_search", args: { query: "李雷在码头" }, callId: "c1" },
+      { name: "lore_search", args: { query: "Morrow's boat" }, callId: "c2" },
+      { name: "lore_search", args: { query: "Vex at the ferry" }, callId: "c3" },
+    ];
+    rig.host.quietReply = (req) => (isStep(req, "extract") && req.tools && !asked(req) ? { content: "", toolCalls: calls } : quiet(req));
+    // The player says "Vex" this turn: a lookup with that word shows, one with "Morrow" doesn't.
+    await rig.turn(chatId, "I ask whether Vex takes the ferry.", "The ferry horn sounds.");
+    await rig.rt.inspector.settle();
+    const context = await contextOf(rig, chatId);
+    expect(lookupsOf(context, "extract").map((q) => q.text)).toEqual(["(withheld: it carries a secret)", "(withheld: it carries a secret)", "Vex at the ferry"]);
+    for (const shown of [context, await storedOf(rig, chatId)]) expect(shown).not.toMatch(/李雷|Morrow/);
+  });
+
   /** The `npc.choose` traces in a Context view or a stored history. */
   const npcTraces = (json: string): LoreStepTrace[] => {
     const parsed = JSON.parse(json) as { generations?: { lore?: LoreStepTrace[] }[]; records?: { lore?: LoreStepTrace[] }[] };
@@ -422,7 +440,7 @@ describe("the inspector's lore traces", () => {
     const w = new Working(reg, world, startState(world));
     const reader = { reg, world: w.world, state: w.state, tokens: (t: string) => Math.ceil(t.length / 3.2) };
     const run = (privateInputs: boolean): StepLore => {
-      const lore = new StepLore("npc.choose", { policy: "prefetch+lookup", tokens: 400 }, reader, "pre", { text: [], names: [] }, { privateInputs });
+      const lore = new StepLore("npc.choose", { policy: "prefetch+lookup", tokens: 400 }, reader, "pre", { text: [], people: [], labels: [], said: "", names: [] }, { privateInputs });
       // As the runtime builds it: the agent's name and option ids, shown as whose choice it is.
       lore.prefetch({ text: "Dev: agenda steal ledger, rest", links: [], shown: "Dev's choice" });
       lore.answer([{ kind: "search", text: "cafe" }, { kind: "list", text: "Mill" }]);
@@ -453,7 +471,7 @@ describe("lookup instructions and answers", () => {
   const stepLore = (world: WorldDoc, purpose: StepPurpose, tokens = 400): StepLore => {
     const w = new Working(reg, world, startState(world));
     const lookups = { budget: new LookupBudget(2, 60_000, 60_000, new AbortController().signal), transport: "tools" as const, refused: () => undefined };
-    return new StepLore(purpose, { policy: "prefetch+lookup", tokens }, { reg, world: w.world, state: w.state, tokens: (t: string) => Math.ceil(t.length / 3.2) }, "post", { text: [], names: [] }, { lookups });
+    return new StepLore(purpose, { policy: "prefetch+lookup", tokens }, { reg, world: w.world, state: w.state, tokens: (t: string) => Math.ceil(t.length / 3.2) }, "post", { text: [], people: [], labels: [], said: "", names: [] }, { lookups });
   };
 
   test("the instructions name only the topics the step can read an entry under", () => {

@@ -26,7 +26,7 @@ import type { StepLore as StepLoreSetting } from "../shared/settings";
 import type { LoreStepTrace } from "../shared/state-view";
 import type { LoreEntryDef, StepPurpose } from "../shared/world";
 import { loreGet, loreList, loreSearch, readableLore, readsSecrets, type LoreHit, type LoreReader, type LoreResult } from "../engine/lore";
-import { findLeaks, loreGateReader } from "../engine/visibility";
+import { findLeaks, loreGateReader, namesAny } from "../engine/visibility";
 import type { HostPort, QuietResult, QuietTool } from "./host";
 import { parseJsonReply } from "./steps";
 import { readStoredJson } from "./stored-json";
@@ -54,10 +54,15 @@ export interface LoreAsk {
   topic?: string;
 }
 
-/** What a step's trace must not show (DESIGN §6.5); the caller leaves out what the player said this turn. */
+/** What a step's trace must not show (DESIGN §6.5); what the player saw said this turn is never withheld. */
 export interface TraceWithheld {
-  /** Text no line of the trace may carry: unrevealed secrets, and the names of people the player hasn't met and of places the POV can't see. */
+  /** Text no line of the trace may carry: unrevealed secrets, less what was said this turn. */
   text: readonly string[];
+  /** People the player hasn't met, named by any word of their name, and things and places they don't know, by their whole names (`namesAny`). */
+  people: readonly string[];
+  labels: readonly string[];
+  /** What the player and the reply said this turn: a name's word said there isn't withheld. */
+  said: string;
   /** What leads to an unrevealed secret entry (its id, title, aliases, keys, terms and topics): no lookup the model wrote may name it. */
   names: readonly string[];
 }
@@ -193,7 +198,7 @@ export class StepLore {
   private shown(kind: LoreStepTrace["queries"][number]["kind"], text: string): string {
     if (kind !== "prefetch" && (this.guarded || this.privateInputs)) return "";
     const shown = text.replace(/\s+/g, " ").trim();
-    if (findLeaks(shown, kind === "prefetch" ? this.withheld.text : [...this.withheld.text, ...this.withheld.names]).length > 0) return WITHHELD;
+    if (findLeaks(shown, kind === "prefetch" ? this.withheld.text : [...this.withheld.text, ...this.withheld.names]).length > 0 || namesAny(shown, this.withheld.people, this.withheld.labels, this.withheld.said)) return WITHHELD;
     return shown.length > TRACE_CHARS ? `${shown.slice(0, TRACE_CHARS)}…` : shown;
   }
 
@@ -207,7 +212,7 @@ export class StepLore {
     const fresh = result.hits.filter((h) => !this.given.has(h.id));
     for (const h of fresh) {
       this.given.set(h.id, h);
-      if (!h.secret && !this.privateInputs) this.trace.entries.push({ title: findLeaks(h.title, this.withheld.text).length > 0 ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut });
+      if (!h.secret && !this.privateInputs) this.trace.entries.push({ title: findLeaks(h.title, this.withheld.text).length > 0 || namesAny(h.title, this.withheld.people, this.withheld.labels, this.withheld.said) ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut });
     }
     if (fresh.length > 0) this.counted(fresh.map((h) => h.snippet));
     return fresh;
