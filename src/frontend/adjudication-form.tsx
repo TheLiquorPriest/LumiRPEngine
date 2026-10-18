@@ -43,7 +43,7 @@ export function policyLines(p: AdjudicationDef): string[] {
   };
   const retry: Record<RetryRule, string> = {
     free: "Retry a failed check whenever you like.",
-    changed: `A failed try stands until something changes: another way, better odds, a new place, or ${p.retryAfter} minutes.`,
+    changed: `A failed try stands until something changes: another way, better odds, a new place, a new round of a fight (or its end), or ${p.retryAfter} minutes.`,
     once: "A failed try stands until the scene changes.",
   };
   return [
@@ -114,7 +114,7 @@ export function AdjudicationForm(props: { value: AdjudicationDef; disabled?: boo
           {p.description.weight === "advantage" ? <NumberStepper label="Advantage from a rating of" value={p.description.advantageAt} min={1} max={p.description.max} step={1} integer disabled={props.disabled} onChange={(advantageAt) => describe({ advantageAt })} /> : null}
           <Choice label="Who settles a check" help="With close calls, a roll near another result lets the narrator add a cost or partial progress. The story: a helper picks the outcome, the odds as guidance; without it, the check succeeds." value={p.authority} labels={AUTHORITY} disabled={props.disabled} onChange={(authority) => set({ authority })} />
           {p.authority === "hybrid" ? <NumberStepper label="A close call is within (points)" value={p.closeBy} min={0} max={20} step={1} integer disabled={props.disabled} onChange={(closeBy) => set({ closeBy })} /> : null}
-          <Choice label="Retrying a failed check" help="After a change: the same try fails again until time passes, the odds change, the player tries another way or goes somewhere else. Once per scene: until they leave and come back." value={p.retry} labels={RETRY} disabled={props.disabled} onChange={(retry) => set({ retry })} />
+          <Choice label="Retrying a failed check" help="After a change: the same try fails again until time passes, a fight moves to a new round or ends, the odds change, the player tries another way or goes somewhere else. Once per scene: until they leave and come back." value={p.retry} labels={RETRY} disabled={props.disabled} onChange={(retry) => set({ retry })} />
           {p.retry === "changed" ? <NumberStepper label="Time that counts as a change (minutes)" value={p.retryAfter} min={0} max={10080} step={5} integer disabled={props.disabled} onChange={(retryAfter) => set({ retryAfter })} /> : null}
         </>
       )}
