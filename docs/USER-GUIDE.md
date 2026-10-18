@@ -510,7 +510,7 @@ The **Context** panel in Play shows what the engine put into the prompt for each
 
 The section opens with a short note for the narrator: it knows only what you know, these lines say how people behave, and it never says outright what a cue only hints at. A cue that would carry a secret you haven't found, or name someone or something you don't know, is left out on its own; the rest of the section stays.
 
-Stance is the last section on the section budget, after the facts (Outcome, Scene, People, Money and the rest), so on a small budget it is the first one left out. To see it more often, raise **Settings → Model use → Engine budget (tokens)**, or give it a lower rank in the world's own sections. The engine's helpers (the brief, the outline, suggested choices and the contradiction check) don't read it: a cue is a hint for the narrator to play, not a fact to state.
+Stance is the last section on the section budget, after the facts (Outcome, Scene, People, Money and the rest), so on a small budget it is the first one left out. Its cues come last of all: they go in only when the budget still has room once every section has its place, and otherwise Stance goes without them. The **Context** panel's size for Stance, and the budget it shows as used, count Stance's people lines only, because the cues change with secrets you haven't found. To see it more often, raise **Settings → Model use → Engine budget (tokens)**, or give it a lower rank in the world's own sections. The engine's helpers (the brief, the outline, suggested choices and the contradiction check) don't read it: a cue is a hint for the narrator to play, not a fact to state.
 
 ### Your lore in world chats
 

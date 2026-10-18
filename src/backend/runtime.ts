@@ -1570,6 +1570,8 @@ export class Runtime implements TurnHooks {
     let budget = settings.modelUse.tokens.sections;
     const { delivery } = await this.inspector.load(input.chatId, input.userId);
     const uncounted: string[] = [];
+    // Sections with hint lines (Stance's cues, §6.6), which ride once every section has its place.
+    const hinted: { entry: { content?: string }; label: string; template: string; lines: string[]; hints: string[]; cost: number }[] = [];
     for (const section of sectionsOf(world)) {
       // The preset places the section itself when an enabled block holds `{{outlet::lre_<slot>}}`
       // (DESIGN §6.7): its outlet twin is filled instead, and the world's placement waits.
@@ -1578,10 +1580,11 @@ export class Runtime implements TurnHooks {
       const entryId = routed ? twin : slotIds.get(section.id);
       if (!entryId || !present.has(entryId)) continue;
       const lines: string[] = [];
+      const hints: string[] = [];
       for (const r of this.registry.renderers) {
         if (r.slot !== section.id) continue;
         try {
-          lines.push(...r.render(ctx));
+          (r.hint ? hints : lines).push(...r.render(ctx));
         } catch (error) {
           this.host.log("warn", `[LumiRPEngine] section ${section.id}: ${error instanceof Error ? error.message : String(error)}`, input.userId);
         }
@@ -1596,6 +1599,7 @@ export class Runtime implements TurnHooks {
       if (section.id === "outcome") lines.unshift(...planned.outcome);
       if (section.id === "montage") lines.push(...planned.montage);
       const safe = lines.filter((l) => findLeaks(l, secrets).length === 0);
+      // Hints alone never make a section: its being there would tell of them.
       if (safe.length === 0) continue;
       const content = renderSection(section.label, section.template, safe);
       const key = hashParts("lre.tokens", input.userId, content);
@@ -1610,7 +1614,10 @@ export class Runtime implements TurnHooks {
       const placement = routed ? null : placementOf(section);
       result.enabled.push(entryId);
       result.forced.push(entryId);
-      result.mutated.push({ id: entryId, content, ...(placement ? { placement } : {}) });
+      const entry = { id: entryId, content, ...(placement ? { placement } : {}) };
+      result.mutated.push(entry);
+      const safeHints = hints.filter((l) => findLeaks(l, secrets).length === 0);
+      if (safeHints.length > 0) hinted.push({ entry, label: section.label, template: section.template, lines: safe, hints: safeHints, cost });
     }
     // The preset's narrator rules, for world chats only: at its `{{outlet::lre_narrator}}`, else
     // before the character. They are the preset's own text, apart from the section budget.
@@ -1621,8 +1628,20 @@ export class Runtime implements TurnHooks {
       result.forced.push(rulesAt);
       result.mutated.push({ id: rulesAt, content: `[Narrator rules]\n${rules}` });
     }
-    this.countLater(input.userId, uncounted);
     record.budget.used = settings.modelUse.tokens.sections - budget;
+    // Hints follow what the POV doesn't know (a hidden flag, a lore gate), so they ride last, in what
+    // the budget has left, and the inspector counts none of them: no clip, size or total the player
+    // sees moves when an off-screen secret changes (§6.2).
+    for (const h of hinted) {
+      const content = renderSection(h.label, h.template, [...h.lines, ...h.hints]);
+      const counted = this.tokenCounts.get(hashParts("lre.tokens", input.userId, content));
+      if (counted === undefined) uncounted.push(content);
+      const extra = Math.max(0, (counted ?? sectionTokens(content)) - h.cost);
+      if (extra > budget) continue;
+      budget -= extra;
+      h.entry.content = content;
+    }
+    this.countLater(input.userId, uncounted);
     // Every engine-book entry the engine didn't fill this turn is voted off, so one re-enabled in the
     // host's UI (an unused slot, a lore entry an earlier build left) can't activate natively. Other
     // books' entries are left to native World Info: no vote, no force, no recursion override.

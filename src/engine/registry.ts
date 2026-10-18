@@ -117,6 +117,12 @@ export interface EffectDef {
 
 export interface SectionRenderer {
   slot: SlotId;
+  /**
+   * Its lines are hints that follow what the POV doesn't know (Stance's cues, DESIGN §6.6): they ride
+   * once every section has its place on the section budget, in what is left, and no size, clip or
+   * total the player sees counts them, so an off-screen change never shows there.
+   */
+  hint?: true;
   /** Compact lines, at most one per fact; dynamic values never contain `{{` or `}}` (DESIGN §6.3). */
   render(ctx: ReadContext): string[];
 }

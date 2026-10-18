@@ -633,23 +633,41 @@ function decidedBlock(ctx: ReadContext, who: EntityId): string | null {
 }
 
 /**
- * The Stance section (DESIGN §6.6): for each person here the POV can see who acts, a line on what
- * they know of the POV and what they are about, and a line of their cues. Each piece that would carry
- * an unrevealed secret or name something the POV can't see is left out on its own.
+ * Who the Stance section tells of (DESIGN §6.6): everyone at the POV's place it can see who acts, in
+ * id order, and the test each piece about them passes: no unrevealed secret, nothing hidden named.
+ * The test is built on its first use, so a renderer with nothing to check never pays for it.
+ */
+function stanceCast(ctx: ReadContext): { people: EntityId[]; safe: (text: string) => boolean } {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const here = placeOfEntity(state, pov);
+  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && acts(ctx, id));
+  let check: ((text: string) => boolean) | null = null;
+  const safe = (text: string): boolean => {
+    if (!check) {
+      const secrets = unrevealedSecrets(reg, world, state);
+      const namesHidden = hiddenNameCheck(reg, world, state, pov);
+      check = (t) => findLeaks(t, secrets).length === 0 && !namesHidden(t);
+    }
+    return check(text);
+  };
+  return { people, safe };
+}
+
+/**
+ * The Stance section's own lines (DESIGN §6.6): for each person it tells of, what they know of the
+ * POV and what they are about. Each piece that would carry an unrevealed secret or name something
+ * the POV can't see is left out on its own.
  */
 export function stanceLines(ctx: ReadContext): string[] {
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
-  const here = placeOfEntity(state, pov);
-  if (!here) return [];
-  const secrets = unrevealedSecrets(reg, world, state);
-  const namesHidden = hiddenNameCheck(reg, world, state, pov);
-  const safe = (text: string): boolean => findLeaks(text, secrets).length === 0 && !namesHidden(text);
+  const { people, safe } = stanceCast(ctx);
   const regard = optionalQuery(ctx, "relationships.words");
   const lines: string[] = [];
-  for (const id of Object.keys(state.entities).sort()) {
+  for (const id of people) {
     const e = own(state.entities, id);
-    if (!e || id === pov || placeOfEntity(state, id) !== here || !kindIs(reg, world, e.kind, "person") || !canSeeEntity(reg, world, state, pov, id) || !acts(ctx, id)) continue;
+    if (!e) continue;
     // Nobody regards a stranger: regard toward the POV is knowing it as much as a `knows` relation.
     const known = knows(state, id, pov) || e.relations.some((r) => r.type === "regard" && r.to === pov);
     const words = regard?.(ctx, id, pov) ?? null;
@@ -670,10 +688,20 @@ export function stanceLines(ctx: ReadContext): string[] {
     const decided = e.agent && ctx.levelOf(id, "castlife") >= 3 ? decidedBlock(ctx, id) : null;
     if (decided !== null && safe(decided)) parts.push(listed("Decided", [decided]));
     lines.push(parts.join(" "));
-    const cues = cuesFor(ctx, id, safe);
-    if (cues.length > 0) lines.push(listed(`${e.name}'s cues`, cues));
   }
   return lines;
+}
+
+/**
+ * The Stance section's hints (DESIGN §6.6): a line of cues for each person it tells of who has any
+ * kept. They follow what the POV doesn't know, so they ride last on the section budget (`hint`).
+ */
+export function stanceCues(ctx: ReadContext): string[] {
+  const { people, safe } = stanceCast(ctx);
+  return people.flatMap((id) => {
+    const cues = cuesFor(ctx, id, safe);
+    return cues.length > 0 ? [listed(`${own(ctx.state.entities, id)?.name ?? id}'s cues`, cues)] : [];
+  });
 }
 
 declare module "../../../engine/registry" {
@@ -776,6 +804,7 @@ export const castlifePack: PackDef = {
     });
     r.view({ panel: "castlife.cast", build: (ctx) => buildCastView(ctx) as unknown as JsonValue });
     r.renderer({ slot: "stance", render: stanceLines });
+    r.renderer({ slot: "stance", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
 
     // Two schedules setting the same field of the same person at once are the engine's

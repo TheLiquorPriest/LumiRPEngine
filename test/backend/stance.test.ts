@@ -1,8 +1,9 @@
 // The Stance section in the prompt (DESIGN §6.2, §6.6): the shipped note leads it, it spends the
-// section budget at its own rank like any section, a world's own sections rank it, and the helpers'
-// fact lines leave it out.
+// section budget at its own rank like any section, a world's own sections rank it, its cues ride last
+// and count in nothing the player sees, and the helpers' fact lines leave it out.
 
 import { describe, expect, test } from "bun:test";
+import type { JsonObject } from "../../src/shared/json";
 import { DEFAULT_SECTIONS, sectionTokens } from "../../src/backend/book";
 import { factLines } from "../../src/backend/turn-steps";
 import { createRegistry } from "../../src/engine/registry-impl";
@@ -22,6 +23,21 @@ async function sent(rig: Rig, chatId: string, budget: number): Promise<Map<strin
     if (label !== undefined) out.set(label, m.content ?? "");
   }
   return out;
+}
+
+const CUE = "keeps checking his phone and pockets it when you look";
+
+/** A Port Alder chat where Danny has a cue for secret lore whose gate is `gate`: kept while it doesn't hold. */
+async function cueChat(rig: Rig, gate: string): Promise<string> {
+  const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+  const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null })) as { draft: { entities: Record<string, JsonObject> } };
+  const lore = { id: "bookmaker", title: "The bookmaker's ledger", content: "Danny owes a bookmaker in Green Bay more than he makes in a season.", keys: [], links: [], secret: true, gate };
+  rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "lore", id: "bookmaker", value: lore }));
+  rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: "danny_okafor", value: { ...draft.entities.danny_okafor, cues: [{ text: CUE, lore: "bookmaker" }] } }));
+  rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+  const chatId = rig.host.createChat("Morning.");
+  rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+  return chatId;
 }
 
 describe("the Stance section on the section budget", () => {
@@ -53,6 +69,32 @@ describe("the Stance section on the section budget", () => {
     const left = [...all.keys()].filter((label) => !ranked.has(label));
     expect(left.length).toBeGreaterThan(0);
     for (const label of left) expect(Object.values(sections).find((s) => s.label === label)?.rank ?? 0).toBeGreaterThan(2.5);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("its cues ride in what the budget has left, and the Context panel shows the same whether a cue's secret is kept or out", async () => {
+    const rig = new Rig({ shipped: true });
+    rig.host.tokenCount = null;
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { tokens: { sections: 100_000 } } } }));
+    const kept = await cueChat(rig, "false");
+    const out = await cueChat(rig, "true");
+    for (const chatId of [kept, out]) await rig.turn(chatId, "I look around.", "Quiet.");
+    // The narrator gets the cue only while its secret is kept; the player's Context row for Stance is the same either way.
+    const row = (chatId: string) => rig.rt.inspectorRecords(chatId)?.at(-1)?.sections.find((s) => s.slot === "stance");
+    expect(row(kept)).toBeDefined();
+    expect(row(kept)).toEqual(row(out));
+    expect((await sent(rig, out, 100_000)).get("Stance")).not.toContain(CUE);
+    const all = await sent(rig, kept, 100_000);
+    const stance = all.get("Stance") ?? "";
+    expect(stance).toContain(CUE);
+    // Room for every section's own lines and no more: Stance goes in without its cue rather than being left out.
+    const bare = stance
+      .split("\n")
+      .filter((line) => !line.includes(CUE))
+      .join("\n");
+    const others = [...all].filter(([label]) => label !== "Stance").reduce((sum, [, text]) => sum + sectionTokens(text), 0);
+    expect((await sent(rig, kept, others + sectionTokens(bare))).get("Stance")).toBe(bare);
+    expect((await sent(rig, kept, others + sectionTokens(stance))).get("Stance")).toBe(stance);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
