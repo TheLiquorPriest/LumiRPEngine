@@ -305,7 +305,7 @@ function dataBlock(vars: Readonly<Record<string, string>>): string {
   add("Outcome", "outcome");
   add("Engine beats", "beats");
   add("Brief", "brief");
-  add("Recent messages", "recent");
+  add("Recent turns", "recent");
   add("The player wrote", "user");
   add("The narrator's reply", "reply");
   return parts.join("\n\n") || "(no facts)";

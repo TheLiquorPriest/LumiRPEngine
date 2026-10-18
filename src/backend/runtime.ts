@@ -58,7 +58,7 @@ import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge } from "./turn-model";
 import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, refsExist, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, type PlanStart, type SignalFacts, type StepRun, type Tie } from "./turn-steps";
-import { buildView, clockMinutes, compactSpan, notWorldView, spanText, TIMELAPSE_ACTION } from "./view";
+import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { WorldStore } from "./worlds";
 
 export interface RuntimeOptions {
@@ -328,6 +328,8 @@ export interface ReadInput {
   world: WorldDoc;
   seed: string;
   pre: LedgerEvent[];
+  /** The Journal's latest turn lines before the reply (`{{recent}}`). */
+  recent: string[];
 }
 
 /** Why a regard proposal past its pair's budget for the reply is refused. */
@@ -635,8 +637,9 @@ export class Runtime implements TurnHooks {
 
   /**
    * The plan phase (DESIGN §5.2, §5.3): with the plan made, `brief` and the prose `outline` (stacked
-   * on the engine's beats) run side by side on the pre budget; their text goes to the Outline
-   * slot. They see only player-visible facts (secrecy batching rule).
+   * on the engine's beats) run side by side on the pre budget, except that an outline template
+   * naming `{{brief}}` waits for the brief; their text goes to the Outline slot. They see only
+   * player-visible facts (secrecy batching rule).
    */
   async afterPlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; signal: AbortSignal }): Promise<void> {
     const bridge = this.bridges.get(input.chatId);
@@ -657,11 +660,17 @@ export class Runtime implements TurnHooks {
     }
     const budget = this.preBudgets.get(input.generationId) ?? new StepBudget(settings.modelUse.budgets.pre.calls, settings.modelUse.budgets.pre.ms, input.signal, settings.modelUse.budgets.pre.lookup);
     const secrets = unrevealedSecrets(this.registry, render.world, render.state);
-    const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, ""), secrets);
+    // The Journal before this turn: the plan's target message and what follows aren't in it.
+    const target = p.messageId === null ? -1 : input.observed.findIndex((m) => m.id === p.messageId);
+    const recent = recentLines(input.core, input.observed, target < 0 ? input.observed.length : target, this.registry);
+    const vars = safeVars(this.stepVars(render.world, render.state, plan, pre.text, "", "", recent), secrets);
     const inputs = { text: [pre.text, vars.outcome ?? "", vars.beats ?? "", this.trackWords(render.world, render.state)].join("\n"), links: this.sceneLinks(render.world, render.state) };
     const at = await this.lorePhase("pre", input.generationId, input.userId, render.world, render.state, budget, pre.text);
-    const run = (r: StepRun, kind: "brief" | "outline"): Promise<string[]> => (budget.take() ? promptedText(this.steps, r, kind, vars, secrets, input.userId, budget.signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []) : Promise.resolve([]));
-    const [briefs, outlines] = await Promise.all([Promise.all(briefRuns.map((r) => run(r, "brief"))), Promise.all(outlineRuns.map((r) => run(r, "outline")))]);
+    const run = (r: StepRun, kind: "brief" | "outline", stepVars = vars): Promise<string[]> => (budget.take() ? promptedText(this.steps, r, kind, stepVars, secrets, input.userId, budget.signal, this.stepLore(r, at, inputs)).then((lines) => lines ?? []) : Promise.resolve([]));
+    const briefTask = Promise.all(briefRuns.map((r) => run(r, "brief")));
+    // An outline template that names {{brief}} waits for the brief (leak-checked as it comes back).
+    const outlineTask = Promise.all(outlineRuns.map((r) => (/\{\{\s*brief\s*\}\}/i.test(r.template?.template ?? "") ? briefTask.then((b) => run(r, "outline", { ...vars, brief: b.flat().join(" ").trim() })) : run(r, "outline"))));
+    const [briefs, outlines] = await Promise.all([briefTask, outlineTask]);
     const brief = briefs.flat().join(" ").trim();
     const prose = { brief: brief === "" ? null : brief, outline: outlines.flat() };
     bridge.setProse(p.seed, prose);
@@ -679,8 +688,12 @@ export class Runtime implements TurnHooks {
     }
   }
 
-  /** The engine placeholders a step template may use (DESIGN §5.2), all player-visible after `safeVars`. */
-  private stepVars(world: WorldDoc, state: WorldState, plan: EngineTurnPlan | undefined, user: string, reply: string): Record<string, string> {
+  /**
+   * The engine placeholders a step template may use (DESIGN §5.2), all player-visible after
+   * `safeVars`: `brief` is the turn's brief, once its step has run, and `recent` the Journal's latest
+   * turn lines before it.
+   */
+  private stepVars(world: WorldDoc, state: WorldState, plan: EngineTurnPlan | undefined, user: string, reply: string, brief: string, recent: readonly string[]): Record<string, string> {
     const facts = factLines(this.registry, world, state, []);
     return {
       world: world.name,
@@ -692,10 +705,10 @@ export class Runtime implements TurnHooks {
       present: presentNames(this.registry, world, state).join(", "),
       outcome: plan ? planLines(plan, world, this.registry).outcome.join("\n") : "",
       beats: (plan?.outline ?? []).join("\n"),
-      brief: "",
+      brief,
       user,
       reply,
-      recent: "",
+      recent: recent.join("\n"),
     };
   }
 
@@ -994,14 +1007,16 @@ export class Runtime implements TurnHooks {
   }
 
   async beforeCommit(input: TurnContext): Promise<void> {
+    const index = input.observed.findIndex((m) => m.id === input.messageId);
+    const recent = recentLines(input.core, input.observed, index < 0 ? input.observed.length : index, this.registry);
     let context: ReadInput | null;
     if (input.kind === "continue") {
-      const index = input.observed.findIndex((m) => m.id === input.messageId);
       const head = input.core.fold(input.observed.slice(0, index + 1));
       const world = input.core.worldAt(head.state.revision);
-      context = world ? { state: head.state, world, seed: "", pre: [] } : null;
+      context = world ? { state: head.state, world, seed: "", pre: [], recent } : null;
     } else {
-      context = input.core.commitContext(input.generationId, input.messageId, input.observed);
+      const at = input.core.commitContext(input.generationId, input.messageId, input.observed);
+      context = at ? { ...at, recent } : null;
     }
     if (context) await this.prepareRead(input.chatId, input.userId, input.messageId, input.swipeId, input.generationId, input.content, context, input.kind !== "continue");
   }
@@ -1028,7 +1043,8 @@ export class Runtime implements TurnHooks {
     // The user's post-phase deadline as set (no silent 15 s floor).
     const budget = new StepBudget(settings.modelUse.budgets.post.calls, settings.modelUse.budgets.post.ms, undefined, settings.modelUse.budgets.post.lookup);
     const secrets = unrevealedSecrets(this.registry, context.world, context.state);
-    const vars = safeVars(this.stepVars(context.world, context.state, plan, pre?.text ?? "", text), secrets);
+    // The brief the plan's step wrote, while the bridge still holds the plan (as `outcome` and `beats`).
+    const vars = safeVars(this.stepVars(context.world, context.state, plan, pre?.text ?? "", text, (plan && bridge.proseFor(context.seed)?.brief) ?? "", context.recent), secrets);
     const modelUse = settings.modelUse;
     // What the reply's steps search lore with: the reply and the player's message, in the POV's scene.
     const read = { text: `${text}\n${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };

@@ -371,6 +371,24 @@ function turnNotes(chain: readonly ChainMessage[], fold: FoldOutput, core: Ledge
   return out.slice(-JOURNAL_TURNS);
 }
 
+/** Turns `{{recent}}` holds (DESIGN §5.2). */
+const RECENT_TURNS = 5;
+
+/**
+ * `{{recent}}` for a model step (DESIGN §5.2): the Journal's latest turn lines before `index` in the
+ * chain, oldest first, as the player sees them at that point (worded and filtered by `turnNotes`
+ * against the state there, so nothing the POV hadn't seen by then).
+ */
+export function recentLines(core: LedgerCore, observed: readonly ChainMessage[], index: number, registry: Registry): string[] {
+  const prefix = observed.slice(0, Math.max(0, index));
+  const fold = core.fold(prefix);
+  const world = core.worldAt(fold.state.revision);
+  if (!world) return [];
+  return turnNotes(core.chain(prefix), fold, core, registry, world, fold.state)
+    .slice(-RECENT_TURNS)
+    .map((n) => n.text);
+}
+
 /** A game-time span in words: "45 min", "2.5 hours", "30 days". */
 export function spanText(minutes: number): string {
   if (minutes >= 1440) return `${Math.round((minutes / 1440) * 10) / 10} ${minutes === 1440 ? "day" : "days"}`;

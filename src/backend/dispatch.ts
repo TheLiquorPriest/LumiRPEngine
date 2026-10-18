@@ -36,7 +36,7 @@ import { ACTIVE_CONNECTION, declineNote, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
-import { TIMELAPSE_ACTION } from "./view";
+import { recentLines, TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
 import { newChatRun, WorldError } from "./worlds";
 
@@ -465,7 +465,7 @@ export class Dispatcher {
         if (refused) throw new RequestError("bad_request", refused);
         // Both read the whole text and replace the swipe's earlier read, so that read's chips go first.
         const context = core.readContext(messageId, now);
-        if (context) await this.rt.prepareRead(chatId, userId, messageId, m.swipeId, `${kind}:${messageId}:${m.swipeId}`, m.swipes[m.swipeId] ?? "", context, true, true);
+        if (context) await this.rt.prepareRead(chatId, userId, messageId, m.swipeId, `${kind}:${messageId}:${m.swipeId}`, m.swipes[m.swipeId] ?? "", { ...context, recent: recentLines(core, now, now.findIndex((x) => x.id === messageId), this.rt.registry) }, true, true);
         const result = await this.write(chatId, userId, { kind, id: this.nextId(), messageId, swipeId: Number(swipe) });
         return { applied: result.applied, pending: result.pending };
       });
