@@ -102,6 +102,22 @@ describe("a narrated purchase that tells the turn's own Buy again", () => {
   });
 });
 
+describe("a narrated purchase of a sibling of the turn's Buy", () => {
+  // "Coffee" priced as Drip coffee is in the Latte's group of the price table: the reply may be
+  // naming the latte the player bought, so it asks rather than charging a second drink.
+  test("'coffee' after a typed latte asks whether it was bought too, unless it's another one, for someone, or another quantity", async () => {
+    const sibling = await after("latte", { item: "coffee", category: "coffee" });
+    expect(sibling.memos).toEqual(["Bought Latte, 16 oz"]);
+    expect(sibling.chips).toEqual([expect.stringMatching(/^Also bought coffee\?/)]);
+    const others: JsonObject[] = [{ item: "another coffee" }, { item: "coffee for Danny" }, { item: "coffee", qty: 2 }];
+    for (const narrated of others) {
+      const chips = (await after("latte", { ...narrated, category: "coffee" })).chips;
+      expect(chips).toHaveLength(1);
+      expect(chips[0]).toMatch(/^Bought /);
+    }
+  });
+});
+
 describe("with purchases on auto, a reply that tells a catalog-matched Buy again charges it once", () => {
   const cases: { typed: string; price?: number; narrated: JsonObject; charged: string }[] = [
     { typed: "milk", narrated: { item: "milk" }, charged: "Bought Milk, whole" },

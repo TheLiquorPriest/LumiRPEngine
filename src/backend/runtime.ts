@@ -16,7 +16,7 @@ import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateVi
 import type { ActionDef, AdjudicationDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
 import { fightOffers } from "../packs/combat/core/index";
-import { transferCents } from "../packs/economy/core/index";
+import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
 import { needsJudge, outcomeChoices, policyFor, policyOf, type Verdict } from "../engine/adjudication";
 import type { EngineTurnPlan, QueueStop } from "../engine/turn";
@@ -272,7 +272,10 @@ function toldAsAnother(narration: string, head: string, ctx: ReadContext): boole
  * catalogued Buy is charged the catalog's price ("you pay $3 for the coffee" after a typed $3
  * coffee charged $5.38). Anything else of the same noun may be either (`unsure`): other qualifiers
  * ("leather card holder" for "credit card holder"), a price off the Buy's, or a narration that
- * says "another" beside it. Only a purchase the player character (or something they own) pays for.
+ * says "another" beside it. So may another noun whose catalog row is a sibling of a Buy's (the same
+ * group in the price table: "coffee" priced as Drip coffee after a Buy of Latte, the reply's words
+ * for the latte), unless its words or the narration's make it another one or it names another
+ * quantity. Only a purchase the player character (or something they own) pays for.
  */
 export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: ReadContext, typed: readonly number[] = [], narration = ""): Along {
   const { world, state } = ctx;
@@ -282,10 +285,14 @@ export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: Rea
   const stated = typeof p.price === "number" && Number.isFinite(p.price) ? Math.abs(p.price) : null;
   const near = (v: number): boolean => stated === null || Math.abs(stated - v) <= 0.25 * v;
   const another = ANOTHER.test(`${p.item} ${typeof p.name === "string" ? p.name : ""}`) || (said.trailing?.word === "for" && forSomeone(said.trailing.words, ctx));
+  const buys = buysIn(pre);
   let verdict: Along = null;
-  for (const buy of buysIn(pre)) {
+  let sameNoun = false;
+  for (const buy of buys) {
     const bought = itemName(buy.name);
-    if (!bought || bought.head !== said.head || another) continue;
+    if (!bought || bought.head !== said.head) continue;
+    sameNoun = true;
+    if (another) continue;
     if (typeof p.qty === "number" && p.qty !== buy.qty) continue;
     const contrast = [...said.words].some((w) => CONTRAST[w] !== undefined && !bought.words.has(w) && [...bought.words].some((b) => b !== w && CONTRAST[b] === CONTRAST[w]));
     if (contrast) continue;
@@ -298,7 +305,15 @@ export function boughtAlong(p: JsonObject, pre: readonly LedgerEvent[], ctx: Rea
     if (holds && priced && !toldAsAnother(narration, said.head, ctx)) return "retold";
     verdict = "unsure";
   }
-  return verdict;
+  if (sameNoun || another || toldAsAnother(narration, said.head, ctx)) return verdict;
+  // Siblings are rows of one group in the price table. The narrated purchase's row is the one
+  // `economy.buy` prices it as where the player character is (by id, else what its words name); a
+  // catalogued Buy carries its own row's name.
+  const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
+  const row = hasOwn(rows, p.item) ? p.item : matchCatalog(ctx, p.item, placeOfEntity(state, world.pov), typeof p.category === "string" ? p.category : "");
+  const group = row === null ? undefined : own(rows, row)?.category;
+  if (typeof group !== "string" || group === "") return null;
+  return buys.some((buy) => (typeof p.qty !== "number" || p.qty === buy.qty) && Object.values(rows).some((r) => r.name === buy.name && r.category === group)) ? "unsure" : null;
 }
 
 /**
