@@ -117,6 +117,8 @@ export class TurnBridge implements TurnModel {
   private readonly unread = new Set<string>();
   /** Actions `interpret` read but couldn't apply, their params naming nothing that fits, keyed like `intents`: the turn plays as plain roleplay, and its reply says why. */
   private readonly unfit = new Map<string, UnfitAction>();
+  /** The input's second action (`interpret`'s `next`), offered as a chip that sends it as the next message, keyed like `intents`. */
+  private readonly nexts = new Map<string, string>();
   /** Prepared reads keyed by `hashParts(text)`. */
   private readonly reads = new Map<string, PreparedRead>();
   /** Engine plans keyed by seed: elapsed minutes for `appliedMinutes`, chips and outline lines. */
@@ -207,6 +209,16 @@ export class TurnBridge implements TurnModel {
 
   offerFor(userText: string): TimelapseTarget | undefined {
     return this.offers.get(userText);
+  }
+
+  setNext(userText: string, next: string | null): void {
+    if (next) this.nexts.set(userText, next);
+    else this.nexts.delete(userText);
+    trim(this.nexts);
+  }
+
+  nextOf(userText: string): string | undefined {
+    return this.nexts.get(userText);
   }
 
   setProse(seed: string, prose: PlanProse): void {

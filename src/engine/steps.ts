@@ -68,6 +68,8 @@ export interface InterpretOutput {
   probabilities: Record<string, number>;
   /** Time the input lets pass after the action ("…and sleep until the next morning"): `minutes` or `until`. */
   then?: JsonObject;
+  /** The input's second action, as the player would type it ("I buy a latte"): offered as a chip that sends it as the next message. Never time passing, which is `then`'s. */
+  next?: string;
   /** The `judge` step's answer for the action's check (DESIGN §11), recorded with the intent so a Re-run reads the same one. */
   judgement?: Judgement;
 }

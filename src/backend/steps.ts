@@ -364,12 +364,19 @@ export class Steps {
 // ---------------------------------------------------------------- the typed-input classifier
 
 const ACTION_VERBS =
-  /\b(go(?:ing)? to|walk|run|drive|driving|ride|head(?:ing)? (?:to|out|over|back|home)|travel|take|grab|pick up|drop|give|hand|lend|loan|wear|put on|take off|remove|use|buy|purchase|order|pay|transfer|send|refuel|fill (?:it|her) up|wait|sleep|bed\b|nap|rest|skip|examine|inspect|look (?:at|in|under)|search|open|close|lock|unlock|call|phone|text|borrow|steal|sell|attack|fight|hit|shoot|climb|jump|sneak|hide|cook|eat|drink|work|study|train|fix|repair|craft|build)\b/i;
-const STRUCTURE = /\$\s?\d|\b\d+(?:\.\d+)?\s?(?:gal|gallons|dollars|bucks|minutes|mins|hours|hrs|days|weeks)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:until|till)\b/i;
+  /\b(go(?:ing)? to|walk|run|drive|driving|ride|head(?:ing)? (?:to|out|over|back|home)|travel|take|grab|pick up|drop|give|hand|lend|loan|wear|put on|take off|remove|use|buy|purchase|order|pay|transfer|send|refuel|fill (?:it|her) up|examine|inspect|look (?:at|in|under)|search|open|close|lock|unlock|call|phone|text|borrow|steal|sell|attack|fight|hit|shoot|climb|jump|sneak|hide|cook|eat|drink|work|study|train|fix|repair|craft|build)\b/i;
+/** Words and cues that let time pass: waiting or sleeping, a span, a clock time, "until". */
+const TIME_CUES = /\b(?:wait|sleep|bed|nap|rest|skip)\b|\b\d+(?:\.\d+)?\s?(?:minutes|mins|hours|hrs|days|weeks)\b|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:until|till)\b/i;
+const AMOUNTS = /\$\s?\d|\b\d+(?:\.\d+)?\s?(?:gal|gallons|dollars|bucks)\b/i;
 
 /** DESIGN §5.2: fires on the action lexicon (the built-in verbs plus every action's `lexicon`), a known item, vehicle, account or place named as a target, or a structural cue. Deterministic, no model. */
 export function classifyTyped(text: string, world: WorldDoc, lexicon: readonly string[] = []): boolean {
-  if (ACTION_VERBS.test(text) || STRUCTURE.test(text)) return true;
+  return TIME_CUES.test(text) || namesAction(text, world, lexicon);
+}
+
+/** Whether typed text names an action other than letting time pass: a built-in verb or a `lexicon` phrase, an amount, or a known item, vehicle, account or place as a target. */
+function namesAction(text: string, world: WorldDoc, lexicon: readonly string[]): boolean {
+  if (ACTION_VERBS.test(text) || AMOUNTS.test(text)) return true;
   const lower = text.toLowerCase();
   for (const phrase of lexicon) if (phrase.trim().length > 2 && lower.includes(phrase.trim().toLowerCase())) return true;
   for (const [id, e] of Object.entries(world.entities)) {
@@ -378,6 +385,17 @@ export function classifyTyped(text: string, world: WorldDoc, lexicon: readonly s
   }
   for (const p of Object.values(world.places)) if (p.name.length > 2 && lower.includes(`to ${p.name.toLowerCase()}`)) return true;
   return false;
+}
+
+/**
+ * Whether typed text only lets time pass ("I sleep until morning", "wait two hours"): a time cue or
+ * one of `timeLexicon`'s phrases, and nothing that names another action (`lexicon` holds the actions'
+ * own phrases; one that is itself a time cue, such as "sleep" or "rest", names no more than the time).
+ * `interpret`'s second action never does: time after the first is `then`'s.
+ */
+export function onlyPassesTime(text: string, world: WorldDoc, lexicon: readonly string[], timeLexicon: readonly string[]): boolean {
+  const lower = text.toLowerCase();
+  return (TIME_CUES.test(text) || timeLexicon.some((phrase) => phrase.trim().length > 2 && lower.includes(phrase.trim().toLowerCase()))) && !namesAction(text, world, lexicon.filter((phrase) => !TIME_CUES.test(phrase)));
 }
 
 // ---------------------------------------------------------------- interpret
@@ -396,7 +414,7 @@ function worldBrief(world: WorldDoc, extra: string): string {
   return `World: ${world.name}. The player character is ${pov?.name ?? world.pov} (id ${world.pov}). Entities: ${people || "none"}. Places: ${places || "none"}. ${extra}`;
 }
 
-/** `interpret`: typed input to at most one action (DESIGN §9.4). `instructions` (a world step template) lead the prompt; the output contract stays; the step's lore follows. Null when the call fails. */
+/** `interpret`: typed input to at most one action (DESIGN §9.4), with the input's second action as the player would type it (`next`). `instructions` (a world step template) lead the prompt; the output contract stays; the step's lore follows. Null when the call fails. */
 export async function interpret(
   steps: Steps,
   text: string,
@@ -411,7 +429,7 @@ export async function interpret(
 ): Promise<InterpretOutput | null> {
   if (actions.length === 0) return { action: null, params: {}, probabilities: { none: 1 } };
   const catalog = actions.map((a) => `${a.id} — ${a.label}${a.params.length > 0 ? ` (params: ${a.params.join(", ")})` : ""}${a.lexicon && a.lexicon.length > 0 ? ` [said as: ${a.lexicon.slice(0, 6).join(", ")}]` : ""}`).join("\n");
-  const system = `${instructions ? `${instructions}\n` : ""}You map a player's typed input in a roleplay to at most one engine action.\n${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}\nAction catalog:\n${catalog}\nRules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). If the input has two actions, return the first. If it also lets time pass after that action ("…and sleep until the next morning", "…then wait two hours"), add "then": {"minutes": number} or {"until": a day part, "shift" or "commitment"}. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "then"?: {...}}.`;
+  const system = `${instructions ? `${instructions}\n` : ""}You map a player's typed input in a roleplay to at most one engine action.\n${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}\nAction catalog:\n${catalog}\nRules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). If the input has two actions, return the first, and add "next": the second, written as the player would type it ("I walk to the market to buy bread" → "I buy bread"). If it also lets time pass after that action ("…and sleep until the next morning", "…then wait two hours"), add "then": {"minutes": number} or {"until": a day part, "shift" or "commitment"}; time passing is never "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "then"?: {...}, "next"?: string}.`;
   // A transient failure (a reset connection, a timeout) gets one more try: a turn whose action went unread runs as plain roleplay.
   const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { retryTransient: true, lore });
   if (!isRecord(raw)) return null;
@@ -420,7 +438,10 @@ export async function interpret(
   if (isRecord(raw.params)) for (const [k, v] of Object.entries(raw.params)) params[k] = JSON.parse(JSON.stringify(v ?? null)) as JsonValue;
   const confidence = typeof raw.confidence === "number" ? Math.min(1, Math.max(0, raw.confidence)) : 0.8;
   const then = isRecord(raw.then) ? (JSON.parse(JSON.stringify(raw.then)) as JsonObject) : undefined;
-  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(then ? { then } : {}) };
+  // The second action becomes a chip's text: one longer than a suggested choice is no single action,
+  // and it is dropped rather than cut, so a cut can't hide a secret from the leak check that follows.
+  const next = typeof raw.next === "string" ? raw.next.replace(/\s+/g, " ").trim() : "";
+  return { action, params: action ? params : {}, probabilities: action ? { [action]: confidence, none: 1 - confidence } : { none: 1 }, ...(then ? { then } : {}), ...(next !== "" && next.length <= 120 ? { next } : {}) };
 }
 
 /** A way of paying said as a payment: a preposition or "use" before it ("pay with my credit card", "on my debit card", "in cash", "from savings"), and not a thing named after it ("a credit card holder"). */

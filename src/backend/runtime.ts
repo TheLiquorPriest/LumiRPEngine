@@ -51,7 +51,7 @@ import { StatePush } from "./push";
 import { effectiveMode, recordOutcome, SettingsStore } from "./settings-store";
 import { startMarkersFrom } from "./start-markers";
 import { StepLore, ToolSupport, type LoreInputs, type LookupTransport } from "./lore-steps";
-import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, saidPayMethod, Steps } from "./steps";
+import { CallMeter, classifyTyped, dedupeProposals, extract, interpret, onlyPassesTime, saidPayMethod, Steps } from "./steps";
 import { PlanNotes } from "./plan-notes";
 import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
@@ -765,6 +765,7 @@ export class Runtime implements TurnHooks {
     if (result === null) {
       this.host.log("warn", `[LumiRPEngine] interpret: couldn't read the player's action; the turn runs as plain roleplay`, userId);
       bridge.setOffer(text, null);
+      bridge.setNext(text, null);
       bridge.setUnread(text);
       return;
     }
@@ -773,12 +774,17 @@ export class Runtime implements TurnHooks {
     // roleplay. Words the player typed are theirs to repeat.
     const typedText = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typedText.includes(s.toLowerCase()));
-    if (findLeaks({ params: result.params, ...(result.then ? { then: result.then } : {}) }, secrets).length > 0) {
+    if (findLeaks({ params: result.params, ...(result.then ? { then: result.then } : {}), ...(result.next ? { next: result.next } : {}) }, secrets).length > 0) {
       this.host.log("info", `[LumiRPEngine] interpret: ${result.action ?? "no action"} carried an unrevealed secret; played as roleplay`, userId);
       bridge.setOffer(text, null);
+      bridge.setNext(text, null);
       bridge.setIntent(text, null);
       return;
     }
+    // The input's second action ("…to buy a latte") is offered once the first has run, as a chip that
+    // sends it as the next message (DESIGN §5.2). Time passing is `then`'s, never a second action, and
+    // a chip never names someone or something the POV can't see.
+    bridge.setNext(text, result.next && !onlyPassesTime(result.next, render.world, all.flatMap((a) => a.lexicon ?? []), TIMELAPSE_LEXICON) && !namesHidden(this.registry, render.world, render.state, result.next) ? result.next : null);
     // A bare time span reads as the timelapse itself; one after another action ("I head home and
     // sleep until the next morning") is offered once that action has run.
     const timeOnly = result?.action === TIMELAPSE_ACTION ? result.params : result && !result.action && result.then ? result.then : null;
@@ -1336,6 +1342,10 @@ export class Runtime implements TurnHooks {
       const detail = offer.type === "duration" && offer.minutes > INTERPRETED_TIMELAPSE_CAP ? "That's longer than one turn runs on its own. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue } });
     }
+    // The input's second action (DESIGN §5.2 `interpret`): one tap sends it as the next message, as a
+    // suggested choice does, and it plays as its own turn, with its own price, time and checks.
+    const next = input.kind === "continue" ? undefined : bridge.nextOf(userText);
+    if (next) stored.push({ id: `next:${at}`, kind: "choice", ...base, label: next, detail: "The rest of your message. Send plays it as its own turn.", actions: [{ id: "send", label: "Send" }], expires: "next_send", payload: { text: next } });
     // An interrupt ended the timelapse early (DESIGN §9.2): say why, and offer the rest of the run.
     const summary = plan?.timelapse?.summary;
     if (summary?.stoppedBy && !(plan?.chips ?? []).some((c) => c.kind === "continue_timelapse")) {

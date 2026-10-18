@@ -1,24 +1,33 @@
 // What `interpret` reads from typed text (DESIGN §5.2, §9.4), on Port Alder: an action whose params
 // name nothing in the world plays as plain roleplay, says why on a decline chip and tells the next
-// reply it didn't happen.
+// reply it didn't happen; a second action in the same message is offered as a chip that sends it as
+// the next message, where it plays as its own turn.
 
 import { describe, expect, test } from "bun:test";
-import type { QuietRequest } from "../../src/backend/host";
+import type { DecideRequest, QuietRequest } from "../../src/backend/host";
 import { toChain } from "../../src/backend/ledger-io";
-import type { JsonObject, JsonValue } from "../../src/shared/json";
+import type { Answers } from "../../src/engine/decide";
+import { placeOfEntity } from "../../src/engine/scope";
+import { unrevealedSecrets } from "../../src/engine/visibility";
+import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
 
 const INTERPRET_MARK = "You map a player's typed input";
 
-/** A Port Alder chat; `hidden` adds someone of that name the POV can't see. */
-async function chat(extra: { hidden?: string } = {}): Promise<{ rig: Rig; chatId: string }> {
+/** A secret track's truth, short enough to fit a second action. */
+const TRUTH = "the ferryman sank the old boat";
+
+/** A Port Alder chat; `hidden` adds someone of that name the POV can't see, `truth` a secret track holding `TRUTH`. */
+async function chat(extra: { hidden?: string; truth?: boolean } = {}): Promise<{ rig: Rig; chatId: string }> {
   const rig = new Rig({ shipped: true });
   const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
-  if (extra.hidden) {
-    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection: "entities", id: "hidden_one", value: { id: "hidden_one", kind: "person", name: extra.hidden, tier: "background", fields: {}, relations: [], visibility: "secret" } }));
-    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
-  }
+  const put = async (collection: string, id: string, value: JsonObject): Promise<void> => {
+    rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
+  };
+  if (extra.hidden) await put("entities", "hidden_one", { id: "hidden_one", kind: "person", name: extra.hidden, tier: "background", fields: {}, relations: [], visibility: "secret" });
+  if (extra.truth) await put("tracks", "wreck", { id: "wreck", kind: "secret", label: "The wreck", start: "hidden", visibility: "secret", stages: { hidden: { label: "Hidden", next: [], truth: TRUTH } } });
+  if (extra.hidden || extra.truth) rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
   const chatId = rig.host.createChat("Morning.");
   rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
   return { rig, chatId };
@@ -95,5 +104,65 @@ describe("a typed action that names nothing in the world", () => {
     const chips = await replyChips(rig, chatId);
     expect(chips.some((c) => c.kind === "decline")).toBe(true);
     for (const c of chips) expect(`${c.label} ${c.detail ?? ""}`.toLowerCase()).not.toContain("vex");
+  });
+});
+
+describe("a second action in the same message", () => {
+  /** Reads the walk with `next` as its second action, and anything else as buying a latte. */
+  const walkThenBuy =
+    (next: string) =>
+    (text: string): JsonObject =>
+      text.startsWith("I walk") ? { action: "go", params: { to: "bluebird_coffee" }, confidence: 0.9, next } : { action: "buy", params: { item: "latte" }, confidence: 0.9 };
+
+  test("'I walk to Bluebird Coffee to buy a latte' walks there, and the buy is a chip that sends it; it plays as its own turn", async () => {
+    const { rig, chatId } = await chat();
+    reading(rig, walkThenBuy("I buy a latte"));
+    await rig.turn(chatId, "I walk to Bluebird Coffee to buy a latte.", "You push open the door of the cafe.");
+    const { state, world } = await folded(rig, chatId);
+    expect(placeOfEntity(state, world.pov)).toBe("bluebird_coffee");
+    const chip = (await replyChips(rig, chatId)).find((c) => c.kind === "choice");
+    expect(chip?.label).toBe("I buy a latte");
+    const lattes = async (): Promise<number> => (await history(rig, chatId)).filter((h) => isRecord(h) && typeof h.memo === "string" && /latte/i.test(h.memo)).length;
+    expect(await lattes()).toBe(0);
+    expect(rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id, choice: chip?.actions[0]?.id })).applied).toBe(true);
+    expect((await rig.host.chats.messages(chatId, rig.host.userId)).findLast((m) => m.isUser)?.content).toBe("I buy a latte");
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "The barista slides a latte across the counter.");
+    expect(await lattes()).toBe(1);
+    expect(rig.rt.ledger.errors).toEqual([]);
+  });
+
+  test("on the Decision route, the helper call that fills the params brings it too", async () => {
+    const { rig, chatId } = await chat();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "standard" } } }));
+    // The choice and the helper call that fills its params each take a call; NPC choices may take another.
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", budgets: { pre: { calls: 4 } }, steps: { interpret: { enabled: true, signals: ["typed_input"], route: { provider: "decision", connectionId: null, model: null } } } } } }));
+    rig.host.decideReply = (req: DecideRequest): Answers => {
+      const out: Answers = {};
+      for (const [key, q] of Object.entries(req.questions)) {
+        const choice = key === "action" ? "go" : q.type === "choice" ? (Object.keys(q.criteria)[0] ?? "none") : null;
+        if (choice !== null) out[key] = { type: "choice", choice, probabilities: { [choice]: 1 }, confidence: 1 };
+      }
+      return out;
+    };
+    reading(rig, walkThenBuy("I buy a latte"));
+    await rig.turn(chatId, "I walk to Bluebird Coffee to buy a latte.", "You push open the door of the cafe.");
+    expect(rig.host.decideCalls.some((r) => isRecord(r.questions.action))).toBe(true);
+    expect((await replyChips(rig, chatId)).filter((c) => c.kind === "choice").map((c) => c.label)).toEqual(["I buy a latte"]);
+  });
+
+  test("one that only lets time pass, or carries an unrevealed secret, is never offered", async () => {
+    const { rig, chatId } = await chat({ truth: true });
+    reading(rig, walkThenBuy("I sleep until the next morning"));
+    await rig.turn(chatId, "I walk to Bluebird Coffee and sleep until the next morning.", "You push open the door of the cafe.");
+    expect((await replyChips(rig, chatId)).some((c) => c.kind === "choice")).toBe(false);
+
+    const { state, world } = await folded(rig, chatId);
+    expect(unrevealedSecrets(rig.rt.registry, world, state)).toContain(TRUTH);
+    reading(rig, walkThenBuy(`I tell Marcus ${TRUTH}`));
+    await rig.turn(chatId, "I walk back to Bluebird Coffee and tell Marcus what I heard.", "Marcus looks up from his coffee.");
+    const chips = await replyChips(rig, chatId);
+    expect(chips.some((c) => c.kind === "choice")).toBe(false);
+    for (const c of chips) expect(`${c.label} ${c.detail ?? ""}`).not.toContain(TRUTH);
   });
 });
