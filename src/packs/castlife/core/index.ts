@@ -175,6 +175,25 @@ function within(dayStart: number, fromH: number, toH: number): { from: number; t
 /** The planner's option id prefix for an agenda's step: `agenda:<track>`. */
 const AGENDA_OPTION = "agenda:";
 
+/** The activity an agenda's step sets; which agenda it is isn't recorded with it. */
+const AGENDA_ACTIVITY = "agenda";
+
+/** Whether a track is public: the only agendas the player is shown. */
+function publicTrack(world: WorldDoc, track: string): boolean {
+  return visibilityOf(own(world.tracks, track)?.visibility) === "public";
+}
+
+/**
+ * A person's activity as the player and the narrator read it (DESIGN §7): as it is, except an
+ * agenda's step. That doesn't say which agenda it is, so it reads "busy" unless every agenda the
+ * person has is public: it never says they are pursuing one the player may not know of.
+ */
+export function shownActivity(ctx: ReadContext, who: EntityId, activity: string): string {
+  if (activity !== AGENDA_ACTIVITY) return activity;
+  const agendas = agendaFor(ctx.world, ctx.state, who);
+  return agendas.length > 0 && agendas.every((a) => publicTrack(ctx.world, a.track)) ? activity : "busy";
+}
+
 /** The planner's options for one agent and day: sleep, meals, socializing, leisure, chores, agenda steps and retrievals. */
 export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): PlanOption[] {
   const level = ctx.levelOf(who, "castlife");
@@ -202,7 +221,7 @@ export function dayOptions(ctx: ReadContext, who: EntityId, dayStart: number): P
       options.push({ id: `chore:${i}`, label: strOf(c.label, "Chores"), activity: "chores", place: strOf(c.place) || home, duration: numOf(c.minutes, 45), window: within(dayStart, 8, 20), utility: numOf(c.utility, 2), reasons: ["chore"] });
     });
   }
-  for (const a of agendaFor(ctx.world, ctx.state, who)) options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: "agenda", place: home, duration: 60, window: within(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
+  for (const a of agendaFor(ctx.world, ctx.state, who)) options.push({ id: `${AGENDA_OPTION}${a.track}`, label: a.stageLabel, activity: AGENDA_ACTIVITY, place: home, duration: 60, window: within(dayStart, 9, 20), utility: 1 + a.priority, reasons: [`agenda: ${a.label}`] });
   const overdue = optionalQuery(ctx, "gear.overdue");
   if (overdue) {
     for (const g of overdue(ctx, who)) {
@@ -486,7 +505,6 @@ export function buildCastView(ctx: ReadContext): CastView {
   const view = optionalQuery(ctx, "relationships.view");
   // Who the POV can see: the groups shown, and the people present (the shared rules, `isGone` included).
   const shown = (id: EntityId): boolean => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id);
-  const publicTrack = (track: string): boolean => visibilityOf(own(ctx.world.tracks, track)?.visibility) === "public";
   const groupIds = Object.keys(ctx.state.entities)
     .sort()
     .filter((id) => isGroup(ctx.registry, ctx.world, ctx.state, id) && shown(id));
@@ -522,7 +540,7 @@ export function buildCastView(ctx: ReadContext): CastView {
       groups: membershipsOf(id).map((m) => ({ id: m.id, ...(m.role !== undefined ? { role: m.role } : {}) })),
     };
     if (present) {
-      if (typeof e.fields.activity === "string" && sees("activity")) p.activity = e.fields.activity.replace(/_/g, " ");
+      if (typeof e.fields.activity === "string" && sees("activity")) p.activity = shownActivity(ctx, id, e.fields.activity).replace(/_/g, " ");
       if (sees("place")) p.place = own(ctx.world.places, place)?.name ?? place;
     } else if (level >= 2) {
       const last = lastSighting(ctx.state, id);
@@ -531,9 +549,9 @@ export function buildCastView(ctx: ReadContext): CastView {
     const regard = view ? view(ctx, id, pov) : [];
     if (regard.length > 0) p.regard = regard;
     const plan = present && e.agent ? dayPlan(ctx, id) : null;
-    const blocks = plan?.blocks.map((b) => (b.option.startsWith(AGENDA_OPTION) && !publicTrack(b.option.slice(AGENDA_OPTION.length)) ? { ...b, label: "Busy", reasons: ["their own business"] } : b));
+    const blocks = plan?.blocks.map((b) => (b.option.startsWith(AGENDA_OPTION) && !publicTrack(ctx.world, b.option.slice(AGENDA_OPTION.length)) ? { ...b, label: "Busy", reasons: ["their own business"] } : b));
     if (blocks && level >= 3) p.timeline = blocks.map((b) => ({ start: formatHHMM(dateAt(cal, b.start).minuteOfDay), end: formatHHMM(dateAt(cal, b.end).minuteOfDay), label: b.label, kind: kindOfBlock(b.activity), reasons: b.reasons }));
-    const agenda = agendaFor(ctx.world, ctx.state, id).filter((a) => publicTrack(a.track));
+    const agenda = agendaFor(ctx.world, ctx.state, id).filter((a) => publicTrack(ctx.world, a.track));
     if (agenda.length > 0) p.agenda = agenda.map((a) => ({ label: a.label, stage: a.stageLabel }));
     const next = blocks?.find((b) => b.start > ctx.state.clock);
     if (next) p.next = { at: formatClock(cal, next.start), label: next.label };
@@ -565,6 +583,8 @@ declare module "../../../engine/registry" {
   interface QueryMap {
     /** Ties the planner left to the seed and invitations not yet decided: inputs for `npc.choose`. */
     "castlife.tie_zones": (ctx: ReadContext) => { key: string; agent: EntityId; options: string[] }[];
+    /** A person's activity as the player and the narrator read it: an agenda's step reads "busy" unless all their agendas are public (`shownActivity`). */
+    "castlife.activity": (ctx: ReadContext, who: EntityId, activity: string) => string;
   }
 }
 
@@ -578,6 +598,7 @@ export const castlifePack: PackDef = {
     for (const def of EVENTS) r.event(def);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []) });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
+    r.query("castlife.activity", shownActivity);
     r.query("castlife.tie_zones", (ctx) => {
       const out: { key: string; agent: EntityId; options: string[] }[] = [];
       const decided = decisions(ctx.state);
@@ -645,7 +666,7 @@ export const castlifePack: PackDef = {
           if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) continue;
           // What they are doing is a field: told only when the POV may see it.
           const act = canSeeField(ctx.registry, ctx.world, ctx.state, pov, id, "activity") ? e.fields.activity : undefined;
-          lines.push(`${e.name}${typeof act === "string" && act !== "idle" ? ` (${act.replace(/_/g, " ")})` : ""} is here.`);
+          lines.push(`${e.name}${typeof act === "string" && act !== "idle" ? ` (${shownActivity(ctx, id, act).replace(/_/g, " ")})` : ""} is here.`);
         }
         if (ctx.levelOf(pov, "castlife") >= 4) {
           const urgent = Object.entries(NEEDS).filter(([n]) => needValue(ctx, pov, n) >= 60).map(([, d]) => d.label);

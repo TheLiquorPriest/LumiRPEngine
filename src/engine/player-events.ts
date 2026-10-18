@@ -273,7 +273,12 @@ function rawLine(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, po
       if (e.field === GONE_FIELD) return `${name(e.entity)} ${e.value === true ? "is gone" : "is back"}`;
       const kind = own(state.entities, e.entity)?.kind ?? "";
       if (e.field === "place" && typeof e.value === "string") return `${name(e.entity)} → ${name(e.value)}`;
-      const v = valueText(reg, world, state, pov, kind, e.field, e.value);
+      // A player's line words an activity as the castlife pack does for the player (an agenda's step
+      // the player may not know of reads "busy", `castlife.activity`).
+      const ctx = player && e.field === "activity" && typeof e.value === "string" ? reg.context(world, state) : null;
+      const shownActivity = ctx ? optionalQuery(ctx, "castlife.activity") : null;
+      const value = ctx && shownActivity && typeof e.value === "string" ? shownActivity(ctx, e.entity, e.value) : e.value;
+      const v = valueText(reg, world, state, pov, kind, e.field, value);
       if (v === null) return null;
       if (e.field === "activity") return `${name(e.entity)}: ${v}`;
       return `${name(e.entity)}: ${fieldDef(reg, world, kind, e.field)?.label ?? humanize(e.field)} ${v}`;

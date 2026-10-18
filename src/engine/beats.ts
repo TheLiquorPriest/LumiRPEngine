@@ -15,7 +15,7 @@ import type { Rng } from "./rng";
 import { allSchedules, nextStartFor, scheduleOwners } from "./schedules";
 import { asObject, placeOfEntity } from "./scope";
 import type { WorldState } from "./state";
-import { own } from "./pack-kit";
+import { optionalQuery, own } from "./pack-kit";
 import type { TimelapseOutcome } from "./time";
 import { canSeeEntity, canSeeField, playerTrack, signalVisible } from "./visibility";
 
@@ -78,17 +78,19 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   }
   for (const b of weightedOrder(storylets(input.events), rng.fork("storylets")).slice(0, 2)) lines.push(b.hint);
   const here = placeOfEntity(state, pov);
+  const ctx = reg.context(world, state);
   if (here) {
+    // An agenda's step reads as the castlife pack words it for the player (`castlife.activity`).
+    const shownActivity = optionalQuery(ctx, "castlife.activity");
     for (const id of Object.keys(state.entities).sort()) {
       const e = own(state.entities, id);
       if (!e || id === pov || !e.agent || placeOfEntity(state, id) !== here || !canSeeEntity(reg, world, state, pov, id)) continue;
       // What they are doing is a field: told only when the POV may see it.
       const act = canSeeField(reg, world, state, pov, id, "activity") ? e.fields.activity : undefined;
-      if (typeof act === "string" && act !== "" && act !== "idle") lines.push(`${e.name} is ${act.replace(/_/g, " ")}.`);
+      if (typeof act === "string" && act !== "" && act !== "idle") lines.push(`${e.name} is ${(shownActivity ? shownActivity(ctx, id, act) : act).replace(/_/g, " ")}.`);
     }
   }
   const cal = calendarOf(world);
-  const ctx = reg.context(world, state);
   for (const s of allSchedules(reg, world)) {
     if (s.target !== "activity" || !scheduleOwners(reg, world, state, s).includes(pov)) continue;
     const n = nextStartFor(reg, ctx, s, pov, state.clock, 1);
