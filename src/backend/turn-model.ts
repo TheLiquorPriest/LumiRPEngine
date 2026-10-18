@@ -102,6 +102,12 @@ export interface ReadChip {
   reason: "over_cap" | "unit_cap";
 }
 
+/** An action `interpret` read whose params name nothing in the world that fits (DESIGN §9.4): its label and why, for its decline chip. */
+export interface UnfitAction {
+  label: string;
+  reason: string;
+}
+
 export class TurnBridge implements TurnModel {
   /** `interpret` results keyed by the turn's last user text. */
   private readonly intents = new Map<string, InterpretOutput | null>();
@@ -109,6 +115,8 @@ export class TurnBridge implements TurnModel {
   private readonly interpreted = new Set<string>();
   /** User texts whose `interpret` call failed: their turn ran as plain roleplay ("Couldn't read your action"). */
   private readonly unread = new Set<string>();
+  /** Actions `interpret` read but couldn't apply, their params naming nothing that fits, keyed like `intents`: the turn plays as plain roleplay, and its reply says why. */
+  private readonly unfit = new Map<string, UnfitAction>();
   /** Prepared reads keyed by `hashParts(text)`. */
   private readonly reads = new Map<string, PreparedRead>();
   /** Engine plans keyed by seed: elapsed minutes for `appliedMinutes`, chips and outline lines. */
@@ -132,6 +140,7 @@ export class TurnBridge implements TurnModel {
     this.intents.set(userText, intent);
     trim(this.intents);
     this.unread.delete(userText);
+    this.unfit.delete(userText);
     if (interpreted && intent) this.interpreted.add(userText);
     else this.interpreted.delete(userText);
     if (this.interpreted.size > 64) this.interpreted.delete(this.interpreted.values().next().value ?? "");
@@ -144,6 +153,7 @@ export class TurnBridge implements TurnModel {
   setUnread(userText: string): void {
     this.intents.delete(userText);
     this.interpreted.delete(userText);
+    this.unfit.delete(userText);
     this.unread.add(userText);
     if (this.unread.size > 64) this.unread.delete(this.unread.values().next().value ?? "");
   }
@@ -151,6 +161,21 @@ export class TurnBridge implements TurnModel {
   /** Whether this text's turn ran unread because its `interpret` call failed. */
   wasUnread(userText: string): boolean {
     return this.unread.has(userText);
+  }
+
+  /**
+   * `interpret` read an action whose params name nothing in the world that fits. No intent is kept,
+   * so the turn plays as plain roleplay, and its reply gets a decline chip saying why.
+   */
+  setUnfit(userText: string, unfit: UnfitAction): void {
+    this.setIntent(userText, null);
+    this.unfit.set(userText, unfit);
+    trim(this.unfit);
+  }
+
+  /** The action this text's turn couldn't apply, when `interpret` read one whose params name nothing that fits. */
+  unfitOf(userText: string): UnfitAction | undefined {
+    return this.unfit.get(userText);
   }
 
   /** Whether this text's intent came from `interpret` (not a palette or chip action). */

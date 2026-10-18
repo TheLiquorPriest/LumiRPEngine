@@ -673,6 +673,13 @@ export class Dispatcher {
       case "decline": {
         const proposal = isRecord(chip.payload.proposal) ? (JSON.parse(JSON.stringify(chip.payload.proposal)) as JsonObject) : null;
         const reason = typeof chip.payload.reason === "string" ? chip.payload.reason : "declined";
+        // A typed action that named nothing in the world has no proposal (DESIGN §9.4): its chip holds the note each choice leaves.
+        const note = !proposal && isRecord(chip.payload.notes) && hasOwn(chip.payload.notes, choice) ? chip.payload.notes[choice] : undefined;
+        if (typeof note === "string") {
+          await this.rt.setOutcomeNote(chatId, userId, chip.id, note);
+          this.rt.push.changed(chatId, userId);
+          return { applied: true, pending: false };
+        }
         if (!proposal || choice === "dismiss") {
           await this.rt.setOutcomeNote(chatId, userId, chip.id, null);
           this.rt.push.changed(chatId, userId);

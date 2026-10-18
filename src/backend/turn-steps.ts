@@ -16,7 +16,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import type { LookupLimits, ModelUseSettings, StepConfig } from "../shared/settings";
 import { stepConfigOf } from "../shared/settings";
 import type { StepSignal } from "../shared/steps";
-import type { ActionDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
+import type { ActionDef, ParamDef, StepPurpose, StepTemplateDef, WorldCurrency, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock } from "../engine/calendar";
 import type { Judgement } from "../engine/adjudication";
 import type { Answers, Questions } from "../engine/decide";
@@ -99,30 +99,36 @@ export function planFacts(world: WorldDoc, before: PlanStart, after: Readonly<Wo
   };
 }
 
+/** A ref param of `interpret`'s read that names nothing that fits (`unfitRef`): its definition and what it held. */
+export interface UnfitRef {
+  def: ParamDef;
+  value: JsonValue | undefined;
+}
+
 /**
- * Whether `interpret`'s params name the right real things: a ref param must be an entity of the
- * param's kind (with inheritance), or a place where the param takes places. Typed text that names
- * nothing that fits ("I take the cash" when cash is an account, not an item) is roleplay for the
- * narrator and `extract`, not an action that would fail.
+ * The first ref param of `interpret`'s params that doesn't name the right real thing, or null when
+ * every one does: an entity of the param's kind (with inheritance), or a place where the param takes
+ * places. Typed text that names nothing that fits ("I take the cash" when cash is an account, not an
+ * item) is roleplay for the narrator and `extract`, not an action that would fail; its reply says why
+ * on a decline chip (DESIGN §9.4).
  */
-export function refsExist(registry: Registry, action: ActionDef | undefined, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>): boolean {
-  if (!action) return false;
+export function unfitRef(registry: Registry, action: ActionDef, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>): UnfitRef | null {
   for (const [name, def] of Object.entries(action.params)) {
     if (def.type !== "ref") continue;
-    const v = params[name];
-    if (v === undefined || v === null || v === "") {
-      if (!def.optional) return false;
+    const value = params[name];
+    if (value === undefined || value === null || value === "") {
+      if (!def.optional) return { def, value };
       continue;
     }
-    if (!safeKey(v)) return false;
-    const entity = hasOwn(state.entities, v) ? state.entities[v] : undefined;
+    if (!safeKey(value)) return { def, value };
+    const entity = hasOwn(state.entities, value) ? state.entities[value] : undefined;
     if (entity) {
-      if (def.ref && !kindIs(registry, world, entity.kind, def.ref)) return false;
+      if (def.ref && !kindIs(registry, world, entity.kind, def.ref)) return { def, value };
       continue;
     }
-    if (!hasOwn(world.places, v) || (def.ref !== undefined && def.ref !== "place")) return false;
+    if (!hasOwn(world.places, value) || (def.ref !== undefined && def.ref !== "place")) return { def, value };
   }
-  return true;
+  return null;
 }
 
 // ---------------------------------------------------------------- signals (DESIGN §5.2)

@@ -27,7 +27,7 @@ import { calendarOf, dateAt, formatClock, formatHHMM, nextTimeOfDay, weekdayName
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
-import { optionalQuery } from "../engine/pack-kit";
+import { optionalQuery, own } from "../engine/pack-kit";
 import type { PackDef, ReadContext } from "../engine/registry";
 import { createRegistry, type Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
@@ -57,7 +57,7 @@ import { OutcomeNotes } from "./outcome-notes";
 import { InspectorLog, type InspectorRecord } from "./inspector-log";
 import { presetCaveats, type PresetCaveat } from "./preset-lint";
 import { applyProposals, type EnginePipeline, type PlanProse, TIME_ADVANCE_CAP, TurnBridge } from "./turn-model";
-import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, refsExist, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, type PlanStart, type SignalFacts, type StepRun, type Tie } from "./turn-steps";
+import { contradiction, factLines, judge, noFacts, npcChoose, planFacts, presentNames, promptedEffects, promptedText, puzzleAnswer, renderTemplate, runsOf, safeVars, StepBudget, tiesOf, unfitRef, type PlanStart, type SignalFacts, type StepRun, type Tie, type UnfitRef } from "./turn-steps";
 import { buildView, clockMinutes, compactSpan, notWorldView, recentLines, spanText, TIMELAPSE_ACTION } from "./view";
 import { WorldStore } from "./worlds";
 
@@ -805,9 +805,12 @@ export class Runtime implements TurnHooks {
       const said = hasOwn(chosen.params, "method") && !(typeof method === "string" && method.trim() !== "") ? saidPayMethod(text) : null;
       if (said) result.params.method = said;
     }
-    if (result?.action && !refsExist(this.registry, all.find((a) => a.id === result.action), result.params, render.world, render.state)) {
-      this.host.log("info", `[LumiRPEngine] interpret: ${result.action} names nothing in the world (${JSON.stringify(result.params)}); played as roleplay`, userId);
-      bridge.setIntent(text, null);
+    // An action whose params name nothing in the world that fits ("I pay Rena" where Rena is no one in
+    // it) plays as plain roleplay, and its reply says why on a decline chip (DESIGN §9.4).
+    const unfit = chosen ? unfitRef(this.registry, chosen, result.params, render.world, render.state) : null;
+    if (chosen && unfit) {
+      this.host.log("info", `[LumiRPEngine] interpret: ${chosen.id} names nothing in the world (${JSON.stringify(result.params)}); played as roleplay`, userId);
+      bridge.setUnfit(text, { label: chosen.label, reason: unfitReason(this.registry, render.world, render.state, unfit, text, secrets) });
       return;
     }
     bridge.setIntent(text, result, true);
@@ -871,12 +874,7 @@ export class Runtime implements TurnHooks {
     }
     const typed = text.toLowerCase();
     const secrets = unrevealedSecrets(this.registry, render.world, render.state).filter((s) => !typed.includes(s.toLowerCase()));
-    // A hidden person counts by any word of their name ("Vex is watching" names Vex Morrow, while a
-    // hidden Dan doesn't make "dangerous" a leak); a hidden place or thing, a track's label and a
-    // secret entry's title only by all their words in order.
-    const { world: w, state: s } = render;
-    const hidden = hiddenEntityNames(this.registry, w, s, w.pov);
-    const leaks = findLeaks(judgement.reason, secrets).length > 0 || namesAny(judgement.reason, hidden.people, [...hidden.things, ...unseenPlaceNames(this.registry, w, s, w.pov), ...hiddenTrackLabels(this.registry, w, s, w.pov), ...secretLoreTitles(this.registry, w, s)]);
+    const leaks = findLeaks(judgement.reason, secrets).length > 0 || namesHidden(this.registry, render.world, render.state, judgement.reason);
     if (leaks) this.host.log("info", `[LumiRPEngine] judge: the reason for ${action.id} carried an unrevealed secret or a hidden name; it isn't shown`, userId);
     bridge.setIntent(text, { ...intent, judgement: leaks ? { ...judgement, reason: "" } : judgement }, bridge.wasInterpreted(text));
   }
@@ -1308,6 +1306,19 @@ export class Runtime implements TurnHooks {
     if (input.kind !== "continue" && userText.trim() !== "" && bridge.wasUnread(userText)) {
       stored.push({ id: `read_failed:${at}`, kind: "read_failed", ...base, label: "Couldn't read your action", detail: "The call that reads your message failed, so this turn ran as plain roleplay. Retry runs the turn again.", actions: [{ id: "rerun", label: "Retry", style: "primary" }], expires: "next_send", payload: {} });
     }
+    // `interpret` read an action whose params name nothing in the world that fits (DESIGN §9.4): the
+    // turn ran as plain roleplay, and a decline chip says why. As after a declined change (§9.5), the
+    // next reply is told it didn't happen, and Remove it or Accept rewords that note.
+    const unfit = input.kind === "continue" ? undefined : bridge.unfitOf(userText);
+    if (unfit) {
+      const id = `unfit:${at}`;
+      const what = `the player's "${unfit.label}"`;
+      const notes = { accept: narratedNote(what, unfit.reason, "accept"), remove: narratedNote(what, unfit.reason, "remove") };
+      const kept = (await this.outcomeNotes.list(input.chatId, input.userId)).filter((n) => n.id !== id);
+      await this.outcomeNotes.save(input.chatId, input.userId, [...kept, { id, messageId: input.messageId, text: notes.accept }]);
+      const reason = `${unfit.reason.charAt(0).toUpperCase()}${unfit.reason.slice(1)}`;
+      stored.push({ id, kind: "decline", ...base, label: `${unfit.label}: couldn't`, detail: `${reason}. Your message played as plain roleplay, and the next reply is told it didn't happen.`, actions: [{ id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send", payload: { reason: unfit.reason, notes } });
+    }
     await this.ageNotes(input.chatId, input.userId, input.messageId);
     const headState = input.core.fold(input.observed).state;
     const chipWorld = input.core.worldAt(headState.revision) ?? input.core.worldAt(rec?.defHash ?? "");
@@ -1693,6 +1704,47 @@ const REQUIREMENT_WORDS: readonly [RegExp, string][] = [
   [/>\s*0\b/, "it needs an amount"],
 ];
 
+/**
+ * Whether model text the player reads names someone or something the POV can't see, or a secret
+ * lore entry (DESIGN §7, `namesAny`): a hidden person by any word of their name ("Vex is watching"
+ * names Vex Morrow, while a hidden Dan doesn't make "dangerous" a leak); a hidden place or thing, a
+ * track's label and a secret entry's title only by all their words in order.
+ */
+function namesHidden(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, text: string): boolean {
+  const hidden = hiddenEntityNames(reg, world, state, world.pov);
+  return namesAny(text, hidden.people, [...hidden.things, ...unseenPlaceNames(reg, world, state, world.pov), ...hiddenTrackLabels(reg, world, state, world.pov), ...secretLoreTitles(reg, world, state)]);
+}
+
+/**
+ * Why `interpret`'s action couldn't apply (DESIGN §9.4), for its decline chip and the next reply's
+ * note: what its param named, as the player typed it ("Rena isn't anyone in this world"), a real
+ * thing of another kind by its name ("Bluebird Coffee isn't a person"), or that it has none (the
+ * player may not have said, or a Decision route had no call left to read it). A name the POV can't
+ * see, one carrying an unrevealed secret (`secrets`, less the player's own words) or anything too
+ * long for a name is never repeated: "it names no one you know".
+ */
+function unfitReason(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, unfit: UnfitRef, text: string, secrets: readonly string[]): string {
+  const { def, value } = unfit;
+  const place = def.ref === "place";
+  const person = !place && def.ref !== undefined && kindIs(reg, world, def.ref, "person");
+  if (value === undefined || value === null || value === "") return place ? "it needs a place" : person ? "it needs someone" : "it needs something";
+  const id = typeof value === "string" ? value : "";
+  const entity = own(state.entities, id);
+  const placeDef = entity ? undefined : own(world.places, id);
+  // A real thing reads by its name where the POV can see it; anything else as the player typed it
+  // ("Rena" for a model's "rena"), else as the model gave it, an id's underscores as spaces.
+  const given = id.replace(/_+/g, " ").trim();
+  const typed = given === "" ? undefined : new RegExp(given.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").exec(text)?.[0];
+  const name = entity ? (canSeeEntity(reg, world, state, world.pov, id) ? entity.name : "") : placeDef ? (canSeePlace(reg, world, state, world.pov, id) ? placeDef.name : "") : (typed ?? given);
+  if (name === "" || name.length > 80 || findLeaks(name, secrets).length > 0 || namesHidden(reg, world, state, name)) return place ? "it names no place you know" : person ? "it names no one you know" : "it names nothing you know";
+  // Only a param of one kind refuses a real thing, for being another.
+  if ((entity || placeDef) && def.ref !== undefined) {
+    const kind = place ? "place" : (reg.kinds.get(def.ref)?.label ?? own(world.kinds, def.ref)?.label ?? def.ref).toLowerCase();
+    return `${name} isn't ${/^[aeiou]/i.test(kind) ? "an" : "a"} ${kind}`;
+  }
+  return `${name} isn't ${place ? "a place" : person ? "anyone" : "anything"} in this world`;
+}
+
 /** A clock time for a chip: "07:00" later the same day, else with its weekday ("Sat 07:00"). */
 function shortClock(cal: Calendar, now: number, at: number): string {
   const d = dateAt(cal, at);
@@ -1816,6 +1868,15 @@ export function describeItem(p: JsonObject): string {
 }
 
 /**
+ * The next Outcome slot's line for something narrated that didn't happen (DESIGN §9.5), named as
+ * `what`: by default (and on Accept) it didn't happen, and why; Remove asks the narrator to drop it
+ * from the story.
+ */
+function narratedNote(what: string, reason: string, choice: "accept" | "remove"): string {
+  return choice === "remove" ? `Earlier, ${what} was narrated but never happened; leave it out from here on.` : `Earlier, ${what} was narrated but didn't happen (${reason}).`;
+}
+
+/**
  * The next Outcome slot's line for a declined narrated change (DESIGN §9.5): by default (and on
  * Accept) it didn't happen; Remove asks the narrator to drop it from the story.
  */
@@ -1823,8 +1884,7 @@ export function declineNote(p: JsonObject, reason: string, choice: "accept" | "r
   // A purchase reads by its item; any other change (a gift of cash, a move) by its chip label,
   // quoted as written, so a name keeps its case ("Danny Okafor paid $20.00 to you").
   const what = p.type === "purchase" ? describeItem(p) : `"${describeProposal(p, world, state)}"`;
-  if (choice === "remove") return `Earlier, ${what} was narrated but never happened; leave it out from here on.`;
-  if (p.type !== "purchase") return `Earlier, ${what} was narrated but didn't happen (${reason}).`;
+  if (choice === "remove" || p.type !== "purchase") return narratedNote(what, reason, choice);
   const payerId = typeof p.payer === "string" && p.payer !== "" ? p.payer : null;
   const who = (payerId ? state.entities[payerId]?.name : undefined) ?? "The payment";
   return payerId ? `Earlier, ${who}'s payment for ${what} was declined (${reason}); they don't have it.` : `Earlier, paying for ${what} was declined (${reason}); it isn't owned.`;
