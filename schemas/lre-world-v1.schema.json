@@ -94,6 +94,7 @@
     "pov": { "$ref": "#/$defs/id", "description": "The POV entity; never capped, whatever its tier." },
     "tiers": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/tier" } },
     "spawnTier": { "$ref": "#/$defs/id", "description": "The tier a spawned entity gets when it names none." },
+    "spawnCap": { "type": "integer", "minimum": 0, "maximum": 500, "description": "Characters replies may introduce in a chat, in total. Absent: 24." },
     "start": {
       "type": "object",
       "description": "Where and when the POV starts: a place id and an ISO local date-time.",

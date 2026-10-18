@@ -15,7 +15,7 @@ import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { EditorRequest, LintIssue, WorldCollection, WorldPart } from "../shared/protocol";
 import type { RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
-import { EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
+import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
 import { blankWorld, currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
@@ -292,6 +292,11 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     if (isRecord(value.start) && typeof value.start.place === "string" && typeof value.start.at === "string") doc.start = { place: value.start.place, at: value.start.at };
     const currency = currencyOf(value.currency);
     if (currency) doc.currency = currency;
+    // The spawn cap as the editor sends it (lint checks its range); the default is no cap set, so a world saved untouched stays as it was.
+    if (typeof value.spawnCap === "number") {
+      if (value.spawnCap === DEFAULT_SPAWN_CAP) delete doc.spawnCap;
+      else doc.spawnCap = value.spawnCap;
+    }
     // Map settings as the engine reads them; the defaults are no settings, so a world saved untouched stays as it was.
     if (value.mapSettings !== undefined) {
       const settings = mapSettingsOf({ mapSettings: value.mapSettings });

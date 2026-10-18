@@ -4,7 +4,8 @@
 import { describe, expect, test } from "bun:test";
 import { EXTRACTION_TYPES } from "../../src/shared/settings";
 import { applyEffects } from "../../src/engine/effects";
-import { SPAWN_CAP, spawnId } from "../../src/engine/narration-channels";
+import { spawnId } from "../../src/engine/narration-channels";
+import { DEFAULT_SPAWN_CAP } from "../../src/shared/world";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { createRng } from "../../src/engine/rng";
 import { Working } from "../../src/engine/working";
@@ -78,8 +79,20 @@ describe("narration channels", () => {
     expect(propose(w, "spawn", { kind: "person", name: "x".repeat(61) })).toBe("bad_name");
     expect(propose(w, "spawn", { kind: "person", name: "Dock Hand", place: "lake" })).toBe("ok");
     expect(w.state.entities[spawnId("Dock Hand")]?.fields.place).toBe("lake");
-    for (let i = 2; i < SPAWN_CAP; i++) expect(propose(w, "spawn", { kind: "person", name: `Extra ${i}` })).toBe("ok");
+    for (let i = 2; i < DEFAULT_SPAWN_CAP; i++) expect(propose(w, "spawn", { kind: "person", name: `Extra ${i}` })).toBe("ok");
     expect(propose(w, "spawn", { kind: "person", name: "One Too Many" })).toBe("spawn_cap");
+  });
+
+  test("spawn: the world's own cap replaces the default; 0 lets no reply introduce anyone", () => {
+    const w = setup();
+    w.world.spawnCap = 60;
+    for (let i = 1; i <= DEFAULT_SPAWN_CAP; i++) expect(propose(w, "spawn", { kind: "person", name: `Extra ${i}` })).toBe("ok");
+    expect(propose(w, "spawn", { kind: "person", name: "The Twenty Fifth" })).toBe("ok");
+    expect(w.state.entities[spawnId("The Twenty Fifth")]?.fields.place).toBe("apartment");
+    const none = setup();
+    none.world.spawnCap = 0;
+    expect(propose(none, "spawn", { kind: "person", name: "Ellie Park" })).toBe("spawn_cap");
+    expect(none.state.entities[spawnId("Ellie Park")]).toBeUndefined();
   });
 
   test("quantity: whole steps on an item its holder has, capped by the field's bound", () => {

@@ -74,6 +74,7 @@ export function validate(doc: unknown): LintIssue[] {
   if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll") err("seedMode", "seedMode must be fresh or same_roll");
   if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", "lenientPricing must be true or false");
   if (doc.spawnTier !== undefined && typeof doc.spawnTier !== "string") err("spawnTier", "spawnTier must be a tier id");
+  if (doc.spawnCap !== undefined && typeof doc.spawnCap !== "number") err("spawnCap", "spawnCap must be a number");
   return issues;
 }
 

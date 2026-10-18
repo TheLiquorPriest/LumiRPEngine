@@ -462,6 +462,7 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
     },
     { kind: "enum", key: "seedMode", label: "Re-run rolls", values: ["fresh", "same_roll"] },
     { kind: "bool", key: "lenientPricing", label: "Lenient pricing (accept narrated prices inside the band)" },
+    { kind: "number", key: "spawnCap", label: "People replies may introduce in a chat (0 for none)", min: 0, max: 500, step: 1 },
     {
       kind: "object",
       key: "currency",

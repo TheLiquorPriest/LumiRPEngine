@@ -110,7 +110,8 @@ export function currencyOf(v: unknown): WorldCurrency | null {
  * capped whatever its tier); step templates for the retired `select` purpose are dropped; and the
  * economy pack's old `unpricedCapCents` becomes `unpricedCap` (the same minor units; a set
  * `unpricedCap` wins). A world without a `ruleset` keeps none: every part of one is optional, and
- * nothing reads a missing one. Lore entries need nothing: their new fields are optional, and one
+ * nothing reads a missing one; one without a `spawnCap` keeps none too and plays at the default 24.
+ * Lore entries need nothing: their new fields are optional, and one
  * without a source was authored. Last, the maps compile into the places, grids and routes they own
  * (`compileMaps`). Revisions are immutable, so this runs whenever one is read. Returns the same
  * object when nothing changes.

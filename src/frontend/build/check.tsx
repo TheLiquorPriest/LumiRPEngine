@@ -17,10 +17,10 @@ export function issueTarget(path: string): { collection: WorldCollection; id: st
   return collection && id ? { collection, id } : null;
 }
 
-/** The world part an issue path opens, when it isn't an item's: `tiers.crowd.band` → Tiers; `spawnTier` sits at the top level, but the Tiers part edits it. */
+/** The world part an issue path opens, when it isn't an item's: `tiers.crowd.band` → Tiers; `spawnTier` and `spawnCap` sit at the top level, but the Tiers and World parts edit them. */
 export function issuePart(path: string): WorldPart | null {
   const head = path.split(".")[0];
-  return head === "spawnTier" ? "tiers" : (PARTS.find((p) => p === head) ?? null);
+  return head === "spawnTier" ? "tiers" : head === "spawnCap" ? "meta" : (PARTS.find((p) => p === head) ?? null);
 }
 
 type Severity = LintIssue["severity"];

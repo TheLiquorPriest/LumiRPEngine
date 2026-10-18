@@ -23,7 +23,7 @@ describe("studio seam", () => {
     const doc: Record<string, unknown> = JSON.parse(JSON.stringify(newWorld("w_shape", "Shape")));
     const parts = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "maps", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps", "lore", "classifications", "tiers", "pins", "calendar", "realism", "time", "start", "currency", "loreIndex", "ruleset", "mapSettings"];
     for (const part of parts) expect({ part, paths: validate({ ...doc, [part]: [] }).map((i) => i.path) }).toEqual({ part, paths: [part] });
-    expect(validate({ ...doc, entities: { you: 5 }, lore: { note: "text" }, spawnTier: 2 }).map((i) => i.path)).toEqual(["entities.you", "lore.note", "spawnTier"]);
+    expect(validate({ ...doc, entities: { you: 5 }, lore: { note: "text" }, spawnTier: 2, spawnCap: "many" }).map((i) => i.path)).toEqual(["entities.you", "lore.note", "spawnTier", "spawnCap"]);
     // A document from before maps, lore, its lookup table, classifications, tiers and currency: load migrates it.
     const { maps: _maps, lore: _lore, loreIndex: _index, classifications: _classes, tiers: _tiers, currency: _currency, ...old } = doc;
     expect(validate(old)).toEqual([]);
@@ -43,6 +43,10 @@ describe("studio seam", () => {
     expect(loaded.issues.filter((i) => i.path.startsWith("steps."))).toEqual([]);
     expect(lint(world).filter((i) => i.severity === "error")).toEqual([]);
     expect(lint({ ...world, pov: "ghost" }).some((i) => i.code === "missing_pov")).toBe(true);
+    // The spawn cap is a whole number from 0 to 500; a world without one plays at 24.
+    for (const spawnCap of [2.5, -1, 501]) expect(lint({ ...world, spawnCap }).some((i) => i.path === "spawnCap" && i.severity === "error")).toBe(true);
+    for (const spawnCap of [0, 60, 500]) expect(lint({ ...world, spawnCap }).some((i) => i.path === "spawnCap")).toBe(false);
+    expect(migrate(world).spawnCap).toBeUndefined();
   });
 
   test("Playtest and Check world run the shipped packs deterministically", () => {

@@ -55,6 +55,8 @@ describe("world schema", () => {
     expect(problems(withValue(world, ["rules", "payday", "on"], { tick: "hour" }))).toEqual(['rules.payday.on.tick: should be "turn", "slot" or "day"']);
     expect(problems(withValue(world, ["lore", "harbor_history", "source"], { kind: "book", bookId: "b1" }))).toEqual(['lore.harbor_history.source: needs "entryId"', 'lore.harbor_history.source: needs "hash"']);
     expect(problems(withValue(world, ["ruleset", "adjudication", "preset"], "lenient"))).toEqual(['ruleset.adjudication.preset: should be "narrative", "balanced", "crunchy" or "custom"']);
+    expect(problems(withValue(world, ["spawnCap"], 600))).toEqual(["spawnCap: should be at most 500"]);
+    expect(problems(withValue(world, ["spawnCap"], 60))).toEqual([]);
     // A map is checked by the map schema, which the world schema names by its `$id`.
     expect(problems(withValue(world, ["maps", "diner_floor", "layout", 1], 42))).toEqual(["maps.diner_floor.layout[1]: should be text"]);
     expect(problems(withValue(world, ["maps", "diner_floor", "walls"], true))).toEqual(['maps.diner_floor.walls: "walls" isn\'t a field here']);

@@ -3,21 +3,19 @@
 // a new character a reply introduces, at the world's spawn tier. Both are bounded. `knows` takes
 // public entities and `known_by` or `discoverable` places the POV can't see yet, named by id or by
 // name: never a secret or `known_by` entity, a secret place, a gated or secret lore entry, or a
-// track. `spawn` validates its kind and place, deduplicates by name and is capped per world.
+// track. `spawn` validates its kind and place, deduplicates by name and stops at the world's spawn cap.
 
 import { hashParts } from "../shared/hash";
 import type { JsonObject } from "../shared/json";
 import type { EntityId } from "../shared/ids";
 import { loreIsSecret } from "../shared/lore";
 import { spawnTierOf } from "../shared/tiers";
-import type { EffectSpec } from "../shared/world";
+import { spawnCapOf, type EffectSpec } from "../shared/world";
 import type { ProposalChannelDef, ReadContext, Rejection } from "./registry";
 import { kindIs, placeOfEntity } from "./scope";
 import { canSeePlace } from "./visibility";
 import { labelOf, own } from "./pack-kit";
 
-/** Characters a world's replies may introduce, in total. */
-export const SPAWN_CAP = 24;
 /** The `spawned` field value that marks a character a reply introduced. */
 export const SPAWNED_BY_NARRATION = "narration";
 const NAME_MAX = 60;
@@ -130,7 +128,8 @@ export const spawnChannel: ProposalChannelDef = {
     if (def.visibility === "secret") return reject("not_public", "a reply can't place someone somewhere secret");
     const lower = name.toLowerCase();
     if (hasOwn(ctx.state.entities, spawnId(name)) || Object.values(ctx.state.entities).some((e) => e.name.trim().toLowerCase() === lower)) return reject("duplicate", `${name} already exists`);
-    if (spawnedCount(ctx) >= SPAWN_CAP) return reject("spawn_cap", `replies have introduced ${SPAWN_CAP} characters already`);
+    const cap = spawnCapOf(ctx.world);
+    if (spawnedCount(ctx) >= cap) return reject("spawn_cap", cap === 0 ? "this world lets no reply introduce characters" : `replies have introduced ${cap} characters already`);
     return null;
   },
   toEffects(p, ctx): EffectSpec[] {

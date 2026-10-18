@@ -10,7 +10,7 @@ import type { LintIssue } from "../shared/protocol";
 import { DOMAINS } from "../shared/ids";
 import { isBand, tierOf } from "../shared/tiers";
 import type { EffectSpec, FieldDef, WorldDoc } from "../shared/world";
-import { objectiveWhen } from "../shared/world";
+import { MAX_SPAWN_CAP, objectiveWhen } from "../shared/world";
 import { compile } from "./expr";
 import { frozenPredicates } from "./realism";
 import { rulesetFloor, type Registry } from "./registry-impl";
@@ -148,6 +148,8 @@ export function lintStructure(world: WorldDoc, reg: Registry): LintIssue[] {
     if (!tierOf(world, e.tier)) err(`entities.${id}.tier`, "unknown_tier", `${e.name}'s tier "${e.tier}" isn't one of the world's tiers.`);
   }
   if (world.spawnTier !== undefined && !tierOf(world, world.spawnTier)) err("spawnTier", "unknown_tier", `New people would join tier "${world.spawnTier}", which isn't one of the world's tiers.`);
+  const cap: unknown = world.spawnCap;
+  if (cap !== undefined && !(typeof cap === "number" && Number.isInteger(cap) && cap >= 0 && cap <= MAX_SPAWN_CAP)) err("spawnCap", "spawn_cap", `The number of people replies may introduce must be a whole number from 0 to ${MAX_SPAWN_CAP}.`);
   for (const { path, effects } of effectLists(world)) {
     effects.forEach((spec, i) => {
       if (spec.type !== "spawn") return;

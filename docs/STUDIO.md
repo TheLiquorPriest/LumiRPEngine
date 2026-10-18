@@ -44,7 +44,7 @@ A world is one JSON document; Lumiverse keeps one per revision and never changes
 |---|---|
 | `packs`, `kinds`, `relations`, `entities`, `places`, `routes`, `grids`, `maps`, `rules`, `actions`, `checks`, `schedules`, `tracks`, `tables`, `sections`, `steps`, `lore`, `classifications`, `tiers` | `pins`, `calendar`, `realism`, `time`, `start`, `currency`, `loreIndex`; optional `ruleset` and `mapSettings` |
 
-The scalars are `format`, `id`, `name`, `engineVersion`, `pov`, `seedMode` (`fresh` or `same_roll`), `lenientPricing`, the optional `spawnTier`, and `suppressed`, a list kept for the format that nothing reads.
+The scalars are `format`, `id`, `name`, `engineVersion`, `pov`, `seedMode` (`fresh` or `same_roll`), `lenientPricing`, the optional `spawnTier`, the optional `spawnCap` (how many people replies may introduce in a chat: a whole number from 0 to 500, 24 when absent), and `suppressed`, a list kept for the format that nothing reads.
 
 A few rules a studio has to keep:
 

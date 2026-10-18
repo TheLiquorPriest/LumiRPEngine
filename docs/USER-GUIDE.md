@@ -328,7 +328,7 @@ Moving any dial yourself makes the preset *Custom*.
 
 Not everyone needs to be simulated in depth. Every character has a **tier**, one of the world's own (a new world has **Leads**, **Supporting** and **Background**; an author can rename them, add more and reorder them in **Build → Tiers**). Each tier belongs to one of three **bands**, Leads, Supporting or Background, and each band has a cap per domain. A character's **effective level** is the lower of the domain level and its band's cap, unless you set a per-character override (**Level overrides** in the character's editor), which can never go above the domain level. Your own character is never capped. In Simulation, Leads run at level 4 while a Background shopkeeper runs at 2.
 
-A tier can make its people **live their own day (agendas and plans) by default**, and a world names the tier **new people join** (by default its first Background tier): people the story introduces, and anything spawned without a tier.
+A tier can make its people **live their own day (agendas and plans) by default**, and a world names the tier **new people join** (by default its first Background tier): people the story introduces, and anything spawned without a tier. How many people the story may introduce in one chat is the world's **People replies may introduce in a chat**, in **Build → World**: 24 unless you set another, up to 500, and 0 for none.
 
 People you mark as **Lives their own day (agendas and plans)** in their entity editor get goals and agendas that feed their choices, even on Story. They are consulted by the AI only on close calls or invitations. Everyone else follows schedules and seeded incidents.
 
@@ -474,7 +474,7 @@ After the narrator writes, the engine reads the reply for changes the story impl
 | **Money transfers** (Payments) · `transfer` | Money moves between people, or between someone's own accounts | confirm |
 | **Feelings toward others** (Feelings) · `regard` | Someone's feelings change: by at most 10 on each feeling per reply, however often the reply says so | confirm |
 | **Quantities** · `quantity` | A count changes (ammunition, supplies) | confirm (no starting mode of its own; Settings shows *From the field's bound*) |
-| **New people** (New characters) · `spawn` | A new character appears (capped, and duplicates are removed) | confirm |
+| **New people** (New characters) · `spawn` | A new character appears (up to the world's limit, 24 by default, and duplicates are removed) | confirm |
 
 Beyond the mode, every field has a limit on how much a single change may be, and **the strictest rule always wins**. Fields a world marks as locked are never offered to the model. If a narrated change contradicts the engine's own outcome, the engine's outcome wins. A purchase takes in the seller's handover and the payment, so one sale is not applied three times, and a payer has to be an account.
 

@@ -1032,6 +1032,8 @@ export interface WorldDoc {
   tiers: Record<TierId, TierDef>;
   /** The tier a spawned entity gets when it names none; unset, the lowest-order tier in the Background band. */
   spawnTier?: TierId;
+  /** Characters replies may introduce in a chat, in total (DESIGN §9.4); absent, `DEFAULT_SPAWN_CAP`. */
+  spawnCap?: number;
   /** Where the POV starts. */
   start: { place: PlaceId; at: string };
 }
@@ -1056,6 +1058,17 @@ export interface WorldCurrency {
 
 /** Modern US, and the default for documents written before `currency` existed. */
 export const DEFAULT_CURRENCY: WorldCurrency = { code: "USD", symbol: "$", minorUnit: "cent", decimals: 2, format: "{sign}{symbol}{amount}" };
+
+/** Characters replies may introduce in a world that sets no `spawnCap`. */
+export const DEFAULT_SPAWN_CAP = 24;
+/** The most a world's `spawnCap` allows: each newcomer is a whole entity every fold carries and the helpers' prompts may list. */
+export const MAX_SPAWN_CAP = 500;
+
+/** The spawn cap a world plays by: its own, as a whole number from 0 to `MAX_SPAWN_CAP` (lint reports one outside), else the default. */
+export function spawnCapOf(world: Pick<WorldDoc, "spawnCap">): number {
+  const cap: unknown = world.spawnCap;
+  return typeof cap === "number" && Number.isFinite(cap) ? Math.max(0, Math.min(MAX_SPAWN_CAP, Math.trunc(cap))) : DEFAULT_SPAWN_CAP;
+}
 
 function grouped(n: bigint): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");

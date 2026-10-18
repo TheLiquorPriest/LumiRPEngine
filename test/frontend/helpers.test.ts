@@ -213,6 +213,7 @@ describe("small parsers", () => {
     expect(issuePart("tiers.crowd.band")).toBe("tiers");
     expect(issuePart("tiers.crowd.label")).toBe("tiers");
     expect(issuePart("spawnTier")).toBe("tiers");
+    expect(issuePart("spawnCap")).toBe("meta");
     expect(issuePart("entities.npc_dev.fields.cash")).toBeNull();
   });
 });

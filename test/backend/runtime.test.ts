@@ -503,6 +503,11 @@ describe("backend runtime", () => {
     expect(resumed.base).toBe(fresh.base);
     if (!isRecord(resumed.draft)) throw new Error("no draft");
     expect(resumed.draft.currency).toEqual(coins);
+    // The spawn cap rides in meta too; the default is no cap stored, so a world saved at 24 stays as it was.
+    const capped = rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: fresh.base, part: "meta", value: { spawnCap: 60 } }));
+    expect(isRecord(capped.draft) && capped.draft.spawnCap).toBe(60);
+    const reset = rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: fresh.base, part: "meta", value: { spawnCap: 24 } }));
+    expect(isRecord(reset.draft) && "spawnCap" in reset.draft).toBe(false);
     const dropped = rig.body(await rig.send({ type: "lre.editor", op: "discard", worldId, base: null }));
     expect(dropped.stored).toBe(false);
     expect(formatMoney(12345, coins)).toBe("123 sp 45 cp");
