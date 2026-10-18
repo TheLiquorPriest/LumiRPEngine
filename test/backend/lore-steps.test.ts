@@ -13,6 +13,7 @@ import { LookupBudget, StepLore, TOOL_SUPPORT_PATH } from "../../src/backend/lor
 import { sectionTokens } from "../../src/backend/book";
 import { runDir } from "../../src/shared/ids";
 import type { JsonObject } from "../../src/shared/json";
+import type { LoreStepTrace } from "../../src/shared/state-view";
 import type { StepPurpose, WorldDoc } from "../../src/shared/world";
 import { baseWorld, registryOf, startState } from "../packs/support";
 import { Rig } from "../support/rig";
@@ -371,39 +372,68 @@ describe("the inspector's lore traces", () => {
     }
   });
 
-  test("an NPC's choice shows in the trace as whose choice it is, with what it found untitled, and not at all for someone the POV can't know", async () => {
+  /** The `npc.choose` traces in a Context view or a stored history. */
+  const npcTraces = (json: string): LoreStepTrace[] => {
+    const parsed = JSON.parse(json) as { generations?: { lore?: LoreStepTrace[] }[]; records?: { lore?: LoreStepTrace[] }[] };
+    return [...(parsed.generations ?? []), ...(parsed.records ?? [])].flatMap((g) => g.lore ?? []).filter((t) => t.step === "npc.choose");
+  };
+
+  test("an NPC's choice shows in the trace as whose choice it is, with nothing it found counted or listed, and not at all for someone the POV can't know", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }]);
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     await rig.rt.inspector.settle();
     const context = await contextOf(rig, chatId);
-    const view = JSON.parse(context) as { generations: { lore?: { step: string; queries: { kind: string; text: string }[]; entries: { title: string }[] }[] }[] };
-    const traces = view.generations.flatMap((g) => g.lore ?? []).filter((t) => t.step === "npc.choose");
+    const stored = await storedOf(rig, chatId);
     // Dev is here with Sam; Kim is elsewhere, and Sam has never met them: Kim's choice has no row.
-    expect(traces.flatMap((t) => t.queries.filter((q) => q.kind === "prefetch").map((q) => q.text))).toEqual(["Dev's choice"]);
-    // The entries Dev's options found would say what Dev plans: they show without titles.
-    expect(traces.flatMap((t) => t.entries).length).toBeGreaterThan(0);
-    expect(traces.flatMap((t) => t.entries.map((e) => e.title)).every((title) => title === "")).toBe(true);
-    for (const shown of [context, await storedOf(rig, chatId)]) {
+    expect(npcTraces(context).flatMap((t) => t.queries.filter((q) => q.kind === "prefetch").map((q) => q.text))).toEqual(["Dev's choice"]);
+    // How many entries Dev's options found, and how big they are, would say what Dev plans.
+    for (const traces of [npcTraces(context), npcTraces(stored)]) {
+      expect(traces.length).toBeGreaterThan(0);
+      for (const t of traces) expect([t.private, t.entries, t.queries.filter((q) => q.matched !== undefined)]).toEqual([true, [], []]);
+    }
+    for (const shown of [context, stored]) {
       expect(shown).not.toContain("work, rest");
       expect(shown).not.toContain("Kim");
     }
-    // The decision itself still weighs the options.
+    // The decision itself still weighs the options, and reads the lore they found.
     expect(JSON.stringify(rig.host.decideCalls.map((r) => r.state))).toContain('"work","rest"');
+    expect(JSON.stringify(rig.host.decideCalls.map((r) => r.state))).toContain("Dev ran the harbor café");
   });
 
-  test("a history kept before lookups were withheld shows its searches without their text, and an NPC choice's entries without titles", async () => {
+  test("an NPC's choice kept by an earlier build reads back as one kept now: no counts, no entries", async () => {
     const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }]);
-    const trace = { step: "npc.choose", phase: "pre", policy: "prefetch+lookup", transport: "tools", queries: [{ kind: "prefetch", text: "Dev: work, rest", matched: 2 }, { kind: "get", text: "wreck", matched: 1 }], entries: [{ title: "Dev's past", tokens: 12, cut: false, secret: false }], lookups: 1, notes: [] };
-    const record = { id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, forced: [], lore: [trace] };
-    await rig.host.storage.write(`${runDir(chatId)}inspector.json`, JSON.stringify({ v: 1, records: [record], delivery: {} }), rig.host.userId);
-    const restarted = new Rig({ host: rig.host });
-    const context = await contextOf(restarted, chatId);
-    expect(lookupsOf(context, "npc.choose")).toEqual([{ kind: "get", text: "", matched: 1 }]);
-    expect(context).toContain('{"kind":"prefetch","text":"","matched":2}');
-    expect(context).toContain('"entries":[{"title":"","tokens":12,"cut":false}]');
-    expect(context).not.toContain("Dev's past");
-    expect(context).not.toContain("work, rest");
-    expect(context).not.toContain("wreck");
+    const trace = (prefetch: string) => ({ step: "npc.choose", phase: "pre", policy: "prefetch+lookup", transport: "tools", queries: [{ kind: "prefetch", text: prefetch, matched: 2 }, { kind: "get", text: "wreck", matched: 1 }], entries: [{ title: "Dev's past", tokens: 12, cut: false }], lookups: 1, notes: [] });
+    // One kept before lookups were withheld (`v: 1`) has no text to show; one kept since shows whose choice it was.
+    for (const [v, prefetch, shown] of [[1, "Dev: work, rest", ""], [2, "Dev's choice", "Dev's choice"]] as const) {
+      const record = { id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, forced: [], lore: [trace(prefetch)] };
+      await rig.host.storage.write(`${runDir(chatId)}inspector.json`, JSON.stringify({ v, records: [record], delivery: {} }), rig.host.userId);
+      const context = await contextOf(new Rig({ host: rig.host }), chatId);
+      const traces = npcTraces(context);
+      expect(traces.map((t) => [t.private, t.entries, t.queries])).toEqual([[true, [], [{ kind: "prefetch", text: shown }, { kind: "get", text: "" }]]]);
+      for (const hidden of ["Dev's past", "work, rest", "wreck"]) expect(context).not.toContain(hidden);
+    }
+  });
+
+  test("an NPC's choice counts and lists nothing its private options found, its lookups' included, while the step itself reads it", () => {
+    const reg = registryOf();
+    const world = baseWorld();
+    world.lore.ledger = { id: "ledger", title: "The mill's ledger", content: "The mill keeps its accounts in a green ledger in the office safe.", keys: ["ledger"], links: [], topics: ["Mill"] };
+    world.lore.cafe = { id: "cafe", title: "The cafe", content: "Opens at six every morning.", keys: ["cafe"], links: [], topics: ["Mill"] };
+    const w = new Working(reg, world, startState(world));
+    const reader = { reg, world: w.world, state: w.state, tokens: (t: string) => Math.ceil(t.length / 3.2) };
+    const run = (privateInputs: boolean): StepLore => {
+      const lore = new StepLore("npc.choose", { policy: "prefetch+lookup", tokens: 400 }, reader, "pre", { text: [], names: [] }, { privateInputs });
+      // As the runtime builds it: the agent's name and option ids, shown as whose choice it is.
+      lore.prefetch({ text: "Dev: agenda steal ledger, rest", links: [], shown: "Dev's choice" });
+      lore.answer([{ kind: "search", text: "cafe" }, { kind: "list", text: "Mill" }]);
+      return lore;
+    };
+    const open = run(false);
+    expect(open.trace.entries.map((e) => e.title)).toEqual(["The mill's ledger", "The cafe"]);
+    const kept = run(true);
+    expect(kept.lines().join("\n")).toContain("green ledger");
+    expect(kept.trace).toMatchObject({ private: true, entries: [] });
+    expect(kept.trace.queries).toEqual([{ kind: "prefetch", text: "Dev's choice" }, { kind: "search", text: "" }, { kind: "list", text: "" }]);
   });
 
   test("a history that lists a secret entry isn't shown: its counts include the secret", async () => {

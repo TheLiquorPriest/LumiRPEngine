@@ -291,13 +291,11 @@ export function stateFixture(chatId: string): StateView {
                 policy: "prefetch+lookup",
                 transport: "need",
                 queries: [
-                  { kind: "prefetch", text: "Rosie's choice", matched: 1 },
-                  { kind: "search", text: "", matched: 1 },
+                  { kind: "prefetch", text: "Rosie's choice" },
+                  { kind: "search", text: "" },
                 ],
-                entries: [
-                  { title: "", tokens: 58, cut: false },
-                  { title: "", tokens: 64, cut: false },
-                ],
+                entries: [],
+                private: true,
                 lookups: 1,
                 notes: ["The connection refused the lore tools, so the step asked in the need form."],
               },

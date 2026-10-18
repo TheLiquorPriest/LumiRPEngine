@@ -4,7 +4,7 @@
 // they reached the model. Built by the backend as `core.context`: an unrevealed secret entry isn't
 // in it at all, a search that would name a secret or someone the player hasn't met is withheld, a
 // step that may read a secret or an NPC's private options shows its lookups without their text
-// ("—"), and an NPC choice's entries show without titles ("—").
+// ("—"), and an NPC choice, being private, shows no counts and no entries.
 
 import { useEffect, useState } from "preact/hooks";
 import { isRecord } from "../../shared/json";
@@ -13,7 +13,7 @@ import type { LorePolicy } from "../../shared/settings";
 import { LORE_POLICIES } from "../../shared/settings";
 import { useApp } from "../app";
 import { Card, Empty, JsonView, Row } from "../components";
-import { list, num, oneOf, str, strings } from "../decode";
+import { list, num, oneOf, optNum, str, strings } from "../decode";
 import type { PanelProps } from "../registry";
 import { STEP_LABEL } from "../settings/steps";
 import type { ContextView, LoreStepTrace } from "../../shared/state-view";
@@ -28,8 +28,9 @@ function decodeLore(value: unknown): LoreStepTrace[] {
     phase: oneOf(t.phase, ["pre", "post"] as const, "pre"),
     policy: oneOf(t.policy, LORE_POLICIES, "prefetch"),
     transport: oneOf(t.transport, ["none", "tools", "need"] as const, "none"),
-    queries: list(t.queries, (q) => ({ kind: oneOf(q.kind, ["prefetch", "search", "get", "list"] as const, "search"), text: str(q.text), matched: num(q.matched) })),
+    queries: list(t.queries, (q) => ({ kind: oneOf(q.kind, ["prefetch", "search", "get", "list"] as const, "search"), text: str(q.text), matched: optNum(q.matched) })),
     entries: list(t.entries, (e) => ({ title: str(e.title), tokens: num(e.tokens), cut: e.cut === true })),
+    ...(t.private === true ? { private: true as const } : {}),
     lookups: num(t.lookups),
     notes: strings(t.notes),
   }));
@@ -133,7 +134,7 @@ export function ContextPanel(props: PanelProps) {
                     k={STEP_LABEL[t.step]}
                     v={
                       <span class="lre-inline">
-                        {t.entries.reduce((s, e) => s + e.tokens, 0)} tok
+                        {t.private ? "private" : `${t.entries.reduce((s, e) => s + e.tokens, 0)} tok`}
                         {t.lookups > 0 ? (
                           <span class="lre-badge">
                             {t.lookups} lookup{t.lookups === 1 ? "" : "s"}
@@ -146,7 +147,8 @@ export function ContextPanel(props: PanelProps) {
                   />
                   {t.queries.map((q, j) => (
                     <div key={`q${j}`} class="lre-small lre-muted">
-                      {QUERY_LABEL[q.kind]}: {q.text === "" ? "—" : q.text} · {q.matched} found
+                      {QUERY_LABEL[q.kind]}: {q.text === "" ? "—" : q.text}
+                      {q.matched === undefined ? "" : ` · ${q.matched} found`}
                     </div>
                   ))}
                   {t.entries.map((e, j) => (

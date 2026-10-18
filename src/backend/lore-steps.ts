@@ -11,11 +11,12 @@
 //
 // The trace is shown to the player, so it carries only what the player may know (§7). An
 // unrevealed secret entry isn't in it at all, nor counted among what a search matched. A step that
-// may read an unrevealed secret writes its lookups with what that secret says, and `npc.choose`
-// writes its with an NPC's private options: their lookups show as their kind and count only, and
-// the entries `npc.choose` was given show without their titles. Any other step's text is withheld
-// when it carries a secret, or names someone or somewhere the POV doesn't know; a lookup the model
-// wrote is also withheld when it names a secret entry.
+// may read an unrevealed secret writes its lookups with what that secret says: they show as their
+// kind and count only. `npc.choose` searches with an NPC's private options, so what it searched
+// for and found would say what those are: its lookups show as their kind alone, its searches
+// uncounted, and the entries it was given aren't listed. Any other step's text is withheld when it
+// carries a secret, or names someone or somewhere the POV doesn't know; a lookup the model wrote is
+// also withheld when it names a secret entry.
 
 import type { UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
@@ -151,7 +152,7 @@ export class StepLore {
   private transport: LookupTransport;
   /** The step may read a secret whose gate doesn't hold: its model's lookups are written with what the secret says. */
   private readonly guarded: boolean;
-  /** The step reads someone's private plans (`LoreInputs.shown`): its lookups and what they found say what those are. */
+  /** The step reads someone's private plans (`LoreInputs.shown`): what it searched for and found would say what those are. */
   private readonly privateInputs: boolean;
   /** Whether a secret entry's gate holds: one that doesn't is left out of the trace. */
   private readonly gateOpen: (entry: LoreEntryDef) => boolean;
@@ -168,9 +169,9 @@ export class StepLore {
     this.counted = options.counted ?? (() => undefined);
     this.lookups = setting.policy === "lookup" || setting.policy === "prefetch+lookup" ? (options.lookups ?? null) : null;
     this.transport = this.lookups?.transport ?? "tools";
-    this.trace = { step: purpose, phase, policy: setting.policy, transport: "none", queries: [], entries: [], lookups: 0, notes: [] };
-    this.guarded = readsSecrets(reader.reg, reader.world, reader.state, purpose, this.effects);
     this.privateInputs = options.privateInputs === true;
+    this.trace = { step: purpose, phase, policy: setting.policy, transport: "none", queries: [], entries: [], ...(this.privateInputs ? { private: true as const } : {}), lookups: 0, notes: [] };
+    this.guarded = readsSecrets(reader.reg, reader.world, reader.state, purpose, this.effects);
     this.gateOpen = loreGateReader(reader.reg, reader.world, reader.state);
   }
 
@@ -198,14 +199,15 @@ export class StepLore {
 
   /**
    * Records a search in the trace and keeps the hits the step hasn't been given yet. An unrevealed
-   * secret is neither listed nor counted; a private step's entries go without their titles.
+   * secret is neither listed nor counted; a private step's searches go uncounted and its entries
+   * unlisted, since their titles, number and size would all say what its inputs are.
    */
   private take(kind: LoreStepTrace["queries"][number]["kind"], text: string, result: LoreResult): LoreHit[] {
-    this.trace.queries.push({ kind, text: this.shown(kind, text), matched: result.matched - result.secret });
+    this.trace.queries.push({ kind, text: this.shown(kind, text), ...(this.privateInputs ? {} : { matched: result.matched - result.secret }) });
     const fresh = result.hits.filter((h) => !this.given.has(h.id));
     for (const h of fresh) {
       this.given.set(h.id, h);
-      if (!h.secret) this.trace.entries.push({ title: this.privateInputs ? "" : findLeaks(h.title, this.withheld.text).length > 0 ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut });
+      if (!h.secret && !this.privateInputs) this.trace.entries.push({ title: findLeaks(h.title, this.withheld.text).length > 0 ? "A hidden entry" : h.title, tokens: h.tokens, cut: h.cut });
     }
     if (fresh.length > 0) this.counted(fresh.map((h) => h.snippet));
     return fresh;
@@ -319,13 +321,14 @@ export class StepLore {
       }
       if (a.kind === "list") {
         const listed = loreList(this.reader, a.text, this.purpose, this.effects);
-        // The trace counts what the list names, an unrevealed secret left out.
+        // The trace counts what the list names, an unrevealed secret left out, unless the step's
+        // inputs are private.
         const lore = this.reader.world.lore;
         const shownCount = listed.filter((l) => {
           const def = hasOwn(lore, l.id) ? lore[l.id] : undefined;
           return !(def && loreIsSecret(def) && !this.gateOpen(def));
         }).length;
-        this.trace.queries.push({ kind: "list", text: this.shown("list", a.text), matched: shownCount });
+        this.trace.queries.push({ kind: "list", text: this.shown("list", a.text), ...(this.privateInputs ? {} : { matched: shownCount }) });
         // A list names entries within the round's lore tokens, as a search's snippets are.
         const lines: string[] = [];
         for (const l of listed.slice(0, LIST_LIMIT)) {

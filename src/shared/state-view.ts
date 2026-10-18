@@ -382,7 +382,8 @@ export interface GmMoney {
  * What one model step read of the world's lore (DESIGN §5.4, §6.5). It is shown to the player, so
  * an unrevealed secret entry is left out, never listed or counted; a query carrying a secret or
  * naming someone or somewhere the POV doesn't know is withheld, and so is a lookup naming a secret
- * entry; and `npc.choose`, which reads an NPC's private options, lists its entries without titles.
+ * entry; and `npc.choose`, which reads an NPC's private options, is `private`: its searches go
+ * uncounted and its entries unlisted.
  */
 export interface LoreStepTrace {
   step: StepPurpose;
@@ -390,10 +391,12 @@ export interface LoreStepTrace {
   policy: LorePolicy;
   /** How lookups reached the model: `none` when none were offered. */
   transport: "none" | "tools" | "need";
-  /** Each search: the prefetch over the step's inputs, or a lookup the model asked for (with no text when the step may read an unrevealed secret or reads private inputs), and how many entries it matched that the player may know of. */
-  queries: { kind: "prefetch" | "search" | "get" | "list"; text: string; matched: number }[];
-  /** The entries the step was given, in order, with their token cost: no unrevealed secret, and no title (`""`) for a private step's. */
+  /** Each search: the prefetch over the step's inputs, or a lookup the model asked for (with no text when the step may read an unrevealed secret or reads private inputs), and how many entries it matched that the player may know of, unless the step is `private`. */
+  queries: { kind: "prefetch" | "search" | "get" | "list"; text: string; matched?: number }[];
+  /** The entries the step was given, in order, with their token cost: no unrevealed secret, and none for a `private` step. */
   entries: { title: string; tokens: number; cut: boolean }[];
+  /** The step read someone's private plans: how much it found, and how big, would say what those are. */
+  private?: true;
   /** Lookup rounds made: one model call each, on the phase's lookup budget. */
   lookups: number;
   /** Why lookups stopped or changed course (the lookup budget ran out, the connection refused tools). */
