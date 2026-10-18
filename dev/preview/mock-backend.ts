@@ -145,7 +145,7 @@ export class MockBackend {
     for (const op of ops) {
       if (op.op === "spawn") {
         const id = op.id ?? `${op.kind}:${gm.entities.length}`;
-        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, fields: [], relations: [], levels: [], sheet: null });
+        gm.entities.push({ id, name: op.name, kind: op.kind, tier: op.tier ?? "background", agent: op.agent ?? false, pov: false, gone: false, spawned: true, visibility: "public", place: op.place ?? null, holder: null, fields: [], relations: [], levels: [], class: {}, tags: [], sheet: null });
         lines.push(`${op.name} is here`);
         continue;
       }
@@ -192,6 +192,11 @@ export class MockBackend {
           if (op.agent !== undefined) entity.agent = op.agent;
           for (const l of entity.levels) if (op.levels && l.domain in op.levels) l.override = op.levels[l.domain] ?? null;
           lines.push(`${entity.name}'s simulation changed`);
+          break;
+        case "classify":
+          entity.class = op.class;
+          entity.tags = op.tags;
+          lines.push(`${entity.name}'s classification changed`);
           break;
         case "despawn":
         case "restore":

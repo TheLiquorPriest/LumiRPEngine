@@ -140,8 +140,9 @@ export function FacetValuesInput(props: { label: string; value: Record<FacetValu
 /**
  * An entity's classification: per facet, in the world's order, one select (single-valued) or a
  * toggle per value (several). A facet or value the world no longer defines stays listed until removed.
+ * Build passes its draft; the GM editor passes the running chat's facets.
  */
-export function ClassesInput(props: { label: string; value: Record<FacetId, FacetValueId[]> | undefined; doc: WorldDoc; onChange(next: Record<FacetId, FacetValueId[]> | undefined): void }) {
+export function ClassesInput(props: { label: string; value: Record<FacetId, FacetValueId[]> | undefined; doc: Pick<WorldDoc, "classifications">; onChange(next: Record<FacetId, FacetValueId[]> | undefined): void }) {
   const value = props.value ?? {};
   const facets = facetsInOrder(props.doc);
   const set = (facet: FacetId, values: FacetValueId[]) => {

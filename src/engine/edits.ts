@@ -1,11 +1,11 @@
 // Typed edits (DESIGN §7 GM edits, §12 ✎ fixes): what a ✎ fix or a GM edit writes, as events.
 // Each operation is checked against what it touches (a field's type, enum values, min and max, a
 // pool's evaluated max, derived and locked fields; a relation type's kinds and fields; a tier, a
-// place, a track's stages) and then resolved through the core effects, so the event validators and
-// pack guards apply, money moves against the outside correction account and a change to XP levels
-// up, as anywhere else. Values are literals: a typed "=1+1" is text, never a formula. A submit
-// applies all or none and is one `fix` post entry on the head (§4.3), so undo, Keep, swipes,
-// Re-narrate and Re-run treat it like any fix.
+// place, a track's stages; the world's facets and their values) and then resolved through the core
+// effects, so the event validators and pack guards apply, money moves against the outside
+// correction account and a change to XP levels up, as anywhere else. Values are literals: a typed
+// "=1+1" is text, never a formula. A submit applies all or none and is one `fix` post entry on the
+// head (§4.3), so undo, Keep, swipes, Re-narrate and Re-run treat it like any fix.
 
 import { hashParts } from "../shared/hash";
 import type { EntityId, FieldId } from "../shared/ids";
@@ -28,6 +28,7 @@ import type { Registry } from "./registry-impl";
 import { materializeIfNeeded } from "./materialize";
 import { createRng, type Rng } from "./rng";
 import { fieldDef, GONE_FIELD, kindDef, kindIs, placeOfEntity } from "./scope";
+import { classOf, classProblems, classValues, tagsOf } from "./selector";
 import type { WorldState } from "./state";
 import { Working } from "./working";
 
@@ -262,6 +263,26 @@ function entityOp(w: Working, op: Extract<EditOp, { op: "entity" }>): Rejection 
   return op.agent === true && !wasAgent ? caughtUp(w, op.entity) : null;
 }
 
+/**
+ * Classes and tags, both whole: the chat holds them from then on, so they win over the world's
+ * definition until an Upgrade takes the revision's. One that reads the same as now is refused,
+ * since holding it would still keep an Upgrade from bringing the revision's in.
+ */
+function classifyOp(w: Working, op: Extract<EditOp, { op: "classify" }>): Rejection | null {
+  const e = own(w.state.entities, op.entity);
+  if (!e) return reject("missing_entity", `no entity ${labelOf(w, op.entity)}`);
+  const classes = classOf(op.class);
+  if (!classes) return reject("bad_args", "a classification is facet → values");
+  const problem = classProblems(w.world, classes, e.name)[0];
+  if (problem) return reject(problem.code, problem.message);
+  const tags = [...new Set(op.tags.map((t) => t.trim()).filter((t) => t !== ""))];
+  const sameAs = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
+  const facets = new Set([...Object.keys(classes), ...Object.keys(w.world.classifications)]);
+  const unchanged = [...facets].every((f) => sameAs(classValues(w.world, w.state, op.entity, f), classes[f] ?? [])) && sameAs(tagsOf(w.world, w.state, op.entity), tags);
+  if (unchanged) return reject("no_change", "nothing to change");
+  return applyAll(w, [{ type: ENGINE_EVENTS.classes, data: { entity: op.entity, class: classes, tags } }]);
+}
+
 function spawnOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "spawn" }>, rng: Rng): Rejection | null {
   const name = op.name.trim();
   if (name === "" || name.length > 80) return reject("bad_name", "a name is 1–80 characters");
@@ -331,6 +352,8 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
       return run(reg, w, [{ type: "stage", args: { track: op.track, to: op.to } }], rng);
     case "entity":
       return entityOp(w, op);
+    case "classify":
+      return classifyOp(w, op);
     case "spawn":
       return spawnOp(reg, w, op, rng);
     case "despawn":
@@ -391,6 +414,15 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
           if (o.levels !== undefined && !(isRecord(o.levels) && Object.values(o.levels).every((v) => v === null || typeof v === "number"))) return null;
           const levels: Record<string, number | null> = isRecord(o.levels) ? Object.fromEntries(Object.entries(o.levels).map(([d, v]) => [d, typeof v === "number" ? v : null])) : {};
           return { op: "entity", entity: o.entity, ...(str(o.tier) ? { tier: o.tier } : {}), ...(typeof o.agent === "boolean" ? { agent: o.agent } : {}), ...(isRecord(o.levels) ? { levels } : {}) };
+        }
+        case "classify": {
+          if (!str(o.entity) || !isRecord(o.class) || !Array.isArray(o.tags) || !o.tags.every(str)) return null;
+          const classes: Record<string, string[]> = {};
+          for (const [facet, values] of Object.entries(o.class)) {
+            if (!safeKey(facet) || !Array.isArray(values) || !values.every(str)) return null;
+            classes[facet] = values.filter(str);
+          }
+          return { op: "classify", entity: o.entity, class: classes, tags: o.tags.filter(str) };
         }
         case "spawn":
           if (!str(o.kind) || !str(o.name) || [o.id, o.tier, o.place].some((v) => v !== undefined && !str(v)) || (o.agent !== undefined && typeof o.agent !== "boolean")) return null;

@@ -24,7 +24,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
-import type { AdjudicationDef, FieldType, StepPurpose, WorldCurrency } from "./world";
+import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, StepPurpose, WorldCurrency } from "./world";
 import type { LorePolicy } from "./settings";
 
 export type ChatStatus = "not_world" | "idle" | "in_flight" | "paused";
@@ -329,6 +329,9 @@ export interface GmEntity {
   relations: GmRelation[];
   /** Each domain's effective level, and the override set on the entity (null: its tier decides). */
   levels: { domain: DomainId; level: number; override: number | null }[];
+  /** Its classes, every facet's (hidden ones too), and tags, as selectors read them now. */
+  class: Record<FacetId, FacetValueId[]>;
+  tags: string[];
   /** The world ruleset's designed sheet read on this entity; null when the world designs none. */
   sheet: SheetSectionView[] | null;
 }
@@ -342,6 +345,8 @@ export interface GmView {
   kinds: { id: string; label: string }[];
   tiers: { id: string; label: string }[];
   domains: { id: DomainId; label: string }[];
+  /** The world's classification facets, hidden ones too: what the classification editor offers. */
+  classifications: Record<FacetId, FacetDef>;
   places: { id: PlaceId; name: string; visibility: string; parent: PlaceId | null }[];
   tracks: { id: string; label: string; kind: string; visibility: string; owner: string | null; stage: string; stages: { id: string; label: string; truth?: string }[] }[];
   relationTypes: { id: string; label: string; from: string; to: string; fields: { id: string; label: string; type: FieldType; min?: number; max?: number; values?: string[] }[] }[];

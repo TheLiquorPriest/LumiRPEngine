@@ -472,7 +472,7 @@ const BACKGROUND = [1, 1, 1, 1, 1, 1, 3, 2, 1];
 
 /** The GM view (`lre.gm`): everyone, the secret and the removed included, and every track's truths. */
 export function gmFixture(): GmView {
-  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), sheet: null, ...rest });
+  const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, ...rest });
   return {
     entities: [
       entity("pov", "Sam Rivera", "person", "principal", "diner", {
@@ -507,6 +507,8 @@ export function gmFixture(): GmView {
           { type: "regard", to: "npc_mara", toName: "Mara Lopez", fields: { warmth: 60, trust: 50, respect: 45 }, value: 55 },
         ],
         levels: gmLevels(SUPPORTING, { money: 4 }),
+        class: { story_role: ["best_friend"] },
+        tags: ["mechanic", "night_owl"],
       }),
       entity("npc_mara", "Mara Lopez", "npc", "supporting", "apartment", { fields: npcFields(0, 80, "calm", "Landlord", "Planning Sam's surprise party"), relations: [{ type: "knows", to: "pov", toName: "Sam Rivera" }] }),
       entity("npc_teo", "Teo Brandt", "npc", "background", "diner", { spawned: true, fields: npcFields(1200, 50, "calm", "Delivery driver", "") }),
@@ -533,6 +535,8 @@ export function gmFixture(): GmView {
       { id: "background", label: "Background" },
     ],
     domains: DOMAINS.map((id) => ({ id, label: id === "castlife" ? "Cast life" : `${id.charAt(0).toUpperCase()}${id.slice(1)}` })),
+    // The world fixture's facets, its GM-only one included.
+    classifications: worldFixture().classifications,
     places: [
       { id: "diner", name: "Rosie's Diner", visibility: "public", parent: null },
       { id: "back_office", name: "Rosie's back office", visibility: "secret", parent: "diner" },

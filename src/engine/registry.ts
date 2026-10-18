@@ -56,15 +56,15 @@ export interface ReadContext {
 
 /**
  * Part of an entity's definition an applied event writes (DESIGN §4.3, the touched record): one of
- * its fields, one relation (by type and target), its tier, agent flag or level overrides, the
- * entity itself when play created it, or an account's balance. Names only, never values.
+ * its fields, one relation (by type and target), its tier, agent flag, level overrides or classes
+ * and tags, the entity itself when play created it, or an account's balance. Names only, never values.
  */
 export type Touch =
   | { entity: EntityId; field: FieldId }
   | { entity: EntityId; rel: RelationTypeId; to: string }
   | { entity: EntityId; aspect: TouchAspect };
 
-export type TouchAspect = "tier" | "agent" | "levels" | "spawned" | "posted";
+export type TouchAspect = "tier" | "agent" | "levels" | "class" | "spawned" | "posted";
 
 /** A registered event type: validation against the state before it, and its reducer. */
 export interface EventTypeDef<E extends LedgerEvent = LedgerEvent> {

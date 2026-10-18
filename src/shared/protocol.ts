@@ -11,7 +11,7 @@ import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, 
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, KindDef, MapDisplay, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, FacetId, FacetValueId, KindDef, MapDisplay, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -100,6 +100,8 @@ export interface FixRequest extends Request<"lre.fix"> {
  *  - `adjust` moves money into (positive) or out of an account against `economy.external:correction`.
  *  - `stage` sets a track's stage.
  *  - `entity` sets an entity's tier, agent flag and per-domain level overrides (null follows the tier).
+ *  - `classify` sets an entity's classes (facet → values, the world's facets and values only) and
+ *    tags, both whole; the chat holds them from then on over the world's definition.
  *  - `spawn` adds an entity; `despawn` takes one out of the world (`gone`, its relations unlinked)
  *    and `restore` brings it back.
  */
@@ -113,6 +115,7 @@ export type EditOp =
   | { op: "adjust"; account: EntityId; cents: number }
   | { op: "stage"; track: TrackId; to: StageId }
   | { op: "entity"; entity: EntityId; tier?: TierId; agent?: boolean; levels?: Partial<Record<DomainId, number | null>> }
+  | { op: "classify"; entity: EntityId; class: Record<FacetId, FacetValueId[]>; tags: string[] }
   | { op: "spawn"; kind: KindId; name: string; id?: EntityId; tier?: TierId; place?: PlaceId; agent?: boolean }
   | { op: "despawn"; entity: EntityId }
   | { op: "restore"; entity: EntityId };

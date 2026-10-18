@@ -149,6 +149,8 @@ describe("GM edits", () => {
       { domain: "money", level: 3, override: null },
       { domain: "castlife", level: 2, override: 2 },
     ],
+    class: {},
+    tags: [],
     sheet: null,
   };
   const regard = [

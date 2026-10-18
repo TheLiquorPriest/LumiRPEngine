@@ -1,8 +1,8 @@
 // Play → GM view (DESIGN §7): everything, secrets and removed entities included, and the GM
 // editor. Behind a spoiler gate; its data is asked for (`lre.gm`) only once the gate is open, so it
 // never travels with the player's state. Every change is one `lre.edit`: checked against what it
-// touches, all or none, one fix with its own Undo chip. Kinds, classifications and tags are the
-// world's definitions, edited in Build.
+// touches, all or none, one fix with its own Undo chip. An entity's classes (hidden facets too) and
+// tags are set here for this chat; kinds and places are the world's definitions, edited in Build.
 
 import { useEffect, useId, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
@@ -11,9 +11,11 @@ import type { GmEntity, GmField, GmMoney, GmRelation, GmView } from "../../share
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../shared/world";
 import { useApp } from "../app";
 import { Card, Empty, Row, Tabs, tabPanel, useBusy } from "../components";
+import { ClassesInput } from "../build/facet-editor";
+import { TagListInput } from "../build/selector-editor";
 import { parseFixValue } from "../fix-editor";
 import type { PanelProps } from "../registry";
-import { adjustOp, editRequest, entityStateOp, relationFields } from "../requests";
+import { adjustOp, classifyOp, editRequest, entityStateOp, relationFields } from "../requests";
 import { decodeEncounterView, EncounterCard } from "../../packs/combat/ui/panel";
 
 type Section = "entities" | "places" | "tracks" | "money" | "fight" | "edits";
@@ -150,6 +152,24 @@ function EntityState(props: { entity: GmEntity; editor: Editor }) {
           </select>
         </label>
       ))}
+      <button type="button" class="lre-btn primary" disabled={editor.busy || op === null} onClick={() => op && void editor.edit([op])}>
+        Save
+      </button>
+    </Card>
+  );
+}
+
+/** Classes, every facet's (the GM sees the hidden ones too), and tags, saved together for this chat. */
+function Classification(props: { entity: GmEntity; editor: Editor }) {
+  const { entity, editor } = props;
+  const [classes, setClasses] = useState(entity.class);
+  const [tags, setTags] = useState(entity.tags);
+  const op = classifyOp(entity, classes, tags);
+  const suggestions = [...new Set(editor.gm.entities.flatMap((e) => e.tags))].sort((a, b) => a.localeCompare(b));
+  return (
+    <Card title="Classification">
+      <ClassesInput label="Classes" value={classes} doc={editor.gm} onChange={(next) => setClasses(next ?? {})} />
+      <TagListInput label="Tags" value={tags} suggestions={suggestions} onChange={setTags} />
       <button type="button" class="lre-btn primary" disabled={editor.busy || op === null} onClick={() => op && void editor.edit([op])}>
         Save
       </button>
@@ -350,6 +370,7 @@ function EntityEditor(props: { entity: GmEntity; editor: Editor; onClose(): void
       <Placement entity={entity} editor={editor} />
       <Relations entity={entity} editor={editor} />
       <EntityState key={`${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`} entity={entity} editor={editor} />
+      <Classification key={JSON.stringify([entity.class, entity.tags])} entity={entity} editor={editor} />
     </div>
   );
 }
@@ -541,7 +562,7 @@ function Body(props: { editor: Editor }) {
         ) : null}
       </div>
       <button type="button" class="lre-btn ghost" onClick={() => app.ui.update((ui) => ({ ...ui, section: "build" }))}>
-        Kinds, classifications, tags and places are the world's: edit them in Build
+        Kinds and places are the world's: edit them in Build
       </button>
     </div>
   );

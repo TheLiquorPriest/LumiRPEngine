@@ -1,8 +1,9 @@
 // The touched record (DESIGN §4.3 `migrate`): which parts of entities' definitions applied events
 // have written since the chat started (fields, relations by type and target, tier, agent flag,
-// level overrides, entities play created, account balances), so an Upgrade's merge takes a
-// revision's value by default only where nothing in play wrote it. "Never changed" comes from the
-// ledger, not from comparing values: a field that changed and changed back still counts.
+// level overrides, classes and tags, entities play created, account balances), so an Upgrade's
+// merge takes a revision's value by default only where nothing in play wrote it. "Never changed"
+// comes from the ledger, not from comparing values: a field that changed and changed back still
+// counts.
 //
 // It is written inside the apply of every event type that declares `touches` (the registry wraps
 // them all), and by `resolve` markers for an entity's levels, so both folds keep it alike, no turn

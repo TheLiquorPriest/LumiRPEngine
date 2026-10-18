@@ -86,7 +86,7 @@ Taxonomy:
 
 Core: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.
 
-Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.signal`.
+Engine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.signal`.
 
 ### Relation types
 

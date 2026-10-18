@@ -17,8 +17,9 @@ export interface EntityState {
   levels: Partial<Record<DomainId, Level>>;
   agent: boolean;
   /**
-   * A spawned entity's classes and tags, as its spawn gave them. Entities the world defines read
-   * theirs live from the world instead, so these are absent for them.
+   * Classes and tags the chat holds: a spawned entity's, as its spawn gave them, and any entity's a
+   * GM edit set or an Upgrade kept. While either is set they win over the world's definition;
+   * otherwise an entity the world defines reads its classes and tags live from the world.
    */
   class?: Record<FacetId, FacetValueId[]>;
   tags?: string[];

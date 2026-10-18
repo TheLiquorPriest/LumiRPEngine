@@ -1,10 +1,11 @@
 // The built-in `engine` pack: bookkeeping events the runtime records (rule firings, interrupt
 // signals, agent catch-up cursors, recorded choices, puzzle attempts, reveals, the paused scene,
-// checks rolled by the `check` effect), GM edits of an entity's tier, agent flag and levels, the
-// engine's narration channels (`knows`, `spawn`) and the taxonomy formulas (`kind_is`, `in_class`,
-// `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built with it first:
-// `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
+// checks rolled by the `check` effect), GM edits of an entity's tier, agent flag and levels and of
+// its classes and tags, the engine's narration channels (`knows`, `spawn`) and the taxonomy formulas
+// (`kind_is`, `in_class`, `has_tag`, `member_of`, `tier_of`, `band_of`). Every registry is built
+// with it first: `createRegistry([enginePack, ...packs])`. Its state lives in `state.packs.engine`.
 
+import { facetsInOrder } from "../shared/classes";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord, safeKey } from "../shared/json";
 import type { EntityId, InterruptClass, Level, Visibility } from "../shared/ids";
@@ -16,7 +17,7 @@ import type { Value } from "./expr";
 import { knowsChannel, spawnChannel } from "./narration-channels";
 import { kindIs } from "./scope";
 import { restoreObservations } from "./seen";
-import { inClass, isMemberOf, tagsOf } from "./selector";
+import { classOf, classProblems, inClass, isMemberOf, tagsOf } from "./selector";
 import type { EntityState, WorldState } from "./state";
 import { own } from "./pack-kit";
 
@@ -38,6 +39,8 @@ export const ENGINE_EVENTS = {
   check: "engine.check",
   /** A GM edit of an entity's simulation detail: its tier, agent flag and per-entity level overrides. */
   entity: "engine.entity",
+  /** A GM edit of an entity's classes and tags, held in state from then on over the world's definition. */
+  classes: "engine.class",
   /** What a coarsened record's fold would get wrong of the POV's observations (`engine/seen`), at its end. */
   observed: "engine.observed",
   /** How the adjudication policy decided an action's check (DESIGN §11): rolled or not and why, the judge's rating, and the attempt a retry rule reads. */
@@ -127,6 +130,13 @@ function sub(state: WorldState, key: string): JsonObject {
 function str(e: PackEvent, key: string): string {
   const v = e.data[key];
   return typeof v === "string" ? v : "";
+}
+
+/** Tags as an event holds them: a list of non-blank words; null when it isn't one. */
+function tagList(v: JsonValue | undefined): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const tags = v.filter((t): t is string => typeof t === "string" && t.trim() !== "");
+  return tags.length === v.length ? tags : null;
 }
 
 function need(e: PackEvent, ...keys: string[]): Rejection | null {
@@ -277,6 +287,41 @@ const events: EventTypeDef<PackEvent>[] = [
       const levels = e.data.levels;
       if (isRecord(levels)) for (const [d, v] of Object.entries(levels)) parts.push(`${d} level ${v === null ? "from the tier" : String(v)}`);
       return `${own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity")}: ${parts.join(", ")}`;
+    },
+  },
+  {
+    type: ENGINE_EVENTS.classes,
+    validate: (e, ctx) => {
+      const ent = own(ctx.state.entities, str(e, "entity"));
+      if (!ent) return { code: "missing_entity", reason: `no entity ${str(e, "entity")}` };
+      const classes = classOf(e.data.class);
+      if (!classes) return { code: "bad_event", reason: "a classification is facet → values" };
+      const problem = classProblems(ctx.world, classes, ent.name)[0];
+      if (problem) return { code: problem.code, reason: problem.message };
+      return tagList(e.data.tags) ? null : { code: "bad_event", reason: "tags are a list of words" };
+    },
+    apply: (e, state) => {
+      const ent = own(state.entities, str(e, "entity"));
+      if (!ent) return;
+      // Both are held, empty ones too, so the world's definition no longer speaks for either.
+      ent.class = classOf(e.data.class) ?? {};
+      ent.tags = tagList(e.data.tags) ?? [];
+    },
+    touches: (e) => [{ entity: str(e, "entity"), aspect: "class" }],
+    describe: (e, ctx, viewer) => {
+      const classes = classOf(e.data.class) ?? {};
+      // A player's line names only the facets players can see, and never tags (DESIGN §4.1).
+      const parts = facetsInOrder(ctx.world)
+        .filter(([, f]) => viewer === undefined || f.shown === true)
+        .flatMap(([id, f]) => {
+          const values = own(classes, id) ?? [];
+          return values.length > 0 ? [`${f.label} ${values.map((v) => own(f.values, v)?.label ?? v).join(", ")}`] : [];
+        });
+      const tags = tagList(e.data.tags) ?? [];
+      if (viewer === undefined && tags.length > 0) parts.push(`tags ${tags.join(", ")}`);
+      const name = own(ctx.state.entities, str(e, "entity"))?.name ?? str(e, "entity");
+      if (parts.length > 0) return `${name}: ${parts.join("; ")}`;
+      return viewer === undefined ? `${name}: no classification or tags` : "";
     },
   },
   {

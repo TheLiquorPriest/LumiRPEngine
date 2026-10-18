@@ -29,7 +29,7 @@ People, places, tracks and single fields of a kind each take one. A value the en
 
 Open **Play → GM view** and tap **Show the GM view** past its spoiler gate. Its data is fetched only while it is open and never travels with what Play shows, so a player glancing at the screen with it closed sees nothing. Looking never changes the chat.
 
-- **Entities:** every person, thing, vehicle, group and account, including the ones spawned in this chat and the ones removed, with badges for **You**, **Removed**, **Spawned**, **Agent** and anything that isn't public. Each opens a form: its fields as its kind defines them, its designed sheet, where it is, its relations, and its simulation detail (tier, whether it lives off-screen, and each domain's level).
+- **Entities:** every person, thing, vehicle, group and account, including the ones spawned in this chat and the ones removed, with badges for **You**, **Removed**, **Spawned**, **Agent** and anything that isn't public. Each opens a form: its fields as its kind defines them, its designed sheet, where it is, its relations, its simulation detail (tier, whether it lives off-screen, and each domain's level), and its classification and tags.
 - **Places:** every place with its visibility.
 - **Tracks:** every quest, secret, puzzle and agenda, with all its stages and every truth.
 - **Money:** each person's money at their own Money level: their band, accounts, bills and latest transactions.
@@ -37,13 +37,14 @@ Open **Play → GM view** and tap **Show the GM view** past its spoiler gate. It
 
 ## GM edits
 
-Anything the GM view shows, you can change: a field (set it, or add to a number), a relation and its fields, where something is (at a place, inside a container, or out of it), money on an account (**Add** and **Take**), a track's stage, someone's tier, whether they live off-screen and their levels, and you can **Spawn** a new entity or **Remove from the world** an existing one.
+Anything the GM view shows, you can change: a field (set it, or add to a number), a relation and its fields, where something is (at a place, inside a container, or out of it), money on an account (**Add** and **Take**), a track's stage, someone's tier, whether they live off-screen and their levels, their classifications and tags, and you can **Spawn** a new entity or **Remove from the world** an existing one.
 
 - **Checked, all or nothing.** Every save is checked as the change it makes: a value outside its range, a choice that isn't one of its values, a relation that breaks its kinds or how many it allows, is refused with the reason, and nothing in that save applies. **Add** to a number is the one exception: it keeps the result inside the field's range instead of refusing. Values are taken as typed, never as formulas.
 - **Locked fields** (🔒, the ones the AI never sees or writes) are writable here and nowhere else.
 - **Money stays balanced.** Adding or taking money posts against an outside **Correction** account, so the books still balance and the Money panel shows it as a correction.
 - **Remove, don't delete.** **Remove from the world** takes someone out of every scene, list, process and prompt, with whatever they hold, and drops their relations: no rule, schedule or zone picks them out, they don't count in a group's regard, and a removed group's schedules stop moving its members. **Restore** brings them back where they were. Undoing the removal brings the relations back too. Your own character can't be removed.
-- **The world's definitions stay in Build.** Kinds, classifications, tags and the world's places are edited in Build and reach the chat through an Upgrade (below).
+- **Classify for this chat.** An entity's **Classification** card sets its value of each of the world's classifications, hidden ones included, and its tags, for a person spawned in play as much as for one the world defines. A classification or value the world doesn't have is refused. What you set holds in this chat over the world's definition, so rules, schedules and **Known by** selectors match it from then on, and an Upgrade keeps it by default (below). A classification players can't see stays out of their Journal, and tags never reach Play.
+- **The world's definitions stay in Build.** Kinds and the world's places are edited in Build and reach the chat through an Upgrade (below).
 
 Each save is one correction: a **Corrected** chip on the latest reply, with **Undo**, worded as the Journal words it. A save made while a reply is streaming waits for the reply and lands right after it.
 

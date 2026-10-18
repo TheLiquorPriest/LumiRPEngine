@@ -1,8 +1,9 @@
 // The GM view's world (DESIGN §7): everything as it stands, secrets and removed entities included,
 // shaped for the GM editor: every entity with its fields as their definitions type them, its
-// relations, levels and designed sheet; places with their visibility; tracks with every stage and
-// truth; the relation types the editor can add; and everyone's money. Read on request only, and it
-// records nothing (L34): unopened accounts show the opening balances they'll start from.
+// relations, levels, classes, tags and designed sheet; places with their visibility; tracks with
+// every stage and truth; the relation types the editor can add; the world's facets, hidden ones
+// too; and everyone's money. Read on request only, and it records nothing (L34): unopened accounts
+// show the opening balances they'll start from.
 
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
@@ -17,6 +18,7 @@ import type { ReadContext } from "./registry";
 import type { Registry } from "./registry-impl";
 import { buildEntitySheet } from "./ruleset";
 import { GONE_FIELD, isGone, kindFields, placeOfEntity, scopeEnv } from "./scope";
+import { classValues, tagsOf } from "./selector";
 import type { WorldState } from "./state";
 import { entityVisibility } from "./visibility";
 
@@ -73,6 +75,13 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
       ...(r.type === "regard" && regard && own(state.entities, r.to) ? { value: Math.round(regard(ctx, id, r.to) * 10) / 10 } : {}),
     })),
     levels: DOMAINS.map((domain) => ({ domain, level: ctx.levelOf(id, domain), override: e.levels[domain] ?? null })),
+    class: Object.fromEntries(
+      Object.keys(world.classifications).flatMap((facet) => {
+        const values = classValues(world, state, id, facet);
+        return values.length > 0 ? [[facet, [...values]]] : [];
+      }),
+    ),
+    tags: [...tagsOf(world, state, id)],
     sheet: buildEntitySheet(ctx, id),
   };
 }
@@ -95,6 +104,7 @@ export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<Wor
     kinds: [...kinds].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label)),
     tiers: tiersInOrder(world).map(([id, t]) => ({ id, label: t.label })),
     domains: DOMAINS.map((id) => ({ id, label: reg.packs.find((p) => p.domain === id)?.label ?? id })),
+    classifications: world.classifications,
     places: Object.values(world.places).map((p) => ({ id: p.id, name: p.name, visibility: p.visibility ?? "public", parent: p.parent ?? null })),
     tracks: Object.values(world.tracks).map((t) => ({
       id: t.id,

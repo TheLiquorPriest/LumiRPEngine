@@ -7,7 +7,7 @@ import type { EntityUpgradePick, KeepLine, ResolveScope, TimeControl, TimelapseT
 import { parseMoneyInput } from "../shared/money";
 import type { EditOp, UpgradePreview } from "../shared/protocol";
 import type { Chip, FixTarget, GmEntity, GmView, PaletteEntry, PaletteOption, TimelapseView } from "../shared/state-view";
-import type { AdjudicationDef, WorldCurrency } from "../shared/world";
+import type { AdjudicationDef, FacetId, FacetValueId, WorldCurrency } from "../shared/world";
 import type { RequestBody } from "./registry";
 
 /** The request body of one protocol type. */
@@ -103,6 +103,14 @@ export function entityStateOp(entity: GmEntity, tier: TierId, agent: boolean, le
   const levelsChanged = Object.keys(changed).length > 0;
   if (tier === entity.tier && agent === entity.agent && !levelsChanged) return null;
   return { op: "entity", entity: entity.id, ...(tier !== entity.tier ? { tier } : {}), ...(agent !== entity.agent ? { agent } : {}), ...(levelsChanged ? { levels: changed } : {}) };
+}
+
+/** The GM's classification edit of an entity: its classes and tags, both whole. Null when they read as they are now. */
+export function classifyOp(entity: GmEntity, classes: Readonly<Record<FacetId, FacetValueId[]>>, tags: readonly string[]): EditOp | null {
+  const same = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x) => b.includes(x));
+  const facets = new Set([...Object.keys(classes), ...Object.keys(entity.class)]);
+  const unchanged = [...facets].every((f) => same(classes[f] ?? [], entity.class[f] ?? [])) && same(tags, entity.tags);
+  return unchanged ? null : { op: "classify", entity: entity.id, class: Object.fromEntries(Object.entries(classes).filter(([, v]) => v.length > 0)), tags: [...tags] };
 }
 
 /**

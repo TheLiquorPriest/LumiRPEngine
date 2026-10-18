@@ -9,6 +9,7 @@ import type { GmView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
 import { paramCandidates } from "../../src/engine/resolve";
+import { scheduleOwners } from "../../src/engine/schedules";
 import { lod1Agents } from "../../src/engine/simulate";
 import type { WorldState } from "../../src/engine/state";
 import { canSeeEntity } from "../../src/engine/visibility";
@@ -27,6 +28,8 @@ async function chat(rig: Rig): Promise<string> {
   await put("entities", "coin", { id: "coin", kind: "box", name: "Coin", tier: "background", fields: {}, relations: [{ type: "in", to: "chest" }] });
   await put("places", "cellar", { id: "cellar", name: "Cellar", fields: {} });
   await put("tracks", "feud", { id: "feud", kind: "quest", label: "The feud", start: "simmer", visibility: "public", stages: { simmer: { label: "Simmering", next: [] }, boil: { label: "Boiling over", next: [] } } });
+  // Not shown to players: only Build and the GM side see it.
+  await put("classifications", "role", { id: "role", label: "Role", multiple: false, values: { ally: { label: "Ally" }, foe: { label: "Foe" } } });
   await put("actions", "talk", { id: "talk", label: "Talk to", params: { to: { type: "ref", ref: "person" } }, requires: [], outcomes: { default: [] }, duration: "1" });
   rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
   const chatId = rig.host.createChat("Morning, Sam.");
@@ -199,10 +202,34 @@ describe("GM edits", () => {
   test("malformed edits are refused before anything is read", async () => {
     const rig = new Rig();
     const chatId = await chat(rig);
-    for (const ops of [[], [{ op: "teleport", entity: POV }], [{ op: "set", entity: POV, field: "mood" }], [{ op: "add", entity: POV, field: "xp", delta: "9" }], "everything"]) {
+    for (const ops of [[], [{ op: "teleport", entity: POV }], [{ op: "set", entity: POV, field: "mood" }], [{ op: "add", entity: POV, field: "xp", delta: "9" }], [{ op: "classify", entity: "dev", class: { role: "ally" }, tags: [] }], "everything"]) {
       const reply = await rig.send({ type: "lre.edit", chatId, ops });
       expect(reply.type === "lre.error" ? reply.code : "accepted").toBe("bad_request");
     }
+  });
+
+  test("classify: classes and tags for this chat, checked against the world's facets, matched by selectors, carried through a swipe", async () => {
+    const rig = new Rig();
+    const chatId = await chat(rig);
+    const owners = async () => {
+      const { state, world } = await folded(rig, chatId);
+      return scheduleOwners(rig.rt.registry, world, state, { id: "allies", owner: { class: { role: ["ally"] }, tag: ["regular"] }, target: "activity", recurrence: { every: "day" }, slots: [{ start: "09:00", end: "10:00", value: "chat" }] });
+    };
+    expect(await owners()).toEqual([]);
+    expect(await refused(rig, chatId, { op: "classify", entity: "dev", class: { mood: ["ally"] }, tags: [] })).toContain("mood");
+    expect(await refused(rig, chatId, { op: "classify", entity: "dev", class: { role: ["villain"] }, tags: [] })).toContain("villain");
+    expect(await refused(rig, chatId, { op: "classify", entity: "dev", class: {}, tags: [] })).toContain("nothing to change");
+    await edit(rig, chatId, { op: "classify", entity: "dev", class: { role: ["ally"] }, tags: ["regular"] });
+    expect(await owners()).toEqual(["dev"]);
+    // The facet is hidden and tags never reach Play: the player's Journal line names neither.
+    const lines = (await rig.rt.view(chatId, rig.host.userId)).journal.filter((n) => n.kind === "fix").map((n) => n.text);
+    expect(lines.some((l) => l.includes("Ally") || l.includes("regular"))).toBe(false);
+    const gm = rig.body(await rig.send({ type: "lre.gm", chatId })) as unknown as GmView;
+    expect(gm.entities.find((e) => e.id === "dev")).toMatchObject({ class: { role: ["ally"] }, tags: ["regular"] });
+    // A Re-run of the reply carries the edit, as it carries every GM edit.
+    const g = await rig.host.start(chatId, { type: "swipe" });
+    await rig.host.finish(g, "Quiet, still.");
+    expect(await owners()).toEqual(["dev"]);
   });
 });
 

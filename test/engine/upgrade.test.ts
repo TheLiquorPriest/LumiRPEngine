@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { upgradePreview } from "../../src/backend/upgrade-preview";
 import { hashJson } from "../../src/shared/hash";
-import type { UpgradePicks } from "../../src/shared/ledger";
+import type { LedgerEvent, UpgradePicks } from "../../src/shared/ledger";
 import type { WorldDoc } from "../../src/shared/world";
 import { blankWorld, migrateWorld } from "../../src/engine/authoring";
 import { calendarOf, slotIndexAt } from "../../src/engine/calendar";
@@ -299,6 +299,25 @@ describe("the merge", () => {
     expect(taken.state.entities.dev?.tier).toBe("supporting");
     expect(touchedAspect(taken.state, "dev", "tier")).toBe(false);
     expect(inClass(taken.b, taken.state, "dev", "role", ["ally"])).toBe(true);
+  });
+
+  test("classes and tags a GM edit set are play's: kept by default, the revision's when picked", () => {
+    const edit = (b: WorldDoc): void => {
+      const dev = b.entities.dev;
+      if (dev) Object.assign(dev, { class: { role: ["foe"] }, tags: ["smuggler"] });
+    };
+    const gmEdit: LedgerEvent = { type: "engine.class", data: { entity: "dev", class: { role: ["ally"] }, tags: ["regular"] } };
+    const kept = chat(edit);
+    play(kept, [gmEdit]);
+    upgrade(kept);
+    expect([inClass(kept.b, kept.state, "dev", "role", ["ally"]), tagsOf(kept.b, kept.state, "dev")]).toEqual([true, ["regular"]]);
+    expect(touchedAspect(kept.state, "dev", "class")).toBe(true);
+
+    const taken = chat(edit);
+    play(taken, [gmEdit]);
+    upgrade(taken, { dev: { class: "take" } });
+    expect([inClass(taken.b, taken.state, "dev", "role", ["foe"]), tagsOf(taken.b, taken.state, "dev")]).toEqual([true, ["smuggler"]]);
+    expect(touchedAspect(taken.state, "dev", "class")).toBe(false);
   });
 
   test("relations: authored additions and removals come in, and both sides of a pair change together or neither does", () => {

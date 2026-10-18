@@ -236,9 +236,10 @@ export function planUpgrade(state: Readonly<WorldState>, env: MarkerEnv, to: Rev
     part("tier", base.tier, next.tier, now.tier, touchedAspect(state, id, "tier"));
     part("agent", was ? agentOf(before, was) : now.agent, agentOf(after, next), now.agent, touchedAspect(state, id, "agent"));
     part("levels", clampLevels(base.levels ?? {}), clampLevels(next.levels ?? {}), now.levels, touchedAspect(state, id, "levels"));
-    // Classes and tags are read live from the revision in force, so the chat's are those, unless it holds its own.
+    // Classes and tags are read live from the revision in force, so the chat's are those, unless it
+    // holds its own (spawned, kept through an Upgrade, or set by a GM edit, which counts as play's).
     const held = now.class !== undefined || now.tags !== undefined ? classesOf(now) : classesOf(own(inForce.entities, id) ?? base);
-    part("class", held, classesOf(next), held, false);
+    part("class", held, classesOf(next), held, touchedAspect(state, id, "class"));
     // Fields as a chat starting on each revision holds them, so where a map lays a thing counts.
     const earlier = was ? laidFields(was, oldLaid.get(id), own(oldRel, id)) : base.fields;
     const later = laidFields(next, newLaid.get(id), own(newRel, id));
@@ -399,7 +400,7 @@ function applyUpgrade(state: WorldState, plan: UpgradePlan, picks: UpgradePicks,
         delete e.class;
         delete e.tags;
       }
-      if (aspect === "tier" || aspect === "agent" || aspect === "levels") forget(state, d.id, { aspect });
+      if (aspect === "tier" || aspect === "agent" || aspect === "levels" || aspect === "class") forget(state, d.id, { aspect });
     }
     // The place and cell go together: taken only when every one of them that differs is taken, once
     // the relations are merged (below).
