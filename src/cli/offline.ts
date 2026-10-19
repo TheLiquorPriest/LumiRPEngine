@@ -14,7 +14,7 @@ import type { Args } from "./args";
 import { intArg, neededText, textArg, ToolError } from "./args";
 import { BODY_LIMIT, clip, readAt } from "./read";
 import type { ToolResult } from "./report";
-import { contentsOf, json, lintSummary, schemaIssues } from "./report";
+import { contentsOf, entityKindsOf, json, lintSummary, schemaIssues } from "./report";
 import { docs, DOCS, guide } from "./texts";
 
 const STARTER_IDS = STARTER_INFO.filter((t) => hasOwn(STARTER_WORLDS, t.id)).map((t) => t.id);
@@ -132,6 +132,7 @@ export function checkTool(args: Args, readFile: (path: string) => string): ToolR
     loads: true,
     world: { id: result.world.id, name: result.world.name, writtenBy, engine: ENGINE_VERSION },
     contents: contentsOf(result.world),
+    entityKinds: entityKindsOf(result.world),
     errors: lint.errors,
     warnings: lint.warnings,
     infos: lint.infos,

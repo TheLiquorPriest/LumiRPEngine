@@ -4,6 +4,10 @@
 // and the user's edits reach the agent the same way; every write names the draft version it read,
 // so neither overwrites the other unseen.
 
+import worldSchemaJson from "../../schemas/lre-world-v1.schema.json";
+import { createRegistry, type Registry } from "../engine/registry-impl";
+import { kindIs } from "../engine/scope";
+import { ALL_PACKS } from "../packs/index";
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { JsonPatchOp, MarkerPreview, ResultBodies } from "../shared/protocol";
@@ -18,15 +22,21 @@ import { loadWorld, worldInput } from "./offline";
 import { getAt, jsonEqual, parsePointer } from "../shared/json-patch";
 import { BODY_LIMIT, clip, jsonText, readAt } from "./read";
 import type { ToolResult } from "./report";
-import { contentsOf, json, lintSummary, newHazards, schemaIssues } from "./report";
-import { rank, searchDoc, searchWords } from "./search";
-import type { ScoredHit } from "./search";
+import { contentsOf, entityKindsOf, json, lintSummary, newHazards, schemaIssues } from "./report";
+import { itemsOf, rank, searchItems, searchWords } from "./search";
+import type { ScoredHit, WorldItem } from "./search";
 
 export type EditorBody = ResultBodies["lre.editor"];
 
 /** Revisions kept in memory: each is a whole world, and a revision never changes. */
 const REVISION_CACHE = 24;
 const MAX_OFFSET = Number.MAX_SAFE_INTEGER;
+
+/** The collections and parts a world may have, as the published schema names them. */
+const WORLD_KEYS: ReadonlySet<string> = new Set(Object.keys(worldSchemaJson.properties).filter((key) => key !== "$schema"));
+
+/** The engine's packs, read once: the kinds a world's own kinds extend come from them. */
+let packs: Registry | null = null;
 
 /** A world as a tool reads it: its head, its draft or one revision. */
 export interface Source {
@@ -147,19 +157,25 @@ export async function worldTool(live: Live, args: Args): Promise<ToolResult> {
   return read.ok ? { text: read.text } : { text: read.text, isError: true };
 }
 
-/** The item a search hit or a diff names: `/<collection>/<id>`, or the part itself when `id` is empty. */
-function itemOf(doc: unknown, collection: string, id: string): unknown {
-  const part = isRecord(doc) && hasOwn(doc, collection) ? doc[collection] : undefined;
-  if (id === "") return part;
-  return isRecord(part) && hasOwn(part, id) ? part[id] : undefined;
-}
-
 export async function searchTool(live: Live, args: Args): Promise<ToolResult> {
   const query = neededText(args, "query", "words to look for");
   const words = searchWords(query);
   const limit = intArg(args, "limit", 1, 100) ?? 20;
   const named = textsArg(args, "collections");
   const collections = named === undefined ? null : new Set(named);
+  const kindNames = textsArg(args, "kinds");
+  const reg = (packs ??= createRegistry(ALL_PACKS));
+  // Read in each document: a world's own kind can extend a pack's, and a draft can add one.
+  const kindsIn = (doc: WorldDoc): ((kind: string) => boolean) | null => (kindNames === undefined ? null : (kind) => kindNames.some((k) => kindIs(reg, doc, kind, k)));
+  // What the worlds searched hold, to tell a name no world has from a search that found nothing.
+  const seenKinds = new Set<string>();
+  const seenCollections = new Set(WORLD_KEYS);
+  const note = (doc: WorldDoc): WorldItem[] => {
+    for (const kind of Object.keys(doc.kinds)) seenKinds.add(kind);
+    const items = itemsOf(doc);
+    for (const item of items) seenCollections.add(item.collection);
+    return items;
+  };
   const worldId = textArg(args, "worldId");
   const worlds = worldId === undefined ? await live.list() : [await live.index(worldId)];
   // Every world is read whole, its draft and its head: one that can't be read (deleted meanwhile, a broken draft) is skipped, not fatal.
@@ -167,12 +183,14 @@ export async function searchTool(live: Live, args: Args): Promise<ToolResult> {
     worlds.map(async (w): Promise<{ hits: ScoredHit[]; draft: boolean } | { skipped: string }> => {
       try {
         const draft = await live.draft(w.id);
+        const draftItems = note(draft.draft);
         // An unstored draft is a copy of the head: one search covers both.
-        if (!draft.stored) return { hits: searchDoc(draft.draft, words, { worldId: w.id, source: "head", collections }), draft: false };
+        if (!draft.stored) return { hits: searchItems(draftItems, words, { worldId: w.id, source: "head", collections, kinds: kindsIn(draft.draft) }), draft: false };
         const head = await live.revision(w.id, w.head);
-        const inDraft = searchDoc(draft.draft, words, { worldId: w.id, source: "draft", collections });
+        const drafted = new Map(draftItems.map((item) => [item.pointer, item.value]));
+        const inDraft = searchItems(draftItems, words, { worldId: w.id, source: "draft", collections, kinds: kindsIn(draft.draft) });
         // The head adds only what the draft changed or dropped; an item both hold alike is the draft's hit.
-        const inHead = searchDoc(head, words, { worldId: w.id, source: "head", collections, skip: (collection, id, item) => jsonEqual(item, itemOf(draft.draft, collection, id)) });
+        const inHead = searchItems(note(head), words, { worldId: w.id, source: "head", collections, kinds: kindsIn(head), skip: (item) => drafted.has(item.pointer) && jsonEqual(item.value, drafted.get(item.pointer)) });
         return { hits: [...inDraft, ...inHead], draft: true };
       } catch (error) {
         return { skipped: error instanceof Error ? error.message : String(error) };
@@ -185,6 +203,11 @@ export async function searchTool(live: Live, args: Args): Promise<ToolResult> {
   });
   // Nothing could be read at all: that is the connection's failure, not a search with no hits.
   if (worlds.length > 0 && skipped.length === worlds.length) throw new ToolError(`No world could be searched: ${skipped[0]?.reason ?? "unknown"}`);
+  // A name no world has would only find nothing, which reads as "there is none": "flows" for the flow entities, say.
+  const strange = (named ?? []).filter((n) => !seenCollections.has(n));
+  if (strange.length > 0) throw new ToolError(`No world searched has a collection or part ${strange.join(", ")}. They have: ${clip([...seenCollections].join(", "), 2000)}. Accounts, cards, flows, jobs, holdings, properties, businesses, trusts and households are entities: search them with kinds (such as kinds: ["flow"]).`);
+  const unknownKinds = (kindNames ?? []).filter((k) => !reg.kinds.has(k) && !seenKinds.has(k));
+  if (unknownKinds.length > 0) throw new ToolError(`There is no kind ${unknownKinds.join(", ")} in the engine's packs or in the worlds searched. Kinds: ${clip([...new Set([...reg.kinds.keys(), ...seenKinds])].sort().join(", "), 2000)}.`);
   const searched = found.flatMap((f) => ("hits" in f ? [f] : []));
   const all = searched.flatMap((f) => f.hits);
   return { text: json({ query, hits: rank(all, limit), total: all.length, searched: { worlds: searched.length, drafts: searched.filter((f) => f.draft).length }, ...(skipped.length > 0 ? { skipped } : {}) }) };
@@ -203,7 +226,7 @@ export async function createTool(live: Live, args: Args): Promise<ToolResult> {
   }
   const world = body.world;
   if (!world) throw new ToolError("LumiRPEngine created the world but sent no document back; lre_worlds lists it.");
-  return { text: json({ worldId: world.id, name: world.name, revision: body.revision ?? null, template: template ?? null, contents: contentsOf(world), next: "Read it with lre_world, change it with lre_edit, then lre_commit with a note." }) };
+  return { text: json({ worldId: world.id, name: world.name, revision: body.revision ?? null, template: template ?? null, contents: contentsOf(world), entityKinds: entityKindsOf(world), next: "Read it with lre_world, change it with lre_edit, then lre_commit with a note." }) };
 }
 
 export async function importTool(live: Live, args: Args, readFile: (path: string) => string): Promise<ToolResult> {
@@ -223,7 +246,7 @@ export async function importTool(live: Live, args: Args, readFile: (path: string
   const world = body.world;
   if (!world) throw new ToolError("LumiRPEngine imported the world but sent no document back; lre_worlds lists it.");
   const review = body.lint ?? [];
-  return { text: json({ worldId: world.id, name: world.name, revision: body.revision ?? null, contents: contentsOf(world), macroReview: review, ...(review.length > 0 ? { note: "Review each macro before playing the world: Lumiverse runs macros in lore and templates when it builds a prompt." } : {}) }) };
+  return { text: json({ worldId: world.id, name: world.name, revision: body.revision ?? null, contents: contentsOf(world), entityKinds: entityKindsOf(world), macroReview: review, ...(review.length > 0 ? { note: "Review each macro before playing the world: Lumiverse runs macros in lore and templates when it builds a prompt." } : {}) }) };
 }
 
 const PATCH_OPS: Record<JsonPatchOp["op"], true> = { add: true, remove: true, replace: true, move: true, copy: true, test: true };

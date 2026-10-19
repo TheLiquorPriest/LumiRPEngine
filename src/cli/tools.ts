@@ -146,8 +146,18 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_search",
-    description: "Search your worlds' heads and stored drafts for words: names, descriptions, lore, cues, formulas, anything written as text. Each hit names the world, whether it is in the head or the draft, the item, and the field that matched (a JSON Pointer inside the item), with a snippet. It reads every world it searches whole, so give worldId when you know the world. A world it couldn't read is listed as skipped.",
-    inputSchema: object({ query: { type: "string", description: "Words to look for; items holding all of them come first." }, worldId: { type: "string", description: "Only this world." }, collections: { type: "array", items: { type: "string" }, description: 'Only these collections or parts ("entities", "lore", "tracks", "calendar"…).' }, limit: { type: "integer", minimum: 1, maximum: 100, description: "At most this many hits (default 20)." } }, ["query"]),
+    description:
+      "Search your worlds' heads and stored drafts for words: names, descriptions, lore, cues, formulas, anything written as text. Each hit names the world, whether it is in the head or the draft, the item, its kind when it is an entity, and the field that matched (a JSON Pointer inside the item), with a snippet. Accounts, cards, flows, jobs, holdings, properties, businesses, trusts and households are entities: kinds narrows the search to them. It reads every world it searches whole, so give worldId when you know the world. A world it couldn't read is listed as skipped.",
+    inputSchema: object(
+      {
+        query: { type: "string", description: "Words to look for; items holding all of them come first." },
+        worldId: { type: "string", description: "Only this world." },
+        collections: { type: "array", items: { type: "string" }, description: 'Only these collections or parts ("entities", "lore", "tracks", "calendar", "packs"…).' },
+        kinds: { type: "array", items: { type: "string" }, description: 'Only entities of these kinds, or of kinds that extend them: "flow", "account", "job", "household", "group" (every group)…' },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "At most this many hits (default 20)." },
+      },
+      ["query"],
+    ),
     write: false,
   },
   {

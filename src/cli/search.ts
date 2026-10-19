@@ -10,17 +10,62 @@ import { cutAt, nameOf } from "./read";
 export interface SearchHit {
   worldId: string;
   source: "head" | "draft";
-  /** A collection (`entities`), or a part of the world (`calendar`) with an empty `id`. */
+  /** A collection (`entities`), a pack's own collection (`products` in the economy's config), or a part of the world (`calendar`) with an empty `id`. */
   collection: string;
   id: string;
+  /** The item's JSON Pointer in the world: `/entities/mara`, `/calendar`, `/packs/economy/config/products/checking`. */
+  pointer: string;
+  /** An entity's kind (`person`, `account`, `flow`, `household`): money, jobs and households are entities too, told apart by it. */
+  kind?: string;
   label: string;
-  /** Where in the item it matched, as a JSON Pointer below `/<collection>/<id>` (`/fields/description`). */
+  /** Where in the item it matched, as a JSON Pointer below `pointer` (`/fields/description`). */
   field: string;
   snippet: string;
 }
 
 export interface ScoredHit extends SearchHit {
   score: number;
+}
+
+/** One item a search reads: an item of a collection, an item of a pack's config map, or a part of the world whole. */
+export interface WorldItem {
+  collection: string;
+  /** Empty for a part. */
+  id: string;
+  pointer: string;
+  value: unknown;
+}
+
+/** A pack's config map keyed by id (the economy's `products`): an object of objects, so it reads as a collection does. */
+function idMap(value: unknown): value is Record<string, Record<string, unknown>> {
+  return isRecord(value) && Object.keys(value).length > 0 && Object.values(value).every(isRecord);
+}
+
+/**
+ * A world document as the items a search reads. A pack's id-keyed config maps are opened up item
+ * by item, each as its own collection named by its key, so a product or an asset is a hit with its
+ * own name; the rest of the pack's config stays the pack's item.
+ */
+export function itemsOf(doc: unknown): WorldItem[] {
+  if (!isRecord(doc)) return [];
+  const out: WorldItem[] = [];
+  for (const [key, value] of Object.entries(doc)) {
+    if (!isCollection(key) || !isRecord(value)) {
+      out.push({ collection: key, id: "", pointer: pointerOf([key]), value });
+      continue;
+    }
+    for (const [id, item] of Object.entries(value)) {
+      const config = key === "packs" && isRecord(item) && isRecord(item.config) ? item.config : null;
+      const maps = config === null ? [] : Object.entries(config).filter((e): e is [string, Record<string, Record<string, unknown>>] => idMap(e[1]));
+      if (config === null || maps.length === 0 || !isRecord(item)) {
+        out.push({ collection: key, id, pointer: pointerOf([key, id]), value: item });
+        continue;
+      }
+      out.push({ collection: key, id, pointer: pointerOf([key, id]), value: { ...item, config: Object.fromEntries(Object.entries(config).filter(([, v]) => !idMap(v))) } });
+      for (const [name, map] of maps) for (const [entry, v] of Object.entries(map)) out.push({ collection: name, id: entry, pointer: pointerOf([key, id, "config", name, entry]), value: v });
+    }
+  }
+  return out;
 }
 
 /** The query's words, lowercased, each once. */
@@ -51,19 +96,25 @@ export interface SearchScope {
   source: "head" | "draft";
   /** Only these collections and parts; all of them when null. */
   collections: ReadonlySet<string> | null;
+  /** Only the entities whose kind passes, and nothing outside `entities`; every item when null. */
+  kinds: ((kind: string) => boolean) | null;
   /** Leaves an item out (a head item the draft holds unchanged, which the draft's hits already cover). */
-  skip?: (collection: string, id: string, item: unknown) => boolean;
+  skip?: (item: WorldItem) => boolean;
 }
 
-/** The items of one world document that hold any of the words, scored. */
-export function searchDoc(doc: unknown, words: readonly string[], scope: SearchScope): ScoredHit[] {
-  if (!isRecord(doc) || words.length === 0) return [];
+/** The items of one world document (`itemsOf`) that hold any of the words, scored. */
+export function searchItems(items: readonly WorldItem[], words: readonly string[], scope: SearchScope): ScoredHit[] {
+  if (words.length === 0) return [];
   const phrase = words.join(" ");
   const hits: ScoredHit[] = [];
-  const consider = (collection: string, id: string, item: unknown): void => {
-    if (scope.skip?.(collection, id, item)) return;
+  for (const entry of items) {
+    const { collection, id, pointer, value } = entry;
+    if (scope.collections !== null && !scope.collections.has(collection)) continue;
+    const kind = collection === "entities" && isRecord(value) && typeof value.kind === "string" ? value.kind : undefined;
+    if (scope.kinds !== null && (kind === undefined || !scope.kinds(kind))) continue;
+    if (scope.skip?.(entry)) continue;
     const leaves: { path: string; text: string }[] = [];
-    strings(item, "", leaves);
+    strings(value, "", leaves);
     const matched = new Set<string>();
     let occurrences = 0;
     let best: { path: string; text: string; found: number } | null = null;
@@ -80,16 +131,11 @@ export function searchDoc(doc: unknown, words: readonly string[], scope: SearchS
       if (words.length > 1 && lower.includes(phrase)) phraseFound = true;
       if (found > 0 && (best === null || found > best.found)) best = { ...leaf, found };
     }
-    if (best === null) return;
-    const label = nameOf(item) ?? (id || collection);
+    if (best === null) continue;
+    const label = nameOf(value) ?? (id || collection);
     const inLabel = words.some((w) => label.toLowerCase().includes(w));
     const score = matched.size * 100 + Math.min(40, occurrences) + (phraseFound ? 50 : 0) + (inLabel ? 20 : 0);
-    hits.push({ worldId: scope.worldId, source: scope.source, collection, id, label, field: best.path, snippet: snippetOf(best.text, words), score });
-  };
-  for (const [key, value] of Object.entries(doc)) {
-    if (scope.collections !== null && !scope.collections.has(key)) continue;
-    if (isCollection(key) && isRecord(value)) for (const [id, item] of Object.entries(value)) consider(key, id, item);
-    else consider(key, "", value);
+    hits.push({ worldId: scope.worldId, source: scope.source, collection, id, pointer, ...(kind !== undefined ? { kind } : {}), label, field: best.path, snippet: snippetOf(best.text, words), score });
   }
   return hits;
 }
