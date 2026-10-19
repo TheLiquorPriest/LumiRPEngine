@@ -4,10 +4,11 @@
 
 import type { EntityId } from "../../../shared/ids";
 import { CLASS_TRAITS, type AccountClass } from "../../../shared/finance";
-import { own, strOf } from "../../../engine/pack-kit";
+import { numOf, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext } from "../../../engine/registry";
 import type { FinanceHooks } from "./module";
-import { accountsOf, balance, classOf, notional, shareOf, wealthBand } from "./model";
+import { isOpened } from "./journal";
+import { accountsOf, balance, classOf, notional, openerOf, shareOf, wealthBand } from "./model";
 
 export interface WorthParts {
   net: number;
@@ -24,15 +25,18 @@ const GROUPS: { label: string; test: (cls: AccountClass) => boolean }[] = [
   { label: "Loans", test: (c) => CLASS_TRAITS[c].installment },
 ];
 
-/** A party's net worth and its parts; `shown` reads an account's balance (a view shows unopened accounts at their opening). */
-export function netWorthParts(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, shown: (account: EntityId) => number = (id) => balance(ctx.state, id)): WorthParts {
+/** A party's net worth and its parts. */
+export function netWorthParts(hooks: FinanceHooks, ctx: ReadContext, party: EntityId): WorthParts {
   const byGroup = new Map<string, number>();
   let assets = 0;
   let liabilities = 0;
   for (const id of accountsOf(ctx, party, "worth")) {
     const cls = classOf(ctx, id);
     if (!cls) continue;
-    const cents = Math.round((shown(id) * shareOf(ctx.state, id, party)) / 100);
+    // An account that hasn't opened counts at the authored opening it will post, as the money views
+    // show it, so a party's worth at a chat's start is what it is once their accounts open.
+    const held = balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
+    const cents = Math.round((held * shareOf(ctx.state, id, party)) / 100);
     if (cents >= 0) assets += cents;
     else liabilities -= cents;
     const group = GROUPS.find((g) => g.test(cls))?.label ?? "Other";
