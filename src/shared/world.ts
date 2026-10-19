@@ -808,6 +808,11 @@ export interface LoreEntryDef {
    * read it, even when listed (linted).
    */
   audience?: StepPurpose[];
+  /**
+   * The people whose own secret it is: their minds read it, gate or no gate (DESIGN §24.5). A
+   * person's cue that stands for the entry makes it theirs too; no other mind ever reads it.
+   */
+  holders?: EntityId[];
 }
 
 /** A topic in the lore lookup table: its label and its entries, in reading order. */

@@ -55,6 +55,20 @@ describe("world lore lint", () => {
     expect(loreIssues(world([entry("harbor", { audience: ["outline"] })]))).toEqual([]);
   });
 
+  test("a secret's holders are people in the world, and a public entry has none", () => {
+    const gate = "stage.keeper == 'hidden'";
+    const w = world([entry("keeper_note", { secret: true, gate, holders: ["ghost"] }), entry("harbor", { holders: ["ghost"] })]);
+    w.entities.ferryman = { id: "ferryman", kind: "person", name: "The ferryman", tier: "background", fields: {}, relations: [] };
+    expect(loreIssues(w)).toEqual([
+      { severity: "warning", path: "lore.keeper_note.holders", code: "missing_ref" },
+      { severity: "warning", path: "lore.harbor.holders", code: "missing_ref" },
+      { severity: "warning", path: "lore.harbor.holders", code: "holders_public" },
+    ]);
+    const own = world([entry("keeper_note", { secret: true, gate, holders: ["ferryman"] })]);
+    own.entities.ferryman = { id: "ferryman", kind: "person", name: "The ferryman", tier: "background", fields: {}, relations: [] };
+    expect(loreIssues(own)).toEqual([]);
+  });
+
   test("an entry nobody can read is flagged: known_by without links, or a visibility the search doesn't know", () => {
     expect(loreIssues(world([entry("rumor", { visibility: "known_by" })]))).toEqual([{ severity: "warning", path: "lore.rumor.visibility", code: "no_links" }]);
     // A world file can carry a value this engine doesn't know.

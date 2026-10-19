@@ -338,7 +338,7 @@ A person's `cues` are what the narrator sees them do while a secret of theirs st
 Lore entries (`/lore/<id>`) are what the world knows, read by the engine's own helpers: `{id, title, content, keys, links, aliases?, topics?}`, where `links` are the ids of the people and places an entry is about.
 
 - `"visibility": "known_by"` keeps an entry back until the player knows every person and place it links.
-- **A secret entry** holds a secret itself: `"secret": true`, a `gate` formula that reveals it (lint refuses a secret without one), and an `audience` of the helpers that may read it before then (`npc.choose`, `contradiction`, `puzzle.answer`, `judge`, `interpret`). The helpers that write for the narrator or the player (`brief`, `outline`, `choices`, `extract`) never read it early, even when listed.
+- **A secret entry** holds a secret itself: `"secret": true`, a `gate` formula that reveals it (lint refuses a secret without one), and an `audience` of the helpers that may read it before then (`npc.choose`, `contradiction`, `puzzle.answer`, `judge`, `interpret`). The helpers that write for the narrator or the player (`brief`, `outline`, `choices`, `extract`) never read it early, even when listed. A character's mind reads a secret entry only when it is their own: list them in `holders`, or give them a cue that stands for it (`{"text": "...", "lore": "<entry id>"}`). `links` never make it theirs, and a gate the player opens tells no mind.
 - A public entry must never repeat a track's truth: lint refuses it (`secret_truth`).
 - `loreIndex` routes the helpers' lookups: `terms` maps a lowercase term to entry ids, `topics` gathers entries under a label.
 

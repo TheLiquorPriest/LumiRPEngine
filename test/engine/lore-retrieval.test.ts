@@ -140,6 +140,33 @@ describe("who may read an entry", () => {
   });
 });
 
+describe("read as a character's mind (DESIGN §24.5)", () => {
+  const affair = entry("affair", { title: "The affair", content: "Jordan has been seeing Rosa behind Maya's back; Maya has no idea.", keys: ["affair"], links: ["maya", "jordan", "rosa"], secret: true, gate: "self.charm >= 15", audience: ["npc.choose"] });
+  const readAs = (w: Working, who: string): string[] => loreSearch(reader(w), { terms: ["affair"], purpose: "mind", as: who, limit: 10, tokenBudget: 800 }).hits.map((h) => h.id);
+
+  test("a secret that links them isn't theirs, before its gate holds or once the POV's gate opens", () => {
+    const w = riverton([affair]);
+    expect(readAs(w, "maya")).toEqual([]);
+    w.apply({ type: "set", entity: "you", field: "charm", value: 15 });
+    // The POV's helpers now read it as public; nobody else learns it from that.
+    expect(loreSearch(reader(w), { terms: ["affair"], purpose: "interpret", limit: 10, tokenBudget: 800 }).hits.map((h) => h.id)).toEqual(["affair"]);
+    for (const who of ["maya", "jordan", "rosa"]) expect(readAs(w, who)).toEqual([]);
+  });
+
+  test("a secret is theirs when its holders name them or a cue of theirs stands for it, gate or no gate", () => {
+    const w = riverton([{ ...affair, holders: ["jordan"] }], (world) => {
+      const rosa = world.entities.rosa;
+      if (rosa) rosa.cues = [{ text: "Goes quiet whenever Maya is mentioned", lore: "affair" }];
+    });
+    expect(readAs(w, "jordan")).toEqual(["affair"]);
+    expect(readAs(w, "rosa")).toEqual(["affair"]);
+    expect(readAs(w, "maya")).toEqual([]);
+    w.apply({ type: "set", entity: "you", field: "charm", value: 15 });
+    expect(readAs(w, "jordan")).toEqual(["affair"]);
+    expect(readAs(w, "maya")).toEqual([]);
+  });
+});
+
 describe("snippets and the token budget", () => {
   const long = (id: string, words: number): LoreEntryDef => entry(id, { keys: ["harbor"], content: Array.from({ length: words }, (_, i) => `word${i}`).join(" ") });
 

@@ -9,27 +9,12 @@ import { isRecord } from "../../../shared/json";
 import { loreIsSecret, lorePhrases } from "../../../shared/lore";
 import type { LintIssue } from "../../../shared/protocol";
 import type { WorldDoc } from "../../../shared/world";
+import { cuesOf, readCue } from "../../../engine/cues";
 import { optionalQuery, own } from "../../../engine/pack-kit";
 import { trackKeepsSecret } from "../../../engine/player-events";
 import type { ReadContext } from "../../../engine/registry";
 import { currentStage } from "../../../engine/tracks";
 import { loreGateReader, namesAny, visibilityOf } from "../../../engine/visibility";
-
-const SECRET_KINDS = ["lore", "track", "flag"] as const;
-
-interface Cue {
-  text: string;
-  secret: { kind: (typeof SECRET_KINDS)[number]; id: string };
-}
-
-/** A cue as the engine reads it: text and the one secret it stands for; anything else is no cue, so it never shows. */
-function readCue(raw: unknown): Cue | null {
-  if (!isRecord(raw) || typeof raw.text !== "string" || raw.text.trim() === "") return null;
-  const keyed = SECRET_KINDS.filter((kind) => raw[kind] !== undefined);
-  const kind = keyed[0];
-  const id = kind === undefined ? undefined : raw[kind];
-  return keyed.length === 1 && kind !== undefined && typeof id === "string" && id !== "" ? { text: raw.text.trim(), secret: { kind, id } } : null;
-}
 
 /**
  * The cues the narrator may play for `who` now, in order: their own, then the current stage's cue of
@@ -46,10 +31,7 @@ export function cuesFor(ctx: ReadContext, who: EntityId, safe: (text: string) =>
   };
   const gateHolds = loreGateReader(reg, world, state);
   const flag = optionalQuery(ctx, "story.flag");
-  const cues = own(world.entities, who)?.cues;
-  for (const raw of Array.isArray(cues) ? cues : []) {
-    const cue = readCue(raw);
-    if (!cue) continue;
+  for (const cue of cuesOf(world, who)) {
     const { kind, id } = cue.secret;
     let kept = false;
     if (kind === "lore") {
