@@ -710,8 +710,12 @@ function payrollFlow(ctx: ReadContext, api: FinanceApi, job: Job): Flow | null {
   const cal = calendarOf(ctx.world);
   const schedule = payFlowSchedule(ctx, job);
   const start = job.anchor !== null && (job.every === "weekly" || job.every === "biweekly") ? dateText(cal, job.anchor) : undefined;
-  // The last paycheck comes on the first payday after the last day worked.
-  const settle = job.end === null ? undefined : api.occurrences(ctx, schedule, clockAt(cal, job.end + 1, 0) - 1, clockAt(cal, job.end + 63, 0), start)[0];
+  // The last paycheck comes on the first payday after the last day worked. The flow ends on that
+  // payday's scheduled day, since its occurrences are counted by it: rolled back off a weekend, the
+  // payday is paid before the day the flow would otherwise end on.
+  const end = job.end;
+  const roll = (d: number): number => (schedule.roll === "before" || schedule.roll === "after" ? api.businessDay(ctx, d, schedule.roll) : d);
+  const settle = end === null ? undefined : cycleDays(ctx, api, job, end - 62, end + 400).find((d) => roll(d) > end);
   return {
     id: `pay:${job.id}`,
     label: `Pay: ${job.title}`,
@@ -722,7 +726,7 @@ function payrollFlow(ctx: ReadContext, api: FinanceApi, job: Job): Flow | null {
     amount: { provider: "payroll", args: { job: job.id } },
     schedule,
     ...(start ? { start } : {}),
-    ...(settle !== undefined ? { end: dateText(cal, dateAt(cal, settle).dayIndex) } : {}),
+    ...(settle !== undefined ? { end: dateText(cal, settle) } : {}),
     // A paycheck that can't be paid is paid with the next: each covers the work since the last one paid.
     shortfall: "skip",
     category: "payroll",
