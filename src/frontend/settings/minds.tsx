@@ -85,6 +85,8 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
           <LimitField label="When their mind is this old (game minutes)" noneLabel="never by age" value={minds.nearRefresh.minutes} min={1} max={525_600} step={30} fallback={MINDS_DEFAULTS.nearRefresh.minutes} disabled={busy} onChange={(minutes) => policy({ nearRefresh: { minutes } })} />
           <div class="lre-h2">Far refresh</div>
           <LimitField label="Every (game minutes)" noneLabel="never" value={minds.farRefreshMinutes} min={1} max={525_600} step={60} fallback={MINDS_DEFAULTS.farRefreshMinutes} disabled={busy} onChange={(farRefreshMinutes) => policy({ farRefreshMinutes })} />
+          <LimitField label="Near and Far refreshes a turn" noneLabel="no limit" value={minds.refreshLimit} min={0} max={64} fallback={MINDS_DEFAULTS.refreshLimit} disabled={busy} onChange={(refreshLimit) => policy({ refreshLimit })} />
+          <div class="lre-small lre-muted">Besides the Live minds, the most pressing first. A refresh you ask for in the GM view always runs.</div>
           <div class="lre-small lre-muted">Background characters never get a mind; they follow their routine.</div>
           <div class="lre-h2">Memory notes after the reply</div>
           {FIDELITIES.filter((f) => f !== "background").map((level) => (

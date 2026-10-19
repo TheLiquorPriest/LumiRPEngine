@@ -52,6 +52,8 @@ describe("Settings → Minds patches", () => {
     expect(memoryOverridePatch(field("salience", "floor"), 0.7)).toEqual({ minds: { memory: { salience: { floor: 0.7 } } } });
     expect(memoryOverridePatch(field("consolidate", "enabled"), false)).toEqual({ minds: { memory: { consolidate: { enabled: false } } } });
     expect(memoryOverridePatch(field("consolidate", "enabled"), 3)).toBeNull();
+    expect(memoryOverridePatch(field("consolidate", "periodDays"), 0)).toBeNull();
+    expect(memoryOverridePatch(field("consolidate", "periodDays"), 0.5)).toEqual({ minds: { memory: { consolidate: { periodDays: 0.5 } } } });
     expect(memoryOverridePatch(field("notes", "show"), null)).toEqual({ minds: { memory: { notes: { show: null } } } });
   });
 
@@ -60,8 +62,10 @@ describe("Settings → Minds patches", () => {
     let s = await settingsAfter(rig, mindsPolicyPatch({ liveLimit: "none" }));
     expect(s.minds.liveLimit).toBe("none");
     expect(s.preset).toBe("custom");
-    s = await settingsAfter(rig, mindsPolicyPatch({ liveLimit: 5, farRefreshMinutes: "none", tokens: 900, skip: { maxBeats: 2 } }));
-    expect([s.minds.liveLimit, s.minds.farRefreshMinutes, s.minds.tokens, s.minds.skip]).toEqual([5, "none", 900, { maxBeats: 2, maxMindsPerBeat: MINDS_PRESETS.standard.skip.maxMindsPerBeat }]);
+    s = await settingsAfter(rig, mindsPolicyPatch({ liveLimit: 5, farRefreshMinutes: "none", refreshLimit: "none", tokens: 900, skip: { maxBeats: 2 } }));
+    expect([s.minds.liveLimit, s.minds.farRefreshMinutes, s.minds.refreshLimit, s.minds.tokens, s.minds.skip]).toEqual([5, "none", "none", 900, { maxBeats: 2, maxMindsPerBeat: MINDS_PRESETS.standard.skip.maxMindsPerBeat }]);
+    s = await settingsAfter(rig, mindsPolicyPatch({ refreshLimit: 4 }));
+    expect(s.minds.refreshLimit).toBe(4);
     s = await settingsAfter(rig, mindsPolicyPatch({ nearRefresh: { mention: false, minutes: "none" } }));
     expect(s.minds.nearRefresh).toEqual({ ...MINDS_PRESETS.standard.nearRefresh, mention: false, minutes: "none" });
     s = await settingsAfter(rig, mindsPolicyPatch({ memoryLevels: withMemoryLevel(s.minds.memoryLevels, "far", true) }));
@@ -73,8 +77,10 @@ describe("Settings → Minds patches", () => {
     expect(s.minds.prompts).toEqual({ consolidate: "Fold them gently." });
     s = await settingsAfter(rig, memoryOverridePatch(field("recall", "tokens"), 2000));
     s = await settingsAfter(rig, memoryOverridePatch(field("consolidate", "enabled"), false));
+    s = await settingsAfter(rig, memoryOverridePatch(field("consolidate", "periodDays"), 2.5));
     expect(memoryOverride(s.minds.memory, field("recall", "tokens"))).toBe(2000);
     expect(memoryOverride(s.minds.memory, field("consolidate", "enabled"))).toBe(false);
+    expect(memoryOverride(s.minds.memory, field("consolidate", "periodDays"))).toBe(2.5);
 
     // A named preset is a whole cadence policy again; the user's prompts and memory stay theirs.
     s = await settingsAfter(rig, { modelUse: { preset: "full" } });
@@ -112,7 +118,7 @@ describe("Build → World → Minds", () => {
     config.thresholds = { live: 80, near: 40, far: 10 };
     config.always = { tag: ["lead"] };
     config.never = { kind: ["animal"] };
-    config.memory = { ...config.memory, notes: { show: 3, keep: 12 }, salience: { halfLifeDays: 2.5, floor: 1 }, consolidate: { enabled: false } };
+    config.memory = { ...config.memory, notes: { show: 3, keep: 12 }, salience: { halfLifeDays: 2.5, floor: 1 }, consolidate: { enabled: false, periodDays: 3 } };
     const set = rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "set", part: "minds", value: mindsPartValue(config) }));
     expect(worldMindsOf(set.draft as WorldDoc)).toEqual(config);
     const got = rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "get" }));
