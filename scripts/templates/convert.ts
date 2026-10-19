@@ -14,8 +14,7 @@ import type { DataTable, TableRow } from "../../src/shared/tables";
 import { defaultTiers, leadTierOf } from "../../src/shared/tiers";
 import type { ActionDef, EffectSpec, EntityDef, FieldDef, GridDef, KindDef, LoreEntryDef, Objective, PackConfig, PlaceDef, Recurrence, RelationInstance, RuleDef, RuleTrigger, ScheduleDef, StageDef, TrackDef, WorldDoc } from "../../src/shared/world";
 import { ENGINE_VERSION, WORLD_FORMAT } from "../../src/shared/world";
-import type { TplAccount, TplBlock, TplCharacter, TplEffect, TplItem, TplKit, TplRule, TplStage, TplVehicle, Template } from "./template";
-import { migrateMoney } from "../../src/engine/money-migrate";
+import type { TplAccount, TplBlock, TplCard, TplCharacter, TplEffect, TplFlow, TplItem, TplJob, TplKit, TplRule, TplStage, TplVehicle, Template } from "./template";
 
 /** Template content the engine has no home for yet (see data-src/templates/README.md). */
 export const DEFERRED = [
@@ -34,7 +33,6 @@ type Fields = JsonObject;
 
 const GREGORIAN_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const TABLE_WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-const ACCOUNT_TYPE: Record<string, string> = { purse: "cash", till: "cash", strongbox: "cash", cash: "cash", checking: "checking", savings: "savings", card: "card", loan: "loan", brokerage: "brokerage" };
 /** How long a scripted move holds someone in place before their schedule takes over again. */
 const MOVE_HOLD_MINUTES = 180;
 
@@ -321,6 +319,8 @@ function clueAction(c: Ctx, clue: NonNullable<Template["clues"]>[number]): Actio
 function placeDef(c: Ctx, p: Template["places"][number]): PlaceDef {
   const fields: Fields = { description: p.description };
   if (p.tags && p.tags.length > 0) fields.tags = p.tags;
+  if (p.atm) fields.atm = { bank: p.atm.bank, fee: p.atm.fee ?? 0, ...(p.atm.limit !== undefined ? { limit: p.atm.limit } : {}), deposits: p.atm.deposits === true };
+  if (p.branch) fields.branch = { bank: p.branch.bank };
   const region = c.climateRegions.get(p.id) ?? appliesRegion(c, p.id);
   if (region) fields.region = region;
   const out: PlaceDef = { id: p.id, name: p.name, fields };
@@ -407,17 +407,10 @@ function characterEntity(c: Ctx, ch: TplCharacter): EntityDef {
   const job = ch.job;
   if (job) {
     put(fields, "occupation", job.occupation ?? undefined);
-    put(fields, "employer", job.employer ?? undefined);
-    put(fields, "hourly_cents", job.hourlyCents);
-    put(fields, "hours_per_week", job.hoursPerWeek);
-    put(fields, "pay_frequency", job.payFrequency ?? (job.occupation ? undefined : "monthly"));
-    put(fields, "payday", job.payday);
-    put(fields, "deposit_to", job.depositTo);
-    put(fields, "annual_income_cents", job.estimatedAnnualIncomeCents ?? (job.incomeMonthlyCents ? job.incomeMonthlyCents * 12 : undefined));
+    // Castlife reads where they work: the workplace, else the employer.
+    put(fields, "employer", job.workplace ?? job.employer ?? undefined);
     put(fields, "shift_pattern", job.shiftPattern);
   }
-  const bills = (c.tpl.bills ?? []).filter((b) => b.payer === ch.id).map((b) => ({ label: b.label, payee: b.payee, amountCents: b.amountCents, every: b.every, day: b.day, ...(b.from ? { from: b.from } : {}) }));
-  if (bills.length > 0) fields.bills = bills;
   const relations: RelationInstance[] = (ch.regard ?? []).map((r) => ({ type: "regard", to: r.toward, fields: { ...r.axes, t: 0 } }));
   // A template marks its point of view with the `pov` tier; the world's POV is `pov` itself and is
   // never capped, so it takes the lead tier.
@@ -455,28 +448,71 @@ function vehicleEntity(c: Ctx, v: TplVehicle): EntityDef {
   return { id: v.id, kind: "vehicle", name: v.name, tier: "background", fields, relations: [] };
 }
 
-/** A symbol's price before the economy pack's market process has moved it (`priceOfSymbol`'s default). */
-const STARTING_SYMBOL_PRICE = 100;
-
 function accountEntity(a: TplAccount): EntityDef {
-  const type = ACCOUNT_TYPE[a.kind] ?? fail(`accounts.${a.id}`, `unknown account kind ${a.kind}`);
-  const fields: Fields = { owner: a.owner, type };
-  if (type === "brokerage") {
-    // Holdings are units of the symbol; the economy pack prices a symbol at 100 until its first market step, and a test pins the match.
-    fields.symbol = a.symbol ?? "broad_us_equity_index";
-    fields.units = (a.holdingsCents ?? 0) / 100 / STARTING_SYMBOL_PRICE;
-  }
+  const fields: Fields = { owners: a.owners.map((o) => ({ party: o.party, role: o.role ?? "owner", ...(o.share !== undefined ? { share: o.share } : {}) })), product: a.product, opening: a.opening ?? 0 };
   put(fields, "institution", a.institution);
-  fields.opening = type === "card" ? -(a.owedCents ?? 0) : type === "loan" ? -(a.principalCents ?? 0) : (a.balance ?? 0);
   put(fields, "limit", a.limitCents);
   put(fields, "apr_pct", a.aprPct);
+  put(fields, "apy_pct", a.apyPct);
   put(fields, "statement_day", a.statementDay);
   put(fields, "due_day", a.dueDay);
   put(fields, "autopay", a.autopay);
-  put(fields, "remaining_months", a.remainingMonths);
+  put(fields, "autopay_from", a.autopayFrom);
+  put(fields, "autopay_cents", a.autopayCents);
   put(fields, "payment", a.paymentCents);
+  put(fields, "term_months", a.termMonths);
+  put(fields, "months_left", a.monthsLeft);
+  put(fields, "secured_by", a.securedBy);
+  put(fields, "overdraft", a.overdraft);
+  put(fields, "overdraft_limit", a.overdraftLimitCents);
+  put(fields, "overdraft_link", a.overdraftLink);
   const relations: RelationInstance[] = a.container ? [{ type: "in", to: a.container }] : [];
   return { id: a.id, kind: "account", name: a.name, tier: "background", fields, relations };
+}
+
+function cardEntity(k: TplCard): EntityDef {
+  const fields: Fields = { account: k.account, holder: k.holder, network: k.network, state: "active" };
+  put(fields, "item", k.item);
+  put(fields, "last4", k.last4);
+  return { id: k.id, kind: "card", name: k.name, tier: "background", fields, relations: [] };
+}
+
+function flowEntity(f: TplFlow): EntityDef {
+  const fields: Fields = { flow_kind: f.kind ?? "bill", from: f.from, to: f.to, amount_cents: f.amountCents, shortfall: f.shortfall ?? "skip", status: "active" };
+  put(fields, "every", f.every);
+  put(fields, "interval", f.interval);
+  put(fields, "days", f.days);
+  put(fields, "weekdays", f.weekdays);
+  put(fields, "months", f.months);
+  put(fields, "at", f.at);
+  put(fields, "once", f.once);
+  put(fields, "start", f.start);
+  put(fields, "end", f.end);
+  put(fields, "retry_days", f.retryDays);
+  put(fields, "retries", f.retries);
+  put(fields, "fallback", f.fallback);
+  put(fields, "category", f.category);
+  put(fields, "link", f.link);
+  if (f.shares) fields.shares = f.shares.map((x) => ({ party: x.party, pct: x.pct }));
+  return { id: f.id, kind: "flow", name: f.label, tier: "background", fields, relations: [] };
+}
+
+/** A character's job when it pays: the job entity the work module pays from (DESIGN §26). */
+function jobEntity(ch: TplCharacter, job: TplJob): EntityDef | null {
+  if (job.rateCents === undefined) return null;
+  const fields: Fields = { worker: ch.id, employer: job.employer ?? job.workplace ?? "", occupation: job.occupation ?? "", basis: job.basis ?? "hourly", rate: job.rateCents, status: "active" };
+  put(fields, "workplace", job.workplace);
+  put(fields, "title", job.title);
+  put(fields, "hours_per_week", job.hoursPerWeek);
+  put(fields, "pay_every", job.payEvery);
+  put(fields, "pay_weekday", job.payWeekday);
+  put(fields, "pay_days", job.payDays);
+  if (job.splits) fields.splits = job.splits.map((x) => ({ to: x.to, ...(x.pct !== undefined ? { pct: x.pct } : {}), ...(x.cents !== undefined ? { cents: x.cents } : {}) }));
+  if (job.deductions) fields.deductions = job.deductions.map((d) => ({ label: d.label, cents: d.cents, ...(d.pretax !== undefined ? { pretax: d.pretax } : {}), ...(d.kind !== undefined ? { kind: d.kind } : {}), ...(d.to !== undefined ? { to: d.to } : {}) }));
+  put(fields, "shift_pattern", job.shiftPattern);
+  put(fields, "start", job.start);
+  put(fields, "tipped", job.tipped);
+  return { id: job.id ?? `job_${ch.id}`, kind: "job", name: job.name ?? job.title ?? `${ch.name}'s work`, tier: "background", fields, relations: [] };
 }
 
 // ---------------------------------------------------------------- schedules
@@ -609,7 +645,7 @@ function context(tpl: Template, env: ConvertEnv): Ctx {
     places: new Set(tpl.places.map((p) => p.id)),
     hidden: new Map(all.filter((i) => i.hidden === true || i.visibility === "secret").map((i) => [i.id, i])),
     containers: new Set(tpl.containers.map((x) => x.id)),
-    accountOwner: new Map(tpl.accounts.map((a) => [a.id, a.owner])),
+    accountOwner: new Map(tpl.accounts.map((a) => [a.id, a.owners[0]?.party ?? a.id])),
     regardPairs,
     climateRegions: new Map(tpl.weather.climates.map((cl) => [cl.region, `region_${cl.region}`])),
     classes: new Map(),
@@ -631,17 +667,7 @@ function loreEntries(c: Ctx, entities: Record<string, EntityDef>): Record<string
   return out;
 }
 
-/**
- * A template as a world. The template format keeps its own money vocabulary (an account's owner and
- * kind, a character's job and bills); the world it builds is read through the money migration, so
- * a starter ships in the foundation's shapes (owners and products, flows, jobs) as a migrated
- * older world would play.
- */
 export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
-  return migrateMoney(templateWorld(tpl, env));
-}
-
-function templateWorld(tpl: Template, env: ConvertEnv): WorldDoc {
   const c = context(tpl, env);
   const preset = REALISM_PRESETS[tpl.realism.preset];
   const holidays = [...(tpl.calendar.inheritHolidays ? holidaysFromTable(env.tables["calendar.holidays"]) : []), ...tpl.calendar.holidays];
@@ -658,6 +684,18 @@ function templateWorld(tpl: Template, env: ConvertEnv): WorldDoc {
   for (const x of tpl.items) if (!c.hidden.has(x.id)) add(itemEntity(c, x, "item"));
   for (const v of tpl.vehicles) add(vehicleEntity(c, v));
   for (const a of tpl.accounts) add(accountEntity(a));
+  for (const k of tpl.cards ?? []) add(cardEntity(k));
+  for (const f of tpl.flows ?? []) add(flowEntity(f));
+  for (const ch of tpl.characters) {
+    const job = ch.job ? jobEntity(ch, ch.job) : null;
+    if (job) add(job);
+  }
+  // A household is a party its members belong to (DESIGN §25.11).
+  for (const h of tpl.households ?? []) {
+    add({ id: h.id, kind: "household", name: h.name, tier: "background", fields: {}, relations: [] });
+    for (const m of h.members) entities[m.id]?.relations.push({ type: "member_of", to: h.id, fields: { role: m.role ?? "member" } });
+  }
+  for (const r of tpl.records ?? []) add({ id: r.id, kind: r.kind, name: r.name, tier: r.tier ?? "background", fields: r.fields, relations: [] });
   for (const cl of tpl.weather.climates) add({ id: `region_${cl.region}`, kind: "region", name: cl.label, tier: "background", fields: { climate: cl.region, weather: "clear" }, relations: [] });
   for (const v of tpl.vehicles) {
     const grant = v.assignedTo;
@@ -689,6 +727,7 @@ function templateWorld(tpl: Template, env: ConvertEnv): WorldDoc {
   config("sheets", { stats: stats.map((s) => ({ id: s.id, label: s.label, min: 3, max: 18, default: 10 })), derived: tpl.sheets.derived });
   config("story", { flags: Object.fromEntries(tpl.flags.filter((f) => f.default !== false && f.default !== 0 && f.default !== "").map((f) => [f.id, f.default])) });
   config("space", { closedRoutes: tpl.routes.filter((r) => r.secret === true).map((r) => r.id) });
+  if (tpl.economy) config("economy", tpl.economy);
 
   // Climate regions: the root place of each climate (and its appliesTo places) points at the region entity.
   const generators: Record<string, number> = {};

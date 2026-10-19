@@ -697,7 +697,7 @@
       "kind": "account",
       "name": "Your wallet",
       "tier": "background",
-      "fields": {"opening": 1050, "owners": [{"party": "pov", "role": "owner"}], "product": "cash"},
+      "fields": {"owners": [{"party": "pov", "role": "owner"}], "product": "cash", "opening": 1050},
       "relations": [{"type": "in", "to": "pov_wallet"}]
     },
     "acct_pov_bank": {
@@ -705,7 +705,7 @@
       "kind": "account",
       "name": "Your account at the Fenland & District Bank",
       "tier": "background",
-      "fields": {"opening": 9000, "owners": [{"party": "pov", "role": "owner"}], "product": "checking"},
+      "fields": {"owners": [{"party": "pov", "role": "owner"}], "product": "checking", "opening": 9000},
       "relations": []
     },
     "acct_household_petty": {
@@ -713,7 +713,7 @@
       "kind": "account",
       "name": "Household petty cash",
       "tier": "background",
-      "fields": {"opening": 2916, "owners": [{"party": "gideon_pell", "role": "owner"}], "product": "cash"},
+      "fields": {"owners": [{"party": "gideon_pell", "role": "owner"}], "product": "cash", "opening": 2916},
       "relations": []
     },
     "acct_rupert_bank": {
@@ -721,7 +721,7 @@
       "kind": "account",
       "name": "Captain Thorne's account",
       "tier": "background",
-      "fields": {"opening": 0, "owners": [{"party": "rupert_thorne", "role": "owner"}], "product": "checking"},
+      "fields": {"owners": [{"party": "rupert_thorne", "role": "owner"}], "product": "checking", "opening": 0},
       "relations": []
     },
     "acct_rupert_debts": {
@@ -730,28 +730,20 @@
       "name": "Captain Thorne's debts",
       "tier": "background",
       "fields": {
-        "institution": "Fenland & District Bank",
+        "owners": [{"party": "rupert_thorne", "role": "owner"}],
+        "product": "loan",
         "opening": -74880,
+        "institution": "Fenland & District Bank",
         "apr_pct": 5,
         "due_day": 1,
         "autopay": "none",
         "payment": 3285,
-        "owners": [{"party": "rupert_thorne", "role": "owner"}],
-        "product": "loan",
         "months_left": 24
       },
       "relations": []
     },
-    "region_harrowmere_estate": {
-      "id": "region_harrowmere_estate",
-      "kind": "region",
-      "name": "Cool, damp fenland",
-      "tier": "background",
-      "fields": {"climate": "harrowmere_estate", "weather": "clear"},
-      "relations": []
-    },
-    "flow_lady_honoria_housekeeping_allowance": {
-      "id": "flow_lady_honoria_housekeeping_allowance",
+    "bill_housekeeping_allowance": {
+      "id": "bill_housekeeping_allowance",
       "kind": "flow",
       "name": "Housekeeping allowance",
       "tier": "background",
@@ -767,8 +759,8 @@
       },
       "relations": []
     },
-    "flow_gideon_pell_butcher_baker_and_grocer": {
-      "id": "flow_gideon_pell_butcher_baker_and_grocer",
+    "bill_household_tradesmen": {
+      "id": "bill_household_tradesmen",
       "kind": "flow",
       "name": "Butcher, baker and grocer",
       "tier": "background",
@@ -784,8 +776,8 @@
       },
       "relations": []
     },
-    "flow_gideon_pell_coal": {
-      "id": "flow_gideon_pell_coal",
+    "bill_household_coal": {
+      "id": "bill_household_coal",
       "kind": "flow",
       "name": "Coal",
       "tier": "background",
@@ -799,6 +791,14 @@
         "every": "month",
         "days": [1]
       },
+      "relations": []
+    },
+    "region_harrowmere_estate": {
+      "id": "region_harrowmere_estate",
+      "kind": "region",
+      "name": "Cool, damp fenland",
+      "tier": "background",
+      "fields": {"climate": "harrowmere_estate", "weather": "clear"},
       "relations": []
     }
   },
