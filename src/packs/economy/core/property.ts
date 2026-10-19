@@ -391,7 +391,7 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   if (financed > 0) {
     mortgage = `${x.property}:mortgage`;
     for (let i = 2; own(ctx.state.entities, mortgage); i++) mortgage = `${x.property}:mortgage:${i}`;
-    const opened = api.openAccount(ctx, { id: mortgage, name: `Mortgage, ${e.name}`, product: "mortgage", owners: [{ party: x.party, role: "owner" }], cents: financed, ...(x.term_months ? { term_months: x.term_months } : {}), ...(x.apr_pct !== undefined ? { apr_pct: x.apr_pct } : {}), secured_by: x.property });
+    const opened = api.openAccount(ctx, { id: mortgage, name: `Mortgage, ${e.name}`, product: "mortgage", owners: [{ party: x.party, role: "owner" }], cents: financed, into: api.outside(`closing:${x.property}`), ...(x.term_months ? { term_months: x.term_months } : {}), ...(x.apr_pct !== undefined ? { apr_pct: x.apr_pct } : {}), secured_by: x.property });
     if (isRejection(opened)) return opened;
     events.push(...opened);
   }
@@ -586,7 +586,7 @@ export function propertyView(api: FinanceApi, ctx: ReadContext, id: EntityId, pa
   const e = own(ctx.state.entities, id);
   const value = propertyValue(ctx.state, id);
   const loans = securedLoans(api, ctx.state, id);
-  const loan = loans[0];
+  const loan = loans.find((l) => l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
   const place = strOf(e?.fields.place);
   const asking = num(e?.fields.asking_price);

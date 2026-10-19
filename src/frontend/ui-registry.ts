@@ -1,12 +1,13 @@
 // The UiRegistry implementation (ARCHITECTURE §5). Each pack's ui registers its Play panels,
-// Build editors, config fields, chip renderers and GM view tabs; a duplicate registration is a pack
-// conflict and throws, so two packs can never silently shadow each other.
+// Build editors, config fields, chip renderers, GM view tabs and editors for its kinds' structured
+// fields; a duplicate registration is a pack conflict and throws, so two packs can never silently
+// shadow each other.
 
 import type { ComponentType } from "preact";
 import type { PackId } from "../shared/ids";
 import type { WorldCollection } from "../shared/protocol";
 import type { ChipKind } from "../shared/state-view";
-import type { ChipProps, EditorDef, GmSectionDef, PackConfigProps, PanelDef, PreviewProps, UiPackDef, UiRegistry } from "./registry";
+import type { ChipProps, EditorDef, FieldEditorDef, GmSectionDef, PackConfigProps, PanelDef, PlaceFieldDef, PreviewProps, UiPackDef, UiRegistry } from "./registry";
 
 export interface UiCatalog {
   /** Play panels in `order`, ties by id. */
@@ -19,6 +20,10 @@ export interface UiCatalog {
   previews: ReadonlyMap<WorldCollection, ComponentType<PreviewProps>>;
   /** The packs' GM view tabs in `order`, ties by id. */
   gmSections: readonly GmSectionDef[];
+  /** Build's editors for structured fields, by kind and field. */
+  fields: readonly FieldEditorDef[];
+  /** Build's editors for place fields, in registration order. */
+  placeFields: readonly PlaceFieldDef[];
   packs: readonly string[];
 }
 
@@ -29,6 +34,8 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
   const chips = new Map<ChipKind, ComponentType<ChipProps>>();
   const previews = new Map<WorldCollection, ComponentType<PreviewProps>>();
   const gmSections = new Map<string, GmSectionDef>();
+  const fields = new Map<string, FieldEditorDef>();
+  const placeFields = new Map<string, PlaceFieldDef>();
   const ids = new Set<string>();
   for (const pack of packs) {
     if (ids.has(pack.id)) throw new Error(`UI pack ${pack.id} is registered twice`);
@@ -58,10 +65,19 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
         if (gmSections.has(def.id)) throw new Error(`A GM view tab ${def.id} (pack ${pack.id}) is already registered`);
         gmSections.set(def.id, def);
       },
+      field(def) {
+        const key = `${def.kind}.${def.field}`;
+        if (fields.has(key)) throw new Error(`An editor for the field ${key} (pack ${pack.id}) is already registered`);
+        fields.set(key, def);
+      },
+      placeField(def) {
+        if (placeFields.has(def.field)) throw new Error(`An editor for the place field ${def.field} (pack ${pack.id}) is already registered`);
+        placeFields.set(def.field, def);
+      },
     };
     pack.register(registry);
   }
   const ordered = [...panels.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   const tabs = [...gmSections.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { panels: ordered, editors, configs, chips, previews, gmSections: tabs, packs: [...ids] };
+  return { panels: ordered, editors, configs, chips, previews, gmSections: tabs, fields: [...fields.values()], placeFields: [...placeFields.values()], packs: [...ids] };
 }

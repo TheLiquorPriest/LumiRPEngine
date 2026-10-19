@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { isRecord } from "../../src/shared/json";
 import { decodeCalendarView } from "../../src/packs/calendar/ui/panel";
 import { decodeCastView } from "../../src/packs/castlife/ui/panel";
-import { decodeMoneyView } from "../../src/packs/economy/ui/panel";
+import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { decodeGearView } from "../../src/packs/gear/ui/panel";
 import { decodeYouView } from "../../src/packs/sheets/ui/panel";
 import { decodeQuestsView } from "../../src/packs/story/ui/panel";
@@ -16,7 +16,7 @@ import { Play, registry } from "../packs/templates/play";
 const DECODERS: Record<string, (value: unknown) => unknown> = {
   "calendar.calendar": decodeCalendarView,
   "castlife.cast": decodeCastView,
-  "economy.money": decodeMoneyView,
+  "economy.money": decodeFinanceView,
   "gear.gear": decodeGearView,
   "sheets.you": decodeYouView,
   "story.quests": decodeQuestsView,

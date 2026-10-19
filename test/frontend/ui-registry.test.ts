@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { fieldEditorFor } from "../../src/frontend/build/schema-form";
 import type { UiPackDef } from "../../src/frontend/registry";
 import { buildCatalog } from "../../src/frontend/ui-registry";
+import type { WorldDoc } from "../../src/shared/world";
 
 const Empty = () => null;
 
@@ -41,6 +43,8 @@ describe("UI registry", () => {
     expect(() => buildCatalog([preview("a"), preview("b")])).toThrow("maps");
     const gm = (id: string): UiPackDef => ({ id, register: (r) => r.gm({ id: "x.tab", label: "T", order: 1, component: Empty }) });
     expect(() => buildCatalog([gm("a"), gm("b")])).toThrow("GM view tab x.tab");
+    const field = (id: string): UiPackDef => ({ id, register: (r) => r.field({ kind: "person", field: "flows", component: Empty }) });
+    expect(() => buildCatalog([field("a"), field("b")])).toThrow("person.flows");
     expect(() => buildCatalog([{ id: "a", register: () => {} }, { id: "a", register: () => {} }])).toThrow("registered twice");
   });
 
@@ -48,5 +52,24 @@ describe("UI registry", () => {
     const tab = (pack: string, id: string, order: number): UiPackDef => ({ id: pack, register: (r) => r.gm({ id, label: id, order, component: Empty }) });
     const catalog = buildCatalog([tab("minds", "minds.minds", 20), tab("economy", "economy.money", 30), tab("aaa", "aaa.tab", 20)]);
     expect(catalog.gmSections.map((def) => def.id)).toEqual(["aaa.tab", "minds.minds", "economy.money"]);
+  });
+
+  test("an entity's structured field gets the editor registered on the nearest kind up its chain", () => {
+    const parent = () => null;
+    const child = () => null;
+    const catalog = buildCatalog([
+      {
+        id: "economy",
+        register(r) {
+          r.field({ kind: "person", field: "flows", component: parent });
+          r.field({ kind: "shopkeeper", field: "flows", component: child });
+        },
+      },
+    ]);
+    const doc = { kinds: { person: { id: "person", label: "Person", fields: {} }, shopkeeper: { id: "shopkeeper", label: "Shopkeeper", extends: "person", fields: {} }, baker: { id: "baker", label: "Baker", extends: "shopkeeper", fields: {} }, crate: { id: "crate", label: "Crate", fields: {} } } } as unknown as WorldDoc;
+    expect(fieldEditorFor(catalog.fields, doc, "person", "flows")?.component).toBe(parent);
+    expect(fieldEditorFor(catalog.fields, doc, "baker", "flows")?.component).toBe(child);
+    expect(fieldEditorFor(catalog.fields, doc, "crate", "flows")).toBeUndefined();
+    expect(fieldEditorFor(catalog.fields, doc, "person", "bills")).toBeUndefined();
   });
 });

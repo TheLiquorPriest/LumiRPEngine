@@ -1,14 +1,15 @@
 // The POV's money before anything opens its accounts: a fresh chat shows the authored opening
-// balances in the HUD and on Money (their representation, DESIGN §9.2); opening Money posts exactly
-// those amounts, and the update the client receives after the write carries them. A cash fix made
-// before then is measured from the opening balances, not from nothing.
+// balances in the HUD and on Money (their representation, DESIGN §9.2), and what each account has
+// available from them; opening Money posts exactly those amounts, and the update the client
+// receives after the write carries them. A cash fix made before then is measured from the opening
+// balances, not from nothing.
 
 import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../src/shared/world";
 import type { StateView } from "../../src/shared/state-view";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { applyDelta } from "../../src/frontend/delta";
-import { decodeMoneyView } from "../../src/packs/economy/ui/panel";
+import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { toChain } from "../../src/backend/ledger-io";
 import { Rig } from "../support/rig";
 
@@ -35,10 +36,11 @@ function clientView(rig: Rig, chatId: string): StateView {
   return view as StateView;
 }
 
+/** What Money shows of the POV's money: its level, cash and each account's amount and what's available, and whether the accounts have opened. */
 function money(view: StateView) {
-  const m = decodeMoneyView(view.panels["economy.money"]);
+  const m = decodeFinanceView(view.panels["economy.money"]);
   if (!m) throw new Error("no Money panel");
-  return m;
+  return { opened: m.opened, amounts: { level: m.level, cash: m.cash, accounts: m.accounts.map((a) => ({ id: a.id, cents: a.cents, available: a.available })) } };
 }
 
 async function posted(rig: Rig, chatId: string): Promise<Record<string, number>> {
@@ -55,10 +57,14 @@ describe("the POV's money before its accounts open", () => {
     const cash = openingOf("acct_pov_cash");
     expect(cash).toBeGreaterThan(0);
     expect(before.hud?.cash).toEqual({ cents: cash });
-    const shown = money(before);
+    const { opened, amounts: shown } = money(before);
+    expect(opened).toBe(false);
     expect(shown.level).toBe(4);
     expect(shown.cash).toEqual({ cents: cash });
     for (const id of ["acct_pov_checking", "acct_pov_savings", "acct_pov_card", "acct_pov_auto_loan"]) expect(shown.accounts.find((a) => a.id === id)?.cents).toBe(openingOf(id));
+    // What's available is counted from the openings too: a card has its limit less what it owes.
+    expect(shown.accounts.find((a) => a.id === "acct_pov_card")?.available).toBe(Number(authored.entities.acct_pov_card?.fields.limit) + openingOf("acct_pov_card"));
+    expect(shown.accounts.find((a) => a.id === "acct_pov_savings")?.available).toBe(openingOf("acct_pov_savings"));
     // Nothing is posted yet: the amounts are the representation.
     expect((await posted(rig, chatId)).acct_pov_cash ?? 0).toBe(0);
 
@@ -68,14 +74,14 @@ describe("the POV's money before its accounts open", () => {
     expect(books.acct_pov_cash).toBe(cash);
     const after = clientView(rig, chatId);
     expect(after.hud?.cash).toEqual({ cents: cash });
-    expect(money(after)).toEqual(shown);
-    expect(money(await rig.rt.view(chatId, rig.host.userId))).toEqual(shown);
+    expect(money(after)).toEqual({ opened: true, amounts: shown });
+    expect(money(await rig.rt.view(chatId, rig.host.userId))).toEqual({ opened: true, amounts: shown });
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
   test("while a reply runs, the opening balances stay showing; they post by the time it finishes", async () => {
     const { rig, chatId } = await freshChat();
-    const shown = money(clientView(rig, chatId));
+    const shown = money(clientView(rig, chatId)).amounts;
     rig.host.sendUser(chatId, "I check my wallet.");
     await rig.host.settle();
     const g = await rig.host.start(chatId, { type: "normal" });
@@ -87,7 +93,7 @@ describe("the POV's money before its accounts open", () => {
     await rig.host.finish(g, "Eighty-five dollars, give or take.");
     await rig.rt.push.settle();
     expect((await posted(rig, chatId)).acct_pov_cash).toBe(openingOf("acct_pov_cash"));
-    expect(money(clientView(rig, chatId)).cash).toEqual(shown.cash);
+    expect(money(clientView(rig, chatId)).amounts.cash).toEqual(shown.cash);
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 

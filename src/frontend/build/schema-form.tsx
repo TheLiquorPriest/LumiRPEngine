@@ -1,6 +1,7 @@
 // The schema-driven form (DESIGN §13): renders a value from `FieldSpec`s, with refs as pickers over
 // the draft's collections, formulas in the expression editor, entity fields typed by their kind
-// (single inheritance resolved here for display only) and the backend's lint beside each field.
+// (single inheritance resolved here for display only), a pack's own editor for a structured field
+// its kind declares (`UiRegistry.field`), and the backend's lint beside each field.
 
 import { useEffect, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../shared/json";
@@ -13,6 +14,7 @@ import type { LintIssue } from "../../shared/protocol";
 import { ALIVE, BUILTIN_RELATIONS, formatMoney, lifeStatesOf } from "../../shared/world";
 import type { FacetValueDef, FieldDef, WorldCurrency, WorldDoc } from "../../shared/world";
 import { MoneyInput } from "../money-input";
+import type { FieldEditorDef } from "../registry";
 import { floorNote } from "../settings/realism";
 import { EffectArgsInput } from "./effect-args";
 import { ExprEditor } from "./expr-editor";
@@ -28,6 +30,8 @@ export interface FormCtx {
   identifiers: readonly string[];
   /** The backend's formula functions (`Draft.functions`), for the expression editor. */
   functions: readonly string[];
+  /** The packs' editors for structured fields (`UiRegistry.field`); without them those fields are JSON. */
+  fieldEditors?: readonly FieldEditorDef[];
 }
 
 export function lintAt(lint: readonly LintIssue[], path: string): LintIssue[] {
@@ -53,6 +57,17 @@ export function kindFields(doc: WorldDoc, kindId: string): Record<string, FieldD
   const out: Record<string, FieldDef> = {};
   for (const id of chain.reverse()) Object.assign(out, doc.kinds[id]?.fields ?? {});
   return out;
+}
+
+/** The pack editor for an entity kind's field: the one registered on the nearest kind up its chain, else none. */
+export function fieldEditorFor(editors: readonly FieldEditorDef[], doc: WorldDoc, kindId: string, field: string): FieldEditorDef | undefined {
+  const seen: string[] = [];
+  for (let id: string | undefined = kindId; id && !seen.includes(id); id = doc.kinds[id]?.extends) {
+    seen.push(id);
+    const found = editors.find((def) => def.kind === id && def.field === field);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 function Issues(props: { issues: readonly LintIssue[] }) {
@@ -341,7 +356,7 @@ function RecordInput(props: { spec: Extract<FieldSpec, { kind: "record" }>; valu
   );
 }
 
-function KindFieldsInput(props: { value: JsonValue | undefined; kind: string; ctx: FormCtx; path: string; onChange(value: JsonValue | undefined): void }) {
+function KindFieldsInput(props: { value: JsonValue | undefined; kind: string; entityId: string; ctx: FormCtx; path: string; onChange(value: JsonValue | undefined): void }) {
   const values: JsonObject = isRecord(props.value) ? (props.value as JsonObject) : {};
   const defs = props.kind ? kindFields(props.ctx.doc, props.kind) : {};
   const extra = Object.keys(values).filter((key) => !(key in defs));
@@ -359,6 +374,8 @@ function KindFieldsInput(props: { value: JsonValue | undefined; kind: string; ct
         const label = `${def.label ?? key}${def.domain ? ` · ${def.domain} ≥${def.level ?? 0}` : ""}`;
         const issues = lintAt(props.ctx.lint, `${props.path}.${key}`);
         if (def.derived) return <TextInput key={key} label={`${label} (derived)`} value={def.derived} readonly mono issues={issues} onChange={() => {}} />;
+        const own = fieldEditorFor(props.ctx.fieldEditors ?? [], props.ctx.doc, props.kind, key);
+        if (own) return <own.component key={key} doc={props.ctx.doc} entity={{ id: props.entityId, kind: props.kind, fields: values }} field={key} def={def} value={values[key]} lint={issues} path={`${props.path}.${key}`} onChange={(next) => set(key, next)} />;
         switch (def.type) {
           case "number":
           case "duration":
@@ -626,7 +643,7 @@ export function FieldInput(props: { spec: FieldSpec; value: JsonValue | undefine
     case "record":
       return <RecordInput spec={spec} value={props.value} ctx={ctx} path={path} onChange={props.onChange} />;
     case "kindFields":
-      return <KindFieldsInput value={props.value} kind={typeof props.parent.kind === "string" ? props.parent.kind : ""} ctx={ctx} path={path} onChange={props.onChange} />;
+      return <KindFieldsInput value={props.value} kind={typeof props.parent.kind === "string" ? props.parent.kind : ""} entityId={typeof props.parent.id === "string" ? props.parent.id : ""} ctx={ctx} path={path} onChange={props.onChange} />;
     case "levels":
       return <LevelsInput label={spec.label} value={props.value} floors={spec.floored ? { ...ctx.doc.ruleset?.minLevels } : undefined} onChange={props.onChange} />;
     case "bandCaps":

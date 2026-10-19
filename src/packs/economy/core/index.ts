@@ -661,9 +661,9 @@ function registerEffects(r: CoreRegistry, hooks: FinanceHooks): void {
   r.effect({ type: "economy.apply_credit", args: ["product", "cents?", "term?", "secured_by?", "who?"], resolve: (a, ctx) => applyForCredit(ctx, actor(ctx, a), strOf(a.product), typeof a.cents === "number" && a.cents > 0 ? Math.round(a.cents) : undefined, typeof a.term === "number" && a.term > 0 ? Math.round(a.term) : undefined, strOf(a.secured_by) || undefined) });
   r.effect({ type: "economy.set_pay_prefs", args: ["tiers", "who?"], resolve: (a, ctx) => setPayPrefs(ctx, actor(ctx, a), a.tiers) });
   // The GM's controls that aren't fields (DESIGN §7): close an account, set its status, release a hold.
-  r.effect({ type: "economy.close_account", args: ["account"], resolve: (a, ctx) => closeAccount(ctx, strOf(a.account)) });
-  r.effect({ type: "economy.set_status", args: ["account", "status"], resolve: (a, ctx) => setStatus(ctx, strOf(a.account), strOf(a.status)) });
-  r.effect({ type: "economy.release_hold", args: ["account", "hold"], resolve: (a, ctx) => releaseHold(ctx, strOf(a.account), strOf(a.hold)) });
+  r.effect({ type: "economy.close_account", args: ["account"], gm: true, resolve: (a, ctx) => closeAccount(ctx, strOf(a.account)) });
+  r.effect({ type: "economy.set_status", args: ["account", "status"], gm: true, resolve: (a, ctx) => setStatus(ctx, strOf(a.account), strOf(a.status)) });
+  r.effect({ type: "economy.release_hold", args: ["account", "hold"], gm: true, resolve: (a, ctx) => releaseHold(ctx, strOf(a.account), strOf(a.hold)) });
 }
 
 function registerActions(r: CoreRegistry): void {
