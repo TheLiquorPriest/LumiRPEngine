@@ -60,4 +60,19 @@ describe("payroll: paychecks", () => {
     const [first] = paid(hired.w, job);
     expect(first?.gross).toBe(tipsOn(first?.minutes as number, 300));
   });
+
+  test("a worker away on a four-week trip isn't paid the hours a week their job counts", () => {
+    const { w } = setup((wd) => {
+      const cal = calendarOf(wd);
+      wd.entities.rosa!.fields.trips = [{ from: clockOfLocal(cal, "2026-10-16T07:30"), until: clockOfLocal(cal, "2026-11-13T18:00"), label: "Visiting family" }];
+      wd.entities.job_yard = entity("job_yard", "job", "Yard", { worker: "rosa", employer: "Riverton yard", title: "Yard", occupation: "office_clerk", basis: "hourly", rate: 2000, hours_per_week: 40, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06" });
+    });
+    lapse(w, 15 * DAY);
+    // The week before she left is paid on the 16th; the two Fridays after pay nothing.
+    expect(payslips(w, "job_yard").map((d) => [d.minutes, d.gross])).toEqual([
+      [40 * 60, 40 * 2000],
+      [0, 0],
+      [0, 0],
+    ]);
+  });
 });

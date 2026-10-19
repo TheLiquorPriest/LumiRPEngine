@@ -441,10 +441,18 @@ export interface Work {
   source: HoursSource;
 }
 
-/** The days a job counts whose midnight falls in [from, to): a pay period's days, and a gig's day by its evening payout. */
-function daysIn(cal: Calendar, job: Job, from: number, to: number): number {
+/**
+ * The days a job counts whose midnight falls in [from, to) (a pay period's days, and a gig's day by
+ * its evening payout), but for those the worker spends away: a trip covers their noon.
+ */
+function daysIn(ctx: ReadContext, job: Job, from: number, to: number): number {
+  const cal = calendarOf(ctx.world);
+  const trips = (optionalQuery(ctx, "castlife.commitments")?.(ctx, job.worker, from, to) ?? []).filter((b) => b.kind === "trip");
   let n = 0;
-  for (let d = dateAt(cal, from - 1).dayIndex + 1; clockAt(cal, d, 0) < to; d++) if (workingDay(cal, job, d)) n++;
+  for (let d = dateAt(cal, from - 1).dayIndex + 1; clockAt(cal, d, 0) < to; d++) {
+    const noon = clockAt(cal, d, 12 * 60);
+    if (workingDay(cal, job, d) && !trips.some((t) => t.start <= noon && noon < t.end)) n++;
+  }
   return n;
 }
 
@@ -463,7 +471,7 @@ export function workIn(ctx: ReadContext, job: Job, from: number, to: number): Wo
   const source = hoursSource(ctx, job, to);
   const cal = calendarOf(ctx.world);
   if (source === "contract") {
-    const days = daysIn(cal, job, from, to);
+    const days = daysIn(ctx, job, from, to);
     const share = job.season ? 1 : job.weeksPerYear / 52;
     return { minutes: Math.round(((job.hoursPerWeek * 60 * days) / 7) * share), shifts: Math.round(((job.shiftsPerWeek * days) / 7) * share * 100) / 100, source };
   }
