@@ -299,6 +299,43 @@ describe("holdings: property", () => {
     expect(trialBalance(w.state)).toBe(0);
   });
 
+  test("routing a property's rent moves the lease already paying it as well as the outside tenants', and an empty route moves it back", () => {
+    const w = setup((world) => duplex(world, { managed: true, market_rent: 110000, vacancy_months: 0 }));
+    run(w, "economy.lease_start", { party: "you", property: "duplex", tenant: "jordan", rent: 125000, months: 12, day: 1, from: "jordan_checking" });
+    const lease = Object.keys(w.state.entities).find((id) => w.state.entities[id]?.kind === "flow" && w.state.entities[id]?.fields.link === "duplex") ?? "";
+    expect(w.state.entities[lease]?.fields.to).toBe("checking");
+    run(w, "economy.route", { party: "you", property: "duplex", to: "savings" });
+    expect(w.state.entities[lease]?.fields.to).toBe("savings");
+    const start = w.events.length;
+    lapseTo(w, "2026-11-01T12:00");
+    const posts = w.events.slice(start).filter((e): e is PostEvent => e.type === "post");
+    expect(posts.some((p) => p.lines.some((l) => l.account === "jordan_checking" && l.amount === -125000) && p.lines.some((l) => l.account === "savings" && l.amount === 125000))).toBe(true);
+    expect(posts.find((p) => p.lines.some((l) => l.account.startsWith("economy.external:tenant")))?.lines.find((l) => l.account === "savings")?.amount).toBe(110000);
+    expect(posts.some((p) => p.lines.some((l) => l.account === "checking" && l.amount > 0) && p.lines.some((l) => l.account === "jordan_checking" || l.account.startsWith("economy.external:tenant")))).toBe(false);
+    run(w, "economy.route", { party: "you", property: "duplex", to: "" });
+    expect(w.state.entities.duplex?.fields.rent_to ?? null).toBeNull();
+    expect(w.state.entities[lease]?.fields.to).toBe("checking");
+    expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("on a property owned with someone, the owners' route splits a lease's rent by share again, and a route to one account takes the split off", () => {
+    const w = setup((world) => {
+      duplex(world);
+      world.entities.duplex!.fields.owners = [{ party: "you", role: "owner", share: 60 }, { party: "jordan", role: "owner", share: 40 }];
+      world.entities.duplex!.fields.rent_to = "savings";
+    });
+    run(w, "economy.lease_start", { party: "you", property: "duplex", tenant: "rosa", rent: 100000, months: 12, day: 1 });
+    const lease = Object.keys(w.state.entities).find((id) => w.state.entities[id]?.kind === "flow" && w.state.entities[id]?.fields.link === "duplex") ?? "";
+    expect(w.state.entities[lease]?.fields.to).toBe("savings");
+    expect(w.state.entities[lease]?.fields.splits).toBeUndefined();
+    run(w, "economy.route", { party: "you", property: "duplex", to: "" });
+    expect(w.state.entities[lease]?.fields.to).toBe("checking");
+    expect(w.state.entities[lease]?.fields.splits).toEqual([{ to: "jordan_checking", pct: 40 }]);
+    run(w, "economy.route", { party: "you", property: "duplex", to: "savings" });
+    expect(w.state.entities[lease]?.fields.to).toBe("savings");
+    expect(w.state.entities[lease]?.fields.splits ?? null).toBeNull();
+  });
+
   test("buying with a down payment opens a mortgage the property secures; selling pays it off and realises the gain", () => {
     const w = setup((world) => {
       world.entities.cabin = { id: "cabin", kind: "property", name: "The cabin", tier: "background", fields: { place: "apartment", owners: [], value: 20_000_000, asking_price: 20_000_000 }, relations: [] };

@@ -90,8 +90,7 @@ function payingSide(owners: readonly Owner[], shares: Readonly<Record<EntityId, 
 }
 
 /** Where a property's rent lands: its `rent_to`, else the first owner's deposit account, with the other owners' parts split off to theirs. */
-function rentSide(api: FinanceApi, ctx: ReadContext, id: EntityId): { to: string; splits?: FlowSplit[] } | null {
-  const rentTo = strOf(fieldsOf(ctx.state, id).rent_to);
+function rentSide(api: FinanceApi, ctx: ReadContext, id: EntityId, rentTo: string = strOf(fieldsOf(ctx.state, id).rent_to)): { to: string; splits?: FlowSplit[] } | null {
   if (rentTo !== "" && own(ctx.state.entities, rentTo)?.kind === "account") return { to: rentTo };
   const { owners, shares } = payers(api, ctx.state, id);
   const deposits = owners.map((o) => ({ party: o.party, account: api.depositAccount(ctx, o.party) })).filter((d): d is { party: EntityId; account: EntityId } => d.account !== null);
@@ -444,6 +443,28 @@ function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, selle
     out.push(deposit ? { type: "set", entity: l.id, field: "to", value: deposit } : { type: "set", entity: l.id, field: "end", value: dateText(ctx.world, ctx.state.clock) });
   }
   return out;
+}
+
+/**
+ * Routing a property's rent (`route_distributions`): its `rent_to` ("" back to the owners' deposit
+ * accounts), and every lease not yet over that pays its owners re-pointed there with it, so the
+ * tenants already paying follow the route as later ones do (§27.9).
+ */
+export function routeRent(api: FinanceApi, ctx: ReadContext, property: EntityId, route: string): LedgerEvent[] {
+  const out: LedgerEvent[] = strOf(fieldsOf(ctx.state, property).rent_to) === route ? [] : [{ type: "set", entity: property, field: "rent_to", value: route === "" ? null : route }];
+  const side = rentSide(api, ctx, property, route);
+  if (!side) return out;
+  const owners = api.ownersOf(ctx.state, property).map((o) => o.party);
+  const splits: JsonValue = side.splits ? (side.splits as unknown as JsonValue) : null;
+  for (const l of authoredLeases(ctx, property)) {
+    if (l.status !== "active" || (l.end !== null && l.end <= ctx.state.clock)) continue;
+    const f = fieldsOf(ctx.state, l.id);
+    const to = strOf(f.to);
+    if (!owners.includes(to) && !api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party))) continue;
+    if (to !== side.to) out.push({ type: "set", entity: l.id, field: "to", value: side.to });
+    if (JSON.stringify(f.splits ?? null) !== JSON.stringify(splits)) out.push({ type: "set", entity: l.id, field: "splits", value: splits });
+  }
+  return unit(out);
 }
 
 export interface PropertySale {
