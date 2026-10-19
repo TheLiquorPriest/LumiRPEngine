@@ -23,8 +23,8 @@ import { decodeEncounterView, EncounterCard } from "../../packs/combat/ui/panel"
 /** The engine's own tabs; a pack's tab goes by its registered id, which holds a dot. */
 type Section = "entities" | "places" | "tracks" | "fight" | "edits" | (string & {});
 
-/** What the editor's forms share: the loaded view, the currency, and one way to send an edit. */
-interface Editor {
+/** What the editor's forms share: the loaded view, the currency, and one way to send an edit. A pack's GM tab (`GmSectionProps`) is one too. */
+export interface Editor {
   gm: GmView;
   currency: WorldCurrency;
   busy: boolean;
@@ -62,7 +62,8 @@ function parse(entity: GmEntity, field: GmField, text: string, currency: WorldCu
   return parseFixValue({ entity: entity.id, field: field.id, type: field.type, value: field.value, ...(field.min !== undefined ? { min: field.min } : {}), ...(field.max !== undefined ? { max: field.max } : {}) }, text, currency);
 }
 
-function FieldRow(props: { entity: GmEntity; field: GmField; editor: Editor }) {
+/** One field of an entity with ✎: typed by its definition, saved as one GM edit. Pack GM tabs use it for the fields they show. */
+export function FieldRow(props: { entity: GmEntity; field: GmField; editor: Editor }) {
   const { entity, field, editor } = props;
   const [text, setText] = useState<string | null>(null);
   const refs = field.type === "ref" ? [...editor.gm.places.map((p) => ({ value: p.id, label: p.name })), ...editor.gm.entities.filter((e) => !field.ref || e.kind === field.ref).map((e) => ({ value: e.id, label: e.name }))] : [];

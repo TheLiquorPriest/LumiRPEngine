@@ -125,16 +125,16 @@ export function flowSources(view: FinanceView): { id: string; label: string }[] 
     .map((a) => ({ id: a.id, label: a.name }));
 }
 
-/**
- * Where a standing payment can go: the party's own accounts (savings, a card to pay off), the
- * people the player may pay (the palette's Pay targets, which name only people the POV knows), or
- * an outside payee by name (typed).
- */
+/** The people the player may name (a payee, a tenant, a hire): the palette's Pay targets, which list only people the POV knows. */
+export function knownPeople(palette: PaletteView | null): { id: string; label: string }[] {
+  const pay = palette?.entries.find((e) => e.action === "pay");
+  return (pay?.options ?? []).flatMap((o) => (typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
+}
+
+/** Where a standing payment can go: the party's own accounts (savings, a card to pay off), the people the player may pay, or an outside payee by name (typed). */
 export function flowTargets(view: FinanceView, palette: PaletteView | null): { id: string; label: string }[] {
   const own = view.accounts.filter((a) => a.status === "open" && !CLASS_TRAITS[a.class].cash && rights(a.role).sees).map((a) => ({ id: a.id, label: `${a.name} (yours)` }));
-  const pay = palette?.entries.find((e) => e.action === "pay");
-  const people = (pay?.options ?? []).flatMap((o) => (typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []));
-  return [...own, ...people.filter((p) => !own.some((o) => o.id === p.id))];
+  return [...own, ...knownPeople(palette).filter((p) => !own.some((o) => o.id === p.id))];
 }
 
 /** How much of a credit account's limit is in use, percent; null without a limit (a charge card). */
