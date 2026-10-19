@@ -402,7 +402,10 @@ export function occurrenceAmount(hooks: FinanceHooks, ctx: ReadContext, flow: Fl
   }
   if (cents === null || !Number.isFinite(cents)) return null;
   const total = Math.round(cents) + Math.max(0, deferred);
-  return total > 0 ? { cents: total } : null;
+  // Into credit a payment pays at most what it owes, as a transfer does; a card that owes nothing isn't paid.
+  const owes = (flow.splits ?? []).length === 0 && traitsOf(ctx, flow.to)?.liability ? Math.max(0, -balance(ctx.state, flow.to)) : total;
+  const due = Math.min(total, owes);
+  return due > 0 ? { cents: due } : null;
 }
 
 // ---------------------------------------------------------------- paying an occurrence
