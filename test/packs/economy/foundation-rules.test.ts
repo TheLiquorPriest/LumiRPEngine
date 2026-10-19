@@ -180,3 +180,30 @@ describe("a loan's autopay pays its bills, never before the first", () => {
     expect(days(flowRuns(w, "autopay:fleet"))).toEqual(days(bills));
   });
 });
+
+describe("a flow into overdraft follows the account's overdraft policy", () => {
+  const big = entity("big", "flow", { flow_kind: "bill", from: "checking", to: "Landlord", amount_cents: 250_000, once: "2026-10-17T09:00", shortfall: "overdraft", status: "active" });
+
+  test("a fee policy pays the gap up to its limit and charges the overdraft fee", () => {
+    const w = setup((world) => {
+      Object.assign(world.entities.checking!.fields, { overdraft: "fee", overdraft_limit: 100_000 });
+      world.entities.big = big;
+    });
+    lapse(w, 2);
+    const fees = w.events.filter((e) => e.type === "economy.txn" && "data" in e && e.data.category === "overdraft");
+    expect(fees).toHaveLength(1);
+    expect(w.state.accounts.checking).toBe(214_000 - 250_000 - 2700);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("a linked policy draws the gap from the linked account, and checking doesn't go below nothing", () => {
+    const w = setup((world) => {
+      Object.assign(world.entities.checking!.fields, { overdraft: "linked", overdraft_link: "savings" });
+      world.entities.big = big;
+    });
+    const savings = w.state.accounts.savings ?? 0;
+    lapse(w, 2);
+    expect(w.state.accounts.checking).toBe(0);
+    expect(w.state.accounts.savings).toBe(savings - (250_000 - 214_000));
+  });
+});

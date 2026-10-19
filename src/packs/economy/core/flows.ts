@@ -19,7 +19,7 @@ import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { FinanceHooks, FlowPosting } from "./module";
 import { cycleOf, flowRunOf, reject } from "./journal";
 import { accountsOf, availableOf, balance, canSpend, classOf, external, hasLedger, holdersOf, priceOf, productOf, statusOf, traitsOf } from "./model";
-import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
+import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
 import type { Run } from "./run";
 
 export const DEFAULT_FLOW_MINUTE = 9 * 60;
@@ -473,7 +473,9 @@ function payFrom(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, fromId: stri
   }
   const finalLines = merged.filter((l) => l.amount !== 0);
   if (finalLines.length < 2) return reject("bad_flow", `${flow.label} pays itself`);
-  return { events: asUnit([...posting(finalLines, { memo, ...meta, counterparty }), ...extra]), paid: cents };
+  // Into overdraft, the account's own policy applies: the gap from its linked account first, or its overdraft fee after.
+  const od = "account" in from && overdraft ? overdraftEvents(ctx, from.account, cents, at) : { before: [], after: [] };
+  return { events: asUnit([...od.before, ...posting(finalLines, { memo, ...meta, counterparty }), ...extra, ...od.after]), paid: cents };
 }
 
 /** A module's own posting for an occurrence, checked as the fold will check it. */
