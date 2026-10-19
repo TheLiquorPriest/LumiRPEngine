@@ -27,7 +27,8 @@ function isLegacy(doc: WorldDoc): boolean {
   return Object.values(doc.entities).some(
     (e) =>
       Array.isArray(e.fields.bills) ||
-      PAYROLL.some((k) => e.fields[k] !== undefined) ||
+      // A job keeps its own pay fields; only a person carrying them is the older shape.
+      (e.kind !== "job" && PAYROLL.some((k) => e.fields[k] !== undefined)) ||
       (e.kind === "account" && (typeof e.fields.owner === "string" || (typeof e.fields.type === "string" && e.fields.product === undefined) || e.fields.remaining_months !== undefined || (typeof e.fields.autopay === "string" && / from /i.test(` ${e.fields.autopay}`)))),
   );
 }
@@ -141,11 +142,11 @@ export function migrateMoney(doc: WorldDoc): WorldDoc {
   for (const [id, e] of Object.entries(doc.entities)) {
     let next = e.kind === "account" ? account(e) : e;
     if (Array.isArray(e.fields.bills)) added.push(...billFlows(doc, e, taken));
-    if (!employed.has(id) && typeof e.fields.occupation === "string") {
+    if (e.kind !== "job" && !employed.has(id) && typeof e.fields.occupation === "string") {
       const job = jobOf(doc, e, taken);
       if (job) added.push(job);
     }
-    if (Array.isArray(e.fields.bills) || PAYROLL.some((k) => e.fields[k] !== undefined)) {
+    if (Array.isArray(e.fields.bills) || (e.kind !== "job" && PAYROLL.some((k) => e.fields[k] !== undefined))) {
       const fields: JsonObject = { ...next.fields };
       delete fields.bills;
       for (const k of PAYROLL) delete fields[k];
