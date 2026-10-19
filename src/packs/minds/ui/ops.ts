@@ -4,7 +4,7 @@
 
 import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
-import type { CommitmentKind, CommitmentStatus, Fidelity, MindCommitment, MindNote, MindPlan, PlanKind, PlanStatus } from "../../../shared/minds";
+import type { CommitmentKind, CommitmentStatus, Fidelity, MindCommitment, MindNote, MindPlan, MindRecord, MindsSecrecy, PlanKind, PlanStatus } from "../../../shared/minds";
 import { MIND_TEXT_CAPS, PLAN_PRIORITY } from "../../../shared/minds";
 import type { EditOp } from "../../../shared/protocol";
 
@@ -14,6 +14,19 @@ export const PLAN_KIND_LABEL: Record<PlanKind, string> = { errand: "Errand", mee
 export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = { open: "Open", done: "Done", dropped: "Dropped" };
 export const COMMITMENT_KIND_LABEL: Record<CommitmentKind, string> = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
 export const COMMITMENT_STATUS_LABEL: Record<CommitmentStatus, string> = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
+
+export type MindPart = "mood" | "monologue" | "depiction" | "intent" | "reactions" | "interrupt";
+
+/**
+ * The parts of a mind the Minds section gives the narrator under the world's secrecy (DESIGN §24.3),
+ * which the GM view marks "to the narrator": all of them under `full`; under `brief` the depiction
+ * and an interrupt with it, unless the depiction was withheld.
+ */
+export function narratorGets(secrecy: MindsSecrecy, mind: Pick<MindRecord, "withheld">): Record<MindPart, boolean> {
+  const full = secrecy === "full";
+  const shown = full || !mind.withheld;
+  return { mood: full, monologue: full, depiction: shown, intent: full, reactions: full, interrupt: shown };
+}
 
 /** Pins a character at a rung, whatever their score, in this chat; null unpins. */
 export function pinOp(entity: EntityId, level: Fidelity | null): EditOp {
