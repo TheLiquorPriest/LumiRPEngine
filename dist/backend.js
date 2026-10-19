@@ -52146,7 +52146,7 @@ class Runtime {
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792376131" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792377279" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
