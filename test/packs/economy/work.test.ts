@@ -6,11 +6,13 @@ import type { LedgerEvent, PackEvent, PostEvent } from "../../../src/shared/ledg
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { applyEffects } from "../../../src/engine/effects";
 import { materializeAll } from "../../../src/engine/materialize";
+import { rowOf } from "../../../src/engine/pack-kit";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
 import { createRng } from "../../../src/engine/rng";
+import { placeOfEntity } from "../../../src/engine/scope";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
-import { ALL_PACKS } from "../../../src/packs/index";
+import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { bracketTax, federalTables, filingStatusOf, salesTaxOn, salesTaxPct } from "../../../src/packs/economy/core/taxes";
 import { modernUsWorld } from "../riverton";
 import { fold, startState, trialBalance } from "../support";
@@ -200,6 +202,24 @@ describe("work: jobs and payroll", () => {
 });
 
 describe("work: businesses", () => {
+  test("Port Alder's sales tax is Michigan's rate, and a purchase there pays it to Michigan", () => {
+    const make = STARTER_WORLDS.modern_slice_of_life;
+    if (!make) throw new Error("no Port Alder starter");
+    const world = make("pa", "Port Alder");
+    const w = new Working(reg, world, startState(world));
+    materializeAll(reg, w, world.pov, "run");
+    const ctx = reg.context(w.world, w.state);
+    const michigan = Number(rowOf(ctx, "economy.regions", "mi")?.sales_tax_combined_avg_pct);
+    expect(michigan).toBe(6);
+    expect(salesTaxPct(ctx, placeOfEntity(w.state, world.pov))).toBe(michigan);
+    expect(act(w, "economy.buy", { payer: world.pov, item: "latte_16oz" }).rejected).toEqual([]);
+    const [bought] = posts(w, /^Bought/);
+    const tax = line(bought!, ext("tax:sales:mi"));
+    const price = bought!.lines.filter((l) => l.amount > 0 && l.account !== ext("tax:sales:mi")).reduce((a, l) => a + l.amount, 0);
+    expect(tax).toBe(salesTaxOn(price, 6));
+    expect(tax).toBeGreaterThan(0);
+  });
+
   test("sales tax applies only at the top level: at Money 3 a purchase costs its listed price, and the business neither collects nor remits", () => {
     const run = (level: Level) => {
       const { w } = setup((world) => {
