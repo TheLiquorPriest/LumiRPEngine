@@ -119,7 +119,7 @@ describe("the preset's guidance", () => {
     expect(names.slice(0, 3)).toEqual(["Main", "RPEngine · judge", "RPEngine"]);
     expect(rig.host.presetBlocks[2]?.marker).toBe("category");
     const added = rig.host.presetBlocks.slice(3);
-    expect(added.map((b) => b.name)).toEqual(["interpret", "extract", "brief", "outline", "choices", "npc.choose", "contradiction", "puzzle.answer", "narrator"].map((t) => `RPEngine · ${t}`));
+    expect(added.map((b) => b.name)).toEqual(["interpret", "extract", "brief", "outline", "choices", "npc.choose", "contradiction", "puzzle.answer", "mind", "memory", "skip", "consolidate", "narrator"].map((t) => `RPEngine · ${t}`));
     expect(added.every((b) => !b.enabled && b.content.split("\n").every((line) => line === "" || line.startsWith("//")))).toBe(true);
     // One write of the preset, however many blocks it adds.
     expect(rig.host.presetWrites).toBe(1);

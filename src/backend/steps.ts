@@ -231,14 +231,18 @@ export class Steps {
    * answers in a follow-up message and the call is made again, once per round held. A connection
    * that refuses the tools is asked again in the need form, and the refusal is kept once that works.
    */
-  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null; guidance?: string } = {}): Promise<JsonValue | null> {
+  async helperJson(purpose: StepPurpose, system: string, user: string, config: StepConfig | null, userId: UserId, signal: AbortSignal, options: { retryTransient?: boolean; lore?: StepLore | null; guidance?: string; usage?: { tokens: number } } = {}): Promise<JsonValue | null> {
     const base = { maxTokens: Math.max(config?.maxTokens ?? HELPER_MAX_TOKENS, 1500), connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null };
     const lore = options.lore ?? null;
     const guidance = options.guidance ? `${GUIDANCE_LEAD}\n${options.guidance}` : "";
     let offer = lore?.offer() ?? null;
     const opening = (): QuietMessage[] => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join("\n\n") }, { role: "user", content: user }];
     // JSON mode stays off while tools are offered: some providers refuse the two together.
-    const ask = (messages: QuietMessage[], tools: boolean, o: { retry: boolean; lookup: boolean }) => this.quiet(purpose, { ...base, messages, json: !tools, ...(tools && lore ? { tools: [...lore.tools] } : {}) }, userId, signal, o);
+    const ask = async (messages: QuietMessage[], tools: boolean, o: { retry: boolean; lookup: boolean }): Promise<QuietResult | Error> => {
+      const r = await this.quiet(purpose, { ...base, messages, json: !tools, ...(tools && lore ? { tools: [...lore.tools] } : {}) }, userId, signal, o);
+      if (options.usage && !(r instanceof Error)) options.usage.tokens += r.tokens;
+      return r;
+    };
     let messages = opening();
     let reply = await ask(messages, offer === "tools", { retry: options.retryTransient === true, lookup: false });
     if (reply instanceof Error && offer === "tools" && lore && !signal.aborted && !transientFailure(reply)) {

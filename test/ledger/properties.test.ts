@@ -75,6 +75,8 @@ describe("ledger property suite", () => {
       // and queued turns play several actions and stop at a check, a failure and an interruption.
       for (const k of ["life", "told"] as const) if (!ONE && RUNS >= 100) expect(coverage.lives[k]).toBeGreaterThan(0);
       for (const k of ["queued", "check", "failure", "interruption"] as const) if (!ONE && RUNS >= 100) expect(coverage.queues[k]).toBeGreaterThan(0);
+      // Minds' records fold on every view: Dev's minds before the plan, presence and memory after the reply, and GM minds controls.
+      for (const k of ["mind", "memory", "presence", "fix"] as const) if (!ONE && RUNS >= 40) expect(coverage.minds[k]).toBeGreaterThan(0);
     },
     24 * 60 * 60 * 1000,
   );

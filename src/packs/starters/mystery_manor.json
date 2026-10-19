@@ -96,7 +96,8 @@
       }
     },
     "story": {"version": 1, "config": {"flags": {"causeway_open": true, "phone_working": true, "alaric_alive": true, "ledger_page_intact": true}}},
-    "combat": {"version": 1, "config": {}}
+    "combat": {"version": 1, "config": {}},
+    "minds": {"version": 1, "config": {}}
   },
   "pins": {
     "generators": {"money": 1, "gear": 1, "vehicles": 1},

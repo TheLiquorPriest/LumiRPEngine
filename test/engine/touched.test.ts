@@ -171,6 +171,20 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "combat.turn", data: { encounter: "e1", round: 1, turn: 1, actor: "rat", reset: {} } },
   { type: "combat.decision", data: { key: "rat:turn", choice: "flee" } },
   { type: "combat.end", data: { encounter: "e1", reason: "over" } },
+  // Minds write only their own slice, never an entity's definition.
+  { type: "minds.round", data: { at: 0, on: true } },
+  { type: "minds.mind", data: { entity: "dev", at: 0, place: "home", level: "near", moment: "turn", reason: "first", monologue: "m", depiction: "d", intent: "i", reactions: [], plans: [{ id: "p1", what: "Meet you", kind: "meet", when: { from: 60, to: 120 }, where: null, with: ["you"], priority: 3, status: "open", made: 0, source: "mind", closed: null, reason: null }], mood: null, interrupt: null, withheld: false } },
+  { type: "minds.plan", data: { entity: "dev", plan: "p1", status: "done", at: 120, reason: null } },
+  { type: "minds.plan_edit", data: { entity: "dev", plan: "p1", value: null } },
+  { type: "minds.memory", data: { entity: "dev", at: 0, notes: [{ id: "n1", text: "n", salience: 3, at: 0 }], commitments: [{ id: "c1", kind: "promise", with: ["you"], text: "t", due: null, status: "open", made: 0, closed: null }], resolved: [], plans: [], told: [{ to: ["you"], what: "w" }], summary: "s" } },
+  { type: "minds.note_edit", data: { entity: "dev", note: "n1", value: null } },
+  { type: "minds.commitment", data: { entity: "dev", commitment: "c1", status: "kept", at: 10, reason: null } },
+  { type: "minds.commitment_edit", data: { entity: "dev", commitment: "c1", value: null } },
+  { type: "minds.presence", data: { msg: null, at: 0, place: "taproom", who: ["you"], saw: ["a fight"] } },
+  { type: "minds.consolidated", data: { entity: "dev", at: 0, notes: [], summary: "s2" } },
+  { type: "minds.pin", data: { entity: "dev", level: "live" } },
+  { type: "minds.refresh", data: { entity: "dev" } },
+  { type: "minds.skip", data: { from: 0, to: 60, beats: [{ at: 30, reason: "r", source: "scan" }] } },
 ];
 
 /** What an event wrote of entities' definitions: each field, relation (by type and target), tier, agent flag, level overrides, classes and tags and life state that changed, each new entity and each own account's balance. */

@@ -101,9 +101,9 @@ const LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"] as const;
 const PARTS = ["pins", "calendar", "realism", "time", "start"] as const;
 /**
  * Parts a document may leave out: `migrateWorld` fills the currency (Modern US) and the lore lookup
- * table (empty), and a world without a ruleset or map settings plays by the defaults.
+ * table (empty), and a world without a ruleset, map settings or minds config plays by the defaults.
  */
-const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings"] as const;
+const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds"] as const;
 
 /**
  * Shape checks for an untrusted document, before `migrateWorld` and `lintWorld` read it: every
@@ -238,7 +238,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
     for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g)) if (!(STEP_PLACEHOLDERS as readonly string[]).includes((m[1] ?? "").toLowerCase())) warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder; it renders empty`);
   }
   issues.push(...lintStructure(world, registry));
-  for (const rule of registry.lints) issues.push(...rule.check(world));
+  for (const rule of registry.lints) issues.push(...rule.check(world, registry));
   return issues;
 }
 

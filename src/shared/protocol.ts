@@ -7,6 +7,7 @@
 
 import type { JsonObject, JsonValue } from "./json";
 import type { LoreIndexAddition } from "./lore";
+import type { MindEditOp } from "./minds";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
@@ -115,6 +116,8 @@ export interface FixRequest extends Request<"lre.fix"> {
  *    tags, both whole; the chat holds them from then on over the world's definition.
  *  - `spawn` adds an entity; `despawn` takes one out of the world (`gone`, its relations unlinked)
  *    and `restore` brings it back.
+ *  - `mind_pin`, `mind_refresh`, `mind_memory`: a character's mind (DESIGN §24.9): pin their fidelity,
+ *    ask for a fresh mind next turn, edit or delete a note, commitment or plan (`MindEditOp`).
  */
 export type EditOp =
   | { op: "set"; entity: EntityId; field: FieldId; value: JsonValue }
@@ -131,7 +134,8 @@ export type EditOp =
   | { op: "life"; entity: EntityId; to?: LifeStateId; tell?: EntityId[] }
   | { op: "spawn"; kind: KindId; name: string; id?: EntityId; tier?: TierId; place?: PlaceId; agent?: boolean }
   | { op: "despawn"; entity: EntityId }
-  | { op: "restore"; entity: EntityId };
+  | { op: "restore"; entity: EntityId }
+  | MindEditOp;
 
 /** A GM edit on the head (DESIGN §7): the operations in order, all or none, as one `post` entry of kind `fix`; locked fields are writable. */
 export interface EditRequest extends Request<"lre.edit"> {
@@ -329,9 +333,10 @@ export type WorldCollection =
 
 /**
  * Singleton parts of a world document. `tiers` is `{tiers, spawnTier?}` (DESIGN §9.1); `ruleset` is
- * optional: an empty one removes it; `loreIndex` is the lore lookup table `{terms, topics}`, whole.
+ * optional: an empty one removes it; `loreIndex` is the lore lookup table `{terms, topics}`, whole;
+ * `minds` is `world.minds` (DESIGN §24.2), whole: the defaults remove it.
  */
-export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex";
+export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex" | "minds";
 
 /** One RFC 6902 operation, its paths RFC 6901 JSON Pointers into the whole world document. */
 export type JsonPatchOp =

@@ -3,6 +3,7 @@
 // filtered to what the POV knows (DESIGN §7); GM previews are labelled and never recorded.
 
 import type { JsonObject, JsonValue } from "./json";
+import type { MindCallTrace, MindsGmView } from "./minds";
 import type {
   ActionId,
   Band,
@@ -363,6 +364,8 @@ export interface GmView {
   edits: { messageId: string; seq: number; lines: string[] }[];
   /** Writes held during a reply that didn't apply when it finished, with the validator's reason. */
   refused: { id: string; reason: string }[];
+  /** Character minds (DESIGN §24.9): every character's fidelity and why, their latest mind, plans, notes, commitments and summary. */
+  minds: MindsGmView;
 }
 
 /** One person's money in the GM view, at their own Money level (as the Money panel shows the POV's at the POV's). */
@@ -425,6 +428,8 @@ export interface ContextGeneration {
   budget: { sections: number; used: number };
   /** What the turn's model steps read of the world's lore, step by step (absent: none read any). */
   lore?: LoreStepTrace[];
+  /** The turn's minds calls (DESIGN §24.5), with no text (absent: none ran). */
+  minds?: MindCallTrace[];
 }
 
 /** The `core.context` panel: the last ten interceptor runs, newest first, and standing warnings (book attachment and slot repair, preset caveats, journal notices). */

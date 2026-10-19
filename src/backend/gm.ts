@@ -4,7 +4,9 @@
 // held writes that didn't apply, with their reasons.
 
 import type { GmView } from "../shared/state-view";
+import { effectiveMemory, type MindsSettings } from "../shared/minds";
 import { buildGmWorld } from "../engine/gm-view";
+import { buildMindsGm } from "../packs/minds/core/gm";
 import type { ChainMessage } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord } from "../engine/ledger/path";
@@ -15,7 +17,7 @@ import { appliedEvents } from "./view";
 /** How many edits the GM view lists, newest first. */
 const GM_EDITS = 40;
 
-export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry): GmView | null {
+export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry, minds: MindsSettings): GmView | null {
   const render = core.renderState(observed);
   if (!render) return null;
   const fold = core.fold(observed);
@@ -29,5 +31,14 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
     ...buildGmWorld(registry, render.world, render.state),
     edits: edits.reverse().slice(0, GM_EDITS),
     refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
+    // Fidelity reads the chat's latest message and reply, as the next turn's would.
+    minds: buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds)),
   };
+}
+
+/** The latest user message and the reply before it, as a turn's fidelity reads them. */
+function latestTexts(observed: readonly ChainMessage[]): { user: string; reply: string } {
+  const text = (m: ChainMessage | undefined): string => (m ? (m.swipes[m.swipeId] ?? "") : "");
+  const lastUser = observed.findLastIndex((m) => m.isUser);
+  return { user: text(observed[lastUser]), reply: text(observed.slice(0, lastUser < 0 ? observed.length : lastUser).findLast((m) => !m.isUser)) };
 }

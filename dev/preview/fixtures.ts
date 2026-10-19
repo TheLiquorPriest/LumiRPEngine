@@ -6,6 +6,7 @@ import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared
 import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
+import { defaultMindsSettings } from "../../src/shared/minds";
 import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
 import type { MapDisplay, WorldDoc, WorldIndex } from "../../src/shared/world";
 import { compileMaps } from "../../src/shared/maps";
@@ -592,6 +593,7 @@ export function gmFixture(): GmView {
       { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"] },
     ],
     refused: [{ id: "w-17", reason: "Dev Patel's energy must be between 0 and 100." }],
+    minds: { enabled: true, secrecy: "brief", now: 0, nowText: "Mon 19 Oct 2026, 07:00", characters: [] },
   };
 }
 
@@ -874,6 +876,7 @@ export function settingsFixture(): UserSettings {
     extraction: { regard: { mode: "never" } },
     swipeDefault: "rerun",
     hideJsonBlocks: true,
+    minds: defaultMindsSettings(),
   };
 }
 

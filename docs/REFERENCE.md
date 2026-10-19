@@ -4,7 +4,7 @@
 
 What the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.
 
-Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1.
+Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.
 
 ## Contents
 
@@ -14,6 +14,7 @@ Engine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1,
 - [Combat pack](#combat-pack-combat)
 - [Economy pack](#economy-pack-economy)
 - [Gear & containers pack](#gear--containers-pack-gear)
+- [Minds pack](#minds-pack-minds)
 - [Relationships pack](#relationships-pack-relationships)
 - [Character sheets pack](#character-sheets-pack-sheets)
 - [Space & travel pack](#space--travel-pack-space)
@@ -108,17 +109,21 @@ Built in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `re
 |---|---|
 | `brief` | `text` |
 | `choices` | `text`, `effects` |
+| `consolidate` | `text` |
 | `contradiction` | `decision`, `text`, `effects` |
 | `extract` | `text`, `effects` |
 | `interpret` | `decision`, `text` |
 | `judge` | `decision`, `text` |
+| `memory` | `text` |
+| `mind` | `text` |
 | `npc.choose` | `decision`, `text` |
 | `outline` | `text` |
 | `puzzle.answer` | `decision`, `text` |
+| `skip` | `text` |
 
 Signals: `agents_present`, `always`, `beat`, `classifier`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.
 
-Template placeholders: `beats`, `brief`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.
+Template placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.
 
 ### Sections
 
@@ -136,6 +141,7 @@ The slots a world gets when it defines none, kept in rank order on the section b
 | `quest` | Quest | 7 |
 | `outline` | Outline | 8 |
 | `stance` | Stance | 9 |
+| `minds` | Minds | 10 |
 
 ### Realism
 
@@ -522,6 +528,22 @@ Detail on demand: `gear` (version 1).
 ### Lint codes
 
 `gear.kits`.
+
+## Minds pack (`minds`)
+
+Version 1 · realism domain none · requires none.
+
+### Events
+
+Its own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.
+
+### Panels and slots
+
+Panels: none. Slots it writes: `minds`.
+
+### Lint codes
+
+`minds.config`, `minds.steps`.
 
 ## Relationships pack (`relationships`)
 

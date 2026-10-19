@@ -51,6 +51,10 @@ export const STEP_LABEL: Record<StepPurpose, string> = {
   extract: "Extract changes",
   choices: "Suggested choices",
   judge: "Judge your approach",
+  mind: "Character minds",
+  memory: "Character memory",
+  skip: "Time-skip beats",
+  consolidate: "Memory consolidation",
 };
 
 const PHASES = ["pre", "post"] as const;

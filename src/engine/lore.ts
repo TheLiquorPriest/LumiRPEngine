@@ -14,6 +14,7 @@
 // to what the step is about; then topic matches; then the query's words in the entry; then the
 // author's priority. Ties go by id, so the same inputs always give the same hits in the same order.
 
+import type { EntityId } from "../shared/ids";
 import { hasOwn, isRecord } from "../shared/json";
 import { loreIsSecret, loreSourceOf, PROSE_STEPS, topicIdOf } from "../shared/lore";
 import type { LoreEntryDef, StepPurpose, WorldDoc } from "../shared/world";
@@ -51,6 +52,12 @@ export interface LoreQuery {
   tokenBudget: number;
   /** Entries the caller already has: they still count as matched, but get no snippet. */
   skip?: ReadonlySet<string>;
+  /**
+   * Read as this character (a mind, DESIGN §24.5): `known_by` entries by what they know rather than
+   * the POV, and of the secrets whose gate doesn't hold only their own (an entry that links them),
+   * whatever its audience says.
+   */
+  as?: EntityId;
 }
 
 export interface LoreHit {
@@ -102,19 +109,20 @@ function wordsOf(text: string): string[] {
 const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 /**
- * Whether `purpose` may read the entry now (see the header). `open` reads gates against this state;
- * pass one reader when checking many entries.
+ * Whether `purpose` may read the entry now (see the header), or, with `as`, the character `as` (a
+ * mind). `open` reads gates against this state; pass one reader when checking many entries.
  */
-export function loreReadable(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, entry: LoreEntryDef, purpose: LorePurpose, effects = false, open = loreGateReader(reg, world, state)): boolean {
+export function loreReadable(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, entry: LoreEntryDef, purpose: LorePurpose, effects = false, open = loreGateReader(reg, world, state), as?: EntityId): boolean {
   if (purpose === "gm") return true;
   const source = loreSourceOf(entry.source);
   if (source.kind === "ai" && source.status === "pending") return false;
-  if (loreIsSecret(entry) && !open(entry)) return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
+  if (loreIsSecret(entry) && !open(entry)) return !effects && (as !== undefined ? listOf(entry.links).includes(as) : !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose));
   const v: unknown = entry.visibility;
   if (v === undefined || v === "public") return true;
   if (v !== "known_by") return false;
+  const reader = as ?? world.pov;
   const links = listOf(entry.links);
-  return links.length > 0 && links.every((id) => (hasOwn(state.entities, id) ? playerKnows(reg, world, state, world.pov, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, world.pov, id)));
+  return links.length > 0 && links.every((id) => (hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id)));
 }
 
 /** The ids of every entry `purpose` may read now, in id order. */
@@ -214,7 +222,7 @@ export function loreSearch(r: LoreReader, q: LoreQuery): LoreResult {
   const words = [...new Set(wordsOf(q.query ?? ""))];
   const ranked: { id: string; entry: LoreEntryDef; key: number[]; why: string[] }[] = [];
   for (const [id, entry] of Object.entries(world.lore)) {
-    if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open)) continue;
+    if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open, q.as)) continue;
     const terms = new Set(tableTerms.get(id) ?? []);
     for (const name of [entry.title, ...listOf(entry.aliases), ...listOf(entry.keys)]) {
       const hit = said(name);

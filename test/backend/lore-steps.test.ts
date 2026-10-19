@@ -91,7 +91,7 @@ const loreLines = (prompt: string): string[] => (prompt.split("World lore (refer
 
 describe("the prefetch", () => {
   test("puts what each step's inputs find into its prompt or its decision's state, at no extra call", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }]);
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { minds: { enabled: false } }]);
     const start = rig.rt.meter.log.length;
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     expect(rig.rt.ledger.errors).toEqual([]);
@@ -108,7 +108,7 @@ describe("the prefetch", () => {
   });
 
   test("a secret reaches the decision steps in its audience, never a step that writes for the player", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }]);
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { minds: { enabled: false } }]);
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     expect(systemOf(rig, "interpret")).toContain(SECRET);
     expect(JSON.stringify(rig.host.decideCalls.map((r) => r.state))).toContain(SECRET);
@@ -151,7 +151,7 @@ const isStep = (req: QuietRequest, step: string): boolean => req.messages[0]?.co
 
 describe("lookups", () => {
   test("a tool-call lookup: the model calls lore_search, the engine answers in a follow-up message, and the meter counts the round", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
     rig.host.quietReply = (req) => (isStep(req, "interpret") && req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
     const start = rig.rt.meter.log.length;
@@ -173,7 +173,7 @@ describe("lookups", () => {
   });
 
   test("after a connection refuses the tools, its lookups use the need form, kept across a restart", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
     const model = (req: QuietRequest): string => {
       if (req.tools) throw new Error("Provider error (400): this model does not support tools");
       if (isStep(req, "interpret") && req.messages[0]?.content.includes('{"need"') && !asked(req)) return JSON.stringify({ need: ["timetable"] });
@@ -235,7 +235,7 @@ describe("the decision pre-pass", () => {
   const prepassOf = (req: QuietRequest): boolean => req.messages[0]?.content.startsWith("You get a decision ready") === true;
 
   test("npc.choose on the Decision connection asks the helper what lore it needs, on the lookup budget, and reads the hits with its prefetch", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
     rig.host.quietReply = (req) => (prepassOf(req) ? { content: "", toolCalls: [search] } : quiet(req));
     const start = rig.rt.meter.log.length;
@@ -308,7 +308,7 @@ describe("the inspector's lore traces", () => {
   };
 
   test("each step's searches, entries with their token cost, lookups and transport reach Context, survive a restart, and never name or count a secret", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
     const search: QuietToolCall = { name: "lore_search", args: { query: "timetable" }, callId: "c1" };
     rig.host.quietReply = (req) => ((isStep(req, "interpret") || isStep(req, "extract")) && req.tools && !asked(req) ? { content: "", toolCalls: [search] } : quiet(req));
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
@@ -329,7 +329,7 @@ describe("the inspector's lore traces", () => {
   });
 
   test("a step that may read a secret shows its model's lookups as their kind and count only, in Context and in the stored history", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }], { ...LORE, timetable: TIMETABLE });
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "standard" } }, { minds: { enabled: false } }], { ...LORE, timetable: TIMETABLE });
     const calls: QuietToolCall[] = [
       { name: "lore_get", args: { id: "wreck" }, callId: "c1" },
       { name: "lore_search", args: { query: "The wreck" }, callId: "c2" },
@@ -397,7 +397,7 @@ describe("the inspector's lore traces", () => {
   };
 
   test("an NPC's choice shows in the trace as whose choice it is, with nothing it found counted or listed, and not at all for someone the POV can't know", async () => {
-    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }]);
+    const { rig, chatId } = await loreChat([{ modelUse: { preset: "full" } }, { minds: { enabled: false } }]);
     await rig.turn(chatId, "I walk to the ferry and wait.", "The ferry horn sounds.");
     await rig.rt.inspector.settle();
     const context = await contextOf(rig, chatId);

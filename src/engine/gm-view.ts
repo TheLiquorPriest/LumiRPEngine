@@ -91,8 +91,8 @@ function entityOf(reg: Registry, ctx: ReadContext, id: string): GmEntity | null 
   };
 }
 
-/** Everything the GM view shows but its list of edits, which the chain holds. */
-export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): Omit<GmView, "edits" | "refused"> {
+/** Everything the GM view shows but its list of edits, which the chain holds, and the minds, which need the user's settings. */
+export function buildGmWorld(reg: Registry, world: WorldDoc, state: Readonly<WorldState>): Omit<GmView, "edits" | "refused" | "minds"> {
   const ctx = reg.context(world, state);
   const relationTypes = new Map<string, GmView["relationTypes"][number]>();
   for (const def of [...reg.relations.values(), ...Object.values(world.relations)]) {

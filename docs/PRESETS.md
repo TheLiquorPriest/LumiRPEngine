@@ -20,6 +20,7 @@ Each section the engine fills has an outlet named `lre_` and its slot. Put `{{ou
 | `quest` | Quest: the stories and goals you can see | `{{outlet::lre_quest}}` |
 | `outline` | Outline: the engine's beats for the reply, with the brief and prose outline | `{{outlet::lre_outline}}` |
 | `stance` | Stance: how the people here behave, with the cues their secrets give | `{{outlet::lre_stance}}` |
+| `minds` | Minds: each character's mind this turn, scoped to what they know (under `brief` secrecy, only how they come across). It has its own token budget (Settings → Minds), apart from the section budget | `{{outlet::lre_minds}}` |
 | — | The narrator rules (below) | `{{outlet::lre_narrator}}` |
 
 A world may define sections of its own (Build → Sections); each one's outlet is `lre_` and its id, so a section `weather` goes to `{{outlet::lre_weather}}`. Outlet names are matched without regard to case, as Lumiverse matches them.
@@ -51,6 +52,10 @@ The engine makes small model calls of its own around each turn. A switched-off b
 | `RPEngine · judge` | Rates how well your described approach suits an action | How generous to be, and what a good plan looks like in your genre |
 | `RPEngine · contradiction` | Checks the reply against the engine's facts | What the narrator may add without it counting (weather, small talk, thoughts) |
 | `RPEngine · puzzle.answer` | Judges whether a typed answer matches a puzzle's | How loose to be about wording and spelling |
+| `RPEngine · mind` | Thinks as one character at a time, from only what that character knows, and gives the narrator their mind | How your preset's characters think: how candid or scheming, how far ahead they plan |
+| `RPEngine · memory` | Writes down, as each character present, what they'll remember of the reply: notes, promises and debts, plans | What your preset's characters hold on to: slights, kindnesses, money, promises |
+| `RPEngine · skip` | Finds the moments worth stopping at inside a time skip | How often your preset wants a skip interrupted |
+| `RPEngine · consolidate` | Folds a character's older notes into their summary | What a summary should keep in your preset's story |
 
 How the engine reads a guidance block:
 

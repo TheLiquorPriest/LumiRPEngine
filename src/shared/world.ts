@@ -51,6 +51,7 @@ import type {
   WorldId,
 } from "./ids";
 import type { DataTable } from "./tables";
+import type { WorldMindsConfig } from "./minds";
 
 export const WORLD_FORMAT = "lre-world-v1";
 
@@ -739,7 +740,12 @@ export type StepPurpose =
   | "outline"
   | "extract"
   | "choices"
-  | "judge";
+  | "judge"
+  /** Character minds (DESIGN §24): each mind, the memory written after a reply, a time skip's beats, and consolidation. */
+  | "mind"
+  | "memory"
+  | "skip"
+  | "consolidate";
 
 /** A world-authored prompted or decision step template (DESIGN §5.2). */
 export interface StepTemplateDef {
@@ -1026,6 +1032,8 @@ export interface WorldDoc {
   mapSettings?: MapSettings;
   /** Classification facets by id (DESIGN §4.1); entities hold values in `class`. */
   classifications: Record<FacetId, FacetDef>;
+  /** Character minds (DESIGN §24.2): secrecy, the fidelity weights and thresholds, the author's pins and memory defaults; absent, the defaults (`worldMindsOf`). */
+  minds?: WorldMindsConfig;
   /** The world's tabletop ruleset (DESIGN §11); absent in worlds that have none. */
   ruleset?: RulesetDef;
   /** Action seeds: a fresh seed per Re-run, or `hash(runSeed, parent path, action)` (DESIGN §4.3). */

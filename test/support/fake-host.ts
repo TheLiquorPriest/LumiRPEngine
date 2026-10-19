@@ -14,6 +14,7 @@ import type {
   DecideRequest,
   DryRun,
   HostBookEntry,
+  HostCharacterCard,
   HostBookEntryInput,
   HostEventMap,
   HostEventName,
@@ -113,6 +114,13 @@ export class FakeHost implements HostPort {
   // ------------------------------------------------------------------ HostPort
 
   rpc: HostPort["rpc"] = this.rpcPool.port(ENGINE_EXTENSION);
+
+  /** Character cards by id, for a mind whose entity links one (`characterId`). */
+  readonly characterCards = new Map<string, HostCharacterCard>();
+
+  characters: HostPort["characters"] = {
+    card: async (characterId) => this.characterCards.get(characterId) ?? null,
+  };
 
   chats: HostPort["chats"] = {
     messages: async (chatId) => this.chat(chatId).messages.map((m, index) => this.toHost(chatId, m, index)),

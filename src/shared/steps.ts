@@ -31,8 +31,11 @@ export function knownSignal(s: string): boolean {
   return (STEP_SIGNALS as readonly string[]).includes(s) || /^every_n:[1-9]\d*$/.test(s);
 }
 
-/** The engine placeholders a step template may use (all player-visible). */
-export const STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent"] as const;
+/**
+ * The engine placeholders a step template may use (all player-visible), and `character`, the name
+ * of the character a minds step thinks for (DESIGN §24.5), empty in every other step.
+ */
+export const STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "character"] as const;
 
 /**
  * The outputs a world template may declare per purpose. `text` on a decision purpose is its
@@ -49,4 +52,9 @@ export const STEP_OUTPUTS: Record<StepPurpose, readonly StepTemplateDef["output"
   choices: ["text", "effects"],
   // A decision only: the rating, its reason and (under narrative authority) the outcome's odds.
   judge: ["decision", "text"],
+  // A minds step's template is its instructions; its answer is the step's own JSON (DESIGN §24.5).
+  mind: ["text"],
+  memory: ["text"],
+  skip: ["text"],
+  consolidate: ["text"],
 };

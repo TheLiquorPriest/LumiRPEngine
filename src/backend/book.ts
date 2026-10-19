@@ -12,6 +12,7 @@ import { isRecord } from "../shared/json";
 import { LEDGER_NAMESPACE } from "../shared/ledger";
 import { neutralizeMacros } from "../shared/macros";
 import type { SectionTemplate, SlotPosition, WorldDoc, WorldIndex } from "../shared/world";
+import { MINDS_SECTION_TEMPLATE, MINDS_SLOT } from "../shared/minds";
 import type { HostBookEntry, HostEntryPlacement, HostPort, PlacementOverride } from "./host";
 import { NARRATOR_OUTLET, outletOf } from "./preset-binding";
 import type { WorldStore } from "./worlds";
@@ -28,11 +29,16 @@ export const DEFAULT_SECTIONS: Record<SlotId, SectionTemplate> = {
   quest: { id: "quest", label: "Quest", rank: 7, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
   outline: { id: "outline", label: "Outline", rank: 8, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
   stance: { id: "stance", label: "Stance", rank: 9, template: "The narrator knows only what the player character knows. These lines say how the people here behave; never state what a cue only hints at.\n{{lines}}", position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  // Character minds (DESIGN §24.3): on their own token budget, apart from the section budget.
+  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: MINDS_SECTION_TEMPLATE, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
 };
 
+/** A world's sections in rank order: its own, else the defaults. The Minds section is every world's, so a world with sections of its own gets the default one when it has none. */
 export function sectionsOf(world: WorldDoc): SectionTemplate[] {
   const own = Object.values(world.sections);
-  return (own.length > 0 ? own : Object.values(DEFAULT_SECTIONS)).sort((a, b) => a.rank - b.rank);
+  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
+  const list = own.length > 0 ? (own.some((s) => s.id === MINDS_SLOT) || !minds ? own : [...own, minds]) : Object.values(DEFAULT_SECTIONS);
+  return list.sort((a, b) => a.rank - b.rank);
 }
 
 /** The host placement for a section, or null to keep native placement (outlets, native). */

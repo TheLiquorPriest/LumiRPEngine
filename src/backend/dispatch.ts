@@ -252,7 +252,7 @@ export class Dispatcher {
         // Asked for when the GM view opens: everything, secrets included, never in a state push.
         await this.requireWorldChat(r.chatId, userId);
         const core = await this.rt.ledger.core(r.chatId, userId);
-        const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry) : null;
+        const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds) : null;
         if (!view) throw new RequestError("unavailable", "the chat's world revision is not loaded");
         reply("lre.gm", view);
         return;
