@@ -1,16 +1,21 @@
-// Build's money editors (DESIGN §13, §25): the Custom toggles, the region and living costs as the
-// economy config stores them, household shares that add up, schedule lists as typed, structured
-// values kept free of empty parts, and every money field and place field reaching its editor
-// through the registry.
+// Build's money editors (DESIGN §13, §25, §26): the Custom toggles, the region, living costs and
+// taxes as the economy config stores them, household shares that add up, schedule lists as typed,
+// structured values kept free of empty parts, and every money field and place field reaching its
+// editor through the registry.
 
 import { describe, expect, test } from "bun:test";
 import { fieldEditorFor } from "../../src/frontend/build/schema-form";
 import { buildCatalog } from "../../src/frontend/ui-registry";
 import economy from "../../src/packs/economy/ui/index";
-import { regionChoices, toggleOf, withLivingCost, withRegion, withToggle } from "../../src/packs/economy/ui/config";
-import { STARTER_WORLDS } from "../../src/packs/index";
+import { exemptChoices, regionChoices, toggleOf, withLivingCost, withRegion, withTax, withToggle } from "../../src/packs/economy/ui/config";
+import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { compact, equalShares, householdMembers, monthDays, numbersOf, recordsOf } from "../../src/packs/economy/ui/field-editors";
+import { corporateTax, taxExempt } from "../../src/packs/economy/core/taxes";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { Working } from "../../src/engine/working";
+import type { JsonObject } from "../../src/shared/json";
 import type { WorldDoc } from "../../src/shared/world";
+import { startState } from "../packs/support";
 
 describe("the Custom money toggles", () => {
   test("a toggle is stored as on or off, and By level removes it (and an empty set of toggles)", () => {
@@ -43,6 +48,33 @@ describe("the region and living costs", () => {
     const two = withLivingCost(one, "rich", 90000);
     expect(two.livingCosts).toEqual({ modest: 21000, rich: 90000 });
     expect(withLivingCost(withLivingCost(two, "rich", undefined), "modest", undefined)).toEqual({});
+  });
+});
+
+describe("the economy's taxes", () => {
+  /** Port Alder with its economy config as Build's form leaves it. */
+  const portAlder = (config: (was: JsonObject) => JsonObject): WorldDoc => {
+    const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+    world.packs.economy = { ...world.packs.economy, config: config(world.packs.economy?.config ?? {}) };
+    return world;
+  };
+
+  test("exempt categories and the corporate rate are stored where the engine reads them, and emptied they go", () => {
+    const starter = portAlder((c) => c);
+    // Port Alder spares groceries and medical; the form lists every category by name, with any the table lacks kept.
+    expect(taxExempt({ world: starter }, null, "medical")).toBe(true);
+    const choices = exemptChoices(starter, ["groceries_staples", "spa_days"]);
+    expect(choices.find((c) => c.value === "groceries_staples")?.label).toBe("Groceries: per-item staples");
+    expect(choices.at(-1)).toEqual({ value: "spa_days", label: "spa_days (not in the categories table)" });
+    const edited = portAlder((c) => withTax(withTax(c, "exempt", ["groceries_staples"]), "corporatePct", 25));
+    expect(edited.packs.economy?.config.taxes).toEqual({ exempt: ["groceries_staples"], corporatePct: 25 });
+    expect(taxExempt({ world: edited }, null, "medical")).toBe(false);
+    expect(taxExempt({ world: edited }, null, "groceries_staples")).toBe(true);
+    // A C corporation's tax on $1,000 of profit: four points more than the federal 21%.
+    const reg = createRegistry(ALL_PACKS);
+    const tax = (world: WorldDoc): number => corporateTax(new Working(reg, world, startState(world)).ctx, "alder_automotive_co", 100000);
+    expect(tax(edited) - tax(starter)).toBe(4000);
+    expect(withTax(withTax({ unpricedCap: 500, taxes: { exempt: ["medical"], corporatePct: 25 } }, "exempt", undefined), "corporatePct", undefined)).toEqual({ unpricedCap: 500 });
   });
 });
 

@@ -2,11 +2,12 @@
 // narrated-price cap (DESIGN §9.5) is the most a narrated price charges for something no catalog
 // row prices, in the world's minor units; left empty, the engine derives it from the tables. The
 // region prices living and taxes for whoever names none; living costs are a week's spending per
-// wealth band. The Custom toggles (DESIGN §25) switch a money feature on or off at the levels its
-// floor allows; products are the world's own account products; assets are what holdings hold (§27).
+// wealth band; taxes are the spending categories sales tax never falls on and the corporate rate
+// (§26). The Custom toggles (DESIGN §25) switch a money feature on or off at the levels its floor
+// allows; products are the world's own account products; assets are what holdings hold (§27).
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
-import { isRecord } from "../../../shared/json";
+import { hasOwn, isRecord } from "../../../shared/json";
 import { ACCOUNT_CLASSES, ASSET_CLASSES, FEATURE_DEFS, FINANCE_FEATURES, OVERDRAFT_POLICIES, type FinanceFeature } from "../../../shared/finance";
 import { formatMoneyInput, minorUnitPlural } from "../../../shared/money";
 import { formatMoney, type WorldCurrency, type WorldDoc } from "../../../shared/world";
@@ -16,7 +17,8 @@ import type { FieldSpec } from "../../../frontend/build/schema";
 import { lintAt, MinorMoneyInput, SchemaFields } from "../../../frontend/build/schema-form";
 import type { PackConfigProps } from "../../../frontend/registry";
 import { derivedUnpricedCap, WEALTH_BANDS } from "../core/model";
-import { SelectField, type Choice } from "./forms";
+import { CORPORATE_PCT } from "../core/taxes";
+import { NumberField, SelectField, type Choice } from "./forms";
 
 /** A Custom toggle's state: as the level decides, or forced on or off. */
 export type ToggleState = "level" | "on" | "off";
@@ -56,6 +58,22 @@ export function withLivingCost(config: Readonly<JsonObject>, band: string, cents
   else costs[band] = Math.round(cents);
   const { livingCosts: _old, ...rest } = config;
   return Object.keys(costs).length > 0 ? { ...rest, livingCosts: costs } : { ...rest };
+}
+
+/** The config with one of its tax settings set, or removed (undefined); with none left, `taxes` goes too. */
+export function withTax(config: Readonly<JsonObject>, key: "exempt" | "corporatePct", value: JsonValue | undefined): JsonObject {
+  const taxes: JsonObject = isRecord(config.taxes) ? { ...config.taxes } : {};
+  if (value === undefined) delete taxes[key];
+  else taxes[key] = value;
+  const { taxes: _old, ...rest } = config;
+  return Object.keys(taxes).length > 0 ? { ...rest, taxes } : { ...rest };
+}
+
+/** The spending categories sales tax could spare: the categories table's rows by name, and any the config exempts that the table doesn't have, kept as they are. */
+export function exemptChoices(world: WorldDoc, exempt: readonly string[]): Choice[] {
+  const rows = world.tables["economy.categories"]?.rows ?? {};
+  const known = Object.entries(rows).map(([id, row]) => ({ value: id, label: typeof row.name === "string" && row.name !== "" ? row.name : id }));
+  return [...known, ...exempt.filter((c) => !hasOwn(rows, c)).map((c) => ({ value: c, label: `${c} (not in the categories table)` }))];
 }
 
 const money = (key: string, label: string, unit: string): FieldSpec => ({ kind: "number", key, label: `${label} (${unit})`, min: 0, step: 1, optional: true });
@@ -179,6 +197,37 @@ function LivingCosts(props: PackConfigProps) {
   );
 }
 
+/** What sales tax spares and what a C corporation pays: the categories exempt everywhere, and the corporate rate. */
+function Taxes(props: PackConfigProps) {
+  const taxes = isRecord(props.config.taxes) ? props.config.taxes : {};
+  const exempt = Array.isArray(taxes.exempt) ? taxes.exempt.filter((c): c is string => typeof c === "string") : [];
+  const corporate = typeof taxes.corporatePct === "number" ? taxes.corporatePct : null;
+  const setExempt = (category: string, on: boolean) => {
+    const next = on ? [...exempt.filter((c) => c !== category), category] : exempt.filter((c) => c !== category);
+    props.onChange(withTax(props.config, "exempt", next.length > 0 ? next : undefined));
+  };
+  return (
+    <Card title="Taxes">
+      <NumberField label="Corporate tax rate (%)" value={corporate} min={0} max={100} placeholder={String(CORPORATE_PCT)} onChange={(v) => props.onChange(withTax(props.config, "corporatePct", v ?? undefined))} />
+      <span class="lre-small lre-muted">What a C corporation pays on its profit, with its state's rate. Empty, it's the federal rate, {CORPORATE_PCT}%.</span>
+      <div class="lre-h">Sales tax</div>
+      <span class="lre-small lre-muted">A category exempt here is never taxed, wherever it's sold; a place can exempt more of its own.</span>
+      {exemptChoices(props.world, exempt).map((c) => (
+        <Row
+          key={c.value}
+          k={c.label}
+          v={
+            <select class="lre-input" style={{ width: "auto" }} aria-label={`${c.label}: sales tax`} value={exempt.includes(c.value) ? "exempt" : "taxed"} onChange={(event) => setExempt(c.value, event.currentTarget.value === "exempt")}>
+              <option value="taxed">Taxed</option>
+              <option value="exempt">Exempt</option>
+            </select>
+          }
+        />
+      ))}
+    </Card>
+  );
+}
+
 export function EconomyConfig(props: PackConfigProps) {
   const currency = props.world.currency;
   const derived = derivedUnpricedCap(props.world);
@@ -205,6 +254,7 @@ export function EconomyConfig(props: PackConfigProps) {
       </Card>
       <Region {...props} />
       <LivingCosts {...props} />
+      <Taxes {...props} />
       <FeatureToggles {...props} />
       <Card title="Products and assets">
         <SchemaFields specs={specs} value={props.config} ctx={ctx} onChange={(next: JsonObject) => props.onChange(next)} />

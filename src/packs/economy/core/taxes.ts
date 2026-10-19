@@ -56,7 +56,7 @@ const ADDITIONAL_MEDICARE_FROM = 20000000;
 const SE_EARNINGS_SHARE = 0.9235;
 
 /** The federal corporate rate on a C corporation's profit, unless the economy config sets its own (`taxes.corporatePct`). */
-const CORPORATE_PCT = 21;
+export const CORPORATE_PCT = 21;
 
 function bracketsOf(v: JsonValue | undefined): TaxBracket[] {
   if (!Array.isArray(v)) return [];
