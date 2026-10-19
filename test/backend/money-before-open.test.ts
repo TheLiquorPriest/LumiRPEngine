@@ -1,7 +1,8 @@
 // The POV's money before anything opens its accounts: a fresh chat shows the authored opening
-// balances in the HUD and on Money (their representation, DESIGN §9.2); opening Money posts exactly
-// those amounts, and the update the client receives after the write carries them. A cash fix made
-// before then is measured from the opening balances, not from nothing.
+// balances in the HUD and on Money (their representation, DESIGN §9.2), and what each account has
+// available from them; opening Money posts exactly those amounts, and the update the client
+// receives after the write carries them. A cash fix made before then is measured from the opening
+// balances, not from nothing.
 
 import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../src/shared/world";
@@ -35,11 +36,11 @@ function clientView(rig: Rig, chatId: string): StateView {
   return view as StateView;
 }
 
-/** What Money shows of the POV's money: its level, cash and each account's amount, and whether the accounts have opened. */
+/** What Money shows of the POV's money: its level, cash and each account's amount and what's available, and whether the accounts have opened. */
 function money(view: StateView) {
   const m = decodeFinanceView(view.panels["economy.money"]);
   if (!m) throw new Error("no Money panel");
-  return { opened: m.opened, amounts: { level: m.level, cash: m.cash, accounts: m.accounts.map((a) => ({ id: a.id, cents: a.cents })) } };
+  return { opened: m.opened, amounts: { level: m.level, cash: m.cash, accounts: m.accounts.map((a) => ({ id: a.id, cents: a.cents, available: a.available })) } };
 }
 
 async function posted(rig: Rig, chatId: string): Promise<Record<string, number>> {
@@ -61,6 +62,9 @@ describe("the POV's money before its accounts open", () => {
     expect(shown.level).toBe(4);
     expect(shown.cash).toEqual({ cents: cash });
     for (const id of ["acct_pov_checking", "acct_pov_savings", "acct_pov_card", "acct_pov_auto_loan"]) expect(shown.accounts.find((a) => a.id === id)?.cents).toBe(openingOf(id));
+    // What's available is counted from the openings too: a card has its limit less what it owes.
+    expect(shown.accounts.find((a) => a.id === "acct_pov_card")?.available).toBe(Number(authored.entities.acct_pov_card?.fields.limit) + openingOf("acct_pov_card"));
+    expect(shown.accounts.find((a) => a.id === "acct_pov_savings")?.available).toBe(openingOf("acct_pov_savings"));
     // Nothing is posted yet: the amounts are the representation.
     expect((await posted(rig, chatId)).acct_pov_cash ?? 0).toBe(0);
 

@@ -45,11 +45,16 @@ const CHECKING = "acct_pov_checking";
 const SAVINGS = "acct_pov_savings";
 const CARD = "acct_pov_card";
 const LOAN = "acct_pov_auto_loan";
+const DEBIT = "card_pov_debit";
+const CREDIT = "card_pov_credit";
 const DANNY = "danny_okafor";
 const DANNY_CHECKING = "acct_danny_checking";
 /** Where the POV starts, and the bank of their checking and savings. */
 const HOME = "harbor_street_114";
 const BANK = "Lakeshore Credit Union";
+/** Alder Market has the bank's branch and machine; the fuel station another bank's machine. */
+const MARKET = "alder_market";
+const FUEL = "shoreline_fuel";
 
 /** The GM view's Money tab: everyone's money as it decodes `lre.gm`, and each entity's declared fields (what its ✎ forms edit). */
 interface GmMoney {
@@ -164,6 +169,11 @@ function account(view: FinanceView, id: string): AccountView {
   return a;
 }
 
+/** Cash on hand as the hub shows it. */
+function cashOf(view: FinanceView): number {
+  return view.cash && "cents" in view.cash ? view.cash.cents : 0;
+}
+
 /** What a refused edit says. */
 function refusal(reply: BackendToFrontend): string {
   if (reply.type !== "lre.error") throw new Error(`the edit wasn't refused (${reply.type})`);
@@ -229,38 +239,53 @@ describe("Play → Money: each control plays as the player's turn", () => {
     expect(account(await chat.hub(), CARD).autopay?.mode).toBe("none");
   });
 
-  test("at the top level cash moves at a branch of the account's bank; with no machine or branch the turn says so and nothing moves", async () => {
-    const nowhere = await MoneyChat.start();
-    const start = await nowhere.hub();
+  test("at the top level cash moves at the bank's branch, another bank's machine charges its fees, and with neither where the POV is the turn says so", async () => {
+    const chat = await MoneyChat.start();
+    const start = await chat.hub();
     expect(accountControls(start, account(start, CHECKING))).toEqual(expect.arrayContaining(["withdraw", "deposit"]));
-    expect(await nowhere.play(cashAction("withdraw", CHECKING, nowhere.cents("20")))).toContain(`no cash machine or ${BANK} branch here`);
-    const unmoved = await nowhere.hub();
-    expect(unmoved.cash).toEqual(start.cash);
+    expect(await chat.play(cashAction("withdraw", CHECKING, chat.cents("20")))).toContain(`no cash machine or ${BANK} branch here`);
+    const unmoved = await chat.hub();
+    expect(cashOf(unmoved)).toBe(cashOf(start));
     expect(account(unmoved, CHECKING).cents).toBe(account(start, CHECKING).cents);
 
-    const branch = await MoneyChat.start({ [HOME]: { branch: { bank: BANK } } });
-    const before = await branch.hub();
-    await branch.play(cashAction("withdraw", CHECKING, branch.cents("20")));
-    const out = await branch.hub();
-    expect(out.cash).toEqual({ cents: (before.cash && "cents" in before.cash ? before.cash.cents : 0) + 2000 });
-    expect(account(out, CHECKING).cents).toBe(account(before, CHECKING).cents - 2000);
-    await branch.play(cashAction("deposit", CHECKING, branch.cents("10")));
-    const back = await branch.hub();
-    expect(account(back, CHECKING).cents).toBe(account(before, CHECKING).cents - 1000);
+    expect(await chat.play({ action: "go", params: { to: MARKET } })).toContain("done");
+    const market = await chat.hub();
+    await chat.play(cashAction("withdraw", CHECKING, chat.cents("20")));
+    const out = await chat.hub();
+    expect(cashOf(out)).toBe(cashOf(market) + 2000);
+    expect(account(out, CHECKING).cents).toBe(account(market, CHECKING).cents - 2000);
+    await chat.play(cashAction("deposit", CHECKING, chat.cents("10")));
+    const back = await chat.hub();
+    expect(account(back, CHECKING).cents).toBe(account(market, CHECKING).cents - 1000);
+    // Paid in at the counter, it's available at once.
     expect(account(back, CHECKING).holds).toEqual([]);
+
+    expect(await chat.play({ action: "go", params: { to: FUEL } })).toContain("done");
+    const fuel = await chat.hub();
+    await chat.play(cashAction("withdraw", CHECKING, chat.cents("20")));
+    const fees = await chat.hub();
+    expect(cashOf(fees)).toBe(cashOf(fuel) + 2000);
+    const charged = account(fuel, CHECKING).cents - account(fees, CHECKING).cents;
+    expect(charged).toBeGreaterThan(2000 + 350);
+    expect(account(fees, CHECKING).transactions[0]?.memo).toMatch(/^Cash withdrawal at .+ \(.+ in fees\)$/);
   });
 
-  test("at the bank's deposit machine a cash deposit is held; a withdrawal there needs a card on the account", async () => {
+  test("at the bank's deposit machine a cash deposit is held; a withdrawal there takes the debit card, and not while it's frozen", async () => {
     const chat = await MoneyChat.start({ [HOME]: { atm: { bank: BANK, deposits: true } } });
     const before = await chat.hub();
     await chat.play(cashAction("deposit", CHECKING, chat.cents("20")));
     const after = await chat.hub();
     const checking = account(after, CHECKING);
     expect(checking.cents).toBe(account(before, CHECKING).cents + 2000);
-    expect(checking.available).toBe(checking.cents - 2000);
+    expect(checking.available).toBe(account(before, CHECKING).available);
     expect(checking.holds).toEqual([expect.objectContaining({ cents: 2000, kind: "deposit" })]);
     expect(accountBlocks(after, checking).holds).toBe(true);
-    expect(await chat.play(cashAction("withdraw", CHECKING, chat.cents("20")))).toContain("has no card for a cash machine");
+    await chat.play(cardAction(DEBIT, "freeze"));
+    expect(await chat.play(cashAction("withdraw", CHECKING, chat.cents("20")))).toContain("cards on Your checking account works");
+    expect(cashOf(await chat.hub())).toBe(cashOf(after));
+    await chat.play(cardAction(DEBIT, "unfreeze"));
+    expect(await chat.play(cashAction("withdraw", CHECKING, chat.cents("20")))).toContain("done");
+    expect(cashOf(await chat.hub())).toBe(cashOf(after) + 2000);
   });
 
   test("below the top level cash moves without a machine", async () => {
@@ -270,7 +295,7 @@ describe("Play → Money: each control plays as the player's turn", () => {
     expect(before.level).toBe(3);
     await chat.play(cashAction("withdraw", CHECKING, chat.cents("20")));
     const after = await chat.hub();
-    expect(after.cash).toEqual({ cents: (before.cash && "cents" in before.cash ? before.cash.cents : 0) + 2000 });
+    expect(cashOf(after)).toBe(cashOf(before) + 2000);
     expect(account(after, CHECKING).cents).toBe(account(before, CHECKING).cents - 2000);
   });
 
@@ -288,52 +313,58 @@ describe("Play → Money: each control plays as the player's turn", () => {
     expect(after.credit?.inquiries.length).toBe((before.credit?.inquiries.length ?? 0) + 1);
   });
 
-  test("a card freezes, unfreezes, is reported lost and is replaced, each control offered only when its state allows it", async () => {
+  test("a card freezes, unfreezes, is reported lost and is replaced by a new card in the wallet, each control offered only when its state allows it", async () => {
     const chat = await MoneyChat.start();
-    await chat.play(applyCreditAction("credit_card", chat.cents("2000")));
     const cardOf = async (id: string) => {
       const view = await chat.hub();
       const card = view.cards.find((c) => c.id === id);
       if (!card) throw new Error(`no card ${id}`);
       return { view, card };
     };
-    const first = (await chat.hub()).cards.find((c) => c.account !== CARD);
-    if (!first) throw new Error("no new card");
-    expect(cardControls(await chat.hub(), first)).toEqual(["freeze", "lost", "replace"]);
-    await chat.play(cardAction(first.id, "freeze"));
-    let { view, card } = await cardOf(first.id);
+    let { view, card } = await cardOf(CREDIT);
+    const first = card;
+    expect(first).toMatchObject({ account: CARD, network: "credit", state: "active", last4: "9032" });
+    expect(first.item).not.toBeNull();
+    expect(cardControls(view, first)).toEqual(["freeze", "lost", "replace"]);
+    await chat.play(cardAction(CREDIT, "freeze"));
+    ({ view, card } = await cardOf(CREDIT));
     expect(card.state).toBe("frozen");
     expect(cardControls(view, card)).toEqual(["unfreeze", "lost", "replace"]);
     expect(view.overview?.alerts).toContainEqual(expect.objectContaining({ tone: "warn", text: `${card.name} is frozen.` }));
-    await chat.play(cardAction(first.id, "unfreeze"));
-    expect((await cardOf(first.id)).card.state).toBe("active");
-    await chat.play(cardAction(first.id, "lost"));
-    ({ view, card } = await cardOf(first.id));
+    await chat.play(cardAction(CREDIT, "unfreeze"));
+    expect((await cardOf(CREDIT)).card.state).toBe("active");
+    await chat.play(cardAction(CREDIT, "lost"));
+    ({ view, card } = await cardOf(CREDIT));
     expect(card.state).toBe("lost");
     expect(cardControls(view, card)).toEqual(["replace"]);
-    await chat.play(cardAction(first.id, "replace"));
-    ({ view, card } = await cardOf(first.id));
+    await chat.play(cardAction(CREDIT, "replace"));
+    ({ view, card } = await cardOf(CREDIT));
     expect(card.state).toBe("cancelled");
     expect(cardControls(view, card)).toEqual([]);
-    const replacement = view.cards.find((c) => c.account === first.account && c.id !== first.id);
+    const replacement = view.cards.find((c) => c.account === CARD && c.id !== CREDIT);
     expect(replacement).toMatchObject({ state: "active", network: "credit" });
     expect(replacement?.last4 ?? "").toMatch(/^\d{4}$/);
+    expect(replacement?.item ?? null).not.toBeNull();
+    expect(replacement?.item).not.toBe(first.item);
   });
 
-  test("How I pay sets the POV's payment tiers, and a purchase then pays by them", async () => {
+  test("How you pay sets the POV's payment tiers, and a purchase then pays by them", async () => {
     const chat = await MoneyChat.start();
-    await chat.play(applyCreditAction("credit_card", chat.cents("2000")));
-    const card = (await chat.hub()).cards.find((c) => c.account !== CARD);
-    if (!card) throw new Error("no new card");
-    const tiers: PayTier[] = [{ use: card.id, max: chat.cents("50") }];
+    const coffee: ActionBody = { action: "buy", params: { item: "coffee", price: chat.cents("3") } };
+    // With the default tiers a coffee comes out of the wallet.
+    const before = await chat.hub();
+    await chat.play(coffee);
+    const usual = await chat.hub();
+    expect(cashOf(usual)).toBeLessThan(cashOf(before));
+    expect(account(usual, CARD).cents).toBe(account(before, CARD).cents);
+    const tiers: PayTier[] = [{ use: CREDIT, max: chat.cents("50") }];
     expect(await chat.play(payPrefsAction(tiers))).toContain("done");
     const set = await chat.hub();
     expect(set.payPrefs).toEqual(tiers);
-    // A coffee goes on the new card, not the wallet cash the default tiers try first.
-    await chat.play({ action: "buy", params: { item: "coffee", price: chat.cents("3") } });
+    await chat.play(coffee);
     const after = await chat.hub();
-    expect(after.cash).toEqual(set.cash);
-    expect(account(after, card.account).cents).toBeLessThan(0);
+    expect(cashOf(after)).toBe(cashOf(set));
+    expect(account(after, CARD).cents).toBeLessThan(account(set, CARD).cents);
   });
 
   test("a standing payment is set up, changed, paused, resumed and cancelled; a one-off pays when its time comes", async () => {
@@ -392,6 +423,20 @@ describe("GM view → Money: each control is one edit", () => {
     expect(mine.flows.some((f) => f.spec.from === DANNY_CHECKING)).toBe(false);
   });
 
+  test("Take money on an account that hasn't opened yet opens it first, so all the GM view shows can be taken", async () => {
+    const chat = await MoneyChat.start();
+    const before = await chat.party(DANNY);
+    expect(before.opened).toBe(false);
+    const danny = account(before, DANNY_CHECKING);
+    expect(danny.available).toBe(danny.cents);
+    const all = adjustOp(DANNY_CHECKING, String(danny.cents / 100), chat.currency, true);
+    if (!all) throw new Error("no amount");
+    accepted(await chat.edit([all]));
+    const after = await chat.party(DANNY);
+    expect(after.opened).toBe(true);
+    expect(account(after, DANNY_CHECKING)).toMatchObject({ cents: 0, available: 0 });
+  });
+
   test("an account's declared fields, its status and closing it; what the backend won't do it says", async () => {
     const chat = await MoneyChat.start();
     expect((await chat.gm()).fields.get(CARD)).toEqual(expect.arrayContaining(["limit", "apr_pct", "autopay", "autopay_from", "status"]));
@@ -445,13 +490,11 @@ describe("GM view → Money: each control is one edit", () => {
 
   test("a card's state is one of its fields", async () => {
     const chat = await MoneyChat.start();
-    await chat.play(applyCreditAction("credit_card", chat.cents("2000")));
-    const card = (await chat.hub()).cards.find((c) => c.account !== CARD);
-    if (!card) throw new Error("no new card");
-    expect((await chat.gm()).fields.get(card.id)).toEqual(expect.arrayContaining(["state", "holder", "account"]));
-    accepted(await chat.edit([{ op: "set", entity: card.id, field: "state", value: "frozen" }]));
+    expect((await chat.gm()).fields.get(DEBIT)).toEqual(expect.arrayContaining(["state", "holder", "account"]));
+    // The ✎ on a field sends one set, as the GM view's entity form does.
+    accepted(await chat.edit([{ op: "set", entity: DEBIT, field: "state", value: "frozen" }]));
     const view = await chat.hub();
-    const frozen = view.cards.find((c) => c.id === card.id);
+    const frozen = view.cards.find((c) => c.id === DEBIT);
     expect(frozen?.state).toBe("frozen");
     if (frozen) expect(cardControls(view, frozen)).toEqual(["unfreeze", "lost", "replace"]);
   });
@@ -512,7 +555,7 @@ describe("GM view → Money: each control is one edit", () => {
 
   test("an NPC's declined bill is a GM note; the player's Money carries no notes and none of it", async () => {
     const chat = await MoneyChat.start();
-    // A one-off bigger than all Danny has, due at 08:00: it declines.
+    // A one-off bigger than all Danny has and any overdraft would cover, due at 08:00: it declines.
     const boat: FlowForm = { ...blankFlowForm(DANNY_CHECKING), label: "Boat repair", kind: "bill", to: "Alder Harbor Marina", amount: "5000", every: "once", start: "2026-09-14", at: "08:00" };
     accepted(await chat.edit(flowSpawnOps(newIdFor("flow", boat.label, new Set((await chat.gm()).fields.keys())), boat, chat.currency)));
     await chat.timelapse(180);
@@ -582,5 +625,14 @@ describe("the hub shows what each Money level shows", () => {
     expect(helen?.credit).toBeNull();
     expect(danny?.level).toBe(4);
     expect(danny?.credit).not.toBeNull();
+    // A member's money shows their household: who's in it and the costs they share.
+    expect(money.find((m) => m.party === "household_kowalczyk")?.partyKind).toBe("household");
+    expect(helen?.household?.members.map((m) => m.id).sort()).toEqual(["helen_kowalczyk", "jess_kowalczyk", "maddie_kowalczyk"]);
+    expect(helen?.household?.monthly.total ?? 0).toBeGreaterThan(0);
+    // An account's role decides what each owner may do with it.
+    const maddie = money.find((m) => m.party === "maddie_kowalczyk");
+    expect(maddie ? account(maddie, "acct_maddie_savings").role : null).toBe("beneficiary");
+    expect(helen ? account(helen, "acct_maddie_savings").role : null).toBe("custodian");
+    expect(maddie ? accountControls(maddie, account(maddie, "acct_maddie_savings")) : null).toEqual([]);
   });
 });
