@@ -1402,7 +1402,7 @@ The Money level sets a baseline.
 | 3 | Every account, cards, flows, payment preferences, households and living costs. |
 | 4 | Statements, interest, fees, delinquency, credit, cash machines, holds, limits and overdrafts. |
 
-Each feature in `FEATURE_DEFS` has a floor (the lowest level it can run at) and the level where it turns on by itself. A world's Custom toggles (`packs.economy.config.features`) switch a feature on anywhere from its floor up, or off. Flows take the payer's level when the payer is in the world, else the payee's. Demotion stops processes and narrows views; balances stay live, and the trial balance is 0 at every level mix.
+Each feature in `FEATURE_DEFS` has a floor (the lowest level it can run at) and the level where it turns on by itself. A world's Custom toggles (`packs.economy.config.features`) switch a feature on anywhere from its floor up, or off. The views follow them: statements, holds, credit and the household show where their feature runs, and full detail (terms' fees and penalty rates) from Money 4. With household shares off, a flow's shares don't split it and its payer pays it whole. Flows take the payer's level when the payer is in the world, else the payee's. Demotion stops processes and narrows views; balances stay live, and the trial balance is 0 at every level mix.
 
 ### 25.13 Minds
 

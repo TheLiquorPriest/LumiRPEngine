@@ -542,9 +542,11 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
   // A module's own posting goes as it gave it; a module that gave only the amount pays like any flow, with its bookkeeping in the same unit.
   const own_lines = amount.posting?.lines?.some((l) => l.amount !== 0) === true;
   const extra = amount.posting && !own_lines ? (amount.posting.extra ?? []) : [];
+  // Shares split a flow where household shares run; elsewhere its payer pays it whole.
+  const shared = (flow.shares ?? []).length > 0 && featureOn(flowLevel(ctx, flow), "households", toggles(ctx.world));
   const computed = (c: number): Attempt | Rejection => {
     if (c <= 0) return { events: extra, paid: 0 };
-    const made = flow.shares && flow.shares.length > 0 ? sharedAttempt(hooks, ctx, flow, c, at) : payFrom(hooks, ctx, flow, flow.from, c, at, overdraft, amount.posting);
+    const made = shared ? sharedAttempt(hooks, ctx, flow, c, at) : payFrom(hooks, ctx, flow, flow.from, c, at, overdraft, amount.posting);
     return "code" in made || extra.length === 0 ? made : { events: asUnit([...made.events.map(({ group: _g, ...e }) => e as LedgerEvent), ...extra]), paid: made.paid };
   };
   const attempt = amount.posting && own_lines ? providedAttempt(ctx, flow, amount.posting, at) : computed(cents);

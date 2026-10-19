@@ -6,7 +6,7 @@
 // surface a party the POV can't see is "someone".
 
 import type { EntityId } from "../../../shared/ids";
-import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, ownersIn, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
+import { AUTOPAY_MODES, CLASS_TRAITS, FINANCE_FEATURES, featureOn, ownersIn, worthShares, type AccountView, type AutopayMode, type CycleState, type AlertLine, type CardView, type FinanceView, type Flow, type FlowView, type HouseholdView, type JournalEntry, type JournalLine, type OverviewView, type PartyKind, type StatementView, type UpcomingLine } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { calendarOf, formatClock, monthName, weekdayName } from "../../../engine/calendar";
 import { numOf, objOf, own, sliceOf, strOf } from "../../../engine/pack-kit";
@@ -188,7 +188,9 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
   const cycle = cycleOf(ctx.state, account);
   const journal = journalOf(ctx.state, account);
   const cents = shown(ctx, account);
-  const statements = level >= 4 || featureFor(ctx, party, "statements");
+  // Statements and holds show where they run: their level, or where Custom turns them on or off.
+  const statements = featureOn(level, "statements", toggles(ctx.world));
+  const holds = featureOn(level, "holds", toggles(ctx.world));
   const autopayMode = strOf(e?.fields.autopay, "none");
   const autopayFrom = strOf(e?.fields.autopay_from);
   const securedBy = strOf(e?.fields.secured_by);
@@ -214,8 +216,8 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     due: statements ? due : null,
     statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s): s is StatementView => s !== null) : [],
     cards: level >= 3 ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
-    pending: detail ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, j)) : [],
-    holds: detail ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
+    pending: holds ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    holds: holds ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
     transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, j)) : [],
     securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) && visible(ctx, viewer, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
     loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : (cycle?.minimum ?? 0), monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null,
@@ -357,7 +359,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const members = kind === "household" ? membersOf(ctx.registry, ctx.world, ctx.state, party) : [];
   const level = Math.max(ctx.levelOf(party, "money"), ...members.map((m) => ctx.levelOf(m, "money")));
   const tog = toggles(ctx.world);
-  const detail = level >= 4 || Object.values(tog).some((v) => v === true);
+  const detail = level >= 4;
   const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));
   const mine = accountsOf(ctx, party);
   const empty: FinanceView = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
@@ -438,8 +440,8 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     accounts,
     cards: accounts.flatMap((a) => a.cards),
     flows: flowViews,
-    credit: partyKindOf(ctx, party) === "person" && (level >= 4 || featureFor(ctx, party, "credit")) ? creditReport(ctx, party) : null,
-    household: level >= 3 && household ? householdView(hooks, ctx, viewer, household, allFlows(hooks, ctx)) : null,
+    credit: partyKindOf(ctx, party) === "person" && featureOn(level, "credit", tog) ? creditReport(ctx, party) : null,
+    household: household && featureOn(level, "households", tog) ? householdView(hooks, ctx, viewer, household, allFlows(hooks, ctx)) : null,
     recent,
     notes,
     payPrefs: level >= 3 && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : [],

@@ -278,3 +278,45 @@ describe("what a module's flow defers is paid with its next occurrence", () => {
     expect(trialBalance(w.state)).toBe(0);
   });
 });
+
+describe("Custom toggles decide what the money view shows and how shares split", () => {
+  const features = (world: WorldDoc, set: JsonObject): void => {
+    world.packs.economy!.config.features = set;
+  };
+  const finance = (w: Working) => w.ctx.query("economy.finance")(w.ctx, "you", true);
+
+  test("statements and credit turned off at Money 4 leave the view with no statements, due line or credit report", () => {
+    const w = setup((world) => features(world, { credit: false }));
+    lapse(w, 20); // the card's 3 Nov statement closes
+    expect(finance(w).accounts.find((a) => a.id === "card")?.statements.length).toBeGreaterThan(0);
+    // The author turns statements off later: what closed stays in the books, out of the view.
+    features(w.world, { credit: false, statements: false });
+    const view = finance(w);
+    const card = view.accounts.find((a) => a.id === "card");
+    expect([card?.statements, card?.due, view.credit]).toEqual([[], null, null]);
+  });
+
+  test("a feature turned on below Money 4 shows itself without turning on full detail", () => {
+    const w = setup((world) => {
+      world.realism.levels.money = 3;
+      features(world, { holds: true });
+    });
+    const view = finance(w);
+    expect(view.detail).toBe(false);
+    expect(view.features).toContain("holds");
+  });
+
+  test("with household shares off, a shared flow is paid whole by its payer and the view has no household", () => {
+    const w = setup((world) => {
+      features(world, { households: false });
+      world.entities.home = { id: "home", kind: "household", name: "Our place", tier: "background", fields: {}, relations: [] };
+      world.entities.you!.relations.push({ type: "member_of", to: "home" });
+      world.entities.joint = entity("joint", "account", { owners: [{ party: "you", role: "joint" }, { party: "maya", role: "joint" }], product: "checking", opening: 250_000 });
+      world.entities.rent = entity("rent", "flow", { flow_kind: "rent", from: "joint", to: "Landlord", amount_cents: 200_000, shares: [{ party: "you", pct: 60, from: "joint" }, { party: "maya", pct: 40, from: "joint" }], every: "month", days: [1], shortfall: "skip", status: "active" });
+    });
+    lapse(w, 17);
+    const rent = dataOf(w, "economy.txn").filter((t) => t.flow === "rent");
+    expect(rent.map((t) => t.lines)).toEqual([[{ account: "joint", amount: -200_000 }]]);
+    expect(finance(w).household).toBeNull();
+  });
+});
