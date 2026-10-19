@@ -36,6 +36,16 @@ function featureAt<T>(ctx: ReadContext, who: EntityId, field: "atm" | "branch"):
   return null;
 }
 
+/**
+ * Whether cash needs a machine or branch for this person: the top level's rule, and only in a world
+ * that places at least one. A world with none (an older one migrated, or one that leaves banking
+ * offstage) would otherwise leave cash out of reach at the top level altogether.
+ */
+function cashNeedsAMachine(ctx: ReadContext, who: EntityId): boolean {
+  if (!featureFor(ctx, who, "atm")) return false;
+  return Object.values(ctx.world.places).some((p) => ["atm", "branch"].some((f) => { const bank = objOf(p.fields[f]).bank; return typeof bank === "string" && bank !== ""; }));
+}
+
 /** A person's active debit card on an account. */
 function debitCard(ctx: ReadContext, who: EntityId, account: EntityId): EntityId | null {
   return cardsOn(ctx.state, account).find((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === who && cardProblem(ctx, c, who) === null) ?? null;
@@ -58,7 +68,7 @@ export function withdraw(ctx: ReadContext, who: EntityId, account: EntityId, raw
   const p = productOf(ctx, account);
   if (!p) return reject("missing_account", "no such account");
   const t = traitsOf(ctx, account);
-  const atTop = featureFor(ctx, who, "atm");
+  const atTop = cashNeedsAMachine(ctx, who);
   const lines: PostingLine[] = [{ account: wallet, amount: cents }];
   const extra: LedgerEvent[] = [];
   let fees = 0;
@@ -123,7 +133,7 @@ export function deposit(ctx: ReadContext, who: EntityId, account: EntityId, raw:
   if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account)) return reject("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
   let held = false;
   let where = "";
-  if (featureFor(ctx, who, "atm")) {
+  if (cashNeedsAMachine(ctx, who)) {
     const branch = featureAt<{ bank: string }>(ctx, who, "branch");
     const atm = featureAt<AtmFeature>(ctx, who, "atm");
     if (branch && branch.feature.bank === p.institution) where = ` at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;

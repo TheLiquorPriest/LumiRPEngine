@@ -1380,6 +1380,8 @@ A person's `pay_prefs` lists ways to pay, in order: cash, debit, credit, charge,
 
 Where cash needs a machine (the `atm` feature, at the top level), a withdrawal takes one of two routes. At a branch of the account's own bank (a place's `branch`) it needs no card and has no limit. At a cash machine (a place's `atm`, found at the person's place or a place it is inside) it takes an active card on the account. The machine's per-withdrawal limit and the card's daily cash limit both apply. Another bank's machine charges its surcharge plus the account's out-of-network fee, and cash from a credit account is a cash advance, with its fee. A cash deposit is available at once at a branch; at a machine that takes deposits, the account's hold days apply. Below the top level, cash moves freely between the wallet and the accounts.
 
+The machine rule holds only in a world that places at least one `atm` or `branch`. A world that places none, such as a migrated older world or one that keeps banking offstage, moves cash freely at every level; otherwise the top level would leave cash out of reach.
+
 ### 25.10 Overdraft
 
 A deposit account's `overdraft` policy decides a payment the balance can't cover. `decline` refuses it. `fee` pays it up to `overdraft_limit` and charges the product's overdraft fee. `linked` draws the gap from `overdraft_link`. A flow that bounces may charge a fee for insufficient funds.

@@ -142,10 +142,21 @@ describe("money foundation: flows, owners and payment", () => {
 
   test("at the top level cash comes from a machine, with its limit and fees; below it, money moves freely", () => {
     const debit = entity("debit", "card", { account: "checking", holder: "you", network: "debit", state: "active" });
+    // The world places a machine, but not here: no cash.
     const none = setup((world) => {
       world.entities.debit = debit;
+      world.places.bank_lobby = { id: "bank_lobby", name: "Bank lobby", fields: { atm: { bank: "Lakeside Bank", fee: 300, limit: 20000 } } };
     });
     expect(withdraw(none.ctx, "you", "checking", 5000)).toMatchObject({ code: "no_atm" });
+    // A world that places no machine or branch at all leaves banking offstage: cash moves freely even at the top level.
+    const offstage = setup((world) => {
+      world.entities.debit = debit;
+    });
+    const loose = withdraw(offstage.ctx, "you", "checking", 5000);
+    if ("code" in loose) throw new Error(loose.reason);
+    const had = offstage.state.accounts.checking ?? 0;
+    offstage.applyAll(loose);
+    expect(had - (offstage.state.accounts.checking ?? 0)).toBe(5000);
     const atm = setup((world) => {
       world.entities.debit = debit;
       const place = world.places[String(world.entities.you!.fields.place ?? world.start.place)]!;
