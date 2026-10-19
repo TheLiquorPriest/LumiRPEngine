@@ -7961,6 +7961,8 @@ function mindsPolicyPatch(change) {
     minds.liveLimit = change.liveLimit;
   if (change.farRefreshMinutes !== undefined)
     minds.farRefreshMinutes = change.farRefreshMinutes;
+  if (change.refreshLimit !== undefined)
+    minds.refreshLimit = change.refreshLimit;
   if (change.tokens !== undefined)
     minds.tokens = change.tokens;
   if (change.memoryLevels !== undefined)
@@ -7991,7 +7993,7 @@ var MEMORY_FIELDS = [
   { part: "salience", key: "halfLifeDays", label: "A note's salience halves every (days)", range: MINDS_RANGES.halfLifeDays, step: 1 },
   { part: "salience", key: "floor", label: "Under this salience a note has faded", range: MINDS_RANGES.floor, step: 0.1 },
   { part: "consolidate", key: "enabled", label: "Fold faded and surplus notes into the summary" },
-  { part: "consolidate", key: "periodDays", label: "Fold a character's notes at most every (days)", range: MINDS_RANGES.periodDays, step: 1 }
+  { part: "consolidate", key: "periodDays", label: "Fold a character's notes at most every (days)", range: MINDS_RANGES.periodDays, step: 0.5 }
 ];
 function memoryValue(config, field) {
   const part = config[field.part];
@@ -8211,7 +8213,7 @@ function MindTemplates(props) {
     children: [
       /* @__PURE__ */ u3("div", {
         class: "lre-small lre-muted",
-        children: "A world's template for a step wins over the player's own prompt and the built-in one. A new template starts from the built-in prompt."
+        children: "A world's template for a step wins over the player's own prompt and the built-in one; only a step's first template (by id) is used, and its signals are ignored. A new template starts from the built-in prompt."
       }, undefined, false, undefined, this),
       MIND_PURPOSES.map((purpose) => {
         const templates = Object.values(props.doc.steps).filter((t) => t.purpose === purpose).sort((a, b) => a.id.localeCompare(b.id));
@@ -8222,16 +8224,16 @@ function MindTemplates(props) {
           children: [
             /* @__PURE__ */ u3(Row, {
               k: STEP_LABEL[purpose],
-              v: /* @__PURE__ */ u3("button", {
+              v: templates.length === 0 ? /* @__PURE__ */ u3("button", {
                 type: "button",
                 class: "lre-btn small",
                 disabled: busy,
                 onClick: () => add(purpose),
                 children: "New template"
-              }, undefined, false, undefined, this),
+              }, undefined, false, undefined, this) : undefined,
               sub: templates.length === 0 ? "None: the player's prompt, else the built-in" : undefined
             }, undefined, false, undefined, this),
-            templates.map((t) => /* @__PURE__ */ u3("button", {
+            templates.map((t, i) => /* @__PURE__ */ u3("button", {
               type: "button",
               class: "lre-item",
               onClick: () => open(t.id),
@@ -8242,6 +8244,10 @@ function MindTemplates(props) {
                     children: t.id
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
+                i > 0 ? /* @__PURE__ */ u3("span", {
+                  class: "lre-badge warn",
+                  children: "Not used"
+                }, undefined, false, undefined, this) : null,
                 /* @__PURE__ */ u3("span", {
                   class: "lre-dim",
                   "aria-hidden": "true",
@@ -13899,6 +13905,20 @@ function MindsSection(props) {
             fallback: MINDS_DEFAULTS.farRefreshMinutes,
             disabled: busy,
             onChange: (farRefreshMinutes) => policy({ farRefreshMinutes })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LimitField, {
+            label: "Near and Far refreshes a turn",
+            noneLabel: "no limit",
+            value: minds.refreshLimit,
+            min: 0,
+            max: 64,
+            fallback: MINDS_DEFAULTS.refreshLimit,
+            disabled: busy,
+            onChange: (refreshLimit) => policy({ refreshLimit })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "Besides the Live minds, the most pressing first. A refresh you ask for in the GM view always runs."
           }, undefined, false, undefined, this),
           /* @__PURE__ */ u3("div", {
             class: "lre-small lre-muted",

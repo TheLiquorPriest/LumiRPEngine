@@ -50083,7 +50083,6 @@ function sectionTokens(text) {
 
 // src/backend/minds-context.ts
 var SKIPPED_FIELDS = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true };
-var CARD_PART = 900;
 var RECALL_SIDE = 1600;
 var CONTEXT_MAX = 16000;
 var STOP2 = Object.fromEntries("the and for with that this from into have has had was were are you your they them their there here what when where which who how why just very some more most other then than about would could should will been being does did not but all any can its it's i'm he's she's".split(" ").map((w) => [w, true]));
@@ -50231,7 +50230,7 @@ ${lines.join(`
 `)}` : "";
 }
 function mindContext(scope) {
-  const { world, state, who, moment, card } = scope;
+  const { world, state, who, moment } = scope;
   const e = own(state.entities, who);
   const c = readCharacter(state, who);
   const place = placeOfEntity(state, who);
@@ -50244,7 +50243,6 @@ function mindContext(scope) {
   const parts = [
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
     block("Who you are", sheetLines(scope)),
-    card ? block("Your character card", [card.description, card.personality, card.scenario].filter((t) => t.trim() !== "").map((t) => clip(t, CARD_PART))) : "",
     c.summary !== "" ? block("Your story so far", [c.summary]) : "",
     block("Where you are", sceneLines(scope, place)),
     block("Your own life", lifeLines(scope, c)),
@@ -51973,9 +51971,7 @@ async function runMinds(deps, input) {
     const prompt = mindPrompt("mind", world, settings.minds, varsFor(world, state, who));
     if (!e)
       return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source } };
-    const characterId = own(world.entities, who)?.characterId;
-    const card = characterId ? await deps.host.characters.card(characterId, userId).catch(() => null) : null;
-    const scope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, card, moment: input.moment, loreTokens };
+    const scope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, moment: input.moment, loreTokens };
     const usage = { tokens: 0 };
     const t0 = performance.now();
     const raw = input.signal.aborted ? null : await deps.steps.helperJson("mind", prompt.text, mindContext(scope), config, userId, input.signal, { guidance, usage });
@@ -52081,7 +52077,7 @@ async function postMinds(deps, input) {
   const moment = { kind: "turn", at: state.clock, reason: "after the reply", user: input.user, reply: input.reply };
   const remembered = await Promise.all(remembering.map(async (id) => {
     const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
-    const scope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, card: null, moment, loreTokens: 0 };
+    const scope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, moment, loreTokens: 0 };
     const usage = { tokens: 0 };
     const t0 = performance.now();
     const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
@@ -54598,7 +54594,7 @@ class Runtime {
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792435888" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792436552" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -57591,12 +57587,6 @@ async function listScripts(options, userId) {
 function createSpindleHost() {
   const diagnostics = new DiagnosticsLog;
   return {
-    characters: {
-      async card(characterId, userId) {
-        const c = await spindle.characters.get(characterId, userId);
-        return c ? { name: c.name, description: c.description, personality: c.personality, scenario: c.scenario } : null;
-      }
-    },
     chats: {
       async messages(chatId) {
         const rows = await spindle.chat.getMessages(chatId);
