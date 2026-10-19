@@ -380,4 +380,12 @@ describe("holdings: property", () => {
     expect(balance(w, "savings")).toBe(5_000_000);
     expect(trialBalance(w.state)).toBe(0);
   });
+
+  test("a share of a property owned with someone sells only to a buyer in the world: the other owner's share stays theirs", () => {
+    const w = setup((world) => duplex(world, { owners: [{ party: "you", role: "owner", share: 60 }, { party: "jordan", role: "owner", share: 40 }] }));
+    const jordan = w.ctx.query("economy.net_worth")(w.ctx, "jordan") ?? 0;
+    expect(refuse(w, "economy.property_sell", { party: "you", property: "duplex", price: 18_000_000 })).toBe("needs_buyer");
+    expect(w.state.entities.duplex?.fields.owners).toEqual([{ party: "you", role: "owner", share: 60 }, { party: "jordan", role: "owner", share: 40 }]);
+    expect(w.ctx.query("economy.net_worth")(w.ctx, "jordan")).toBe(jordan);
+  });
 });

@@ -490,6 +490,8 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
   const price = Math.round(x.price);
   if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
   if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party)) return reject("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
+  // Someone outside the world can't hold a share beside the other owners: they buy a whole property from its only owner (§27.9).
+  if (x.buyer === undefined && owners.some((o) => o.party !== x.party && api.shareOf(ctx.state, x.property, o.party) > 0)) return reject("needs_buyer", `selling a share of ${e.name} needs a buyer in the world`);
   const to = x.to ?? api.depositAccount(ctx, x.party);
   if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
   if (x.to && !api.accountsOf(ctx, x.party, "worth").includes(x.to) && !api.accountsOf(ctx, x.party, "spend").includes(x.to)) return reject("not_yours", `${labelOf(ctx, x.to)} isn't ${labelOf(ctx, x.party)}'s`);
