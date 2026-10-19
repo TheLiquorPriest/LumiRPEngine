@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import type { TravelOption } from "../../../src/packs/vehicles/core/index";
 import { balance, priceOf } from "../../../src/packs/economy/core/model";
+import { holdingValue } from "../../../src/packs/economy/core/holdings";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { commitments } from "../../../src/packs/castlife/core/index";
 import { coreEventTypes, type EventTypes } from "../../../src/engine/events";
@@ -235,6 +236,26 @@ describe("Port Alder (modern_slice_of_life)", () => {
     expect(p.state.entities.danny_okafor?.fields.place).not.toBe("chicago_il");
   });
 
+  test("the player's index-fund account takes an investment from checking, counts the units it held, and moves on the seeded price path", () => {
+    const fund = "acct_pov_brokerage";
+    const run = () => {
+      const p = new Play("modern_slice_of_life");
+      const checking = balance(p.state, "acct_pov_checking");
+      expect(p.act("trade", { side: "buy", asset: "broad_us_equity_index", account: fund, amount: 50000, from: "acct_pov_checking" }).ok).toBe(true);
+      expect(balance(p.state, "acct_pov_checking")).toBe(checking - 50000);
+      const holding = Object.keys(p.state.entities).find((id) => p.state.entities[id]?.kind === "holding" && p.state.entities[id]?.fields.account === fund) ?? "";
+      const value = (): number => holdingValue(registry.context(p.world, p.state), holding);
+      // The $3,125.00 the account held, at the starting 100 a unit, and the $500.00 just bought.
+      expect(value()).toBe(362500);
+      p.lapse(14 * DAY);
+      return value();
+    };
+    const after = run();
+    expect(after).not.toBe(362500);
+    expect(after).toBeGreaterThan(250000);
+    expect(after).toBeLessThan(500000);
+    expect(run()).toBe(after); // the same run seed gives the same path
+  });
   test("the township truck puzzle shows in Quests once the shop takes the job", () => {
     const p = new Play("modern_slice_of_life");
     expect(playerTrack(registry, p.world, p.state, "pov", "p_township_truck")).toBeNull();
