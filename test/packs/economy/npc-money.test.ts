@@ -80,7 +80,11 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     const helen = view.money.find((m) => m.party === "helen_kowalczyk");
     expect(helen?.accounts.find((a) => a.id === "acct_helen_checking")?.cents).toBe(w.state.accounts.acct_helen_checking ?? 0);
     expect(helen?.recent.some((r) => r.memo === "Rent, Unit 2B" && r.cents === 99500)).toBe(true);
-    expect(helen?.recent.some((r) => r.memo === "Household share, 1A" && r.cents === 30000)).toBe(true);
+    // Her building's outside tenant pays and its insurance is paid on the 1st as well, so those are
+    // among her newest lines; Jess's household share, paid the same morning, shows on Jess's side.
+    expect(helen?.recent.some((r) => r.memo === "Rent, 114 Harbor Street, unit 3" && r.cents > 0)).toBe(true);
+    expect(helen?.recent.some((r) => r.memo === "Insurance, 114 Harbor Street" && r.cents === -18500)).toBe(true);
+    expect(view.money.find((m) => m.party === "jess_kowalczyk")?.recent.some((r) => r.memo === "Household share, 1A" && r.cents === 30000)).toBe(true);
     const danny = view.money.find((m) => m.party === "danny_okafor");
     expect(danny?.notes.some((n) => n.text.startsWith("Payday:"))).toBe(true);
     expect(danny?.recent.some((r) => r.memo === "Living costs" && r.cents < 0)).toBe(true);
