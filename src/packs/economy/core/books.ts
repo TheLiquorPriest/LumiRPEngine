@@ -36,8 +36,12 @@ export const BOOK_KEYS = [
 export type BookKey = (typeof BOOK_KEYS)[number];
 export type MonthBook = Record<BookKey, number>;
 
-/** Journal categories of postings the work module books itself, left out of the other income and expenses. Transfers between its own accounts are neither. */
-export const BOOKED_CATEGORIES: readonly string[] = ["sales", "cogs", "sales_tax", "invoice", "payroll", "business_tax", "draw", "distribution", "transfer"];
+/**
+ * Journal categories the books leave out of the other income and expenses: what the work module
+ * books itself; transfers between its own accounts; and balance-sheet moves (money borrowed, and
+ * investments and property bought and sold), which change what it holds, not what it makes.
+ */
+export const BOOKED_CATEGORIES: readonly string[] = ["sales", "cogs", "sales_tax", "invoice", "payroll", "business_tax", "draw", "distribution", "transfer", "loan", "investment", "property"];
 
 /** Months of books kept per business: two years and the month under way. */
 const MONTHS_KEPT = 25;

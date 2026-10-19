@@ -22,3 +22,17 @@ describe("business books: payouts", () => {
     expect(act(w, "economy.distribute", { business: "daybreak", by: "maya" }, "d3").rejected).toHaveLength(1);
   });
 });
+
+describe("business books: revenue and expenses", () => {
+  test("borrowing money and buying investments move the balance sheet, not the books", () => {
+    const { w } = setup((wd) => {
+      wd.packs.economy!.config = { ...wd.packs.economy!.config, assets: { acme: { label: "Acme Corp", symbol: "ACME", class: "security", price: 10_000 } } };
+    });
+    expect(act(w, "economy.apply_credit", { who: "daybreak", product: "loan", cents: 500_000, term: 24 }).rejected).toEqual([]);
+    expect(posts(w, /loan paid out/).some((p) => line(p, "db_operating") === 500_000)).toBe(true);
+    expect(act(w, "economy.trade", { party: "daybreak", side: "buy", asset: "acme", amount: 300_000, from: "db_operating" }).rejected).toEqual([]);
+    expect(posts(w, /^Bought/).some((p) => line(p, "db_operating") === -300_000)).toBe(true);
+    const books = w.ctx.query("economy.business_books")(w.ctx, "daybreak", w.state.clock - 1440, w.state.clock + 1);
+    expect(books).toMatchObject({ revenue: 0, expenses: 0, profit: 0 });
+  });
+});
