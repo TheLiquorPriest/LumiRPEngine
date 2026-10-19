@@ -6,6 +6,7 @@
 import type { GmView } from "../shared/state-view";
 import { worldMindsOf, type MindsSettings } from "../shared/minds";
 import { buildGmWorld } from "../engine/gm-view";
+import { calendarOf, formatClock } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
 import { activeRecord } from "../engine/ledger/path";
@@ -30,6 +31,6 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
     ...buildGmWorld(registry, render.world, render.state),
     edits: edits.reverse().slice(0, GM_EDITS),
     refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
-    minds: { enabled: minds.enabled, secrecy: worldMindsOf(render.world).secrecy, characters: [] },
+    minds: { enabled: minds.enabled, secrecy: worldMindsOf(render.world).secrecy, now: render.state.clock, nowText: formatClock(calendarOf(render.world), render.state.clock), characters: [] },
   };
 }

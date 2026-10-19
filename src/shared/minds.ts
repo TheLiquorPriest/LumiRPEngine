@@ -699,6 +699,9 @@ export interface MindsGmCharacter {
 export interface MindsGmView {
   enabled: boolean;
   secrecy: MindsSecrecy;
+  /** The chat's clock (game minutes) and in words: what a plan added "in N hours" counts from. */
+  now: number;
+  nowText: string;
   /** Every person but the POV, closest on the ladder first. */
   characters: MindsGmCharacter[];
 }

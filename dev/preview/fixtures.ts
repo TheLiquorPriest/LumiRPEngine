@@ -593,7 +593,7 @@ export function gmFixture(): GmView {
       { messageId: "m2", seq: 7, lines: ["Vic Moreau is gone"] },
     ],
     refused: [{ id: "w-17", reason: "Dev Patel's energy must be between 0 and 100." }],
-    minds: { enabled: true, secrecy: "brief", characters: [] },
+    minds: { enabled: true, secrecy: "brief", now: 0, nowText: "Mon 19 Oct 2026, 07:00", characters: [] },
   };
 }
 
