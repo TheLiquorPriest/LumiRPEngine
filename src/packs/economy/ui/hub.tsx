@@ -99,8 +99,8 @@ function Overview(props: SectionProps) {
 
 /** One party's money hub: its sections as tabs, the one picked drawn below. */
 export function MoneyHub(props: SectionProps & { label: string }) {
-  const { view } = props;
-  const tabs = hubTabs(view);
+  const { view, controls } = props;
+  const tabs = hubTabs(view, controls.mode);
   const [section, setSection] = useState<HubSection>("overview");
   const panelId = useId();
   // A section the party no longer has (a business sold, a level lowered) falls back to the overview.

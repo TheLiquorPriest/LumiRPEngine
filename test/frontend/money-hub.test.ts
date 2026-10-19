@@ -75,17 +75,26 @@ describe("the view as it arrives", () => {
 
 describe("realism gating", () => {
   test("Money 0 shows nothing, Money 1 only the overview's band; a party shows only the sections it has", () => {
-    expect(hubTabs(view({ level: 0 }))).toEqual([]);
-    expect(hubTabs(view({ level: 1, accounts: [checking] })).map((t) => t.id)).toEqual(["overview"]);
-    expect(hubTabs(view({ accounts: [checking] })).map((t) => t.id)).toEqual(["overview", "accounts", "flows"]);
+    expect(hubTabs(view({ level: 0 }), "player")).toEqual([]);
+    expect(hubTabs(view({ level: 1, accounts: [checking] }), "player").map((t) => t.id)).toEqual(["overview"]);
+    expect(hubTabs(view({ accounts: [checking] }), "player").map((t) => t.id)).toEqual(["overview", "accounts", "flows"]);
     const full = view({ level: 4, detail: true, accounts: [checking], investments: { value: 1, cost: 1, unrealised: 0, realised: 0, holdings: [] }, credit: { person: "pov", score: 712, band: "good", tier: "prime", asOf: "Oct 1", factors: null, history: [], utilisationPct: 34, ageMonths: 50, onTimePct: 100, accounts: [], inquiries: [], marks: [], offers: [] } });
-    expect(hubTabs(full).map((t) => t.id)).toEqual(["overview", "accounts", "flows", "investments", "credit"]);
+    expect(hubTabs(full, "player").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "investments", "credit"]);
   });
 
   test("a household that holds no account itself shows its members, with no empty Accounts or Flows tab", () => {
     const household = { id: "home", name: "The Kowalczyks", members: [{ id: "helen", name: "Helen", role: "head", share: 60 }], accounts: [], flows: [], monthly: { total: 52000, parts: [{ id: "helen", name: "Helen", cents: 31200 }] } };
-    expect(hubTabs(view({ partyKind: "household", household })).map((t) => t.id)).toEqual(["overview", "household"]);
-    expect(hubTabs(view({ partyKind: "household" })).map((t) => t.id)).toEqual(["overview"]);
+    expect(hubTabs(view({ partyKind: "household", household }), "player").map((t) => t.id)).toEqual(["overview", "household"]);
+    expect(hubTabs(view({ partyKind: "household" }), "player").map((t) => t.id)).toEqual(["overview"]);
+  });
+
+  test("the GM also gets the sections it adds to while they're empty: a person's Jobs, Properties, and a person's Household from Money 3", () => {
+    expect(hubTabs(view({ accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "jobs", "properties", "household"]);
+    // Below Money 3 a household doesn't show, so there's nothing to add to; a business holds no job.
+    expect(hubTabs(view({ level: 2, features: [], accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "jobs", "properties"]);
+    expect(hubTabs(view({ partyKind: "business", accounts: [checking] }), "gm").map((t) => t.id)).toEqual(["overview", "accounts", "flows", "properties"]);
+    // A band and no accounts yet: what the GM adds wouldn't show.
+    expect(hubTabs(view({ overview: null, cash: { band: "modest" } }), "gm").map((t) => t.id)).toEqual(["overview"]);
   });
 
   test("below the top level an account shows its balance and a few lines, never its terms, statements, pending lines or holds", () => {

@@ -490,3 +490,12 @@ export function fieldOps(entity: EntityId, was: Readonly<JsonObject>, now: Reado
 export function jobSpawnOps(id: EntityId, name: string, fields: JsonObject): EditOp[] {
   return [{ op: "spawn", kind: "job", name, id }, ...Object.entries({ ...fields, status: "active" }).map(([field, value]): EditOp => ({ op: "set", entity: id, field, value }))];
 }
+
+/** The GM's new property for a party: spawned under its name, the party its whole owner, at its value, in one edit. */
+export function propertySpawnOps(id: EntityId, name: string, owner: EntityId, value: number): EditOp[] {
+  return [
+    { op: "spawn", kind: "property", name, id },
+    { op: "set", entity: id, field: "owners", value: [{ party: owner, role: "owner", share: 100 }] },
+    { op: "set", entity: id, field: "value", value },
+  ];
+}

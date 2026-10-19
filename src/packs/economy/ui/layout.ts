@@ -39,21 +39,26 @@ export interface HubTab {
  * The hub's sections for a party, in order. Money 1 is a band and nothing else; from 2 a section
  * shows when the party has something there (accounts; flows, or the feature that runs them from
  * its accounts; a job, a household, …), so a household that holds no account of its own still
- * shows its members, and a player with no job or business sees no empty tab for one.
+ * shows its members, and a player with no job or business sees no empty tab for one. The GM also
+ * gets the sections that hold its create controls while they're empty, wherever what it adds would
+ * show: a person's Jobs, anyone's Properties, and a person's Household from Money 3.
  */
-export function hubTabs(view: FinanceView): HubTab[] {
+export function hubTabs(view: FinanceView, mode: "player" | "gm"): HubTab[] {
   if (view.level <= 0) return [];
   const tabs: HubTab[] = [{ id: "overview", label: SECTION_LABELS.overview, dot: view.overview?.alerts.some((a) => a.tone !== "info") ?? false }];
   if (view.level === 1) return tabs;
   const hasAccounts = view.accounts.length > 0;
+  // A view without an overview is a band only (no accounts yet): nothing the GM adds would show in it.
+  const creates = mode === "gm" && view.overview !== null;
+  const person = view.partyKind === "person";
   if (hasAccounts) tabs.push({ id: "accounts", label: SECTION_LABELS.accounts, dot: view.accounts.some((a) => a.status !== "open" || a.statements.some((s) => s.state === "late") || a.cards.some((c) => c.state === "lost")) });
   if ((hasAccounts && view.features.includes("flows")) || view.flows.length > 0) tabs.push({ id: "flows", label: SECTION_LABELS.flows, dot: view.flows.some((f) => f.missed > 0 && f.status === "active") });
-  if (view.jobs.length > 0) tabs.push({ id: "jobs", label: SECTION_LABELS.jobs, dot: false });
+  if (view.jobs.length > 0 || (creates && person)) tabs.push({ id: "jobs", label: SECTION_LABELS.jobs, dot: false });
   if (view.businesses.length > 0) tabs.push({ id: "businesses", label: SECTION_LABELS.businesses, dot: view.businesses.some((b) => b.invoices.some((i) => i.state === "late")) });
   if (view.investments !== null) tabs.push({ id: "investments", label: SECTION_LABELS.investments, dot: false });
-  if (view.properties.length > 0) tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
+  if (view.properties.length > 0 || creates) tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
   if (view.credit !== null) tabs.push({ id: "credit", label: SECTION_LABELS.credit, dot: view.credit.marks.length > 0 });
-  if (view.household !== null) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
+  if (view.household !== null || (creates && person && view.level >= 3)) tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
   return tabs;
 }
 

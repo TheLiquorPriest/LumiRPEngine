@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView, HoldingView } from "../../src/shared/finance";
-import { businessControls, endableLeases, flowControls, holdingControls, invoiceControls, jobControls, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets } from "../../src/packs/economy/ui/layout";
+import { businessControls, endableLeases, flowControls, holdingControls, hubTabs, invoiceControls, jobControls, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets } from "../../src/packs/economy/ui/layout";
 import {
   distributeAction,
   drawAction,
@@ -22,6 +22,7 @@ import {
   newIdFor,
   propertyBuyAction,
   propertySellAction,
+  propertySpawnOps,
   raiseAction,
   routeAction,
   routeOps,
@@ -45,6 +46,9 @@ const MARCUS_CHECKING = "acct_marcus_checking";
 const MARCUS_MORTGAGE = "acct_marcus_mortgage";
 const DANNY = "danny_okafor";
 const DANNY_CHECKING = "acct_danny_checking";
+/** Dale has an account, but no job, property or household. */
+const DALE = "dale_whitcomb";
+const KOWALCZYKS = "household_kowalczyk";
 const INDEX = "hold_pov_index";
 const LKFR = "hold_pov_lkfr";
 /** Marcus's house on Birch Lane, and the POV's rent on 114 Harbor Street. */
@@ -241,6 +245,27 @@ describe("The GM view's Jobs and Businesses: each control applies as the GM's ed
     expect(gm.fields.get(SHOP)).toContain("invoice_days");
     accepted(await chat.edit([{ op: "set", entity: SHOP, field: "invoice_days", value: 45 }]));
     expect((await chat.gm()).values.get(SHOP)?.invoice_days).toBe(45);
+  });
+
+  test("for someone with no job, property or household, the GM still has Jobs, Properties and Household to add one in", async () => {
+    const chat = await MoneyChat.start();
+    const dale = await chat.party(DALE);
+    expect([dale.jobs, dale.properties, dale.household]).toEqual([[], [], null]);
+    expect(hubTabs(dale, "gm").map((t) => t.id)).toEqual(expect.arrayContaining(["jobs", "properties", "household"]));
+    const taken = new Set((await chat.gm()).fields.keys());
+    // Add a job, as its form sends it.
+    const job = newIdFor("job", "Dale Whitcomb Driver", taken);
+    accepted(await chat.edit(jobSpawnOps(job, "Driver at Alder Automotive", { worker: DALE, employer: SHOP, title: "Driver", basis: "hourly", rate: chat.cents("19"), pay_every: "weekly" })));
+    expect(find((await chat.party(DALE)).jobs, job)).toMatchObject({ title: "Driver", employer: "Alder Automotive", pay: "$19.00 an hour", status: "active" });
+    // Add a property: Dale its whole owner, at its value.
+    const cabin = newIdFor("prop", "The lake cabin", taken);
+    accepted(await chat.edit(propertySpawnOps(cabin, "The lake cabin", DALE, chat.cents("185000"))));
+    expect(find((await chat.party(DALE)).properties, cabin)).toMatchObject({ name: "The lake cabin", share: 100, value: 18500000 });
+    // Add to a household: Dale joins the Kowalczyks.
+    accepted(await chat.edit([{ op: "link", rel: "member_of", from: DALE, to: KOWALCZYKS }]));
+    const joined = await chat.party(DALE);
+    expect(joined.household?.id).toBe(KOWALCZYKS);
+    expect(joined.household?.members.map((m) => m.id)).toContain(DALE);
   });
 });
 

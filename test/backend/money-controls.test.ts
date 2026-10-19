@@ -394,7 +394,7 @@ describe("GM view → Money: each control is one edit", () => {
     const chat = await MoneyChat.start();
     accepted(await chat.edit([{ op: "spawn", kind: "household", name: "Unit 2B", id: "unit_2b" }, { op: "link", rel: "member_of", from: "pov", to: "unit_2b" }]));
     let mine = await chat.hub();
-    expect(hubTabs(mine).map((t) => t.id)).toContain("household");
+    expect(hubTabs(mine, "player").map((t) => t.id)).toContain("household");
     expect(mine.household?.members.map((m) => m.id)).toEqual(["pov"]);
     // As the household's Add a member and its ✕ send them.
     accepted(await chat.edit([{ op: "link", rel: "member_of", from: DANNY, to: "unit_2b" }]));
@@ -437,7 +437,7 @@ describe("the hub shows what each Money level shows", () => {
     const chat = await MoneyChat.start();
     const top = await chat.hub();
     expect(top.level).toBe(4);
-    expect(hubTabs(top).map((t) => t.id)).toEqual(expect.arrayContaining(["overview", "accounts", "flows", "credit"]));
+    expect(hubTabs(top, "player").map((t) => t.id)).toEqual(expect.arrayContaining(["overview", "accounts", "flows", "credit"]));
     expect(account(top, CARD).aprPct).toBe(22);
     expect(accountBlocks(top, account(top, CARD)).terms).toBe(true);
     expect(overviewBlocks(top)).toMatchObject({ cashFlowAhead: true, upcoming: 20 });
@@ -446,7 +446,7 @@ describe("the hub shows what each Money level shows", () => {
     await chat.level(3);
     const three = await chat.hub();
     expect(three.level).toBe(3);
-    const threeTabs = hubTabs(three).map((t) => t.id);
+    const threeTabs = hubTabs(three, "player").map((t) => t.id);
     expect(threeTabs).toContain("flows");
     expect(threeTabs).not.toContain("credit");
     expect(three.accounts.map((a) => a.id).sort()).toEqual(top.accounts.map((a) => a.id).sort());
@@ -459,7 +459,7 @@ describe("the hub shows what each Money level shows", () => {
     await chat.level(2);
     const two = await chat.hub();
     expect(two.accounts.map((a) => a.id).sort()).toEqual(["acct_pov_cash", CHECKING]);
-    const twoTabs = hubTabs(two).map((t) => t.id);
+    const twoTabs = hubTabs(two, "player").map((t) => t.id);
     expect(twoTabs).toContain("accounts");
     expect(twoTabs).not.toContain("flows");
     expect(two.flows).toEqual([]);
@@ -470,7 +470,7 @@ describe("the hub shows what each Money level shows", () => {
     const one = await chat.hub();
     expect(one.accounts).toEqual([]);
     expect(one.cash).toEqual({ band: one.band ?? "" });
-    expect(hubTabs(one).map((t) => t.id)).toEqual(["overview"]);
+    expect(hubTabs(one, "player").map((t) => t.id)).toEqual(["overview"]);
   });
 
   test("the GM view draws every party with money at their own level, the POV first", async () => {
@@ -483,7 +483,7 @@ describe("the hub shows what each Money level shows", () => {
     const danny = money.find((m) => m.party === DANNY);
     expect(sam?.level).toBe(2);
     expect(sam?.flows).toEqual([]);
-    expect(sam ? hubTabs(sam).map((t) => t.id) : []).not.toContain("flows");
+    expect(sam ? hubTabs(sam, "gm").map((t) => t.id) : []).not.toContain("flows");
     expect(helen?.level).toBe(3);
     expect(helen?.flows.length).toBeGreaterThan(0);
     expect(helen?.credit).toBeNull();
@@ -492,7 +492,7 @@ describe("the hub shows what each Money level shows", () => {
     // A household shows as its members do: who's in it and the costs they share, picked itself or seen from a member's money.
     const household = money.find((m) => m.party === "household_kowalczyk");
     expect(household?.partyKind).toBe("household");
-    expect(household ? hubTabs(household).map((t) => t.id) : []).toContain("household");
+    expect(household ? hubTabs(household, "gm").map((t) => t.id) : []).toContain("household");
     for (const view of [household, helen]) {
       expect(view?.household?.members.map((m) => m.id).sort()).toEqual(["helen_kowalczyk", "jess_kowalczyk", "maddie_kowalczyk"]);
       expect(view?.household?.monthly.total ?? 0).toBeGreaterThan(0);
