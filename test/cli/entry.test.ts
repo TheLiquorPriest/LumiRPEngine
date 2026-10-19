@@ -93,7 +93,7 @@ describe("the lumirpengine entry", () => {
     expect(run.out.trim()).toMatch(/^lumirpengine \d+\.\d+\.\d+ \(engine \d+\.\d+\.\d+, world format lre-world-v1, agent API \d+\)$/);
   });
 
-  test("a piped template prints the whole export file, which check then reads", async () => {
+  test("a piped template prints the whole export file, which check then reads; check exits 1 on a file that fails", async () => {
     const run = await cli(["template", "mystery_manor"]);
     expect(run.code).toBe(0);
     const file = JSON.parse(run.out) as { format: string; world: { name: string } };
@@ -102,7 +102,18 @@ describe("the lumirpengine entry", () => {
     writeFileSync(path, run.out);
     const check = await cli(["check", path]);
     expect(check.code).toBe(0);
-    expect(JSON.parse(check.out)).toMatchObject({ ok: true, errors: 0, contents: { entities: 38 } });
+    expect(JSON.parse(check.out)).toMatchObject({ ok: true, loads: true, errors: 0, contents: { entities: 38 } });
+    // A script goes by the exit code: a file that doesn't load, or loads with lint errors, is a failure.
+    const broken = join(home, "broken-world.json");
+    writeFileSync(broken, "{ nope");
+    const failed = await cli(["check", broken]);
+    expect(failed.code).toBe(1);
+    expect(JSON.parse(failed.out)).toMatchObject({ ok: false, loads: false });
+    const erring = join(home, "erring-world.json");
+    writeFileSync(erring, JSON.stringify({ ...file, world: { ...file.world, pov: "nobody" } }));
+    const linted = await cli(["check", erring]);
+    expect(linted.code).toBe(1);
+    expect(JSON.parse(linted.out)).toMatchObject({ ok: false, loads: true });
   });
 });
 

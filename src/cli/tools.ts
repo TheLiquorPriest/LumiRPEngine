@@ -165,7 +165,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "lre_edit",
     description:
-      'Change a world\'s draft with JSON Patch (RFC 6902): add, remove, replace, move, copy and test, each path a JSON Pointer into the whole world ("/entities/mara/fields/place"). All the operations apply or none do. The draft is the user\'s Build draft too. Pass expectVersion (the draft version you last read) so that a change made since is refused, not overwritten. Answers the new version, what changed per collection, the first lint issues and any macro hazards the edit brought in.',
+      'Change a world\'s draft with JSON Patch (RFC 6902): add, remove, replace, move, copy and test, each path a JSON Pointer into the whole world ("/entities/mara/fields/place"). All the operations apply or none do. The draft is the user\'s Build draft too. Pass expectVersion (the draft version you last read) so that a change made since is refused, not overwritten. Without it, when someone writes the draft between this call\'s read and its patch, the patch still goes on top of their write if that write changed none of the items the patch touches (the answer\'s meanwhile lists what it changed); if it did, the edit is refused and names those items. Answers the new version, what changed per collection, the first lint issues and any macro hazards the edit brought in.',
     inputSchema: object(
       {
         worldId: WORLD_ID,

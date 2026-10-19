@@ -235,11 +235,12 @@ function patchOps(raw: unknown): JsonPatchOp[] {
   return raw.map((op, i): JsonPatchOp => {
     const where = `ops[${i}]`;
     if (!isRecord(op) || typeof op.op !== "string" || !hasOwn(PATCH_OPS, op.op)) throw new ToolError(`${where}: op is one of add, remove, replace, move, copy and test.`);
-    if (typeof op.path !== "string") throw new ToolError(`${where}: path must be a JSON Pointer ("/entities/mara").`);
+    // Checked here too, not only by LumiRPEngine: a conflict's retry reads every pointer of the patch.
+    if (typeof op.path !== "string" || (op.path !== "" && !op.path.startsWith("/"))) throw new ToolError(`${where}: path must be a JSON Pointer ("/entities/mara").`);
     const { path } = op;
     if (op.op === "remove") return { op: "remove", path };
     if (op.op === "move" || op.op === "copy") {
-      if (typeof op.from !== "string") throw new ToolError(`${where}: ${op.op} needs from, a JSON Pointer.`);
+      if (typeof op.from !== "string" || (op.from !== "" && !op.from.startsWith("/"))) throw new ToolError(`${where}: ${op.op} needs from, a JSON Pointer.`);
       return { op: op.op, from: op.from, path };
     }
     if (op.value === undefined) throw new ToolError(`${where}: ${op.op} needs a value.`);
@@ -252,6 +253,21 @@ function stale(worldId: string, now: number, expected: number, refused: string, 
   return new ToolError(`${refused}: the draft of ${worldId} is at version ${now}, not ${expected}. It was written since you read it (by the user in Build, or another agent). Read it again (lre_world or lre_draft), then ${then}.`);
 }
 
+/**
+ * The changed items a patch reaches: an op's `path` (or a move's or copy's `from`) inside one, or
+ * one inside it (`/entities` holds every entity, `""` the whole world).
+ */
+function inTheWay(ops: readonly JsonPatchOp[], changes: readonly Change[]): Change[] {
+  const pointers = ops.flatMap((op) => ("from" in op ? [op.path, op.from] : [op.path])).map(parsePointer);
+  return changes.filter((change) => {
+    const item = parsePointer(change.key);
+    return pointers.some((pointer) => {
+      const [short, long] = pointer.length <= item.length ? [pointer, item] : [item, pointer];
+      return short.every((token, i) => token === long[i]);
+    });
+  });
+}
+
 export type Serialize = <T>(key: string, run: () => Promise<T>) => Promise<T>;
 
 export function editTool(live: Live, args: Args, serialize: Serialize): Promise<ToolResult> {
@@ -259,42 +275,54 @@ export function editTool(live: Live, args: Args, serialize: Serialize): Promise<
   const ops = patchOps(args.ops);
   const expected = intArg(args, "expectVersion", 0, MAX_OFFSET);
   return serialize(`world:${worldId}`, async () => {
-    for (let attempt = 1; ; attempt++) {
-      const before = await live.draft(worldId);
-      if (expected !== undefined && before.version !== expected) throw stale(worldId, before.version, expected, "Nothing changed", `redo the edit against version ${before.version}`);
-      let after: EditorBody;
+    const read = await live.draft(worldId);
+    if (expected !== undefined && read.version !== expected) throw stale(worldId, read.version, expected, "Nothing changed", `redo the edit against version ${read.version}`);
+    // The draft the patch goes onto: the one read, or once, the one another writer left in its place.
+    let onto = read;
+    let meanwhile: Change[] = [];
+    let after: EditorBody | null = null;
+    while (after === null) {
       try {
-        // The base and version read just now: a write in between (or a commit and a new draft) is refused, not overwritten.
-        after = await live.conn.request("lre.editor", { op: "patch", worldId, base: before.base, version: before.version, ops });
+        // The base and version of `onto`: a write in between (or a commit and a new draft) is refused, not overwritten.
+        after = await live.conn.request("lre.editor", { op: "patch", worldId, base: onto.base, version: onto.version, ops });
       } catch (error) {
         if (!(error instanceof LreError)) throw error;
-        if (error.code === "conflict") {
-          // A conflict while the draft still stands where it was read is the patch's own `test` failing: retrying can't help.
-          const now = await live.draft(worldId);
-          if (now.version === before.version && now.base === before.base) throw new ToolError(`Nothing changed: ${error.message}`);
-          // Without expectVersion the edit is meant for the draft as it is: read it again once and apply.
-          if (expected === undefined && attempt === 1) continue;
-          throw stale(worldId, now.version, expected ?? before.version, "Nothing changed", `redo the edit against version ${now.version}`);
-        }
         if (error.code === "bad_request" || error.code === "validation") throw new ToolError(`Nothing changed: LumiRPEngine refused the patch. ${error.message}`);
-        throw error;
+        if (error.code !== "conflict") throw error;
+        const now = await live.draft(worldId);
+        // A conflict while the draft still stands where it was read is the patch's own `test` failing: retrying can't help.
+        if (now.version === onto.version && now.base === onto.base) throw new ToolError(`Nothing changed: ${error.message}`);
+        // With expectVersion the edit is meant for that version alone; without it, there is one retry.
+        if (expected !== undefined || onto !== read) throw stale(worldId, now.version, read.version, "Nothing changed", `redo the edit against version ${now.version}`);
+        meanwhile = changesBetween(read.draft, now.draft);
+        // The patch was written against the draft as read: where the other write changed what it touches, applying it anyway would overwrite that change unseen.
+        const overlap = inTheWay(ops, meanwhile);
+        if (overlap.length > 0) {
+          const items = clip(overlap.map((c) => `${c.label} at ${c.key}`).join("; "), 2000);
+          throw new ToolError(`Nothing changed: the draft of ${worldId} went from version ${read.version} to ${now.version} while this edit was on its way (written by the user in Build, or another agent), and that write changed what this patch touches: ${items}. Read ${overlap.length === 1 ? "it" : "them"} again (lre_world with that pointer), then redo the edit against version ${now.version}.`);
+        }
+        onto = now;
       }
-      const changes = changesBetween(before.draft, after.draft);
-      return {
-        text: json({
-          worldId,
-          version: after.version,
-          base: after.base,
-          changed: countsOf(changes),
-          items: changes.slice(0, 40),
-          moreItems: Math.max(0, changes.length - 40),
-          lint: lintSummary(after.lint, 12),
-          schema: lintSummary(schemaIssues(after.draft), 12),
-          macroHazards: newHazards(before.draft, after.draft),
-          ...(changes.length === 0 ? { note: "The patch applied, but the draft is the same as before." } : {}),
-        }),
-      };
     }
+    const changes = changesBetween(onto.draft, after.draft);
+    return {
+      text: json({
+        worldId,
+        version: after.version,
+        base: after.base,
+        changed: countsOf(changes),
+        items: changes.slice(0, 40),
+        moreItems: Math.max(0, changes.length - 40),
+        lint: lintSummary(after.lint, 12),
+        schema: lintSummary(schemaIssues(after.draft), 12),
+        macroHazards: newHazards(onto.draft, after.draft),
+        ...(changes.length === 0 ? { note: "The patch applied, but the draft is the same as before." } : {}),
+        // Said, not hidden: someone else is working in this draft right now.
+        ...(onto !== read
+          ? { meanwhile: { note: `The draft went from version ${read.version} to ${onto.version} while this edit was on its way (the user in Build, or another agent). That write touched nothing this patch does, so the patch went on top of it.`, items: meanwhile.slice(0, 20).map((c) => c.label), more: Math.max(0, meanwhile.length - 20) } }
+          : {}),
+      }),
+    };
   });
 }
 

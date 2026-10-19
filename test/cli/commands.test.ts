@@ -8,6 +8,7 @@ import { run } from "../../src/cli/commands";
 import type { Http } from "../../src/cli/connection";
 import { CredentialStore } from "../../src/cli/credentials";
 import type { McpServer } from "../../src/cli/mcp";
+import { templateFile } from "../../src/cli/offline";
 import { isRecord } from "../../src/shared/json";
 import { FakeLumiverse, USER } from "./fake-lumiverse";
 
@@ -19,17 +20,20 @@ interface Terminal {
   asked: string[];
 }
 
-/** A terminal with nobody at it (every prompt answers nothing) and a credentials file of its own. */
-function terminal(fake: FakeLumiverse, options: { env?: Record<string, string>; http?: Http } = {}): Terminal {
+/** A terminal with nobody at it (every prompt answers nothing), stdout a terminal too (unpiped), and a credentials file of its own; `files` are the files it can read. */
+function terminal(fake: FakeLumiverse, options: { env?: Record<string, string>; http?: Http; files?: Record<string, string> } = {}): Terminal {
   const out: string[] = [];
   const err: string[] = [];
   const asked: string[] = [];
   let saved: string | null = null;
+  const files = options.files ?? {};
   const io: CliIO = {
     out: (text) => void out.push(text),
     err: (text) => void err.push(text),
     readFile: (path) => {
-      throw new Error(`ENOENT: no such file, open '${path}'`);
+      const text = files[path];
+      if (text === undefined) throw new Error(`ENOENT: no such file, open '${path}'`);
+      return text;
     },
     writeFile: () => undefined,
     env: options.env ?? {},
@@ -133,6 +137,24 @@ describe("a running mcp server", () => {
     const flagged = serverOf(await run(["mcp", "--read-only"], terminal(fake).io));
     expect(await toolNames(flagged.mcp)).not.toContain("lre_edit");
     flagged.close();
+  });
+});
+
+describe("check in a terminal", () => {
+  test("prints the report and exits 1 on a world that fails, unpiped as when piped, and 0 on a clean one", async () => {
+    const file = templateFile("mystery_manor") as { world: Record<string, unknown> };
+    const files = { "clean.json": JSON.stringify(file), "broken.json": "{ nope", "erring.json": JSON.stringify({ ...file, world: { ...file.world, pov: "nobody" } }) };
+    const cases: [string, number, Record<string, unknown>][] = [
+      ["clean.json", 0, { ok: true, loads: true }],
+      ["broken.json", 1, { ok: false, loads: false }],
+      ["erring.json", 1, { ok: false, loads: true }],
+    ];
+    for (const [path, code, report] of cases) {
+      const t = terminal(new FakeLumiverse(), { files });
+      expect(t.io.stdoutIsTTY).toBe(true);
+      expect([path, await run(["check", path], t.io)]).toEqual([path, { code }]);
+      expect(JSON.parse(t.out.join("\n"))).toMatchObject(report);
+    }
   });
 });
 

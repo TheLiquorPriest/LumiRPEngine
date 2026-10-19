@@ -128,6 +128,8 @@ export function checkTool(args: Args, readFile: (path: string) => string): ToolR
   const report = {
     ok: lint.errors === 0,
     from: input.from,
+    // Said either way, so `loads` alone tells a shape failure from lint errors.
+    loads: true,
     world: { id: result.world.id, name: result.world.name, writtenBy, engine: ENGINE_VERSION },
     contents: contentsOf(result.world),
     errors: lint.errors,

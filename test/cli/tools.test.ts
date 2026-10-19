@@ -22,6 +22,19 @@ async function call(ctx: ToolContext, name: string, args: Record<string, unknown
 
 const person = (id: string, name: string, extra: Record<string, unknown> = {}) => ({ id, kind: "person", name, tier: "background", fields: {}, relations: [], ...extra });
 
+/** Build writes `ops` to the draft once, just before the next patch a tool sends: after the tool read the draft, before its write lands. */
+function buildWritesFirst(fake: FakeLumiverse, worldId: string, ops: unknown[]): void {
+  const handle = fake.lre.handle.bind(fake.lre);
+  let pending = true;
+  fake.lre.handle = (r) => {
+    if (pending && r.type === "lre.editor" && r.op === "patch") {
+      pending = false;
+      handle({ lre: 1, type: "lre.editor", reqId: "build", op: "patch", worldId, base: null, ops });
+    }
+    return handle(r);
+  };
+}
+
 describe("live tools", () => {
   test("lre_worlds lists each world with its draft; lre_world reads the draft by default, the head and a revision by prefix", async () => {
     const fake = new FakeLumiverse();
@@ -62,31 +75,58 @@ describe("live tools", () => {
     expect(stale.text).toContain("is at version 1, not 0");
     const bad = await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "move", path: "/x" }] });
     expect(bad.text).toBe("ops[0]: move needs from, a JSON Pointer.");
+    const pointerless = await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "entities/mara/name", value: "x" }] });
+    expect(pointerless.text).toBe('ops[0]: path must be a JSON Pointer ("/entities/mara").');
     const refused = await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/entities/nobody/name", value: "x" }] });
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain("Nothing changed: LumiRPEngine refused the patch.");
     expect(fake.lre.sent("lre.editor", "patch")).toHaveLength(2);
   });
 
-  test("lre_edit without expectVersion rereads once when someone wrote in between", async () => {
+  test("lre_edit without expectVersion goes on top of a write made in between when that write touches nothing the patch does", async () => {
     const fake = new FakeLumiverse();
     const w = fake.lre.seed("Alpha");
     const { ctx } = client(fake);
-    // Build writes between the tool's read and its patch: the first patch meets a moved version.
-    const handle = fake.lre.handle.bind(fake.lre);
-    let raced = false;
-    fake.lre.handle = (r) => {
-      if (r.type === "lre.editor" && r.op === "patch" && !raced) {
-        raced = true;
-        handle({ lre: 1, type: "lre.editor", reqId: "build", op: "patch", worldId: w.index.id, base: null, ops: [{ op: "add", path: "/entities/from_build", value: person("from_build", "Build") }] });
-      }
-      return handle(r);
-    };
+    buildWritesFirst(fake, w.index.id, [{ op: "add", path: "/entities/from_build", value: person("from_build", "Build") }]);
     const edit = await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "add", path: "/entities/mara", value: person("mara", "Mara") }] });
     expect(edit.data.version).toBe(2);
     expect(Object.keys(w.draft?.doc.entities ?? {})).toEqual(expect.arrayContaining(["from_build", "mara"]));
     // The first patch is Build's own; the tool's met a moved version, read again and applied on version 1.
     expect(fake.lre.sent("lre.editor", "patch").map((r) => r.version)).toEqual([undefined, 0, 1]);
+    // The answer counts the patch's own change, and says what the other write did.
+    expect(edit.data.items).toEqual([expect.objectContaining({ key: "/entities/mara", kind: "added" })]);
+    expect(edit.data.meanwhile).toMatchObject({ items: ["entities › Build (from_build)"], more: 0 });
+  });
+
+  test("lre_edit without expectVersion refuses, and doesn't retry, when a write made in between changed what the patch touches", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const worldId = w.index.id;
+    const { ctx } = client(fake);
+    await call(ctx, "lre_edit", { worldId, ops: [{ op: "add", path: "/entities/mara", value: person("mara", "Mara", { fields: { notes: "Keeps the ledger." } }) }, { op: "add", path: "/entities/bram", value: person("bram", "Bram") }] });
+    // The tool's own patches: Build's carry no version.
+    const tries = (): number => fake.lre.sent("lre.editor", "patch").filter((r) => r.version !== undefined).length;
+    // Build renames Mara after the tool read version 1 and before its patch lands: the agent's rename must not win unseen.
+    buildWritesFirst(fake, worldId, [{ op: "replace", path: "/entities/mara/name", value: "Mara Vale" }]);
+    const sent = tries();
+    const same = await call(ctx, "lre_edit", { worldId, ops: [{ op: "replace", path: "/entities/mara/name", value: "Mara Voss" }] });
+    expect(same.isError).toBe(true);
+    expect(same.text).toContain(`the draft of ${worldId} went from version 1 to 2`);
+    expect(same.text).toContain("entities › Mara Vale (mara) at /entities/mara");
+    expect(same.text).toContain("redo the edit against version 2");
+    expect(tries()).toBe(sent + 1);
+    expect(w.draft?.doc.entities.mara?.name).toBe("Mara Vale");
+    // A move out of the changed item reaches it through from, and a write to the whole collection holds it.
+    const reaching: unknown[][] = [[{ op: "move", from: "/entities/mara/fields/notes", path: "/entities/bram/fields/notes" }], [{ op: "replace", path: "/entities", value: {} }]];
+    for (const [i, ops] of reaching.entries()) {
+      buildWritesFirst(fake, worldId, [{ op: "replace", path: "/entities/mara/fields/notes", value: `Build's note ${i}` }]);
+      const before = tries();
+      const refused = await call(ctx, "lre_edit", { worldId, ops });
+      expect([i, refused.isError, refused.text.includes("at /entities/mara")]).toEqual([i, true, true]);
+      expect(tries()).toBe(before + 1);
+    }
+    expect(w.draft?.doc.entities.mara?.fields.notes).toBe("Build's note 1");
+    expect(Object.keys(w.draft?.doc.entities ?? {})).toEqual(expect.arrayContaining(["mara", "bram"]));
   });
 
   test("lre_draft, lre_diff, lre_commit with a note, and lre_history", async () => {
@@ -446,7 +486,7 @@ describe("offline tools", () => {
 
   test("check, playtest and check world run a starter with the bundled engine", async () => {
     const check = await call(ctx, "lre_check", { path: "manor.json" });
-    expect(check.data).toMatchObject({ ok: true, errors: 0, world: { id: "mystery_manor", name: "Mystery manor" } });
+    expect(check.data).toMatchObject({ ok: true, loads: true, errors: 0, world: { id: "mystery_manor", name: "Mystery manor" } });
     expect((check.data.contents as Record<string, number>).entities).toBeGreaterThan(5);
     const play = await call(ctx, "lre_playtest", { path: "manor.json", turns: ["look around", "wait an hour"] });
     expect((play.data.turns as { user: string }[]).map((t) => t.user)).toEqual(["look around", "wait an hour"]);
@@ -463,7 +503,7 @@ describe("offline tools", () => {
     const file = templateFile("fantasy_town") as { world: Record<string, unknown> };
     const world = { ...file.world, pov: "nobody", lore: { ...(file.world.lore as object), note: { id: "note", title: "Note", content: "Hello {{user}}", keys: [], links: [] } } };
     const check = await call(ctx, "lre_check", { world });
-    expect(check.data.ok).toBe(false);
+    expect(check.data).toMatchObject({ ok: false, loads: true });
     expect(check.data.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "missing_pov", severity: "error" })]));
     expect(check.data.macroHazards).toEqual(expect.arrayContaining([{ path: "lore.note.content", macro: "{{user}}" }]));
   });
