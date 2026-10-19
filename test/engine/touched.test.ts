@@ -113,6 +113,9 @@ function everythingWorld(): WorldDoc {
   w.entities.rat = { id: "rat", kind: "person", name: "Rat", tier: "background", fields: { place: "taproom", max_hp: 3 }, relations: [] };
   w.entities.acct = { id: "acct", kind: "account", name: "Checking", tier: "background", fields: { owner: "you", type: "checking" }, relations: [] };
   w.entities.card = { id: "card", kind: "account", name: "Card", tier: "background", fields: { owner: "you", type: "card" }, relations: [] };
+  w.entities.shop = { id: "shop", kind: "business", name: "Taproom", tier: "background", fields: { place: "taproom", owners: [{ party: "dev", role: "owner", share: 100 }] }, relations: [] };
+  w.entities.job_dev = { id: "job_dev", kind: "job", name: "Barkeep", tier: "background", fields: { worker: "dev", employer: "shop", basis: "hourly", rate: 1500 }, relations: [] };
+  w.entities.inv = { id: "inv", kind: "invoice", name: "Ale delivery", tier: "background", fields: { business: "shop", customer: "you", cents: 1000, due: "2026-01-01" }, relations: [] };
   w.tracks.heist = { id: "heist", kind: "quest", label: "The heist", start: "idea", visibility: "public", stages: { idea: { label: "An idea", next: [] }, on: { label: "Underway", next: [] } } };
   w.checks.initiative = { id: "initiative", dice: "d20" };
   w.ruleset = { combat: { initiative: "initiative", economy: { action: { label: "Action" } }, hp: "hp" } };
@@ -167,6 +170,14 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.status", data: { account: "acct", status: "frozen" } },
   { type: "economy.accrue", data: { account: "acct", at: 0 } },
   { type: "economy.decline", data: { reason: "no funds" } },
+  { type: "economy.payslip", data: { job: "job_dev", worker: "dev", through: 1440, gross: 12000, taxes: 1200, deductions: 0, net: 10800, minutes: 480, shifts: 1, year: 2026, month: 1, fica: 12000, pretax: 0, business: "shop", cost: 12000 } },
+  { type: "economy.timesheet", data: { job: "job_dev", minutes: 480, days: [0], since: 0 } },
+  { type: "economy.commission", data: { job: "job_dev", cents: 5000, since: 0 } },
+  { type: "economy.sale", data: { business: "shop", cents: 1000, tax: 60, cogs: 400, takings: 1060, payer: "you", memo: "Ale", category: "drinks" } },
+  { type: "economy.remit", data: { business: "shop", what: "sales_tax", cents: 60 } },
+  { type: "economy.invoice_paid", data: { invoice: "inv", business: "shop", customer: "you", cents: 1000 } },
+  { type: "economy.payout", data: { business: "shop", cents: 5000, kind: "draw", party: "dev" } },
+  { type: "economy.estimated_tax", data: { party: "dev", periods: ["2026-1"], cents: 500 } },
   { type: "relationships.regard", data: { from: "you", to: "dev", deltas: { warmth: 5 } } },
   { type: "castlife.need", data: { entity: "you", need: "hunger", delta: 10 } },
   { type: "castlife.decision", data: { key: "dev:evening", choice: "rest" } },
