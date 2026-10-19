@@ -233,7 +233,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_chats",
-    description: "Your chats that play a world (one world's, with worldId): chat id, name, the world and revision each plays, and whether it is behind the world's head.",
+    description: "Your chats that play a world (one world's, with worldId): chat id, name, the world and revision each plays, and whether it is behind the world's head. A chat whose state LumiRPEngine can't read has no revision, and a reason.",
     inputSchema: object({ worldId: { type: "string", description: "Only this world's chats." } }),
     write: false,
   },
@@ -246,7 +246,7 @@ export const TOOLS: readonly ToolDef[] = [
   {
     name: "lre_upgrade",
     description:
-      "Move a chat to a later revision of its world (the head by default). With preview, list what would change, entity by entity, with the default pick of each; without it, apply the Upgrade with the default picks (take what play never touched, keep what it changed). Changes about what the player hasn't found yet stay hidden unless spoilers is true.",
+      "Move a chat to a later revision of its world (the head by default). With preview, list what would change, entity by entity, with the default pick of each; without it, apply the Upgrade with the default picks (take what play never touched, keep what it changed). Changes about what the player hasn't found yet stay hidden unless spoilers is true. Applied while the chat is mid-turn, the Upgrade is pending: it lands when that turn ends.",
     inputSchema: object({ chatId: { type: "string", description: "The chat's id (lre_chats)." }, to: { type: "string", description: "The revision to move to (default: the world's head)." }, preview: { type: "boolean", description: "Only list what would change." }, spoilers: { type: "boolean", description: "With preview, show hidden changes too." } }, ["chatId"]),
     write: { destructive: true, idempotent: true },
   },

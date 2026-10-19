@@ -29,13 +29,13 @@ class Refusal extends Error {
   }
 }
 
-
-
 interface StoredWorld {
   index: WorldIndex;
+  /** Kept beside the index, as the backend keeps `history.json`: `list` leaves it out, `get` carries it. */
+  history: RevisionNote[];
   revisions: Map<string, WorldDoc>;
   draft: { base: string; doc: WorldDoc; version: number } | null;
-  /** The last draft's version: a new draft counts on from it, so a version never names two drafts. */
+  /** The working copy's version while no draft is stored: a discard or commit counts one, and a new draft starts above it. */
   lastVersion: number;
 }
 
@@ -48,6 +48,8 @@ export class FakeLre {
   /** What `lre.hello` answers as `agentApi`; undefined answers none, as an older build does. */
   agentApi: number | undefined = 1;
   preview: MarkerPreview = { lines: [] };
+  /** Whether an applied Upgrade waits for the chat's turn to end. */
+  upgradePending = false;
   private seq = 0;
 
   /** A world as `create` makes one, from a starter or blank. */
@@ -55,7 +57,7 @@ export class FakeLre {
     const id = `w_${(++this.seq).toString().padStart(4, "0")}`;
     const make = template !== undefined && hasOwn(STARTER_WORLDS, template) ? STARTER_WORLDS[template] : undefined;
     const doc = make ? make(id, name) : newWorld(id, name);
-    const stored: StoredWorld = { index: { id, name, head: "", loreBookId: null, revisions: [], history: [] }, revisions: new Map(), draft: null, lastVersion: 0 };
+    const stored: StoredWorld = { index: { id, name, head: "", loreBookId: null, revisions: [] }, history: [], revisions: new Map(), draft: null, lastVersion: 0 };
     this.worlds.set(id, stored);
     this.commitDoc(stored, doc, source);
     return stored;
@@ -66,7 +68,8 @@ export class FakeLre {
     if (issues.some((i) => i.severity === "error")) throw new Refusal("validation", "the world has errors", issues);
     const rev = revisionOf(doc);
     w.revisions.set(rev, structuredClone(doc));
-    w.index = { ...w.index, name: doc.name, head: rev, revisions: [...w.index.revisions.filter((r) => r !== rev), rev], history: [...(w.index.history ?? []), { revision: rev, at: Date.now(), source, ...(note ? { note } : {}) }] };
+    w.index = { ...w.index, name: doc.name, head: rev, revisions: [...w.index.revisions.filter((r) => r !== rev), rev] };
+    w.history.push({ revision: rev, at: Date.now(), source, ...(note ? { note } : {}) });
     return rev;
   }
 
@@ -79,19 +82,20 @@ export class FakeLre {
   private editorBody(w: StoredWorld): Payload {
     const doc = w.draft?.doc ?? w.revisions.get(w.index.head);
     if (!doc) throw new Refusal("internal", "no head");
-    return { draft: structuredClone(doc), lint: lint(doc), base: w.draft?.base ?? w.index.head, stored: w.draft !== null, version: w.draft?.version ?? 0 };
+    return { draft: structuredClone(doc), lint: lint(doc), base: w.draft?.base ?? w.index.head, stored: w.draft !== null, version: w.draft?.version ?? w.lastVersion };
   }
 
   private editor(r: Payload): Payload {
     const w = this.world(r.worldId);
     if (r.op === "get") return this.editorBody(w);
-    if (typeof r.version === "number" && r.version !== (w.draft?.version ?? 0)) throw new Refusal("conflict", "the draft changed; reload and retry");
-    if (typeof r.base === "string" && r.base !== (w.draft?.base ?? w.index.head)) throw new Refusal("conflict", "the world changed; reload and retry");
+    if (typeof r.version === "number" && r.version !== (w.draft?.version ?? w.lastVersion)) throw new Refusal("conflict", "the draft changed; reload and retry");
     if (r.op === "discard") {
-      w.lastVersion = w.draft?.version ?? w.lastVersion;
+      // Dropping a draft counts one, so the working copy never repeats a version (and "no draft" is no fixed number).
+      if (w.draft !== null) w.lastVersion = Math.max(w.lastVersion, w.draft.version) + 1;
       w.draft = null;
       return this.editorBody(w);
     }
+    if (typeof r.base === "string" && r.base !== (w.draft?.base ?? w.index.head)) throw new Refusal("conflict", "the world changed; reload and retry");
     const current = w.draft?.doc ?? w.revisions.get(w.index.head);
     if (!current) throw new Refusal("internal", "no head");
     let doc: WorldDoc;
@@ -120,7 +124,7 @@ export class FakeLre {
         const revision = typeof r.revision === "string" ? r.revision : w.index.head;
         const doc = w.revisions.get(revision);
         if (!doc) throw new Refusal("not_found", `revision ${revision} not found`);
-        return { world: structuredClone(doc), revision, packKinds: {}, packRelations: {}, functions: [] };
+        return { world: structuredClone(doc), revision, history: structuredClone(w.history), packKinds: {}, packRelations: {}, functions: [] };
       }
       case "create": {
         if (typeof r.template === "string" && !hasOwn(STARTER_WORLDS, r.template)) throw new Refusal("not_found", `unknown template ${r.template}`);
@@ -133,12 +137,13 @@ export class FakeLre {
         return { worlds: [...this.worlds.values()].map((w) => w.index) };
       case "commit": {
         const w = this.world(r.worldId);
+        if (typeof r.version === "number" && r.version !== (w.draft?.version ?? w.lastVersion)) throw new Refusal("conflict", `the draft changed since you read it (it is at version ${w.draft?.version ?? w.lastVersion} now); review it and commit again`);
         if (!w.draft) throw new Refusal("bad_request", "no draft");
         if (r.base !== null && r.base !== w.draft.base) throw new Refusal("conflict", "the world changed; reload and retry");
         if (w.draft.base !== w.index.head) throw new Refusal("conflict", "the head moved since this draft began");
         const doc = w.draft.doc;
         const revision = this.commitDoc(w, doc, "agent", typeof r.note === "string" ? r.note : undefined);
-        w.lastVersion = w.draft.version;
+        w.lastVersion = Math.max(w.lastVersion, w.draft.version) + 1;
         w.draft = null;
         return { revision, lint: lint(doc) };
       }
@@ -158,7 +163,7 @@ export class FakeLre {
       case "templates":
         return { templates: [...STARTER_INFO] };
       case "chats":
-        return { chats: this.chats.filter((c) => r.worldId === undefined || c.worldId === r.worldId) };
+        return { chats: this.chats.filter((c) => (r.worldId === undefined || c.worldId === r.worldId) && (r.chatId === undefined || c.chatId === r.chatId)) };
       case "attach": {
         const w = this.world(r.worldId);
         if (this.chats.some((c) => c.chatId === r.chatId && c.worldId !== r.worldId)) throw new Refusal("conflict", "This chat already plays another world. Start a new chat for this one.");
@@ -166,7 +171,7 @@ export class FakeLre {
         return { revision: w.index.head };
       }
       case "upgrade":
-        return { revision: r.to as JsonValue };
+        return { revision: r.to as JsonValue, pending: this.upgradePending };
     }
     throw new Refusal("bad_request", `the fake doesn't do world ${String(r.op)}`);
   }
@@ -293,7 +298,7 @@ export class FakeLumiverse {
         queueMicrotask(() => {
           if (!record.open) return;
           // A push the client doesn't wait for comes first, as the host's interleave can put one.
-          events.message(JSON.stringify({ event: "SPINDLE_FRONTEND_MSG", payload: { extensionId: this.extension.id, identifier: "lumi_rp_engine", data: { lre: 1, type: "lre.draft.changed", worldId: "w_x", version: 1, stored: true } } }));
+          events.message(JSON.stringify({ event: "SPINDLE_FRONTEND_MSG", payload: { extensionId: this.extension.id, identifier: "lumi_rp_engine", data: { lre: 1, type: "lre.draft.changed", worldId: "w_x", version: 1, stored: true, base: null } } }));
           events.message(JSON.stringify({ event: "SPINDLE_FRONTEND_MSG", payload: { extensionId: this.extension.id, identifier: "lumi_rp_engine", data } }));
         });
       },

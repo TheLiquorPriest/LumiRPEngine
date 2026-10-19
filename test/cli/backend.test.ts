@@ -89,6 +89,11 @@ test("edit, draft, commit, history, restore and diff against the real backend, w
     [first, "create", null],
     [second, "agent", "Add Mara"],
   ]);
+  // With no draft stored the version is the world's count, never 0 again: an edit meant for an older read is refused.
+  expect(await call("lre_draft", { worldId })).toMatchObject({ stored: false, version: 3 });
+  const afterCommit = await callTool("lre_edit", { worldId, ops: [{ op: "replace", path: "/name", value: "Too late" }], expectVersion: 0 }, ctx);
+  expect(afterCommit.isError).toBe(true);
+  expect(afterCommit.text).toContain("is at version 3, not 0");
 
   const restored = await call("lre_restore", { worldId, revision: first.slice(0, 10) });
   expect(restored).toMatchObject({ restored: first, replaced: null });

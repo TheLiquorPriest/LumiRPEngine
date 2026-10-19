@@ -36,6 +36,7 @@ A world is one JSON document in the `lre-world-v1` format, with a published JSON
 - In a key, `~1` stands for `/` and `~0` for `~`: the table `economy.catalog` is `/tables/economy.catalog`, and a key `a/b` is `/x/a~1b`.
 - `test` makes an edit conditional on what you read: `{"op": "test", "path": "/entities/mara/name", "value": "Mara"}` first, and the whole patch is refused if Mara was renamed meanwhile.
 - `/id`, `/format`, `/engineVersion`, `/suppressed` and `/pins` are the engine's: a patch may not change them.
+- One patch carries at most 500 operations and brings in at most 4 MiB of JSON (what it adds, replaces and copies), and the world may nest at most 64 levels deep. An item the engine can't read (`/lore/x` set to `{}`) is refused before anything is written, so add items whole.
 
 ## Ids and keys
 

@@ -27,9 +27,10 @@ describe("live tools", () => {
     const fake = new FakeLumiverse();
     const w = fake.lre.seed("Brindlemere", "fantasy_town");
     const { ctx } = client(fake);
-    expect((await call(ctx, "lre_worlds")).data).toEqual({ worlds: [{ id: w.index.id, name: "Brindlemere", head: w.index.head, revisions: 1, history: 1, draft: { stored: false, version: 0 } }] });
+    expect((await call(ctx, "lre_worlds")).data).toEqual({ worlds: [{ id: w.index.id, name: "Brindlemere", head: w.index.head, revisions: 1, draft: { stored: false, version: 0 } }] });
     const outline = await call(ctx, "lre_world", { worldId: w.index.id });
-    expect(outline.text).toContain("none is stored, so this is its head");
+    // The version shows with no draft stored too: the next write's expectVersion names it.
+    expect(outline.text).toContain(`the draft of “Brindlemere” (${w.index.id}), version 0: none is stored, so this is its head`);
     expect(outline.text).toContain("too big for one answer, so here is its outline");
     expect(outline.text).toMatch(/- entities: \d+ items \(/);
     expect(outline.text.length).toBeLessThan(24_000);
@@ -91,6 +92,7 @@ describe("live tools", () => {
   test("lre_draft, lre_diff, lre_commit with a note, and lre_history", async () => {
     const fake = new FakeLumiverse();
     const w = fake.lre.seed("Alpha");
+    const first = w.index.head;
     const { ctx } = client(fake);
     expect((await call(ctx, "lre_commit", { worldId: w.index.id })).text).toContain("There is no draft of “Alpha” to commit");
     await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "add", path: "/entities/mara", value: person("mara", "Mara") }, { op: "replace", path: "/name", value: "Alpha Prime" }] });
@@ -101,7 +103,7 @@ describe("live tools", () => {
     expect(diff.data.changes).toEqual(expect.arrayContaining([expect.objectContaining({ key: "/entities/mara", label: "entities › Mara Voss (mara)", kind: "added" }), expect.objectContaining({ key: "/name", kind: "changed", fields: [{ path: "/name", kind: "changed", from: '"Alpha"', to: '"Alpha Prime"' }] })]));
     const commit = await call(ctx, "lre_commit", { worldId: w.index.id, note: "Add Mara" });
     expect(commit.isError).toBe(false);
-    expect(fake.lre.sent("lre.world", "commit")).toEqual([{ type: "lre.world", op: "commit", worldId: w.index.id, base: w.index.history?.[0]?.revision, note: "Add Mara" }]);
+    expect(fake.lre.sent("lre.world", "commit")).toEqual([{ type: "lre.world", op: "commit", worldId: w.index.id, base: first, version: 2, note: "Add Mara" }]);
     const history = await call(ctx, "lre_history", { worldId: w.index.id });
     expect((history.data.history as { source: string; note?: string; head?: true }[]).map((h) => [h.source, h.note ?? null, h.head ?? false])).toEqual([
       ["create", null, false],
@@ -144,12 +146,12 @@ describe("live tools", () => {
     await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/name", value: "Beta" }] });
     await call(ctx, "lre_commit", { worldId: w.index.id, note: "Rename" });
     const restored = await call(ctx, "lre_restore", { worldId: w.index.id, revision: first });
-    // Versions count on across drafts: the committed one was 1, so the restored draft is 2.
-    expect(restored.data).toMatchObject({ restored: first, version: 2, replaced: null });
-    expect(fake.lre.sent("lre.editor", "restore")).toEqual([{ type: "lre.editor", op: "restore", worldId: w.index.id, base: null, version: 0, revision: first }]);
+    // A version is never repeated: the commit counted one (2), so the restored draft is 3, and the discard counts one more.
+    expect(restored.data).toMatchObject({ restored: first, version: 3, replaced: null });
+    expect(fake.lre.sent("lre.editor", "restore")).toEqual([{ type: "lre.editor", op: "restore", worldId: w.index.id, base: null, version: 2, revision: first }]);
     const discarded = await call(ctx, "lre_discard", { worldId: w.index.id });
-    expect(discarded.data).toMatchObject({ discarded: true, version: 0, dropped: { name: { changed: 1 } } });
-    expect(fake.lre.sent("lre.editor", "discard")).toEqual([{ type: "lre.editor", op: "discard", worldId: w.index.id, base: null, version: 2 }]);
+    expect(discarded.data).toMatchObject({ discarded: true, version: 4, dropped: { name: { changed: 1 } } });
+    expect(fake.lre.sent("lre.editor", "discard")).toEqual([{ type: "lre.editor", op: "discard", worldId: w.index.id, base: null, version: 3 }]);
   });
 
   test("with expectVersion, lre_commit, lre_discard and lre_restore leave alone a draft the user wrote since", async () => {
@@ -178,6 +180,33 @@ describe("live tools", () => {
     const committed = await call(ctx, "lre_commit", { worldId: w.index.id, note: "Add Mara", expectVersion: read + 1 });
     expect(committed.isError).toBe(false);
     expect(fake.lre.sent("lre.world", "commit")).toHaveLength(1);
+    // With no draft stored the version still moves: the user's edit and Commit in Build count, so an edit meant for before them is refused.
+    const before = Number((await call(ctx, "lre_draft", { worldId: w.index.id })).data.version);
+    expect(before).toBe(read + 2);
+    fake.lre.handle({ lre: 1, type: "lre.editor", reqId: "build", op: "patch", worldId: w.index.id, base: null, ops: [{ op: "replace", path: "/name", value: "Theirs" }] });
+    fake.lre.handle({ lre: 1, type: "lre.world", reqId: "build", op: "commit", worldId: w.index.id, base: null });
+    const late = await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/name", value: "Mine" }], expectVersion: before });
+    expect(late.isError).toBe(true);
+    expect(late.text).toContain(`is at version ${before + 2}, not ${before}`);
+    expect(fake.lre.world(w.index.id).revisions.get(fake.lre.world(w.index.id).index.head)?.name).toBe("Theirs");
+  });
+
+  test("lre_commit sends the version it read, so a write that lands just before the commit isn't committed unseen", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const { ctx } = client(fake);
+    await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "add", path: "/entities/mara", value: person("mara", "Mara") }] });
+    // Build writes between the tool's read and its commit.
+    const handle = fake.lre.handle.bind(fake.lre);
+    fake.lre.handle = (r) => {
+      if (r.type === "lre.world" && r.op === "commit") handle({ lre: 1, type: "lre.editor", reqId: "build", op: "patch", worldId: w.index.id, base: null, ops: [{ op: "add", path: "/entities/from_build", value: person("from_build", "Build") }] });
+      return handle(r);
+    };
+    const raced = await call(ctx, "lre_commit", { worldId: w.index.id, note: "Add Mara" });
+    expect(raced.isError).toBe(true);
+    expect(raced.text).toContain(`Not committed: the draft of ${w.index.id} is at version 2, not 1.`);
+    expect(fake.lre.sent("lre.world", "commit")).toEqual([{ type: "lre.world", op: "commit", worldId: w.index.id, base: w.index.head, version: 1, note: "Add Mara" }]);
+    expect(fake.lre.world(w.index.id).history).toHaveLength(1);
   });
 
   test("lre_world_delete previews without confirm, refuses a name that isn't exact, and deletes only with it", async () => {
@@ -373,8 +402,33 @@ describe("live tools", () => {
     expect(preview.data).toMatchObject({ hidden: 1, preview: { entities: [{ name: "Hobbs" }, { hidden: "A hidden change" }] } });
     expect((await call(ctx, "lre_upgrade", { chatId: "chat_1", preview: true, spoilers: true })).text).toContain("Lady Vane");
     const applied = await call(ctx, "lre_upgrade", { chatId: "chat_1" });
-    expect(applied.data).toMatchObject({ chatId: "chat_1", revision: head });
+    expect(applied.data).toMatchObject({ chatId: "chat_1", revision: head, pending: false });
     expect(fake.lre.sent("lre.world", "upgrade")).toEqual([{ type: "lre.world", op: "upgrade", chatId: "chat_1", to: head, merge: {} }]);
+  });
+
+  test("lre_upgrade asks about its one chat, says when the Upgrade waits for a turn to end, and won't guess at a chat it can't read", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const old = w.index.head;
+    const { ctx } = client(fake);
+    await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/name", value: "Alpha Prime" }] });
+    await call(ctx, "lre_commit", { worldId: w.index.id, note: "Rename" });
+    fake.lre.chats = [
+      { chatId: "c1", name: "First", worldId: w.index.id, revision: old, behind: true },
+      { chatId: "c2", name: "Second", worldId: w.index.id, revision: old, behind: true },
+      { chatId: "c3", name: "Broken", worldId: w.index.id, revision: null, behind: false, reason: "its ledger is unreadable" },
+    ];
+    // Mid-turn: LumiRPEngine holds the marker until the turn ends.
+    fake.lre.upgradePending = true;
+    const applied = await call(ctx, "lre_upgrade", { chatId: "c2" });
+    expect(applied.data).toMatchObject({ chatId: "c2", from: old, revision: w.index.head, pending: true });
+    expect(String(applied.data.note)).toContain("lands when that turn ends");
+    // Only c2's state was asked for, not every chat's.
+    expect(fake.lre.sent("lre.world", "chats")).toEqual([{ type: "lre.world", op: "chats", chatId: "c2" }]);
+    const broken = await call(ctx, "lre_upgrade", { chatId: "c3" });
+    expect(broken.isError).toBe(true);
+    expect(broken.text).toContain("can't read the state of chat c3 (its ledger is unreadable)");
+    expect(fake.lre.sent("lre.world", "upgrade")).toHaveLength(1);
   });
 
   test("lre_status says who is signed in where, never the token, and what LumiRPEngine speaks there", async () => {

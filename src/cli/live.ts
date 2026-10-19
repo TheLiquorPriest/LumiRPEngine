@@ -6,8 +6,8 @@
 
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
-import type { JsonPatchOp, MarkerPreview, ResultBodies, WorldChatInfo } from "../shared/protocol";
-import type { WorldDoc, WorldIndex } from "../shared/world";
+import type { JsonPatchOp, MarkerPreview, ResultBodies } from "../shared/protocol";
+import type { RevisionNote, WorldDoc, WorldIndex } from "../shared/world";
 import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
 import type { Connection } from "./connection";
@@ -64,15 +64,26 @@ export class Live {
     }
     const body = await this.conn.request("lre.world", { op: "get", worldId, revision });
     if (!body.world) throw new ToolError(`LumiRPEngine sent no document for revision ${revision} of ${worldId}.`);
-    this.revisions.set(key, body.world);
+    this.keep(key, body.world);
+    return body.world;
+  }
+
+  private keep(key: string, world: WorldDoc): void {
+    this.revisions.set(key, world);
     for (const oldest of this.revisions.keys()) {
       if (this.revisions.size <= REVISION_CACHE) break;
       this.revisions.delete(oldest);
     }
-    return body.world;
   }
 
-  /** The draft as Build has it: the stored one, else a copy of the head (`stored: false`, version 0). */
+  /** How each revision became head, oldest first. Only `get` carries it, with the head's document, which is kept for later reads. */
+  async history(worldId: string): Promise<RevisionNote[]> {
+    const body = await this.conn.request("lre.world", { op: "get", worldId });
+    if (body.world && body.revision) this.keep(`${worldId}\u0000${body.revision}`, body.world);
+    return body.history ?? [];
+  }
+
+  /** The draft as Build has it: the stored one, else a copy of the head (`stored: false`, at the version the world's working copy is at). */
   draft(worldId: string): Promise<EditorBody> {
     return this.conn.request("lre.editor", { op: "get", worldId, base: null });
   }
@@ -123,7 +134,7 @@ export async function worldsTool(live: Live): Promise<ToolResult> {
     text: json({
       worlds: worlds.map((w, i) => {
         const draft = drafts[i];
-        return { id: w.id, name: w.name, head: w.head, revisions: w.revisions.length, history: w.history?.length ?? 0, draft: typeof draft === "string" || draft === undefined ? null : draft };
+        return { id: w.id, name: w.name, head: w.head, revisions: w.revisions.length, draft: typeof draft === "string" || draft === undefined ? null : draft };
       }),
       ...(skipped.length > 0 ? { skipped, about: "These worlds' drafts couldn't be read, so their draft is null." } : {}),
     }),
@@ -322,13 +333,18 @@ export function commitTool(live: Live, args: Args, serialize: Serialize): Promis
     if (!draft.stored) throw new ToolError(`There is no draft of “${index.name}” to commit: nothing has changed since its head. lre_edit writes one.`);
     let body: ResultBodies["lre.world"];
     try {
-      body = await live.conn.request("lre.world", note ? { op: "commit", worldId, base: draft.base, note } : { op: "commit", worldId, base: draft.base });
+      // The version read just now: a write that lands before the commit is refused there, not committed unseen.
+      body = await live.conn.request("lre.world", { op: "commit", worldId, base: draft.base, version: draft.version, ...(note ? { note } : {}) });
     } catch (error) {
       if (error instanceof LreError && error.code === "validation") {
         const errors = (error.lint.length > 0 ? error.lint : draft.lint).filter((i) => i.severity === "error");
         throw new ToolError(`Not committed: the draft has ${errors.length} lint error${errors.length === 1 ? "" : "s"}, and LumiRPEngine commits none. Fix ${errors.length === 1 ? "it" : "them"} with lre_edit:\n${json(errors.slice(0, 30))}${errors.length > 30 ? `\n(${errors.length - 30} more)` : ""}`);
       }
-      if (error instanceof LreError && error.code === "conflict") throw new ToolError(`Not committed: ${error.message}. The draft began from revision ${draft.base ?? "none"}, and the head is ${index.head}: the head moved since. See the difference with lre_diff, then lre_discard and redo the changes on the new head.`);
+      if (error instanceof LreError && error.code === "conflict") {
+        const now = await live.draft(worldId);
+        if (now.version !== draft.version) throw stale(worldId, now.version, draft.version, "Not committed", "commit against its version if what it holds now should go into the head");
+        throw new ToolError(`Not committed: ${error.message}. The draft began from revision ${draft.base ?? "none"}, and the head is ${index.head}: the head moved since. See the difference with lre_diff, then lre_discard and redo the changes on the new head.`);
+      }
       throw error;
     }
     // Hazards against the head this commit replaced (revisions never change, so it can be read after).
@@ -359,8 +375,8 @@ export function discardTool(live: Live, args: Args, serialize: Serialize): Promi
 }
 
 export async function historyTool(live: Live, args: Args): Promise<ToolResult> {
-  const index = await live.index(worldIdOf(args));
-  const notes = index.history ?? [];
+  const worldId = worldIdOf(args);
+  const [index, notes] = await Promise.all([live.index(worldId), live.history(worldId)]);
   const noted = new Set(notes.map((n) => n.revision));
   const unnoted = index.revisions.filter((r) => !noted.has(r));
   return {
@@ -434,13 +450,14 @@ export function deleteTool(live: Live, args: Args, serialize: Serialize): Promis
   return serialize(`world:${worldId}`, async () => {
     const index = await live.index(worldId);
     if (confirm !== index.name) {
-      const [chats, draft] = await Promise.all([live.conn.request("lre.world", { op: "chats", worldId }).then((b) => b.chats ?? []), live.draft(worldId)]);
+      const [chats, draft, history] = await Promise.all([live.conn.request("lre.world", { op: "chats", worldId }).then((b) => b.chats ?? []), live.draft(worldId), live.history(worldId)]);
+      const playing = chats.length === 0 ? "No chat plays it." : chats.length === 1 ? "Its chat loses its world and stops being a world chat." : `Its ${chats.length} chats lose their world and stop being world chats.`;
       const preview = {
         worldId,
         name: index.name,
-        wouldDelete: { revisions: index.revisions.length, draft: draft.stored ? { version: draft.version } : null, history: index.history?.length ?? 0 },
+        wouldDelete: { revisions: index.revisions.length, draft: draft.stored ? { version: draft.version } : null, history: history.length },
         chats: chats.map((c) => ({ chatId: c.chatId, name: c.name })),
-        afterwards: `${chats.length === 0 ? "No chat plays it." : `${chats.length === 1 ? "Its chat loses its world" : `Its ${chats.length} chats lose their world`} and stop${chats.length === 1 ? "s" : ""} being a world chat.`} Its engine lore book ("LumiRPEngine · " and the world's name) stays in World Books${chats.length > 0 ? ", still attached to those chats," : ""} for the user to delete.`,
+        afterwards: `${playing} Its engine lore book ("LumiRPEngine · " and the world's name) stays in World Books${chats.length > 0 ? ", still attached to those chats," : ""} for the user to delete.`,
         toDelete: `Call again with confirm set to its exact name: ${JSON.stringify(index.name)}.`,
       };
       // Without confirm, a preview; with the wrong name, a refusal that says the same.
@@ -521,24 +538,37 @@ export async function upgradeTool(live: Live, args: Args, serialize: Serialize):
   const preview = boolArg(args, "preview");
   const spoilers = boolArg(args, "spoilers");
   const toArg = textArg(args, "to");
-  const chats: WorldChatInfo[] = (await live.conn.request("lre.world", { op: "chats" })).chats ?? [];
-  const chat = chats.find((c) => c.chatId === chatId);
+  // One chat asked about: listing them all would open every world chat's state. `find`, since a build that ignores chatId lists them all.
+  const chat = ((await live.conn.request("lre.world", { op: "chats", chatId })).chats ?? []).find((c) => c.chatId === chatId);
   if (!chat) throw new ToolError(`No chat ${chatId} plays a world. lre_chats lists the chats that do.`);
+  if (chat.revision === null) throw new ToolError(`LumiRPEngine can't read the state of chat ${chatId}${chat.reason ? ` (${chat.reason})` : ""}, so it can't say which revision the chat plays, or upgrade it.`);
+  const from = chat.revision;
   const index = await live.index(chat.worldId);
   const to = toArg === undefined ? index.head : resolveRevision(index, toArg);
   // A chat on the head can still lag behind it (an earlier Upgrade that moved it without the changes), so only the preview can say there is nothing to bring in.
-  if (to === chat.revision && !preview) {
-    const pending = (await live.conn.request("lre.marker", { chatId, kind: "migrate", to, preview: true })).preview?.upgrade;
-    if (!pending || (pending.entities.length === 0 && pending.tracks.length === 0)) return { text: json({ chatId, worldId: chat.worldId, revision: to, note: "The chat already plays that revision, with all of its changes: there is nothing to upgrade." }) };
+  if (to === from && !preview) {
+    const incoming = (await live.conn.request("lre.marker", { chatId, kind: "migrate", to, preview: true })).preview?.upgrade;
+    if (!incoming || (incoming.entities.length === 0 && incoming.tracks.length === 0)) return { text: json({ chatId, worldId: chat.worldId, revision: to, note: "The chat already plays that revision, with all of its changes: there is nothing to upgrade." }) };
   }
   if (preview) {
     const body = await live.conn.request("lre.marker", { chatId, kind: "migrate", to, preview: true });
     const { report, hidden } = previewOf(body.preview, spoilers);
-    return { text: json({ chatId, worldId: chat.worldId, from: chat.revision, to, preview: report, ...(hidden > 0 ? { hidden, about: `${hidden} change${hidden === 1 ? " is" : "s are"} about what the player hasn't found yet; spoilers: true shows ${hidden === 1 ? "it" : "them"}.` } : {}) }) };
+    return { text: json({ chatId, worldId: chat.worldId, from, to, preview: report, ...(hidden > 0 ? { hidden, about: `${hidden} change${hidden === 1 ? " is" : "s are"} about what the player hasn't found yet; spoilers: true shows ${hidden === 1 ? "it" : "them"}.` } : {}) }) };
   }
   return serialize(`chat:${chatId}`, async () => {
     // Default picks: an empty `merge` brings the definition changes in, taking what play never touched and keeping what it did.
     const body = await live.conn.request("lre.world", { op: "upgrade", chatId, to, merge: {} });
-    return { text: json({ chatId, worldId: chat.worldId, from: chat.revision, revision: body.revision ?? to, picks: "the defaults: what play never touched comes from the new revision; what play changed stays as played" }) };
+    const pending = body.pending === true;
+    return {
+      text: json({
+        chatId,
+        worldId: chat.worldId,
+        from,
+        revision: body.revision ?? to,
+        pending,
+        picks: "the defaults: what play never touched comes from the new revision; what play changed stays as played",
+        ...(pending ? { note: "The chat is in the middle of a turn: the Upgrade lands when that turn ends, so lre_chats shows the old revision until then." } : {}),
+      }),
+    };
   });
 }
