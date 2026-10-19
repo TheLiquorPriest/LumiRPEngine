@@ -80,7 +80,7 @@ const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "
 export const TOOLS: readonly ToolDef[] = [
   {
     name: "lre_guide",
-    description: 'The agent guide to LumiRPEngine worlds: the world model, the workflow, and the patterns that bite (reveals, lifeKnownBy, fields.owner, cues, ids, map-owned items, tables). Read it before you write a world. topic narrows it to one section (its heading, such as "Tracks: quests and secrets") or to whatever matches the words.',
+    description: 'The agent guide to LumiRPEngine worlds: the world model, the workflow, and the patterns that bite (reveals, lifeKnownBy, fields.owner, cues, ids, map-owned items, tables, a mind\'s secrecy, money\'s owners and flows). Read it before you write a world. topic narrows it to one section (its heading, such as "Tracks: quests and secrets", "Money" or "Character minds") or to whatever matches the words.',
     inputSchema: object({ topic: { type: "string", description: "A section's heading, or a few words." } }),
     write: false,
   },
@@ -110,19 +110,19 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_check",
-    description: "Check a world the way LumiRPEngine loads it, on this machine: the shape, migration to this engine, every lint rule of the engine and its packs, and the host macro hazards in authored text (lore, section and step templates). Errors block a commit and an import.",
+    description: "Check a world the way LumiRPEngine loads it, on this machine: the shape, migration to this engine, every lint rule of the engine and its packs, and the host macro hazards in authored text (lore, section and step templates). It counts the world's items and its entities by kind, which is where its accounts, flows, jobs and holdings show. Errors block a commit and an import.",
     inputSchema: object({ path: PATH, world: WORLD }),
     write: false,
   },
   {
     name: "lre_playtest",
-    description: "Play typed turns through the bundled engine from the world's start, with no narrator and no model: what each turn does to the world, and the engine's notes on it. The world comes from a file, inline, or from your Lumiverse (worldId with source).",
+    description: "Play typed turns through the bundled engine from the world's start, with no narrator and no model (so no character mind runs): what each turn does to the world, and the engine's notes on it. The world comes from a file, inline, or from your Lumiverse (worldId with source).",
     inputSchema: object({ ...RUN_FROM, turns: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50, description: 'What the player types, one entry per turn ("look around", "walk to the market").' } }, ["turns"]),
     write: false,
   },
   {
     name: "lre_check_world",
-    description: "Simulate whole days from the world's start with the bundled engine (no narrator, no model): NPC schedules and plans, rules, tracks and money, with dropped events, failures and secret leaks as notes. The world comes from a file, inline, or from your Lumiverse (worldId with source).",
+    description: "Simulate whole days from the world's start with the bundled engine (no narrator, no model, so no character mind runs): NPC schedules and plans, rules, tracks and money, flows and pay included, with dropped events, failures and secret leaks as notes. The world comes from a file, inline, or from your Lumiverse (worldId with source).",
     inputSchema: object({ ...RUN_FROM, days: { type: "integer", minimum: 1, maximum: 14, description: "Days to simulate (default 3)." } }),
     write: false,
   },

@@ -53,6 +53,11 @@ describe("live tools", () => {
     const missing = await call(ctx, "lre_world", { worldId: w.index.id, pointer: "/entities/nobody_here" });
     expect(missing.isError).toBe(true);
     expect(missing.text).toContain("/entities holds");
+    // An outline of the entities says what each is, so an account or a flow isn't mistaken for a person.
+    const entities = await call(ctx, "lre_world", { worldId: w.index.id, source: "head", pointer: "/entities" });
+    const brindlemere = fake.lre.world(w.index.id).revisions.get(w.index.head);
+    const [someId, some] = Object.entries(brindlemere?.entities ?? {})[0] ?? [];
+    expect(entities.text).toContain(`- ${String(someId)}: ${String(some?.kind)} ${JSON.stringify(some?.name)} (`);
     expect(fake.lre.sent("lre.editor", "get")[0]).toEqual({ type: "lre.editor", op: "get", worldId: w.index.id, base: null });
     expect(fake.lre.sent("lre.world", "get")).toEqual([{ type: "lre.world", op: "get", worldId: w.index.id, revision: w.index.head }]);
   });
@@ -582,6 +587,14 @@ describe("offline tools", () => {
   test("guide, docs, schema, templates and template answer within one answer", async () => {
     const guide = await call(ctx, "lre_guide");
     expect(guide.text).toContain("# Writing LumiRPEngine worlds: a guide for agents");
+    // Larger than one answer: all of it but its largest section, which it names for a second call.
+    expect(guide.text.length).toBeLessThanOrEqual(24_000);
+    for (const heading of ["## How to work on a user's world", "## Character minds", "## Before you commit"]) expect(guide.text).toContain(heading);
+    expect(guide.text).not.toContain("\n## Money\n");
+    expect(guide.text).toMatch(/read each with topic when the work needs it: "Money" \([\d,]+ characters\)/);
+    const money = await call(ctx, "lre_guide", { topic: "Money" });
+    expect(money.text.startsWith("## Money\n")).toBe(true);
+    expect(money.text).toContain("### Flows: money that moves on its own");
     expect((await call(ctx, "lre_guide", { topic: "A revealed secret starts one stage earlier" })).text).toContain('"when": "true"');
     expect((await call(ctx, "lre_docs", { query: "account opening", doc: "reference" })).text).toContain("REFERENCE.md ›");
     expect((await call(ctx, "lre_docs", { query: "x", doc: "nope" })).isError).toBe(true);

@@ -119,18 +119,51 @@ export function lookup(sections: readonly Section[], query: string, limit = 5, b
 }
 
 const guideSections = sectionsOf(guideText);
+
+/** A section with its subsections, as the markdown a topic answers with. */
+function render(parts: readonly Section[]): string {
+  return parts.map((s) => `${"#".repeat(s.depth)} ${s.title.split(" › ").at(-1) ?? s.title}\n\n${s.body}`).join("\n\n");
+}
+
+/** The guide's top-level sections (its title's, then each `##` with what is under it), in order. */
+const guideBlocks: { title: string; text: string }[] = [];
+{
+  let open: Section[] = [];
+  const close = (): void => {
+    const head = open[0];
+    if (head) guideBlocks.push({ title: head.title.split(" › ").at(-1) ?? head.title, text: render(open) });
+    open = [];
+  };
+  for (const s of guideSections) {
+    if (s.depth <= 2) close();
+    open.push(s);
+  }
+  close();
+}
 const docSections: Record<string, Section[]> = Object.fromEntries(Object.entries(DOCS).map(([name, d]) => [name, sectionsOf(d.text).flatMap(partsOf).map((s) => ({ ...s, title: `${d.file} › ${s.title}` }))]));
 
 /**
- * The agent guide. Without a topic: the whole guide when it fits one answer, else its contents.
+ * The agent guide. Without a topic: the whole guide when it fits one answer; else all of it but its
+ * largest sections, which are the most particular (Money), named so a second call can read them.
  * A topic that names a heading returns that section with its subsections; any other is looked up.
  */
 export function guide(topic?: string): string {
   const wanted = (topic ?? "").trim().toLowerCase();
   if (wanted === "") {
     if (guideText.length <= ANSWER_LIMIT) return guideText;
-    const contents = guideSections.map((s) => `${"  ".repeat(Math.max(0, s.depth - 2))}- ${s.title.split(" › ").at(-1) ?? s.title} (${count(s.body.length, "character")})`);
-    return `The agent guide is ${count(guideText.length, "character")}, more than one answer holds. Its sections (pass one as topic):\n\n${contents.join("\n")}`;
+    const out = new Set<number>();
+    // Room for the closing note that names what was left out.
+    let size = guideBlocks.reduce((n, b) => n + b.text.length + 2, 400);
+    for (const i of guideBlocks.map((_, i) => i).sort((a, b) => (guideBlocks[b]?.text.length ?? 0) - (guideBlocks[a]?.text.length ?? 0))) {
+      if (size <= ANSWER_LIMIT) break;
+      out.add(i);
+      size -= (guideBlocks[i]?.text.length ?? 0) + 2;
+    }
+    const left = guideBlocks.filter((_, i) => out.has(i)).map((b) => `"${b.title}" (${count(b.text.length, "character")})`);
+    return `${guideBlocks
+      .filter((_, i) => !out.has(i))
+      .map((b) => b.text)
+      .join("\n\n")}\n\n(Left out so the rest fits one answer; read each with topic when the work needs it: ${left.join(", ")}.)`;
   }
   const at = guideSections.findIndex((s) => (s.title.split(" › ").at(-1) ?? "").toLowerCase() === wanted);
   const head = guideSections[at];
@@ -140,7 +173,7 @@ export function guide(topic?: string): string {
       if (s.depth <= head.depth) break;
       parts.push(s);
     }
-    const text = parts.map((s) => `${"#".repeat(s.depth)} ${s.title.split(" › ").at(-1) ?? s.title}\n\n${s.body}`).join("\n\n");
+    const text = render(parts);
     if (text.length <= ANSWER_LIMIT) return text;
   }
   return lookup(guideSections, wanted, 4);
