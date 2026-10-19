@@ -1259,7 +1259,57 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
 - **When minds run:** whenever they are on and the purpose's step card isn't switched off. An unsaved card runs with the defaults, and a saved one sets the connection, the tokens and the lore.
 - **Cost:** minds' calls aren't counted in §5.3's per-preset tables. A turn makes one call per mind that runs, and after the reply one `memory` call per present character at a chosen level and the occasional `consolidate`.
 
-<!-- §24.7 Time skips and §24.8 The planner -->
+### 24.7 Time skips
+A timelapse turn (§9.2: the palette, a chip or typed time) is a **time skip** while minds are on: before the reply, the skip finds its beats, lets the minds of the people each beat involves think there, and may stop where one of them would interrupt it (`backend/skip.ts`). The background lane and Re-narrate never run one, and minds off leaves a plain timelapse.
+- **The state it starts from** is exactly the plan's: the fold before the turn's target, the turn's decisions and its minds round, and the turn's first steps (§5.1). So it reaches each beat in the state the plan will.
+- **The beat scan** finds the following without a model, only up to where the skip would end on its own:
+  - the POV's appointments;
+  - the plans of Live and Near characters (as recorded: the GM's pin, else their latest mind's level) that involve the POV, where the planner lays them (§24.8);
+  - from a scratch run of the skip: invitations to the POV, story moments (a track changing stage; a time rule, or one that interrupts or tells a beat), and the POV's money (paydays, bills, statements, declines, at their own instants).
+
+  Beats at the same minute are one.
+- **The `skip` step** is off unless the user turns it on. Its prompt is the world's template, else the user's own, else the built-in, and the answer format follows it. It is given the span, the beats found and what the people involved plan, and proposes at most five more beats, each a local time inside the span with a reason. Its reasons, like the scan's, are recorded in `minds.skip` for the GM only: no mind and no player surface is given them, since they may come of someone's private intent.
+- **The caps:**
+  - **Beats per skip** (`minds.skip.maxBeats`) keep the weightiest: plans with the POV, then invitations, its appointments, story moments, its money, and the step's last.
+  - **Minds per beat** (`maxMindsPerBeat`) keep the people the beat names first, then whoever is with the POV at Live or Near by fidelity at that moment, best score first.
+
+  `"none"` is no cap, and the before-the-reply clock still bounds it.
+- **Running it:** one timelapse segment, run beat by beat under one unit cap (only its first slot runs whatever the cap).
+  - At each beat, each of its people thinks in a call of their own, blind to the others, and the reason they are given names only the time.
+  - Their `minds.mind` events apply at that moment, so their plans shape what follows.
+  - Past the last beat the skip runs to its end, where whoever is with the POV thinks once more, within the Live limit, as the turn's own minds for the Minds section.
+- **Stops:**
+  - **A mind's `interrupt`** stops the skip at its beat. The summary records `stoppedBy: "mind"` and who. The stop chip reads "Timelapse stopped: <name>" (or "someone", for a character the POV doesn't know) and offers Continue to the original target. The Outcome line and the outline say who stepped in; the Minds section tells how.
+  - **The before-the-reply clock** (Settings → Model use, at most 105 s) running out stops the skip at the next beat; whatever that beat's minds finished stays. The summary names no stop, and the Continue timelapse chip offers the time left; the turn never fails.
+  - Any other stop (a `stop`-class signal, the unit cap) is the timelapse's own (§9.2).
+- **Recording:** the skip's record is each beat with the events decided there, and where it stopped. The plan replays it: the same segment stops at the same beats, in the same state, and applies the same events. The turn's events are therefore an ordinary timelapse record (§4.3), coarsened, holding `minds.skip` (the beats, their times, reasons and sources) and each beat's minds. A re-fold or a Re-narrate reads them, and a Re-run asks again.
+
+### 24.8 The planner
+The Cast life planner (§8) lays each character's own plans into their days and lives them; plans already recorded drive it whether minds are on or off, on the background lane too.
+- **Laying a plan.** A character's open plans (`minds.plans`, from a mind, the memory step or the GM) become blocks of their day:
+  - **A tight window** (at most twice what its kind takes) is the plan's own time.
+  - **A wider window** gets its kind's length (an errand 45 minutes, a meeting 90, a visit 120, work 240, rest 60, leisure 90, other 60). It goes at the first time in the window, within its kind's hours (errands 9 to 18, meetings 10 to 22, visits 10 to 21), that trips, appointments and, for a plan that doesn't take its time from routine, the routine leave free. The search covers the window's first 14 days.
+- **Precedence:**
+  - A plan takes its time from routine (work, school) when it is strong (priority 4 or 5), or, for a Live or Near character, ordinary (3) at a set time.
+  - A Far character's routine bends only for strong plans, and a Background character follows routine only.
+  - A plan that must happen (5) overrides appointments too.
+  - Plans cut each other by priority, then age, and a trip overrides everything.
+
+  Laying is a pure function of the plans and the authored commitments, never of the clock or of where anyone stands. A plan therefore lands at the same time however often, and from whatever timelapse segment, its day is planned.
+- **Living it:**
+  - A plan's block starts and ends at its own minute, between slot steps: an agent process's moments (`ProcessDef.instants`), applied among the schedule edges in a turn and a timelapse, for an agent stepped through the slot before. Catch-up steps by slot.
+  - At the start the character goes to the plan's place (home for rest).
+  - After the end they take up whatever follows, going home when that names no place.
+- **Settling it:** at each slot step a `minds.plan` event marks a plan done once every block laid for it has passed. It marks one dropped once its window has passed with nothing laid: "no time for it" (routine, appointments or a trip left no room), or "routine only" for a Background character. Each records its own time, so a late catch-up settles it alike.
+- **What the player sees:** a plan's block shows its kind ("Errand", "Meeting someone", "A visit", "Work", "Rest", "Time out", "Busy") and "their own plan", never the plan's words, which are the character's private intent. The GM view shows the plan whole (§24.9).
+- **Occasions.** A day's occasion shapes its options:
+  - **A day off** (the weekend, or a holiday that gives one) makes a slow morning (breakfast 7 to 11) and more time for leisure and friends.
+  - **Holidays and observances** (Calendar 4) each bring an option of their own.
+  - **Birthdays:** a person's own birthday and a close friend's (regard 30 and up) bring theirs. The `birthday` field is `MM-DD`, or `YYYY-MM-DD` with the year they were born. 29 February falls on the 28th in a common year, and lint flags a birthday that doesn't read as a date.
+  - **Season and weather:** summer draws people outdoors, winter and bad weather keep them in.
+- **Needs** (Cast life 4) follow the plan. An NPC's need is met at the end of the latest block that meets it, or now while they're in it, and the routine's times stand in before the day has met it. Options weigh needs as the day so far leaves them, so a plan through the lunch hour leaves them hungry for dinner.
+- **Invitations** (Cast life 4) come from plans with the POV. One is asked at most 6 hours before the meeting, never before the meeting's day or before the plan was made, and only once (it is keyed by the plan). Its text never names a place the POV can't see. The old formula invitations run only while minds are off.
+- **Stance** leaves out whoever the Minds section tells of (§6.6, §24.3).
 
 ### 24.9 The GM view
 - **What it shows:** per character, their level, score and each input's points, the pins, whether a fresh mind is asked for, their latest mind (monologue, depiction, intent, reactions, mood, interrupt, and whether its depiction was withheld), their plans, notes (with their salience now, and whether faded), commitments, witness log and summary.
