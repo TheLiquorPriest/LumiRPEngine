@@ -8,6 +8,7 @@ import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { lintWorld } from "../../../src/engine/authoring";
 import { calendarOf, dateAt } from "../../../src/engine/calendar";
 import { materializeAll } from "../../../src/engine/materialize";
+import { optionalService } from "../../../src/engine/pack-kit";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
@@ -254,5 +255,26 @@ describe("a shared flow's shares pay together or not at all", () => {
     expect(flowRuns(w, "rent").map((r) => [r.outcome, r.cents])).toEqual([["paid", 200_000]]);
     expect(w.state.accounts["economy.external:landlord"]).toBe(200_000);
     expect(rentLines(w).map((t) => t.lines)).toEqual([[{ account: "joint", amount: -120_000 }], [{ account: "joint", amount: -80_000 }]]);
+  });
+});
+
+describe("what a module's flow defers is paid with its next occurrence", () => {
+  test("a property tax instalment that can't be paid is added to the next one", () => {
+    const w = setup((world) => {
+      world.entities.checking!.fields.opening = 0;
+      world.entities.savings!.fields.opening = 0;
+      delete world.entities.card;
+      world.entities.cabin = { id: "cabin", kind: "property", name: "The cabin", tier: "background", fields: { place: "apartment", owners: [{ party: "you", role: "owner", share: 100 }], value: 30_000_000, tax_pct: 1.2, tax_installments: 12, appreciation_pct: 0, volatility_pct: 0 }, relations: [] };
+    });
+    lapse(w, 18); // the 1 Nov instalment finds nothing to pay with
+    const add = optionalService(w.ctx, "economy.adjust")?.(w.ctx, "checking", 1_000_000);
+    if (!add || "code" in add) throw new Error("no adjust");
+    w.applyAll(add);
+    lapse(w, 30);
+    expect(flowRuns(w, "property_tax:cabin").map((r) => [r.outcome, r.cents])).toEqual([
+      ["deferred", 0],
+      ["paid", 60_000],
+    ]);
+    expect(trialBalance(w.state)).toBe(0);
   });
 });
