@@ -21,8 +21,13 @@ export function MoneyPanel(props: PanelProps) {
     busy,
     currency: props.state.currency ?? DEFAULT_CURRENCY,
     palette: props.state.palette,
-    // A tap while one is in flight is dropped (useBusy), so it answers false rather than never.
-    act: (body) => (busy ? Promise.resolve(false) : new Promise<boolean>((resolve) => run(async () => resolve((await app.request(actionRequest(props.chatId, body))) !== null)))),
+    act: (body) => {
+      // A tap while one is in flight is dropped (useBusy), so it answers false rather than never.
+      if (busy) return Promise.resolve(false);
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      run(async () => resolve((await app.request(actionRequest(props.chatId, body))) !== null));
+      return promise;
+    },
   };
   return (
     <div class="lre-stack" data-lre-panel="economy.money">

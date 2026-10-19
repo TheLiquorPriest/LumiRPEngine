@@ -15,6 +15,7 @@ import { accountBlocks, accountControls, cardControls, creditBlocks, flowSources
 import {
   accountStatusOps,
   actionRequest,
+  amountOf,
   applyCreditAction,
   autopayAction,
   autopayOps,
@@ -151,9 +152,9 @@ class MoneyChat {
 
   /** An amount as typed into a control. */
   cents(text: string): number {
-    const op = adjustOp("x", text, this.currency, false);
-    if (op?.op !== "adjust") throw new Error(`${text} isn't an amount`);
-    return op.cents;
+    const cents = amountOf(text, this.currency);
+    if (cents === null) throw new Error(`${text} isn't an amount`);
+    return cents;
   }
 }
 
