@@ -405,7 +405,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     payPrefs: level >= 3 && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : [],
   };
   for (const section of hooks.views) {
-    const extra = section(ctx, party, view);
+    const extra = section(ctx, party, view, viewer.pov);
     if (extra.jobs) view.jobs.push(...extra.jobs);
     if (extra.businesses) view.businesses.push(...extra.businesses);
     if (extra.investments) view.investments = extra.investments;

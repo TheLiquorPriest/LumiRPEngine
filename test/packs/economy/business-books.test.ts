@@ -1,8 +1,10 @@
 // Businesses' books and payouts (DESIGN §26.2), folded through Riverton: what a business counts as
-// revenue and expenses, and what it pays its owners.
+// revenue and expenses, what it pays its owners, and how its dashboard names the people in it.
 
 import { describe, expect, test } from "bun:test";
-import { act, line, packEvents, posts, setup } from "./work-world";
+import type { BusinessView } from "../../../src/shared/finance";
+import type { Working } from "../../../src/engine/working";
+import { account, act, entity, line, packEvents, posts, setup } from "./work-world";
 
 describe("business books: payouts", () => {
   test("paying out profit twice pays each sale's profit once", () => {
@@ -49,5 +51,38 @@ describe("business books: invoices", () => {
     // Someone in the world pays from their own money, so their invoices aren't bounded this way.
     expect(bill({ customer: "rosa" }, 700_000, "i5")).toEqual([]);
     expect(Object.values(w.state.entities).filter((e) => e.kind === "invoice").map((e) => e.fields.cents)).toEqual([500_000, 100_000, 700_000]);
+  });
+});
+
+/**
+ * The player owns most of the Daybreak Café; Dana Vale, whom the player has never seen, owns the
+ * rest, works there and owes it for an order.
+ */
+function hiddenPartner(): Working {
+  const { w } = setup((wd) => {
+    wd.entities.dana = { ...entity("dana", "person", "Dana Vale", { place: "cafe", region: "oh" }), visibility: "secret" };
+    wd.entities.dana_checking = account("dana_checking", "dana", "checking", 50_000);
+    wd.entities.daybreak!.fields.owners = [
+      { party: "you", role: "owner", share: 60 },
+      { party: "dana", role: "owner", share: 40 },
+    ];
+    wd.entities.job_dana = entity("job_dana", "job", "Barista", { worker: "dana", employer: "daybreak", title: "Barista", occupation: "barista", splits: [{ to: "dana_checking", pct: 100 }] });
+    wd.entities.inv_dana = entity("inv_dana", "invoice", "Catering", { business: "daybreak", customer: "dana", cents: 40_000, memo: "Catering", issued: "2026-10-01", due: "2026-11-01" });
+  });
+  return w;
+}
+
+/** The Daybreak Café on the player's own money view, as the player sees it or as the GM does. */
+function cafe(w: Working, player: boolean): BusinessView | undefined {
+  const view = player ? w.ctx.query("economy.finance")(w.ctx, "you", true) : w.ctx.query("economy.people_money")(w.ctx).find((m) => m.party === "you");
+  return view?.businesses.find((b) => b.id === "daybreak");
+}
+
+describe("business books: dashboards", () => {
+  test("the GM's view of the player's business names everyone in it", () => {
+    const b = cafe(hiddenPartner(), false);
+    expect(b?.owners.map((o) => o.name)).toEqual(["Alex Rivera", "Dana Vale"]);
+    expect(b?.employees.map((j) => j.worker)).toEqual(["Dana Vale"]);
+    expect(b?.invoices.map((i) => i.customerName)).toEqual(["Dana Vale"]);
   });
 });
