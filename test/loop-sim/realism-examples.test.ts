@@ -23,6 +23,7 @@ import { buildGearView } from "../../src/packs/gear/core/view";
 import { buildGarageView } from "../../src/packs/vehicles/core/view";
 import { modernUsWorld } from "../packs/riverton";
 import { fold, startState, trialBalance } from "../packs/support";
+import { holdingValue } from "../../src/packs/economy/core/holdings";
 import { reg } from "./harness";
 
 /** The POV's money as the Money panel shows it. */
@@ -67,6 +68,25 @@ describe("realism examples: money", () => {
     expect(r.ok).toBe(true);
     expect([account(w, "checking"), account(w, "savings")]).toEqual([c - 50000, s + 50000]);
     expect(moneyView(w.ctx).recent.filter((t) => t.memo === "Transfer").map((t) => t.cents).sort((a, b) => a - b)).toEqual([-50000, 50000]);
+  });
+
+  test("an investment moves on a seeded price path: the same run seed gives the same value, another seed another", () => {
+    const run = (seed: string): number => {
+      const w = setup((wd) => {
+        wd.realism.levels.money = 4;
+        const economy = wd.packs.economy;
+        if (economy) economy.config = { ...economy.config, assets: { idx: { label: "Index fund", symbol: "IDX", class: "fund", price: 10000 } } };
+        wd.entities.brokerage = { id: "brokerage", kind: "account", name: "Brokerage", tier: "background", fields: { owners: [{ party: "you", role: "owner" }], product: "brokerage" }, relations: [] };
+      });
+      expect(effects(w, [{ type: "economy.trade", args: { party: "you", side: "buy", asset: "idx", account: "brokerage", amount: 100000, from: "checking" } }]).rejected).toEqual([]);
+      expect(holdingValue(w.ctx, "brokerage:idx")).toBe(100000);
+      lapse(w, 14 * 1440, seed);
+      return holdingValue(w.ctx, "brokerage:idx");
+    };
+    const a = run("alpha");
+    expect(run("alpha")).toBe(a);
+    expect(run("beta")).not.toBe(a);
+    expect(a).not.toBe(100000);
   });
 
   test("a card statement shows a minimum at level 4, and interest once a balance is carried; at level 3 autopay settles the card", () => {

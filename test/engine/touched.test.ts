@@ -113,10 +113,18 @@ function everythingWorld(): WorldDoc {
   w.entities.rat = { id: "rat", kind: "person", name: "Rat", tier: "background", fields: { place: "taproom", max_hp: 3 }, relations: [] };
   w.entities.acct = { id: "acct", kind: "account", name: "Checking", tier: "background", fields: { owner: "you", type: "checking" }, relations: [] };
   w.entities.card = { id: "card", kind: "account", name: "Card", tier: "background", fields: { owner: "you", type: "card" }, relations: [] };
+  // An index fund, a call on it, a house and a shop, for the holdings module's events.
+  w.entities.hold = { id: "hold", kind: "holding", name: "IDX", tier: "background", fields: { account: "acct", asset: "idx", lots: [{ qty: 10, cost: 100000, at: 0 }] }, relations: [] };
+  w.entities.hold_call = { id: "hold_call", kind: "holding", name: "IDX call", tier: "background", fields: { account: "acct", asset: "opt:idx:call:10000:2026-11-20", lots: [{ qty: 1, cost: 20000, at: 0 }] }, relations: [] };
+  w.entities.house = { id: "house", kind: "property", name: "House", tier: "background", fields: { place: "inn", owners: [{ party: "you", role: "owner", share: 100 }], value: 30000000 }, relations: [] };
+  w.entities.shop = { id: "shop", kind: "business", name: "Shop", tier: "background", fields: { owners: [{ party: "you", role: "owner", share: 100 }] }, relations: [] };
   w.tracks.heist = { id: "heist", kind: "quest", label: "The heist", start: "idea", visibility: "public", stages: { idea: { label: "An idea", next: [] }, on: { label: "Underway", next: [] } } };
   w.checks.initiative = { id: "initiative", dice: "d20" };
   w.ruleset = { combat: { initiative: "initiative", economy: { action: { label: "Action" } }, hp: "hp" } };
-  return migrateWorld(w);
+  const migrated = migrateWorld(w);
+  // A blank world carries no economy config: the index fund is authored on the migrated one.
+  migrated.packs.economy = { version: migrated.packs.economy?.version ?? 1, config: { ...migrated.packs.economy?.config, assets: { idx: { label: "Index fund", symbol: "IDX", class: "fund", price: 10000 } } } };
+  return migrated;
 }
 
 /** One event of every registered type, in an order where each applies to the state the ones before it leave. */
@@ -167,6 +175,15 @@ const EVERY_TYPE: LedgerEvent[] = [
   { type: "economy.status", data: { account: "acct", status: "frozen" } },
   { type: "economy.accrue", data: { account: "acct", at: 0 } },
   { type: "economy.decline", data: { reason: "no funds" } },
+  { type: "economy.price", data: { symbol: "idx", price: 101 } },
+  { type: "economy.quote", data: { asset: "idx", price: 10100 } },
+  { type: "economy.mint", data: { asset: "opt:idx:call:10000:2026-11-20", def: { label: "IDX 2026-11-20 $100.00 call", class: "option", underlying: "idx", strike: 10000, expiry: "2026-11-20", right: "call", multiplier: 100, settlement: "physical" } } },
+  { type: "economy.lots", data: { holding: "hold", qty: 2, cents: 20200, kind: "buy", label: "Bought IDX" } },
+  { type: "economy.income", data: { source: "hold", cents: 500, kind: "dividend" } },
+  { type: "economy.exercise", data: { option: "hold_call", into: "hold", qty: 1, units: 100, cash: 1000000, right: "call", label: "Exercised the IDX call" } },
+  { type: "economy.acquire", data: { entity: "house", party: "you", cents: 25000000 } },
+  { type: "economy.dispose", data: { entity: "house", party: "you", pct: 50, proceeds: 15000000, label: "Sold half the house" } },
+  { type: "economy.stake_route", data: { business: "shop", owner: "you", to: "acct" } },
   { type: "relationships.regard", data: { from: "you", to: "dev", deltas: { warmth: 5 } } },
   { type: "castlife.need", data: { entity: "you", need: "hunger", delta: 10 } },
   { type: "castlife.decision", data: { key: "dev:evening", choice: "rest" } },
