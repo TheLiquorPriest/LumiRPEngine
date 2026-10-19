@@ -66,6 +66,8 @@ export function outline(reg: Registry, world: WorldDoc, state: Readonly<WorldSta
   if (tl) {
     const stop = tl.result.stops[0];
     if (stop && signalVisible(reg, world, state, pov, stop)) lines.push(`Time passes until it's interrupted: ${stop.text}. Narrate the interval from the Montage; don't add events.`);
+    // A time skip a character's mind stopped (DESIGN §24.7): what they do comes from their mind, never stated here.
+    else if (tl.summary.stoppedBy === "mind") lines.push(`Time passes until ${tl.mindName ?? "someone"} steps in; how they do is in the Minds section. Narrate the interval from the Montage; don't add events.`);
     else lines.push("Time passes. Narrate the interval from the Montage; don't add events.");
   }
   for (const e of input.events) {

@@ -135,6 +135,10 @@ declare module "../../../engine/registry" {
      * states as options; null below Weather 2 (no simulated state to correct) or without a region.
      */
     "weather.fix": (ctx: ReadContext) => FixTarget | null;
+    /** The season at a time (the calendar's month), or null with Weather off: the day planner's occasions read it (DESIGN §24.8). */
+    "weather.season": (ctx: ReadContext, at: number) => Season | null;
+    /** Whether the sky over a place keeps people in (its state slows or closes travel), or null below Weather 2 (DESIGN §24.8). */
+    "weather.foul": (ctx: ReadContext, place: PlaceId) => boolean | null;
   }
 }
 
@@ -268,6 +272,13 @@ export const weatherPack: PackDef = {
     });
     r.query("weather.travel_factor", (ctx, place, mode) => (ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : (own(stateAt(ctx, place)?.travel ?? {}, mode) ?? 1)));
     r.query("weather.closed_modes", (ctx, place) => (ctx.levelOf(ctx.world.pov, "weather") < 4 ? [] : (stateAt(ctx, place)?.closes ?? [])));
+    r.query("weather.season", (ctx, at) => (ctx.levelOf(ctx.world.pov, "weather") < 1 ? null : seasonAt(ctx, at)));
+    // The test the temperature reads as wet: any travel effect at all, whatever the level shows of it.
+    r.query("weather.foul", (ctx, place) => {
+      if (ctx.levelOf(ctx.world.pov, "weather") < 2) return null;
+      const st = stateAt(ctx, place);
+      return st ? st.closes.length > 0 || Object.keys(st.travel).length > 0 : null;
+    });
     // A fix is a plain `set` on the region, so it holds until the climate's own step next changes the
     // sky (each slot keeps it with the climate's persistence); under a scripted hold, until that ends.
     r.query("weather.fix", (ctx) => {

@@ -147,6 +147,13 @@ export interface SlotInfo {
   index: number;
 }
 
+/** A moment inside a slot at which an agent process acts between its slot steps (`ProcessDef.instants`). */
+export interface AgentInstant {
+  at: number;
+  /** What the process does then, as it reads it back in `atInstant`. */
+  key: string;
+}
+
 /**
  * A recurring process stepped per schedule slot with a process seed (DESIGN §4.3 seeds). A `world`
  * process (the default) steps once per slot; an `agent` process steps once per LOD1 agent under the
@@ -159,6 +166,16 @@ export interface ProcessDef {
   minLevel: Level;
   scope?: "world" | "agent";
   step(slot: SlotInfo, ctx: ReadContext, rng: (entity: EntityId) => Rng, agent?: EntityId): LedgerEvent[];
+  /**
+   * An agent process's moments strictly inside a slot (DESIGN §8): a character's own plan starting
+   * or ending between slot steps (§24.8). They apply at their time among the schedule edges, in a
+   * turn and in a timelapse, to an agent stepped through the slot before; catch-up has none. Read
+   * from a state the slot's other moments may have changed already, so they must not depend on the
+   * clock or on what moments change: a segment that starts mid-slot then gets the same ones.
+   */
+  instants?(ctx: ReadContext, agent: EntityId, slot: SlotInfo): AgentInstant[];
+  /** What the process does at one of its instants, at that instant's clock. */
+  atInstant?(ctx: ReadContext, agent: EntityId, instant: AgentInstant): LedgerEvent[];
 }
 
 /** A pack's default table and its column contract (ARCHITECTURE §6). */

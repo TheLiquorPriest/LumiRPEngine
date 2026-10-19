@@ -1540,7 +1540,7 @@ export class Runtime implements TurnHooks {
       const elapsed = summary.to - summary.from;
       const rest = summary.target.type === "duration" ? { type: "duration" as const, minutes: Math.max(1, summary.target.minutes - elapsed) } : summary.target;
       const left = rest.type === "duration" ? ` (${compactSpan(rest.minutes)} left)` : "";
-      stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) as JsonValue } });
+      stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? (plan?.timelapse?.mindName ?? "someone") : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) as JsonValue } });
     }
     for (const [i, chip] of bridge.chipsFor(input.content).entries()) stored.push(skipAheadChip(`adv:${at}:${i}`, base, chip.target, chip.reason));
     await this.chips.add(input.chatId, input.userId, stored);
@@ -2169,7 +2169,9 @@ export function planLines(plan: EngineTurnPlan, world: WorldDoc, registry: Regis
   if (summary) {
     const cal = calendarOf(world);
     const span = spanText(summary.to - summary.from);
-    outcome.push(`Time passed: ${span}, from ${formatClock(cal, summary.from)} to ${formatClock(cal, summary.to)}${summary.stoppedBy ? `, stopped early by ${STOP_LABEL[summary.stoppedBy]}` : ""}. Narrate only this span.`);
+    // A character's mind that stopped a time skip is named only as the POV may know them (DESIGN §24.7).
+    const by = summary.stoppedBy === "mind" ? (plan.timelapse?.mindName ?? "someone") : summary.stoppedBy ? STOP_LABEL[summary.stoppedBy] : null;
+    outcome.push(`Time passed: ${span}, from ${formatClock(cal, summary.from)} to ${formatClock(cal, summary.to)}${by ? `, stopped early by ${by}` : ""}. Narrate only this span.`);
   }
   // The player's message holds more than the turn played: told so, the narrator doesn't play it out.
   if (plan.stopped) outcome.push(`The rest of the player's message hasn't happened (${STOPPED_NOTE[plan.stopped.cause]}); don't narrate it.`);
