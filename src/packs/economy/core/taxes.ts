@@ -16,7 +16,7 @@ import type { EntityId, PlaceId } from "../../../shared/ids";
 import type { PackEvent } from "../../../shared/ledger";
 import { FILING_STATUSES, type FilingStatus, type Flow } from "../../../shared/finance";
 import { calendarOf, clockAt, dateAt, dayIndexOf } from "../../../engine/calendar";
-import { numOf, objOf, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
+import { labelOf, numOf, objOf, own, rowOf, sliceOf, sliceRecord, strOf } from "../../../engine/pack-kit";
 import type { EventTypeDef, ReadContext, Rejection } from "../../../engine/registry";
 import { isGone, kindIs } from "../../../engine/scope";
 import type { WorldState } from "../../../engine/state";
@@ -431,7 +431,7 @@ export const ESTIMATED_TAX: EventTypeDef<PackEvent> = {
     all[party] = paid;
     if (e.data.business === true) addToBooks(state, party, monthOf(ctx.world, state.clock), { business_tax: total });
   },
-  describe: (e) => `Estimated tax: ${str(e, "party")}`,
+  describe: (e, ctx, viewer) => (viewer ? "" : `Estimated tax: ${labelOf(ctx, str(e, "party"))}`),
 };
 
 /** The estimated-tax flow: on the four due dates, rolled to the next business day, from the payer to the tax authority. */

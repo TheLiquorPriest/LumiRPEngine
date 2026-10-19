@@ -42,6 +42,15 @@ const BOOKKEEPING = new Set<string>([
   // A flow's run carries its schedule state; its posting and its payer's note carry the line, so
   // nobody else's bills, takings or living costs reach the player.
   "economy.flow_run",
+  // The work module's books (DESIGN §26.4): sales, remittances, invoices paid, payouts, payslips,
+  // commission and estimated tax. Their postings and the payer's notes carry the lines.
+  "economy.sale",
+  "economy.remit",
+  "economy.invoice_paid",
+  "economy.payout",
+  "economy.payslip",
+  "economy.commission",
+  "economy.estimated_tax",
   // The holdings module's books (DESIGN §27.11): marks, contracts listed, lots, income and gains
   // records, and routes. What anyone hears of a trade, a payout or a sale is its posting.
   "economy.quote",

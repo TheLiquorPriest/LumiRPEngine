@@ -99,7 +99,8 @@ export const SALE: EventTypeDef<PackEvent> = {
     const list = Array.isArray(own(sales, business)) ? (own(sales, business) as JsonValue[]) : [];
     sales[business] = [...list.slice(-(SALES_KEPT - 1)), { at: state.clock, cents, tax, memo: str(e, "memo"), payer: str(e, "payer"), category: str(e, "category") }];
   },
-  describe: (e) => `Sale: ${str(e, "memo")}`,
+  // The book of a sale is the GM's line; the player reads its posting.
+  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: sale ${str(e, "payer") === "" ? "to walk-in customers" : `of ${str(e, "memo")} to ${labelOf(ctx, str(e, "payer"))}`}`),
 };
 
 /** `economy.remit`: a business paid what it owed its suppliers, or the sales tax it collected. */
@@ -114,7 +115,7 @@ export const REMIT: EventTypeDef<PackEvent> = {
       addToBooks(state, business, monthOf(ctx.world, state.clock), { tax_remitted: cents });
     } else addToPayables(state, business, { suppliers: -cents });
   },
-  describe: (e) => (e.data.what === "sales_tax" ? "Sales tax paid" : "Suppliers paid"),
+  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: ${e.data.what === "sales_tax" ? "sales tax paid" : "suppliers paid"}`),
 };
 
 /** Commission on a sale for each commission job at the business whose worker is `working`, split evenly. */
@@ -267,7 +268,7 @@ export const INVOICE_PAID: EventTypeDef<PackEvent> = {
     const customer = str(e, "customer");
     if (own(state.entities, customer) && kindIs(ctx.registry, ctx.world, own(state.entities, customer)?.kind ?? "", "business")) addToBooks(state, customer, month, { bills: cents });
   },
-  describe: (e) => `Invoice paid: ${str(e, "invoice")}`,
+  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: invoice paid by ${own(ctx.state.entities, str(e, "customer")) ? labelOf(ctx, str(e, "customer")) : str(e, "customer")}`),
 };
 
 /** The events that mark an invoice paid in full with a payment of `cents`, and book it. */
@@ -412,7 +413,7 @@ export const PAYOUT: EventTypeDef<PackEvent> = {
     for (const [month, cents] of months) addToBooks(state, business, month, { distributions: numOf(cents) });
     sliceRecord(state, "economy", "distributed")[business] = state.clock;
   },
-  describe: (e) => (e.data.what === "draw" ? "Owner's draw" : "Profit distributed"),
+  describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "business"))}: ${e.data.what === "draw" ? "owner's draw" : "profit distributed"}`),
 };
 
 /** Whether an owner may draw on a business: an owner or joint owner; a corporation pays its owners by salary or dividends instead. */

@@ -663,7 +663,7 @@ export const PAYSLIP: EventTypeDef<PackEvent> = {
     const business = str(e, "business");
     if (business !== "") addToBooks(state, business, monthOf(ctx.world, state.clock), { payroll: numOf(e.data.cost) });
   },
-  describe: (e) => `Payslip: ${str(e, "job")}`,
+  describe: (e, ctx, viewer) => (viewer ? "" : `Payslip: ${labelOf(ctx, str(e, "worker"))}, ${labelOf(ctx, str(e, "job"))}`),
 };
 
 /** The days on a timesheet, as a sorted list of day indexes. */
@@ -704,7 +704,7 @@ export const COMMISSION: EventTypeDef<PackEvent> = {
     const cur = objOf(own(payroll, job));
     payroll[job] = { ...cur, sales: numOf(cur.sales) + numOf(e.data.cents) };
   },
-  describe: (e) => `Commission on sales: ${str(e, "job")}`,
+  describe: (e, ctx, viewer) => (viewer ? "" : `Commission on sales: ${labelOf(ctx, str(e, "job"))}`),
   coarsen: {
     key: (e) => `${str(e, "job")}:${numOf(e.data.since)}`,
     merge: (a, b) => ({ ...b, data: { ...b.data, cents: numOf(a.data.cents) + numOf(b.data.cents) } }),
