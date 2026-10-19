@@ -397,8 +397,12 @@ export function occurrenceAmount(hooks: FinanceHooks, ctx: ReadContext, flow: Fl
     const provider = own(hooks.amounts, a.provider);
     if (!provider) return reject("no_provider", `nothing works out ${flow.label}`);
     const made = provider(ctx, flow, at, rng);
-    if (made === null || "code" in made) return made;
-    return { cents: Math.round(made.cents), posting: made };
+    // Nothing this time: only what an earlier occurrence deferred falls due.
+    if (made === null) return deferred > 0 ? { cents: deferred } : null;
+    if ("code" in made) return made;
+    // What a module gave only the amount of pays like any flow, so what an earlier one deferred is added; its own posting goes as it gave it.
+    if (made.lines?.some((l) => l.amount !== 0)) return { cents: Math.round(made.cents), posting: made };
+    return { cents: Math.round(made.cents) + Math.max(0, deferred), posting: made };
   }
   if (cents === null || !Number.isFinite(cents)) return null;
   const total = Math.round(cents) + Math.max(0, deferred);
@@ -522,14 +526,14 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
   const ctx = run.ctx;
   const before = flowRunOf(ctx.state, flow.id);
   if (before.ended) return;
-  const amount = retry && before.retry ? { cents: before.retry.cents } : occurrenceAmount(hooks, ctx, flow, at, rng, flow.amount && !("provider" in flow.amount) ? (before.deferred ?? 0) : 0);
+  const amount = retry && before.retry ? { cents: before.retry.cents } : occurrenceAmount(hooks, ctx, flow, at, rng, before.deferred ?? 0);
   const ended = (done: number, missed: number): boolean => (flow.count !== undefined && done + missed >= flow.count) || false;
   const who = noteParty(ctx, flow);
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
   if (amount === null) return;
   if ("code" in amount) {
-    // The module couldn't work the amount out: nothing moves, and it counts as missed.
-    const next: FlowRunState = { done: before.done, missed: before.missed + 1, ended: ended(before.done, before.missed + 1) };
+    // The module couldn't work the amount out: nothing moves, it counts as missed, and what was carried still waits.
+    const next: FlowRunState = { done: before.done, missed: before.missed + 1, ...(before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done, before.missed + 1) };
     run.emit([runEvent(flow, at, "declined", 0, next)]);
     return;
   }
@@ -547,7 +551,8 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
   if (!("code" in attempt)) {
     const applied = run.emit(attempt.events);
     if (applied.length > 0 || attempt.events.length === 0) {
-      const next: FlowRunState = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
+      // A module's own posting can't take what was carried; it waits for an occurrence that can.
+      const next: FlowRunState = { done: before.done + 1, missed: before.missed, ...(own_lines && before.deferred ? { deferred: before.deferred } : {}), ended: ended(before.done + 1, before.missed) };
       run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
       if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0) run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
       return;
@@ -593,7 +598,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       break;
     }
     case "defer": {
-      const next: FlowRunState = { done: before.done, missed: before.missed + 1, deferred: cents, ended: ended(before.done, before.missed + 1) };
+      const next: FlowRunState = { done: before.done, missed: before.missed + 1, deferred: cents + (own_lines ? (before.deferred ?? 0) : 0), ended: ended(before.done, before.missed + 1) };
       run.emit([runEvent(flow, at, "deferred", 0, next, cents)]);
       if (who) run.emit([signal("decline", `${flow.label} (${money(cents)}) couldn't be paid; it carries to next time.`, who, at)]);
       return;
