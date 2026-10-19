@@ -3481,7 +3481,7 @@ var STEP_SIGNALS = [
 function knownSignal(s) {
   return STEP_SIGNALS.includes(s) || /^every_n:[1-9]\d*$/.test(s);
 }
-var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent"];
+var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "character"];
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
   "npc.choose": ["decision", "text"],
@@ -3491,7 +3491,11 @@ var STEP_OUTPUTS = {
   outline: ["text"],
   extract: ["text", "effects"],
   choices: ["text", "effects"],
-  judge: ["decision", "text"]
+  judge: ["decision", "text"],
+  mind: ["text"],
+  memory: ["text"],
+  skip: ["text"],
+  consolidate: ["text"]
 };
 
 // src/shared/lore.ts
@@ -7932,6 +7936,10 @@ function agendaFor(world, state, agent) {
   }
   return out.sort((a, b) => b.priority - a.priority || a.track.localeCompare(b.track));
 }
+function isTerminal(track, stage) {
+  const def = own(track.stages, stage);
+  return !def || def.next.length === 0 && !def.fail;
+}
 
 // src/engine/working.ts
 class Working {
@@ -8058,11 +8066,46 @@ function advance(reg, w, to, opts) {
   };
   let cursors = new Map;
   let next = 0;
-  const applyInstants = (until) => {
-    while (next < instants.length && (instants[next]?.at ?? Infinity) <= until) {
-      const inst = instants[next++];
-      clockTo(w, inst.at, cause, e);
-      e.emit(instantEvents(reg, w.ctx, inst, opts.runSeed, { povRoutine: timelapse }));
+  const agentInstants = (slot, until) => {
+    const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
+    if (timed.length === 0)
+      return [];
+    const after = w.state.clock;
+    const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+    const info = { start: slot.start, end: slot.end, index: slot.index };
+    const out = [];
+    for (const agent of who) {
+      if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1)
+        continue;
+      for (const def of timed) {
+        if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
+          continue;
+        for (const instant of def.instants?.(w.ctx, agent, info) ?? [])
+          if (instant.at > after && instant.at <= until && instant.at > slot.start && instant.at < slot.end)
+            out.push({ at: instant.at, agent, def, instant });
+      }
+    }
+    return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
+  };
+  const applyInstants = (until, slot) => {
+    const timed = agentInstants(slot, until);
+    let t = 0;
+    for (;; ) {
+      const edge = instants[next];
+      const edgeAt = edge && edge.at <= until ? edge.at : Infinity;
+      const moment = timed[t];
+      if (edgeAt === Infinity && !moment)
+        break;
+      if (edge && edgeAt <= (moment?.at ?? Infinity)) {
+        next++;
+        clockTo(w, edgeAt, cause, e);
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine: timelapse }));
+      } else if (moment) {
+        t++;
+        clockTo(w, moment.at, cause, e);
+        if (stillActs(w, moment.agent))
+          e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant) ?? []);
+      }
     }
   };
   const signalsSince = (index) => {
@@ -8084,16 +8127,17 @@ function advance(reg, w, to, opts) {
       cursors.delete(agent);
     }
     const slotDays = agents.length * (slot.end - slot.start) / MINUTES_PER_DAY;
-    if (timelapse && result.slots > 0 && result.agentDays + slotDays > cap.agentDays) {
+    const ranBefore = result.slots + (opts.slotsBefore ?? 0) > 0;
+    if (timelapse && ranBefore && result.agentDays + slotDays > cap.agentDays) {
       result.stop = "cap";
       break;
     }
-    const mark = timelapse && result.slots > 0 ? w.mark() : null;
+    const mark = timelapse && ranBefore ? w.mark() : null;
     const held = mark ? new Map(cursors) : null;
     const before = w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
-    applyInstants(slot.end);
+    applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
     const info = { start: slot.start, end: slot.end, index: slot.index };
     for (const def of reg.processes) {
@@ -8146,7 +8190,7 @@ function advance(reg, w, to, opts) {
     }
   }
   if (result.stop === "target") {
-    applyInstants(to);
+    applyInstants(to, slotOf(cal, slotIndexAt(cal, to)));
     clockTo(w, to, cause, e);
   }
   for (const [agent, slot] of cursors)
@@ -8560,36 +8604,122 @@ function parseOverrides(v) {
   }
   return out;
 }
+
+class TimelapseRun {
+  reg;
+  w;
+  target;
+  opts;
+  resolved;
+  from;
+  to;
+  ended = null;
+  before;
+  start;
+  cap;
+  result;
+  constructor(reg, w, target, opts, resolved) {
+    this.reg = reg;
+    this.w = w;
+    this.target = target;
+    this.opts = opts;
+    this.resolved = resolved;
+    this.before = structuredClone(w.state);
+    this.start = w.events.length;
+    this.from = w.state.clock;
+    this.to = resolved.to;
+    this.cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
+    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [] };
+  }
+  static start(reg, w, target, opts) {
+    if (clockPaused(w.world, w.state))
+      return { code: "paused", reason: "The clock is paused; resume it first." };
+    const resolved = resolveTarget(reg, w.world, w.state, target);
+    return "code" in resolved ? resolved : new TimelapseRun(reg, w, target, opts, resolved);
+  }
+  get clock() {
+    return this.w.state.clock;
+  }
+  advanceTo(at) {
+    if (this.ended !== null)
+      return false;
+    const to = Math.min(at, this.to);
+    if (to <= this.w.state.clock)
+      return true;
+    const used = { agentDays: this.result.agentDays, events: this.w.events.length - this.start };
+    if (this.result.slots > 0 && (used.agentDays >= this.cap.agentDays || used.events >= this.cap.events)) {
+      this.ended = this.result.stop = "cap";
+      return false;
+    }
+    const r = advance(this.reg, this.w, to, {
+      runSeed: this.opts.runSeed,
+      mode: "timelapse",
+      cause: "timelapse",
+      includePov: true,
+      ...this.opts.overrides ? { interrupts: this.opts.overrides } : {},
+      unitCap: { agentDays: this.cap.agentDays - used.agentDays, events: this.cap.events - used.events },
+      slotsBefore: this.result.slots,
+      ...this.resolved.stopWhen ? { stopWhen: this.resolved.stopWhen } : {}
+    });
+    const acc = this.result;
+    acc.slots += r.slots;
+    acc.agentDays += r.agentDays;
+    acc.stops.push(...r.stops);
+    acc.notes.push(...r.notes);
+    acc.rules.push(...r.rules);
+    acc.tracks.push(...r.tracks);
+    if (r.stop === "target")
+      return true;
+    this.ended = acc.stop = r.stop;
+    acc.stoppedBy = r.stoppedBy;
+    return false;
+  }
+  apply(events) {
+    return this.w.applyAll(events);
+  }
+  finish(stop) {
+    if (stop === null)
+      this.advanceTo(this.to);
+    const w = this.w;
+    const result = { ...this.result, to: w.state.clock, events: w.events.length - this.start, ...stop ? { stop: stop.by === "mind" ? "interrupt" : "cap" } : {} };
+    const summary = { type: "timelapse", from: this.from, to: result.to, target: this.target, stoppedBy: stop?.by === "mind" ? "mind" : result.stoppedBy, segment: this.opts.segment ?? 1, ...stop?.by === "mind" ? { mind: stop.entity } : {} };
+    w.apply(summary);
+    const remaining = result.stop === "cap" ? Math.max(0, this.to - result.to) : 0;
+    const montage = buildMontage(this.reg, w.world, this.before, w.state, w.events.slice(this.start), w.state.time.montage);
+    return {
+      ok: true,
+      result,
+      summary,
+      remaining,
+      chip: remaining > 0 ? { kind: "continue_timelapse", target: this.target.type === "duration" ? { type: "duration", minutes: remaining } : this.target, remaining } : null,
+      montage,
+      ...stop?.by === "mind" ? { mindName: playerKnows(this.reg, w.world, w.state, w.world.pov, stop.entity) ? own(w.state.entities, stop.entity)?.name ?? null : null } : {}
+    };
+  }
+}
 function runTimelapse(reg, w, target, opts) {
-  if (clockPaused(w.world, w.state))
-    return { code: "paused", reason: "The clock is paused; resume it first." };
-  const resolved = resolveTarget(reg, w.world, w.state, target);
-  if ("code" in resolved)
-    return resolved;
-  const before = structuredClone(w.state);
-  const start = w.events.length;
-  const from = w.state.clock;
-  const result = advance(reg, w, resolved.to, {
-    runSeed: opts.runSeed,
-    mode: "timelapse",
-    cause: "timelapse",
-    includePov: true,
-    ...opts.overrides ? { interrupts: opts.overrides } : {},
-    unitCap: clampUnitCap(opts.unitCap ?? w.state.time.unitCap),
-    ...resolved.stopWhen ? { stopWhen: resolved.stopWhen } : {}
-  });
-  const summary = { type: "timelapse", from, to: result.to, target, stoppedBy: result.stoppedBy, segment: opts.segment ?? 1 };
-  w.apply(summary);
-  const remaining = result.stop === "cap" ? resolved.to - result.to : 0;
-  const montage = buildMontage(reg, w.world, before, w.state, w.events.slice(start), w.state.time.montage);
-  return {
-    ok: true,
-    result,
-    summary,
-    remaining,
-    chip: result.stop === "cap" ? { kind: "continue_timelapse", target: target.type === "duration" ? { type: "duration", minutes: remaining } : target, remaining } : null,
-    montage
-  };
+  const run = TimelapseRun.start(reg, w, target, opts);
+  return "code" in run ? run : run.finish(null);
+}
+function replaySkip(reg, w, target, record, opts) {
+  const run = TimelapseRun.start(reg, w, target, opts);
+  if ("code" in run)
+    return run;
+  const stopAt = record.stop?.at ?? Infinity;
+  for (const beat of record.beats) {
+    if (beat.at > stopAt)
+      break;
+    run.advanceTo(beat.at);
+    if (run.clock !== beat.at)
+      return run.finish(null);
+    run.apply(beat.events);
+  }
+  if (record.stop) {
+    run.advanceTo(record.stop.at);
+    if (run.clock === record.stop.at)
+      return run.finish(record.stop);
+  }
+  return run.finish(null);
 }
 function applyTimeAdvance(reg, w, minutes, opts) {
   const target = { type: "duration", minutes };
@@ -9739,7 +9869,8 @@ var PERSON = {
     needs: { type: "list", label: "Needs", domain: "castlife", level: 4, locked: true },
     appointments: { type: "list", label: "Appointments", domain: "castlife", level: 2 },
     trips: { type: "list", label: "Trips", domain: "castlife", level: 1 },
-    chores: { type: "list", label: "Chores", domain: "castlife", level: 3 }
+    chores: { type: "list", label: "Chores", domain: "castlife", level: 3 },
+    birthday: { type: "date", label: "Birthday (MM-DD or YYYY-MM-DD)", domain: "castlife", level: 3 }
   }
 };
 function asMode(v) {
@@ -13956,6 +14087,13 @@ var weatherPack = {
     });
     r.query("weather.travel_factor", (ctx, place, mode) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : own(stateAt(ctx, place)?.travel ?? {}, mode) ?? 1);
     r.query("weather.closed_modes", (ctx, place) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? [] : stateAt(ctx, place)?.closes ?? []);
+    r.query("weather.season", (ctx, at) => ctx.levelOf(ctx.world.pov, "weather") < 1 ? null : seasonAt(ctx, at));
+    r.query("weather.foul", (ctx, place) => {
+      if (ctx.levelOf(ctx.world.pov, "weather") < 2)
+        return null;
+      const st = stateAt(ctx, place);
+      return st ? st.closes.length > 0 || Object.keys(st.travel).length > 0 : null;
+    });
     r.query("weather.fix", (ctx) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2)
         return null;
@@ -14386,11 +14524,301 @@ function regardView(ctx, from, to) {
   return axesOf(ctx).map((a) => ({ axis: a.label, band: bandOf(bands, axes[a.id] ?? 0)?.label ?? "neutral", value: axes[a.id] ?? 0 }));
 }
 
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 1200 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "brief",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, 8000],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num3 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
+var whole3 = (v, range, fallback) => Math.round(num3(v, range, fallback));
+var obj = (v) => isRecord(v) ? v : {};
+function selectorOrNull(v) {
+  if (!isRecord(v))
+    return null;
+  const out = {};
+  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
+  const ids = list(v.ids);
+  const kind = list(v.kind);
+  const tier = list(v.tier);
+  const memberOf = list(v.memberOf);
+  const tag = list(v.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v.class)) {
+      const vs = list(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m = obj(raw);
+  const witness = obj(m.witness);
+  const recall = obj(m.recall);
+  const notes = obj(m.notes);
+  const commitments = obj(m.commitments);
+  const salience = obj(m.salience);
+  const consolidate = obj(m.consolidate);
+  return {
+    witness: { show: whole3(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole3(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole3(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole3(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole3(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole3(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole3(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num3(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num3(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num3(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj(world.minds);
+  const w = obj(raw.weights);
+  const band = obj(w.band);
+  const d = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v, fallback) => num3(v, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t = obj(raw.thresholds);
+  const far = num3(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num3(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num3(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    weights: {
+      here: weight(w.here, d.here),
+      nearby: weight(w.nearby, d.nearby),
+      mentioned: weight(w.mentioned, d.mentioned),
+      regard: weight(w.regard, d.regard),
+      knows: weight(w.knows, d.knows),
+      owner: weight(w.owner, d.owner),
+      track: weight(w.track, d.track),
+      roles,
+      rule: weight(w.rule, d.rule),
+      pending: weight(w.pending, d.pending),
+      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
+      recent: weight(w.recent, d.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory)
+  };
+}
+function limitOf(limit) {
+  return limit === "none" ? Number.POSITIVE_INFINITY : limit;
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var MIND_PROMPT_MAX = 20000;
+function limitIn(v, lo, hi, fallback) {
+  if (v === "none")
+    return "none";
+  return typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : fallback;
+}
+function memoryOverridesOf(raw) {
+  const m = obj(raw);
+  const full = memoryConfigOf(raw, DEFAULT_MINDS_MEMORY);
+  const out = {};
+  for (const part of Object.keys(DEFAULT_MINDS_MEMORY)) {
+    const given = obj(m[part]);
+    const read = full[part];
+    const keep = {};
+    for (const key of Object.keys(given))
+      if (hasOwn(read, key) && given[key] === read[key])
+        keep[key] = read[key] ?? null;
+    if (Object.keys(keep).length > 0)
+      Object.assign(out, { [part]: keep });
+  }
+  return out;
+}
+function mindsSettingsOf(raw, base = MINDS_DEFAULTS) {
+  const m = obj(raw);
+  const near = obj(m.nearRefresh);
+  const skip = obj(m.skip);
+  const levels = Array.isArray(m.memoryLevels) ? FIDELITIES.filter((f) => f !== "background" && m.memoryLevels.includes(f)) : [...base.memoryLevels];
+  const prompts = {};
+  const rawPrompts = obj(m.prompts);
+  for (const p of MIND_PURPOSES) {
+    const text = rawPrompts[p];
+    if (typeof text === "string" && text.trim() !== "")
+      prompts[p] = text.slice(0, MIND_PROMPT_MAX);
+  }
+  return {
+    enabled: typeof m.enabled === "boolean" ? m.enabled : base.enabled,
+    liveLimit: limitIn(m.liveLimit, 0, 64, base.liveLimit),
+    nearRefresh: {
+      scene: typeof near.scene === "boolean" ? near.scene : base.nearRefresh.scene,
+      mention: typeof near.mention === "boolean" ? near.mention : base.nearRefresh.mention,
+      turns: limitIn(near.turns, 1, 1000, base.nearRefresh.turns),
+      minutes: limitIn(near.minutes, 1, 525600, base.nearRefresh.minutes)
+    },
+    farRefreshMinutes: limitIn(m.farRefreshMinutes, 1, 525600, base.farRefreshMinutes),
+    refreshLimit: limitIn(m.refreshLimit, 0, 64, base.refreshLimit),
+    memoryLevels: levels,
+    tokens: typeof m.tokens === "number" && Number.isInteger(m.tokens) && m.tokens >= 0 && m.tokens <= 1e5 ? m.tokens : base.tokens,
+    memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
+    prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
+    skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) }
+  };
+}
+function effectiveMemory(world, settings) {
+  const fromWorld = worldMindsOf(world).memory;
+  const merged = {};
+  for (const part of Object.keys(fromWorld))
+    merged[part] = { ...fromWorld[part], ...settings.memory[part] ?? {} };
+  return memoryConfigOf(merged, fromWorld);
+}
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 };
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var MINDS_EVENTS = {
+  round: "minds.round",
+  mind: "minds.mind",
+  memory: "minds.memory",
+  presence: "minds.presence",
+  plan: "minds.plan",
+  planEdit: "minds.plan_edit",
+  noteEdit: "minds.note_edit",
+  commitment: "minds.commitment",
+  commitmentEdit: "minds.commitment_edit",
+  consolidated: "minds.consolidated",
+  pin: "minds.pin",
+  refresh: "minds.refresh",
+  skip: "minds.skip"
+};
+var MINDS_SLOT = "minds";
+var MINDS_SECTION_TEMPLATE = `Each mind below is scoped to what that character knows and is blind to everyone else's. Show it through what they do and say; never state a thought, a reason or an intent outright, and never let one character act on another's private mind.
+{{lines}}`;
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+});
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen). Leave the list empty when there are none.",
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    "- plans: intentions with times that this turn formed.",
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+});
+
 // src/engine/plan-day.ts
 var IDLE_OPTION = "idle";
 var IDLE_STEP = 30;
-function utilityAt(o, t) {
-  const u = typeof o.utility === "number" ? o.utility : o.utility(t);
+function utilityAt(o, t, laid) {
+  const u = typeof o.utility === "number" ? o.utility : o.utility(t, laid);
   return Number.isFinite(u) ? u : 0;
 }
 function tieKey(agent, dayStart, at) {
@@ -14410,12 +14838,12 @@ function planDay(input) {
       fi++;
     const f = fixed[fi];
     if (f && f.start <= t) {
-      blocks.push({ start: t, end: Math.min(f.end, input.end), option: `fixed:${f.label}`, label: f.label, activity: f.activity, place: f.place ?? null, utility: 0, reasons: [f.reason], fixed: true });
+      blocks.push({ start: t, end: Math.min(f.end, input.end), option: f.option ?? `fixed:${f.label}`, label: f.label, activity: f.activity, place: f.place ?? null, utility: 0, reasons: [f.reason], fixed: true });
       t = Math.min(f.end, input.end);
       continue;
     }
     const gapEnd = f ? Math.min(f.start, input.end) : input.end;
-    const candidates = input.options.filter((o) => o.duration > 0 && (o.repeat || !used.has(o.id)) && (!o.window || o.window.from <= t && t < o.window.to)).map((o) => ({ o, u: utilityAt(o, t) })).sort((a, b) => b.u - a.u || a.o.id.localeCompare(b.o.id));
+    const candidates = input.options.filter((o) => o.duration > 0 && (o.repeat || !used.has(o.id)) && (!o.window || o.window.from <= t && t < o.window.to)).map((o) => ({ o, u: utilityAt(o, t, blocks) })).sort((a, b) => b.u - a.u || a.o.id.localeCompare(b.o.id));
     const best = candidates[0];
     if (!best || best.u <= 0) {
       const opens = input.options.filter((o) => (o.repeat || !used.has(o.id)) && o.window && o.window.from > t).map((o) => o.window?.from ?? gapEnd);
@@ -14454,11 +14882,187 @@ function planDay(input) {
       ties.push({ key, at: t, options: tied.map((c) => ({ id: c.o.id, utility: c.u })), chosen: pick, via });
     }
     const end = Math.min(t + chosen.o.duration, gapEnd);
-    blocks.push({ start: t, end, option: chosen.o.id, label: chosen.o.label, activity: chosen.o.activity, place: chosen.o.place ?? null, utility: chosen.u, reasons: chosen.o.reasons, fixed: false });
+    blocks.push({ start: t, end, option: chosen.o.id, label: chosen.o.label, activity: chosen.o.activity, place: chosen.o.place ?? null, utility: chosen.u, reasons: [...chosen.o.reasons, ...chosen.o.because?.(t, blocks) ?? []], fixed: false });
     used.add(chosen.o.id);
     t = end;
   }
   return { agent: input.agent, start: input.start, end: input.end, blocks, ties, tieZone };
+}
+
+// src/packs/castlife/core/places.ts
+function homeOf(ctx, who) {
+  const h = own(ctx.state.entities, who)?.fields.home;
+  return typeof h === "string" ? h : null;
+}
+function workPlace(ctx, who) {
+  const employer = own(ctx.state.entities, who)?.fields.employer;
+  if (typeof employer !== "string")
+    return null;
+  if (own(ctx.world.places, employer))
+    return employer;
+  return placeOfEntity(ctx.state, employer);
+}
+function placeOfType(ctx, sceneType, near) {
+  const ids = Object.keys(ctx.world.places).sort();
+  const parent = near ? own(ctx.world.places, near)?.parent : undefined;
+  return ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.parent === parent) ?? ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.visibility !== "secret") ?? null;
+}
+
+// src/packs/castlife/core/commitments.ts
+var PLAYED = {
+  errand: { minutes: 45, hours: [9, 18], activity: "errand", label: "Errand" },
+  meet: { minutes: 90, hours: [10, 22], activity: "socialize", label: "Meeting someone" },
+  visit: { minutes: 120, hours: [10, 21], activity: "visiting", label: "A visit" },
+  work: { minutes: 240, hours: [6, 20], activity: "work", label: "Work" },
+  rest: { minutes: 60, hours: [0, 24], activity: "rest", label: "Rest" },
+  leisure: { minutes: 90, hours: [9, 22], activity: "leisure", label: "Time out" },
+  other: { minutes: 60, hours: [8, 21], activity: "busy", label: "Busy" }
+};
+var SEARCH_DAYS = 14;
+function cutAround(blocks, cutters) {
+  return cutters.reduce((list, cutter) => list.flatMap((c) => {
+    if (c.end <= cutter.start || c.start >= cutter.end)
+      return [c];
+    const parts = [];
+    if (c.start < cutter.start)
+      parts.push({ ...c, end: cutter.start });
+    if (c.end > cutter.end)
+      parts.push({ ...c, start: cutter.end });
+    return parts;
+  }), blocks);
+}
+function personPlaceFor(ctx, who, at) {
+  let best = null;
+  for (const s of allSchedules(ctx.registry, ctx.world)) {
+    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
+      continue;
+    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
+    const a = activeSlot(ctx.world, s, at);
+    if (a && typeof a.slot.value === "string" && (!best || rank < best.rank))
+      best = { rank, place: a.slot.value };
+  }
+  return best?.place ?? null;
+}
+function authored(ctx, who, start, end) {
+  const ranked = [];
+  for (const s of allSchedules(ctx.registry, ctx.world)) {
+    if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
+      continue;
+    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
+    const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
+    for (const e of edges) {
+      if (e.edge !== "start")
+        continue;
+      const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
+      const value = s.slots[e.slot]?.value;
+      if (!close || typeof value !== "string" || close.at <= start || e.at >= end)
+        continue;
+      const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
+      const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
+      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind }, rank });
+    }
+  }
+  const routine = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
+  const f = own(ctx.state.entities, who)?.fields;
+  const appointments = [];
+  for (const raw of Array.isArray(f?.appointments) ? f.appointments : []) {
+    const a = objOf(raw);
+    const at = numOf(a.at, NaN);
+    const until = at + numOf(a.minutes, 60);
+    if (!(until > start && at < end))
+      continue;
+    appointments.push({ start: at, end: until, label: strOf(a.label, "Appointment"), activity: "appointment", place: strOf(a.place) || null, reason: "appointment", kind: "appointment" });
+  }
+  const trips = [];
+  for (const raw of Array.isArray(f?.trips) ? f.trips : []) {
+    const t = objOf(raw);
+    const from = numOf(t.from, NaN);
+    const until = numOf(t.until, NaN);
+    if (!(until > start && from < end))
+      continue;
+    trips.push({ start: from, end: until, label: strOf(t.label, "Away"), activity: "trip", place: strOf(t.place) || null, reason: "trip", kind: "trip" });
+  }
+  return { routine, appointments, trips };
+}
+function planTier(ctx, who) {
+  return optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
+}
+function plansOf(ctx, who, tier = planTier(ctx, who)) {
+  if (tier === "background" || who === ctx.world.pov)
+    return [];
+  return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).filter((p) => p.status === "open" && p.when.to > p.when.from);
+}
+function tight(p) {
+  return p.when.to - p.when.from <= 2 * PLAYED[p.kind].minutes;
+}
+function cutsRoutine(p, tier) {
+  return p.priority >= 4 || tier !== "far" && p.priority >= 3 && tight(p);
+}
+function precedence(a, b) {
+  return b.priority - a.priority || a.made - b.made || a.id.localeCompare(b.id);
+}
+function planBlock(ctx, who, p, start, end) {
+  const played = PLAYED[p.kind];
+  const place = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
+  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
+}
+function placed(ctx, who, p, tier, a) {
+  if (tight(p))
+    return planBlock(ctx, who, p, p.when.from, p.when.to);
+  const cal = calendarOf(ctx.world);
+  const { minutes, hours } = PLAYED[p.kind];
+  const to = Math.min(p.when.to, p.when.from + SEARCH_DAYS * MINUTES_PER_DAY);
+  const blockers = [...a.trips, ...p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(p, tier) ? [] : a.routine];
+  const candidates = new Set([p.when.from]);
+  for (const b of blockers)
+    if (b.end > p.when.from && b.end < to)
+      candidates.add(b.end);
+  for (let day = dateAt(cal, p.when.from).dayIndex;clockAt(cal, day, 0) < to; day++)
+    candidates.add(clockAt(cal, day, hours[0] * 60));
+  for (const c of [...candidates].sort((x, y) => x - y)) {
+    if (c < p.when.from || c >= to)
+      continue;
+    const day = dateAt(cal, c).dayIndex;
+    const start = Math.max(c, clockAt(cal, day, hours[0] * 60));
+    const end = start + minutes;
+    if (end > Math.min(to, clockAt(cal, day, hours[1] * 60)))
+      continue;
+    if (!blockers.some((b) => b.start < end && b.end > start))
+      return planBlock(ctx, who, p, start, end);
+  }
+  return null;
+}
+function commitments(ctx, who, start, end) {
+  const tier = planTier(ctx, who);
+  const plans = plansOf(ctx, who, tier).filter((p) => p.when.to > start && p.when.from < end).sort(precedence);
+  const from = Math.min(start, ...plans.map((p) => p.when.from));
+  const to = Math.max(end, ...plans.map((p) => Math.min(p.when.to, p.when.from + SEARCH_DAYS * MINUTES_PER_DAY)));
+  const a = authored(ctx, who, from, to);
+  const laid = [];
+  for (const p of plans) {
+    const block = placed(ctx, who, p, tier, a);
+    if (block)
+      laid.push({ p, block });
+  }
+  const pieces = [];
+  laid.forEach(({ p, block }, i) => {
+    const cutters = [...laid.slice(0, i).map((l) => l.block), ...p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(p, tier) ? [] : a.routine];
+    pieces.push(...cutAround([block], cutters));
+  });
+  const routine = cutAround(a.routine, laid.filter((l) => cutsRoutine(l.p, tier)).map((l) => l.block));
+  const appointments = cutAround(a.appointments, laid.filter((l) => l.p.priority >= 5).map((l) => l.block));
+  return [...cutAround([...routine, ...appointments, ...pieces], a.trips), ...a.trips].filter((c) => c.end > start && c.start < end).sort((x, y) => x.start - y.start);
+}
+function laidPlans(ctx, who, plans) {
+  const out = new Map(plans.map((p) => [p.id, []]));
+  if (plans.length === 0)
+    return out;
+  const from = Math.min(...plans.map((p) => p.when.from));
+  const to = Math.max(...plans.map((p) => p.when.to));
+  for (const c of commitments(ctx, who, from, to))
+    if (c.plan !== undefined)
+      out.get(c.plan)?.push(c);
+  return out;
 }
 
 // src/packs/castlife/core/cues.ts
@@ -14616,6 +15220,49 @@ function cueIssues(world) {
   return issues;
 }
 
+// src/packs/castlife/core/occasions.ts
+var FOND = 30;
+function birthdayOf(v) {
+  const m = typeof v === "string" ? /^\s*(?:(-?\d{1,6})-)?(\d{1,2})-(\d{1,2})\s*$/.exec(v) : null;
+  if (!m)
+    return null;
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  return month >= 1 && day >= 1 && day <= 31 ? { month, day, year: m[1] === undefined ? null : Number(m[1]) } : null;
+}
+function birthdayOn(cal, v, date) {
+  const b = birthdayOf(v);
+  if (!b || b.month !== date.month)
+    return false;
+  const last = cal.system.monthLength(date.year, date.month);
+  return b.day === date.day || b.day > last && date.day === last;
+}
+function calendarDay(ctx, cal, day) {
+  const date = dateAt(cal, clockAt(cal, day, 0));
+  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
+  return { date, weekend: date.weekday === 0 || date.weekday === 6, holidays };
+}
+function occasionOf(ctx, who, day) {
+  const cal = calendarOf(ctx.world);
+  const { date, weekend, holidays } = calendarDay(ctx, cal, day);
+  const regard = optionalQuery(ctx, "regard");
+  const friends = regard ? Object.keys(ctx.state.entities).sort().filter((other) => {
+    const e = own(ctx.state.entities, other);
+    return other !== who && !!e && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other) && birthdayOn(cal, e.fields.birthday, date) && regard(ctx, who, other) >= FOND;
+  }) : [];
+  const home = own(ctx.state.entities, who)?.fields.home;
+  const place = typeof home === "string" && own(ctx.world.places, home) ? home : null;
+  return {
+    weekend,
+    dayOff: weekend || holidays.some((h) => h.dayOff),
+    holidays,
+    birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
+    friends,
+    season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day, 12 * 60)) ?? null,
+    foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
+  };
+}
+
 // src/packs/castlife/core/index.ts
 var NEEDS = {
   hunger: { rate: 4, satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], label: "hungry", daily: [420, 750, 1110] },
@@ -14624,100 +15271,33 @@ var NEEDS = {
   fun: { rate: 1, satisfiedBy: ["leisure", "exercise", "drinks", "socialize"], label: "bored", daily: [1200] }
 };
 var NEED_ALERT = 80;
-function needValue(ctx, who, need, at = ctx.state.clock) {
+function satisfies(activity, need) {
+  return own(NEEDS, need)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
+}
+function needIn(ctx, who, need, at, blocks) {
   const def = own(NEEDS, need);
   if (!def)
     return 0;
   const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need));
-  if (typeof n.t !== "number" && who !== ctx.world.pov) {
+  if (typeof n.t === "number" || who === ctx.world.pov) {
+    const v = numOf(n.v, 20);
+    const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
+    return Math.max(0, Math.min(100, v + def.rate * Math.max(0, at - t) / 60));
+  }
+  let met = -Infinity;
+  for (const b of blocks)
+    if (b.start <= at && satisfies(b.activity, need))
+      met = Math.max(met, Math.min(b.end, at));
+  if (met === -Infinity) {
     const minute = dateAt(calendarOf(ctx.world), at).minuteOfDay;
-    const since = Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
-    return Math.min(100, def.rate * since / 60);
+    met = at - Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
   }
-  const v = numOf(n.v, 20);
-  const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
-  return Math.max(0, Math.min(100, v + def.rate * Math.max(0, at - t) / 60));
+  return Math.min(100, def.rate * (at - met) / 60);
 }
-function personPlaceFor(ctx, who, at) {
-  let best = null;
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
-    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
-      continue;
-    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
-    const a = activeSlot(ctx.world, s, at);
-    if (a && typeof a.slot.value === "string" && (!best || rank < best.rank))
-      best = { rank, place: a.slot.value };
-  }
-  return best?.place ?? null;
-}
-function homeOf(ctx, who) {
-  const h = own(ctx.state.entities, who)?.fields.home;
-  return typeof h === "string" ? h : null;
-}
-function workPlace(ctx, who) {
-  const employer = own(ctx.state.entities, who)?.fields.employer;
-  if (typeof employer !== "string")
-    return null;
-  if (own(ctx.world.places, employer))
-    return employer;
-  return placeOfEntity(ctx.state, employer);
-}
-function cutAround(blocks, cutters) {
-  return cutters.reduce((list, cutter) => list.flatMap((c) => {
-    if (c.end <= cutter.start || c.start >= cutter.end)
-      return [c];
-    const parts = [];
-    if (c.start < cutter.start)
-      parts.push({ ...c, end: cutter.start });
-    if (c.end > cutter.end)
-      parts.push({ ...c, start: cutter.end });
-    return parts;
-  }), blocks);
-}
-function commitments(ctx, who, start, end) {
-  const ranked = [];
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
-    if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
-      continue;
-    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
-    const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
-    for (const e of edges) {
-      if (e.edge !== "start")
-        continue;
-      const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
-      const value = s.slots[e.slot]?.value;
-      if (!close || typeof value !== "string" || close.at <= start || e.at >= end)
-        continue;
-      const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
-      const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
-      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind }, rank });
-    }
-  }
-  const out = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
-  const f = own(ctx.state.entities, who)?.fields;
-  for (const raw of Array.isArray(f?.appointments) ? f.appointments : []) {
-    const a = objOf(raw);
-    const at = numOf(a.at, NaN);
-    const until = at + numOf(a.minutes, 60);
-    if (!(until > start && at < end))
-      continue;
-    out.push({ start: at, end: until, label: strOf(a.label, "Appointment"), activity: "appointment", place: strOf(a.place) || null, reason: "appointment", kind: "appointment" });
-  }
-  const trips = [];
-  for (const raw of Array.isArray(f?.trips) ? f.trips : []) {
-    const t = objOf(raw);
-    const from = numOf(t.from, NaN);
-    const until = numOf(t.until, NaN);
-    if (!(until > start && from < end))
-      continue;
-    trips.push({ start: from, end: until, label: strOf(t.label, "Away"), activity: "trip", place: strOf(t.place) || null, reason: "trip", kind: "trip" });
-  }
-  return [...cutAround(out, trips), ...trips].sort((a, b) => a.start - b.start);
-}
-function placeOfType(ctx, sceneType, near) {
-  const ids = Object.keys(ctx.world.places).sort();
-  const parent = near ? own(ctx.world.places, near)?.parent : undefined;
-  return ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.parent === parent) ?? ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.visibility !== "secret") ?? null;
+function needValue(ctx, who, need, at = ctx.state.clock) {
+  const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need)).t === "number";
+  const planned = !recorded && who !== ctx.world.pov && own(ctx.state.entities, who)?.agent === true && ctx.levelOf(who, "castlife") >= 3;
+  return needIn(ctx, who, need, at, planned ? dayPlan(ctx, who, dateAt(calendarOf(ctx.world), at).dayIndex).blocks : []);
 }
 function within3(dayStart, fromH, toH) {
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
@@ -14736,16 +15316,25 @@ function shownActivity(ctx, who, activity) {
 function dayOptions(ctx, who, dayStart) {
   const level = ctx.levelOf(who, "castlife");
   const home = homeOf(ctx, who);
-  const need = (n) => level >= 4 ? needValue(ctx, who, n, dayStart + 12 * 60) : 0;
   const cal = calendarOf(ctx.world);
   const hourOf = (t) => dateAt(cal, t).minuteOfDay / 60;
-  const pressed = (n, word) => need(n) >= 50 ? [`${word} (${n} ${Math.round(need(n))})`] : [];
+  const need = (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0;
+  const pressed = (n, word) => (t, laid) => {
+    const v = need(n, t, laid);
+    return v >= 50 ? [`${word} (${n} ${Math.round(v)})`] : [];
+  };
+  const occasion = occasionOf(ctx, who, dateAt(cal, dayStart).dayIndex);
+  const off = occasion.dayOff;
+  const company = placeOfType(ctx, "conversation", home) ?? home;
+  const outdoors = occasion.foul ? home : placeOfType(ctx, "exploration", home) ?? home;
+  const outside = (occasion.season === "summer" ? 0.5 : occasion.season === "winter" ? -0.5 : 0) - (occasion.foul ? 1 : 0);
+  const unwind = [...off ? ["a day off"] : [], ...occasion.season === "summer" || occasion.season === "winter" ? [occasion.season] : [], ...occasion.foul ? ["bad weather"] : []];
   const options = [
     { id: "sleep", label: "Sleep", activity: "sleep", place: home, duration: 480, repeat: true, reasons: ["night"], utility: (t) => hourOf(t) >= 21.5 || hourOf(t) < 6 ? 10 : 0 },
-    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: within3(dayStart, 6, 10), utility: 4 + need("hunger") / 20, reasons: ["morning meal", ...pressed("hunger", "hungry")] },
-    { id: "lunch", label: "Lunch", activity: "lunch", place: placeOfType(ctx, "conversation", home) ?? home, duration: 45, window: within3(dayStart, 11, 14), utility: 4 + need("hunger") / 20, reasons: ["midday meal", ...pressed("hunger", "hungry")] },
-    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within3(dayStart, 17, 21), utility: 4.5 + need("hunger") / 20, reasons: ["evening meal", ...pressed("hunger", "hungry")] },
-    { id: "leisure", label: "Time out", activity: "leisure", place: placeOfType(ctx, "exploration", home) ?? home, duration: 60, window: within3(dayStart, 9, 20), utility: 1.5 + need("fun") / 30, reasons: ["unwind", ...pressed("fun", "bored")] }
+    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: off ? within3(dayStart, 7, 11) : within3(dayStart, 6, 10), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: off ? ["morning meal", "a slow morning"] : ["morning meal"], because: pressed("hunger", "hungry") },
+    { id: "lunch", label: "Lunch", activity: "lunch", place: company, duration: 45, window: within3(dayStart, 11, 14), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: ["midday meal"], because: pressed("hunger", "hungry") },
+    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within3(dayStart, 17, 21), utility: (t, laid) => 4.5 + need("hunger", t, laid) / 20, reasons: ["evening meal"], because: pressed("hunger", "hungry") },
+    { id: "leisure", label: "Time out", activity: "leisure", place: outdoors, duration: 60, window: within3(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need("fun", t, laid) / 30, reasons: ["unwind", ...unwind], because: pressed("fun", "bored") }
   ];
   const social = optionalQuery(ctx, "regard");
   let fondness = 0;
@@ -14754,7 +15343,7 @@ function dayOptions(ctx, who, dayStart) {
       if (other !== who && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person"))
         fondness = Math.max(fondness, social(ctx, who, other));
   }
-  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: placeOfType(ctx, "conversation", home) ?? home, duration: 90, window: within3(dayStart, 17, 22), utility: 2.5 + fondness / 50 + need("social") / 25, reasons: ["company", ...fondness >= 30 ? ["a close friend"] : [], ...pressed("social", "lonely")] });
+  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company, duration: 90, window: off ? within3(dayStart, 12, 23) : within3(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: ["company", ...fondness >= FOND ? ["a close friend"] : [], ...off ? ["a day off"] : []], because: pressed("social", "lonely") });
   const chores = own(ctx.state.entities, who)?.fields.chores;
   if (Array.isArray(chores)) {
     chores.forEach((raw, i) => {
@@ -14770,6 +15359,15 @@ function dayOptions(ctx, who, dayStart) {
       const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
       options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within3(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
     }
+  }
+  for (const h of occasion.holidays) {
+    options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within3(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company, duration: 90, window: within3(dayStart, 17, 22), utility: 3, reasons: [h.label] });
+  }
+  if (occasion.birthday)
+    options.push({ id: "birthday", label: "Birthday", activity: "socialize", place: company, duration: 150, window: within3(dayStart, 17, 23), utility: 6.5, reasons: ["their birthday"] });
+  for (const friend of occasion.friends.slice(0, 2)) {
+    const theirs = homeOf(ctx, friend);
+    options.push({ id: `birthday:${friend}`, label: "A friend's birthday", activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company, duration: 90, window: within3(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: ["a friend's birthday"] });
   }
   return options;
 }
@@ -14808,6 +15406,90 @@ var ACQUAINT_CHANCE = 0.15;
 function acquainted(state, a, b) {
   return !!own(state.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
 }
+function takeUp(ctx, who, place, activity, at) {
+  const out = [];
+  const e = own(ctx.state.entities, who);
+  if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
+    return out;
+  if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
+    out.push({ type: "set", entity: who, field: "place", value: place });
+    if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
+      out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
+  }
+  if (!held2(ctx.state, who, "activity", at) && e.fields.activity !== activity)
+    out.push({ type: "set", entity: who, field: "activity", value: activity });
+  return out;
+}
+function planOutcomes(ctx, who, slot) {
+  if (who === ctx.world.pov)
+    return [];
+  const due = (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).filter((p) => p.status === "open" && p.when.from <= slot.end);
+  if (due.length === 0)
+    return [];
+  const tier = planTier(ctx, who);
+  const laid = laidPlans(ctx, who, tier === "background" ? [] : due);
+  const out = [];
+  for (const p of due) {
+    const blocks = laid.get(p.id) ?? [];
+    const last = Math.max(...blocks.map((b) => b.end));
+    if (blocks.length > 0 && last <= slot.end)
+      out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "done", at: last, reason: null } });
+    else if (blocks.length === 0 && p.when.to <= slot.end)
+      out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: tier === "background" ? "routine only" : "no time for it" } });
+  }
+  return out;
+}
+var INVITE_LEAD = 6 * 60;
+function planAsks(ctx, who) {
+  const pov = ctx.world.pov;
+  const plans = plansOf(ctx, who).filter((p) => p.with.includes(pov));
+  if (plans.length === 0)
+    return [];
+  const cal = calendarOf(ctx.world);
+  const laid = laidPlans(ctx, who, plans);
+  return plans.flatMap((p) => {
+    const first = laid.get(p.id)?.[0];
+    return first ? [{ plan: p.id, ask: Math.max(first.start - INVITE_LEAD, p.made, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null }] : [];
+  });
+}
+function planInvitation(ctx, who, ask) {
+  const key = `${who}:plan:${ask.plan}`;
+  const given = sliceOf(ctx.state, "castlife").invitations;
+  if (!acts2(ctx, ctx.world.pov) || Array.isArray(given) && given.some((i) => objOf(i).key === key))
+    return [];
+  const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
+  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
+}
+function planMoments(ctx, who, slot) {
+  if (plansOf(ctx, who).length === 0)
+    return [];
+  const inside = (at) => at > slot.start && at < slot.end;
+  const out = [];
+  for (const c of commitments(ctx, who, slot.start, slot.end)) {
+    if (c.plan === undefined)
+      continue;
+    if (inside(c.start))
+      out.push({ at: c.start, key: `start:${c.plan}` });
+    if (inside(c.end))
+      out.push({ at: c.end, key: `end:${c.plan}` });
+  }
+  if (ctx.levelOf(who, "castlife") >= 4) {
+    for (const a of planAsks(ctx, who))
+      if (inside(a.ask))
+        out.push({ at: a.ask, key: `invite:${a.plan}` });
+  }
+  return out;
+}
+function atPlanMoment(ctx, who, moment) {
+  if (moment.key.startsWith("invite:")) {
+    const ask = planAsks(ctx, who).find((a) => `invite:${a.plan}` === moment.key);
+    return ask ? planInvitation(ctx, who, ask) : [];
+  }
+  const block = dayPlan(ctx, who, dateAt(calendarOf(ctx.world), moment.at).dayIndex).blocks.find((b) => b.start <= moment.at && moment.at < b.end);
+  if (!block)
+    return [];
+  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), block.activity.startsWith("retrieve:") ? "errand" : block.activity, moment.at);
+}
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
   const e = own(ctx.state.entities, who);
@@ -14822,7 +15504,6 @@ function stepAgent2(slot, ctx, rngFor, who) {
   if (!block)
     return out;
   const pov = ctx.world.pov;
-  const povPlace = placeOfEntity(ctx.state, pov);
   if (block.activity.startsWith("retrieve:")) {
     const thing = block.activity.slice("retrieve:".length);
     const lent = own(ctx.state.entities, thing)?.fields.owner === who && Object.values(ctx.state.entities).some((x) => x.relations.some((r) => r.type === "uses" && r.to === thing));
@@ -14833,15 +15514,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
         out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
     }
   }
-  const activity = block.activity.startsWith("retrieve:") ? "errand" : block.activity;
-  const stays = routineStays(ctx, who, block.place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true;
-  if (!stays && !held2(ctx.state, who, "place", slot.end) && block.place && own(ctx.world.places, block.place) && placeOfEntity(ctx.state, who) !== block.place) {
-    out.push({ type: "set", entity: who, field: "place", value: block.place });
-    if (who !== pov && block.place === povPlace)
-      out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
-  }
-  if (!stays && !held2(ctx.state, who, "activity", slot.end) && e.fields.activity !== activity)
-    out.push({ type: "set", entity: who, field: "activity", value: activity });
+  out.push(...takeUp(ctx, who, block.place, block.activity.startsWith("retrieve:") ? "errand" : block.activity, slot.end), ...planOutcomes(ctx, who, slot));
   if (level < 4)
     return out;
   if (who === pov) {
@@ -14863,6 +15536,11 @@ function stepAgent2(slot, ctx, rngFor, who) {
         out.push(...appraise(ctx, who, other, kind, `${kind} at ${own(ctx.world.places, block.place)?.name ?? block.place}`, true));
     }
   }
+  for (const a of planAsks(ctx, who))
+    if (a.ask > slot.start && a.ask <= slot.end)
+      out.push(...planInvitation(ctx, who, a));
+  if (optionalQuery(ctx, "minds.on")?.(ctx) === true)
+    return out;
   const regard = optionalQuery(ctx, "regard");
   const hour = dateAt(cal, slot.start).minuteOfDay / 60;
   if (regard && acts2(ctx, pov) && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
@@ -14930,7 +15608,7 @@ var EVENTS2 = [
         return;
       const at = numOf(e.data.at, state.clock);
       const need = strOf(e.data.need);
-      const v = Math.max(0, Math.min(100, needValue({ world: ctx.world, state }, strOf(e.data.entity), need, at) + numOf(e.data.delta)));
+      const v = Math.max(0, Math.min(100, needValue(ctx, strOf(e.data.entity), need, at) + numOf(e.data.delta)));
       who.fields.needs = { ...objOf(who.fields.needs), [need]: { v, t: at } };
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
@@ -14950,7 +15628,7 @@ var EVENTS2 = [
     apply: (e, state) => {
       const s = mutableSlice(state, "castlife");
       const list = Array.isArray(s.invitations) ? s.invitations.slice(-9) : [];
-      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text) });
+      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...typeof e.data.key === "string" ? { key: e.data.key } : {} });
       s.invitations = list;
     },
     describe: (e, ctx, viewer) => invitationText(ctx, strOf(e.data.agent), typeof e.data.place === "string" ? e.data.place : null, numOf(e.data.at), viewer)
@@ -15076,7 +15754,8 @@ function stanceCast(ctx) {
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state, pov);
-  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false);
+  const minded = new Set(optionalQuery(ctx, "minds.minded")?.(ctx) ?? []);
+  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false && !minded.has(id));
   let check = null;
   const safe = (text) => {
     if (!check) {
@@ -15135,9 +15814,10 @@ var castlifePack = {
   register(r) {
     for (const def of EVENTS2)
       r.event(def);
-    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [] });
+    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: atPlanMoment });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.query("castlife.activity", shownActivity);
+    r.query("castlife.commitments", (ctx, who, start, end) => commitments(ctx, who, start, end).map((c) => ({ start: c.start, end: c.end, activity: c.activity, place: c.place ?? null, kind: c.kind, label: c.label, ...c.plan !== undefined ? { plan: c.plan } : {} })));
     r.query("castlife.tie_zones", (ctx) => {
       const out = [];
       const decided = decisions(ctx.state);
@@ -15226,6 +15906,10 @@ var castlifePack = {
     r.renderer({ slot: "stance", render: stanceLines });
     r.renderer({ slot: "stance", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
+    r.lint({
+      code: "castlife.birthday",
+      check: (world) => Object.values(world.entities).flatMap((e) => e.fields.birthday === undefined || e.fields.birthday === null || birthdayOf(e.fields.birthday) ? [] : [{ severity: "warning", code: "castlife.birthday", message: `${e.name}'s birthday doesn't read as a date: write it MM-DD, or YYYY-MM-DD with the year they were born.`, path: `entities.${e.id}.fields.birthday` }])
+    });
     r.lint({
       code: "castlife.double_booking",
       check(world) {
@@ -17210,6 +17894,984 @@ var combatPack = {
   }
 };
 var core_default11 = combatPack;
+
+// src/packs/minds/core/state.ts
+var PACK6 = "minds";
+var EMPTY_SLICE = { round: 0, on: false, chars: {}, presence: [] };
+function emptyCharacter() {
+  return { mind: null, plans: [], notes: [], commitments: [], witness: [], summary: "", pin: null, refresh: false, lastPresent: null, consolidated: null };
+}
+function readSlice(state) {
+  const raw = state.packs[PACK6];
+  if (!raw)
+    return EMPTY_SLICE;
+  const s = raw;
+  return { round: s.round ?? 0, on: s.on ?? false, chars: s.chars ?? {}, presence: s.presence ?? [] };
+}
+function readCharacter(state, id) {
+  return own(readSlice(state).chars, id) ?? emptyCharacter();
+}
+function writeSlice(state) {
+  const s = state.packs[PACK6] ?? {};
+  s.round ??= 0;
+  s.on ??= false;
+  s.chars ??= {};
+  s.presence ??= [];
+  const full = s;
+  state.packs[PACK6] = full;
+  return full;
+}
+function writeCharacter(state, id) {
+  const s = writeSlice(state);
+  const c = own(s.chars, id) ?? emptyCharacter();
+  s.chars[id] = c;
+  return c;
+}
+function putPlan(c, plan) {
+  const i = c.plans.findIndex((p) => p.id === plan.id);
+  if (i >= 0)
+    c.plans[i] = plan;
+  else
+    c.plans.push(plan);
+  boundPlans(c);
+}
+function boundPlans(c) {
+  const open = c.plans.filter((p) => p.status === "open");
+  const closed = c.plans.filter((p) => p.status !== "open");
+  const keptOpen = open.slice(Math.max(0, open.length - MINDS_KEEP.openPlans));
+  const keptClosed = closed.slice(Math.max(0, closed.length - MINDS_KEEP.closedPlans));
+  const keep = new Set([...keptOpen, ...keptClosed]);
+  c.plans = c.plans.filter((p) => keep.has(p));
+}
+function putCommitment(c, commitment) {
+  const i = c.commitments.findIndex((x) => x.id === commitment.id);
+  if (i >= 0)
+    c.commitments[i] = commitment;
+  else
+    c.commitments.push(commitment);
+  boundCommitments(c);
+}
+function boundCommitments(c) {
+  const open = c.commitments.filter((x) => x.status === "open");
+  const closed = c.commitments.filter((x) => x.status !== "open");
+  const keep = new Set([...open.slice(Math.max(0, open.length - MINDS_KEEP.openCommitments)), ...closed.slice(Math.max(0, closed.length - MINDS_KEEP.closedCommitments))]);
+  c.commitments = c.commitments.filter((x) => keep.has(x));
+}
+function putNote(c, note) {
+  const i = c.notes.findIndex((n) => n.id === note.id);
+  if (i >= 0)
+    c.notes[i] = note;
+  else
+    c.notes.push(note);
+  while (c.notes.length > MINDS_KEEP.notes) {
+    let drop = 0;
+    for (let j = 1;j < c.notes.length; j++) {
+      const a = c.notes[j];
+      const b = c.notes[drop];
+      if (a && b && (a.salience < b.salience || a.salience === b.salience && a.at < b.at))
+        drop = j;
+    }
+    c.notes.splice(drop, 1);
+  }
+}
+function addWitness(c, entry) {
+  c.witness.push(entry);
+  if (c.witness.length > MINDS_KEEP.witness)
+    c.witness.splice(0, c.witness.length - MINDS_KEEP.witness);
+}
+function salienceNow(note, clock, memory) {
+  const days = Math.max(0, clock - note.at) / 1440;
+  return note.salience * 0.5 ** (days / memory.salience.halfLifeDays);
+}
+function faded(note, clock, memory) {
+  return salienceNow(note, clock, memory) < memory.salience.floor;
+}
+function openPlans(c) {
+  return c.plans.filter((p) => p.status === "open").sort((a, b) => a.when.from - b.when.from || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+function openCommitments(c) {
+  return c.commitments.filter((x) => x.status === "open");
+}
+
+// src/packs/minds/core/events.ts
+var str4 = (v) => typeof v === "string";
+var finite2 = (v) => typeof v === "number" && Number.isFinite(v);
+var ids = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+var texts = ids;
+function bad(reason) {
+  return { code: "bad_event", reason };
+}
+function isFidelity(v) {
+  return typeof v === "string" && FIDELITIES.includes(v);
+}
+function isPlan(v) {
+  if (!isRecord(v) || !isRecord(v.when))
+    return false;
+  return str4(v.id) && v.id !== "" && str4(v.what) && typeof v.kind === "string" && PLAN_KINDS.includes(v.kind) && finite2(v.when.from) && finite2(v.when.to) && v.when.to >= v.when.from && (v.where === null || str4(v.where)) && ids(v.with) && finite2(v.priority) && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max && (v.status === "open" || v.status === "done" || v.status === "dropped") && finite2(v.made) && (v.source === "mind" || v.source === "memory" || v.source === "gm") && (v.closed === null || finite2(v.closed)) && (v.reason === null || str4(v.reason));
+}
+function isNote(v) {
+  return isRecord(v) && str4(v.id) && v.id !== "" && str4(v.text) && finite2(v.salience) && v.salience >= 0 && v.salience <= 5 && finite2(v.at);
+}
+function isCommitment(v) {
+  return isRecord(v) && str4(v.id) && v.id !== "" && typeof v.kind === "string" && COMMITMENT_KINDS.includes(v.kind) && ids(v.with) && str4(v.text) && (v.due === null || finite2(v.due)) && typeof v.status === "string" && COMMITMENT_STATUSES.includes(v.status) && finite2(v.made) && (v.closed === null || finite2(v.closed));
+}
+function planOf(v) {
+  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason };
+}
+function noteOf(v) {
+  return { id: v.id, text: v.text, salience: v.salience, at: v.at };
+}
+function commitmentOf(v) {
+  return { id: v.id, kind: v.kind, with: [...v.with], text: v.text, due: v.due, status: v.status, made: v.made, closed: v.closed };
+}
+function person(ctx, data) {
+  return str4(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
+}
+function nameOf4(ctx, id) {
+  return own(ctx.state.entities, id)?.name ?? id;
+}
+var PLAN_STATUSES = ["open", "done", "dropped"];
+var round = {
+  type: MINDS_EVENTS.round,
+  validate: (e) => finite2(e.data.at) && typeof e.data.on === "boolean" ? null : bad("a minds round needs its clock and whether minds are on"),
+  apply: (e, state) => {
+    const s = writeSlice(state);
+    s.round += 1;
+    s.on = e.data.on === true;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : e.data.on === true ? "Minds round" : "Minds switched off"
+};
+function validMind(data) {
+  const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
+  if (!finite2(at) || !(place === null || str4(place)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str4(reason))
+    return bad("a mind needs its clock, place, level, moment and reason");
+  if (!str4(monologue) || !str4(depiction) || !str4(intent) || !texts(reactions) || !Array.isArray(plans) || !plans.every((p) => isPlan(p)))
+    return bad("a mind needs its monologue, depiction, intent, reactions and plans");
+  if (!(mood === null || str4(mood)) || !(interrupt === null || isRecord(interrupt) && str4(interrupt.reason)) || typeof withheld !== "boolean")
+    return bad("a mind's mood, interrupt or withheld flag is malformed");
+  return null;
+}
+var mind = {
+  type: MINDS_EVENTS.mind,
+  validate: (e, ctx) => person(ctx, e.data) ?? validMind(e.data),
+  apply: (e, state) => {
+    const d = e.data;
+    if (!str4(d.entity))
+      return;
+    const s = writeSlice(state);
+    const c = writeCharacter(state, d.entity);
+    const plans = Array.isArray(d.plans) ? d.plans.filter((p) => isPlan(p)).map(planOf) : [];
+    const record = {
+      at: finite2(d.at) ? d.at : state.clock,
+      round: s.round,
+      level: isFidelity(d.level) ? d.level : "background",
+      place: str4(d.place) ? d.place : null,
+      moment: d.moment === "beat" ? "beat" : "turn",
+      reason: str4(d.reason) ? d.reason : "",
+      monologue: str4(d.monologue) ? d.monologue : "",
+      depiction: str4(d.depiction) ? d.depiction : "",
+      intent: str4(d.intent) ? d.intent : "",
+      reactions: texts(d.reactions) ? [...d.reactions] : [],
+      plans: plans.map((p) => p.id),
+      mood: str4(d.mood) ? d.mood : null,
+      interrupt: isRecord(d.interrupt) && str4(d.interrupt.reason) ? d.interrupt.reason : null,
+      withheld: d.withheld === true
+    };
+    c.mind = record;
+    c.refresh = false;
+    for (const p of plans)
+      putPlan(c, p);
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s mind (${String(e.data.level)}): ${str4(e.data.intent) && e.data.intent !== "" ? e.data.intent : "no intent"}`
+};
+function validMemory(data) {
+  const { at, notes, commitments, resolved, plans, told, summary } = data;
+  if (!finite2(at) || !Array.isArray(notes) || !notes.every((n) => isNote(n)) || !Array.isArray(commitments) || !commitments.every((c) => isCommitment(c)))
+    return bad("a memory needs its clock, notes and commitments");
+  if (!Array.isArray(resolved) || !resolved.every((r) => isRecord(r) && str4(r.id) && (r.status === "kept" || r.status === "broken" || r.status === "released")))
+    return bad("a memory's resolved commitments are malformed");
+  if (!Array.isArray(plans) || !plans.every((p) => isPlan(p)) || !Array.isArray(told) || !told.every((t) => isRecord(t) && ids(t.to) && str4(t.what)) || !(summary === null || str4(summary)))
+    return bad("a memory's plans, told or summary are malformed");
+  return null;
+}
+var memory = {
+  type: MINDS_EVENTS.memory,
+  validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
+  apply: (e, state) => {
+    const d = e.data;
+    if (!str4(d.entity))
+      return;
+    const who = d.entity;
+    const at = finite2(d.at) ? d.at : state.clock;
+    const c = writeCharacter(state, who);
+    for (const n of Array.isArray(d.notes) ? d.notes : [])
+      if (isNote(n))
+        putNote(c, noteOf(n));
+    for (const x of Array.isArray(d.commitments) ? d.commitments : [])
+      if (isCommitment(x))
+        putCommitment(c, commitmentOf(x));
+    for (const r of Array.isArray(d.resolved) ? d.resolved : []) {
+      if (!isRecord(r) || !str4(r.id))
+        continue;
+      const open = c.commitments.find((x) => x.id === r.id && x.status === "open");
+      if (open && (r.status === "kept" || r.status === "broken" || r.status === "released"))
+        putCommitment(c, { ...open, status: r.status, closed: at });
+    }
+    for (const p of Array.isArray(d.plans) ? d.plans : [])
+      if (isPlan(p))
+        putPlan(c, planOf(p));
+    if (str4(d.summary))
+      c.summary = d.summary;
+    for (const t of Array.isArray(d.told) ? d.told : []) {
+      if (!isRecord(t) || !ids(t.to) || !str4(t.what))
+        continue;
+      for (const to of t.to)
+        if (to !== who && own(state.entities, to))
+          addWitness(writeCharacter(state, to), { at, what: t.what, how: "told", by: who, place: null });
+    }
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const n = Array.isArray(e.data.notes) ? e.data.notes.length : 0;
+    const c = Array.isArray(e.data.commitments) ? e.data.commitments.length : 0;
+    return `${nameOf4(ctx, String(e.data.entity))} remembers the turn: ${n} note${n === 1 ? "" : "s"}, ${c} new commitment${c === 1 ? "" : "s"}`;
+  }
+};
+var presence = {
+  type: MINDS_EVENTS.presence,
+  validate: (e) => finite2(e.data.at) && (e.data.msg === null || str4(e.data.msg)) && (e.data.place === null || str4(e.data.place)) && ids(e.data.who) && texts(e.data.saw) ? null : bad("a presence record needs its clock, message, place, who and what they saw"),
+  apply: (e, state) => {
+    const d = e.data;
+    const at = finite2(d.at) ? d.at : state.clock;
+    const place = str4(d.place) ? d.place : null;
+    const who = ids(d.who) ? d.who.filter((id) => own(state.entities, id)) : [];
+    const s = writeSlice(state);
+    s.presence.push({ msg: str4(d.msg) ? d.msg : null, at, place, who: [...who] });
+    if (s.presence.length > MINDS_KEEP.presence)
+      s.presence.splice(0, s.presence.length - MINDS_KEEP.presence);
+    const saw = texts(d.saw) ? d.saw : [];
+    for (const id of who) {
+      const c = writeCharacter(state, id);
+      c.lastPresent = at;
+      for (const what of saw)
+        addWitness(c, { at, what, how: "saw", by: null, place });
+    }
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `Present: ${ids(e.data.who) && e.data.who.length > 0 ? e.data.who.map((id) => nameOf4(ctx, id)).join(", ") : "no one"}`
+};
+var planStatus = {
+  type: MINDS_EVENTS.plan,
+  validate: (e, ctx) => {
+    const d = e.data;
+    if (!str4(d.plan) || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str4(d.reason)))
+      return bad("a plan's status needs the plan, a status, its clock and a reason or null");
+    const missing = person(ctx, d);
+    if (missing)
+      return missing;
+    return readCharacter(ctx.state, String(d.entity)).plans.some((p) => p.id === d.plan) ? null : { code: "missing_plan", reason: "that plan isn't theirs any more" };
+  },
+  apply: (e, state) => {
+    const d = e.data;
+    const c = writeCharacter(state, String(d.entity));
+    const p = c.plans.find((x) => x.id === d.plan);
+    if (!p || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status))
+      return;
+    const status = d.status;
+    putPlan(c, { ...p, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state.clock, reason: str4(d.reason) ? d.reason : null });
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const plan = readCharacter(ctx.state, String(e.data.entity)).plans.find((p) => p.id === e.data.plan);
+    return `${nameOf4(ctx, String(e.data.entity))}'s plan ${plan ? `"${plan.what}"` : String(e.data.plan)}: ${String(e.data.status)}`;
+  }
+};
+function editDef(type, key, valid, list, put, remove) {
+  return {
+    type,
+    validate: (e, ctx) => {
+      const d = e.data;
+      const missing = person(ctx, d);
+      if (missing)
+        return missing;
+      const id = d[key];
+      if (!str4(id) || id === "")
+        return bad(`a ${key} edit needs the ${key}'s id`);
+      if (d.value === null)
+        return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: `that ${key} isn't theirs any more` };
+      return valid(d.value) && isRecord(d.value) && d.value.id === id ? null : bad(`a ${key} edit's value is malformed`);
+    },
+    apply: (e, state) => {
+      const d = e.data;
+      const who = String(d.entity);
+      if (d.value === null)
+        remove(state, who, String(d[key]));
+      else if (d.value !== undefined && valid(d.value))
+        put(state, who, d.value);
+    },
+    describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s ${key} ${e.data.value === null ? "deleted" : "edited"}`
+  };
+}
+var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state, who, v) => {
+  if (isPlan(v))
+    putPlan(writeCharacter(state, who), planOf(v));
+}, (state, who, id) => {
+  const c = writeCharacter(state, who);
+  c.plans = c.plans.filter((p) => p.id !== id);
+});
+var noteEdit = editDef(MINDS_EVENTS.noteEdit, "note", isNote, (c) => c.notes, (state, who, v) => {
+  if (isNote(v))
+    putNote(writeCharacter(state, who), noteOf(v));
+}, (state, who, id) => {
+  const c = writeCharacter(state, who);
+  c.notes = c.notes.filter((n) => n.id !== id);
+});
+var commitmentEdit = editDef(MINDS_EVENTS.commitmentEdit, "commitment", isCommitment, (c) => c.commitments, (state, who, v) => {
+  if (isCommitment(v))
+    putCommitment(writeCharacter(state, who), commitmentOf(v));
+}, (state, who, id) => {
+  const c = writeCharacter(state, who);
+  c.commitments = c.commitments.filter((x) => x.id !== id);
+});
+var commitmentStatus = {
+  type: MINDS_EVENTS.commitment,
+  validate: (e, ctx) => {
+    const d = e.data;
+    if (!str4(d.commitment) || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str4(d.reason)))
+      return bad("a commitment's status needs the commitment, a status, its clock and a reason or null");
+    const missing = person(ctx, d);
+    if (missing)
+      return missing;
+    return readCharacter(ctx.state, String(d.entity)).commitments.some((x) => x.id === d.commitment) ? null : { code: "missing_commitment", reason: "that commitment isn't theirs any more" };
+  },
+  apply: (e, state) => {
+    const d = e.data;
+    const c = writeCharacter(state, String(d.entity));
+    const x = c.commitments.find((y) => y.id === d.commitment);
+    if (!x || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status))
+      return;
+    const status = d.status;
+    putCommitment(c, { ...x, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state.clock });
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s commitment: ${String(e.data.status)}`
+};
+var consolidated = {
+  type: MINDS_EVENTS.consolidated,
+  validate: (e, ctx) => person(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str4(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
+  apply: (e, state) => {
+    const d = e.data;
+    const c = writeCharacter(state, String(d.entity));
+    const gone = new Set(ids(d.notes) ? d.notes : []);
+    c.notes = c.notes.filter((n) => !gone.has(n.id));
+    if (str4(d.summary))
+      c.summary = d.summary;
+    c.consolidated = finite2(d.at) ? d.at : state.clock;
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s older notes folded into their summary`
+};
+var pin = {
+  type: MINDS_EVENTS.pin,
+  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad("a pin is a fidelity level or null")),
+  apply: (e, state) => {
+    writeCharacter(state, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}: fidelity ${e.data.level === null ? "unpinned" : `pinned at ${String(e.data.level)}`}`
+};
+var refresh = {
+  type: MINDS_EVENTS.refresh,
+  validate: (e, ctx) => person(ctx, e.data),
+  apply: (e, state) => {
+    writeCharacter(state, String(e.data.entity)).refresh = true;
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}: a fresh mind next turn`
+};
+var skip = {
+  type: MINDS_EVENTS.skip,
+  validate: (e) => finite2(e.data.from) && finite2(e.data.to) && Array.isArray(e.data.beats) && e.data.beats.every((b) => isRecord(b) && finite2(b.at) && str4(b.reason) && (b.source === "scan" || b.source === "model")) ? null : bad("a skip's beats need their span and each beat's clock, reason and source"),
+  apply: () => {
+    return;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `Time skip beats: ${Array.isArray(e.data.beats) ? e.data.beats.length : 0}`
+};
+var MINDS_EVENT_DEFS = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, skip];
+function mindsOn(ctx) {
+  return readSlice(ctx.state).on;
+}
+
+// src/packs/minds/core/edit.ts
+function reject13(code, reason) {
+  return { code, reason };
+}
+function capText(text, max) {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max)
+    return t;
+  const cut = t.slice(0, max + 1);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > max * 0.6 ? cut.slice(0, at) : t.slice(0, max)).replace(/[\s,;:.]+$/, "")}\u2026`;
+}
+var text3 = (v, max) => typeof v === "string" && v.trim() !== "" ? capText(v, max) : null;
+var minutes = (v) => typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
+function peopleIn(ctx, v) {
+  if (v === undefined)
+    return [];
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string"))
+    return reject13("bad_value", "who it's with is a list of people");
+  const ids = v;
+  for (const id of ids)
+    if (!own(ctx.state.entities, id))
+      return reject13("missing_entity", `there's no ${labelOf(ctx, id)}`);
+  return [...new Set(ids)];
+}
+function noteFrom(ctx, who, id, v, before) {
+  const body = text3(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
+  if (body === null)
+    return reject13("bad_value", "a note needs its text");
+  const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
+  if (salience === null)
+    return reject13("bad_value", "a note's salience is 1 to 5");
+  return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
+}
+function commitmentFrom(ctx, who, id, v, before) {
+  const body = text3(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
+  if (body === null)
+    return reject13("bad_value", "a commitment needs its text");
+  const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
+  if (kind === null)
+    return reject13("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
+  const status = v.status === undefined ? before?.status ?? "open" : COMMITMENT_STATUSES.includes(v.status) ? v.status : null;
+  if (status === null)
+    return reject13("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
+  const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
+  if (!Array.isArray(withList))
+    return withList;
+  const due = v.due === undefined ? before?.due ?? null : v.due === null ? null : minutes(v.due);
+  if (v.due !== undefined && v.due !== null && due === null)
+    return reject13("bad_value", "a commitment's due time is game minutes");
+  const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
+  return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
+}
+function planFrom(ctx, who, id, v, before) {
+  const what = text3(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
+  if (what === null)
+    return reject13("bad_value", "a plan needs what it is");
+  const when = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
+  if (!when || when.from === null || when.to === null || when.to < when.from)
+    return reject13("bad_value", "a plan needs when, from and to in game minutes, to not before from");
+  const kind = v.kind === undefined ? before?.kind ?? "other" : PLAN_KINDS.includes(v.kind) ? v.kind : null;
+  if (kind === null)
+    return reject13("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
+  const where = v.where === undefined ? before?.where ?? null : v.where === null ? null : typeof v.where === "string" && own(ctx.world.places, v.where) ? v.where : undefined;
+  if (where === undefined)
+    return reject13("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
+  const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
+  if (!Array.isArray(withList))
+    return withList;
+  const priority = v.priority === undefined ? before?.priority ?? PLAN_PRIORITY.normal : typeof v.priority === "number" && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max ? Math.round(v.priority) : null;
+  if (priority === null)
+    return reject13("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
+  const statuses = ["open", "done", "dropped"];
+  const status = v.status === undefined ? before?.status ?? "open" : statuses.includes(v.status) ? v.status : null;
+  if (status === null)
+    return reject13("bad_value", "a plan's status is open, done or dropped");
+  const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
+  return {
+    id: id ?? `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`,
+    what,
+    kind,
+    when: { from: when.from, to: when.to },
+    where,
+    with: withList,
+    priority,
+    status,
+    made: before?.made ?? ctx.state.clock,
+    source: before?.source ?? "gm",
+    closed,
+    reason: status === "open" ? null : before?.reason ?? "GM edit"
+  };
+}
+function mindEdit(ctx, op) {
+  const { world, state, registry } = ctx;
+  const e = own(state.entities, op.entity);
+  if (!e)
+    return reject13("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
+  if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person"))
+    return reject13("no_mind", `${e.name} doesn't have a mind`);
+  if (op.op === "mind_pin")
+    return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
+  if (op.op === "mind_refresh")
+    return [{ type: MINDS_EVENTS.refresh, data: { entity: op.entity } }];
+  const c = readCharacter(state, op.entity);
+  const value = op.value;
+  if (op.part === "note") {
+    const before = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
+    if (op.id !== null && !before)
+      return reject13("missing_note", `${e.name} has no such note`);
+    if (value === null)
+      return op.id === null ? reject13("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
+    const note = noteFrom(ctx, op.entity, op.id, value, before);
+    return "code" in note ? note : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note.id, value: note } }];
+  }
+  if (op.part === "commitment") {
+    const before = op.id === null ? undefined : c.commitments.find((x) => x.id === op.id);
+    if (op.id !== null && !before)
+      return reject13("missing_commitment", `${e.name} has no such commitment`);
+    if (value === null)
+      return op.id === null ? reject13("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
+    const commitment = commitmentFrom(ctx, op.entity, op.id, value, before);
+    return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment } }];
+  }
+  const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
+  if (op.id !== null && !before)
+    return reject13("missing_plan", `${e.name} has no such plan`);
+  if (value === null)
+    return op.id === null ? reject13("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
+  const plan = planFrom(ctx, op.entity, op.id, value, before);
+  return "code" in plan ? plan : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan.id, value: plan } }];
+}
+
+// src/packs/minds/core/fidelity.ts
+function mindCandidates(ctx) {
+  const { registry: reg, world, state } = ctx;
+  return Object.keys(state.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id));
+}
+var NAME_FILLER = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: true, lady: true, lord: true, dame: true, the: true, of: true, de: true, van: true, von: true, la: true, le: true, old: true, young: true, captain: true, constable: true, father: true, mother: true, sister: true, brother: true, aunt: true, uncle: true };
+function words2(text) {
+  return text.toLowerCase().replace(/['\u2019]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+function namedIn(name, said) {
+  const own = words2(name);
+  if (own.length === 0 || said.length === 0)
+    return false;
+  const whole = own.join(" ");
+  const joined = ` ${said.join(" ")} `;
+  if (joined.includes(` ${whole} `))
+    return true;
+  const present = new Set(said);
+  return own.some((w) => w.length >= 3 && !NAME_FILLER[w] && present.has(w));
+}
+function namesIn(value, ids, out) {
+  if (typeof value === "string") {
+    if (ids.has(value))
+      out.add(value);
+    let found = [];
+    try {
+      found = identifiers(value);
+    } catch {}
+    for (const id of found)
+      if (ids.has(id))
+        out.add(id);
+  } else if (Array.isArray(value))
+    for (const v of value)
+      namesIn(v, ids, out);
+  else if (isRecord(value))
+    for (const v of Object.values(value))
+      namesIn(v, ids, out);
+}
+var refsCache = new WeakMap;
+function worldRefs(world) {
+  const hit = refsCache.get(world);
+  if (hit)
+    return hit;
+  const ids = new Set(Object.keys(world.entities));
+  const tracks = new Map;
+  for (const [id, t] of Object.entries(world.tracks)) {
+    const out = new Set;
+    namesIn(t.stages, ids, out);
+    if (t.knownBy?.ids) {
+      for (const x of t.knownBy.ids)
+        if (ids.has(x))
+          out.add(x);
+    }
+    tracks.set(id, out);
+  }
+  const rules = new Set;
+  for (const r of Object.values(world.rules))
+    namesIn(r, ids, rules);
+  const refs = { tracks, rules };
+  refsCache.set(world, refs);
+  return refs;
+}
+function liveTracks(world, state) {
+  return Object.keys(world.tracks).sort().filter((id) => {
+    const t = own(world.tracks, id);
+    const stage = currentStage(world, state, id);
+    return t !== undefined && stage !== null && !isTerminal(t, stage);
+  });
+}
+function closeBy(world, a, b) {
+  if (a === null || b === null || a === b)
+    return false;
+  const parent = (p) => own(world.places, p)?.parent ?? null;
+  return parent(a) === b || parent(b) === a || parent(a) !== null && parent(a) === parent(b);
+}
+function reason(out, label, points) {
+  if (points !== 0)
+    out.push({ label, points: Math.round(points * 10) / 10 });
+  return points;
+}
+function pendingWith(ctx, id) {
+  const { world, state } = ctx;
+  const pov = world.pov;
+  let n = 0;
+  const invited = ctx.registry.formulas.get("invited");
+  if (invited && invited(ctx, id) === true)
+    n++;
+  const now = state.clock;
+  const appointments = (who, other) => {
+    const list = own(state.entities, who)?.fields.appointments;
+    return (Array.isArray(list) ? list : []).filter((raw) => {
+      const a = objOf(raw);
+      const withList = Array.isArray(a.with) ? a.with : [];
+      return typeof a.at === "number" && a.at >= now && withList.includes(other);
+    }).length;
+  };
+  n += appointments(id, pov) + appointments(pov, id);
+  const c = readCharacter(state, id);
+  n += openPlans(c).filter((p) => p.with.includes(pov) && p.when.to >= now).length;
+  n += openCommitments(c).filter((x) => x.with.includes(pov)).length;
+  return n;
+}
+function fidelityOf(ctx, texts, config = worldMindsOf(ctx.world)) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const w = config.weights;
+  const here = placeOfEntity(state, pov);
+  const said = words2(`${texts.user}
+${texts.reply}`);
+  const refs = worldRefs(world);
+  const tracks = liveTracks(world, state);
+  const regard = optionalQuery(ctx, "regard");
+  const out = [];
+  for (const id of mindCandidates(ctx)) {
+    const e = own(state.entities, id);
+    if (!e)
+      continue;
+    const reasons = [];
+    let score = 0;
+    const place = placeOfEntity(state, id);
+    if (here !== null && place === here)
+      score += reason(reasons, "In the scene", w.here);
+    else if (closeBy(world, place, here))
+      score += reason(reasons, "Close by", w.nearby);
+    if (namedIn(e.name, said))
+      score += reason(reasons, "Named this turn", w.mentioned);
+    if (regard) {
+      const strongest = Math.max(Math.abs(regard(ctx, id, pov)), Math.abs(regard(ctx, pov, id)));
+      score += reason(reasons, "Regard with you", w.regard * Math.min(1, strongest / 100));
+    }
+    if (knows(state, id, pov) || knows(state, pov, id))
+      score += reason(reasons, "Knows you", w.knows);
+    const owned = tracks.filter((t) => own(world.tracks, t)?.owner === id);
+    if (owned.length > 0)
+      score += reason(reasons, "Owns a story track", w.owner);
+    const named = tracks.filter((t) => own(world.tracks, t)?.owner !== id && refs.tracks.get(t)?.has(id)).length;
+    if (named > 0)
+      score += reason(reasons, `In ${Math.min(3, named)} story track${named === 1 ? "" : "s"}`, w.track * Math.min(3, named));
+    let roles = 0;
+    for (const [value, points] of Object.entries(w.roles)) {
+      const held = Object.keys(world.classifications).some((facet) => classValues(world, state, id, facet).some((v) => v === value || valueWithin(world, facet, v, value)));
+      if (held)
+        roles += points;
+    }
+    score += reason(reasons, "Story role", roles);
+    if (refs.rules.has(id))
+      score += reason(reasons, "Named by a world rule", w.rule);
+    const pending = Math.min(3, pendingWith(ctx, id));
+    if (pending > 0)
+      score += reason(reasons, `${pending} pending with you`, w.pending * pending);
+    const band = tierBand(world, e.tier);
+    if (band)
+      score += reason(reasons, band === "principal" ? "Lead" : band === "supporting" ? "Supporting" : "Background tier", w.band[band]);
+    const last = Math.max(readCharacter(state, id).lastPresent ?? Number.NEGATIVE_INFINITY, lastSighting(state, id)?.at ?? Number.NEGATIVE_INFINITY);
+    if (Number.isFinite(last))
+      score += reason(reasons, "Seen with you lately", w.recent * Math.max(0, 1 - (state.clock - last) / 1440));
+    const gm = readCharacter(state, id).pin;
+    const never = config.never !== null && selectorMatches(reg, world, state, config.never, id);
+    const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
+    const author = never ? "background" : always ? "live" : null;
+    const t = config.thresholds;
+    const scored = score >= t.live ? "live" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    const level = gm ?? author ?? scored;
+    if (gm)
+      reasons.push({ label: `Pinned at ${gm} by the GM`, points: 0 });
+    else if (author)
+      reasons.push({ label: never ? "The author: never a mind" : "The author: always Live", points: 0 });
+    out.push({ entity: id, level, score: Math.round(score * 10) / 10, reasons, pin: { gm, author } });
+  }
+  const rank = { live: 0, near: 1, far: 2, background: 3 };
+  return out.sort((a, b) => rank[a.level] - rank[b.level] || b.score - a.score || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0));
+}
+var LEVEL_RANK = { live: 0, near: 1, far: 2, background: 3 };
+function pickMinds(ctx, scores, texts, settings) {
+  const { world, state } = ctx;
+  const slice = readSlice(state);
+  const here = placeOfEntity(state, world.pov);
+  const said = words2(`${texts.user}
+${texts.reply}`);
+  const live = [];
+  const refreshes = [];
+  let liveLeft = limitOf(settings.liveLimit);
+  const ORDER = { gm: 0, live: 1, promoted: 2, scene: 3, mention: 4, first: 5, turns: 6, minutes: 7, period: 8 };
+  for (const s of scores) {
+    const c = readCharacter(state, s.entity);
+    const mind = c.mind;
+    if (c.refresh) {
+      refreshes.push({ entity: s.entity, level: s.level, reason: "gm", order: ORDER.gm, score: s.score });
+      continue;
+    }
+    if (s.level === "background")
+      continue;
+    if (s.level === "live" && liveLeft > 0) {
+      liveLeft--;
+      live.push({ entity: s.entity, level: "live", reason: "live" });
+      continue;
+    }
+    const why = (() => {
+      if (!mind)
+        return "first";
+      if (LEVEL_RANK[s.level] < LEVEL_RANK[mind.level])
+        return "promoted";
+      if (s.level === "far")
+        return state.clock - mind.at >= limitOf(settings.farRefreshMinutes) ? "period" : null;
+      const near = settings.nearRefresh;
+      const place = placeOfEntity(state, s.entity);
+      if (near.scene && here !== null && place === here && mind.place !== here)
+        return "scene";
+      if (near.mention && namedIn(own(state.entities, s.entity)?.name ?? "", said))
+        return "mention";
+      if (slice.round - mind.round >= limitOf(near.turns))
+        return "turns";
+      if (state.clock - mind.at >= limitOf(near.minutes))
+        return "minutes";
+      return null;
+    })();
+    if (why)
+      refreshes.push({ entity: s.entity, level: s.level, reason: why, order: ORDER[why], score: s.score });
+  }
+  const sorted = refreshes.sort((a, b) => a.order - b.order || b.score - a.score || (a.entity < b.entity ? -1 : 1));
+  const chosen = [...sorted.filter((r) => r.reason === "gm"), ...sorted.filter((r) => r.reason !== "gm").slice(0, limitOf(settings.refreshLimit))];
+  return [...live, ...chosen.map(({ entity, level, reason: r }) => ({ entity, level, reason: r }))];
+}
+
+// src/packs/minds/core/lint.ts
+var WEIGHT_KEYS = ["here", "nearby", "mentioned", "regard", "knows", "owner", "track", "rule", "pending", "recent"];
+var MEMORY_PARTS = {
+  witness: { show: { range: MINDS_RANGES.show, whole: true } },
+  recall: { recent: { range: MINDS_RANGES.show, whole: true }, relevant: { range: MINDS_RANGES.show, whole: true }, tokens: { range: MINDS_RANGES.recallTokens, whole: true } },
+  notes: { show: { range: MINDS_RANGES.show, whole: true }, keep: { range: MINDS_RANGES.keep, whole: true } },
+  commitments: { show: { range: MINDS_RANGES.show, whole: true } },
+  salience: { halfLifeDays: { range: MINDS_RANGES.halfLifeDays, whole: false }, floor: { range: MINDS_RANGES.floor, whole: false } },
+  consolidate: { enabled: "bool", periodDays: { range: MINDS_RANGES.periodDays, whole: false } }
+};
+function configIssues(world, registry) {
+  const raw = world.minds;
+  if (raw === undefined)
+    return [];
+  const out = [];
+  const err = (path, message) => void out.push({ severity: "error", path, code: "minds.config", message });
+  const warn = (path, message) => void out.push({ severity: "warning", path, code: "minds.config", message });
+  if (!isRecord(raw)) {
+    err("minds", "The minds config is an object (secrecy, weights, thresholds, always, never, memory); the defaults play instead.");
+    return out;
+  }
+  for (const key of Object.keys(raw))
+    if (!WORLD_MINDS_KEYS.includes(key))
+      warn(`minds.${key}`, `"${key}" isn't part of the minds config; nothing reads it.`);
+  if (raw.secrecy !== undefined && raw.secrecy !== "full" && raw.secrecy !== "brief")
+    err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "brief" plays instead.');
+  const number = (path, v, [lo, hi], whole) => {
+    if (v === undefined)
+      return;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < lo || v > hi || whole && !Number.isInteger(v))
+      err(path, `${whole ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
+  };
+  const weights = raw.weights;
+  if (weights !== undefined && !isRecord(weights))
+    err("minds.weights", "The weights are an object of points by input; the defaults play instead.");
+  if (isRecord(weights)) {
+    for (const key of WEIGHT_KEYS)
+      number(`minds.weights.${key}`, weights[key], MINDS_RANGES.weight, false);
+    const band = weights.band;
+    if (band !== undefined && !isRecord(band))
+      err("minds.weights.band", "The band weights are an object: principal, supporting and background.");
+    if (isRecord(band))
+      for (const b of ["principal", "supporting", "background"])
+        number(`minds.weights.band.${b}`, band[b], MINDS_RANGES.weight, false);
+    const roles = weights.roles;
+    if (roles !== undefined && !isRecord(roles))
+      err("minds.weights.roles", "The role weights are an object of points by classification value.");
+    if (isRecord(roles)) {
+      for (const [value, points] of Object.entries(roles)) {
+        number(`minds.weights.roles.${value}`, points, MINDS_RANGES.weight, false);
+        const held = Object.values(world.classifications).some((facet) => isRecord(facet.values) && hasOwn(facet.values, value));
+        if (!held)
+          warn(`minds.weights.roles.${value}`, `No classification of this world has a value "${value}", so this weight never counts.`);
+      }
+    }
+    for (const key of Object.keys(weights))
+      if (!WEIGHT_KEYS.includes(key) && key !== "band" && key !== "roles")
+        warn(`minds.weights.${key}`, `"${key}" isn't a focus input; nothing reads it.`);
+  }
+  const thresholds = raw.thresholds;
+  if (thresholds !== undefined && !isRecord(thresholds))
+    err("minds.thresholds", "The thresholds are an object: live, near and far.");
+  if (isRecord(thresholds)) {
+    for (const key of ["live", "near", "far"])
+      number(`minds.thresholds.${key}`, thresholds[key], MINDS_RANGES.threshold, false);
+    const { live, near, far } = thresholds;
+    if (typeof live === "number" && typeof near === "number" && live < near)
+      warn("minds.thresholds.live", "Live is below Near: Live plays at Near's threshold.");
+    if (typeof near === "number" && typeof far === "number" && near < far)
+      warn("minds.thresholds.near", "Near is below Far: Near plays at Far's threshold.");
+  }
+  for (const key of ["always", "never"]) {
+    const sel = raw[key];
+    if (sel === undefined || sel === null)
+      continue;
+    if (!isRecord(sel)) {
+      err(`minds.${key}`, `"${key}" is a selector or null.`);
+      continue;
+    }
+    if (Object.keys(sel).length === 0)
+      warn(`minds.${key}`, `An empty selector here pins no one; leave "${key}" out instead.`);
+    if (registry)
+      for (const problem of selectorProblems(registry, world, sel))
+        err(`minds.${key}`, `The "${key}" selector ${problem}.`);
+  }
+  const memory = raw.memory;
+  if (memory !== undefined && !isRecord(memory))
+    err("minds.memory", "The memory defaults are an object; the built-in defaults play instead.");
+  if (isRecord(memory)) {
+    for (const [part, fields] of Object.entries(memory)) {
+      const spec = hasOwn(MEMORY_PARTS, part) ? MEMORY_PARTS[part] : undefined;
+      if (!spec) {
+        warn(`minds.memory.${part}`, `"${part}" isn't a memory layer; nothing reads it.`);
+        continue;
+      }
+      if (!isRecord(fields)) {
+        err(`minds.memory.${part}`, `The ${part} settings are an object.`);
+        continue;
+      }
+      for (const [key, v] of Object.entries(fields)) {
+        const field = hasOwn(spec, key) ? spec[key] : undefined;
+        if (!field)
+          warn(`minds.memory.${part}.${key}`, `"${key}" isn't a ${part} setting; nothing reads it.`);
+        else if (field === "bool") {
+          if (typeof v !== "boolean")
+            err(`minds.memory.${part}.${key}`, "On (true) or off (false); the default plays instead.");
+        } else
+          number(`minds.memory.${part}.${key}`, v, field.range, field.whole);
+      }
+    }
+  }
+  return out;
+}
+function stepIssues(world) {
+  const out = [];
+  const first = new Map;
+  for (const id of Object.keys(world.steps).sort()) {
+    const t = world.steps[id];
+    if (!t || !isMindPurpose(t.purpose))
+      continue;
+    if (t.signals.length > 0)
+      out.push({ severity: "info", path: `steps.${id}.signals`, code: "minds.step_signals", message: `Minds run on their own cadence (Settings \u2192 Minds), so a ${t.purpose} template's signals are ignored.` });
+    const earlier = first.get(t.purpose);
+    if (earlier !== undefined)
+      out.push({ severity: "warning", path: `steps.${id}`, code: "minds.step_duplicate", message: `The world has another ${t.purpose} template ("${earlier}"); only that one, the first by id, is used.` });
+    else
+      first.set(t.purpose, id);
+  }
+  return out;
+}
+var MINDS_LINTS = [
+  { code: "minds.config", check: (world, registry) => configIssues(world, registry) },
+  { code: "minds.steps", check: (world) => stepIssues(world) }
+];
+
+// src/packs/minds/core/section.ts
+function clause(text) {
+  return text.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
+}
+function mindLines(ctx) {
+  const { registry: reg, world, state } = ctx;
+  const slice = readSlice(state);
+  if (!slice.on)
+    return [];
+  const pov = world.pov;
+  const here = placeOfEntity(state, pov);
+  const secrecy = worldMindsOf(world).secrecy;
+  let check = null;
+  const safe = (text) => {
+    if (!check) {
+      const secrets = unrevealedSecrets(reg, world, state);
+      const hidden = hiddenNameCheck(reg, world, state, pov);
+      check = (t) => findLeaks(t, secrets).length === 0 && !hidden(t);
+    }
+    return check(text);
+  };
+  const out = [];
+  for (const id of Object.keys(slice.chars).sort()) {
+    const m = own(slice.chars, id)?.mind;
+    const e = own(state.entities, id);
+    if (!m || !e || m.round !== slice.round || id === pov || isGone(state, id) || !acts(world, state, id))
+      continue;
+    const present = here !== null && placeOfEntity(state, id) === here && canSeeEntity(reg, world, state, pov, id);
+    if (!present && m.interrupt === null)
+      continue;
+    const name = present || playerKnows(reg, world, state, pov, id) ? e.name : "Someone";
+    if (secrecy === "full") {
+      const parts = [`${name}'s mind: ${clause(m.monologue)}.`];
+      if (m.intent !== "")
+        parts.push(`Intends: ${clause(m.intent)}.`);
+      if (m.reactions.length > 0)
+        parts.push(`Reactions: ${m.reactions.map(clause).join("; ")}.`);
+      if (m.mood)
+        parts.push(`Mood: ${clause(m.mood)}.`);
+      if (m.depiction !== "")
+        parts.push(`Shows: ${clause(m.depiction)}.`);
+      if (m.interrupt)
+        parts.push(`Interrupts the skip: ${clause(m.interrupt)}.`);
+      out.push({ entity: id, line: parts.join(" ") });
+      continue;
+    }
+    if (m.withheld || m.depiction.trim() === "" || !safe(m.depiction))
+      continue;
+    const interrupt = m.interrupt && safe(m.interrupt) ? ` Interrupts the skip: ${clause(m.interrupt)}.` : "";
+    out.push({ entity: id, line: `${name}: ${clause(m.depiction)}.${interrupt}` });
+  }
+  return out;
+}
+function minded(ctx) {
+  return mindLines(ctx).map((l) => l.entity);
+}
+
+// src/packs/minds/core/index.ts
+var mindsPack = {
+  id: PACK6,
+  label: "Minds",
+  version: 1,
+  domain: null,
+  requires: [],
+  register(r) {
+    for (const def of MINDS_EVENT_DEFS)
+      r.event(def);
+    r.service("minds.edit", mindEdit);
+    r.query("minds.plans", (ctx, who) => openPlans(readCharacter(ctx.state, who)));
+    r.query("minds.tier", (ctx, who) => {
+      const c = readCharacter(ctx.state, who);
+      return c.pin ?? c.mind?.level ?? "background";
+    });
+    r.query("minds.minded", minded);
+    r.query("minds.on", mindsOn);
+    r.query("minds.fidelity", (ctx, texts) => fidelityOf(ctx, texts));
+    r.renderer({ slot: MINDS_SLOT, render: (ctx) => mindLines(ctx).map((l) => l.line) });
+    for (const rule of MINDS_LINTS)
+      r.lint(rule);
+  }
+};
+var core_default12 = mindsPack;
 // src/packs/starters/fantasy_town.json
 var fantasy_town_default = {
   format: "lre-world-v1",
@@ -17300,7 +18962,8 @@ var fantasy_town_default = {
       }
     },
     story: { version: 1, config: { flags: { ferry_running: true, market_open: true } } },
-    combat: { version: 1, config: {} }
+    combat: { version: 1, config: {} },
+    minds: { version: 1, config: {} }
   },
   pins: {
     generators: { money: 1, gear: 1, vehicles: 1 },
@@ -24687,7 +26350,8 @@ var mystery_manor_default = {
       }
     },
     story: { version: 1, config: { flags: { causeway_open: true, phone_working: true, alaric_alive: true, ledger_page_intact: true } } },
-    combat: { version: 1, config: {} }
+    combat: { version: 1, config: {} },
+    minds: { version: 1, config: {} }
   },
   pins: {
     generators: { money: 1, gear: 1, vehicles: 1 },
@@ -32329,7 +33993,8 @@ var modern_slice_of_life_default = {
       }
     },
     story: { version: 1, config: { flags: { shop_open: true, ferry_running: true } } },
-    combat: { version: 1, config: {} }
+    combat: { version: 1, config: {} },
+    minds: { version: 1, config: {} }
   },
   pins: {
     generators: { money: 1, gear: 1, vehicles: 1 },
@@ -41538,7 +43203,7 @@ var STARTER_INFO = [
 ];
 
 // src/packs/index.ts
-var ALL_PACKS = [enginePack, core_default, core_default2, core_default3, core_default4, core_default5, core_default6, core_default7, core_default8, core_default9, core_default10, core_default11];
+var ALL_PACKS = [enginePack, core_default, core_default2, core_default3, core_default4, core_default5, core_default6, core_default7, core_default8, core_default9, core_default10, core_default11, core_default12];
 
 // src/engine/beats.ts
 var MAX_BEATS = 6;
@@ -41580,6 +43245,8 @@ function outline(reg, world, state, input, rng, max = MAX_BEATS) {
     const stop = tl.result.stops[0];
     if (stop && signalVisible(reg, world, state, pov, stop))
       lines.push(`Time passes until it's interrupted: ${stop.text}. Narrate the interval from the Montage; don't add events.`);
+    else if (tl.summary.stoppedBy === "mind")
+      lines.push(`Time passes until ${tl.mindName ?? "someone"} steps in; how they do is in the Minds section. Narrate the interval from the Montage; don't add events.`);
     else
       lines.push("Time passes. Narrate the interval from the Montage; don't add events.");
   }
@@ -41650,13 +43317,20 @@ function queueStop(w, res, since, scene, speeding) {
   });
   return signalled ? "interruption" : null;
 }
+function turnStart(reg, w, runSeed) {
+  w.applyAll(pauseBookkeeping(w.world, w.state));
+  materializeAll(reg, w, w.world.pov, runSeed);
+}
+function timelapseOptions(intent, runSeed) {
+  const seg = intent.params.segment;
+  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 } };
+}
 function planTurn(input) {
   const reg = input.registry;
   const w = new Working(reg, input.world, input.state);
   const rng = createRng(input.seed);
   const chips = [];
-  w.applyAll(pauseBookkeeping(w.world, w.state));
-  materializeAll(reg, w, w.world.pov, input.runSeed);
+  turnStart(reg, w, input.runSeed);
   const from = w.state.clock;
   const intent = input.intent;
   const resolutions = [];
@@ -41664,9 +43338,8 @@ function planTurn(input) {
   let timelapse = null;
   const combat = [];
   if (intent?.action === TIMELAPSE_ACTION) {
-    const target = parseTarget(intent.params.target);
-    const seg = intent.params.segment;
-    const outcome = !target ? { code: "bad_target", reason: "no timelapse target" } : fightHoldsClock(w.ctx) ? { code: "in_fight", reason: IN_FIGHT } : runTimelapse(reg, w, target, { runSeed: input.runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 });
+    const { target, opts } = timelapseOptions(intent, input.runSeed);
+    const outcome = !target ? { code: "bad_target", reason: "no timelapse target" } : fightHoldsClock(w.ctx) ? { code: "in_fight", reason: IN_FIGHT } : input.skip ? replaySkip(reg, w, target, input.skip, opts) : runTimelapse(reg, w, target, opts);
     if ("code" in outcome)
       w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
     else
@@ -42863,7 +44536,7 @@ function isWorldDoc(v) {
 var COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"];
 var LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"];
 var PARTS2 = ["pins", "calendar", "realism", "time", "start"];
-var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings"];
+var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds"];
 function shapeIssues(doc) {
   const issues = [];
   const err = (path, message) => {
@@ -43013,7 +44686,7 @@ function lintWorld(world, registry) {
   }
   issues.push(...lintStructure(world, registry));
   for (const rule of registry.lints)
-    issues.push(...rule.check(world));
+    issues.push(...rule.check(world, registry));
   return issues;
 }
 function macrosIn(world) {
@@ -43041,7 +44714,7 @@ function stamped(world) {
 // src/engine/edits.ts
 var CORRECTION = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
 var EDIT_OPS_MAX = 64;
-function reject13(code, reason) {
+function reject14(code, reason) {
   return { code, reason };
 }
 function shapeProblem(reg, w, type, def, value) {
@@ -43117,17 +44790,17 @@ function applyAll2(w, events) {
 function writable3(reg, w, entity, field, opts) {
   const e = own(w.state.entities, entity);
   if (!e)
-    return reject13("missing_entity", `no entity ${labelOf(w, entity)}`);
+    return reject14("missing_entity", `no entity ${labelOf(w, entity)}`);
   if (!safeKey(field))
-    return reject13("bad_field", "not a field name");
+    return reject14("bad_field", "not a field name");
   if (field === GONE_FIELD)
-    return reject13("reserved", "use Remove or Restore");
+    return reject14("reserved", "use Remove or Restore");
   const def = fieldDef(reg, w.world, e.kind, field);
   const label = def?.label ?? field.replace(/_/g, " ");
   if (def?.derived !== undefined)
-    return reject13("derived", `${label} is worked out from other values`);
+    return reject14("derived", `${label} is worked out from other values`);
   if (def?.locked && !opts.gm)
-    return reject13("locked", `${label} is locked`);
+    return reject14("locked", `${label} is locked`);
   return { def, label };
 }
 function setField(reg, w, entity, field, value, opts, rng) {
@@ -43136,7 +44809,7 @@ function setField(reg, w, entity, field, value, opts, rng) {
     return ok;
   const problem = ok.def ? valueProblem(reg, w, entity, ok.def, value) : null;
   if (problem)
-    return reject13("bad_value", `${ok.label} ${problem}`);
+    return reject14("bad_value", `${ok.label} ${problem}`);
   if (field === "cash" && typeof value === "number") {
     materializeIfNeeded(reg, w, entity, "money", opts.runSeed);
     const corrected = optionalService(w.ctx, "economy.set_cash")?.(w.ctx, entity, value) ?? null;
@@ -43150,36 +44823,36 @@ function addField(reg, w, entity, field, delta, opts, rng) {
   if ("code" in ok)
     return ok;
   if (!Number.isFinite(delta) || delta === 0)
-    return reject13("bad_delta", "add a number other than 0");
+    return reject14("bad_delta", "add a number other than 0");
   if (ok.def && ok.def.type !== "number" && ok.def.type !== "money" && ok.def.type !== "duration")
-    return reject13("not_numeric", `${ok.label} isn't a number`);
+    return reject14("not_numeric", `${ok.label} isn't a number`);
   if (ok.def?.type === "money" && !Number.isSafeInteger(delta))
-    return reject13("bad_delta", `${ok.label} moves in whole amounts`);
+    return reject14("bad_delta", `${ok.label} moves in whole amounts`);
   return run(reg, w, [{ type: "add", args: { entity, field, delta } }], rng);
 }
 function linkOp(reg, w, op, rng) {
   const def = own(w.world.relations, op.rel) ?? reg.relations.get(op.rel);
   if (!def && !BUILTIN_RELATIONS.some((r) => r === op.rel))
-    return reject13("unknown_relation", `no relation type ${op.rel.replace(/_/g, " ")}`);
+    return reject14("unknown_relation", `no relation type ${op.rel.replace(/_/g, " ")}`);
   const from = own(w.state.entities, op.from);
   const to = own(w.state.entities, op.to);
   if (!from || !to)
-    return reject13("missing_entity", `no entity ${labelOf(w, from ? op.to : op.from)}`);
+    return reject14("missing_entity", `no entity ${labelOf(w, from ? op.to : op.from)}`);
   if (op.from === op.to)
-    return reject13("self", `${from.name} can't relate to itself`);
+    return reject14("self", `${from.name} can't relate to itself`);
   const label = def?.label ?? op.rel.replace(/_/g, " ");
   if (def && def.from !== "*" && !kindIs(reg, w.world, from.kind, def.from))
-    return reject13("bad_kind", `${label} starts from a ${(kindDef(reg, w.world, def.from)?.label ?? def.from).toLowerCase()}`);
+    return reject14("bad_kind", `${label} starts from a ${(kindDef(reg, w.world, def.from)?.label ?? def.from).toLowerCase()}`);
   if (def && def.to !== "*" && !kindIs(reg, w.world, to.kind, def.to))
-    return reject13("bad_kind", `${label} points at a ${(kindDef(reg, w.world, def.to)?.label ?? def.to).toLowerCase()}`);
+    return reject14("bad_kind", `${label} points at a ${(kindDef(reg, w.world, def.to)?.label ?? def.to).toLowerCase()}`);
   for (const [key, value] of Object.entries(op.fields ?? {})) {
     const fdef = def ? own(def.fields, key) : undefined;
     const problem = !safeKey(key) ? "isn't a field name" : fdef ? valueProblem(reg, w, op.from, fdef, value) : null;
     if (problem)
-      return reject13("bad_value", `${fdef?.label ?? key.replace(/_/g, " ")} ${problem}`);
+      return reject14("bad_value", `${fdef?.label ?? key.replace(/_/g, " ")} ${problem}`);
   }
   if (op.until !== undefined && !Number.isFinite(op.until))
-    return reject13("bad_until", "an end time is a time");
+    return reject14("bad_until", "an end time is a time");
   const args = { rel: op.rel, from: op.from, to: op.to };
   if (op.fields && Object.keys(op.fields).length > 0)
     args.fields = op.fields;
@@ -43190,12 +44863,12 @@ function linkOp(reg, w, op, rng) {
 function putOp(reg, w, entity, into, rng) {
   const e = own(w.state.entities, entity);
   if (!e)
-    return reject13("missing_entity", `no entity ${labelOf(w, entity)}`);
+    return reject14("missing_entity", `no entity ${labelOf(w, entity)}`);
   const holders = e.relations.filter((r) => r.type === "in");
   const specs = holders.filter((r) => r.to !== into).map((r) => ({ type: "unlink", args: { rel: "in", from: entity, to: r.to } }));
   if (into === null) {
     if (holders.length === 0)
-      return reject13("not_inside", `${e.name} isn't inside anything`);
+      return reject14("not_inside", `${e.name} isn't inside anything`);
     const place = placeOfEntity(w.state, entity);
     if (place)
       specs.push({ type: "set", args: { entity, field: "place", value: place } });
@@ -43203,15 +44876,15 @@ function putOp(reg, w, entity, into, rng) {
   }
   const container = own(w.state.entities, into);
   if (!container)
-    return reject13("missing_entity", `no entity ${labelOf(w, into)}`);
+    return reject14("missing_entity", `no entity ${labelOf(w, into)}`);
   let cur = into;
   for (let guard = 0;cur && guard < 32; guard++) {
     if (cur === entity)
-      return reject13("cycle", `${e.name} can't go inside ${container.name}`);
+      return reject14("cycle", `${e.name} can't go inside ${container.name}`);
     cur = own(w.state.entities, cur)?.relations.find((r) => r.type === "in")?.to;
   }
   if (holders.some((r) => r.to === into))
-    return reject13("already_inside", `${e.name} is already in ${container.name}`);
+    return reject14("already_inside", `${e.name} is already in ${container.name}`);
   if (typeof e.fields.place === "string")
     specs.push({ type: "set", args: { entity, field: "place", value: null } });
   specs.push({ type: "link", args: { rel: "in", from: entity, to: into } });
@@ -43219,9 +44892,9 @@ function putOp(reg, w, entity, into, rng) {
 }
 function adjustOp(reg, w, account, cents, rng) {
   if (!own(w.state.entities, account))
-    return reject13("missing_entity", `no account ${labelOf(w, account)}`);
+    return reject14("missing_entity", `no account ${labelOf(w, account)}`);
   if (!Number.isSafeInteger(cents) || cents === 0)
-    return reject13("bad_amount", "an adjustment is a whole amount other than nothing");
+    return reject14("bad_amount", "an adjustment is a whole amount other than nothing");
   const adjust = optionalService(w.ctx, "economy.adjust");
   if (adjust) {
     const events = adjust(w.ctx, account, cents);
@@ -43235,31 +44908,31 @@ function caughtUp(w, entity) {
 function entityOp(w, op) {
   const e = own(w.state.entities, op.entity);
   if (!e)
-    return reject13("missing_entity", `no entity ${labelOf(w, op.entity)}`);
+    return reject14("missing_entity", `no entity ${labelOf(w, op.entity)}`);
   const data = { entity: op.entity };
   if (op.tier !== undefined) {
     if (!tierOf(w.world, op.tier) && !isBand(op.tier))
-      return reject13("bad_tier", `no tier ${op.tier}`);
+      return reject14("bad_tier", `no tier ${op.tier}`);
     data.tier = op.tier;
   }
   if (op.agent !== undefined) {
     if (op.entity === w.world.pov)
-      return reject13("pov", "the point of view is played, never an agent");
+      return reject14("pov", "the point of view is played, never an agent");
     data.agent = op.agent;
   }
   if (op.levels !== undefined) {
     const levels = {};
     for (const [domain, level] of Object.entries(op.levels)) {
       if (!DOMAINS.some((d) => d === domain))
-        return reject13("bad_domain", `no domain ${domain}`);
+        return reject14("bad_domain", `no domain ${domain}`);
       if (level !== null && level !== undefined && !(Number.isInteger(level) && level >= 0 && level <= 4))
-        return reject13("bad_level", "a level is a whole number 0\u20134");
+        return reject14("bad_level", "a level is a whole number 0\u20134");
       levels[domain] = level ?? null;
     }
     data.levels = levels;
   }
   if (Object.keys(data).length === 1)
-    return reject13("no_change", "nothing to change");
+    return reject14("no_change", "nothing to change");
   const wasAgent = e.agent;
   const rejection = applyAll2(w, [{ type: ENGINE_EVENTS.entity, data }]);
   if (rejection)
@@ -43269,19 +44942,19 @@ function entityOp(w, op) {
 function classifyOp(w, op) {
   const e = own(w.state.entities, op.entity);
   if (!e)
-    return reject13("missing_entity", `no entity ${labelOf(w, op.entity)}`);
+    return reject14("missing_entity", `no entity ${labelOf(w, op.entity)}`);
   const classes = classOf(op.class);
   if (!classes)
-    return reject13("bad_args", "a classification is facet \u2192 values");
+    return reject14("bad_args", "a classification is facet \u2192 values");
   const problem = classProblems(w.world, classes, e.name)[0];
   if (problem)
-    return reject13(problem.code, problem.message);
+    return reject14(problem.code, problem.message);
   const tags = [...new Set(op.tags.map((t) => t.trim()).filter((t) => t !== ""))];
   const sameAs = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
   const facets = new Set([...Object.keys(classes), ...Object.keys(w.world.classifications)]);
   const unchanged = [...facets].every((f) => sameAs(classValues(w.world, w.state, op.entity, f), classes[f] ?? [])) && sameAs(tagsOf(w.world, w.state, op.entity), tags);
   if (unchanged)
-    return reject13("no_change", "nothing to change");
+    return reject14("no_change", "nothing to change");
   const was = Object.fromEntries([...facets].flatMap((f) => {
     const values = classValues(w.world, w.state, op.entity, f);
     return values.length > 0 ? [[f, [...values]]] : [];
@@ -43293,18 +44966,18 @@ function lifeOp(reg, w, op, rng) {
   const rejection = run(reg, w, [{ type: "life", args: { entity: op.entity, ...op.to !== undefined ? { to: op.to } : {}, ...op.tell !== undefined ? { tell: op.tell } : {} } }], rng);
   if (rejection)
     return rejection;
-  return w.events.length === before ? reject13("no_change", "nothing to change") : null;
+  return w.events.length === before ? reject14("no_change", "nothing to change") : null;
 }
 function spawnOp(reg, w, op, rng) {
   const name = op.name.trim();
   if (name === "" || name.length > 80)
-    return reject13("bad_name", "a name is 1\u201380 characters");
+    return reject14("bad_name", "a name is 1\u201380 characters");
   if (op.id !== undefined && (!safeKey(op.id) || own(w.state.entities, op.id)))
-    return reject13("bad_id", `${op.id} is taken or isn't an id`);
+    return reject14("bad_id", `${op.id} is taken or isn't an id`);
   if (op.tier !== undefined && !tierOf(w.world, op.tier))
-    return reject13("bad_tier", `no tier ${op.tier}`);
+    return reject14("bad_tier", `no tier ${op.tier}`);
   if (op.place !== undefined && !own(w.world.places, op.place))
-    return reject13("missing_place", `no place ${labelOf(w, op.place)}`);
+    return reject14("missing_place", `no place ${labelOf(w, op.place)}`);
   const args = { kind: op.kind, name };
   if (op.id !== undefined)
     args.id = op.id;
@@ -43319,11 +44992,11 @@ function spawnOp(reg, w, op, rng) {
 function despawnOp(reg, w, entity, rng) {
   const e = own(w.state.entities, entity);
   if (!e)
-    return reject13("missing_entity", `no entity ${labelOf(w, entity)}`);
+    return reject14("missing_entity", `no entity ${labelOf(w, entity)}`);
   if (entity === w.world.pov)
-    return reject13("pov", "the point of view can't be removed");
+    return reject14("pov", "the point of view can't be removed");
   if (e.fields[GONE_FIELD] === true)
-    return reject13("gone", `${e.name} is already removed`);
+    return reject14("gone", `${e.name} is already removed`);
   const where = placeOfEntity(w.state, entity);
   const contained = typeof e.fields.place !== "string" && e.relations.some((r) => r.type === "in");
   const unlinked = run(reg, w, e.relations.map((r) => ({ type: "unlink", args: { rel: r.type, from: entity, to: r.to } })), rng.fork("own"));
@@ -43343,9 +45016,9 @@ function despawnOp(reg, w, entity, rng) {
 function restoreOp(reg, w, entity, rng) {
   const e = own(w.state.entities, entity);
   if (!e)
-    return reject13("missing_entity", `no entity ${labelOf(w, entity)}`);
+    return reject14("missing_entity", `no entity ${labelOf(w, entity)}`);
   if (e.fields[GONE_FIELD] !== true)
-    return reject13("not_gone", `${e.name} isn't removed`);
+    return reject14("not_gone", `${e.name} isn't removed`);
   const rejection = run(reg, w, [{ type: "set", args: { entity, field: GONE_FIELD, value: false } }], rng);
   if (rejection)
     return rejection;
@@ -43381,6 +45054,15 @@ function applyOp(reg, w, op, opts, rng) {
       return despawnOp(reg, w, op.entity, rng);
     case "restore":
       return restoreOp(reg, w, op.entity, rng);
+    case "mind_pin":
+    case "mind_refresh":
+    case "mind_memory": {
+      const edit = optionalService(w.ctx, "minds.edit");
+      if (!edit)
+        return reject14("no_minds", "this world has no character minds");
+      const out = edit(w.ctx, op);
+      return Array.isArray(out) ? applyAll2(w, out) : out;
+    }
   }
 }
 function resolveEdit(reg, world, state, ops, opts) {
@@ -43394,7 +45076,7 @@ function resolveEdit(reg, world, state, ops, opts) {
   const group = w.events.length > 1 ? `edit:${hashParts(JSON.stringify(w.events)).slice(0, 10)}` : undefined;
   return { events: group ? w.events.map((e) => ({ ...e, group })) : [...w.events] };
 }
-var str4 = (v) => typeof v === "string";
+var str5 = (v) => typeof v === "string";
 function parseEditOps(raw) {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > EDIT_OPS_MAX)
     return null;
@@ -43405,53 +45087,61 @@ function parseEditOps(raw) {
     const op = (() => {
       switch (o.op) {
         case "set":
-          return str4(o.entity) && str4(o.field) && o.value !== undefined ? { op: "set", entity: o.entity, field: o.field, value: o.value } : null;
+          return str5(o.entity) && str5(o.field) && o.value !== undefined ? { op: "set", entity: o.entity, field: o.field, value: o.value } : null;
         case "add":
-          return str4(o.entity) && str4(o.field) && typeof o.delta === "number" ? { op: "add", entity: o.entity, field: o.field, delta: o.delta } : null;
+          return str5(o.entity) && str5(o.field) && typeof o.delta === "number" ? { op: "add", entity: o.entity, field: o.field, delta: o.delta } : null;
         case "link":
-          if (!str4(o.rel) || !str4(o.from) || !str4(o.to) || o.fields !== undefined && !isRecord(o.fields) || o.until !== undefined && typeof o.until !== "number")
+          if (!str5(o.rel) || !str5(o.from) || !str5(o.to) || o.fields !== undefined && !isRecord(o.fields) || o.until !== undefined && typeof o.until !== "number")
             return null;
           return { op: "link", rel: o.rel, from: o.from, to: o.to, ...isRecord(o.fields) ? { fields: o.fields } : {}, ...typeof o.until === "number" ? { until: o.until } : {} };
         case "unlink":
-          return str4(o.rel) && str4(o.from) && str4(o.to) ? { op: "unlink", rel: o.rel, from: o.from, to: o.to } : null;
+          return str5(o.rel) && str5(o.from) && str5(o.to) ? { op: "unlink", rel: o.rel, from: o.from, to: o.to } : null;
         case "move":
-          return str4(o.entity) && str4(o.to) ? { op: "move", entity: o.entity, to: o.to } : null;
+          return str5(o.entity) && str5(o.to) ? { op: "move", entity: o.entity, to: o.to } : null;
         case "put":
-          return str4(o.entity) && (o.into === null || str4(o.into)) ? { op: "put", entity: o.entity, into: o.into } : null;
+          return str5(o.entity) && (o.into === null || str5(o.into)) ? { op: "put", entity: o.entity, into: o.into } : null;
         case "adjust":
-          return str4(o.account) && typeof o.cents === "number" ? { op: "adjust", account: o.account, cents: o.cents } : null;
+          return str5(o.account) && typeof o.cents === "number" ? { op: "adjust", account: o.account, cents: o.cents } : null;
         case "stage":
-          return str4(o.track) && str4(o.to) ? { op: "stage", track: o.track, to: o.to } : null;
+          return str5(o.track) && str5(o.to) ? { op: "stage", track: o.track, to: o.to } : null;
         case "entity": {
-          if (!str4(o.entity) || o.tier !== undefined && !str4(o.tier) || o.agent !== undefined && typeof o.agent !== "boolean")
+          if (!str5(o.entity) || o.tier !== undefined && !str5(o.tier) || o.agent !== undefined && typeof o.agent !== "boolean")
             return null;
           if (o.levels !== undefined && !(isRecord(o.levels) && Object.values(o.levels).every((v) => v === null || typeof v === "number")))
             return null;
           const levels = isRecord(o.levels) ? Object.fromEntries(Object.entries(o.levels).map(([d, v]) => [d, typeof v === "number" ? v : null])) : {};
-          return { op: "entity", entity: o.entity, ...str4(o.tier) ? { tier: o.tier } : {}, ...typeof o.agent === "boolean" ? { agent: o.agent } : {}, ...isRecord(o.levels) ? { levels } : {} };
+          return { op: "entity", entity: o.entity, ...str5(o.tier) ? { tier: o.tier } : {}, ...typeof o.agent === "boolean" ? { agent: o.agent } : {}, ...isRecord(o.levels) ? { levels } : {} };
         }
         case "classify": {
-          if (!str4(o.entity) || !isRecord(o.class) || !Array.isArray(o.tags) || !o.tags.every(str4))
+          if (!str5(o.entity) || !isRecord(o.class) || !Array.isArray(o.tags) || !o.tags.every(str5))
             return null;
           const classes = {};
           for (const [facet, values] of Object.entries(o.class)) {
-            if (!safeKey(facet) || !Array.isArray(values) || !values.every(str4))
+            if (!safeKey(facet) || !Array.isArray(values) || !values.every(str5))
               return null;
-            classes[facet] = values.filter(str4);
+            classes[facet] = values.filter(str5);
           }
-          return { op: "classify", entity: o.entity, class: classes, tags: o.tags.filter(str4) };
+          return { op: "classify", entity: o.entity, class: classes, tags: o.tags.filter(str5) };
         }
         case "life":
-          if (!str4(o.entity) || o.to !== undefined && !str4(o.to) || o.tell !== undefined && !(Array.isArray(o.tell) && o.tell.every(str4)) || o.to === undefined && o.tell === undefined)
+          if (!str5(o.entity) || o.to !== undefined && !str5(o.to) || o.tell !== undefined && !(Array.isArray(o.tell) && o.tell.every(str5)) || o.to === undefined && o.tell === undefined)
             return null;
-          return { op: "life", entity: o.entity, ...str4(o.to) ? { to: o.to } : {}, ...Array.isArray(o.tell) ? { tell: o.tell.filter(str4) } : {} };
+          return { op: "life", entity: o.entity, ...str5(o.to) ? { to: o.to } : {}, ...Array.isArray(o.tell) ? { tell: o.tell.filter(str5) } : {} };
         case "spawn":
-          if (!str4(o.kind) || !str4(o.name) || [o.id, o.tier, o.place].some((v) => v !== undefined && !str4(v)) || o.agent !== undefined && typeof o.agent !== "boolean")
+          if (!str5(o.kind) || !str5(o.name) || [o.id, o.tier, o.place].some((v) => v !== undefined && !str5(v)) || o.agent !== undefined && typeof o.agent !== "boolean")
             return null;
-          return { op: "spawn", kind: o.kind, name: o.name, ...str4(o.id) ? { id: o.id } : {}, ...str4(o.tier) ? { tier: o.tier } : {}, ...str4(o.place) ? { place: o.place } : {}, ...typeof o.agent === "boolean" ? { agent: o.agent } : {} };
+          return { op: "spawn", kind: o.kind, name: o.name, ...str5(o.id) ? { id: o.id } : {}, ...str5(o.tier) ? { tier: o.tier } : {}, ...str5(o.place) ? { place: o.place } : {}, ...typeof o.agent === "boolean" ? { agent: o.agent } : {} };
         case "despawn":
         case "restore":
-          return str4(o.entity) ? { op: o.op, entity: o.entity } : null;
+          return str5(o.entity) ? { op: o.op, entity: o.entity } : null;
+        case "mind_pin":
+          return str5(o.entity) && (o.level === null || o.level === "live" || o.level === "near" || o.level === "far" || o.level === "background") ? { op: "mind_pin", entity: o.entity, level: o.level } : null;
+        case "mind_refresh":
+          return str5(o.entity) ? { op: "mind_refresh", entity: o.entity } : null;
+        case "mind_memory":
+          if (!str5(o.entity) || o.part !== "note" && o.part !== "commitment" && o.part !== "plan" || !(o.id === null || str5(o.id)) || !(o.value === null || isRecord(o.value)))
+            return null;
+          return { op: "mind_memory", entity: o.entity, part: o.part, id: o.id, value: o.value };
         default:
           return null;
       }
@@ -43912,14 +45602,16 @@ class LedgerCore {
     }
     j.pending[input.generationId] = pending;
   }
-  plan(generationId, observed, dryRun) {
+  planState(generationId, observed) {
     const p = this.journal.pending[generationId];
-    if (!p || p.kind === "continue" || p.kind === "impersonate")
-      return [];
+    const base = p && p.kind !== "continue" && p.kind !== "impersonate" ? this.planBase(p, observed) : null;
+    return base ? { state: base.state, world: base.world } : null;
+  }
+  planBase(p, observed) {
     const targetIndex = p.messageId ? observed.findIndex((m) => m.id === p.messageId) : -1;
     const prefix = targetIndex >= 0 ? observed.slice(0, targetIndex) : [...observed];
     if (this.pausedWithin(prefix))
-      return [];
+      return null;
     const out = this.fold(prefix);
     const state = structuredClone(out.state);
     const parentPath = out.messages.length > 0 ? out.messages[out.messages.length - 1]?.path ?? ROOT_PATH : ROOT_PATH;
@@ -43939,7 +45631,7 @@ class LedgerCore {
     }
     const world = this.env.worlds(state.revision);
     if (!world)
-      return [];
+      return null;
     let startMarkers = [];
     let seq = this.journal.seq;
     if (!this.journal.started) {
@@ -43950,6 +45642,16 @@ class LedgerCore {
       for (const mk of startMarkers)
         applyMarker(state, mk, this.env);
     }
+    return { prefix, out, state, parentPath, target, users, userMessages, world, startMarkers, seq };
+  }
+  plan(generationId, observed, dryRun) {
+    const p = this.journal.pending[generationId];
+    if (!p || p.kind === "continue" || p.kind === "impersonate")
+      return [];
+    const base = this.planBase(p, observed);
+    if (!base)
+      return [];
+    const { prefix, out, state, parentPath, target, users, userMessages, world, startMarkers, seq } = base;
     if (p.kind === "renarrate" && target && !dryRun && this.planRenarrate(p, target, out.state, parentPath, world)) {
       Object.assign(p, {
         planned: true,
@@ -45245,11 +46947,11 @@ ${e.content.slice(0, ENTRY_MAX_CHARS)}`).join(`
 
 `);
 }
-function words2(text) {
+function words3(text) {
   return text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3).map((w) => w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
 }
 function matchRow(table, text) {
-  const wanted = new Set(words2(text));
+  const wanted = new Set(words3(text));
   if (wanted.size === 0)
     return null;
   let best = null;
@@ -45257,7 +46959,7 @@ function matchRow(table, text) {
   for (const id of Object.keys(table.rows).sort()) {
     const row = table.rows[id] ?? {};
     const label = [row.title, row.name, row.label].find((v) => typeof v === "string") ?? "";
-    const have = new Set([...words2(id.replace(/_/g, " ")), ...words2(label)]);
+    const have = new Set([...words3(id.replace(/_/g, " ")), ...words3(label)]);
     const shared = [...wanted].filter((w) => have.has(w)).length;
     if (shared > score) {
       best = id;
@@ -46441,7 +48143,7 @@ function upChain(world, packKinds, kind, visit) {
   }
   return;
 }
-function words3(id) {
+function words4(id) {
   const text = id.replace(/[._]/g, " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -46459,7 +48161,7 @@ function slotsOf(world, profile, packKinds) {
   const kindId = pov?.kind ?? "person";
   const ownKind = hasOwn(world.kinds, kindId) ? world.kinds[kindId] : undefined;
   const packKind = hasOwn(packKinds, kindId) ? packKinds[kindId] : undefined;
-  const label = ownKind?.label ?? packKind?.label ?? words3(kindId);
+  const label = ownKind?.label ?? packKind?.label ?? words4(kindId);
   const kindIn = (doc) => {
     const existing = hasOwn(doc.kinds, kindId) ? doc.kinds[kindId] : undefined;
     if (existing)
@@ -46470,10 +48172,10 @@ function slotsOf(world, profile, packKinds) {
   };
   const slots = [];
   for (const [id, def] of Object.entries(profile.fields)) {
-    slots.push({ path: `kinds.${kindId}.fields.${id}`, group: "fields", label: def.label ?? words3(id), mine: upChain(world, packKinds, kindId, (_k, k) => hasOwn(k.fields, id) ? k.fields[id] : undefined), theirs: def, field: { id, def }, write: (doc) => void (kindIn(doc).fields[id] = structuredClone(def)) });
+    slots.push({ path: `kinds.${kindId}.fields.${id}`, group: "fields", label: def.label ?? words4(id), mine: upChain(world, packKinds, kindId, (_k, k) => hasOwn(k.fields, id) ? k.fields[id] : undefined), theirs: def, field: { id, def }, write: (doc) => void (kindIn(doc).fields[id] = structuredClone(def)) });
   }
   for (const [id, def] of Object.entries(profile.checks)) {
-    slots.push({ path: `checks.${id}`, group: "checks", label: words3(id), mine: hasOwn(world.checks, id) ? world.checks[id] : undefined, theirs: def, write: (doc) => void (doc.checks[id] = structuredClone(def)) });
+    slots.push({ path: `checks.${id}`, group: "checks", label: words4(id), mine: hasOwn(world.checks, id) ? world.checks[id] : undefined, theirs: def, write: (doc) => void (doc.checks[id] = structuredClone(def)) });
   }
   for (const [id, def] of Object.entries(profile.actions)) {
     slots.push({ path: `actions.${id}`, group: "actions", label: def.label, mine: hasOwn(world.actions, id) ? world.actions[id] : undefined, theirs: def, write: (doc) => void (doc.actions[id] = structuredClone(def)) });
@@ -46502,7 +48204,7 @@ function slotsOf(world, profile, packKinds) {
     slots.push({
       path: `ruleset.minLevels.${domain}`,
       group: "ruleset",
-      label: `Level floor: ${words3(domain)} ${String(level)}`,
+      label: `Level floor: ${words4(domain)} ${String(level)}`,
       mine: floors && hasOwn(floors, domain) ? floors[domain] : undefined,
       theirs: level,
       write: (doc) => {
@@ -46511,7 +48213,7 @@ function slotsOf(world, profile, packKinds) {
       }
     });
   }
-  slots.push({ path: "ruleset.adjudication", group: "ruleset", label: `How checks are decided: ${words3(rs.adjudication.preset)}`, mine: rulesetPart(world, "adjudication"), theirs: rs.adjudication, write: (doc) => void (rulesetIn(doc).adjudication = structuredClone(rs.adjudication)) });
+  slots.push({ path: "ruleset.adjudication", group: "ruleset", label: `How checks are decided: ${words4(rs.adjudication.preset)}`, mine: rulesetPart(world, "adjudication"), theirs: rs.adjudication, write: (doc) => void (rulesetIn(doc).adjudication = structuredClone(rs.adjudication)) });
   slots.push({ path: "ruleset.combat", group: "ruleset", label: "Combat rules", mine: rulesetPart(world, "combat"), theirs: rs.combat, write: (doc) => void (rulesetIn(doc).combat = structuredClone(rs.combat)) });
   return { kind: { id: kindId, label, copied: !ownKind }, slots };
 }
@@ -46541,7 +48243,7 @@ function fitted(def, v) {
       return typeof v === "string" ? undefined : null;
   }
 }
-function planOf(world, profile, packKinds, choices) {
+function planOf2(world, profile, packKinds, choices) {
   const { kind, slots } = slotsOf(world, profile, packKinds);
   const items = slots.map((slot) => ({ path: slot.path, group: slot.group, label: slot.label, status: statusOf(slot) }));
   const write = slots.filter((slot, i) => {
@@ -46574,7 +48276,7 @@ function planOf(world, profile, packKinds, choices) {
   return { plan: { profile: profile.id, kind, items, people, values }, write };
 }
 function applyProfile(world, profile, packKinds, choices = {}) {
-  const { plan, write } = planOf(world, profile, packKinds, choices);
+  const { plan, write } = planOf2(world, profile, packKinds, choices);
   const doc = structuredClone(world);
   for (const slot of write)
     slot.write(doc);
@@ -46598,7 +48300,7 @@ var PATCH_SIZE_CAP = 4 * 1024 * 1024;
 var DOC_DEPTH_CAP = 64;
 var NOTE_CAP = 200;
 var PATCH_PROTECTED = ["id", "format", "engineVersion", "pins", "suppressed"];
-var WORLD_PARTS = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true };
+var WORLD_PARTS = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true };
 
 class WorldError extends Error {
   code;
@@ -47181,6 +48883,14 @@ function setPart(doc, part, value) {
     const terms = isRecord(value.terms) ? Object.fromEntries(Object.entries(value.terms).flatMap(([term, entries]) => safeKey(term) ? [[term, ids(entries)]] : [])) : {};
     const topics = isRecord(value.topics) ? Object.fromEntries(Object.entries(value.topics).flatMap(([id, t]) => safeKey(id) && isRecord(t) ? [[id, { label: typeof t.label === "string" ? t.label : id, entries: ids(t.entries) }]] : [])) : {};
     doc.loreIndex = { terms, topics };
+    return;
+  }
+  if (part === "minds") {
+    const kept = Object.fromEntries(WORLD_MINDS_KEYS.filter((key) => value[key] !== undefined).map((key) => [key, value[key] ?? null]));
+    if (Object.keys(kept).length === 0)
+      delete doc.minds;
+    else
+      doc.minds = kept;
     return;
   }
   Object.assign(doc, { [part]: value });
@@ -47871,421 +49581,6 @@ async function saveFromChat(host, worlds, chatId, worldId, userId, hiding, excer
   return { worldId, id };
 }
 
-// src/engine/bounds.ts
-var RANK = { auto: 0, confirm: 1, never: 2 };
-function strictest(...modes) {
-  let out = "auto";
-  for (const m of modes)
-    if (m && RANK[m] > RANK[out])
-      out = m;
-  return out;
-}
-function combineBounds(...bounds) {
-  let maxDelta;
-  const modes = [];
-  for (const b of bounds) {
-    if (!b)
-      continue;
-    modes.push(b.mode);
-    if (b.maxDelta !== undefined)
-      maxDelta = maxDelta === undefined ? Math.abs(b.maxDelta) : Math.min(maxDelta, Math.abs(b.maxDelta));
-  }
-  return maxDelta === undefined ? { mode: strictest(...modes) } : { mode: strictest(...modes), maxDelta };
-}
-function clampToField(def, current, delta) {
-  let next = current + delta;
-  if (def?.min !== undefined)
-    next = Math.max(def.min, next);
-  if (def?.max !== undefined)
-    next = Math.min(def.max, next);
-  return next - current;
-}
-function boundProposal(reg, world, state, input, policy) {
-  const e = input.entity ? own(state.entities, input.entity) : undefined;
-  const def = e && input.field ? fieldDef(reg, world, e.kind, input.field) : undefined;
-  const locked = def?.locked === true || def?.derived !== undefined;
-  const bound = combineBounds(def?.bound, policy.typeMode ? { mode: policy.typeMode, ...policy.typeMaxDelta !== undefined ? { maxDelta: policy.typeMaxDelta } : {} } : undefined, policy.channelCap !== undefined ? { mode: "auto", maxDelta: policy.channelCap } : undefined, locked ? { mode: "never" } : undefined);
-  let capped = false;
-  let delta = input.delta;
-  if (delta !== undefined) {
-    if (bound.maxDelta !== undefined && Math.abs(delta) > bound.maxDelta) {
-      delta = Math.sign(delta) * bound.maxDelta;
-      capped = true;
-    }
-    const current = e && input.field ? own(e.fields, input.field) : undefined;
-    const clamped = clampToField(def, typeof current === "number" ? current : 0, delta);
-    if (clamped !== delta)
-      capped = true;
-    delta = clamped;
-  }
-  let value = input.value;
-  if (typeof value === "number" && def) {
-    const clamped = Math.min(def.max ?? Infinity, Math.max(def.min ?? -Infinity, value));
-    if (clamped !== value)
-      capped = true;
-    value = clamped;
-  }
-  return { mode: bound.mode, ...delta !== undefined ? { delta } : {}, ...value !== undefined ? { value } : {}, capped, bound };
-}
-
-// src/engine/ledger/fold.ts
-function refEq(a, b) {
-  if (a.in !== b.in || a.index !== b.index)
-    return false;
-  return a.in === "events" || b.in === "post" && a.seq === b.seq;
-}
-var dependentNote = (n) => n.kind === "dropped" || n.kind === "note";
-var dependentKeep = (k) => k.status === "dropped" || k.status === "converted";
-
-class LedgerFold {
-  types;
-  cache = new Map;
-  settled = new Map;
-  every;
-  fingerprint;
-  capacity;
-  tails = [];
-  digests = { content: new Map, record: new Map, markers: new Map, folds: new Map, key: new Map };
-  constructor(types, options = {}) {
-    this.types = types;
-    this.every = Math.max(1, options.snapshotEvery ?? 200);
-    this.fingerprint = options.fingerprint ?? "dev";
-    this.capacity = options.capacity ?? 1 << 16;
-  }
-  keyOf(prev, m, input, paused, pausesHere) {
-    const rec = activeRecord(m, input.tombstones);
-    const stored = m.ledger?.swipes[String(m.swipeId)];
-    const recKey = stored ? `${rec ? "r" : "t"}${this.digest(this.digests.record, JSON.stringify(stored), () => hashJson(stored))}` : "";
-    const markers = m.ledger ? this.digest(this.digests.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
-    const text = activeText(m);
-    const content = this.digest(this.digests.content, text, () => contentId(text).hash);
-    const flags = `${m.isUser ? "u" : "a"}${paused ? "p" : ""}${pausesHere ? "P" : ""}`;
-    const memo = `${prev}\x00${flags}\x00${m.swipeId}\x00${content}\x00${recKey}\x00${markers}\x00${m.id}`;
-    return this.digest(this.digests.key, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : ""));
-  }
-  digest(memo, text, compute) {
-    const hit = memo.get(text);
-    if (hit !== undefined)
-      return hit;
-    const d = compute();
-    if (memo.size >= this.capacity) {
-      const oldest = memo.keys().next();
-      if (!oldest.done)
-        memo.delete(oldest.value);
-    }
-    memo.set(text, d);
-    return d;
-  }
-  fold(input) {
-    const startWorld = input.worlds(input.revision);
-    if (!startWorld)
-      throw new FoldError(`unknown revision ${input.revision}`);
-    const n = input.chain.length;
-    const pausedAfter = new Set(input.pauses.map((p) => p.messageId));
-    const steps = [];
-    const keys = [];
-    let key = hashParts("lre.fold", input.revision);
-    let paused = false;
-    let base = -1;
-    for (let i = 0;i < n; i++) {
-      const m = input.chain[i];
-      const k = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
-      const cached = this.cache.get(k);
-      if (!cached)
-        break;
-      steps.push(cached);
-      keys.push(k);
-      key = k;
-      paused = cached.paused;
-      if (cached.state)
-        base = i;
-    }
-    const from = base >= 0 ? steps[base] : undefined;
-    let shared = from?.state ?? null;
-    let state = shared ?? initialState(startWorld, input.revision, this.types);
-    steps.length = base + 1;
-    keys.length = base + 1;
-    let parent = from?.result.path ?? ROOT_PATH;
-    key = keys[base] ?? hashParts("lre.fold", input.revision);
-    paused = from?.paused ?? false;
-    const context = hashParts("lre.snap", this.fingerprint, input.revision);
-    if (input.snapshots && input.pauses.length === 0 && base < n - 1) {
-      const frames = [];
-      const frameKeys = [];
-      let p = parent;
-      let k = key;
-      let best = -1;
-      let snapshot;
-      for (let i = base + 1;i < n; i++) {
-        const m = input.chain[i];
-        const f = this.frame(input, m, p, false, false);
-        k = this.keyOf(k, m, input, false, false);
-        frames.push(f);
-        frameKeys.push(k);
-        p = f.result.path;
-        if ((i + 1) % this.every !== 0)
-          continue;
-        const found = input.snapshots.get(hashParts(context, p));
-        if (found) {
-          best = i;
-          snapshot = found;
-        }
-      }
-      if (snapshot && best > base) {
-        const notes = new Map;
-        const keep = new Map;
-        const violations = new Map;
-        for (const [i, x] of snapshot.notes)
-          notes.set(i, [...notes.get(i) ?? [], x]);
-        for (const [i, x] of snapshot.keep)
-          keep.set(i, [...keep.get(i) ?? [], x]);
-        for (const [i, x] of snapshot.violations)
-          violations.set(i, [...violations.get(i) ?? [], x]);
-        for (let i = base + 1;i <= best; i++) {
-          const f = frames[i - base - 1];
-          const k = frameKeys[i - base - 1];
-          const step = { state: null, result: f.result, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
-          this.remember(k, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
-          steps.push(step);
-          keys.push(k);
-        }
-        shared = snapshot.state;
-        state = shared;
-        base = best;
-        parent = steps[best]?.result.path ?? ROOT_PATH;
-        key = keys[best] ?? key;
-        paused = false;
-      }
-    }
-    if (shared && base < n - 1) {
-      state = structuredClone(shared);
-      shared = null;
-    }
-    for (let i = base + 1;i < n; i++) {
-      const m = input.chain[i];
-      key = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
-      const f = this.frame(input, m, parent, paused, pausedAfter.has(m.id));
-      const step = this.step(input, m, f, state);
-      const checkpoint = (i + 1) % this.every === 0;
-      this.remember(key, step, checkpoint || i === n - 1, !checkpoint && i === n - 1);
-      steps.push(step);
-      keys.push(key);
-      parent = step.result.path;
-      paused = step.paused;
-      if (checkpoint && input.snapshots && input.pauses.length === 0)
-        input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, state));
-    }
-    const out = { state: shared ? structuredClone(shared) : state, notes: [], keepReport: [], messages: [], violations: [] };
-    for (const s of steps) {
-      out.messages.push(s.result);
-      out.notes.push(...s.notes);
-      out.keepReport.push(...s.keep);
-      out.violations.push(...s.violations);
-    }
-    return out;
-  }
-  snapshotOf(key, steps, state) {
-    const snap = { key, state: structuredClone(state), notes: [], keep: [], violations: [] };
-    steps.forEach((s, i) => {
-      for (const x of s.notes)
-        if (dependentNote(x))
-          snap.notes.push([i, x]);
-      for (const x of s.keep)
-        if (dependentKeep(x))
-          snap.keep.push([i, x]);
-      for (const x of s.violations)
-        snap.violations.push([i, x]);
-    });
-    return snap;
-  }
-  remember(key, step, withState, tail) {
-    const entry = { ...step, state: withState && step.state ? structuredClone(step.state) : null };
-    this.cache.set(key, entry);
-    if (tail) {
-      this.tails.push(key);
-      while (this.tails.length > 64) {
-        const old = this.tails.shift();
-        const e = old === undefined ? undefined : this.cache.get(old);
-        if (e && old !== key)
-          e.state = null;
-      }
-    }
-    while (this.cache.size > this.capacity) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest === undefined)
-        break;
-      this.cache.delete(oldest);
-    }
-  }
-  step(input, m, f, state) {
-    const notes = [...f.notes];
-    const keep = [...f.keep];
-    const violations = [];
-    const types = this.types;
-    const ctx = () => {
-      const world = input.worlds(state.revision);
-      if (!world)
-        throw new FoldError(`unknown revision ${state.revision}`);
-      return types.context(world, state);
-    };
-    const env = { worlds: input.worlds, types };
-    const marker = (mk) => {
-      if (mk.kind === "migrate" && !input.worlds(mk.to))
-        throw new FoldError(`unknown revision ${mk.to}`);
-      for (const text of applyMarker(state, mk, env))
-        notes.push({ kind: "note", messageId: m.id, ref: { marker: mk.seq }, text });
-    };
-    const { rec, recPath, liveMarkers, livePost } = f;
-    const parent = f.result.parentPath;
-    if (m.isUser || f.result.fold === "paused") {} else if (!rec) {
-      for (const mk of liveMarkers)
-        marker(mk);
-    } else {
-      const view = f.result.fold === "view";
-      const folds = recPath === null ? null : [rec.events, rec.markersApplied, rec.post, rec.undone, rec.keep ?? null, rec.path, m.ledger?.markers ?? []];
-      const settledKey = folds === null ? "" : this.digest(this.digests.folds, JSON.stringify(folds), () => hashJson(folds));
-      const before = recPath !== null && !view && !this.settled.has(settledKey) ? hashJson(state) : null;
-      let converged = false;
-      if (view) {
-        const asOnPath = liveMarkers.every((mk) => mk.at === null || mk.at === recPath) && livePost.every((p) => p.at === recPath);
-        const original = this.settled.get(settledKey);
-        converged = asOnPath && original !== undefined && original === hashJson(state);
-      }
-      const converted = rec.keep?.[parent]?.convert ?? [];
-      const record = rec;
-      const event = (ev, ref) => {
-        if (record.undone.some((u) => refEq(u, ref)))
-          return;
-        if (converged) {
-          applyEvent(types, ev, state, ctx());
-          return;
-        }
-        const failure = validateEvent(types, ev, ctx());
-        if (failure && !view) {
-          violations.push(`${m.id}: on-path ${ev.type} failed re-validation (${failure.reason})`);
-          return;
-        }
-        if (failure) {
-          if (converted.some((c) => refEq(c, ref))) {
-            keep.push({ messageId: m.id, parentPath: parent, ref, status: "converted", text: failure.reason });
-          } else {
-            notes.push({ kind: "dropped", messageId: m.id, ref, text: failure.reason });
-            keep.push({ messageId: m.id, parentPath: parent, ref, status: "dropped", text: failure.reason });
-            return;
-          }
-        }
-        applyEvent(types, ev, state, ctx());
-      };
-      const run = (list, refOf) => {
-        for (let i = 0;i < list.length; ) {
-          const group = list[i]?.group;
-          let end = i + 1;
-          if (group !== undefined)
-            while (end < list.length && list[end]?.group === group)
-              end++;
-          const unit = [];
-          for (let k = i;k < end; k++) {
-            const ev = list[k];
-            const ref = refOf(k);
-            if (ev && !record.undone.some((u) => refEq(u, ref)))
-              unit.push({ ev, ref });
-          }
-          i = end;
-          if (unit.length < 2 || !view || converged) {
-            for (const u of unit)
-              event(u.ev, u.ref);
-            continue;
-          }
-          const world = input.worlds(state.revision);
-          if (!world)
-            throw new FoldError(`unknown revision ${state.revision}`);
-          const scratch = structuredClone(state);
-          const failure = unit.map((u) => u.ev).reduce((found, ev) => {
-            if (found)
-              return found;
-            const c = types.context(world, scratch);
-            const rejection = validateEvent(types, ev, c);
-            if (!rejection)
-              applyEvent(types, ev, scratch, c);
-            return rejection;
-          }, null);
-          if (failure === null) {
-            for (const u of unit)
-              applyEvent(types, u.ev, state, ctx());
-          } else if (unit.some((u) => converted.some((c) => refEq(c, u.ref)))) {
-            for (const u of unit) {
-              const own = validateEvent(types, u.ev, ctx());
-              if (own)
-                keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "converted", text: own.reason });
-              applyEvent(types, u.ev, state, ctx());
-            }
-          } else {
-            for (const u of unit) {
-              notes.push({ kind: "dropped", messageId: m.id, ref: u.ref, text: failure.reason });
-              keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "dropped", text: failure.reason });
-            }
-          }
-        }
-      };
-      for (const mk of liveMarkers)
-        if (mk.seq <= record.markersApplied)
-          marker(mk);
-      run(record.events, (index) => ({ in: "events", index }));
-      const later = [
-        ...liveMarkers.filter((mk) => mk.seq > record.markersApplied).map((mk) => ({ seq: mk.seq, marker: mk })),
-        ...livePost.map((p) => ({ seq: p.seq, post: p }))
-      ].sort((a, b) => a.seq - b.seq);
-      for (const item of later) {
-        if ("marker" in item)
-          marker(item.marker);
-        else
-          run(item.post.events, (index) => ({ in: "post", seq: item.post.seq, index }));
-      }
-      if (before !== null && violations.length === 0)
-        this.digest(this.settled, settledKey, () => before);
-    }
-    return { state, result: f.result, notes, keep, violations, paused: f.paused };
-  }
-  frame(input, m, parent, paused, pausesHere) {
-    const notes = [];
-    const keep = [];
-    if (m.isUser) {
-      const path = stepPath(parent, true, contentId(activeText(m)).hash, "", "");
-      return { result: { id: m.id, fold: "user", parentPath: parent, path }, notes, keep, rec: null, recPath: null, liveMarkers: [], livePost: [], paused: paused || pausesHere };
-    }
-    const rec = activeRecord(m, input.tombstones);
-    const stored = m.ledger?.swipes[String(m.swipeId)];
-    const tombstoned = stored !== undefined && isTombstoned(input.tombstones, m.id, stored);
-    if (tombstoned)
-      notes.push({ kind: "tombstoned", messageId: m.id, ref: null, text: "discarded" });
-    const recPath = turnPath(rec);
-    const markers = [...m.ledger?.markers ?? []].sort((a, b) => a.seq - b.seq);
-    const liveMarkers = markers.filter((mk) => isLive(mk.at, parent, recPath));
-    for (const mk of markers) {
-      if (isLive(mk.at, parent, recPath))
-        continue;
-      notes.push({ kind: "inert", messageId: m.id, ref: { marker: mk.seq }, text: "made on another branch" });
-      keep.push({ messageId: m.id, parentPath: parent, ref: { marker: mk.seq }, status: "inert", text: "made on another branch" });
-    }
-    const livePost = rec ? rec.post.filter((p) => isLive(p.at, parent, recPath)).sort((a, b) => a.seq - b.seq) : [];
-    if (rec) {
-      for (const p of rec.post) {
-        if (isLive(p.at, parent, recPath))
-          continue;
-        notes.push({ kind: "inert", messageId: m.id, ref: { in: "post", seq: p.seq, index: 0 }, text: "made on another branch" });
-        keep.push({ messageId: m.id, parentPath: parent, ref: { in: "post", seq: p.seq, index: 0 }, status: "inert", text: "made on another branch" });
-      }
-      for (const d of rec.dropped ?? [])
-        notes.push({ kind: "not_carried", messageId: m.id, ref: { in: "post", seq: d.seq, index: 0 }, text: d.reason });
-    }
-    const view = recPath !== null && (recPath !== parent || rec?.readElsewhere === true);
-    const fold = paused ? "paused" : !rec ? tombstoned ? "tombstoned" : "plain" : recPath === null ? "plain" : view ? "view" : "on_path";
-    const content = rec ? rec.swipeHash.hash : contentId(activeText(m)).hash;
-    const path = stepPath(parent, false, content, recordHash(rec, livePost, parent), markersHash(liveMarkers));
-    return { result: { id: m.id, fold, parentPath: parent, path }, notes, keep, rec, recPath, liveMarkers, livePost, paused };
-  }
-}
-
 // src/engine/lore.ts
 var MIN_TERM = 3;
 var MIN_WORDS = 4;
@@ -48299,21 +49594,22 @@ function wordsOf2(text) {
   return plain(text).trim().split(" ").filter((w) => w.length >= MIN_TERM && !hasOwn(STOP_WORDS, w)).map((w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
 }
 var listOf = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state)) {
+function loreReadable(reg, world, state, entry, purpose, effects = false, open = loreGateReader(reg, world, state), as) {
   if (purpose === "gm")
     return true;
   const source = loreSourceOf(entry.source);
   if (source.kind === "ai" && source.status === "pending")
     return false;
   if (loreIsSecret(entry) && !open(entry))
-    return !effects && !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose);
+    return !effects && (as !== undefined ? listOf(entry.links).includes(as) : !PROSE_STEPS.includes(purpose) && listOf(entry.audience).includes(purpose));
   const v = entry.visibility;
   if (v === undefined || v === "public")
     return true;
   if (v !== "known_by")
     return false;
+  const reader = as ?? world.pov;
   const links = listOf(entry.links);
-  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, world.pov, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, world.pov, id));
+  return links.length > 0 && links.every((id) => hasOwn(state.entities, id) ? playerKnows(reg, world, state, reader, id) : hasOwn(world.places, id) && canSeePlace(reg, world, state, reader, id));
 }
 function readableLore(reg, world, state, purpose, effects = false) {
   const open = loreGateReader(reg, world, state);
@@ -48409,7 +49705,7 @@ function loreSearch(r, q) {
   const words = [...new Set(wordsOf2(q.query ?? ""))];
   const ranked = [];
   for (const [id, entry] of Object.entries(world.lore)) {
-    if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open))
+    if (!loreReadable(reg, world, state, entry, q.purpose, q.effects === true, open, q.as))
       continue;
     const terms = new Set(tableTerms.get(id) ?? []);
     for (const name of [entry.title, ...listOf(entry.aliases), ...listOf(entry.keys)]) {
@@ -48488,7 +49784,7 @@ function loreList(r, topic, purpose, effects = false) {
 }
 
 // src/backend/preset-binding.ts
-var GUIDANCE_TARGETS = ["interpret", "extract", "brief", "outline", "choices", "npc.choose", "judge", "contradiction", "puzzle.answer", "narrator"];
+var GUIDANCE_TARGETS = ["interpret", "extract", "brief", "outline", "choices", "npc.choose", "judge", "contradiction", "puzzle.answer", "mind", "memory", "skip", "consolidate", "narrator"];
 var GUIDANCE_PREFIX = "RPEngine \xB7 ";
 var GUIDANCE_CATEGORY = "RPEngine";
 var GUIDANCE_MAX_CHARS = 1500;
@@ -48559,6 +49855,10 @@ var STARTER = {
   judge: "It rates how well the player's described approach suits the action. Say how generous to be, and what a good plan looks like in this preset's genre.",
   contradiction: "It checks the reply against the engine's facts. Say what this preset's narrator may add without it counting (weather, small talk, inner thoughts).",
   "puzzle.answer": "It judges whether a typed answer matches a puzzle's. Say how loose to be about wording and spelling.",
+  mind: "It thinks as one character at a time, from only what that character knows, and gives the narrator their mind. Say how this preset's characters think: how candid, how scheming, how far ahead they plan.",
+  memory: "It writes down, as each character, what they will remember of a reply. Say what this preset's characters hold on to: slights, kindnesses, money, promises.",
+  skip: "It finds the moments worth stopping at inside a time skip. Say how often this preset wants a skip interrupted.",
+  consolidate: "It folds a character's older notes into their summary. Say what a summary should keep in this preset's story.",
   narrator: "In world chats the engine gives this to the narrator with its sections, before the character, or where an enabled block holds {{outlet::lre_narrator}}. Write rules for using the sections: trust the Outcome and narrate the result it states, invent no prices or events."
 };
 function starterText(target) {
@@ -48645,11 +49945,14 @@ var DEFAULT_SECTIONS = {
   quest: { id: "quest", label: "Quest", rank: 7, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 3, direction: "from_end" } },
   outline: { id: "outline", label: "Outline", rank: 8, template: "{{lines}}", position: { type: "chat_depth", role: "system", depth: 0, direction: "from_end" } },
   stance: { id: "stance", label: "Stance", rank: 9, template: `The narrator knows only what the player character knows. These lines say how the people here behave; never state what a cue only hints at.
-{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } }
+{{lines}}`, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } },
+  [MINDS_SLOT]: { id: MINDS_SLOT, label: "Minds", rank: 10, template: MINDS_SECTION_TEMPLATE, position: { type: "chat_depth", role: "system", depth: 1, direction: "from_end" } }
 };
 function sectionsOf(world) {
   const own = Object.values(world.sections);
-  return (own.length > 0 ? own : Object.values(DEFAULT_SECTIONS)).sort((a, b) => a.rank - b.rank);
+  const minds = DEFAULT_SECTIONS[MINDS_SLOT];
+  const list = own.length > 0 ? own.some((s) => s.id === MINDS_SLOT) || !minds ? own : [...own, minds] : Object.values(DEFAULT_SECTIONS);
+  return list.sort((a, b) => a.rank - b.rank);
 }
 function placementOf(section) {
   const p = section.position;
@@ -48778,261 +50081,207 @@ function sectionTokens(text) {
   return tokensOf(text) + 2 + 3 * (text.match(/\n/g)?.length ?? 0) + (text.match(/\d+/g)?.length ?? 0);
 }
 
-// src/backend/chat-prefs.ts
-class ChatPrefs {
-  host;
-  prefs = new Map;
-  constructor(host) {
-    this.host = host;
-  }
-  path(chatId) {
-    return `${runDir(chatId)}prefs.json`;
-  }
-  async load(chatId, userId) {
-    const key = `${userId}\x00${chatId}`;
-    const known = this.prefs.get(key);
-    if (known)
-      return known;
-    const raw = await readStoredJson(this.host, this.path(chatId), userId, "Chat preferences", isRecord);
-    const display = isRecord(raw) ? raw.mapDisplay : undefined;
-    const prefs = { v: 1, ...display === "knowledge" || display === "fog" ? { mapDisplay: display } : {} };
-    this.prefs.set(key, prefs);
-    if (this.prefs.size > 256)
-      this.prefs.delete(this.prefs.keys().next().value ?? "");
-    return prefs;
-  }
-  async mapDisplay(chatId, userId) {
-    return (await this.load(chatId, userId)).mapDisplay ?? null;
-  }
-  async setMapDisplay(chatId, userId, display) {
-    const prefs = await this.load(chatId, userId);
-    if (prefs.mapDisplay === display)
-      return;
-    const next = { ...prefs, mapDisplay: display };
-    this.prefs.set(`${userId}\x00${chatId}`, next);
-    const path = this.path(chatId);
-    await this.host.storage.write(`${path}.tmp`, JSON.stringify(next), userId);
-    await this.host.storage.move(`${path}.tmp`, path, userId);
-  }
+// src/backend/minds-context.ts
+var SKIPPED_FIELDS = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true };
+var CARD_PART = 900;
+var RECALL_SIDE = 1600;
+var CONTEXT_MAX = 16000;
+var STOP2 = Object.fromEntries("the and for with that this from into have has had was were are you your they them their there here what when where which who how why just very some more most other then than about would could should will been being does did not but all any can its it's i'm he's she's".split(" ").map((w) => [w, true]));
+function wordsOf3(text) {
+  return (text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []).filter((w) => w.length >= 4 && !STOP2[w]);
 }
-
-// src/backend/chips.ts
-function isChipInput(raw) {
-  if (!isRecord(raw) || typeof raw.label !== "string")
-    return false;
-  if (raw.type === "money")
-    return raw.value === undefined || Number.isSafeInteger(raw.value);
-  return raw.type === "choice" && Array.isArray(raw.options) && raw.options.every((o) => isRecord(o) && typeof o.value === "string" && typeof o.label === "string");
+function clip(text, max) {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : `${t.slice(0, max).replace(/\s+\S*$/, "")}\u2026`;
 }
-function isStoredChip(raw) {
-  if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.kind !== "string" || typeof raw.messageId !== "string" || typeof raw.label !== "string" || !isRecord(raw.payload))
-    return false;
-  if (raw.swipeId !== undefined && !Number.isInteger(raw.swipeId))
-    return false;
-  if (raw.detail !== undefined && typeof raw.detail !== "string")
-    return false;
-  if (raw.expires !== "next_send" && raw.expires !== "never")
-    return false;
-  return Array.isArray(raw.actions) && raw.actions.every((a) => isRecord(a) && typeof a.id === "string" && typeof a.label === "string" && (a.style === undefined || a.style === "primary" || a.style === "danger") && (a.input === undefined || isChipInput(a.input)));
+function nameOf5(scope, id) {
+  return own(scope.state.entities, id)?.name ?? own(scope.world.places, id)?.name ?? id;
 }
-
-class ChipStore {
-  host;
-  chips = new Map;
-  constructor(host) {
-    this.host = host;
-  }
-  path(chatId) {
-    return `${runDir(chatId)}chips.json`;
-  }
-  key(chatId, userId) {
-    return `${userId}\x00${chatId}`;
-  }
-  async list(chatId, userId) {
-    const known = this.chips.get(this.key(chatId, userId));
-    if (known)
-      return known;
-    const raw = await readStoredJson(this.host, this.path(chatId), userId, "chips", Array.isArray);
-    const list = Array.isArray(raw) ? raw.filter(isStoredChip) : [];
-    this.chips.set(this.key(chatId, userId), list);
-    if (this.chips.size > 256)
-      this.chips.delete(this.chips.keys().next().value ?? "");
-    return list;
-  }
-  async save(chatId, userId) {
-    const path = this.path(chatId);
-    await this.host.storage.write(`${path}.tmp`, JSON.stringify(this.chips.get(this.key(chatId, userId)) ?? []), userId);
-    await this.host.storage.move(`${path}.tmp`, path, userId);
-  }
-  async add(chatId, userId, chips) {
-    if (chips.length === 0)
-      return;
-    const list = await this.list(chatId, userId);
-    for (const chip of chips) {
-      const at = list.findIndex((c) => c.id === chip.id);
-      if (at >= 0)
-        list[at] = chip;
-      else
-        list.push(chip);
-    }
-    await this.save(chatId, userId);
-  }
-  async take(chatId, userId, id) {
-    const list = await this.list(chatId, userId);
-    const index = list.findIndex((c) => c.id === id);
-    if (index < 0)
-      return null;
-    const [chip] = list.splice(index, 1);
-    await this.save(chatId, userId);
-    return chip ?? null;
-  }
-  async removeWhere(chatId, userId, drop) {
-    const list = await this.list(chatId, userId);
-    const kept = list.filter((c) => !drop(c));
-    if (kept.length === list.length)
-      return;
-    this.chips.set(this.key(chatId, userId), kept);
-    await this.save(chatId, userId);
-  }
-  async lapse(chatId, userId) {
-    const list = await this.list(chatId, userId);
-    const gone = list.filter((c) => c.expires === "next_send");
-    if (gone.length === 0)
-      return [];
-    this.chips.set(this.key(chatId, userId), list.filter((c) => c.expires !== "next_send"));
-    await this.save(chatId, userId);
-    return gone;
-  }
-  async prune(chatId, userId, alive) {
-    const list = await this.list(chatId, userId);
-    const kept = list.filter((c) => alive.has(c.messageId));
-    if (kept.length === list.length)
-      return;
-    this.chips.set(this.key(chatId, userId), kept);
-    await this.save(chatId, userId);
-  }
-  async shiftSwipes(chatId, userId, messageId, deleted) {
-    const list = await this.list(chatId, userId);
-    const dropped = new Set;
-    let changed = false;
-    for (let i = list.length - 1;i >= 0; i--) {
-      const c = list[i];
-      if (!c || c.messageId !== messageId || c.swipeId === undefined || c.swipeId < deleted)
-        continue;
-      changed = true;
-      if (c.swipeId === deleted) {
-        dropped.add(c.id);
-        list.splice(i, 1);
-      } else
-        list[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
-    }
-    if (changed)
-      await this.save(chatId, userId);
-    return dropped;
-  }
+function povLabel(scope) {
+  const { state, world, who } = scope;
+  const pov = world.pov;
+  const known = knows(state, who, pov) || knows(state, pov, who) || !!own(state.entities, who)?.relations.some((r) => r.type === "regard" && r.to === pov) || !!own(state.entities, pov)?.relations.some((r) => r.type === "regard" && r.to === who);
+  return known ? nameOf5(scope, pov) : "a stranger";
 }
-function idAfterSwipeDelete(id, messageId, deleted) {
-  const head = `:${messageId}:`;
-  for (let at = id.indexOf(head);at >= 0; at = id.indexOf(head, at + 1)) {
-    const from = at + head.length;
-    const digits = /^\d+/.exec(id.slice(from))?.[0];
-    const end = from + (digits?.length ?? 0);
-    if (digits === undefined || end < id.length && id[end] !== ":")
-      continue;
-    const swipe = Number(digits);
-    if (swipe < deleted)
-      return id;
-    return swipe === deleted ? null : `${id.slice(0, from)}${swipe - 1}${id.slice(end)}`;
-  }
-  return id;
-}
-
-// src/backend/push.ts
-function diff(from, to, path = [], out = []) {
-  if (isRecord(from) && isRecord(to) && !Array.isArray(from) && !Array.isArray(to)) {
-    for (const key of Object.keys(from))
-      if (!(key in to))
-        out.push({ op: "del", path: [...path, key] });
-    for (const [key, value] of Object.entries(to)) {
-      const before = from[key];
-      if (before === undefined)
-        out.push({ op: "set", path: [...path, key], value });
-      else
-        diff(before, value, [...path, key], out);
-    }
-    return out;
-  }
-  if (JSON.stringify(from) !== JSON.stringify(to))
-    out.push({ op: "set", path, value: to });
+function presentTurns(state, who) {
+  const out = [];
+  for (const p of readSlice(state).presence)
+    if (p.msg !== null && p.who.includes(who) && !out.includes(p.msg))
+      out.push(p.msg);
   return out;
 }
-function asJson(view) {
-  return JSON.parse(JSON.stringify(view));
+function recallFor(scope) {
+  const { memory, messages } = scope;
+  const index = new Map(messages.map((m, i) => [m.id, i]));
+  const turns = [];
+  for (const msg of presentTurns(scope.state, scope.who)) {
+    const i = index.get(msg);
+    const reply = i === undefined ? undefined : messages[i];
+    if (i === undefined || !reply || reply.isUser)
+      continue;
+    const user = messages.slice(0, i).findLast((m) => m.isUser);
+    const said = user ? clip(user.swipes[user.swipeId] ?? user.content, RECALL_SIDE) : "";
+    const wrote = clip(readableReply(reply.swipes[reply.swipeId] ?? reply.content, scope.hideJson), RECALL_SIDE);
+    if (wrote === "" && said === "")
+      continue;
+    turns.push({ msg, text: `${said !== "" ? `Player: ${said}
+` : ""}Story: ${wrote}` });
+  }
+  const recent = turns.slice(Math.max(0, turns.length - memory.recall.recent));
+  const rest = turns.slice(0, Math.max(0, turns.length - memory.recall.recent));
+  const wanted = new Set(wordsOf3(`${scope.moment.user} ${scope.moment.reply} ${scope.moment.reason}`));
+  const scored = rest.map((t, i) => ({ t, i, hits: wordsOf3(t.text).filter((w) => wanted.has(w)).length })).filter((x) => x.hits > 0).sort((a, b) => b.hits - a.hits || b.i - a.i).slice(0, memory.recall.relevant);
+  const chosen = [...scored.map((x) => x.t), ...recent].sort((a, b) => turns.indexOf(a) - turns.indexOf(b));
+  const out = [];
+  let left = memory.recall.tokens;
+  for (const t of [...chosen].reverse()) {
+    const cost = sectionTokens(t.text);
+    if (cost > left)
+      continue;
+    left -= cost;
+    out.unshift(t);
+  }
+  return out;
 }
+function occasion(scope, place) {
+  const { reg, world, state } = scope;
+  const cal = calendarOf(world);
+  const day = dateAt(cal, state.clock).dayIndex;
+  const holidays = holidaysOn(cal, day).map((h) => h.label);
+  const sky = place ? optionalQuery(reg.context(world, state), "weather.sky")?.(reg.context(world, state), place) : null;
+  return `It is ${formatClock(cal, state.clock)} (${dayPartAt(cal, state.clock).label.toLowerCase()})${holidays.length > 0 ? `, ${holidays.join(", ")}` : ""}${sky ? `; the weather: ${sky.replace(/_/g, " ")}` : ""}.`;
+}
+function sheetLines(scope) {
+  const { reg, world, state, who } = scope;
+  const e = own(state.entities, who);
+  if (!e)
+    return [];
+  const out = [];
+  for (const [field, value] of Object.entries(e.fields).sort(([a], [b]) => a.localeCompare(b))) {
+    if (SKIPPED_FIELDS[field] || value === null || typeof value === "object")
+      continue;
+    const label = fieldDef(reg, world, e.kind, field)?.label ?? field.replace(/_/g, " ");
+    const shown = typeof value === "string" && own(state.entities, value) ? nameOf5(scope, value) : typeof value === "string" && own(world.places, value) ? nameOf5(scope, value) : String(value).replace(/_/g, " ");
+    out.push(`- ${label}: ${shown}`);
+  }
+  return out;
+}
+function lifeLines(scope, c) {
+  const { reg, world, state, who } = scope;
+  const ctx = reg.context(world, state);
+  const out = [];
+  for (const line of optionalQuery(ctx, "economy.summary")?.(ctx, who).lines ?? [])
+    out.push(`- Money: ${line}`);
+  const cal = calendarOf(world);
+  try {
+    for (const b of dayPlan(ctx, who).blocks.filter((x) => x.end > state.clock).slice(0, 6))
+      out.push(`- Today ${formatHHMM(dateAt(cal, b.start).minuteOfDay)}\u2013${formatHHMM(dateAt(cal, b.end).minuteOfDay)}: ${b.label}${b.place ? ` (${nameOf5(scope, b.place)})` : ""}`);
+  } catch {}
+  for (const a of agendaFor(world, state, who)) {
+    const truth = own(own(world.tracks, a.track)?.stages ?? {}, a.stage)?.truth;
+    out.push(`- Your aim, ${a.label}: ${a.stageLabel}${truth ? ` (the truth of it: ${truth})` : ""}`);
+  }
+  for (const x of openCommitments(c).slice(0, scope.memory.commitments.show))
+    out.push(`- Commitment (${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf5(scope, id)).join(", ")}` : ""}): ${x.text}${x.due !== null ? `, due ${formatClock(cal, x.due)}` : ""}`);
+  for (const p of openPlans(c).slice(0, 8))
+    out.push(`- Plan (${p.kind}): ${p.what}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf5(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf5(scope, id)).join(", ")}` : ""}`);
+  return out;
+}
+function sceneLines(scope, place) {
+  const { reg, world, state, who } = scope;
+  if (place === null)
+    return ["You aren't anywhere in particular."];
+  const ctx = reg.context(world, state);
+  const words = optionalQuery(ctx, "relationships.words");
+  const here = Object.keys(state.entities).sort().filter((id) => id !== who && placeOfEntity(state, id) === place && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && canSeeEntity(reg, world, state, who, id));
+  const out = [`You are at ${nameOf5(scope, place)}.`];
+  if (here.length === 0)
+    out.push("No one else is here.");
+  for (const id of here) {
+    const label = id === world.pov ? povLabel(scope) : nameOf5(scope, id);
+    const regard = words?.(ctx, who, id) ?? null;
+    out.push(`- ${label}${id === world.pov ? " (the player character)" : ""}${regard ? `: you feel ${regard}` : knows(state, who, id) ? ": you know them" : ""}`);
+  }
+  return out;
+}
+function memoryLines(scope, c) {
+  const { state, memory, world } = scope;
+  const cal = calendarOf(world);
+  const out = [];
+  const notes = c.notes.filter((n) => !faded(n, state.clock, memory)).sort((a, b) => salienceNow(b, state.clock, memory) - salienceNow(a, state.clock, memory) || b.at - a.at).slice(0, memory.notes.show);
+  for (const n of notes)
+    out.push(`- ${n.text}`);
+  const witness = c.witness.slice(Math.max(0, c.witness.length - memory.witness.show));
+  for (const w of witness)
+    out.push(`- ${formatClock(cal, w.at)}: ${w.how === "told" ? `told${w.by ? ` by ${nameOf5(scope, w.by)}` : ""}: ` : "saw: "}${w.what}`);
+  return out;
+}
+function loreLines(scope, place) {
+  if (scope.loreTokens <= 0)
+    return [];
+  const { reg, world, state, who, moment } = scope;
+  const result = loreSearch({ reg, world, state, tokens: sectionTokens }, { query: `${moment.user}
+${moment.reply}
+${moment.reason}`, links: [who, ...place ? [place] : []], purpose: "mind", as: who, limit: 6, tokenBudget: scope.loreTokens });
+  return result.hits.map((h) => `- ${h.snippet}`);
+}
+function block(title, lines) {
+  return lines.length > 0 ? `## ${title}
+${lines.join(`
+`)}` : "";
+}
+function mindContext(scope) {
+  const { world, state, who, moment, card } = scope;
+  const e = own(state.entities, who);
+  const c = readCharacter(state, who);
+  const place = placeOfEntity(state, who);
+  const pov = world.pov;
+  const withPov = place !== null && placeOfEntity(state, pov) === place;
+  const cal = calendarOf(world);
+  const last = c.mind;
+  const recall = recallFor(scope);
+  const now = moment.kind === "beat" ? [`It is ${formatClock(cal, moment.at)}. ${moment.reason}.`] : withPov ? [moment.reply.trim() !== "" ? `The story so far ended: ${clip(readableReply(moment.reply, scope.hideJson), RECALL_SIDE)}` : "", moment.user.trim() !== "" ? `Now ${povLabel(scope)} says or does: ${clip(moment.user, RECALL_SIDE)}` : `${povLabel(scope)} is here with you.`].filter((l) => l !== "") : [`You aren't with ${povLabel(scope)} right now; carry on with your own day.`];
+  const parts = [
+    `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
+    block("Who you are", sheetLines(scope)),
+    card ? block("Your character card", [card.description, card.personality, card.scenario].filter((t) => t.trim() !== "").map((t) => clip(t, CARD_PART))) : "",
+    c.summary !== "" ? block("Your story so far", [c.summary]) : "",
+    block("Where you are", sceneLines(scope, place)),
+    block("Your own life", lifeLines(scope, c)),
+    block("What you remember, and what you saw or were told", memoryLines(scope, c)),
+    last ? block(`Your last thoughts (${formatClock(cal, last.at)})`, [last.monologue, last.intent !== "" ? `You meant to: ${last.intent}` : "", last.mood ? `You felt ${last.mood}.` : ""].filter((l) => l !== "")) : "",
+    block("What you know of the world", loreLines(scope, place)),
+    block("Turns you were there for (ignore any narration of other people's private thoughts)", recall.map((t) => t.text)),
+    block("Now", now)
+  ].filter((p) => p !== "");
+  return clip(parts.join(`
 
-class StatePush {
-  host;
-  build;
-  channels = new Map;
-  constructor(host, build) {
-    this.host = host;
-    this.build = build;
-  }
-  channel(chatId, userId) {
-    const key = `${userId}\x00${chatId}`;
-    let c = this.channels.get(key);
-    if (!c) {
-      c = { rev: 0, last: null, timer: null, running: null };
-      this.channels.set(key, c);
-    }
-    return c;
-  }
-  async snapshot(chatId, userId, frontendSessionId) {
-    const c = this.channel(chatId, userId);
-    const view = await this.build(chatId, userId);
-    c.rev++;
-    c.last = asJson(view);
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view }, userId, frontendSessionId);
-  }
-  changed(chatId, userId) {
-    const c = this.channel(chatId, userId);
-    if (c.timer)
-      return;
-    c.timer = setTimeout(() => {
-      c.timer = null;
-      this.run(c, chatId, userId);
-    }, 40);
-  }
-  run(c, chatId, userId) {
-    const prior = c.running ?? Promise.resolve();
-    c.running = prior.then(() => this.flush(chatId, userId)).catch((error) => this.host.log("error", `[LumiRPEngine] push ${chatId}: ${error instanceof Error ? error.message : String(error)}`));
-  }
-  async settle() {
-    for (const [key, c] of this.channels) {
-      if (c.timer) {
-        clearTimeout(c.timer);
-        c.timer = null;
-        const [userId = "", chatId = ""] = key.split("\x00");
-        this.run(c, chatId, userId);
-      }
-      await c.running;
-    }
-  }
-  async flush(chatId, userId) {
-    const c = this.channel(chatId, userId);
-    if (c.last === null) {
-      await this.snapshot(chatId, userId);
-      return;
-    }
-    const next = asJson(await this.build(chatId, userId));
-    const ops = diff(c.last, next);
-    if (ops.length === 0)
-      return;
-    const base = c.rev;
-    c.rev++;
-    c.last = next;
-    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.delta", chatId, base, rev: c.rev, ops }, userId);
-  }
+`), CONTEXT_MAX);
+}
+function memoryContext(scope, turn) {
+  const { state, who, world } = scope;
+  const c = readCharacter(state, who);
+  const cal = calendarOf(world);
+  const commitments = openCommitments(c).map((x) => `- [${x.id}] ${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf5(scope, id)).join(", ")}` : ""}: ${x.text}`);
+  const plans = openPlans(c).map((p) => `- ${p.what} (${formatClock(cal, p.when.from)})`);
+  const parts = [
+    `You are ${nameOf5(scope, who)}. ${occasion(scope, placeOfEntity(state, who))}`,
+    c.summary !== "" ? block("Your story so far", [c.summary]) : "",
+    block("Your open commitments (by id)", commitments),
+    block("Your plans", plans),
+    block("What you remember", memoryLines(scope, c)),
+    block("The turn just written", [turn.user.trim() !== "" ? `Player: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== ""))
+  ].filter((p) => p !== "");
+  return clip(parts.join(`
+
+`), CONTEXT_MAX);
+}
+function consolidateContext(scope, notes) {
+  const c = readCharacter(scope.state, scope.who);
+  const cal = calendarOf(scope.world);
+  return [`You are ${nameOf5(scope, scope.who)}.`, block("Your summary", [c.summary !== "" ? c.summary : "(none yet)"]), block("Older notes to fold in", notes.map((n) => `- ${formatClock(cal, n.at)}: ${n.text}`))].filter((p) => p !== "").join(`
+
+`);
 }
 
 // src/backend/settings-store.ts
@@ -49079,7 +50328,11 @@ var MODEL_USE_PRESETS = {
       interpret: step(true, ["classifier"], HELPER, lore("prefetch+lookup", 400)),
       extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 400)),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 400)),
-      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 400))
+      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 400)),
+      mind: step(true, ["always"], HELPER, lore("prefetch", 400)),
+      memory: step(true, ["reply"], HELPER, lore("none", 0)),
+      skip: step(true, ["timelapse"], HELPER, lore("prefetch", 300)),
+      consolidate: step(true, ["reply"], HELPER, lore("none", 0))
     },
     budgets: { pre: { calls: 2, ms: 30000, lookup: { calls: 2, ms: 15000 } }, post: { calls: 2, ms: 45000, lookup: { calls: 1, ms: 20000 } } },
     tokens: { sections: 600 }
@@ -49092,7 +50345,11 @@ var MODEL_USE_PRESETS = {
       extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
       contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
       "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 600)),
-      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 600))
+      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
+      mind: step(true, ["always"], HELPER, lore("prefetch", 600)),
+      memory: step(true, ["reply"], HELPER, lore("none", 0)),
+      skip: step(true, ["timelapse"], HELPER, lore("prefetch", 400)),
+      consolidate: step(true, ["reply"], HELPER, lore("none", 0))
     },
     budgets: { pre: { calls: 8, ms: 60000, lookup: { calls: 3, ms: 30000 } }, post: { calls: 4, ms: 60000, lookup: { calls: 2, ms: 30000 } } },
     tokens: { sections: 1000 }
@@ -49116,7 +50373,8 @@ function defaultSettings() {
     overrideWorldAdjudication: false,
     extraction: {},
     swipeDefault: "rerun",
-    hideJsonBlocks: true
+    hideJsonBlocks: true,
+    minds: defaultMindsSettings()
   };
 }
 function mergePatch(target, patch) {
@@ -49138,12 +50396,14 @@ function normalize(raw) {
     return defaultSettings();
   const fill = defaultSettings();
   const preset = isRecord(raw.modelUse) ? raw.modelUse.preset : undefined;
-  if (preset === "lean" || preset === "full")
+  if (preset === "lean" || preset === "full") {
     fill.modelUse = { preset, ...structuredClone(MODEL_USE_PRESETS[preset]) };
+    fill.minds = defaultMindsSettings(preset);
+  }
   const merged = mergePatch(JSON.parse(JSON.stringify(fill)), JSON.parse(JSON.stringify(raw)));
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
-var STEP_PURPOSES = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"];
+var STEP_PURPOSES = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"];
 var MAX_PHASE_MS = 600000;
 var int = (v, lo, hi) => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined;
 var real = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined;
@@ -49285,7 +50545,8 @@ function conform(v, d) {
     overrideWorldAdjudication: typeof v.overrideWorldAdjudication === "boolean" ? v.overrideWorldAdjudication : d.overrideWorldAdjudication,
     extraction,
     swipeDefault: oneOf2(v.swipeDefault, ["rerun", "renarrate"]) ?? d.swipeDefault,
-    hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks
+    hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
+    minds: mindsSettingsOf(v.minds, d.minds)
   };
 }
 function expandPresets(settings, patch) {
@@ -49294,8 +50555,10 @@ function expandPresets(settings, patch) {
   if (realism === "story" || realism === "grounded" || realism === "simulation")
     out.realism = { preset: realism, ...structuredClone(REALISM_PRESETS2[realism]) };
   const modelUse = isRecord(patch.modelUse) ? patch.modelUse.preset : undefined;
-  if (modelUse === "lean" || modelUse === "standard" || modelUse === "full")
+  if (modelUse === "lean" || modelUse === "standard" || modelUse === "full") {
     out.modelUse = { preset: modelUse, ...structuredClone(MODEL_USE_PRESETS[modelUse]) };
+    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), memory: out.minds.memory, prompts: out.minds.prompts };
+  }
   return out;
 }
 function emptyStats() {
@@ -49451,66 +50714,57 @@ class SettingsStore {
   }
 }
 
-// src/backend/start-markers.ts
-var LEVELS2 = [0, 1, 2, 3, 4];
-function at(map, key) {
-  return isRecord(map) && hasOwn(map, key) ? map[key] : undefined;
-}
-function levelAt(map, key) {
-  const v = at(map, key);
-  return LEVELS2.find((l) => l === v);
-}
-function worldFirstTime(user, world) {
-  const w = world.time;
-  const sceneTicks = { ...user.sceneTicks };
-  const ticks = at(w, "sceneTicks");
-  for (const [type, minutes] of Object.entries(isRecord(ticks) ? ticks : {}))
-    if (safeKey(type) && typeof minutes === "number" && Number.isFinite(minutes))
-      sceneTicks[type] = minutes;
-  const interrupts = { ...user.interrupts };
-  for (const cls of INTERRUPT_CLASSES) {
-    const policy = at(at(w, "interrupts"), cls);
-    if (policy === "stop" || policy === "note" || policy === "ignore")
-      interrupts[cls] = policy;
+// src/engine/decide.ts
+class DecideError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "DecideError";
   }
-  const speedThrough = { ...user.speedThrough };
-  const speeds = at(w, "speedThrough");
-  for (const [activity, s] of Object.entries(isRecord(speeds) ? speeds : {})) {
-    if (safeKey(activity) && isRecord(s) && (s.mode === "offer" || s.mode === "auto") && typeof s.thresholdMinutes === "number" && Number.isFinite(s.thresholdMinutes))
-      speedThrough[activity] = { mode: s.mode, thresholdMinutes: s.thresholdMinutes };
-  }
-  const montage = at(w, "montage");
-  const cap = at(w, "unitCap");
-  const unitCap = isRecord(cap) && typeof cap.agentDays === "number" && Number.isFinite(cap.agentDays) && typeof cap.events === "number" && Number.isFinite(cap.events) ? { agentDays: cap.agentDays, events: cap.events } : user.unitCap;
-  return { ...user, sceneTicks, interrupts, speedThrough, montage: montage === "key" || montage === "day" || montage === "week" ? montage : user.montage, unitCap };
 }
-function startMarkersFrom(settings, world, revision) {
-  const mine = settings.overrideWorldDefaults;
-  const out = [{ kind: "migrate", to: revision }];
-  for (const domain of DOMAINS)
-    out.push({ kind: "resolve", domain, scope: { all: true }, to: (mine ? undefined : levelAt(world.realism.levels, domain)) ?? settings.realism.levels[domain] });
-  for (const band of BANDS) {
-    const authored = at(world.realism.tierCaps, band);
-    const caps = mine || !isRecord(authored) ? settings.realism.tierCaps[band] : authored;
-    for (const domain of DOMAINS) {
-      const to = levelAt(caps, domain) ?? (at(authored, domain) !== undefined ? 4 : undefined);
-      if (to !== undefined)
-        out.push({ kind: "resolve", domain, scope: { tier: band }, to });
+var hasOwn5 = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+function orderedKeys(p, keys) {
+  const ks = keys ? [...keys] : Object.keys(p).sort();
+  if (ks.length === 0)
+    throw new DecideError("No options to choose from");
+  if (new Set(ks).size !== ks.length)
+    throw new DecideError("Duplicate option keys");
+  return ks;
+}
+function weightsOf(p, ks) {
+  return ks.map((k) => {
+    const v = hasOwn5(p, k) ? p[k] : undefined;
+    if (v === undefined)
+      return 0;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+      throw new DecideError(`Probability for "${k}" must be a finite number \u2265 0, got ${String(v)}`);
     }
+    return v;
+  });
+}
+function normalized(p, keys) {
+  const ks = orderedKeys(p, keys);
+  const w = weightsOf(p, ks);
+  const top = Math.max(...w);
+  if (top === 0)
+    throw new DecideError("Probabilities have no mass (all zero)");
+  const scaled = w.map((x) => x / top);
+  const sum = scaled.reduce((a, b) => a + b, 0);
+  return { ks, probs: scaled.map((x) => x / sum) };
+}
+function sample2(p, rng, keys) {
+  const { ks, probs } = normalized(p, keys);
+  const u = rng.next();
+  let cum = 0;
+  let last = 0;
+  for (let i = 0;i < ks.length; i++) {
+    if (probs[i] === 0)
+      continue;
+    last = i;
+    cum += probs[i];
+    if (u < cum)
+      return ks[i];
   }
-  const t = mine ? settings.time : worldFirstTime(settings.time, world);
-  for (const [sceneType, minutes] of Object.entries(t.sceneTicks))
-    out.push({ kind: "time", control: "tick", scope: { sceneType }, to: minutes });
-  out.push({ kind: "time", control: "scale", scope: { all: true }, to: t.scale });
-  for (const cls of INTERRUPT_CLASSES)
-    out.push({ kind: "time", control: "interrupt", scope: { interrupt: cls }, to: t.interrupts[cls] });
-  for (const [activity, policy] of Object.entries(t.speedThrough))
-    out.push({ kind: "time", control: "speed_through", scope: { activity }, to: { mode: policy.mode, thresholdMinutes: policy.thresholdMinutes } });
-  out.push({ kind: "time", control: "montage", scope: { all: true }, to: t.montage });
-  out.push({ kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: t.unitCap.agentDays, events: t.unitCap.events } });
-  const authored = readAdjudication(world.ruleset?.adjudication);
-  out.push({ kind: "adjudicate", to: authored && !settings.overrideWorldAdjudication ? authored : settings.adjudication });
-  return out;
+  return ks[last];
 }
 
 // src/engine/steps.ts
@@ -49677,7 +50931,12 @@ ${options.guidance}` : "";
     const opening = () => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join(`
 
 `) }, { role: "user", content: user }];
-    const ask = (messages, tools, o) => this.quiet(purpose, { ...base, messages, json: !tools, ...tools && lore ? { tools: [...lore.tools] } : {} }, userId, signal, o);
+    const ask = async (messages, tools, o) => {
+      const r = await this.quiet(purpose, { ...base, messages, json: !tools, ...tools && lore ? { tools: [...lore.tools] } : {} }, userId, signal, o);
+      if (options.usage && !(r instanceof Error))
+        options.usage.tokens += r.tokens;
+      return r;
+    };
     let messages = opening();
     let reply = await ask(messages, offer === "tools", { retry: options.retryTransient === true, lookup: false });
     if (reply instanceof Error && offer === "tools" && lore && !signal.aborted && !transientFailure(reply)) {
@@ -50250,504 +51509,6 @@ class ToolSupport {
   }
 }
 
-// src/backend/plan-notes.ts
-var PLAN_NOTES_CAP = 128;
-function lines(v) {
-  return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
-}
-
-class PlanNotes {
-  host;
-  notes = new Map;
-  constructor(host) {
-    this.host = host;
-  }
-  path(chatId) {
-    return `${runDir(chatId)}plans.json`;
-  }
-  async load(chatId, userId) {
-    const key = `${userId}\x00${chatId}`;
-    const known = this.notes.get(key);
-    if (known)
-      return known;
-    const raw = await readStoredJson(this.host, this.path(chatId), userId, "plan lines", isRecord);
-    const map = new Map;
-    if (isRecord(raw)) {
-      for (const seed of Object.keys(raw)) {
-        const v = hasOwn(raw, seed) ? raw[seed] : undefined;
-        if (safeKey(seed) && isRecord(v))
-          map.set(seed, { outcome: lines(v.outcome), montage: lines(v.montage), outline: lines(v.outline) });
-      }
-    }
-    this.notes.set(key, map);
-    if (this.notes.size > 256)
-      this.notes.delete(this.notes.keys().next().value ?? "");
-    return map;
-  }
-  async get(chatId, userId, seed) {
-    const found = (await this.load(chatId, userId)).get(seed);
-    return found ? { outcome: [...found.outcome], montage: [...found.montage], outline: [...found.outline] } : null;
-  }
-  async put(chatId, userId, seed, value) {
-    if (!safeKey(seed))
-      return;
-    const map = await this.load(chatId, userId);
-    map.delete(seed);
-    map.set(seed, value);
-    while (map.size > PLAN_NOTES_CAP)
-      map.delete(map.keys().next().value ?? "");
-    const path = this.path(chatId);
-    await this.host.storage.write(`${path}.tmp`, JSON.stringify(Object.fromEntries(map)), userId);
-    await this.host.storage.move(`${path}.tmp`, path, userId);
-  }
-}
-
-// src/backend/outcome-notes.ts
-function isOutcomeNote(raw) {
-  return isRecord(raw) && typeof raw.id === "string" && typeof raw.messageId === "string" && typeof raw.text === "string" && (raw.toldTo === undefined || typeof raw.toldTo === "string");
-}
-
-class OutcomeNotes {
-  host;
-  notes = new Map;
-  constructor(host) {
-    this.host = host;
-  }
-  path(chatId) {
-    return `${runDir(chatId)}outcome-notes.json`;
-  }
-  async list(chatId, userId) {
-    const key = `${userId}\x00${chatId}`;
-    let known = this.notes.get(key);
-    if (!known) {
-      const raw = await readStoredJson(this.host, this.path(chatId), userId, "Outcome notes", Array.isArray);
-      known = this.notes.get(key) ?? (Array.isArray(raw) ? raw.filter(isOutcomeNote).map((n) => ({ id: n.id, messageId: n.messageId, text: n.text, ...n.toldTo !== undefined ? { toldTo: n.toldTo } : {} })) : []);
-      this.notes.set(key, known);
-      if (this.notes.size > 256)
-        this.notes.delete(this.notes.keys().next().value ?? "");
-    }
-    return known.map((n) => ({ ...n }));
-  }
-  async save(chatId, userId, notes) {
-    const key = `${userId}\x00${chatId}`;
-    const before = this.notes.get(key);
-    if (before && JSON.stringify(before) === JSON.stringify(notes))
-      return;
-    this.notes.delete(key);
-    this.notes.set(key, notes.map((n) => ({ ...n })));
-    if (this.notes.size > 256)
-      this.notes.delete(this.notes.keys().next().value ?? "");
-    const path = this.path(chatId);
-    await this.host.storage.write(`${path}.tmp`, JSON.stringify(notes), userId);
-    await this.host.storage.move(`${path}.tmp`, path, userId);
-  }
-}
-
-// src/backend/inspector-log.ts
-var INSPECTOR_RUNS = 10;
-var FORMAT = 2;
-var ACTIVATIONS = { confirmed: true, unconfirmed: true };
-var DELIVERIES = { verified: true, unverified: true, unchecked: true };
-function strings(v) {
-  return Array.isArray(v) && v.every((s) => typeof s === "string");
-}
-function isInspectorRecord(raw) {
-  if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.at !== "number" || typeof raw.activation !== "string" || !hasOwn(ACTIVATIONS, raw.activation))
-    return false;
-  if (!isRecord(raw.budget) || typeof raw.budget.sections !== "number" || typeof raw.budget.used !== "number" || !strings(raw.forced))
-    return false;
-  if (raw.warnings !== undefined && !strings(raw.warnings))
-    return false;
-  return Array.isArray(raw.sections) && raw.sections.every((s) => isRecord(s) && typeof s.slot === "string" && typeof s.label === "string" && typeof s.tokens === "number" && typeof s.clipped === "boolean" && typeof s.delivery === "string" && hasOwn(DELIVERIES, s.delivery));
-}
-var TRANSPORTS = ["none", "tools", "need"];
-var QUERY_KINDS = ["prefetch", "search", "get", "list"];
-function loreTracesOf(raw, legacy) {
-  if (!Array.isArray(raw))
-    return;
-  const out = [];
-  for (const t of raw) {
-    if (!isRecord(t) || !Array.isArray(t.queries) || !Array.isArray(t.entries) || typeof t.lookups !== "number" || !strings(t.notes))
-      continue;
-    const step = LORE_AUDIENCE.find((p) => p === t.step);
-    const policy = LORE_POLICIES.find((p) => p === t.policy);
-    const transport = TRANSPORTS.find((x) => x === t.transport);
-    if (!step || !policy || !transport || t.phase !== "pre" && t.phase !== "post")
-      continue;
-    if (t.entries.some((e) => isRecord(e) && e.secret === true))
-      continue;
-    const privateInputs = step === "npc.choose";
-    const queries = t.queries.flatMap((q) => {
-      const kind = isRecord(q) ? QUERY_KINDS.find((k) => k === q.kind) : undefined;
-      if (!kind || !isRecord(q) || typeof q.text !== "string")
-        return [];
-      if (privateInputs)
-        return [{ kind, text: legacy || kind !== "prefetch" ? "" : q.text }];
-      return typeof q.matched === "number" ? [{ kind, text: legacy ? "" : q.text, matched: q.matched }] : [];
-    });
-    const entries = privateInputs ? [] : t.entries.flatMap((e) => isRecord(e) && typeof e.title === "string" && typeof e.tokens === "number" && typeof e.cut === "boolean" ? [{ title: e.title, tokens: e.tokens, cut: e.cut }] : []);
-    out.push({ step, phase: t.phase, policy, transport, queries, entries, ...privateInputs ? { private: true } : {}, lookups: t.lookups, notes: [...t.notes] });
-  }
-  return out;
-}
-function deliveryOf(raw) {
-  const out = {};
-  if (!isRecord(raw))
-    return out;
-  for (const slot of Object.keys(raw)) {
-    const v = raw[slot];
-    if (v === "verified" || v === "unverified")
-      out[slot] = v;
-  }
-  return out;
-}
-
-class InspectorLog {
-  host;
-  logs = new Map;
-  writes = new Map;
-  constructor(host) {
-    this.host = host;
-  }
-  path(chatId) {
-    return `${runDir(chatId)}inspector.json`;
-  }
-  async load(chatId, userId) {
-    const known = this.logs.get(chatId);
-    if (known?.userId === userId)
-      return known;
-    await this.writes.get(chatId);
-    const raw = await readStoredJson(this.host, this.path(chatId), userId, "inspector history", (r) => isRecord(r) && (r.v === 1 || r.v === FORMAT) && Array.isArray(r.records));
-    const raced = this.logs.get(chatId);
-    if (raced?.userId === userId)
-      return raced;
-    const records = isRecord(raw) && Array.isArray(raw.records) ? raw.records.filter(isInspectorRecord).slice(-INSPECTOR_RUNS) : [];
-    const legacy = isRecord(raw) && raw.v !== FORMAT;
-    const log = {
-      userId,
-      records: records.map(({ lore, ...r }) => {
-        const traces = loreTracesOf(lore, legacy);
-        return traces ? { ...r, lore: traces } : r;
-      }),
-      delivery: isRecord(raw) ? deliveryOf(raw.delivery) : {}
-    };
-    this.logs.delete(chatId);
-    this.logs.set(chatId, log);
-    if (this.logs.size > 256)
-      this.logs.delete(this.logs.keys().next().value ?? "");
-    return log;
-  }
-  records(chatId) {
-    return this.logs.get(chatId)?.records;
-  }
-  async add(chatId, userId, record) {
-    const log = await this.load(chatId, userId);
-    log.records.push(record);
-    if (log.records.length > INSPECTOR_RUNS)
-      log.records.splice(0, log.records.length - INSPECTOR_RUNS);
-    this.save(chatId);
-  }
-  save(chatId) {
-    const log = this.logs.get(chatId);
-    if (!log)
-      return;
-    const path = this.path(chatId);
-    const write = (this.writes.get(chatId) ?? Promise.resolve()).then(async () => {
-      await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: FORMAT, records: log.records, delivery: log.delivery }), log.userId);
-      await this.host.storage.move(`${path}.tmp`, path, log.userId);
-    }).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the inspector history wasn't saved (${error instanceof Error ? error.message : String(error)})`, log.userId));
-    this.writes.set(chatId, write);
-    write.finally(() => {
-      if (this.writes.get(chatId) === write)
-        this.writes.delete(chatId);
-    });
-  }
-  async settle() {
-    while (this.writes.size > 0)
-      await Promise.all([...this.writes.values()]);
-  }
-}
-
-// src/backend/preset-lint.ts
-var MIN_REASONING_MAX_TOKENS = 1500;
-var JSON_ASK = /\b(reply|replies|response|responses|respond|answer|output|end|append|include|finish)\b[^.\n]{0,80}\bjson\b/gi;
-var JSON_FENCE = /<json>|```json/i;
-var NEGATED2 = /\b(no|not|never|don't|dont|do not|avoid|without)\b/i;
-var REASONING_MODEL = /deepseek-(v4|r1|reasoner)|\br1\b|reason|think|\bo[134](-|$)|gpt-5|qwq|gemini-(2\.5|3)|claude-(opus|sonnet)-4|grok-[34]/i;
-function isReasoningModel(model) {
-  return REASONING_MODEL.test(model);
-}
-function jsonLedgerBlocks(blocks) {
-  return blocks.filter((b) => JSON_FENCE.test(b.content) || [...b.content.matchAll(JSON_ASK)].some((m) => !NEGATED2.test(b.content.slice(Math.max(0, (m.index ?? 0) - 24), (m.index ?? 0) + m[0].length))));
-}
-function presetCaveats(run, presetName) {
-  const preset = presetName ? `Your active preset \u201C${presetName}\u201D` : "Your active preset";
-  const out = [];
-  for (const b of jsonLedgerBlocks(run.blocks)) {
-    out.push({ code: "preset_json_ledger", message: `${preset} has an enabled block \u201C${b.name}\u201D that asks the narrator for JSON; replies will carry it. Turn it off in the preset if you don't want it.` });
-  }
-  if (run.maxTokens !== null && run.maxTokens < MIN_REASONING_MAX_TOKENS && isReasoningModel(run.model)) {
-    out.push({ code: "preset_low_max_tokens", message: `${preset} limits replies to ${run.maxTokens} tokens with a reasoning model (${run.model}); its reasoning can use them all and leave the reply empty. Raise max tokens to at least ${MIN_REASONING_MAX_TOKENS}.` });
-  }
-  return out;
-}
-
-// src/backend/turn-model.ts
-var NAMED = ["from", "to", "payer", "who", "entity"];
-function applyProposals(registry, w, proposals, seed, runSeed) {
-  const out = [];
-  proposals.forEach((proposal, i) => {
-    const type = typeof proposal.type === "string" ? proposal.type : "";
-    const channel = registry.proposals.get(type);
-    if (!channel) {
-      out.push({ proposal, events: [], materialized: [], rejection: { code: "unknown_channel", reason: `no channel for ${type}` } });
-      return;
-    }
-    const mark = w.mark();
-    const named = NAMED.map((k) => proposal[k]).filter((id) => typeof id === "string" && hasOwn(w.state.entities, id));
-    const materialized = [...new Set(named)].flatMap((id) => materializeAll(registry, w, id, runSeed));
-    const rejection = channel.validate(proposal, w.ctx);
-    if (rejection) {
-      w.restore(mark);
-      out.push(rejection.unseen ? { proposal, events: [], materialized: [], rejection: null, dropped: rejection.gm ?? rejection.reason } : { proposal, events: [], materialized: [], rejection });
-      return;
-    }
-    const result = applyEffects(registry, w, channel.toEffects(proposal, w.ctx), { bindings: { self: w.world.pov }, rng: createRng(`${seed}:proposal:${i}`) });
-    const failed = result.rejected[0];
-    if (failed) {
-      w.restore(mark);
-      out.push({ proposal, events: [], materialized: [], rejection: failed.rejection });
-      return;
-    }
-    out.push({ proposal, events: result.applied, materialized, rejection: null });
-  });
-  return out;
-}
-function clockMinutes(events) {
-  let minutes = 0;
-  for (const e of events)
-    if (e.type === "clock")
-      minutes += e.minutes;
-  return minutes;
-}
-var TIME_ADVANCE_CAP = 240;
-
-class TurnBridge {
-  registry;
-  pipeline;
-  runSeed;
-  intents = new Map;
-  interpreted = new Set;
-  unread = new Set;
-  unfit = new Map;
-  nexts = new Map;
-  reads = new Map;
-  plans = new Map;
-  readChips = new Map;
-  decisions = new Map;
-  prose = new Map;
-  offers = new Map;
-  constructor(registry, pipeline, runSeed) {
-    this.registry = registry;
-    this.pipeline = pipeline;
-    this.runSeed = runSeed;
-  }
-  setIntent(userText, intent, interpreted = false) {
-    this.intents.set(userText, intent);
-    trim(this.intents);
-    this.unread.delete(userText);
-    this.unfit.delete(userText);
-    if (interpreted && intent)
-      this.interpreted.add(userText);
-    else
-      this.interpreted.delete(userText);
-    if (this.interpreted.size > 64)
-      this.interpreted.delete(this.interpreted.values().next().value ?? "");
-  }
-  amendIntent(userText, intent) {
-    if (this.intents.has(userText))
-      this.intents.set(userText, intent);
-  }
-  setUnread(userText) {
-    this.intents.delete(userText);
-    this.interpreted.delete(userText);
-    this.unfit.delete(userText);
-    this.unread.add(userText);
-    if (this.unread.size > 64)
-      this.unread.delete(this.unread.values().next().value ?? "");
-  }
-  wasUnread(userText) {
-    return this.unread.has(userText);
-  }
-  setUnfit(userText, unfit, intent = null) {
-    this.setIntent(userText, intent, intent !== null);
-    this.unfit.set(userText, unfit);
-    trim(this.unfit);
-  }
-  unfitOf(userText) {
-    return this.unfit.get(userText);
-  }
-  wasInterpreted(userText) {
-    return this.interpreted.has(userText);
-  }
-  hasIntent(userText) {
-    return this.intents.has(userText);
-  }
-  intentOf(userText) {
-    return this.intents.get(userText) ?? null;
-  }
-  setDecisions(userText, events) {
-    if (events.length === 0)
-      this.decisions.delete(userText);
-    else
-      this.decisions.set(userText, events);
-    trim(this.decisions);
-  }
-  setOffer(userText, target) {
-    if (target)
-      this.offers.set(userText, target);
-    else
-      this.offers.delete(userText);
-    trim(this.offers);
-  }
-  offerFor(userText) {
-    return this.offers.get(userText);
-  }
-  setNext(userText, next) {
-    if (next)
-      this.nexts.set(userText, next);
-    else
-      this.nexts.delete(userText);
-    trim(this.nexts);
-  }
-  nextOf(userText) {
-    return this.nexts.get(userText);
-  }
-  setProse(seed, prose) {
-    this.prose.set(seed, prose);
-    trim(this.prose);
-  }
-  proseFor(seed) {
-    return this.prose.get(seed);
-  }
-  prepareRead(text, read) {
-    this.reads.set(hashParts("lre.read", text), read);
-    trim(this.reads);
-  }
-  planFor(seed) {
-    return this.plans.get(seed);
-  }
-  chipsFor(text) {
-    return this.readChips.get(hashParts("lre.read", text)) ?? [];
-  }
-  plan(input) {
-    const last = input.userTexts.at(-1) ?? "";
-    const w = new Working(this.registry, input.ctx.world, input.state);
-    w.applyAll(this.decisions.get(last) ?? []);
-    const result = this.pipeline.plan({
-      registry: this.registry,
-      world: input.ctx.world,
-      state: w.state,
-      runSeed: this.runSeed,
-      seed: input.seed,
-      kind: input.kind,
-      userTexts: input.userTexts,
-      intent: this.intents.get(last) ?? null
-    });
-    this.plans.set(input.seed, result);
-    trim(this.plans);
-    return [...w.events, ...result.events];
-  }
-  read(input) {
-    const key = hashParts("lre.read", input.text);
-    const prepared = this.reads.get(key);
-    const w = new Working(this.registry, input.ctx.world, input.state);
-    w.applyAll(prepared?.events ?? []);
-    const chips = [];
-    const proposals = [];
-    for (const p of prepared?.auto ?? []) {
-      if (p.type !== "time_advance") {
-        proposals.push(p);
-        continue;
-      }
-      const minutes = typeof p.minutes === "number" ? Math.round(p.minutes) : 0;
-      const outcome = applyTimeAdvance(this.registry, w, minutes, { runSeed: this.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
-      if (outcome.chip)
-        chips.push({ target: outcome.chip.target, reason: outcome.reason === "unit_cap" ? "unit_cap" : "over_cap" });
-    }
-    applyProposals(this.registry, w, proposals, input.seed, this.runSeed);
-    if (prepared?.post !== false) {
-      const base = input.seed.split(":")[0] ?? input.seed;
-      const applied = (this.plans.get(base)?.elapsedMinutes ?? 0) + clockMinutes(w.events);
-      w.applyAll(this.pipeline.post({ registry: this.registry, world: input.ctx.world, state: w.state, runSeed: this.runSeed, seed: input.seed, appliedMinutes: applied, extracted: [...w.events] }));
-    }
-    this.readChips.set(key, chips);
-    trim(this.readChips);
-    return w.events;
-  }
-}
-function trim(map, cap = 64) {
-  while (map.size > cap) {
-    const first = map.keys().next();
-    if (first.done)
-      return;
-    map.delete(first.value);
-  }
-}
-
-// src/engine/decide.ts
-class DecideError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "DecideError";
-  }
-}
-var hasOwn5 = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-function orderedKeys(p, keys) {
-  const ks = keys ? [...keys] : Object.keys(p).sort();
-  if (ks.length === 0)
-    throw new DecideError("No options to choose from");
-  if (new Set(ks).size !== ks.length)
-    throw new DecideError("Duplicate option keys");
-  return ks;
-}
-function weightsOf(p, ks) {
-  return ks.map((k) => {
-    const v = hasOwn5(p, k) ? p[k] : undefined;
-    if (v === undefined)
-      return 0;
-    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
-      throw new DecideError(`Probability for "${k}" must be a finite number \u2265 0, got ${String(v)}`);
-    }
-    return v;
-  });
-}
-function normalized(p, keys) {
-  const ks = orderedKeys(p, keys);
-  const w = weightsOf(p, ks);
-  const top = Math.max(...w);
-  if (top === 0)
-    throw new DecideError("Probabilities have no mass (all zero)");
-  const scaled = w.map((x) => x / top);
-  const sum = scaled.reduce((a, b) => a + b, 0);
-  return { ks, probs: scaled.map((x) => x / sum) };
-}
-function sample2(p, rng, keys) {
-  const { ks, probs } = normalized(p, keys);
-  const u = rng.next();
-  let cum = 0;
-  let last = 0;
-  for (let i = 0;i < ks.length; i++) {
-    if (probs[i] === 0)
-      continue;
-    last = i;
-    cum += probs[i];
-    if (u < cum)
-      return ks[i];
-  }
-  return ks[last];
-}
-
 // src/backend/turn-steps.ts
 function factLines(registry, world, state, secrets) {
   const ctx = registry.context(world, state);
@@ -51072,6 +51833,1693 @@ Outcomes with the dice's exact odds: ${JSON.stringify(guidance)}` : ""}`;
   const reason = typeof raw.reason === "string" ? raw.reason.replace(/\s+/g, " ").trim().slice(0, 240) : "";
   const outcomes = outcomesOf(raw.outcomes);
   return { rating: Math.min(ask.max, Math.max(0, Math.round(raw.rating))), reason, ...outcomes ? { outcomes } : {} };
+}
+
+// src/backend/minds.ts
+function mindsStepConfig(modelUse, purpose) {
+  const saved = modelUse.steps[purpose];
+  if (saved && !saved.enabled)
+    return null;
+  return saved ?? { enabled: true, signals: [], maxTokens: HELPER_MAX_TOKENS };
+}
+function mindsOn2(settings) {
+  return settings.minds.enabled && mindsStepConfig(settings.modelUse, "mind") !== null;
+}
+function mindPrompt(purpose, world, settings, vars) {
+  const template = Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
+  const own = settings.prompts[purpose];
+  const source = template ? "world" : own ? "override" : "default";
+  const text = template?.template ?? own ?? MIND_PROMPT_DEFAULTS[purpose];
+  return { text: `${renderTemplate(text, vars)}
+
+${MIND_ANSWER_FORMATS[purpose]}`, source };
+}
+function varsFor(world, state, who) {
+  const place = placeOfEntity(state, who);
+  return { world: world.name, character: own(state.entities, who)?.name ?? who, clock: formatClock(calendarOf(world), state.clock), place: place ? own(world.places, place)?.name ?? place : "", pov: povLabel({ state, world, who }) };
+}
+var str6 = (v) => typeof v === "string" ? v : "";
+function localTime(world, now, text) {
+  const t = text.trim().replace(" ", "T");
+  const cal = calendarOf(world);
+  try {
+    if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(t))
+      return clockOfLocal(cal, t);
+    if (/^\d{1,2}:\d{2}$/.test(t))
+      return nextTimeOfDay(cal, now - 1, parseHHMM(t.padStart(5, "0")));
+  } catch {
+    return null;
+  }
+  return null;
+}
+function personNamed(reg, world, state, name) {
+  const n = name.trim().toLowerCase();
+  if (n === "")
+    return null;
+  const people = Object.keys(state.entities).filter((id) => kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id));
+  const exact = people.find((id) => id === name.trim() || own(state.entities, id)?.name.toLowerCase() === n);
+  if (exact)
+    return exact;
+  const partial = people.filter((id) => (own(state.entities, id)?.name.toLowerCase().split(/\s+/) ?? []).includes(n));
+  return partial.length === 1 ? partial[0] ?? null : null;
+}
+function placeNamed2(world, name) {
+  const n = name.trim().toLowerCase();
+  if (n === "")
+    return null;
+  return Object.keys(world.places).find((id) => id === name.trim() || own(world.places, id)?.name.toLowerCase() === n) ?? null;
+}
+function plansFrom(reg, world, state, who, raw, source) {
+  const now = state.clock;
+  const out = [];
+  for (const [i, d] of (Array.isArray(raw) ? raw : []).slice(0, MIND_TEXT_CAPS.plans).entries()) {
+    if (!isRecord(d))
+      continue;
+    const what = capText(str6(d.what), MIND_TEXT_CAPS.planWhat);
+    const when = isRecord(d.when) ? d.when : {};
+    const from = localTime(world, now, str6(when.from));
+    if (what === "" || from === null)
+      continue;
+    const toRaw = localTime(world, now, str6(when.to));
+    const to = toRaw !== null && toRaw >= from ? toRaw : from + 60;
+    if (to < now)
+      continue;
+    const kind = PLAN_KINDS.includes(str6(d.kind)) ? str6(d.kind) : "other";
+    const withIds = [...new Set((Array.isArray(d.with) ? d.with : []).map((x) => personNamed(reg, world, state, str6(x))).filter((x) => x !== null && x !== who))];
+    const priority = typeof d.priority === "number" && Number.isFinite(d.priority) ? Math.min(PLAN_PRIORITY.max, Math.max(PLAN_PRIORITY.min, Math.round(d.priority))) : PLAN_PRIORITY.normal;
+    out.push({ id: `p_${hashParts("minds.plan", who, String(now), String(i), what).slice(0, 10)}`, what, kind, when: { from, to }, where: placeNamed2(world, str6(d.where)), with: withIds, priority, status: "open", made: now, source, closed: null, reason: null });
+  }
+  return out;
+}
+function mindData(reg, world, state, who, raw, moment, level, reason) {
+  if (!isRecord(raw))
+    return null;
+  const monologue = capText(str6(raw.monologue), MIND_TEXT_CAPS.monologue);
+  const intent = capText(str6(raw.intent), MIND_TEXT_CAPS.intent);
+  const depiction = capText(str6(raw.depiction), MIND_TEXT_CAPS.depiction);
+  if (monologue === "" && intent === "" && depiction === "")
+    return null;
+  const reactions = (Array.isArray(raw.reactions) ? raw.reactions : []).map((r) => capText(str6(r), MIND_TEXT_CAPS.reaction)).filter((r) => r !== "").slice(0, MIND_TEXT_CAPS.reactions);
+  const mood = capText(str6(raw.mood), MIND_TEXT_CAPS.mood);
+  const interruptReason = moment.kind === "beat" && isRecord(raw.interrupt) ? capText(str6(raw.interrupt.reason), MIND_TEXT_CAPS.interrupt) : "";
+  let withheld = false;
+  if (worldMindsOf(world).secrecy === "brief" && depiction !== "") {
+    const secrets = unrevealedSecrets(reg, world, state);
+    withheld = findLeaks(depiction, secrets).length > 0 || hiddenNameCheck(reg, world, state, world.pov)(depiction);
+  }
+  return {
+    entity: who,
+    at: moment.at,
+    place: placeOfEntity(state, who),
+    level,
+    moment: moment.kind,
+    reason: capText(reason, MIND_TEXT_CAPS.reason),
+    monologue,
+    depiction,
+    intent,
+    reactions,
+    plans: plansFrom(reg, world, state, who, raw.plans, "mind"),
+    mood: mood === "" ? null : mood,
+    interrupt: interruptReason === "" ? null : { reason: interruptReason },
+    withheld
+  };
+}
+function traceName(reg, world, state, who) {
+  return playerKnows(reg, world, state, world.pov, who) ? own(state.entities, who)?.name ?? "Someone" : "Someone";
+}
+async function chatMessages(deps, chatId, userId) {
+  try {
+    return await deps.host.chats.messages(chatId, userId);
+  } catch {
+    return [];
+  }
+}
+async function runMinds(deps, input) {
+  const { registry: reg } = deps;
+  const { world, state, userId } = input;
+  const settings = await deps.settings.get(userId);
+  const config = mindsStepConfig(settings.modelUse, "mind");
+  if (!config || input.who.length === 0)
+    return { events: [], traces: [] };
+  const memory = effectiveMemory(world, settings.minds);
+  const guidance = input.guidance ?? deps.presets.last(userId).guidance.mind ?? "";
+  const messages = input.messages ?? await chatMessages(deps, input.chatId, userId);
+  const loreTokens = config.lore && config.lore.policy !== "none" ? config.lore.tokens : config.lore ? 0 : 400;
+  const phase = input.phase ?? (input.moment.kind === "beat" ? "skip" : "pre");
+  const calls = input.who.map(async (who) => {
+    const level = input.levels[who] ?? "near";
+    const e = own(state.entities, who);
+    const base = { purpose: "mind", phase, who: traceName(reg, world, state, who), level };
+    const prompt = mindPrompt("mind", world, settings.minds, varsFor(world, state, who));
+    if (!e)
+      return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source } };
+    const characterId = own(world.entities, who)?.characterId;
+    const card = characterId ? await deps.host.characters.card(characterId, userId).catch(() => null) : null;
+    const scope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, card, moment: input.moment, loreTokens };
+    const usage = { tokens: 0 };
+    const t0 = performance.now();
+    const raw = input.signal.aborted ? null : await deps.steps.helperJson("mind", prompt.text, mindContext(scope), config, userId, input.signal, { guidance, usage });
+    const ms = Math.round(performance.now() - t0);
+    const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
+    return { data, trace: { ...base, outcome: data === null ? "failed" : data.withheld ? "leak_blocked" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source } };
+  });
+  const results = await Promise.all(calls);
+  const w = new Working(reg, world, state);
+  const events = [];
+  for (const r of results) {
+    if (!r.data)
+      continue;
+    const event = { type: MINDS_EVENTS.mind, data: r.data };
+    if (!w.apply(event))
+      events.push(event);
+  }
+  return { events, traces: results.map((r) => r.trace) };
+}
+async function preMinds(deps, input) {
+  const settings = await deps.settings.get(input.userId);
+  const on = mindsOn2(settings);
+  if (!on)
+    return { events: readSlice(input.state).on ? [{ type: MINDS_EVENTS.round, data: { at: input.state.clock, on: false } }] : [], traces: [] };
+  const round = { type: MINDS_EVENTS.round, data: { at: input.state.clock, on: true } };
+  if (input.timelapse)
+    return { events: [round], traces: [] };
+  const w = new Working(deps.registry, input.world, input.state);
+  w.apply(round);
+  const ctx = deps.registry.context(input.world, w.state);
+  const texts = { user: input.user, reply: input.reply };
+  const scores = fidelityOf(ctx, texts);
+  const picks = pickMinds(ctx, scores, texts, settings.minds);
+  const levels = {};
+  const reasons = {};
+  for (const p of picks) {
+    levels[p.entity] = p.level;
+    reasons[p.entity] = p.reason;
+  }
+  const moment = { kind: "turn", at: w.state.clock, reason: "a turn", user: input.user, reply: input.reply };
+  const ran = await runMinds(deps, { chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who: picks.map((p) => p.entity), moment, levels, reasons, signal: input.signal, ...input.guidance !== undefined ? { guidance: input.guidance } : {}, phase: "pre" });
+  return { events: [round, ...ran.events], traces: ran.traces };
+}
+function presentWith(reg, world, state) {
+  const here = placeOfEntity(state, world.pov);
+  if (here === null)
+    return [];
+  return Object.keys(state.entities).sort().filter((id) => id !== world.pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id));
+}
+function memoryData(reg, world, state, who, raw) {
+  if (!isRecord(raw))
+    return null;
+  const now = state.clock;
+  const notes = (Array.isArray(raw.notes) ? raw.notes : []).slice(0, MIND_TEXT_CAPS.notes).flatMap((n, i) => {
+    if (!isRecord(n))
+      return [];
+    const text = capText(str6(n.text), MIND_TEXT_CAPS.note);
+    const salience = typeof n.salience === "number" && Number.isFinite(n.salience) ? Math.min(5, Math.max(1, Math.round(n.salience))) : 3;
+    return text === "" ? [] : [{ id: `n_${hashParts("minds.note", who, String(now), String(i), text).slice(0, 10)}`, text, salience, at: now }];
+  });
+  const commitments = (Array.isArray(raw.commitments) ? raw.commitments : []).slice(0, MIND_TEXT_CAPS.commitments).flatMap((x, i) => {
+    if (!isRecord(x))
+      return [];
+    const text = capText(str6(x.text), MIND_TEXT_CAPS.commitment);
+    if (text === "")
+      return [];
+    const kind = COMMITMENT_KINDS.includes(str6(x.kind)) ? str6(x.kind) : "other";
+    const withIds = [...new Set((Array.isArray(x.with) ? x.with : []).map((n) => personNamed(reg, world, state, str6(n))).filter((n) => n !== null && n !== who))];
+    return [{ id: `c_${hashParts("minds.commitment", who, String(now), String(i), text).slice(0, 10)}`, kind, with: withIds, text, due: localTime(world, now, str6(x.due)), status: "open", made: now, closed: null }];
+  });
+  const open = new Set(readCharacter(state, who).commitments.filter((x) => x.status === "open").map((x) => x.id));
+  const resolved = (Array.isArray(raw.resolved) ? raw.resolved : []).flatMap((r) => isRecord(r) && open.has(str6(r.id)) && (r.status === "kept" || r.status === "broken" || r.status === "released") ? [{ id: str6(r.id), status: r.status }] : []);
+  const told = (Array.isArray(raw.told) ? raw.told : []).slice(0, MIND_TEXT_CAPS.tolds).flatMap((t) => {
+    if (!isRecord(t))
+      return [];
+    const what = capText(str6(t.what), MIND_TEXT_CAPS.told);
+    const to = [...new Set((Array.isArray(t.to) ? t.to : []).map((n) => personNamed(reg, world, state, str6(n))).filter((n) => n !== null && n !== who))];
+    return what === "" || to.length === 0 ? [] : [{ to, what }];
+  });
+  const summary = capText(str6(raw.summary), MIND_TEXT_CAPS.summary);
+  return { entity: who, at: now, notes, commitments, resolved, plans: plansFrom(reg, world, state, who, raw.plans, "memory"), told, summary: summary === "" ? null : summary };
+}
+var CONSOLIDATIONS_PER_TURN = 2;
+async function postMinds(deps, input) {
+  const { registry: reg } = deps;
+  const { world, state, userId } = input;
+  const settings = await deps.settings.get(userId);
+  if (!mindsOn2(settings))
+    return { events: [], traces: [] };
+  const who = presentWith(reg, world, state);
+  const saw = playerLines(reg, world, state, world.pov, input.pre, 3);
+  const presence = { type: MINDS_EVENTS.presence, data: { msg: input.messageId, at: state.clock, place: placeOfEntity(state, world.pov), who, saw } };
+  const w = new Working(reg, world, state);
+  w.apply(presence);
+  const events = [presence];
+  const traces = [];
+  const memory = effectiveMemory(world, settings.minds);
+  const ctx = reg.context(world, w.state);
+  const levels = new Map(fidelityOf(ctx, { user: input.user, reply: input.reply }).map((s) => [s.entity, s.level]));
+  const memoryConfig = mindsStepConfig(settings.modelUse, "memory");
+  const remembering = memoryConfig ? who.filter((id) => settings.minds.memoryLevels.includes(levels.get(id) ?? "background")) : [];
+  const messages = remembering.length > 0 ? await chatMessages(deps, input.chatId, userId) : [];
+  const moment = { kind: "turn", at: state.clock, reason: "after the reply", user: input.user, reply: input.reply };
+  const remembered = await Promise.all(remembering.map(async (id) => {
+    const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
+    const scope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, card: null, moment, loreTokens: 0 };
+    const usage = { tokens: 0 };
+    const t0 = performance.now();
+    const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
+    const data = raw === null ? null : memoryData(reg, world, w.state, id, raw);
+    traces.push({ purpose: "memory", phase: "post", who: traceName(reg, world, state, id), level: levels.get(id) ?? "near", outcome: data ? "recorded" : "failed", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+    return data;
+  }));
+  for (const data of remembered) {
+    if (!data)
+      continue;
+    const event = { type: MINDS_EVENTS.memory, data };
+    if (!w.apply(event))
+      events.push(event);
+  }
+  const consolidateConfig = memory.consolidate.enabled ? mindsStepConfig(settings.modelUse, "consolidate") : null;
+  if (consolidateConfig) {
+    const now = w.state.clock;
+    const due = Object.keys(readSlice(w.state).chars).sort().flatMap((id) => {
+      const c = readCharacter(w.state, id);
+      const last = c.consolidated ?? null;
+      if (last !== null && now - last < memory.consolidate.periodDays * 1440)
+        return [];
+      const ranked = [...c.notes].sort((a, b) => salienceNow(a, now, memory) - salienceNow(b, now, memory) || a.at - b.at);
+      const surplus = Math.max(0, c.notes.length - memory.notes.keep);
+      const fold = ranked.filter((n, i) => i < surplus || faded(n, now, memory));
+      return fold.length > 0 ? [{ id, fold }] : [];
+    }).slice(0, CONSOLIDATIONS_PER_TURN);
+    const folded = await Promise.all(due.map(async ({ id, fold }) => {
+      const prompt = mindPrompt("consolidate", world, settings.minds, varsFor(world, w.state, id));
+      const usage = { tokens: 0 };
+      const t0 = performance.now();
+      const raw = input.signal.aborted ? null : await deps.steps.helperJson("consolidate", prompt.text, consolidateContext({ state: w.state, world, who: id }, fold), consolidateConfig, userId, input.signal, { guidance: input.guidance?.consolidate ?? deps.presets.last(userId).guidance.consolidate ?? "", usage });
+      const summary = isRecord(raw) ? capText(str6(raw.summary), MIND_TEXT_CAPS.summary) : "";
+      traces.push({ purpose: "consolidate", phase: "post", who: traceName(reg, world, state, id), level: levels.get(id) ?? "background", outcome: summary === "" ? "failed" : "recorded", ms: Math.round(performance.now() - t0), tokens: usage.tokens, prompt: prompt.source });
+      return summary === "" ? null : { type: MINDS_EVENTS.consolidated, data: { entity: id, at: now, notes: fold.map((n) => n.id), summary } };
+    }));
+    for (const event of folded)
+      if (event && !w.apply(event))
+        events.push(event);
+  }
+  return { events, traces };
+}
+
+// src/backend/skip.ts
+var RANK = { plan: 1, invitation: 2, appointment: 3, story: 4, money: 5, model: 6 };
+function scanBeats(reg, world, state, intent, runSeed) {
+  const { target, opts } = timelapseOptions(intent, runSeed);
+  const w = new Working(reg, world, state);
+  const run = target ? TimelapseRun.start(reg, w, target, opts) : null;
+  if (!run || "code" in run)
+    return null;
+  const mark = w.events.length;
+  run.advanceTo(run.to);
+  const end = run.clock;
+  const pov = world.pov;
+  const ctx = reg.context(world, state);
+  const nameOf = (id) => own(state.entities, id)?.name ?? id;
+  const person = (id) => id !== pov && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person");
+  const beats = [];
+  const add = (at, reason, rank, who) => {
+    if (at > run.from && at <= end)
+      beats.push({ at, reason, source: "scan", who, rank });
+  };
+  const appointments = own(state.entities, pov)?.fields.appointments;
+  for (const raw of Array.isArray(appointments) ? appointments : []) {
+    if (isRecord(raw) && typeof raw.at === "number")
+      add(raw.at, `the player character's appointment${typeof raw.label === "string" ? `: ${raw.label}` : ""}`, RANK.appointment, []);
+  }
+  const tier = optionalQuery(ctx, "minds.tier");
+  const plans = optionalQuery(ctx, "minds.plans");
+  const laid = optionalQuery(ctx, "castlife.commitments");
+  if (tier && plans && laid) {
+    for (const id of Object.keys(state.entities).sort()) {
+      const level = id === pov ? "background" : tier(ctx, id);
+      if (level !== "live" && level !== "near")
+        continue;
+      const withPov = plans(ctx, id).filter((p) => p.with.includes(pov));
+      for (const b of laid(ctx, id, run.from, end)) {
+        const p = withPov.find((x) => x.id === b.plan);
+        if (p)
+          add(b.start, `${nameOf(id)}'s plan with the player character: ${p.what}`, RANK.plan, [id, ...p.with.filter(person)]);
+      }
+    }
+  }
+  const rules = allRules(reg, world);
+  let clock = run.from;
+  for (const e of w.events.slice(mark)) {
+    if (e.type === "clock")
+      clock += e.minutes;
+    else if (e.type === "stage") {
+      const track = own(world.tracks, e.track);
+      add(clock, `a story moment: ${track?.label ?? e.track}`, RANK.story, track?.owner && person(track.owner) ? [track.owner] : []);
+    } else if (e.type === "castlife.invitation" && "data" in e && typeof e.data.agent === "string")
+      add(clock, `${nameOf(e.data.agent)}'s invitation`, RANK.invitation, [e.data.agent]);
+    else if (e.type === ENGINE_EVENTS.fired && "data" in e) {
+      const rule = rules.find((r) => r.id === e.data.rule);
+      if (rule && (("at" in rule.on) || rule.interrupt === true || rule.beat !== undefined))
+        add(clock, `the rule ${rule.id}`, RANK.story, []);
+    } else if (e.type === ENGINE_EVENTS.signal && "data" in e && e.data.entity === pov && (e.data.class === "bill" || e.data.class === "decline"))
+      add(typeof e.data.at === "number" ? e.data.at : clock, `the player character's money: ${String(e.data.text ?? e.data.class)}`, RANK.money, []);
+  }
+  return { from: run.from, to: run.to, beats };
+}
+function capBeats(beats, max) {
+  const byMinute = new Map;
+  for (const b of beats) {
+    const same = byMinute.get(b.at);
+    if (!same)
+      byMinute.set(b.at, { ...b, who: [...b.who] });
+    else
+      byMinute.set(b.at, { ...b.rank < same.rank ? b : same, source: same.source === "scan" || b.source === "scan" ? "scan" : "model", who: [...new Set([...same.who, ...b.who])] });
+  }
+  const merged = [...byMinute.values()];
+  const kept = Number.isFinite(max) ? [...merged].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)) : merged;
+  return kept.sort((a, b) => a.at - b.at);
+}
+function stamp(world, at) {
+  const d = dateAt(calendarOf(world), at);
+  return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ${formatHHMM(d.minuteOfDay)}`;
+}
+async function proposedBeats(deps, input, state, scanned) {
+  const config = mindsStepConfig(input.settings.modelUse, "skip");
+  if (!config || input.signal.aborted)
+    return [];
+  const ctx = deps.registry.context(input.world, state);
+  const plans = optionalQuery(ctx, "minds.plans");
+  const intents = [...new Set(scanned.beats.flatMap((b) => b.who))].flatMap((id) => {
+    const theirs = plans?.(ctx, id) ?? [];
+    return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${stamp(input.world, p.when.from)})`).join("; ")}`] : [];
+  });
+  const user = [`The skip runs from ${stamp(input.world, scanned.from)} to ${stamp(input.world, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:
+${scanned.beats.map((b) => `- ${stamp(input.world, b.at)}: ${b.reason}`).join(`
+`)}` : "No moments found.", intents.length > 0 ? `What the people involved plan:
+${intents.join(`
+`)}` : ""].filter((part) => part !== "").join(`
+
+`);
+  const raw = await deps.steps.helperJson("skip", mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name }).text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "" });
+  if (!isRecord(raw) || !Array.isArray(raw.beats))
+    return [];
+  const out = [];
+  for (const b of raw.beats.slice(0, 5)) {
+    if (!isRecord(b) || typeof b.at !== "string" || typeof b.reason !== "string")
+      continue;
+    const at = localTime(input.world, scanned.from, b.at);
+    if (at !== null && at > scanned.from && at <= scanned.to)
+      out.push({ at, reason: b.reason.replace(/\s+/g, " ").trim().slice(0, MIND_TEXT_CAPS.reason), source: "model", who: [], rank: RANK.model });
+  }
+  return out;
+}
+async function mindsAt(deps, input, w, named, cap, reason, traces) {
+  const pov = input.world.pov;
+  const scores = optionalQuery(w.ctx, "minds.fidelity")?.(w.ctx, { user: "", reply: "" }) ?? [];
+  const here = placeOfEntity(w.state, pov);
+  const able = (id) => id !== pov && own(w.state.entities, id) !== undefined && !isGone(w.state, id) && acts(w.world, w.state, id);
+  const rank = (id) => {
+    const i = scores.findIndex((s) => s.entity === id);
+    return i < 0 ? scores.length : i;
+  };
+  const present = scores.filter((s) => (s.level === "live" || s.level === "near") && here !== null && placeOfEntity(w.state, s.entity) === here).map((s) => s.entity);
+  const who = [...new Set([...[...named].sort((a, b) => rank(a) - rank(b)), ...present])].filter(able).slice(0, cap);
+  if (who.length === 0)
+    return [];
+  const levels = {};
+  for (const id of who)
+    levels[id] = scores.find((s) => s.entity === id)?.level ?? "background";
+  const result = await deps.minds({ chatId: input.chatId, userId: input.userId, world: input.world, state: w.state, who, moment: { kind: "beat", at: w.state.clock, reason, user: "", reply: "" }, levels, signal: input.signal, guidance: input.guidance?.mind ?? "", phase: "skip" });
+  traces.push(...result.traces);
+  return result.events.filter((e) => e.type === MINDS_EVENTS.mind && ("data" in e) && typeof e.data.entity === "string" && who.includes(e.data.entity));
+}
+function interrupter(w, events) {
+  for (const e of events) {
+    if (e.type !== MINDS_EVENTS.mind || !("data" in e))
+      continue;
+    const who = e.data.entity;
+    if (typeof who === "string" && isRecord(e.data.interrupt) && typeof e.data.interrupt.reason === "string" && acts(w.world, w.state, who))
+      return who;
+  }
+  return null;
+}
+async function runSkip(deps, input) {
+  const reg = deps.registry;
+  const cal = calendarOf(input.world);
+  const w = new Working(reg, input.world, input.state);
+  turnStart(reg, w, input.runSeed);
+  const scanned = scanBeats(reg, input.world, w.state, input.intent, input.runSeed);
+  const { target, opts } = timelapseOptions(input.intent, input.runSeed);
+  const run = scanned && target ? TimelapseRun.start(reg, w, target, opts) : null;
+  if (!scanned || !run || "code" in run)
+    return null;
+  const beats = capBeats([...scanned.beats, ...await proposedBeats(deps, input, w.state, scanned)], limitOf(input.settings.minds.skip.maxBeats));
+  const perBeat = limitOf(input.settings.minds.skip.maxMindsPerBeat);
+  const traces = [];
+  const record = { beats: [{ at: run.from, events: run.apply([{ type: MINDS_EVENTS.skip, data: { from: run.from, to: run.to, beats: beats.map((b) => ({ at: b.at, reason: b.reason, source: b.source })) } }]) }], stop: null };
+  for (const beat of beats) {
+    if (input.signal.aborted) {
+      record.stop = { by: "clock", at: run.clock };
+      return { record, traces };
+    }
+    run.advanceTo(beat.at);
+    if (run.clock !== beat.at)
+      break;
+    const applied = run.apply(await mindsAt(deps, input, w, beat.who, perBeat, `Time skips ahead; it is now ${formatClock(cal, beat.at)}.`, traces));
+    if (applied.length > 0)
+      record.beats.push({ at: beat.at, events: applied });
+    const stopper = interrupter(w, applied);
+    if (stopper) {
+      record.stop = { by: "mind", at: beat.at, entity: stopper };
+      return { record, traces };
+    }
+  }
+  run.advanceTo(run.to);
+  if (!input.signal.aborted) {
+    const end = run.apply(await mindsAt(deps, input, w, [], limitOf(input.settings.minds.liveLimit), `The time skip ends; it is now ${formatClock(cal, run.clock)}.`, traces));
+    if (end.length > 0)
+      record.beats.push({ at: run.clock, events: end });
+  }
+  return { record, traces };
+}
+
+// src/engine/bounds.ts
+var RANK2 = { auto: 0, confirm: 1, never: 2 };
+function strictest(...modes) {
+  let out = "auto";
+  for (const m of modes)
+    if (m && RANK2[m] > RANK2[out])
+      out = m;
+  return out;
+}
+function combineBounds(...bounds) {
+  let maxDelta;
+  const modes = [];
+  for (const b of bounds) {
+    if (!b)
+      continue;
+    modes.push(b.mode);
+    if (b.maxDelta !== undefined)
+      maxDelta = maxDelta === undefined ? Math.abs(b.maxDelta) : Math.min(maxDelta, Math.abs(b.maxDelta));
+  }
+  return maxDelta === undefined ? { mode: strictest(...modes) } : { mode: strictest(...modes), maxDelta };
+}
+function clampToField(def, current, delta) {
+  let next = current + delta;
+  if (def?.min !== undefined)
+    next = Math.max(def.min, next);
+  if (def?.max !== undefined)
+    next = Math.min(def.max, next);
+  return next - current;
+}
+function boundProposal(reg, world, state, input, policy) {
+  const e = input.entity ? own(state.entities, input.entity) : undefined;
+  const def = e && input.field ? fieldDef(reg, world, e.kind, input.field) : undefined;
+  const locked = def?.locked === true || def?.derived !== undefined;
+  const bound = combineBounds(def?.bound, policy.typeMode ? { mode: policy.typeMode, ...policy.typeMaxDelta !== undefined ? { maxDelta: policy.typeMaxDelta } : {} } : undefined, policy.channelCap !== undefined ? { mode: "auto", maxDelta: policy.channelCap } : undefined, locked ? { mode: "never" } : undefined);
+  let capped = false;
+  let delta = input.delta;
+  if (delta !== undefined) {
+    if (bound.maxDelta !== undefined && Math.abs(delta) > bound.maxDelta) {
+      delta = Math.sign(delta) * bound.maxDelta;
+      capped = true;
+    }
+    const current = e && input.field ? own(e.fields, input.field) : undefined;
+    const clamped = clampToField(def, typeof current === "number" ? current : 0, delta);
+    if (clamped !== delta)
+      capped = true;
+    delta = clamped;
+  }
+  let value = input.value;
+  if (typeof value === "number" && def) {
+    const clamped = Math.min(def.max ?? Infinity, Math.max(def.min ?? -Infinity, value));
+    if (clamped !== value)
+      capped = true;
+    value = clamped;
+  }
+  return { mode: bound.mode, ...delta !== undefined ? { delta } : {}, ...value !== undefined ? { value } : {}, capped, bound };
+}
+
+// src/engine/ledger/fold.ts
+function refEq(a, b) {
+  if (a.in !== b.in || a.index !== b.index)
+    return false;
+  return a.in === "events" || b.in === "post" && a.seq === b.seq;
+}
+var dependentNote = (n) => n.kind === "dropped" || n.kind === "note";
+var dependentKeep = (k) => k.status === "dropped" || k.status === "converted";
+
+class LedgerFold {
+  types;
+  cache = new Map;
+  settled = new Map;
+  every;
+  fingerprint;
+  capacity;
+  tails = [];
+  digests = { content: new Map, record: new Map, markers: new Map, folds: new Map, key: new Map };
+  constructor(types, options = {}) {
+    this.types = types;
+    this.every = Math.max(1, options.snapshotEvery ?? 200);
+    this.fingerprint = options.fingerprint ?? "dev";
+    this.capacity = options.capacity ?? 1 << 16;
+  }
+  keyOf(prev, m, input, paused, pausesHere) {
+    const rec = activeRecord(m, input.tombstones);
+    const stored = m.ledger?.swipes[String(m.swipeId)];
+    const recKey = stored ? `${rec ? "r" : "t"}${this.digest(this.digests.record, JSON.stringify(stored), () => hashJson(stored))}` : "";
+    const markers = m.ledger ? this.digest(this.digests.markers, JSON.stringify(m.ledger.markers), () => hashJson(m.ledger?.markers)) : "";
+    const text = activeText(m);
+    const content = this.digest(this.digests.content, text, () => contentId(text).hash);
+    const flags = `${m.isUser ? "u" : "a"}${paused ? "p" : ""}${pausesHere ? "P" : ""}`;
+    const memo = `${prev}\x00${flags}\x00${m.swipeId}\x00${content}\x00${recKey}\x00${markers}\x00${m.id}`;
+    return this.digest(this.digests.key, memo, () => hashParts("lre.fold", prev, m.id, m.isUser ? "u" : "a", String(m.swipeId), content, recKey, markers, paused ? "p" : "", pausesHere ? "P" : ""));
+  }
+  digest(memo, text, compute) {
+    const hit = memo.get(text);
+    if (hit !== undefined)
+      return hit;
+    const d = compute();
+    if (memo.size >= this.capacity) {
+      const oldest = memo.keys().next();
+      if (!oldest.done)
+        memo.delete(oldest.value);
+    }
+    memo.set(text, d);
+    return d;
+  }
+  fold(input) {
+    const startWorld = input.worlds(input.revision);
+    if (!startWorld)
+      throw new FoldError(`unknown revision ${input.revision}`);
+    const n = input.chain.length;
+    const pausedAfter = new Set(input.pauses.map((p) => p.messageId));
+    const steps = [];
+    const keys = [];
+    let key = hashParts("lre.fold", input.revision);
+    let paused = false;
+    let base = -1;
+    for (let i = 0;i < n; i++) {
+      const m = input.chain[i];
+      const k = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
+      const cached = this.cache.get(k);
+      if (!cached)
+        break;
+      steps.push(cached);
+      keys.push(k);
+      key = k;
+      paused = cached.paused;
+      if (cached.state)
+        base = i;
+    }
+    const from = base >= 0 ? steps[base] : undefined;
+    let shared = from?.state ?? null;
+    let state = shared ?? initialState(startWorld, input.revision, this.types);
+    steps.length = base + 1;
+    keys.length = base + 1;
+    let parent = from?.result.path ?? ROOT_PATH;
+    key = keys[base] ?? hashParts("lre.fold", input.revision);
+    paused = from?.paused ?? false;
+    const context = hashParts("lre.snap", this.fingerprint, input.revision);
+    if (input.snapshots && input.pauses.length === 0 && base < n - 1) {
+      const frames = [];
+      const frameKeys = [];
+      let p = parent;
+      let k = key;
+      let best = -1;
+      let snapshot;
+      for (let i = base + 1;i < n; i++) {
+        const m = input.chain[i];
+        const f = this.frame(input, m, p, false, false);
+        k = this.keyOf(k, m, input, false, false);
+        frames.push(f);
+        frameKeys.push(k);
+        p = f.result.path;
+        if ((i + 1) % this.every !== 0)
+          continue;
+        const found = input.snapshots.get(hashParts(context, p));
+        if (found) {
+          best = i;
+          snapshot = found;
+        }
+      }
+      if (snapshot && best > base) {
+        const notes = new Map;
+        const keep = new Map;
+        const violations = new Map;
+        for (const [i, x] of snapshot.notes)
+          notes.set(i, [...notes.get(i) ?? [], x]);
+        for (const [i, x] of snapshot.keep)
+          keep.set(i, [...keep.get(i) ?? [], x]);
+        for (const [i, x] of snapshot.violations)
+          violations.set(i, [...violations.get(i) ?? [], x]);
+        for (let i = base + 1;i <= best; i++) {
+          const f = frames[i - base - 1];
+          const k = frameKeys[i - base - 1];
+          const step = { state: null, result: f.result, notes: [...f.notes, ...notes.get(i) ?? []], keep: [...f.keep, ...keep.get(i) ?? []], violations: violations.get(i) ?? [], paused: false };
+          this.remember(k, i === best ? { ...step, state: snapshot.state } : step, i === best, false);
+          steps.push(step);
+          keys.push(k);
+        }
+        shared = snapshot.state;
+        state = shared;
+        base = best;
+        parent = steps[best]?.result.path ?? ROOT_PATH;
+        key = keys[best] ?? key;
+        paused = false;
+      }
+    }
+    if (shared && base < n - 1) {
+      state = structuredClone(shared);
+      shared = null;
+    }
+    for (let i = base + 1;i < n; i++) {
+      const m = input.chain[i];
+      key = this.keyOf(key, m, input, paused, pausedAfter.has(m.id));
+      const f = this.frame(input, m, parent, paused, pausedAfter.has(m.id));
+      const step = this.step(input, m, f, state);
+      const checkpoint = (i + 1) % this.every === 0;
+      this.remember(key, step, checkpoint || i === n - 1, !checkpoint && i === n - 1);
+      steps.push(step);
+      keys.push(key);
+      parent = step.result.path;
+      paused = step.paused;
+      if (checkpoint && input.snapshots && input.pauses.length === 0)
+        input.snapshots.put(this.snapshotOf(hashParts(context, parent), steps, state));
+    }
+    const out = { state: shared ? structuredClone(shared) : state, notes: [], keepReport: [], messages: [], violations: [] };
+    for (const s of steps) {
+      out.messages.push(s.result);
+      out.notes.push(...s.notes);
+      out.keepReport.push(...s.keep);
+      out.violations.push(...s.violations);
+    }
+    return out;
+  }
+  snapshotOf(key, steps, state) {
+    const snap = { key, state: structuredClone(state), notes: [], keep: [], violations: [] };
+    steps.forEach((s, i) => {
+      for (const x of s.notes)
+        if (dependentNote(x))
+          snap.notes.push([i, x]);
+      for (const x of s.keep)
+        if (dependentKeep(x))
+          snap.keep.push([i, x]);
+      for (const x of s.violations)
+        snap.violations.push([i, x]);
+    });
+    return snap;
+  }
+  remember(key, step, withState, tail) {
+    const entry = { ...step, state: withState && step.state ? structuredClone(step.state) : null };
+    this.cache.set(key, entry);
+    if (tail) {
+      this.tails.push(key);
+      while (this.tails.length > 64) {
+        const old = this.tails.shift();
+        const e = old === undefined ? undefined : this.cache.get(old);
+        if (e && old !== key)
+          e.state = null;
+      }
+    }
+    while (this.cache.size > this.capacity) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined)
+        break;
+      this.cache.delete(oldest);
+    }
+  }
+  step(input, m, f, state) {
+    const notes = [...f.notes];
+    const keep = [...f.keep];
+    const violations = [];
+    const types = this.types;
+    const ctx = () => {
+      const world = input.worlds(state.revision);
+      if (!world)
+        throw new FoldError(`unknown revision ${state.revision}`);
+      return types.context(world, state);
+    };
+    const env = { worlds: input.worlds, types };
+    const marker = (mk) => {
+      if (mk.kind === "migrate" && !input.worlds(mk.to))
+        throw new FoldError(`unknown revision ${mk.to}`);
+      for (const text of applyMarker(state, mk, env))
+        notes.push({ kind: "note", messageId: m.id, ref: { marker: mk.seq }, text });
+    };
+    const { rec, recPath, liveMarkers, livePost } = f;
+    const parent = f.result.parentPath;
+    if (m.isUser || f.result.fold === "paused") {} else if (!rec) {
+      for (const mk of liveMarkers)
+        marker(mk);
+    } else {
+      const view = f.result.fold === "view";
+      const folds = recPath === null ? null : [rec.events, rec.markersApplied, rec.post, rec.undone, rec.keep ?? null, rec.path, m.ledger?.markers ?? []];
+      const settledKey = folds === null ? "" : this.digest(this.digests.folds, JSON.stringify(folds), () => hashJson(folds));
+      const before = recPath !== null && !view && !this.settled.has(settledKey) ? hashJson(state) : null;
+      let converged = false;
+      if (view) {
+        const asOnPath = liveMarkers.every((mk) => mk.at === null || mk.at === recPath) && livePost.every((p) => p.at === recPath);
+        const original = this.settled.get(settledKey);
+        converged = asOnPath && original !== undefined && original === hashJson(state);
+      }
+      const converted = rec.keep?.[parent]?.convert ?? [];
+      const record = rec;
+      const event = (ev, ref) => {
+        if (record.undone.some((u) => refEq(u, ref)))
+          return;
+        if (converged) {
+          applyEvent(types, ev, state, ctx());
+          return;
+        }
+        const failure = validateEvent(types, ev, ctx());
+        if (failure && !view) {
+          violations.push(`${m.id}: on-path ${ev.type} failed re-validation (${failure.reason})`);
+          return;
+        }
+        if (failure) {
+          if (converted.some((c) => refEq(c, ref))) {
+            keep.push({ messageId: m.id, parentPath: parent, ref, status: "converted", text: failure.reason });
+          } else {
+            notes.push({ kind: "dropped", messageId: m.id, ref, text: failure.reason });
+            keep.push({ messageId: m.id, parentPath: parent, ref, status: "dropped", text: failure.reason });
+            return;
+          }
+        }
+        applyEvent(types, ev, state, ctx());
+      };
+      const run = (list, refOf) => {
+        for (let i = 0;i < list.length; ) {
+          const group = list[i]?.group;
+          let end = i + 1;
+          if (group !== undefined)
+            while (end < list.length && list[end]?.group === group)
+              end++;
+          const unit = [];
+          for (let k = i;k < end; k++) {
+            const ev = list[k];
+            const ref = refOf(k);
+            if (ev && !record.undone.some((u) => refEq(u, ref)))
+              unit.push({ ev, ref });
+          }
+          i = end;
+          if (unit.length < 2 || !view || converged) {
+            for (const u of unit)
+              event(u.ev, u.ref);
+            continue;
+          }
+          const world = input.worlds(state.revision);
+          if (!world)
+            throw new FoldError(`unknown revision ${state.revision}`);
+          const scratch = structuredClone(state);
+          const failure = unit.map((u) => u.ev).reduce((found, ev) => {
+            if (found)
+              return found;
+            const c = types.context(world, scratch);
+            const rejection = validateEvent(types, ev, c);
+            if (!rejection)
+              applyEvent(types, ev, scratch, c);
+            return rejection;
+          }, null);
+          if (failure === null) {
+            for (const u of unit)
+              applyEvent(types, u.ev, state, ctx());
+          } else if (unit.some((u) => converted.some((c) => refEq(c, u.ref)))) {
+            for (const u of unit) {
+              const own = validateEvent(types, u.ev, ctx());
+              if (own)
+                keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "converted", text: own.reason });
+              applyEvent(types, u.ev, state, ctx());
+            }
+          } else {
+            for (const u of unit) {
+              notes.push({ kind: "dropped", messageId: m.id, ref: u.ref, text: failure.reason });
+              keep.push({ messageId: m.id, parentPath: parent, ref: u.ref, status: "dropped", text: failure.reason });
+            }
+          }
+        }
+      };
+      for (const mk of liveMarkers)
+        if (mk.seq <= record.markersApplied)
+          marker(mk);
+      run(record.events, (index) => ({ in: "events", index }));
+      const later = [
+        ...liveMarkers.filter((mk) => mk.seq > record.markersApplied).map((mk) => ({ seq: mk.seq, marker: mk })),
+        ...livePost.map((p) => ({ seq: p.seq, post: p }))
+      ].sort((a, b) => a.seq - b.seq);
+      for (const item of later) {
+        if ("marker" in item)
+          marker(item.marker);
+        else
+          run(item.post.events, (index) => ({ in: "post", seq: item.post.seq, index }));
+      }
+      if (before !== null && violations.length === 0)
+        this.digest(this.settled, settledKey, () => before);
+    }
+    return { state, result: f.result, notes, keep, violations, paused: f.paused };
+  }
+  frame(input, m, parent, paused, pausesHere) {
+    const notes = [];
+    const keep = [];
+    if (m.isUser) {
+      const path = stepPath(parent, true, contentId(activeText(m)).hash, "", "");
+      return { result: { id: m.id, fold: "user", parentPath: parent, path }, notes, keep, rec: null, recPath: null, liveMarkers: [], livePost: [], paused: paused || pausesHere };
+    }
+    const rec = activeRecord(m, input.tombstones);
+    const stored = m.ledger?.swipes[String(m.swipeId)];
+    const tombstoned = stored !== undefined && isTombstoned(input.tombstones, m.id, stored);
+    if (tombstoned)
+      notes.push({ kind: "tombstoned", messageId: m.id, ref: null, text: "discarded" });
+    const recPath = turnPath(rec);
+    const markers = [...m.ledger?.markers ?? []].sort((a, b) => a.seq - b.seq);
+    const liveMarkers = markers.filter((mk) => isLive(mk.at, parent, recPath));
+    for (const mk of markers) {
+      if (isLive(mk.at, parent, recPath))
+        continue;
+      notes.push({ kind: "inert", messageId: m.id, ref: { marker: mk.seq }, text: "made on another branch" });
+      keep.push({ messageId: m.id, parentPath: parent, ref: { marker: mk.seq }, status: "inert", text: "made on another branch" });
+    }
+    const livePost = rec ? rec.post.filter((p) => isLive(p.at, parent, recPath)).sort((a, b) => a.seq - b.seq) : [];
+    if (rec) {
+      for (const p of rec.post) {
+        if (isLive(p.at, parent, recPath))
+          continue;
+        notes.push({ kind: "inert", messageId: m.id, ref: { in: "post", seq: p.seq, index: 0 }, text: "made on another branch" });
+        keep.push({ messageId: m.id, parentPath: parent, ref: { in: "post", seq: p.seq, index: 0 }, status: "inert", text: "made on another branch" });
+      }
+      for (const d of rec.dropped ?? [])
+        notes.push({ kind: "not_carried", messageId: m.id, ref: { in: "post", seq: d.seq, index: 0 }, text: d.reason });
+    }
+    const view = recPath !== null && (recPath !== parent || rec?.readElsewhere === true);
+    const fold = paused ? "paused" : !rec ? tombstoned ? "tombstoned" : "plain" : recPath === null ? "plain" : view ? "view" : "on_path";
+    const content = rec ? rec.swipeHash.hash : contentId(activeText(m)).hash;
+    const path = stepPath(parent, false, content, recordHash(rec, livePost, parent), markersHash(liveMarkers));
+    return { result: { id: m.id, fold, parentPath: parent, path }, notes, keep, rec, recPath, liveMarkers, livePost, paused };
+  }
+}
+
+// src/backend/chat-prefs.ts
+class ChatPrefs {
+  host;
+  prefs = new Map;
+  constructor(host) {
+    this.host = host;
+  }
+  path(chatId) {
+    return `${runDir(chatId)}prefs.json`;
+  }
+  async load(chatId, userId) {
+    const key = `${userId}\x00${chatId}`;
+    const known = this.prefs.get(key);
+    if (known)
+      return known;
+    const raw = await readStoredJson(this.host, this.path(chatId), userId, "Chat preferences", isRecord);
+    const display = isRecord(raw) ? raw.mapDisplay : undefined;
+    const prefs = { v: 1, ...display === "knowledge" || display === "fog" ? { mapDisplay: display } : {} };
+    this.prefs.set(key, prefs);
+    if (this.prefs.size > 256)
+      this.prefs.delete(this.prefs.keys().next().value ?? "");
+    return prefs;
+  }
+  async mapDisplay(chatId, userId) {
+    return (await this.load(chatId, userId)).mapDisplay ?? null;
+  }
+  async setMapDisplay(chatId, userId, display) {
+    const prefs = await this.load(chatId, userId);
+    if (prefs.mapDisplay === display)
+      return;
+    const next = { ...prefs, mapDisplay: display };
+    this.prefs.set(`${userId}\x00${chatId}`, next);
+    const path = this.path(chatId);
+    await this.host.storage.write(`${path}.tmp`, JSON.stringify(next), userId);
+    await this.host.storage.move(`${path}.tmp`, path, userId);
+  }
+}
+
+// src/backend/chips.ts
+function isChipInput(raw) {
+  if (!isRecord(raw) || typeof raw.label !== "string")
+    return false;
+  if (raw.type === "money")
+    return raw.value === undefined || Number.isSafeInteger(raw.value);
+  return raw.type === "choice" && Array.isArray(raw.options) && raw.options.every((o) => isRecord(o) && typeof o.value === "string" && typeof o.label === "string");
+}
+function isStoredChip(raw) {
+  if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.kind !== "string" || typeof raw.messageId !== "string" || typeof raw.label !== "string" || !isRecord(raw.payload))
+    return false;
+  if (raw.swipeId !== undefined && !Number.isInteger(raw.swipeId))
+    return false;
+  if (raw.detail !== undefined && typeof raw.detail !== "string")
+    return false;
+  if (raw.expires !== "next_send" && raw.expires !== "never")
+    return false;
+  return Array.isArray(raw.actions) && raw.actions.every((a) => isRecord(a) && typeof a.id === "string" && typeof a.label === "string" && (a.style === undefined || a.style === "primary" || a.style === "danger") && (a.input === undefined || isChipInput(a.input)));
+}
+
+class ChipStore {
+  host;
+  chips = new Map;
+  constructor(host) {
+    this.host = host;
+  }
+  path(chatId) {
+    return `${runDir(chatId)}chips.json`;
+  }
+  key(chatId, userId) {
+    return `${userId}\x00${chatId}`;
+  }
+  async list(chatId, userId) {
+    const known = this.chips.get(this.key(chatId, userId));
+    if (known)
+      return known;
+    const raw = await readStoredJson(this.host, this.path(chatId), userId, "chips", Array.isArray);
+    const list = Array.isArray(raw) ? raw.filter(isStoredChip) : [];
+    this.chips.set(this.key(chatId, userId), list);
+    if (this.chips.size > 256)
+      this.chips.delete(this.chips.keys().next().value ?? "");
+    return list;
+  }
+  async save(chatId, userId) {
+    const path = this.path(chatId);
+    await this.host.storage.write(`${path}.tmp`, JSON.stringify(this.chips.get(this.key(chatId, userId)) ?? []), userId);
+    await this.host.storage.move(`${path}.tmp`, path, userId);
+  }
+  async add(chatId, userId, chips) {
+    if (chips.length === 0)
+      return;
+    const list = await this.list(chatId, userId);
+    for (const chip of chips) {
+      const at = list.findIndex((c) => c.id === chip.id);
+      if (at >= 0)
+        list[at] = chip;
+      else
+        list.push(chip);
+    }
+    await this.save(chatId, userId);
+  }
+  async take(chatId, userId, id) {
+    const list = await this.list(chatId, userId);
+    const index = list.findIndex((c) => c.id === id);
+    if (index < 0)
+      return null;
+    const [chip] = list.splice(index, 1);
+    await this.save(chatId, userId);
+    return chip ?? null;
+  }
+  async removeWhere(chatId, userId, drop) {
+    const list = await this.list(chatId, userId);
+    const kept = list.filter((c) => !drop(c));
+    if (kept.length === list.length)
+      return;
+    this.chips.set(this.key(chatId, userId), kept);
+    await this.save(chatId, userId);
+  }
+  async lapse(chatId, userId) {
+    const list = await this.list(chatId, userId);
+    const gone = list.filter((c) => c.expires === "next_send");
+    if (gone.length === 0)
+      return [];
+    this.chips.set(this.key(chatId, userId), list.filter((c) => c.expires !== "next_send"));
+    await this.save(chatId, userId);
+    return gone;
+  }
+  async prune(chatId, userId, alive) {
+    const list = await this.list(chatId, userId);
+    const kept = list.filter((c) => alive.has(c.messageId));
+    if (kept.length === list.length)
+      return;
+    this.chips.set(this.key(chatId, userId), kept);
+    await this.save(chatId, userId);
+  }
+  async shiftSwipes(chatId, userId, messageId, deleted) {
+    const list = await this.list(chatId, userId);
+    const dropped = new Set;
+    let changed = false;
+    for (let i = list.length - 1;i >= 0; i--) {
+      const c = list[i];
+      if (!c || c.messageId !== messageId || c.swipeId === undefined || c.swipeId < deleted)
+        continue;
+      changed = true;
+      if (c.swipeId === deleted) {
+        dropped.add(c.id);
+        list.splice(i, 1);
+      } else
+        list[i] = { ...c, id: idAfterSwipeDelete(c.id, messageId, deleted) ?? c.id, swipeId: c.swipeId - 1 };
+    }
+    if (changed)
+      await this.save(chatId, userId);
+    return dropped;
+  }
+}
+function idAfterSwipeDelete(id, messageId, deleted) {
+  const head = `:${messageId}:`;
+  for (let at = id.indexOf(head);at >= 0; at = id.indexOf(head, at + 1)) {
+    const from = at + head.length;
+    const digits = /^\d+/.exec(id.slice(from))?.[0];
+    const end = from + (digits?.length ?? 0);
+    if (digits === undefined || end < id.length && id[end] !== ":")
+      continue;
+    const swipe = Number(digits);
+    if (swipe < deleted)
+      return id;
+    return swipe === deleted ? null : `${id.slice(0, from)}${swipe - 1}${id.slice(end)}`;
+  }
+  return id;
+}
+
+// src/backend/push.ts
+function diff(from, to, path = [], out = []) {
+  if (isRecord(from) && isRecord(to) && !Array.isArray(from) && !Array.isArray(to)) {
+    for (const key of Object.keys(from))
+      if (!(key in to))
+        out.push({ op: "del", path: [...path, key] });
+    for (const [key, value] of Object.entries(to)) {
+      const before = from[key];
+      if (before === undefined)
+        out.push({ op: "set", path: [...path, key], value });
+      else
+        diff(before, value, [...path, key], out);
+    }
+    return out;
+  }
+  if (JSON.stringify(from) !== JSON.stringify(to))
+    out.push({ op: "set", path, value: to });
+  return out;
+}
+function asJson(view) {
+  return JSON.parse(JSON.stringify(view));
+}
+
+class StatePush {
+  host;
+  build;
+  channels = new Map;
+  constructor(host, build) {
+    this.host = host;
+    this.build = build;
+  }
+  channel(chatId, userId) {
+    const key = `${userId}\x00${chatId}`;
+    let c = this.channels.get(key);
+    if (!c) {
+      c = { rev: 0, last: null, timer: null, running: null };
+      this.channels.set(key, c);
+    }
+    return c;
+  }
+  async snapshot(chatId, userId, frontendSessionId) {
+    const c = this.channel(chatId, userId);
+    const view = await this.build(chatId, userId);
+    c.rev++;
+    c.last = asJson(view);
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.snapshot", chatId, rev: c.rev, view }, userId, frontendSessionId);
+  }
+  changed(chatId, userId) {
+    const c = this.channel(chatId, userId);
+    if (c.timer)
+      return;
+    c.timer = setTimeout(() => {
+      c.timer = null;
+      this.run(c, chatId, userId);
+    }, 40);
+  }
+  run(c, chatId, userId) {
+    const prior = c.running ?? Promise.resolve();
+    c.running = prior.then(() => this.flush(chatId, userId)).catch((error) => this.host.log("error", `[LumiRPEngine] push ${chatId}: ${error instanceof Error ? error.message : String(error)}`));
+  }
+  async settle() {
+    for (const [key, c] of this.channels) {
+      if (c.timer) {
+        clearTimeout(c.timer);
+        c.timer = null;
+        const [userId = "", chatId = ""] = key.split("\x00");
+        this.run(c, chatId, userId);
+      }
+      await c.running;
+    }
+  }
+  async flush(chatId, userId) {
+    const c = this.channel(chatId, userId);
+    if (c.last === null) {
+      await this.snapshot(chatId, userId);
+      return;
+    }
+    const next = asJson(await this.build(chatId, userId));
+    const ops = diff(c.last, next);
+    if (ops.length === 0)
+      return;
+    const base = c.rev;
+    c.rev++;
+    c.last = next;
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.state.delta", chatId, base, rev: c.rev, ops }, userId);
+  }
+}
+
+// src/backend/start-markers.ts
+var LEVELS2 = [0, 1, 2, 3, 4];
+function at(map, key) {
+  return isRecord(map) && hasOwn(map, key) ? map[key] : undefined;
+}
+function levelAt(map, key) {
+  const v = at(map, key);
+  return LEVELS2.find((l) => l === v);
+}
+function worldFirstTime(user, world) {
+  const w = world.time;
+  const sceneTicks = { ...user.sceneTicks };
+  const ticks = at(w, "sceneTicks");
+  for (const [type, minutes] of Object.entries(isRecord(ticks) ? ticks : {}))
+    if (safeKey(type) && typeof minutes === "number" && Number.isFinite(minutes))
+      sceneTicks[type] = minutes;
+  const interrupts = { ...user.interrupts };
+  for (const cls of INTERRUPT_CLASSES) {
+    const policy = at(at(w, "interrupts"), cls);
+    if (policy === "stop" || policy === "note" || policy === "ignore")
+      interrupts[cls] = policy;
+  }
+  const speedThrough = { ...user.speedThrough };
+  const speeds = at(w, "speedThrough");
+  for (const [activity, s] of Object.entries(isRecord(speeds) ? speeds : {})) {
+    if (safeKey(activity) && isRecord(s) && (s.mode === "offer" || s.mode === "auto") && typeof s.thresholdMinutes === "number" && Number.isFinite(s.thresholdMinutes))
+      speedThrough[activity] = { mode: s.mode, thresholdMinutes: s.thresholdMinutes };
+  }
+  const montage = at(w, "montage");
+  const cap = at(w, "unitCap");
+  const unitCap = isRecord(cap) && typeof cap.agentDays === "number" && Number.isFinite(cap.agentDays) && typeof cap.events === "number" && Number.isFinite(cap.events) ? { agentDays: cap.agentDays, events: cap.events } : user.unitCap;
+  return { ...user, sceneTicks, interrupts, speedThrough, montage: montage === "key" || montage === "day" || montage === "week" ? montage : user.montage, unitCap };
+}
+function startMarkersFrom(settings, world, revision) {
+  const mine = settings.overrideWorldDefaults;
+  const out = [{ kind: "migrate", to: revision }];
+  for (const domain of DOMAINS)
+    out.push({ kind: "resolve", domain, scope: { all: true }, to: (mine ? undefined : levelAt(world.realism.levels, domain)) ?? settings.realism.levels[domain] });
+  for (const band of BANDS) {
+    const authored = at(world.realism.tierCaps, band);
+    const caps = mine || !isRecord(authored) ? settings.realism.tierCaps[band] : authored;
+    for (const domain of DOMAINS) {
+      const to = levelAt(caps, domain) ?? (at(authored, domain) !== undefined ? 4 : undefined);
+      if (to !== undefined)
+        out.push({ kind: "resolve", domain, scope: { tier: band }, to });
+    }
+  }
+  const t = mine ? settings.time : worldFirstTime(settings.time, world);
+  for (const [sceneType, minutes] of Object.entries(t.sceneTicks))
+    out.push({ kind: "time", control: "tick", scope: { sceneType }, to: minutes });
+  out.push({ kind: "time", control: "scale", scope: { all: true }, to: t.scale });
+  for (const cls of INTERRUPT_CLASSES)
+    out.push({ kind: "time", control: "interrupt", scope: { interrupt: cls }, to: t.interrupts[cls] });
+  for (const [activity, policy] of Object.entries(t.speedThrough))
+    out.push({ kind: "time", control: "speed_through", scope: { activity }, to: { mode: policy.mode, thresholdMinutes: policy.thresholdMinutes } });
+  out.push({ kind: "time", control: "montage", scope: { all: true }, to: t.montage });
+  out.push({ kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: t.unitCap.agentDays, events: t.unitCap.events } });
+  const authored = readAdjudication(world.ruleset?.adjudication);
+  out.push({ kind: "adjudicate", to: authored && !settings.overrideWorldAdjudication ? authored : settings.adjudication });
+  return out;
+}
+
+// src/backend/plan-notes.ts
+var PLAN_NOTES_CAP = 128;
+function lines(v) {
+  return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
+}
+
+class PlanNotes {
+  host;
+  notes = new Map;
+  constructor(host) {
+    this.host = host;
+  }
+  path(chatId) {
+    return `${runDir(chatId)}plans.json`;
+  }
+  async load(chatId, userId) {
+    const key = `${userId}\x00${chatId}`;
+    const known = this.notes.get(key);
+    if (known)
+      return known;
+    const raw = await readStoredJson(this.host, this.path(chatId), userId, "plan lines", isRecord);
+    const map = new Map;
+    if (isRecord(raw)) {
+      for (const seed of Object.keys(raw)) {
+        const v = hasOwn(raw, seed) ? raw[seed] : undefined;
+        if (safeKey(seed) && isRecord(v))
+          map.set(seed, { outcome: lines(v.outcome), montage: lines(v.montage), outline: lines(v.outline) });
+      }
+    }
+    this.notes.set(key, map);
+    if (this.notes.size > 256)
+      this.notes.delete(this.notes.keys().next().value ?? "");
+    return map;
+  }
+  async get(chatId, userId, seed) {
+    const found = (await this.load(chatId, userId)).get(seed);
+    return found ? { outcome: [...found.outcome], montage: [...found.montage], outline: [...found.outline] } : null;
+  }
+  async put(chatId, userId, seed, value) {
+    if (!safeKey(seed))
+      return;
+    const map = await this.load(chatId, userId);
+    map.delete(seed);
+    map.set(seed, value);
+    while (map.size > PLAN_NOTES_CAP)
+      map.delete(map.keys().next().value ?? "");
+    const path = this.path(chatId);
+    await this.host.storage.write(`${path}.tmp`, JSON.stringify(Object.fromEntries(map)), userId);
+    await this.host.storage.move(`${path}.tmp`, path, userId);
+  }
+}
+
+// src/backend/outcome-notes.ts
+function isOutcomeNote(raw) {
+  return isRecord(raw) && typeof raw.id === "string" && typeof raw.messageId === "string" && typeof raw.text === "string" && (raw.toldTo === undefined || typeof raw.toldTo === "string");
+}
+
+class OutcomeNotes {
+  host;
+  notes = new Map;
+  constructor(host) {
+    this.host = host;
+  }
+  path(chatId) {
+    return `${runDir(chatId)}outcome-notes.json`;
+  }
+  async list(chatId, userId) {
+    const key = `${userId}\x00${chatId}`;
+    let known = this.notes.get(key);
+    if (!known) {
+      const raw = await readStoredJson(this.host, this.path(chatId), userId, "Outcome notes", Array.isArray);
+      known = this.notes.get(key) ?? (Array.isArray(raw) ? raw.filter(isOutcomeNote).map((n) => ({ id: n.id, messageId: n.messageId, text: n.text, ...n.toldTo !== undefined ? { toldTo: n.toldTo } : {} })) : []);
+      this.notes.set(key, known);
+      if (this.notes.size > 256)
+        this.notes.delete(this.notes.keys().next().value ?? "");
+    }
+    return known.map((n) => ({ ...n }));
+  }
+  async save(chatId, userId, notes) {
+    const key = `${userId}\x00${chatId}`;
+    const before = this.notes.get(key);
+    if (before && JSON.stringify(before) === JSON.stringify(notes))
+      return;
+    this.notes.delete(key);
+    this.notes.set(key, notes.map((n) => ({ ...n })));
+    if (this.notes.size > 256)
+      this.notes.delete(this.notes.keys().next().value ?? "");
+    const path = this.path(chatId);
+    await this.host.storage.write(`${path}.tmp`, JSON.stringify(notes), userId);
+    await this.host.storage.move(`${path}.tmp`, path, userId);
+  }
+}
+
+// src/backend/inspector-log.ts
+var INSPECTOR_RUNS = 10;
+var FORMAT = 2;
+var ACTIVATIONS = { confirmed: true, unconfirmed: true };
+var DELIVERIES = { verified: true, unverified: true, unchecked: true };
+function strings(v) {
+  return Array.isArray(v) && v.every((s) => typeof s === "string");
+}
+function isInspectorRecord(raw) {
+  if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.at !== "number" || typeof raw.activation !== "string" || !hasOwn(ACTIVATIONS, raw.activation))
+    return false;
+  if (!isRecord(raw.budget) || typeof raw.budget.sections !== "number" || typeof raw.budget.used !== "number" || !strings(raw.forced))
+    return false;
+  if (raw.warnings !== undefined && !strings(raw.warnings))
+    return false;
+  return Array.isArray(raw.sections) && raw.sections.every((s) => isRecord(s) && typeof s.slot === "string" && typeof s.label === "string" && typeof s.tokens === "number" && typeof s.clipped === "boolean" && typeof s.delivery === "string" && hasOwn(DELIVERIES, s.delivery));
+}
+var TRANSPORTS = ["none", "tools", "need"];
+var QUERY_KINDS = ["prefetch", "search", "get", "list"];
+function loreTracesOf(raw, legacy) {
+  if (!Array.isArray(raw))
+    return;
+  const out = [];
+  for (const t of raw) {
+    if (!isRecord(t) || !Array.isArray(t.queries) || !Array.isArray(t.entries) || typeof t.lookups !== "number" || !strings(t.notes))
+      continue;
+    const step = LORE_AUDIENCE.find((p) => p === t.step);
+    const policy = LORE_POLICIES.find((p) => p === t.policy);
+    const transport = TRANSPORTS.find((x) => x === t.transport);
+    if (!step || !policy || !transport || t.phase !== "pre" && t.phase !== "post")
+      continue;
+    if (t.entries.some((e) => isRecord(e) && e.secret === true))
+      continue;
+    const privateInputs = step === "npc.choose";
+    const queries = t.queries.flatMap((q) => {
+      const kind = isRecord(q) ? QUERY_KINDS.find((k) => k === q.kind) : undefined;
+      if (!kind || !isRecord(q) || typeof q.text !== "string")
+        return [];
+      if (privateInputs)
+        return [{ kind, text: legacy || kind !== "prefetch" ? "" : q.text }];
+      return typeof q.matched === "number" ? [{ kind, text: legacy ? "" : q.text, matched: q.matched }] : [];
+    });
+    const entries = privateInputs ? [] : t.entries.flatMap((e) => isRecord(e) && typeof e.title === "string" && typeof e.tokens === "number" && typeof e.cut === "boolean" ? [{ title: e.title, tokens: e.tokens, cut: e.cut }] : []);
+    out.push({ step, phase: t.phase, policy, transport, queries, entries, ...privateInputs ? { private: true } : {}, lookups: t.lookups, notes: [...t.notes] });
+  }
+  return out;
+}
+var MIND_PHASES = ["pre", "post", "skip"];
+var MIND_OUTCOMES = ["recorded", "reused", "failed", "leak_blocked", "skipped_limit"];
+var MIND_PROMPTS = ["world", "override", "default"];
+function mindTracesOf(raw) {
+  if (!Array.isArray(raw))
+    return;
+  return raw.flatMap((t) => {
+    if (!isRecord(t) || typeof t.who !== "string" || typeof t.ms !== "number" || typeof t.tokens !== "number")
+      return [];
+    const purpose = MIND_PURPOSES.find((p) => p === t.purpose);
+    const phase = MIND_PHASES.find((p) => p === t.phase);
+    const level = FIDELITIES.find((f) => f === t.level);
+    const outcome = MIND_OUTCOMES.find((o) => o === t.outcome);
+    const prompt = MIND_PROMPTS.find((p) => p === t.prompt);
+    if (!purpose || !phase || !level || !outcome || !prompt)
+      return [];
+    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt }];
+  });
+}
+function deliveryOf(raw) {
+  const out = {};
+  if (!isRecord(raw))
+    return out;
+  for (const slot of Object.keys(raw)) {
+    const v = raw[slot];
+    if (v === "verified" || v === "unverified")
+      out[slot] = v;
+  }
+  return out;
+}
+
+class InspectorLog {
+  host;
+  logs = new Map;
+  writes = new Map;
+  constructor(host) {
+    this.host = host;
+  }
+  path(chatId) {
+    return `${runDir(chatId)}inspector.json`;
+  }
+  async load(chatId, userId) {
+    const known = this.logs.get(chatId);
+    if (known?.userId === userId)
+      return known;
+    await this.writes.get(chatId);
+    const raw = await readStoredJson(this.host, this.path(chatId), userId, "inspector history", (r) => isRecord(r) && (r.v === 1 || r.v === FORMAT) && Array.isArray(r.records));
+    const raced = this.logs.get(chatId);
+    if (raced?.userId === userId)
+      return raced;
+    const records = isRecord(raw) && Array.isArray(raw.records) ? raw.records.filter(isInspectorRecord).slice(-INSPECTOR_RUNS) : [];
+    const legacy = isRecord(raw) && raw.v !== FORMAT;
+    const log = {
+      userId,
+      records: records.map(({ lore, minds, ...r }) => {
+        const traces = loreTracesOf(lore, legacy);
+        const calls = mindTracesOf(minds);
+        return { ...r, ...traces ? { lore: traces } : {}, ...calls ? { minds: calls } : {} };
+      }),
+      delivery: isRecord(raw) ? deliveryOf(raw.delivery) : {}
+    };
+    this.logs.delete(chatId);
+    this.logs.set(chatId, log);
+    if (this.logs.size > 256)
+      this.logs.delete(this.logs.keys().next().value ?? "");
+    return log;
+  }
+  records(chatId) {
+    return this.logs.get(chatId)?.records;
+  }
+  async add(chatId, userId, record) {
+    const log = await this.load(chatId, userId);
+    log.records.push(record);
+    if (log.records.length > INSPECTOR_RUNS)
+      log.records.splice(0, log.records.length - INSPECTOR_RUNS);
+    this.save(chatId);
+  }
+  save(chatId) {
+    const log = this.logs.get(chatId);
+    if (!log)
+      return;
+    const path = this.path(chatId);
+    const write = (this.writes.get(chatId) ?? Promise.resolve()).then(async () => {
+      await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: FORMAT, records: log.records, delivery: log.delivery }), log.userId);
+      await this.host.storage.move(`${path}.tmp`, path, log.userId);
+    }).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: the inspector history wasn't saved (${error instanceof Error ? error.message : String(error)})`, log.userId));
+    this.writes.set(chatId, write);
+    write.finally(() => {
+      if (this.writes.get(chatId) === write)
+        this.writes.delete(chatId);
+    });
+  }
+  async settle() {
+    while (this.writes.size > 0)
+      await Promise.all([...this.writes.values()]);
+  }
+}
+
+// src/backend/preset-lint.ts
+var MIN_REASONING_MAX_TOKENS = 1500;
+var JSON_ASK = /\b(reply|replies|response|responses|respond|answer|output|end|append|include|finish)\b[^.\n]{0,80}\bjson\b/gi;
+var JSON_FENCE = /<json>|```json/i;
+var NEGATED2 = /\b(no|not|never|don't|dont|do not|avoid|without)\b/i;
+var REASONING_MODEL = /deepseek-(v4|r1|reasoner)|\br1\b|reason|think|\bo[134](-|$)|gpt-5|qwq|gemini-(2\.5|3)|claude-(opus|sonnet)-4|grok-[34]/i;
+function isReasoningModel(model) {
+  return REASONING_MODEL.test(model);
+}
+function jsonLedgerBlocks(blocks) {
+  return blocks.filter((b) => JSON_FENCE.test(b.content) || [...b.content.matchAll(JSON_ASK)].some((m) => !NEGATED2.test(b.content.slice(Math.max(0, (m.index ?? 0) - 24), (m.index ?? 0) + m[0].length))));
+}
+function presetCaveats(run, presetName) {
+  const preset = presetName ? `Your active preset \u201C${presetName}\u201D` : "Your active preset";
+  const out = [];
+  for (const b of jsonLedgerBlocks(run.blocks)) {
+    out.push({ code: "preset_json_ledger", message: `${preset} has an enabled block \u201C${b.name}\u201D that asks the narrator for JSON; replies will carry it. Turn it off in the preset if you don't want it.` });
+  }
+  if (run.maxTokens !== null && run.maxTokens < MIN_REASONING_MAX_TOKENS && isReasoningModel(run.model)) {
+    out.push({ code: "preset_low_max_tokens", message: `${preset} limits replies to ${run.maxTokens} tokens with a reasoning model (${run.model}); its reasoning can use them all and leave the reply empty. Raise max tokens to at least ${MIN_REASONING_MAX_TOKENS}.` });
+  }
+  return out;
+}
+
+// src/backend/turn-model.ts
+var NAMED = ["from", "to", "payer", "who", "entity"];
+function applyProposals(registry, w, proposals, seed, runSeed) {
+  const out = [];
+  proposals.forEach((proposal, i) => {
+    const type = typeof proposal.type === "string" ? proposal.type : "";
+    const channel = registry.proposals.get(type);
+    if (!channel) {
+      out.push({ proposal, events: [], materialized: [], rejection: { code: "unknown_channel", reason: `no channel for ${type}` } });
+      return;
+    }
+    const mark = w.mark();
+    const named = NAMED.map((k) => proposal[k]).filter((id) => typeof id === "string" && hasOwn(w.state.entities, id));
+    const materialized = [...new Set(named)].flatMap((id) => materializeAll(registry, w, id, runSeed));
+    const rejection = channel.validate(proposal, w.ctx);
+    if (rejection) {
+      w.restore(mark);
+      out.push(rejection.unseen ? { proposal, events: [], materialized: [], rejection: null, dropped: rejection.gm ?? rejection.reason } : { proposal, events: [], materialized: [], rejection });
+      return;
+    }
+    const result = applyEffects(registry, w, channel.toEffects(proposal, w.ctx), { bindings: { self: w.world.pov }, rng: createRng(`${seed}:proposal:${i}`) });
+    const failed = result.rejected[0];
+    if (failed) {
+      w.restore(mark);
+      out.push({ proposal, events: [], materialized: [], rejection: failed.rejection });
+      return;
+    }
+    out.push({ proposal, events: result.applied, materialized, rejection: null });
+  });
+  return out;
+}
+function clockMinutes(events) {
+  let minutes = 0;
+  for (const e of events)
+    if (e.type === "clock")
+      minutes += e.minutes;
+  return minutes;
+}
+var TIME_ADVANCE_CAP = 240;
+
+class TurnBridge {
+  registry;
+  pipeline;
+  runSeed;
+  intents = new Map;
+  interpreted = new Set;
+  unread = new Set;
+  unfit = new Map;
+  nexts = new Map;
+  reads = new Map;
+  plans = new Map;
+  readChips = new Map;
+  decisions = new Map;
+  minds = new Map;
+  prose = new Map;
+  offers = new Map;
+  skips = new Map;
+  constructor(registry, pipeline, runSeed) {
+    this.registry = registry;
+    this.pipeline = pipeline;
+    this.runSeed = runSeed;
+  }
+  setIntent(userText, intent, interpreted = false) {
+    this.intents.set(userText, intent);
+    trim(this.intents);
+    this.unread.delete(userText);
+    this.unfit.delete(userText);
+    if (interpreted && intent)
+      this.interpreted.add(userText);
+    else
+      this.interpreted.delete(userText);
+    if (this.interpreted.size > 64)
+      this.interpreted.delete(this.interpreted.values().next().value ?? "");
+  }
+  amendIntent(userText, intent) {
+    if (this.intents.has(userText))
+      this.intents.set(userText, intent);
+  }
+  setUnread(userText) {
+    this.intents.delete(userText);
+    this.interpreted.delete(userText);
+    this.unfit.delete(userText);
+    this.unread.add(userText);
+    if (this.unread.size > 64)
+      this.unread.delete(this.unread.values().next().value ?? "");
+  }
+  wasUnread(userText) {
+    return this.unread.has(userText);
+  }
+  setUnfit(userText, unfit, intent = null) {
+    this.setIntent(userText, intent, intent !== null);
+    this.unfit.set(userText, unfit);
+    trim(this.unfit);
+  }
+  unfitOf(userText) {
+    return this.unfit.get(userText);
+  }
+  wasInterpreted(userText) {
+    return this.interpreted.has(userText);
+  }
+  hasIntent(userText) {
+    return this.intents.has(userText);
+  }
+  intentOf(userText) {
+    return this.intents.get(userText) ?? null;
+  }
+  setDecisions(userText, events) {
+    if (events.length === 0)
+      this.decisions.delete(userText);
+    else
+      this.decisions.set(userText, events);
+    trim(this.decisions);
+  }
+  setMinds(userText, events) {
+    if (events.length === 0)
+      this.minds.delete(userText);
+    else
+      this.minds.set(userText, events);
+    trim(this.minds);
+  }
+  prePlan(userText) {
+    return [...this.decisions.get(userText) ?? [], ...this.minds.get(userText) ?? []];
+  }
+  setSkip(userText, record) {
+    if (record)
+      this.skips.set(userText, record);
+    else
+      this.skips.delete(userText);
+    trim(this.skips);
+  }
+  setOffer(userText, target) {
+    if (target)
+      this.offers.set(userText, target);
+    else
+      this.offers.delete(userText);
+    trim(this.offers);
+  }
+  offerFor(userText) {
+    return this.offers.get(userText);
+  }
+  setNext(userText, next) {
+    if (next)
+      this.nexts.set(userText, next);
+    else
+      this.nexts.delete(userText);
+    trim(this.nexts);
+  }
+  nextOf(userText) {
+    return this.nexts.get(userText);
+  }
+  setProse(seed, prose) {
+    this.prose.set(seed, prose);
+    trim(this.prose);
+  }
+  proseFor(seed) {
+    return this.prose.get(seed);
+  }
+  prepareRead(text, read) {
+    this.reads.set(hashParts("lre.read", text), read);
+    trim(this.reads);
+  }
+  planFor(seed) {
+    return this.plans.get(seed);
+  }
+  chipsFor(text) {
+    return this.readChips.get(hashParts("lre.read", text)) ?? [];
+  }
+  plan(input) {
+    const last = input.userTexts.at(-1) ?? "";
+    const w = new Working(this.registry, input.ctx.world, input.state);
+    w.applyAll(this.prePlan(last));
+    const result = this.pipeline.plan({
+      registry: this.registry,
+      world: input.ctx.world,
+      state: w.state,
+      runSeed: this.runSeed,
+      seed: input.seed,
+      kind: input.kind,
+      userTexts: input.userTexts,
+      intent: this.intents.get(last) ?? null,
+      skip: this.skips.get(last) ?? null
+    });
+    this.plans.set(input.seed, result);
+    trim(this.plans);
+    return [...w.events, ...result.events];
+  }
+  read(input) {
+    const key = hashParts("lre.read", input.text);
+    const prepared = this.reads.get(key);
+    const w = new Working(this.registry, input.ctx.world, input.state);
+    w.applyAll(prepared?.events ?? []);
+    const chips = [];
+    const proposals = [];
+    for (const p of prepared?.auto ?? []) {
+      if (p.type !== "time_advance") {
+        proposals.push(p);
+        continue;
+      }
+      const minutes = typeof p.minutes === "number" ? Math.round(p.minutes) : 0;
+      const outcome = applyTimeAdvance(this.registry, w, minutes, { runSeed: this.runSeed, capMinutes: TIME_ADVANCE_CAP, unitCap: w.state.time.unitCap });
+      if (outcome.chip)
+        chips.push({ target: outcome.chip.target, reason: outcome.reason === "unit_cap" ? "unit_cap" : "over_cap" });
+    }
+    applyProposals(this.registry, w, proposals, input.seed, this.runSeed);
+    if (prepared?.post !== false) {
+      const base = input.seed.split(":")[0] ?? input.seed;
+      const applied = (this.plans.get(base)?.elapsedMinutes ?? 0) + clockMinutes(w.events);
+      w.applyAll(this.pipeline.post({ registry: this.registry, world: input.ctx.world, state: w.state, runSeed: this.runSeed, seed: input.seed, appliedMinutes: applied, extracted: [...w.events] }));
+    }
+    w.applyAll(prepared?.minds ?? []);
+    this.readChips.set(key, chips);
+    trim(this.readChips);
+    return w.events;
+  }
+}
+function trim(map, cap = 64) {
+  while (map.size > cap) {
+    const first = map.keys().next();
+    if (first.done)
+      return;
+    map.delete(first.value);
+  }
 }
 
 // src/backend/view.ts
@@ -52127,6 +54575,9 @@ class Runtime {
   lastPlace = new Map;
   prePhase = new Map;
   loreTraces = new Map;
+  mindTraces = new Map;
+  minds;
+  beatMinds = (input) => runMinds(this.minds, input);
   constructor(options) {
     this.host = options.host;
     this.registry = createRegistry(options.packs);
@@ -52146,7 +54597,8 @@ class Runtime {
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792377279" }));
+    this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792435888" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -52297,13 +54749,33 @@ class Runtime {
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
     this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
+    const lastReply = before.findLast((m) => !m.isUser);
+    const mindsTask = preMinds(this.minds, { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? lastReply.swipes[lastReply.swipeId] ?? "" : "", timelapse: bridge.intentOf(text)?.action === TIMELAPSE_ACTION2, signal: budget.signal, guidance: preset.guidance.mind ?? "" });
     await this.judgeAnswer(bridge, text, render, settings, facts, budget, at);
     if (described)
       await this.judgeApproach(bridge, text, render, settings, facts, budget, at);
     const decisions = early ?? (choose && budget.take() ? await choose() : []);
     bridge.setDecisions(text, decisions);
+    const minds = await mindsTask;
+    bridge.setMinds(text, minds.events);
+    this.addMindTraces(input.chatId, p.generationId, minds.traces, true);
     if (text.trim() !== "")
-      this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${budget.spent} pre call(s)`, input.userId);
+      this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${minds.traces.length} mind(s), ${budget.spent} pre call(s)`, input.userId);
+    const intent = bridge.intentOf(text);
+    const base = intent?.action === TIMELAPSE_ACTION2 && mindsOn2(settings) ? input.core.planState(p.generationId, input.observed) : null;
+    let skip = null;
+    if (intent && base) {
+      const start = new Working(this.registry, base.world, base.state);
+      start.applyAll(bridge.prePlan(text));
+      try {
+        skip = await runSkip({ registry: this.registry, steps: this.steps, minds: this.beatMinds }, { chatId: input.chatId, userId: input.userId, world: base.world, state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
+      } catch (error) {
+        this.host.log("warn", `[LumiRPEngine] time skip not run: ${error instanceof Error ? error.message : String(error)}`, input.userId);
+      }
+      if (skip)
+        this.addMindTraces(input.chatId, p.generationId, skip.traces);
+    }
+    bridge.setSkip(text, skip?.record ?? null);
   }
   async afterPlan(input) {
     const bridge = this.bridges.get(input.chatId);
@@ -52341,6 +54813,18 @@ class Runtime {
     bridge.setProse(p.seed, prose);
     await this.keepPlanLines(input.chatId, input.userId, p.seed, plan, render.world, prose);
     this.host.log("info", `[LumiRPEngine] plan ${input.generationId.slice(0, 8)}: brief ${brief === "" ? "none" : "yes"}, ${outlines.flat().length} outline line(s), ${budget.spent} pre call(s)`, input.userId);
+  }
+  addMindTraces(chatId, generationId, traces, replace = false) {
+    const list = [...replace ? [] : this.mindTraces.get(generationId) ?? [], ...traces];
+    if (list.length === 0)
+      this.mindTraces.delete(generationId);
+    else
+      lruSet(this.mindTraces, generationId, list, 64);
+    const record = this.inspector.records(chatId)?.find((r) => r.id === generationId);
+    if (!record || list.length === 0)
+      return;
+    record.minds = structuredClone(list);
+    this.inspector.save(chatId);
   }
   async keepPlanLines(chatId, userId, seed, plan, world, prose) {
     if (!plan)
@@ -52704,7 +55188,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text, userId, budget.signal, lore(contradictionRun)) : Promise.resolve(null);
     const choiceRuns = runsOf(modelUse, context.world, "choices", facts, { output: "text", guidance });
     const choiceTasks = choiceRuns.map((r) => post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([]));
-    const [extracted, effects, decisions, contradicted, choices] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks)]);
+    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: context.world, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
+    const [extracted, effects, decisions, contradicted, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks), mindsTask]);
+    this.addMindTraces(chatId, key, minded.traces);
     const traces = this.loreTraces.get(key);
     const inspected = traces ? this.inspector.records(chatId)?.find((r) => r.id === key) : undefined;
     if (traces && inspected) {
@@ -52766,7 +55252,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       else
         confirm.push(fitted);
     }
-    bridge.prepareRead(input.content, { auto, post, events: decisions });
+    bridge.prepareRead(input.content, { auto, post, events: decisions, minds: minded.events });
     const w = new Working(this.registry, context.world, context.state);
     const outcomes = applyProposals(this.registry, w, auto.filter((p) => p.type !== "time_advance"), `${context.seed}:preview`, bridge.runSeed);
     const stored = [];
@@ -52975,7 +55461,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       const elapsed = summary.to - summary.from;
       const rest = summary.target.type === "duration" ? { type: "duration", minutes: Math.max(1, summary.target.minutes - elapsed) } : summary.target;
       const left = rest.type === "duration" ? ` (${compactSpan(rest.minutes)} left)` : "";
-      stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) } });
+      stored.push({ id: `tl:${at}:stop`, kind: "continue_timelapse", ...base, label: `Timelapse stopped: ${summary.stoppedBy === "mind" ? plan?.timelapse?.mindName ?? "someone" : STOP_LABEL[summary.stoppedBy]}`, detail: `Continue to the original target${left}?`, actions: [{ id: "timelapse", label: "Continue", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(rest)) } });
     }
     for (const [i, chip] of bridge.chipsFor(input.content).entries())
       stored.push(skipAheadChip(`adv:${at}:${i}`, base, chip.target, chip.reason));
@@ -53090,6 +55576,9 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const traces = plan ? this.loreTraces.get(plan.generationId) : undefined;
     if (traces)
       record.lore = structuredClone(traces);
+    const minded = plan ? this.mindTraces.get(plan.generationId) : undefined;
+    if (minded)
+      record.minds = structuredClone(minded);
     if (bookId && present.size === 0)
       record.warnings = ["The world's book wasn't attached to this chat, so no engine sections reached the narrator. It is re-attached for the next turn."];
     else if (bookId && index) {
@@ -53101,6 +55590,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         this.book.ensure(world, index, input.userId).catch((error) => this.host.log("warn", `[LumiRPEngine] book repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
     }
     let budget = settings.modelUse.tokens.sections;
+    const mindsBudget = settings.minds.tokens;
+    const fullMinds = worldMindsOf(world).secrecy === "full";
     const { delivery } = await this.inspector.load(input.chatId, input.userId);
     const uncounted = [];
     const hinted = [];
@@ -53132,7 +55623,8 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
         lines.unshift(...planned.outcome);
       if (section.id === "montage")
         lines.push(...planned.montage);
-      const safe = lines.filter((l) => findLeaks(l, secrets).length === 0);
+      const minds = section.id === MINDS_SLOT;
+      const safe = minds && fullMinds ? lines : lines.filter((l) => findLeaks(l, secrets).length === 0);
       if (safe.length === 0)
         continue;
       const content = renderSection(section.label, section.template, safe);
@@ -53141,11 +55633,12 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       if (counted === undefined)
         uncounted.push(content);
       const cost = counted ?? sectionTokens(content);
-      const clipped = section.rank > 0 && cost > budget;
+      const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
       record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, delivery: clipped ? "unchecked" : delivery[section.id] ?? "unchecked" });
       if (clipped)
         continue;
-      budget -= cost;
+      if (!minds)
+        budget -= cost;
       if (routed)
         routedSlots.add(section.id);
       const placement = routed ? null : placementOf(section);
@@ -53493,7 +55986,8 @@ function planLines(plan, world, registry) {
   if (summary) {
     const cal = calendarOf(world);
     const span = spanText(summary.to - summary.from);
-    outcome.push(`Time passed: ${span}, from ${formatClock(cal, summary.from)} to ${formatClock(cal, summary.to)}${summary.stoppedBy ? `, stopped early by ${STOP_LABEL[summary.stoppedBy]}` : ""}. Narrate only this span.`);
+    const by = summary.stoppedBy === "mind" ? plan.timelapse?.mindName ?? "someone" : summary.stoppedBy ? STOP_LABEL[summary.stoppedBy] : null;
+    outcome.push(`Time passed: ${span}, from ${formatClock(cal, summary.from)} to ${formatClock(cal, summary.to)}${by ? `, stopped early by ${by}` : ""}. Narrate only this span.`);
   }
   if (plan.stopped)
     outcome.push(`The rest of the player's message hasn't happened (${STOPPED_NOTE[plan.stopped.cause]}); don't narrate it.`);
@@ -53656,7 +56150,7 @@ function describeProposal(p, world, state) {
 var ASPECT_LABEL = { kind: "Kind", name: "Name", tier: "Tier", agent: "Lives off-screen", levels: "Level overrides", class: "Classes and tags", life: "Life state" };
 var MAX_TEXT = 140;
 var STATUS_ORDER = { new: 0, changed: 1, removed: 2 };
-function clip(text) {
+function clip2(text) {
   return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}\u2026` : text;
 }
 function byDefault(touched) {
@@ -53688,10 +56182,10 @@ function upgradePreview(reg, plan, state, after, inForce) {
     if (typeof v === "number")
       return def?.type === "money" ? formatMoney(v, after.currency) : String(v);
     if (typeof v === "string")
-      return clip(nameOf(v) ?? v);
+      return clip2(nameOf(v) ?? v);
     if (Array.isArray(v))
-      return v.length === 0 ? "none" : clip(`${v.length} \xD7 ${JSON.stringify(v)}`);
-    return clip(JSON.stringify(v));
+      return v.length === 0 ? "none" : clip2(`${v.length} \xD7 ${JSON.stringify(v)}`);
+    return clip2(JSON.stringify(v));
   };
   const aspectText = (aspect, v) => {
     if (aspect === "kind" && typeof v === "string")
@@ -53709,7 +56203,7 @@ function upgradePreview(reg, plan, state, after, inForce) {
     }
     return valueText(v);
   };
-  const linkText = (r) => r ? r.fields && Object.keys(r.fields).length > 0 ? clip(`linked, ${Object.entries(r.fields).map(([k, x]) => `${k.replace(/_/g, " ")} ${valueText(x)}`).join(", ")}`) : "linked" : "not linked";
+  const linkText = (r) => r ? r.fields && Object.keys(r.fields).length > 0 ? clip2(`linked, ${Object.entries(r.fields).map(([k, x]) => `${k.replace(/_/g, " ")} ${valueText(x)}`).join(", ")}`) : "linked" : "not linked";
   const rows = [];
   const shown = new Set;
   for (const d of plan.entities) {
@@ -53893,9 +56387,45 @@ function buildGmWorld(reg, world, state) {
   };
 }
 
+// src/packs/minds/core/gm.ts
+var LEVEL_ORDER = { live: 0, near: 1, far: 2, background: 3 };
+function outOfPlay(id, why) {
+  return { entity: id, level: "background", score: 0, reasons: [{ label: why, points: 0 }], pin: { gm: null, author: null } };
+}
+function characterView(ctx, id, c, fidelity, memory) {
+  const { world, state } = ctx;
+  const cal = calendarOf(world);
+  const clock = (at) => formatClock(cal, at);
+  const name = (who) => own(state.entities, who)?.name ?? who;
+  const plans = [...c.plans].sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || a.when.from - b.when.from);
+  const mind = c.mind ? { ...c.mind, clock: clock(c.mind.at), plans: c.plans.filter((p) => c.mind?.plans.includes(p.id)) } : null;
+  return {
+    entity: id,
+    name: name(id),
+    fidelity,
+    refreshQueued: c.refresh,
+    mind,
+    plans: plans.map((p) => ({ ...p, fromText: clock(p.when.from), toText: clock(p.when.to) })),
+    notes: [...c.notes].reverse().map((n) => ({ ...n, now: Math.round(salienceNow(n, state.clock, memory) * 100) / 100, faded: faded(n, state.clock, memory), clock: clock(n.at) })),
+    commitments: [...c.commitments].sort((a, b) => (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || a.made - b.made).map((x) => ({ ...x, withNames: x.with.map(name), dueText: x.due === null ? null : clock(x.due) })),
+    witness: [...c.witness].reverse().map((w) => ({ ...w, clock: clock(w.at) })),
+    summary: c.summary
+  };
+}
+function buildMindsGm(ctx, texts, enabled, memory) {
+  const { registry: reg, world, state } = ctx;
+  const config = worldMindsOf(world);
+  const scores = new Map(fidelityOf(ctx, texts, config).map((s) => [s.entity, s]));
+  const people = Object.keys(state.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person"));
+  const characters = people.map((id) => characterView(ctx, id, readCharacter(state, id), scores.get(id) ?? outOfPlay(id, isGone(state, id) ? "Removed" : "Doesn't act"), memory));
+  characters.sort((a, b) => LEVEL_ORDER[a.fidelity.level] - LEVEL_ORDER[b.fidelity.level] || b.fidelity.score - a.fidelity.score || (a.entity < b.entity ? -1 : 1));
+  const secrecy = config.secrecy;
+  return { enabled, secrecy, now: state.clock, nowText: formatClock(calendarOf(world), state.clock), characters };
+}
+
 // src/backend/gm.ts
 var GM_EDITS = 40;
-function buildGmView(core, observed, registry) {
+function buildGmView(core, observed, registry, minds) {
   const render = core.renderState(observed);
   if (!render)
     return null;
@@ -53911,8 +56441,14 @@ function buildGmView(core, observed, registry) {
   return {
     ...buildGmWorld(registry, render.world, render.state),
     edits: edits.reverse().slice(0, GM_EDITS),
-    refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason }))
+    refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
+    minds: buildMindsGm(registry.context(render.world, render.state), latestTexts(observed), minds.enabled, effectiveMemory(render.world, minds))
   };
+}
+function latestTexts(observed) {
+  const text = (m) => m ? m.swipes[m.swipeId] ?? "" : "";
+  const lastUser = observed.findLastIndex((m) => m.isUser);
+  return { user: text(observed[lastUser]), reply: text(observed.slice(0, lastUser < 0 ? observed.length : lastUser).findLast((m) => !m.isUser)) };
 }
 
 // src/backend/dispatch.ts
@@ -54111,7 +56647,7 @@ class Dispatcher {
       case "lre.gm": {
         await this.requireWorldChat(r.chatId, userId);
         const core = await this.rt.ledger.core(r.chatId, userId);
-        const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry) : null;
+        const view = core ? buildGmView(core, toChain(await this.rt.host.chats.messages(r.chatId, userId)), this.rt.registry, (await this.rt.settings.get(userId)).minds) : null;
         if (!view)
           throw new RequestError("unavailable", "the chat's world revision is not loaded");
         reply("lre.gm", view);
@@ -54830,13 +57366,13 @@ function toJsonObject(value) {
       out[k] = toJson(v);
   return out;
 }
-function str5(o, key) {
+function str7(o, key) {
   if (!isRecord(o))
     return;
   const v = o[key];
   return typeof v === "string" ? v : undefined;
 }
-function num3(o, key) {
+function num4(o, key) {
   if (!isRecord(o))
     return;
   const v = o[key];
@@ -54844,28 +57380,28 @@ function num3(o, key) {
 }
 var GENERATION_TYPES = { normal: "normal", regenerate: "regenerate", swipe: "swipe", continue: "continue", impersonate: "impersonate" };
 function generationType(o) {
-  return GENERATION_TYPES[str5(o, "generationType") ?? "normal"] ?? "normal";
+  return GENERATION_TYPES[str7(o, "generationType") ?? "normal"] ?? "normal";
 }
 function decodeMessage(raw, chatId) {
   if (!isRecord(raw))
     return null;
-  const id = str5(raw, "id");
+  const id = str7(raw, "id");
   if (!id)
     return null;
   const swipes = Array.isArray(raw.swipes) ? raw.swipes.map((s) => typeof s === "string" ? s : "") : [];
-  const content = str5(raw, "content") ?? "";
-  const swipeId = num3(raw, "swipe_id") ?? 0;
+  const content = str7(raw, "content") ?? "";
+  const swipeId = num4(raw, "swipe_id") ?? 0;
   if (swipes.length === 0)
     swipes.push(content);
   const extra = isRecord(raw.extra) ? raw.extra : {};
   const metadata = isRecord(raw.metadata) ? raw.metadata : isRecord(extra.spindle_metadata) ? extra.spindle_metadata : {};
-  const role = str5(raw, "role");
+  const role = str7(raw, "role");
   return {
     id,
-    chatId: str5(raw, "chat_id") ?? chatId,
-    index: num3(raw, "index_in_chat") ?? 0,
+    chatId: str7(raw, "chat_id") ?? chatId,
+    index: num4(raw, "index_in_chat") ?? 0,
     isUser: raw.is_user === true || role === "user",
-    name: str5(raw, "name") ?? "",
+    name: str7(raw, "name") ?? "",
     content,
     swipeId,
     swipes,
@@ -54874,41 +57410,41 @@ function decodeMessage(raw, chatId) {
 }
 var SWIPE_ACTIONS = { added: "added", navigated: "navigated", updated: "updated", deleted: "deleted" };
 function decodeEvent(event, p) {
-  const chatId = str5(p, event === "CHAT_DELETED" ? "id" : "chatId");
+  const chatId = str7(p, event === "CHAT_DELETED" ? "id" : "chatId");
   if (!chatId)
     return null;
   switch (event) {
     case "GENERATION_STARTED":
     case "GENERATION_IN_PROGRESS": {
-      const generationId = str5(p, "generationId");
+      const generationId = str7(p, "generationId");
       if (!generationId)
         return null;
       const base = {
         generationId,
         chatId,
-        model: str5(p, "model") ?? "",
-        targetMessageId: str5(p, "targetMessageId") ?? null,
-        targetSwipeId: num3(p, "targetSwipeId") ?? null,
-        characterId: str5(p, "characterId") ?? null,
-        characterName: str5(p, "characterName") ?? null
+        model: str7(p, "model") ?? "",
+        targetMessageId: str7(p, "targetMessageId") ?? null,
+        targetSwipeId: num4(p, "targetSwipeId") ?? null,
+        characterId: str7(p, "characterId") ?? null,
+        characterName: str7(p, "characterName") ?? null
       };
       if (event === "GENERATION_IN_PROGRESS")
         return base;
-      const frontendSessionId = str5(p, "frontendSessionId");
+      const frontendSessionId = str7(p, "frontendSessionId");
       return { ...base, generationType: generationType(p), ...frontendSessionId ? { frontendSessionId } : {} };
     }
     case "GENERATION_ENDED": {
-      const generationId = str5(p, "generationId");
+      const generationId = str7(p, "generationId");
       if (!generationId)
         return null;
-      const messageId = str5(p, "messageId");
-      const error = str5(p, "error");
-      const finish = str5(p, "finish_reason");
-      const draft = str5(p, "impersonateDraft");
+      const messageId = str7(p, "messageId");
+      const error = str7(p, "error");
+      const finish = str7(p, "finish_reason");
+      const draft = str7(p, "impersonateDraft");
       return {
         generationId,
         chatId,
-        content: str5(p, "content") ?? "",
+        content: str7(p, "content") ?? "",
         generationType: generationType(p),
         ...messageId ? { messageId } : {},
         ...error ? { error } : {},
@@ -54918,8 +57454,8 @@ function decodeEvent(event, p) {
       };
     }
     case "GENERATION_STOPPED": {
-      const generationId = str5(p, "generationId");
-      return generationId ? { generationId, chatId, content: str5(p, "content") ?? "" } : null;
+      const generationId = str7(p, "generationId");
+      return generationId ? { generationId, chatId, content: str7(p, "content") ?? "" } : null;
     }
     case "MESSAGE_SENT":
     case "MESSAGE_EDITED": {
@@ -54928,25 +57464,25 @@ function decodeEvent(event, p) {
     }
     case "MESSAGE_SWIPED": {
       const message = decodeMessage(isRecord(p) ? p.message : null, chatId);
-      const action = SWIPE_ACTIONS[str5(p, "action") ?? ""];
+      const action = SWIPE_ACTIONS[str7(p, "action") ?? ""];
       if (!message || !action)
         return null;
-      const previousSwipeId = num3(p, "previousSwipeId");
-      return { chatId, message, action, swipeId: num3(p, "swipeId") ?? message.swipeId, ...previousSwipeId !== undefined ? { previousSwipeId } : {} };
+      const previousSwipeId = num4(p, "previousSwipeId");
+      return { chatId, message, action, swipeId: num4(p, "swipeId") ?? message.swipeId, ...previousSwipeId !== undefined ? { previousSwipeId } : {} };
     }
     case "CHAT_DELETED":
       return { chatId };
     case "MESSAGE_DELETED": {
-      const messageId = str5(p, "messageId");
+      const messageId = str7(p, "messageId");
       return messageId ? { chatId, messageId } : null;
     }
     case "WORLD_INFO_ACTIVATED": {
       const entries = [];
       if (isRecord(p) && Array.isArray(p.entries)) {
         for (const e of p.entries) {
-          const id = str5(e, "id");
+          const id = str7(e, "id");
           if (id)
-            entries.push({ id, comment: str5(e, "comment") ?? "", source: str5(e, "source") ?? "", bookId: str5(e, "bookId") ?? "" });
+            entries.push({ id, comment: str7(e, "comment") ?? "", source: str7(e, "source") ?? "", bookId: str7(e, "bookId") ?? "" });
         }
       }
       return { chatId, entries, stats: isRecord(p) && isRecord(p.stats) ? toJsonObject(p.stats) : {} };
@@ -54954,7 +57490,7 @@ function decodeEvent(event, p) {
   }
 }
 function decodeAnswer(raw) {
-  const type = str5(raw, "type");
+  const type = str7(raw, "type");
   if (!isRecord(raw))
     return null;
   const probabilities = {};
@@ -54964,21 +57500,21 @@ function decodeAnswer(raw) {
         probabilities[k] = v;
   }
   if (type === "choice")
-    return { type, choice: str5(raw, "choice") ?? "", probabilities, confidence: num3(raw, "confidence") ?? 0 };
+    return { type, choice: str7(raw, "choice") ?? "", probabilities, confidence: num4(raw, "confidence") ?? 0 };
   if (type === "score")
-    return { type, score: num3(raw, "score") ?? 0, probabilities, confidence: num3(raw, "confidence") ?? 0 };
+    return { type, score: num4(raw, "score") ?? 0, probabilities, confidence: num4(raw, "confidence") ?? 0 };
   if (type === "noul")
-    return { type, noul: num3(raw, "noul") ?? 0.5 };
+    return { type, noul: num4(raw, "noul") ?? 0.5 };
   return null;
 }
 function usageTokens(raw) {
   if (!isRecord(raw) || !isRecord(raw.usage))
     return 0;
   const u = raw.usage;
-  const total = num3(u, "total_tokens");
+  const total = num4(u, "total_tokens");
   if (total !== undefined)
     return total;
-  return (num3(u, "input_tokens") ?? num3(u, "prompt_tokens") ?? 0) + (num3(u, "output_tokens") ?? num3(u, "completion_tokens") ?? 0);
+  return (num4(u, "input_tokens") ?? num4(u, "prompt_tokens") ?? 0) + (num4(u, "output_tokens") ?? num4(u, "completion_tokens") ?? 0);
 }
 function entryInput(entry) {
   return {
@@ -55055,6 +57591,12 @@ async function listScripts(options, userId) {
 function createSpindleHost() {
   const diagnostics = new DiagnosticsLog;
   return {
+    characters: {
+      async card(characterId, userId) {
+        const c = await spindle.characters.get(characterId, userId);
+        return c ? { name: c.name, description: c.description, personality: c.personality, scenario: c.scenario } : null;
+      }
+    },
     chats: {
       async messages(chatId) {
         const rows = await spindle.chat.getMessages(chatId);
@@ -55135,18 +57677,18 @@ function createSpindleHost() {
     },
     registerContextHandler(handler, timeoutMs) {
       spindle.registerContextHandler(async (context, signal) => {
-        const chatId = str5(context, "chatId");
-        const userId = str5(context, "userId");
+        const chatId = str7(context, "chatId");
+        const userId = str7(context, "userId");
         if (chatId && userId) {
           const input = {
             chatId,
             userId,
             generationType: generationType(context),
             dryRun: isRecord(context) && context.dryRun === true,
-            connectionId: str5(context, "connectionId") ?? null,
-            personaId: str5(context, "personaId") ?? null
+            connectionId: str7(context, "connectionId") ?? null,
+            personaId: str7(context, "personaId") ?? null
           };
-          const session = str5(context, "frontendSessionId");
+          const session = str7(context, "frontendSessionId");
           if (session)
             input.frontendSessionId = session;
           await handler(input, signal ?? new AbortController().signal);
@@ -55192,8 +57734,8 @@ function createSpindleHost() {
           signal
         });
         const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
-        const toolCalls = calls.flatMap((c, i) => isRecord(c) && typeof c.name === "string" ? [{ name: c.name, args: toJsonObject(c.args), callId: str5(c, "call_id") ?? `call_${i}` }] : []);
-        return { content: str5(raw, "content") ?? "", finishReason: str5(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...toolCalls.length > 0 ? { toolCalls } : {} };
+        const toolCalls = calls.flatMap((c, i) => isRecord(c) && typeof c.name === "string" ? [{ name: c.name, args: toJsonObject(c.args), callId: str7(c, "call_id") ?? `call_${i}` }] : []);
+        return { content: str7(raw, "content") ?? "", finishReason: str7(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...toolCalls.length > 0 ? { toolCalls } : {} };
       },
       async decide(request, userId, signal) {
         const s = request.state;

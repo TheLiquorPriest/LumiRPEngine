@@ -1,4 +1,4 @@
-// node_modules/preact/dist/preact.mjs
+// ../../LumiRPEngine/node_modules/preact/dist/preact.mjs
 var n;
 var t;
 var i;
@@ -347,7 +347,7 @@ n = { __e: function(n, t, i, r) {
   return n.__v.__b - t.__v.__b;
 }, e = Symbol(), l = /(PointerCapture)$|Capture$/i, c = 0, a = {}, s = 0;
 
-// node_modules/preact/hooks/dist/hooks.mjs
+// ../../LumiRPEngine/node_modules/preact/hooks/dist/hooks.mjs
 var t2;
 var r2;
 var u2;
@@ -830,7 +830,11 @@ var STEP_OUTPUTS = {
   outline: ["text"],
   extract: ["text", "effects"],
   choices: ["text", "effects"],
-  judge: ["decision", "text"]
+  judge: ["decision", "text"],
+  mind: ["text"],
+  memory: ["text"],
+  skip: ["text"],
+  consolidate: ["text"]
 };
 
 // src/shared/lore.ts
@@ -1008,7 +1012,7 @@ function humanize(id) {
   const words = id.replace(/[_.]+/g, " ").trim();
   return words.length === 0 ? id : words[0]?.toUpperCase() + words.slice(1);
 }
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
+// ../../LumiRPEngine/node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
 var o3 = 0;
 function u3(t, e, n2, f, u, i) {
   e || (e = {});
@@ -4249,7 +4253,7 @@ var COLLECTION_SPECS = {
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' }
   ],
   steps: [
-    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"] },
+    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
     { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "enum", key: "output", label: "Output", values: ["text", "effects", "decision"] },
     { kind: "tags", key: "signals", label: "Signals" }
@@ -7296,6 +7300,212 @@ function LookupTableEditor(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 1200 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "brief",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, 8000],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num2 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
+var whole = (v, range, fallback) => Math.round(num2(v, range, fallback));
+var obj2 = (v) => isRecord(v) ? v : {};
+function selectorOrNull(v) {
+  if (!isRecord(v))
+    return null;
+  const out = {};
+  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
+  const ids = list(v.ids);
+  const kind = list(v.kind);
+  const tier = list(v.tier);
+  const memberOf = list(v.memberOf);
+  const tag = list(v.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v.class)) {
+      const vs = list(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m = obj2(raw);
+  const witness = obj2(m.witness);
+  const recall = obj2(m.recall);
+  const notes = obj2(m.notes);
+  const commitments = obj2(m.commitments);
+  const salience = obj2(m.salience);
+  const consolidate = obj2(m.consolidate);
+  return {
+    witness: { show: whole(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num2(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num2(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num2(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj2(world.minds);
+  const w = obj2(raw.weights);
+  const band = obj2(w.band);
+  const d = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v, fallback) => num2(v, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t = obj2(raw.thresholds);
+  const far = num2(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num2(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num2(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    weights: {
+      here: weight(w.here, d.here),
+      nearby: weight(w.nearby, d.nearby),
+      mentioned: weight(w.mentioned, d.mentioned),
+      regard: weight(w.regard, d.regard),
+      knows: weight(w.knows, d.knows),
+      owner: weight(w.owner, d.owner),
+      track: weight(w.track, d.track),
+      roles,
+      rule: weight(w.rule, d.rule),
+      pending: weight(w.pending, d.pending),
+      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
+      recent: weight(w.recent, d.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory)
+  };
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var MIND_PROMPT_MAX = 20000;
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+});
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen). Leave the list empty when there are none.",
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    "- plans: intentions with times that this turn formed.",
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+});
+
 // src/shared/settings.ts
 var LORE_POLICIES = ["none", "prefetch", "lookup", "prefetch+lookup"];
 var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 300 });
@@ -7368,7 +7578,11 @@ var STEP_LABEL = {
   outline: "Prose outline",
   extract: "Extract changes",
   choices: "Suggested choices",
-  judge: "Judge your approach"
+  judge: "Judge your approach",
+  mind: "Character minds",
+  memory: "Character memory",
+  skip: "Time-skip beats",
+  consolidate: "Memory consolidation"
 };
 var PHASES = ["pre", "post"];
 var PHASE_LABEL = { pre: "Before the reply", post: "After the reply" };
@@ -7736,6 +7950,493 @@ function StepsSection(props) {
       }, purpose, true, undefined, this);
     })
   }, undefined, false, undefined, this);
+}
+
+// src/frontend/settings/minds-patch.ts
+function mindsPolicyPatch(change) {
+  const minds = {};
+  if (change.enabled !== undefined)
+    minds.enabled = change.enabled;
+  if (change.liveLimit !== undefined)
+    minds.liveLimit = change.liveLimit;
+  if (change.farRefreshMinutes !== undefined)
+    minds.farRefreshMinutes = change.farRefreshMinutes;
+  if (change.tokens !== undefined)
+    minds.tokens = change.tokens;
+  if (change.memoryLevels !== undefined)
+    minds.memoryLevels = FIDELITIES.filter((f) => f !== "background" && change.memoryLevels?.includes(f));
+  if (change.nearRefresh)
+    minds.nearRefresh = { ...change.nearRefresh };
+  if (change.skip)
+    minds.skip = { ...change.skip };
+  return { modelUse: { preset: "custom" }, minds };
+}
+function withMemoryLevel(levels, level, on) {
+  return FIDELITIES.filter((f) => f !== "background" && (f === level ? on : levels.includes(f)));
+}
+function mindsPromptPatch(purpose, text) {
+  if (text !== null && text.length > MIND_PROMPT_MAX)
+    return null;
+  const own = text === null || text.trim() === "" || text.trim() === MIND_PROMPT_DEFAULTS[purpose].trim() ? null : text;
+  return { minds: { prompts: { [purpose]: own } } };
+}
+var MEMORY_FIELDS = [
+  { part: "witness", key: "show", label: "Witness log lines a mind sees", range: MINDS_RANGES.show, integer: true },
+  { part: "recall", key: "recent", label: "Recall: latest turns they were there for", range: MINDS_RANGES.show, integer: true },
+  { part: "recall", key: "relevant", label: "Recall: turns that best match the moment", range: MINDS_RANGES.show, integer: true },
+  { part: "recall", key: "tokens", label: "Recall: tokens it may take", range: MINDS_RANGES.recallTokens, integer: true, step: 100 },
+  { part: "notes", key: "show", label: "Notes a mind sees", range: MINDS_RANGES.show, integer: true },
+  { part: "notes", key: "keep", label: "Notes kept before the oldest are folded", range: MINDS_RANGES.keep, integer: true },
+  { part: "commitments", key: "show", label: "Open commitments a mind sees", range: MINDS_RANGES.show, integer: true },
+  { part: "salience", key: "halfLifeDays", label: "A note's salience halves every (days)", range: MINDS_RANGES.halfLifeDays, step: 1 },
+  { part: "salience", key: "floor", label: "Under this salience a note has faded", range: MINDS_RANGES.floor, step: 0.1 },
+  { part: "consolidate", key: "enabled", label: "Fold faded and surplus notes into the summary" },
+  { part: "consolidate", key: "periodDays", label: "Fold a character's notes at most every (days)", range: MINDS_RANGES.periodDays, step: 1 }
+];
+function memoryValue(config, field) {
+  const part = config[field.part];
+  return part[field.key] ?? 0;
+}
+function memoryOverride(memory, field) {
+  const part = memory[field.part];
+  return part?.[field.key];
+}
+function memoryOverridePatch(field, value) {
+  if (typeof value === "number") {
+    const [lo, hi] = field.range ?? [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
+    if (!field.range || !Number.isFinite(value) || value < lo || value > hi || field.integer && !Number.isInteger(value))
+      return null;
+  } else if (typeof value === "boolean" && field.range)
+    return null;
+  return { minds: { memory: { [field.part]: { [field.key]: value } } } };
+}
+
+// src/packs/minds/ui/ops.ts
+var FIDELITY_LABEL = { live: "Live", near: "Near", far: "Far", background: "Background" };
+var PLAN_KIND_LABEL = { errand: "Errand", meet: "Meet", visit: "Visit", work: "Work", rest: "Rest", leisure: "Leisure", other: "Other" };
+var PLAN_STATUS_LABEL = { open: "Open", done: "Done", dropped: "Dropped" };
+var COMMITMENT_KIND_LABEL = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
+var COMMITMENT_STATUS_LABEL = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
+function pinOp(entity, level) {
+  return { op: "mind_pin", entity, level };
+}
+function refreshOp(entity) {
+  return { op: "mind_refresh", entity };
+}
+function deleteOp(entity, part, id) {
+  return { op: "mind_memory", entity, part, id, value: null };
+}
+function textIn(text, cap) {
+  const t = text.trim().replace(/\s+/g, " ");
+  return t === "" || t.length > cap ? null : t;
+}
+function wholeIn(text, lo, hi) {
+  if (text.trim() === "")
+    return null;
+  const n = Number(text);
+  return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
+}
+function noteDraft(note) {
+  return { text: note?.text ?? "", salience: String(note?.salience ?? 3) };
+}
+function noteOp(entity, id, draft) {
+  const text = textIn(draft.text, MIND_TEXT_CAPS.note);
+  const salience = wholeIn(draft.salience, 1, 5);
+  if (text === null || salience === null)
+    return null;
+  return { op: "mind_memory", entity, part: "note", id, value: { text, salience } };
+}
+function commitmentDraft(c) {
+  return { kind: c?.kind ?? "promise", with: [...c?.with ?? []], text: c?.text ?? "", due: c?.due ?? null, status: c?.status ?? "open" };
+}
+function commitmentOp(entity, id, draft) {
+  const text = textIn(draft.text, MIND_TEXT_CAPS.commitment);
+  const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
+  if (text === null || withIds.length === 0 || draft.due !== null && !Number.isFinite(draft.due))
+    return null;
+  const value = { kind: draft.kind, with: withIds, text, due: draft.due === null ? null : Math.round(draft.due), status: draft.status };
+  return { op: "mind_memory", entity, part: "commitment", id, value };
+}
+function planDraft(now, plan) {
+  if (plan)
+    return { what: plan.what, kind: plan.kind, from: plan.when.from, to: plan.when.to, where: plan.where, with: [...plan.with], priority: plan.priority, status: plan.status };
+  return { what: "", kind: "errand", from: now + 60, to: now + 120, where: null, with: [], priority: PLAN_PRIORITY.normal, status: "open" };
+}
+function startPlanIn(draft, now, hours) {
+  const from = Math.round(now + hours * 60);
+  return { ...draft, from, to: from + (draft.to - draft.from) };
+}
+function planLasts(draft, minutes) {
+  return { ...draft, to: draft.from + Math.round(minutes) };
+}
+function planOp(entity, id, draft) {
+  const what = textIn(draft.what, MIND_TEXT_CAPS.planWhat);
+  const ok = Number.isInteger(draft.from) && Number.isInteger(draft.to) && draft.from < draft.to && Number.isInteger(draft.priority) && draft.priority >= PLAN_PRIORITY.min && draft.priority <= PLAN_PRIORITY.max;
+  if (what === null || !ok)
+    return null;
+  const value = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: [...new Set(draft.with.filter((w) => w !== "" && w !== entity))], priority: draft.priority, status: draft.status };
+  return { op: "mind_memory", entity, part: "plan", id, value };
+}
+
+// src/frontend/build/minds-editor.tsx
+var SECRECY_EXPLAINED = {
+  brief: {
+    label: "Brief",
+    text: "The narrator gets only a short description of how each character comes across: what they do, how they look and sound. It is checked first, and left out if it would give away a secret or someone you haven't met. Their private thoughts and what they mean to do stay in the GM view. Safest against spoilers; the narrator has less to work with."
+  },
+  full: {
+    label: "Full",
+    text: "The narrator also gets each character's inner monologue and what they mean to do, told to show them through behaviour and never say them outright. Richer, more consistent characters; a careless narrator could let a thought or a secret slip."
+  }
+};
+var WEIGHT_LABEL = {
+  here: "In the player's scene",
+  nearby: "Close by (the same building or street)",
+  mentioned: "Named in the latest message or reply",
+  regard: "Strong feelings toward the player, either way (at the extreme)",
+  knows: "Knows the player, or is known",
+  owner: "Owns a quest, secret or agenda under way",
+  track: "Each track under way that names them (up to three)",
+  rule: "Named by a world rule",
+  pending: "Each pending thing with the player (up to three): an invitation, appointment, plan or commitment",
+  recent: "Seen with the player lately"
+};
+var BAND_LABEL2 = { principal: "Tier band: leads", supporting: "Tier band: supporting", background: "Tier band: background" };
+function mindsPartValue(config) {
+  if (JSON.stringify(config) === JSON.stringify(DEFAULT_WORLD_MINDS))
+    return {};
+  const out = structuredClone(config);
+  if (config.always === null)
+    delete out.always;
+  if (config.never === null)
+    delete out.never;
+  return out;
+}
+function roleOptions(doc) {
+  return Object.values(doc.classifications ?? {}).flatMap((facet) => Object.entries(facet.values).map(([id, v]) => ({ value: id, label: `${facet.label}: ${v.label}` })));
+}
+function Weight(props) {
+  return /* @__PURE__ */ u3(NumberStepper, {
+    label: props.label,
+    value: props.value,
+    min: MINDS_RANGES.weight[0],
+    max: MINDS_RANGES.weight[1],
+    step: 5,
+    disabled: props.disabled,
+    onChange: props.onChange
+  }, undefined, false, undefined, this);
+}
+function Roles(props) {
+  const options = roleOptions(props.doc);
+  const [pick, setPick] = d2("");
+  const left = options.filter((o) => props.roles[o.value] === undefined);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-minds-roles": true,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "Role values (a value nested under one counts as it), such as an antagonist"
+      }, undefined, false, undefined, this),
+      Object.entries(props.roles).map(([id, pts]) => /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3(Weight, {
+            label: options.find((o) => o.value === id)?.label ?? id,
+            value: pts,
+            disabled: props.disabled,
+            onChange: (v) => props.onChange({ ...props.roles, [id]: v })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small ghost",
+            "aria-label": `Remove ${id}`,
+            disabled: props.disabled,
+            onClick: () => props.onChange(Object.fromEntries(Object.entries(props.roles).filter(([k]) => k !== id))),
+            children: "✕"
+          }, undefined, false, undefined, this)
+        ]
+      }, id, true, undefined, this)),
+      left.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            "aria-label": "Role value",
+            value: pick,
+            disabled: props.disabled,
+            onChange: (event) => setPick(event.currentTarget.value),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: "Pick a value…"
+              }, undefined, false, undefined, this),
+              left.map((o) => /* @__PURE__ */ u3("option", {
+                value: o.value,
+                children: o.label
+              }, o.value, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small",
+            disabled: props.disabled || pick === "",
+            onClick: () => (props.onChange({ ...props.roles, [pick]: 20 }), setPick("")),
+            children: "Add"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : options.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "This world has no classifications yet."
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function MindTemplates(props) {
+  const app = useApp();
+  const send = b2(() => draftSend(app), [app]);
+  const [busy, run] = useBusy();
+  const open = (id) => app.ui.update((ui) => ({ ...ui, build: { view: "item", worldId: props.worldId, collection: "steps", id } }));
+  const add = (purpose) => run(async () => {
+    let n = 1;
+    while (props.doc.steps[`${purpose}_${n}`])
+      n++;
+    const id = `${purpose}_${n}`;
+    const message = await send({ type: "lre.editor", worldId: props.worldId, base: null, op: "put", collection: "steps", id, value: { id, purpose, template: MIND_PROMPT_DEFAULTS[purpose], output: "text", signals: [] } });
+    if (message.type === "lre.result")
+      open(id);
+  });
+  return /* @__PURE__ */ u3(Card, {
+    title: "Step templates",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-small lre-muted",
+        children: "A world's template for a step wins over the player's own prompt and the built-in one. A new template starts from the built-in prompt."
+      }, undefined, false, undefined, this),
+      MIND_PURPOSES.map((purpose) => {
+        const templates = Object.values(props.doc.steps).filter((t) => t.purpose === purpose).sort((a, b) => a.id.localeCompare(b.id));
+        return /* @__PURE__ */ u3("div", {
+          class: "lre-stack",
+          style: { gap: "2px" },
+          "data-lre-minds-templates": purpose,
+          children: [
+            /* @__PURE__ */ u3(Row, {
+              k: STEP_LABEL[purpose],
+              v: /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn small",
+                disabled: busy,
+                onClick: () => add(purpose),
+                children: "New template"
+              }, undefined, false, undefined, this),
+              sub: templates.length === 0 ? "None: the player's prompt, else the built-in" : undefined
+            }, undefined, false, undefined, this),
+            templates.map((t) => /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-item",
+              onClick: () => open(t.id),
+              children: [
+                /* @__PURE__ */ u3("span", {
+                  class: "grow",
+                  children: /* @__PURE__ */ u3("code", {
+                    children: t.id
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  class: "lre-dim",
+                  "aria-hidden": "true",
+                  children: "›"
+                }, undefined, false, undefined, this)
+              ]
+            }, t.id, true, undefined, this))
+          ]
+        }, purpose, true, undefined, this);
+      })
+    ]
+  }, undefined, true, undefined, this);
+}
+function MindsEditor() {
+  const app = useApp();
+  const draft = useSelect(app.drafts, (d) => d);
+  const send = b2(() => draftSend(app), [app]);
+  const initial = draft ? worldMindsOf(draft.doc) : DEFAULT_WORLD_MINDS;
+  const [value, setValue] = d2(initial);
+  const [busy, run] = useBusy();
+  useHeld(value, setValue, initial, `${draft?.worldId ?? ""}/minds`);
+  if (!draft)
+    return null;
+  const changed = JSON.stringify(value) !== JSON.stringify(initial);
+  const w = value.weights;
+  const setWeights = (patch) => setValue({ ...value, weights: { ...w, ...patch } });
+  const t = value.thresholds;
+  const ordered = t.live >= t.near && t.near >= t.far;
+  const save = (next) => run(() => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "minds", value: next }));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-editor": "part:minds",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h2",
+        children: "Minds"
+      }, undefined, false, undefined, this),
+      lintAt(draft.lint, "minds").map((issue, i) => /* @__PURE__ */ u3("div", {
+        class: issue.severity === "error" ? "lre-banner warn" : "lre-banner info",
+        children: issue.message
+      }, `${issue.code}:${i}`, false, undefined, this)),
+      /* @__PURE__ */ u3(Card, {
+        title: "What the narrator gets of a mind",
+        children: [
+          /* @__PURE__ */ u3(Seg, {
+            label: "Secrecy",
+            value: value.secrecy,
+            options: ["brief", "full"].map((s) => ({ value: s, label: SECRECY_EXPLAINED[s].label })),
+            disabled: busy,
+            onChange: (secrecy) => setValue({ ...value, secrecy })
+          }, undefined, false, undefined, this),
+          ["brief", "full"].map((s) => /* @__PURE__ */ u3(Row, {
+            k: SECRECY_EXPLAINED[s].label,
+            sub: SECRECY_EXPLAINED[s].text,
+            tone: s === value.secrecy ? undefined : "muted"
+          }, s, false, undefined, this)),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "Either way, the player never sees a mind; the GM view shows them all."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Focus weights",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "Points each thing adds to a character's focus score; the score decides how closely they are simulated. Negative points push them away."
+          }, undefined, false, undefined, this),
+          Object.keys(WEIGHT_LABEL).map((key) => /* @__PURE__ */ u3(Weight, {
+            label: WEIGHT_LABEL[key],
+            value: w[key],
+            disabled: busy,
+            onChange: (v) => setWeights({ [key]: v })
+          }, key, false, undefined, this)),
+          Object.keys(BAND_LABEL2).map((key) => /* @__PURE__ */ u3(Weight, {
+            label: BAND_LABEL2[key],
+            value: w.band[key],
+            disabled: busy,
+            onChange: (v) => setWeights({ band: { ...w.band, [key]: v } })
+          }, key, false, undefined, this)),
+          /* @__PURE__ */ u3(Roles, {
+            doc: draft.doc,
+            roles: w.roles,
+            disabled: busy,
+            onChange: (roles) => setWeights({ roles })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Thresholds",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "The lowest score for each level. Live characters think every turn; Near ones when something calls for it; Far ones now and then; under Far, Background characters follow their routine."
+          }, undefined, false, undefined, this),
+          ["live", "near", "far"].map((key) => /* @__PURE__ */ u3(NumberStepper, {
+            label: FIDELITY_LABEL[key],
+            value: t[key],
+            min: MINDS_RANGES.threshold[0],
+            max: MINDS_RANGES.threshold[1],
+            step: 5,
+            integer: true,
+            disabled: busy,
+            onChange: (v) => setValue({ ...value, thresholds: { ...t, [key]: v } })
+          }, key, false, undefined, this)),
+          ordered ? null : /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-warn",
+            children: "Live should be at least Near, and Near at least Far; out of order, the lower ones are raised to match."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Who always, and who never",
+        children: [
+          /* @__PURE__ */ u3(SelectorEditor, {
+            label: "Always Live",
+            value: value.always ?? undefined,
+            doc: draft.doc,
+            optional: true,
+            onChange: (next) => setValue({ ...value, always: next ?? null })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SelectorEditor, {
+            label: "Never a mind (wins over Always Live)",
+            value: value.never ?? undefined,
+            doc: draft.doc,
+            optional: true,
+            onChange: (next) => setValue({ ...value, never: next ?? null })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "A selector with nothing in it picks no one. The player's own character never gets a mind."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Memory defaults",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "How this world's characters remember. A player's own Settings → Minds → Memory wins."
+          }, undefined, false, undefined, this),
+          MEMORY_FIELDS.map((field) => {
+            const current = memoryValue(value.memory, field);
+            const set = (v) => setValue({ ...value, memory: { ...value.memory, [field.part]: { ...value.memory[field.part], [field.key]: v } } });
+            return field.range ? /* @__PURE__ */ u3(NumberStepper, {
+              label: field.label,
+              value: typeof current === "number" ? current : null,
+              min: field.range[0],
+              max: field.range[1],
+              step: field.step ?? 1,
+              integer: field.integer === true,
+              disabled: busy,
+              onChange: set
+            }, `${field.part}.${field.key}`, false, undefined, this) : /* @__PURE__ */ u3(HostSwitch, {
+              label: field.label,
+              checked: current === true,
+              disabled: busy,
+              onChange: set
+            }, `${field.part}.${field.key}`, false, undefined, this);
+          })
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-savebar",
+        children: [
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn primary",
+            disabled: !changed || busy,
+            onClick: () => save(mindsPartValue(value)),
+            children: "Save to draft"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn ghost",
+            disabled: !changed || busy,
+            onClick: () => setValue(initial),
+            children: "Revert"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn ghost",
+            disabled: busy || draft.doc.minds === undefined,
+            onClick: () => save({}),
+            children: "Use the defaults"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(MindTemplates, {
+        doc: draft.doc,
+        worldId: draft.worldId
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
 }
 
 // src/frontend/build/lore-editor.tsx
@@ -8769,7 +9470,7 @@ function presetAdjudication(id) {
 function threshold(v, fallback) {
   return v === null ? null : typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
 }
-function whole(v, [lo, hi], fallback) {
+function whole2(v, [lo, hi], fallback) {
   return typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : fallback;
 }
 function oneOf2(v, values, fallback) {
@@ -8785,18 +9486,18 @@ function readAdjudication(raw) {
     return presetAdjudication(preset);
   const base = ADJUDICATION_PRESETS.crunchy;
   const d = isRecord(raw.description) ? raw.description : {};
-  const max = whole(d.max, ADJUDICATION_BOUNDS.descriptionMax, base.description.max);
+  const max = whole2(d.max, ADJUDICATION_BOUNDS.descriptionMax, base.description.max);
   return {
     preset,
     checks: oneOf2(raw.checks, CHECK_TIMINGS, base.checks),
     riskyAt: threshold(raw.riskyAt, base.riskyAt) ?? base.riskyAt,
     trivialAt: threshold(raw.trivialAt, base.trivialAt),
     impossibleAt: threshold(raw.impossibleAt, base.impossibleAt),
-    description: { weight: oneOf2(d.weight, DESCRIPTION_WEIGHTS, base.description.weight), max, advantageAt: whole(d.advantageAt, [1, max], Math.min(max, base.description.advantageAt)) },
+    description: { weight: oneOf2(d.weight, DESCRIPTION_WEIGHTS, base.description.weight), max, advantageAt: whole2(d.advantageAt, [1, max], Math.min(max, base.description.advantageAt)) },
     authority: oneOf2(raw.authority, CHECK_AUTHORITIES, base.authority),
-    closeBy: whole(raw.closeBy, ADJUDICATION_BOUNDS.closeBy, base.closeBy),
+    closeBy: whole2(raw.closeBy, ADJUDICATION_BOUNDS.closeBy, base.closeBy),
     retry: oneOf2(raw.retry, RETRY_RULES, base.retry),
-    retryAfter: whole(raw.retryAfter, ADJUDICATION_BOUNDS.retryAfter, base.retryAfter)
+    retryAfter: whole2(raw.retryAfter, ADJUDICATION_BOUNDS.retryAfter, base.retryAfter)
   };
 }
 
@@ -11529,7 +12230,8 @@ var PARTS2 = [
   { id: "tiers", label: "Tiers" },
   { id: "time", label: "Time defaults" },
   { id: "ruleset", label: "Ruleset" },
-  { id: "loreIndex", label: "Lore lookup table" }
+  { id: "loreIndex", label: "Lore lookup table" },
+  { id: "minds", label: "Minds" }
 ];
 var TEMPLATES = [
   { id: null, label: "Blank" },
@@ -12454,6 +13156,8 @@ function PartView(props) {
     }, undefined, false, undefined, this);
   if (props.part === "ruleset")
     return /* @__PURE__ */ u3(RulesetEditor, {}, undefined, false, undefined, this);
+  if (props.part === "minds")
+    return /* @__PURE__ */ u3(MindsEditor, {}, undefined, false, undefined, this);
   return /* @__PURE__ */ u3(SchemaPartView, {
     part: props.part
   }, undefined, false, undefined, this);
@@ -12990,6 +13694,343 @@ function AdjudicationThisChat(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/settings/minds.tsx
+var PROMPT_NOTE = {
+  mind: "One call per character, as that character: what they think, how they come across, what they mean to do.",
+  memory: "After the reply, per character at the levels you pick: the notes, commitments and plans they take from it.",
+  skip: "Before a time skip: further moments in it worth stopping at.",
+  consolidate: "Folds a character's faded and surplus notes into their summary."
+};
+function LimitField(props) {
+  const fallback = props.fallback === "none" ? props.min : props.fallback;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    style: { gap: "2px" },
+    children: [
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: `${props.label}: ${props.noneLabel}`,
+        checked: props.value === "none",
+        disabled: props.disabled,
+        onChange: (none) => props.onChange(none ? "none" : fallback)
+      }, undefined, false, undefined, this),
+      props.value === "none" ? null : /* @__PURE__ */ u3(NumberStepper, {
+        label: props.label,
+        value: props.value,
+        min: props.min,
+        max: props.max,
+        step: props.step ?? 1,
+        integer: true,
+        disabled: props.disabled,
+        onChange: props.onChange
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PromptEditor(props) {
+  const builtIn = MIND_PROMPT_DEFAULTS[props.purpose];
+  const saved = props.value ?? builtIn;
+  const [text, setText] = d2(saved);
+  A(() => setText(saved), [saved]);
+  const save = mindsPromptPatch(props.purpose, text);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-card",
+    "data-lre-minds-prompt": props.purpose,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-spread",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "title",
+            children: STEP_LABEL[props.purpose]
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: props.value === undefined ? "lre-badge" : "lre-badge accent",
+            children: props.value === undefined ? "Built-in" : "Your own"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-small lre-muted",
+        children: PROMPT_NOTE[props.purpose]
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("textarea", {
+        class: "lre-input",
+        rows: 8,
+        "aria-label": `${STEP_LABEL[props.purpose]} prompt`,
+        value: text,
+        disabled: props.busy,
+        onInput: (event) => setText(event.currentTarget.value)
+      }, undefined, false, undefined, this),
+      text.length > MIND_PROMPT_MAX ? /* @__PURE__ */ u3("div", {
+        class: "lre-small lre-warn",
+        children: [
+          "Too long: at most ",
+          MIND_PROMPT_MAX.toLocaleString(),
+          " characters."
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("details", {
+        children: [
+          /* @__PURE__ */ u3("summary", {
+            class: "lre-small",
+            children: "The built-in default"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("pre", {
+            class: "lre-code",
+            style: { whiteSpace: "pre-wrap" },
+            children: builtIn
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn primary small",
+            disabled: props.busy || save === null || text === saved,
+            onClick: () => save && props.patch(save),
+            children: "Save"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn ghost small",
+            disabled: props.busy || text === saved,
+            onClick: () => setText(saved),
+            children: "Revert"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small",
+            disabled: props.busy || props.value === undefined,
+            onClick: () => props.patch(mindsPromptPatch(props.purpose, null) ?? {}),
+            children: "Reset to the default"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function MindsSection(props) {
+  const { minds, busy } = props;
+  const policy = (change) => props.patch(mindsPolicyPatch(change));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    children: [
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: "Character minds",
+        checked: minds.enabled,
+        disabled: busy,
+        onChange: (enabled) => policy({ enabled })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("p", {
+        class: "lre-small lre-muted",
+        style: { margin: 0 },
+        children: "Each character near the story thinks for themselves in their own model call, scoped to what they know. Picking a Model use preset sets everything here but your prompts and memory overrides; changing any of these makes it Custom."
+      }, undefined, false, undefined, this),
+      minds.enabled ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h2",
+            children: "How many think"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LimitField, {
+            label: "Live minds a turn",
+            noneLabel: "no limit",
+            value: minds.liveLimit,
+            min: 0,
+            max: 64,
+            fallback: MINDS_DEFAULTS.liveLimit,
+            disabled: busy,
+            onChange: (liveLimit) => policy({ liveLimit })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "Live characters think every turn, best score first; past the limit they wait for a Near refresh."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h2",
+            children: "Near refresh"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(HostSwitch, {
+            label: "When they come into the scene, or it changes",
+            checked: minds.nearRefresh.scene,
+            disabled: busy,
+            onChange: (scene) => policy({ nearRefresh: { scene } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(HostSwitch, {
+            label: "When the latest message or reply names them",
+            checked: minds.nearRefresh.mention,
+            disabled: busy,
+            onChange: (mention) => policy({ nearRefresh: { mention } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LimitField, {
+            label: "Every so many turns",
+            noneLabel: "never by turns",
+            value: minds.nearRefresh.turns,
+            min: 1,
+            max: 1000,
+            fallback: MINDS_DEFAULTS.nearRefresh.turns,
+            disabled: busy,
+            onChange: (turns) => policy({ nearRefresh: { turns } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LimitField, {
+            label: "When their mind is this old (game minutes)",
+            noneLabel: "never by age",
+            value: minds.nearRefresh.minutes,
+            min: 1,
+            max: 525600,
+            step: 30,
+            fallback: MINDS_DEFAULTS.nearRefresh.minutes,
+            disabled: busy,
+            onChange: (minutes) => policy({ nearRefresh: { minutes } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h2",
+            children: "Far refresh"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LimitField, {
+            label: "Every (game minutes)",
+            noneLabel: "never",
+            value: minds.farRefreshMinutes,
+            min: 1,
+            max: 525600,
+            step: 60,
+            fallback: MINDS_DEFAULTS.farRefreshMinutes,
+            disabled: busy,
+            onChange: (farRefreshMinutes) => policy({ farRefreshMinutes })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "Background characters never get a mind; they follow their routine."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h2",
+            children: "Memory notes after the reply"
+          }, undefined, false, undefined, this),
+          FIDELITIES.filter((f) => f !== "background").map((level) => /* @__PURE__ */ u3(HostSwitch, {
+            label: `${FIDELITY_LABEL[level]} characters in the scene`,
+            checked: minds.memoryLevels.includes(level),
+            disabled: busy,
+            onChange: (on) => policy({ memoryLevels: withMemoryLevel(minds.memoryLevels, level, on) })
+          }, level, false, undefined, this)),
+          /* @__PURE__ */ u3(NumberStepper, {
+            label: "Minds section budget (tokens)",
+            value: minds.tokens,
+            min: 0,
+            max: 1e5,
+            step: 100,
+            integer: true,
+            disabled: busy,
+            onChange: (tokens) => policy({ tokens })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "The narrator's Minds section has its own budget, apart from the engine's section budget, so minds never crowd out Scene or People."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h2",
+            children: "Time skips"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LimitField, {
+            label: "Beats a skip may stop at",
+            noneLabel: "no limit",
+            value: minds.skip.maxBeats,
+            min: 0,
+            max: 200,
+            fallback: MINDS_DEFAULTS.skip.maxBeats,
+            disabled: busy,
+            onChange: (maxBeats) => policy({ skip: { maxBeats } })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(LimitField, {
+            label: "Minds at each beat",
+            noneLabel: "no limit",
+            value: minds.skip.maxMindsPerBeat,
+            min: 0,
+            max: 64,
+            fallback: MINDS_DEFAULTS.skip.maxMindsPerBeat,
+            disabled: busy,
+            onChange: (maxMindsPerBeat) => policy({ skip: { maxMindsPerBeat } })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h2",
+        children: "Memory"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-small lre-muted",
+        children: "Each world sets these for its characters (Build → World → Minds); what you set here wins in every world."
+      }, undefined, false, undefined, this),
+      MEMORY_FIELDS.map((field) => {
+        const own = memoryOverride(minds.memory, field);
+        const id = `${field.part}.${field.key}`;
+        const reset = own === undefined ? /* @__PURE__ */ u3("span", {
+          class: "lre-small lre-muted",
+          children: [
+            "the world's (built in: ",
+            String(memoryValue(DEFAULT_MINDS_MEMORY, field)),
+            ")"
+          ]
+        }, undefined, true, undefined, this) : /* @__PURE__ */ u3("button", {
+          type: "button",
+          class: "lre-btn small ghost",
+          disabled: busy,
+          onClick: () => props.patch(memoryOverridePatch(field, null) ?? {}),
+          children: "Use the world's"
+        }, undefined, false, undefined, this);
+        if (!field.range) {
+          return /* @__PURE__ */ u3("div", {
+            "data-lre-minds-memory": id,
+            children: [
+              /* @__PURE__ */ u3(HostSwitch, {
+                label: field.label,
+                checked: typeof own === "boolean" ? own : memoryValue(DEFAULT_MINDS_MEMORY, field) === true,
+                disabled: busy,
+                onChange: (on) => props.patch(memoryOverridePatch(field, on) ?? {})
+              }, undefined, false, undefined, this),
+              reset
+            ]
+          }, id, true, undefined, this);
+        }
+        return /* @__PURE__ */ u3("div", {
+          "data-lre-minds-memory": id,
+          children: [
+            /* @__PURE__ */ u3(NumberStepper, {
+              label: field.label,
+              value: typeof own === "number" ? own : null,
+              min: field.range[0],
+              max: field.range[1],
+              step: field.step ?? 1,
+              integer: field.integer === true,
+              disabled: busy,
+              onChange: (value) => {
+                const p = memoryOverridePatch(field, value);
+                if (p)
+                  props.patch(p);
+              }
+            }, undefined, false, undefined, this),
+            reset
+          ]
+        }, id, true, undefined, this);
+      }),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h2",
+        children: "Prompts"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "A world's own step template for a purpose wins over these (Build → Step templates)."
+      }, undefined, false, undefined, this),
+      MIND_PURPOSES.map((purpose) => /* @__PURE__ */ u3(PromptEditor, {
+        purpose,
+        value: minds.prompts[purpose],
+        busy,
+        patch: props.patch
+      }, purpose, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/settings/upgrade.tsx
 var PICK_LABEL = { take: "Take", keep: "Keep", remove: "Remove" };
 var WHY_LABEL = { "changed in play": "Changed in play", unchanged: "Unchanged in play", new: "New in this revision", removed: "Gone from this revision" };
@@ -13480,6 +14521,17 @@ function Settings() {
         children: /* @__PURE__ */ u3(ModelUseSection, {
           modelUse: settings.modelUse,
           meter: view?.meter ?? null,
+          patch,
+          busy
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Fold, {
+        id: "minds",
+        title: "Minds",
+        summary: settings.minds.enabled ? `On · ${settings.minds.liveLimit === "none" ? "no Live limit" : `up to ${settings.minds.liveLimit} Live a turn`}` : "Off",
+        ...fold,
+        children: /* @__PURE__ */ u3(MindsSection, {
+          minds: settings.minds,
           patch,
           busy
         }, undefined, false, undefined, this)
@@ -16775,6 +17827,99 @@ function EconomyConfig(props) {
   }, undefined, false, undefined, this);
 }
 
+// src/packs/economy/ui/gm.tsx
+function PersonMoney(props) {
+  const { money: m, section } = props;
+  const [amount, setAmount] = d2("");
+  const valid = adjustOp(m.entity, amount, section.currency, false) !== null;
+  return /* @__PURE__ */ u3(Card, {
+    title: `Money · ${m.name}`,
+    aside: /* @__PURE__ */ u3("span", {
+      class: "lre-badge",
+      children: [
+        "Money ",
+        m.level
+      ]
+    }, undefined, true, undefined, this),
+    children: [
+      m.band ? /* @__PURE__ */ u3(Row, {
+        k: "Band",
+        v: m.band
+      }, undefined, false, undefined, this) : null,
+      m.netWorthCents !== null ? /* @__PURE__ */ u3(Row, {
+        k: "Net worth",
+        v: formatMoney(m.netWorthCents, section.currency)
+      }, undefined, false, undefined, this) : null,
+      !m.opened ? /* @__PURE__ */ u3("div", {
+        class: "lre-small lre-muted",
+        children: "Not opened yet: these are the opening balances it will start from."
+      }, undefined, false, undefined, this) : null,
+      m.accounts.map((a) => /* @__PURE__ */ u3(Row, {
+        k: a.name,
+        sub: a.kind,
+        v: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            formatMoney(a.cents, section.currency),
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small",
+              "aria-label": `Add to ${a.name}`,
+              disabled: section.busy || !valid,
+              onClick: () => {
+                const op = adjustOp(a.id, amount, section.currency, false);
+                if (op)
+                  section.edit([op]);
+              },
+              children: "+"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small",
+              "aria-label": `Take from ${a.name}`,
+              disabled: section.busy || !valid,
+              onClick: () => {
+                const op = adjustOp(a.id, amount, section.currency, true);
+                if (op)
+                  section.edit([op]);
+              },
+              children: "−"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, a.id, false, undefined, this)),
+      m.accounts.length > 0 ? /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        "aria-label": `Amount for ${m.name}`,
+        placeholder: "Amount to add or take",
+        value: amount,
+        onInput: (event) => setAmount(event.currentTarget.value)
+      }, undefined, false, undefined, this) : null,
+      m.recent.map((r, i) => /* @__PURE__ */ u3(Row, {
+        k: r.memo,
+        sub: `${r.at} · ${r.account}`,
+        v: formatMoney(r.cents, section.currency)
+      }, `r${i}`, false, undefined, this)),
+      m.notes.map((n, i) => /* @__PURE__ */ u3(Row, {
+        k: n.text,
+        sub: n.at
+      }, `n${i}`, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmMoneySection(props) {
+  if (props.gm.money.length === 0)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "No one else's money is tracked."
+    }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(M, {
+    children: props.gm.money.map((m) => /* @__PURE__ */ u3(PersonMoney, {
+      money: m,
+      section: props
+    }, m.entity, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+
 // src/packs/economy/ui/panel.tsx
 var KIND_ICON = { cash: "\uD83D\uDCB5", checking: "\uD83C\uDFE6", savings: "\uD83D\uDC16", card: "\uD83D\uDCB3", loan: "\uD83D\uDCC4", brokerage: "\uD83D\uDCC8" };
 function decodeMoneyView(value) {
@@ -16882,6 +18027,7 @@ var economy = {
   id: "economy",
   register(r) {
     r.panel({ id: "economy.money", label: "Money", order: 30, component: MoneyPanel });
+    r.gm({ id: "economy.money", label: "Money", order: 30, component: GmMoneySection });
     r.config(EconomyConfig);
   }
 };
@@ -17060,6 +18206,805 @@ var gear = {
 };
 var ui_default5 = gear;
 
+// src/packs/minds/ui/gm.tsx
+var LEVEL_TONE = { live: "accent", near: "", far: "", background: "" };
+var SECRECY_NOTE = {
+  full: "Full: the narrator gets each mind's monologue and intent, told to show them and never state them.",
+  brief: "Brief: the narrator gets only the depiction, checked for leaks; the monologue and intent stay here."
+};
+function nameIn(list, id) {
+  if (id === null)
+    return "—";
+  return list.find((p) => p.id === id)?.name ?? id;
+}
+function points(n) {
+  return n > 0 ? `+${n}` : String(n);
+}
+function PeoplePicker(props) {
+  const left = props.people.filter((p) => p.id !== props.exclude && !props.value.includes(p.id));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          props.value.map((id) => /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small",
+            "aria-label": `Remove ${nameIn(props.people, id)}`,
+            disabled: props.disabled,
+            onClick: () => props.onChange(props.value.filter((v) => v !== id)),
+            children: [
+              nameIn(props.people, id),
+              " ×"
+            ]
+          }, id, true, undefined, this)),
+          left.length > 0 ? /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            "aria-label": `Add to ${props.label}`,
+            value: "",
+            disabled: props.disabled,
+            onChange: (event) => event.currentTarget.value && props.onChange([...props.value, event.currentTarget.value]),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: "Add someone…"
+              }, undefined, false, undefined, this),
+              left.map((p) => /* @__PURE__ */ u3("option", {
+                value: p.id,
+                children: p.name
+              }, p.id, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function FormButtons(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-inline",
+    children: [
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn primary",
+        disabled: props.ctx.section.busy || props.op === null,
+        onClick: () => props.op && void props.ctx.edit([props.op]).then((ok) => ok && props.onDone()),
+        children: "Save"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn ghost",
+        onClick: props.onDone,
+        children: "Cancel"
+      }, undefined, false, undefined, this),
+      props.op === null ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: props.invalid
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function NoteForm(props) {
+  const [draft, setDraft] = d2(props.initial);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-minds-form": "note",
+    children: [
+      /* @__PURE__ */ u3("textarea", {
+        class: "lre-input",
+        rows: 3,
+        style: { fontFamily: "inherit" },
+        "aria-label": "Note",
+        maxLength: MIND_TEXT_CAPS.note,
+        value: draft.text,
+        onInput: (event) => setDraft({ ...draft, text: event.currentTarget.value })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Seg, {
+        label: "Salience",
+        value: draft.salience,
+        options: ["1", "2", "3", "4", "5"].map((s) => ({ value: s, label: s })),
+        onChange: (salience) => setDraft({ ...draft, salience })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FormButtons, {
+        ctx: props.ctx,
+        op: noteOp(props.entity, props.id, draft),
+        invalid: "A note needs its text.",
+        onDone: props.onDone
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function CommitmentForm(props) {
+  const [draft, setDraft] = d2(props.initial);
+  const [dueIn, setDueIn] = d2("");
+  const now = props.ctx.view.now;
+  const setDue = (text) => {
+    setDueIn(text);
+    const hours = Number(text);
+    setDraft({ ...draft, due: text.trim() === "" ? props.initial.due : Number.isFinite(hours) ? Math.round(now + hours * 60) : Number.NaN });
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-minds-form": "commitment",
+    children: [
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Kind",
+        value: draft.kind,
+        onChange: (event) => setDraft({ ...draft, kind: event.currentTarget.value }),
+        children: COMMITMENT_KINDS.map((k) => /* @__PURE__ */ u3("option", {
+          value: k,
+          children: COMMITMENT_KIND_LABEL[k]
+        }, k, false, undefined, this))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("textarea", {
+        class: "lre-input",
+        rows: 2,
+        style: { fontFamily: "inherit" },
+        "aria-label": "What it is",
+        maxLength: MIND_TEXT_CAPS.commitment,
+        value: draft.text,
+        onInput: (event) => setDraft({ ...draft, text: event.currentTarget.value })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(PeoplePicker, {
+        label: "With",
+        value: draft.with,
+        people: props.ctx.people,
+        exclude: props.entity,
+        disabled: props.ctx.section.busy,
+        onChange: (next) => setDraft({ ...draft, with: next })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            inputMode: "decimal",
+            "aria-label": "Due in hours from now",
+            placeholder: props.dueText ? `Due ${props.dueText}` : "Due in (hours), blank for none",
+            value: dueIn,
+            onInput: (event) => setDue(event.currentTarget.value)
+          }, undefined, false, undefined, this),
+          draft.due !== null ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small ghost",
+            onClick: () => (setDueIn(""), setDraft({ ...draft, due: null })),
+            children: "No due time"
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Status",
+        value: draft.status,
+        onChange: (event) => setDraft({ ...draft, status: event.currentTarget.value }),
+        children: COMMITMENT_STATUSES.map((s) => /* @__PURE__ */ u3("option", {
+          value: s,
+          children: COMMITMENT_STATUS_LABEL[s]
+        }, s, false, undefined, this))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FormButtons, {
+        ctx: props.ctx,
+        op: commitmentOp(props.entity, props.id, draft),
+        invalid: "A commitment needs its text and someone it is with.",
+        onDone: props.onDone
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PlanForm(props) {
+  const [draft, setDraft] = d2(props.initial);
+  const now = props.ctx.view.now;
+  const [startIn, setStartIn] = d2(String(Math.round((draft.from - now) / 60 * 4) / 4));
+  const [lasts, setLasts] = d2(String(draft.to - draft.from));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-minds-form": "plan",
+    children: [
+      /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        "aria-label": "What",
+        placeholder: "What they mean to do",
+        maxLength: MIND_TEXT_CAPS.planWhat,
+        value: draft.what,
+        onInput: (event) => setDraft({ ...draft, what: event.currentTarget.value })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Kind",
+        value: draft.kind,
+        onChange: (event) => setDraft({ ...draft, kind: event.currentTarget.value }),
+        children: PLAN_KINDS.map((k) => /* @__PURE__ */ u3("option", {
+          value: k,
+          children: PLAN_KIND_LABEL[k]
+        }, k, false, undefined, this))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Starts in (hours from now; negative for earlier)"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            inputMode: "decimal",
+            value: startIn,
+            onInput: (event) => {
+              const text = event.currentTarget.value;
+              setStartIn(text);
+              const hours = Number(text);
+              if (text.trim() !== "" && Number.isFinite(hours))
+                setDraft(startPlanIn(draft, now, hours));
+            }
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Lasts (minutes)"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            inputMode: "numeric",
+            value: lasts,
+            onInput: (event) => {
+              const text = event.currentTarget.value;
+              setLasts(text);
+              const minutes = Number(text);
+              if (Number.isInteger(minutes) && minutes > 0)
+                setDraft(planLasts(draft, minutes));
+            }
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Where",
+        value: draft.where ?? "",
+        onChange: (event) => setDraft({ ...draft, where: event.currentTarget.value || null }),
+        children: [
+          /* @__PURE__ */ u3("option", {
+            value: "",
+            children: "Anywhere"
+          }, undefined, false, undefined, this),
+          props.ctx.places.map((p) => /* @__PURE__ */ u3("option", {
+            value: p.id,
+            children: p.name
+          }, p.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(PeoplePicker, {
+        label: "With",
+        value: draft.with,
+        people: props.ctx.people,
+        exclude: props.entity,
+        disabled: props.ctx.section.busy,
+        onChange: (next) => setDraft({ ...draft, with: next })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Seg, {
+        label: "Priority",
+        value: draft.priority,
+        options: Array.from({ length: PLAN_PRIORITY.max - PLAN_PRIORITY.min + 1 }, (_, i) => ({ value: PLAN_PRIORITY.min + i, label: String(PLAN_PRIORITY.min + i), title: i === 0 ? "Whenever it fits" : i === PLAN_PRIORITY.max - PLAN_PRIORITY.min ? "It must happen" : undefined })),
+        onChange: (priority) => setDraft({ ...draft, priority })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Status",
+        value: draft.status,
+        onChange: (event) => setDraft({ ...draft, status: event.currentTarget.value }),
+        children: ["open", "done", "dropped"].map((s) => /* @__PURE__ */ u3("option", {
+          value: s,
+          children: PLAN_STATUS_LABEL[s]
+        }, s, false, undefined, this))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FormButtons, {
+        ctx: props.ctx,
+        op: planOp(props.entity, props.id, draft),
+        invalid: "A plan needs what it is, and a length.",
+        onDone: props.onDone
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ItemActions(props) {
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-inline",
+    children: [
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small",
+        "aria-label": `Edit ${props.noun}`,
+        disabled: props.ctx.section.busy,
+        onClick: props.onEdit,
+        children: "✎"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small danger",
+        "aria-label": `Delete ${props.noun}`,
+        disabled: props.ctx.section.busy,
+        onClick: () => void props.ctx.edit([props.remove]),
+        children: "✕"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Ladder(props) {
+  const { ctx, c } = props;
+  const f = c.fidelity;
+  return /* @__PURE__ */ u3(Card, {
+    title: "Fidelity",
+    aside: /* @__PURE__ */ u3("span", {
+      class: `lre-badge ${LEVEL_TONE[f.level]}`,
+      children: FIDELITY_LABEL[f.level]
+    }, undefined, false, undefined, this),
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "Score",
+        v: String(Math.round(f.score))
+      }, undefined, false, undefined, this),
+      f.reasons.length === 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-small lre-muted",
+        children: "Nothing adds to their score now."
+      }, undefined, false, undefined, this) : f.reasons.map((r, i) => /* @__PURE__ */ u3(Row, {
+        k: r.label,
+        v: r.points === 0 ? "pin" : points(r.points)
+      }, `${r.label}:${i}`, false, undefined, this)),
+      f.pin.author ? /* @__PURE__ */ u3(Row, {
+        k: "The author's pin",
+        v: FIDELITY_LABEL[f.pin.author],
+        sub: "Build → World → Minds: Always Live or Never a mind"
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Seg, {
+        label: "Pin their fidelity",
+        value: f.pin.gm ?? "score",
+        options: [{ value: "score", label: "By score" }, ...FIDELITIES.map((level) => ({ value: level, label: FIDELITY_LABEL[level] }))],
+        disabled: ctx.section.busy,
+        onChange: (pin) => void ctx.edit([pinOp(c.entity, pin === "score" ? null : pin)])
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn",
+            disabled: ctx.section.busy || c.refreshQueued,
+            onClick: () => void ctx.edit([refreshOp(c.entity)]),
+            children: "Refresh their mind next turn"
+          }, undefined, false, undefined, this),
+          c.refreshQueued ? /* @__PURE__ */ u3("span", {
+            class: "lre-badge accent",
+            children: "Fresh mind next turn"
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function LatestMind(props) {
+  const { ctx, c } = props;
+  const m = c.mind;
+  if (!m)
+    return /* @__PURE__ */ u3(Card, {
+      title: "Latest mind",
+      children: /* @__PURE__ */ u3(Empty, {
+        children: "No mind yet."
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this);
+  const full = ctx.view.secrecy === "full";
+  const toNarrator = /* @__PURE__ */ u3("span", {
+    class: "lre-badge",
+    children: "to the narrator"
+  }, undefined, false, undefined, this);
+  return /* @__PURE__ */ u3(Card, {
+    title: "Latest mind",
+    aside: /* @__PURE__ */ u3("span", {
+      class: "lre-badge",
+      children: FIDELITY_LABEL[m.level]
+    }, undefined, false, undefined, this),
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "When",
+        v: m.clock,
+        sub: `${m.moment === "beat" ? "At a time-skip beat" : "On a turn"} · ${m.reason}${m.place ? ` · at ${nameIn(ctx.places, m.place)}` : ""}`
+      }, undefined, false, undefined, this),
+      m.mood ? /* @__PURE__ */ u3(Row, {
+        k: "Mood",
+        v: m.mood
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Row, {
+        k: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            "Monologue ",
+            full ? toNarrator : null
+          ]
+        }, undefined, true, undefined, this),
+        sub: m.monologue || "—"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            "Depiction ",
+            full || m.withheld ? null : toNarrator
+          ]
+        }, undefined, true, undefined, this),
+        sub: m.depiction || "—"
+      }, undefined, false, undefined, this),
+      m.withheld ? /* @__PURE__ */ u3("div", {
+        class: "lre-banner warn",
+        children: "The depiction gave away a secret or a name you haven't met, so the narrator got none of it this time."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Row, {
+        k: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            "Intent ",
+            full ? toNarrator : null
+          ]
+        }, undefined, true, undefined, this),
+        sub: m.intent || "—"
+      }, undefined, false, undefined, this),
+      m.reactions.length > 0 ? /* @__PURE__ */ u3(Row, {
+        k: "Reactions",
+        sub: m.reactions.join(" · ")
+      }, undefined, false, undefined, this) : null,
+      m.interrupt ? /* @__PURE__ */ u3(Row, {
+        k: "Interrupted the skip",
+        v: m.interrupt,
+        tone: "warn"
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function Plans(props) {
+  const { ctx, c } = props;
+  const [editing, setEditing] = d2(null);
+  return /* @__PURE__ */ u3(Card, {
+    title: "Plans",
+    aside: /* @__PURE__ */ u3("span", {
+      class: "lre-badge",
+      children: [
+        c.plans.filter((p) => p.status === "open").length,
+        " open"
+      ]
+    }, undefined, true, undefined, this),
+    children: [
+      c.plans.length === 0 && editing === null ? /* @__PURE__ */ u3(Empty, {
+        children: "No plans."
+      }, undefined, false, undefined, this) : null,
+      c.plans.map((p) => editing === p.id ? /* @__PURE__ */ u3(PlanForm, {
+        ctx,
+        entity: c.entity,
+        id: p.id,
+        initial: planDraft(ctx.view.now, p),
+        onDone: () => setEditing(null)
+      }, p.id, false, undefined, this) : /* @__PURE__ */ u3(Row, {
+        k: p.what,
+        sub: `${PLAN_KIND_LABEL[p.kind]} · ${p.fromText} – ${p.toText}${p.where ? ` · ${nameIn(ctx.places, p.where)}` : ""}${p.with.length > 0 ? ` · with ${p.with.map((w) => nameIn(ctx.people, w)).join(", ")}` : ""} · priority ${p.priority} · ${PLAN_STATUS_LABEL[p.status]}${p.reason ? ` (${p.reason})` : ""} · from ${p.source === "gm" ? "you" : `their ${p.source}`}`,
+        tone: p.status === "open" ? undefined : "muted",
+        v: /* @__PURE__ */ u3(ItemActions, {
+          ctx,
+          noun: `plan ${p.what}`,
+          onEdit: () => setEditing(p.id),
+          remove: deleteOp(c.entity, "plan", p.id)
+        }, undefined, false, undefined, this)
+      }, p.id, false, undefined, this)),
+      editing === "" ? /* @__PURE__ */ u3(PlanForm, {
+        ctx,
+        entity: c.entity,
+        id: null,
+        initial: planDraft(ctx.view.now),
+        onDone: () => setEditing(null)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small",
+        disabled: ctx.section.busy,
+        onClick: () => setEditing(""),
+        children: "Add a plan"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Commitments(props) {
+  const { ctx, c } = props;
+  const [editing, setEditing] = d2(null);
+  return /* @__PURE__ */ u3(Card, {
+    title: "Commitments",
+    aside: /* @__PURE__ */ u3("span", {
+      class: "lre-badge",
+      children: [
+        c.commitments.filter((x) => x.status === "open").length,
+        " open"
+      ]
+    }, undefined, true, undefined, this),
+    children: [
+      c.commitments.length === 0 && editing === null ? /* @__PURE__ */ u3(Empty, {
+        children: "No commitments."
+      }, undefined, false, undefined, this) : null,
+      c.commitments.map((x) => editing === x.id ? /* @__PURE__ */ u3(CommitmentForm, {
+        ctx,
+        entity: c.entity,
+        id: x.id,
+        initial: commitmentDraft(x),
+        dueText: x.dueText,
+        onDone: () => setEditing(null)
+      }, x.id, false, undefined, this) : /* @__PURE__ */ u3(Row, {
+        k: x.text,
+        sub: `${COMMITMENT_KIND_LABEL[x.kind]} with ${x.withNames.join(", ") || "—"}${x.dueText ? ` · due ${x.dueText}` : ""} · ${COMMITMENT_STATUS_LABEL[x.status]}`,
+        tone: x.status === "open" ? undefined : "muted",
+        v: /* @__PURE__ */ u3(ItemActions, {
+          ctx,
+          noun: `commitment ${x.text}`,
+          onEdit: () => setEditing(x.id),
+          remove: deleteOp(c.entity, "commitment", x.id)
+        }, undefined, false, undefined, this)
+      }, x.id, false, undefined, this)),
+      editing === "" ? /* @__PURE__ */ u3(CommitmentForm, {
+        ctx,
+        entity: c.entity,
+        id: null,
+        initial: commitmentDraft(),
+        dueText: null,
+        onDone: () => setEditing(null)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small",
+        disabled: ctx.section.busy,
+        onClick: () => setEditing(""),
+        children: "Add a commitment"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Notes(props) {
+  const { ctx, c } = props;
+  const [editing, setEditing] = d2(null);
+  return /* @__PURE__ */ u3(Card, {
+    title: "Memory notes",
+    aside: /* @__PURE__ */ u3("span", {
+      class: "lre-badge",
+      children: [
+        c.notes.filter((n) => !n.faded).length,
+        " remembered"
+      ]
+    }, undefined, true, undefined, this),
+    children: [
+      c.notes.length === 0 && editing === null ? /* @__PURE__ */ u3(Empty, {
+        children: "No notes."
+      }, undefined, false, undefined, this) : null,
+      c.notes.map((n) => editing === n.id ? /* @__PURE__ */ u3(NoteForm, {
+        ctx,
+        entity: c.entity,
+        id: n.id,
+        initial: noteDraft(n),
+        onDone: () => setEditing(null)
+      }, n.id, false, undefined, this) : /* @__PURE__ */ u3(Row, {
+        k: n.text,
+        sub: `${n.clock} · salience ${n.salience}, now ${n.now.toFixed(1)}${n.faded ? " · faded" : ""}`,
+        tone: n.faded ? "muted" : undefined,
+        v: /* @__PURE__ */ u3(ItemActions, {
+          ctx,
+          noun: `note ${n.text}`,
+          onEdit: () => setEditing(n.id),
+          remove: deleteOp(c.entity, "note", n.id)
+        }, undefined, false, undefined, this)
+      }, n.id, false, undefined, this)),
+      editing === "" ? /* @__PURE__ */ u3(NoteForm, {
+        ctx,
+        entity: c.entity,
+        id: null,
+        initial: noteDraft(),
+        onDone: () => setEditing(null)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small",
+        disabled: ctx.section.busy,
+        onClick: () => setEditing(""),
+        children: "Add a note"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function CharacterMinds(props) {
+  const { ctx, c } = props;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-gm-minds": c.entity,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-spread",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-h2",
+            children: c.name
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small ghost",
+            onClick: props.onClose,
+            children: "All"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Ladder, {
+        ctx,
+        c
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(LatestMind, {
+        ctx,
+        c
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Plans, {
+        ctx,
+        c
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Commitments, {
+        ctx,
+        c
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Notes, {
+        ctx,
+        c
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Summary",
+        children: c.summary ? /* @__PURE__ */ u3("div", {
+          class: "lre-small",
+          children: c.summary
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
+          children: "No summary yet."
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Witnessed",
+        children: c.witness.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          children: "Nothing recorded."
+        }, undefined, false, undefined, this) : c.witness.map((w, i) => /* @__PURE__ */ u3(Row, {
+          k: w.what,
+          sub: `${w.clock} · ${w.how === "told" ? `told${w.by ? ` by ${nameIn(ctx.people, w.by)}` : ""}` : "saw it"}${w.place ? ` · ${nameIn(ctx.places, w.place)}` : ""}`
+        }, `${w.at}:${i}`, false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmMindsSection(props) {
+  const view = props.gm.minds;
+  const [open, setOpen] = d2(null);
+  const [query, setQuery] = d2("");
+  const [level, setLevel] = d2("");
+  const pov = props.gm.entities.find((e) => e.pov);
+  const ctx = {
+    section: props,
+    view,
+    people: [...pov ? [{ id: pov.id, name: pov.name }] : [], ...view.characters.map((c) => ({ id: c.entity, name: c.name }))],
+    places: props.gm.places.map((p) => ({ id: p.id, name: p.name })),
+    edit: props.edit
+  };
+  const selected = view.characters.find((c) => c.entity === open);
+  const q = query.trim().toLowerCase();
+  const list = view.characters.filter((c) => (level === "" || c.fidelity.level === level) && (q === "" || c.name.toLowerCase().includes(q)));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-gm-section": "minds",
+    children: [
+      view.enabled ? null : /* @__PURE__ */ u3("div", {
+        class: "lre-banner info",
+        children: "Character minds are off in Settings → Minds. What they recorded before stays here, and edits still apply."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Now",
+        v: view.nowText
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "This world's secrecy",
+        sub: SECRECY_NOTE[view.secrecy]
+      }, undefined, false, undefined, this),
+      selected ? /* @__PURE__ */ u3(CharacterMinds, {
+        ctx,
+        c: selected,
+        onClose: () => setOpen(null)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-inline",
+            children: [
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                type: "search",
+                "aria-label": "Search",
+                placeholder: "Search by name",
+                value: query,
+                onInput: (event) => setQuery(event.currentTarget.value)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("select", {
+                class: "lre-input",
+                "aria-label": "Fidelity",
+                value: level,
+                onChange: (event) => setLevel(event.currentTarget.value),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: "Every level"
+                  }, undefined, false, undefined, this),
+                  FIDELITIES.map((f) => /* @__PURE__ */ u3("option", {
+                    value: f,
+                    children: FIDELITY_LABEL[f]
+                  }, f, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(Card, {
+            title: `${list.length} of ${view.characters.length}`,
+            children: [
+              view.characters.length === 0 ? /* @__PURE__ */ u3(Empty, {
+                children: "No characters yet."
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3("div", {
+                class: "lre-list",
+                "data-lre-gm-list": "minds",
+                children: list.map((c) => /* @__PURE__ */ u3("button", {
+                  type: "button",
+                  class: "lre-item",
+                  onClick: () => setOpen(c.entity),
+                  children: [
+                    /* @__PURE__ */ u3("span", {
+                      class: "grow",
+                      children: [
+                        c.name,
+                        /* @__PURE__ */ u3("span", {
+                          class: "sub",
+                          children: [
+                            c.mind ? `Last mind ${c.mind.clock}` : "No mind yet",
+                            " · score ",
+                            Math.round(c.fidelity.score)
+                          ]
+                        }, undefined, true, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ u3("span", {
+                      class: `lre-badge ${LEVEL_TONE[c.fidelity.level]}`,
+                      children: FIDELITY_LABEL[c.fidelity.level]
+                    }, undefined, false, undefined, this),
+                    c.fidelity.pin.gm || c.fidelity.pin.author ? /* @__PURE__ */ u3("span", {
+                      class: "lre-badge warn",
+                      children: "Pinned"
+                    }, undefined, false, undefined, this) : null,
+                    c.refreshQueued ? /* @__PURE__ */ u3("span", {
+                      class: "lre-badge",
+                      children: "Refresh"
+                    }, undefined, false, undefined, this) : null
+                  ]
+                }, c.entity, true, undefined, this))
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/minds/ui/index.ts
+var minds = {
+  id: "minds",
+  register(r) {
+    r.gm({ id: "minds.gm", label: "Minds", order: 20, component: GmMindsSection });
+  }
+};
+var ui_default6 = minds;
+
 // src/packs/sheets/ui/index.ts
 var sheets = {
   id: "sheets",
@@ -17067,7 +19012,7 @@ var sheets = {
     r.panel({ id: "sheets.you", label: "You", order: 20, component: YouPanel });
   }
 };
-var ui_default6 = sheets;
+var ui_default7 = sheets;
 
 // src/frontend/map-math.ts
 var ZOOM_MIN = 0.25;
@@ -19223,7 +21168,7 @@ var space = {
     r.preview("maps", MapProposalPreview);
   }
 };
-var ui_default7 = space;
+var ui_default8 = space;
 
 // src/packs/story/ui/panel.tsx
 var KINDS = ["quest", "secret", "puzzle", "agenda"];
@@ -19815,7 +21760,7 @@ var story = {
     r.editor({ collection: "tracks", label: "Tracks", component: TrackEditor });
   }
 };
-var ui_default8 = story;
+var ui_default9 = story;
 
 // src/packs/vehicles/ui/panel.tsx
 function decodeGarageView(value) {
@@ -19935,7 +21880,7 @@ var vehicles = {
     r.panel({ id: "vehicles.garage", label: "Garage", order: 40, component: GaragePanel });
   }
 };
-var ui_default9 = vehicles;
+var ui_default10 = vehicles;
 
 // src/frontend/play/context.tsx
 var POLICY_LABEL = { none: "lore off", prefetch: "prefetch", lookup: "lookups", "prefetch+lookup": "prefetch and lookups" };
@@ -19952,6 +21897,27 @@ function decodeLore(value) {
     ...t.private === true ? { private: true } : {},
     lookups: num(t.lookups),
     notes: strings(t.notes)
+  }));
+}
+var MIND_OUTCOME = {
+  recorded: { text: "recorded", tone: "pos" },
+  reused: { text: "reused", tone: "" },
+  failed: { text: "failed", tone: "neg" },
+  leak_blocked: { text: "kept from the narrator", tone: "warn" },
+  skipped_limit: { text: "over the limit", tone: "" }
+};
+var MIND_PHASE = { pre: "Before the reply", post: "After the reply", skip: "In a time skip" };
+var MIND_PROMPT = { world: "the world's prompt", override: "your prompt", default: "the built-in prompt" };
+function decodeMinds(value) {
+  return list(value, (t) => ({
+    purpose: oneOf(t.purpose, MIND_PURPOSES, "mind"),
+    phase: oneOf(t.phase, ["pre", "post", "skip"], "pre"),
+    who: str(t.who, "Someone"),
+    level: oneOf(t.level, FIDELITIES, "near"),
+    outcome: oneOf(t.outcome, ["recorded", "reused", "failed", "leak_blocked", "skipped_limit"], "failed"),
+    ms: num(t.ms),
+    tokens: num(t.tokens),
+    prompt: oneOf(t.prompt, ["world", "override", "default"], "default")
   }));
 }
 var DELIVERY = ["verified", "unverified", "unchecked"];
@@ -19973,7 +21939,8 @@ function decodeContextView(value) {
         activation: oneOf(g.activation, ["confirmed", "unconfirmed"], "unconfirmed"),
         sections: list(g.sections, (s) => ({ slot: str(s.slot), label: str(s.label, str(s.slot)), tokens: num(s.tokens), clipped: s.clipped === true, delivery: oneOf(s.delivery, DELIVERY, "unchecked") })),
         budget: { sections: num(budget.sections), used: num(budget.used) },
-        lore: decodeLore(g.lore)
+        lore: decodeLore(g.lore),
+        minds: decodeMinds(g.minds)
       };
     })
   };
@@ -20127,6 +22094,23 @@ function ContextPanel(props) {
                 }, n, false, undefined, this))
               ]
             }, `${t.phase}:${t.step}:${i}`, true, undefined, this))
+          }, undefined, false, undefined, this) : null,
+          (generation.minds ?? []).length > 0 ? /* @__PURE__ */ u3(Card, {
+            title: "Minds",
+            children: (generation.minds ?? []).map((m, i) => /* @__PURE__ */ u3(Row, {
+              k: `${m.who} · ${STEP_LABEL[m.purpose]}`,
+              v: /* @__PURE__ */ u3("span", {
+                class: "lre-inline",
+                children: [
+                  m.outcome === "skipped_limit" || m.outcome === "reused" ? null : `${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`,
+                  /* @__PURE__ */ u3("span", {
+                    class: `lre-badge ${MIND_OUTCOME[m.outcome].tone}`,
+                    children: MIND_OUTCOME[m.outcome].text
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              sub: `${FIDELITY_LABEL[m.level]} · ${MIND_PHASE[m.phase]} · ${MIND_PROMPT[m.prompt]}`
+            }, `${m.phase}:${m.purpose}:${i}`, false, undefined, this))
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this)
@@ -20956,91 +22940,13 @@ function Entities(props) {
     ]
   }, undefined, true, undefined, this);
 }
-function PersonMoney(props) {
-  const { money: m, editor } = props;
-  const [amount, setAmount] = d2("");
-  const valid = adjustOp(m.entity, amount, editor.currency, false) !== null;
-  return /* @__PURE__ */ u3(Card, {
-    title: `Money · ${m.name}`,
-    aside: /* @__PURE__ */ u3("span", {
-      class: "lre-badge",
-      children: [
-        "Money ",
-        m.level
-      ]
-    }, undefined, true, undefined, this),
-    children: [
-      m.band ? /* @__PURE__ */ u3(Row, {
-        k: "Band",
-        v: m.band
-      }, undefined, false, undefined, this) : null,
-      m.netWorthCents !== null ? /* @__PURE__ */ u3(Row, {
-        k: "Net worth",
-        v: formatMoney(m.netWorthCents, editor.currency)
-      }, undefined, false, undefined, this) : null,
-      !m.opened ? /* @__PURE__ */ u3("div", {
-        class: "lre-small lre-muted",
-        children: "Not opened yet: these are the opening balances it will start from."
-      }, undefined, false, undefined, this) : null,
-      m.accounts.map((a) => /* @__PURE__ */ u3(Row, {
-        k: a.name,
-        sub: a.kind,
-        v: /* @__PURE__ */ u3("span", {
-          class: "lre-inline",
-          children: [
-            formatMoney(a.cents, editor.currency),
-            /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-btn small",
-              "aria-label": `Add to ${a.name}`,
-              disabled: editor.busy || !valid,
-              onClick: () => {
-                const op = adjustOp(a.id, amount, editor.currency, false);
-                if (op)
-                  editor.edit([op]);
-              },
-              children: "+"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-btn small",
-              "aria-label": `Take from ${a.name}`,
-              disabled: editor.busy || !valid,
-              onClick: () => {
-                const op = adjustOp(a.id, amount, editor.currency, true);
-                if (op)
-                  editor.edit([op]);
-              },
-              children: "−"
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, a.id, false, undefined, this)),
-      m.accounts.length > 0 ? /* @__PURE__ */ u3("input", {
-        class: "lre-input",
-        "aria-label": `Amount for ${m.name}`,
-        placeholder: "Amount to add or take",
-        value: amount,
-        onInput: (event) => setAmount(event.currentTarget.value)
-      }, undefined, false, undefined, this) : null,
-      m.recent.map((r, i) => /* @__PURE__ */ u3(Row, {
-        k: r.memo,
-        sub: `${r.at} · ${r.account}`,
-        v: formatMoney(r.cents, editor.currency)
-      }, `r${i}`, false, undefined, this)),
-      m.notes.map((n, i) => /* @__PURE__ */ u3(Row, {
-        k: n.text,
-        sub: n.at
-      }, `n${i}`, false, undefined, this))
-    ]
-  }, undefined, true, undefined, this);
-}
 function Body(props) {
   const { editor } = props;
   const app = useApp();
   const [section, setSection] = d2("entities");
   const panelId = P2();
   const { gm } = editor;
+  const packTab = app.catalog.gmSections.find((def) => def.id === section);
   const fight = gm.encounter === null ? null : decodeEncounterView(gm.encounter);
   const shown = section === "fight" && !fight ? "entities" : section;
   return /* @__PURE__ */ u3("div", {
@@ -21054,7 +22960,7 @@ function Body(props) {
           { id: "entities", label: "Entities" },
           { id: "places", label: "Places" },
           { id: "tracks", label: "Tracks" },
-          { id: "money", label: "Money" },
+          ...app.catalog.gmSections.map((def) => ({ id: def.id, label: def.label })),
           ...fight ? [{ id: "fight", label: "Fight" }] : [],
           { id: "edits", label: "Edits" }
         ],
@@ -21109,12 +23015,12 @@ function Body(props) {
               }, s.id, false, undefined, this))
             ]
           }, t.id, true, undefined, this)) : null,
-          section === "money" ? gm.money.length === 0 ? /* @__PURE__ */ u3(Empty, {
-            children: "No one else's money is tracked."
-          }, undefined, false, undefined, this) : gm.money.map((m) => /* @__PURE__ */ u3(PersonMoney, {
-            money: m,
-            editor
-          }, m.entity, false, undefined, this)) : null,
+          packTab ? /* @__PURE__ */ u3(packTab.component, {
+            ...props.section,
+            gm,
+            busy: editor.busy,
+            edit: editor.edit
+          }, undefined, false, undefined, this) : null,
           section === "edits" ? /* @__PURE__ */ u3(Card, {
             title: "Corrections in force",
             children: [
@@ -21213,7 +23119,8 @@ function GmPanel(props) {
         ]
       }, undefined, true, undefined, this),
       editor ? /* @__PURE__ */ u3(Body, {
-        editor
+        editor,
+        section: { chatId: props.chatId, currency: editor.currency, reload: load, send: props.send }
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
         children: "Loading the GM view…"
       }, undefined, false, undefined, this)
@@ -21507,7 +23414,7 @@ var core = {
     r.panel({ id: "core.gm", label: "GM view", order: 110, component: GmPanel });
   }
 };
-var UI_PACKS = [core, ui_default6, ui_default4, ui_default9, ui_default5, ui_default3, ui_default, ui_default8, ui_default7, ui_default2];
+var UI_PACKS = [core, ui_default7, ui_default4, ui_default10, ui_default5, ui_default3, ui_default, ui_default9, ui_default8, ui_default2, ui_default6];
 
 // src/frontend/delta.ts
 class DeltaError extends Error {
@@ -22019,6 +23926,7 @@ function buildCatalog(packs) {
   const configs = new Map;
   const chips = new Map;
   const previews = new Map;
+  const gmSections = new Map;
   const ids = new Set;
   for (const pack of packs) {
     if (ids.has(pack.id))
@@ -22049,12 +23957,18 @@ function buildCatalog(packs) {
         if (previews.has(collection))
           throw new Error(`A preview for ${collection} (pack ${pack.id}) is already registered`);
         previews.set(collection, component);
+      },
+      gm(def) {
+        if (gmSections.has(def.id))
+          throw new Error(`A GM view tab ${def.id} (pack ${pack.id}) is already registered`);
+        gmSections.set(def.id, def);
       }
     };
     pack.register(registry);
   }
   const ordered = [...panels.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { panels: ordered, editors, configs, chips, previews, packs: [...ids] };
+  const tabs = [...gmSections.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  return { panels: ordered, editors, configs, chips, previews, gmSections: tabs, packs: [...ids] };
 }
 
 // src/frontend/setup.tsx

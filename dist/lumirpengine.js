@@ -929,6 +929,7 @@ var lre_world_v1_schema_default = {
       }
     },
     classifications: { type: "object", propertyNames: { minLength: 1 }, additionalProperties: { $ref: "#/$defs/facet" } },
+    minds: { $ref: "#/$defs/minds" },
     ruleset: { $ref: "#/$defs/ruleset" },
     seedMode: { enum: ["fresh", "same_roll"], description: "Action seeds: a fresh seed per Re-run, or the same roll for the same path and action." },
     lenientPricing: { type: "boolean", description: "Accept a narrated price inside its band." },
@@ -971,7 +972,83 @@ var lre_world_v1_schema_default = {
     band: { enum: ["principal", "supporting", "background"] },
     visibility: { enum: ["public", "known_by", "secret"] },
     fieldType: { enum: ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] },
-    stepPurpose: { enum: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"] },
+    stepPurpose: { enum: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
+    minds: {
+      title: "character minds",
+      type: "object",
+      description: "Character minds: what the narrator gets of a mind, the fidelity ladder's weights and thresholds, the author's pins and the memory defaults. Every part is optional; one left out, or out of range, reads as the default.",
+      additionalProperties: false,
+      properties: {
+        secrecy: { enum: ["full", "brief"], description: "full: the narrator gets each mind's monologue and intent, to depict and never state; brief (the default): only a depiction, checked for leaks." },
+        weights: {
+          type: "object",
+          description: "Points each input adds to a character's focus score, from -100 to 200.",
+          additionalProperties: false,
+          properties: {
+            here: { type: "number", minimum: -100, maximum: 200, description: "In the POV's scene. Default 45." },
+            nearby: { type: "number", minimum: -100, maximum: 200, description: "Under the same parent place as the POV. Default 20." },
+            mentioned: { type: "number", minimum: -100, maximum: 200, description: "Named or addressed in the latest message or reply. Default 40." },
+            regard: { type: "number", minimum: -100, maximum: 200, description: "Regard between them and the POV (the axes' mean, whichever way is stronger) at its extreme, scaled by its size. Default 10." },
+            knows: { type: "number", minimum: -100, maximum: 200, description: "A knows relation with the POV either way. Default 10." },
+            owner: { type: "number", minimum: -100, maximum: 200, description: "Owns a track under way. Default 15." },
+            track: { type: "number", minimum: -100, maximum: 200, description: "Each track under way whose stages name them, up to three. Default 8." },
+            roles: { type: "object", description: "Role facet values by value id; a value nested under a weighted one counts as it. Default antagonist 20.", propertyNames: { minLength: 1 }, additionalProperties: { type: "number", minimum: -100, maximum: 200 } },
+            rule: { type: "number", minimum: -100, maximum: 200, description: "Named by a world rule. Default 5." },
+            pending: { type: "number", minimum: -100, maximum: 200, description: "Each pending interaction with the POV, up to three. Default 15." },
+            band: {
+              type: "object",
+              description: "The detail band their tier maps to. Defaults 15, 5 and 0.",
+              additionalProperties: false,
+              properties: { principal: { type: "number", minimum: -100, maximum: 200 }, supporting: { type: "number", minimum: -100, maximum: 200 }, background: { type: "number", minimum: -100, maximum: 200 } }
+            },
+            recent: { type: "number", minimum: -100, maximum: 200, description: "Seen with the POV lately, fading over a day. Default 10." }
+          }
+        },
+        thresholds: {
+          type: "object",
+          description: "The lowest score for Live, Near and Far; under far is Background. Read in order: live at least near, near at least far. Defaults 60, 35 and 15.",
+          additionalProperties: false,
+          properties: { live: { type: "number", minimum: 0, maximum: 1000 }, near: { type: "number", minimum: 0, maximum: 1000 }, far: { type: "number", minimum: 0, maximum: 1000 } }
+        },
+        always: { anyOf: [{ $ref: "#/$defs/selector" }, { type: "null" }], description: "People who are always Live." },
+        never: { anyOf: [{ $ref: "#/$defs/selector" }, { type: "null" }], description: "People who never get a mind; wins over always." },
+        memory: {
+          type: "object",
+          description: "How minds remember; a user's overrides win.",
+          additionalProperties: false,
+          properties: {
+            witness: { type: "object", additionalProperties: false, properties: { show: { type: "integer", minimum: 0, maximum: 64, description: "Witness log lines shown to a mind. Default 8." } } },
+            recall: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                recent: { type: "integer", minimum: 0, maximum: 64, description: "The latest turns they were there for. Default 4." },
+                relevant: { type: "integer", minimum: 0, maximum: 64, description: "The turns they were there for that best match the moment. Default 4." },
+                tokens: { type: "integer", minimum: 0, maximum: 8000, description: "Tokens recall may take. Default 1200." }
+              }
+            },
+            notes: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                show: { type: "integer", minimum: 0, maximum: 64, description: "Notes shown to a mind. Default 8." },
+                keep: { type: "integer", minimum: 1, maximum: 64, description: "Notes kept before the oldest are folded into the summary. Default 24." }
+              }
+            },
+            commitments: { type: "object", additionalProperties: false, properties: { show: { type: "integer", minimum: 0, maximum: 64, description: "Open commitments shown to a mind; all are kept until resolved. Default 8." } } },
+            salience: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                halfLifeDays: { type: "number", minimum: 0.1, maximum: 3650, description: "Game days in which a note's salience halves. Default 7." },
+                floor: { type: "number", minimum: 0, maximum: 5, description: "A note under this salience has faded. Default 0.5." }
+              }
+            },
+            consolidate: { type: "object", additionalProperties: false, properties: { enabled: { type: "boolean", description: "Fold faded and surplus notes into the summary. Default true." }, periodDays: { type: "number", minimum: 0.1, maximum: 365, description: "At most how often a character's notes are folded, in game days. Default 1." } } }
+          }
+        }
+      }
+    },
     selector: {
       title: "a selector",
       type: "object",
@@ -1829,7 +1906,7 @@ var STEP_SIGNALS = [
 function knownSignal(s) {
   return STEP_SIGNALS.includes(s) || /^every_n:[1-9]\d*$/.test(s);
 }
-var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent"];
+var STEP_PLACEHOLDERS = ["world", "pov", "place", "clock", "scene", "present", "facts", "outcome", "beats", "brief", "user", "reply", "recent", "character"];
 var STEP_OUTPUTS = {
   interpret: ["decision", "text"],
   "npc.choose": ["decision", "text"],
@@ -1839,7 +1916,11 @@ var STEP_OUTPUTS = {
   outline: ["text"],
   extract: ["text", "effects"],
   choices: ["text", "effects"],
-  judge: ["decision", "text"]
+  judge: ["decision", "text"],
+  mind: ["text"],
+  memory: ["text"],
+  skip: ["text"],
+  consolidate: ["text"]
 };
 
 // src/shared/ids.ts
@@ -9619,7 +9700,7 @@ function isWorldDoc(v) {
 var COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"];
 var LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"];
 var PARTS2 = ["pins", "calendar", "realism", "time", "start"];
-var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings"];
+var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings", "minds"];
 function shapeIssues(doc) {
   const issues = [];
   const err = (path, message) => {
@@ -9766,7 +9847,7 @@ function lintWorld(world, registry) {
   }
   issues.push(...lintStructure(world, registry));
   for (const rule of registry.lints)
-    issues.push(...rule.check(world));
+    issues.push(...rule.check(world, registry));
   return issues;
 }
 function macrosIn(world) {
@@ -10475,6 +10556,10 @@ function agendaFor(world, state, agent) {
   }
   return out.sort((a, b) => b.priority - a.priority || a.track.localeCompare(b.track));
 }
+function isTerminal(track, stage) {
+  const def = own(track.stages, stage);
+  return !def || def.next.length === 0 && !def.fail;
+}
 
 // src/engine/working.ts
 class Working {
@@ -10601,11 +10686,46 @@ function advance(reg, w, to, opts) {
   };
   let cursors = new Map;
   let next = 0;
-  const applyInstants = (until) => {
-    while (next < instants.length && (instants[next]?.at ?? Infinity) <= until) {
-      const inst = instants[next++];
-      clockTo(w, inst.at, cause, e);
-      e.emit(instantEvents(reg, w.ctx, inst, opts.runSeed, { povRoutine: timelapse }));
+  const agentInstants = (slot, until) => {
+    const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
+    if (timed.length === 0)
+      return [];
+    const after = w.state.clock;
+    const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+    const info = { start: slot.start, end: slot.end, index: slot.index };
+    const out = [];
+    for (const agent of who) {
+      if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1)
+        continue;
+      for (const def of timed) {
+        if (w.ctx.levelOf(agent, def.domain) < def.minLevel)
+          continue;
+        for (const instant of def.instants?.(w.ctx, agent, info) ?? [])
+          if (instant.at > after && instant.at <= until && instant.at > slot.start && instant.at < slot.end)
+            out.push({ at: instant.at, agent, def, instant });
+      }
+    }
+    return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
+  };
+  const applyInstants = (until, slot) => {
+    const timed = agentInstants(slot, until);
+    let t = 0;
+    for (;; ) {
+      const edge = instants[next];
+      const edgeAt = edge && edge.at <= until ? edge.at : Infinity;
+      const moment = timed[t];
+      if (edgeAt === Infinity && !moment)
+        break;
+      if (edge && edgeAt <= (moment?.at ?? Infinity)) {
+        next++;
+        clockTo(w, edgeAt, cause, e);
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine: timelapse }));
+      } else if (moment) {
+        t++;
+        clockTo(w, moment.at, cause, e);
+        if (stillActs(w, moment.agent))
+          e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant) ?? []);
+      }
     }
   };
   const signalsSince = (index) => {
@@ -10627,16 +10747,17 @@ function advance(reg, w, to, opts) {
       cursors.delete(agent);
     }
     const slotDays = agents.length * (slot.end - slot.start) / MINUTES_PER_DAY;
-    if (timelapse && result.slots > 0 && result.agentDays + slotDays > cap.agentDays) {
+    const ranBefore = result.slots + (opts.slotsBefore ?? 0) > 0;
+    if (timelapse && ranBefore && result.agentDays + slotDays > cap.agentDays) {
       result.stop = "cap";
       break;
     }
-    const mark = timelapse && result.slots > 0 ? w.mark() : null;
+    const mark = timelapse && ranBefore ? w.mark() : null;
     const held = mark ? new Map(cursors) : null;
     const before = w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
-    applyInstants(slot.end);
+    applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
     const info = { start: slot.start, end: slot.end, index: slot.index };
     for (const def of reg.processes) {
@@ -10689,7 +10810,7 @@ function advance(reg, w, to, opts) {
     }
   }
   if (result.stop === "target") {
-    applyInstants(to);
+    applyInstants(to, slotOf(cal, slotIndexAt(cal, to)));
     clockTo(w, to, cause, e);
   }
   for (const [agent, slot] of cursors)
@@ -11102,36 +11223,122 @@ function parseOverrides(v) {
   }
   return out;
 }
+
+class TimelapseRun {
+  reg;
+  w;
+  target;
+  opts;
+  resolved;
+  from;
+  to;
+  ended = null;
+  before;
+  start;
+  cap;
+  result;
+  constructor(reg, w, target, opts, resolved) {
+    this.reg = reg;
+    this.w = w;
+    this.target = target;
+    this.opts = opts;
+    this.resolved = resolved;
+    this.before = structuredClone(w.state);
+    this.start = w.events.length;
+    this.from = w.state.clock;
+    this.to = resolved.to;
+    this.cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
+    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [] };
+  }
+  static start(reg, w, target, opts) {
+    if (clockPaused(w.world, w.state))
+      return { code: "paused", reason: "The clock is paused; resume it first." };
+    const resolved = resolveTarget(reg, w.world, w.state, target);
+    return "code" in resolved ? resolved : new TimelapseRun(reg, w, target, opts, resolved);
+  }
+  get clock() {
+    return this.w.state.clock;
+  }
+  advanceTo(at) {
+    if (this.ended !== null)
+      return false;
+    const to = Math.min(at, this.to);
+    if (to <= this.w.state.clock)
+      return true;
+    const used = { agentDays: this.result.agentDays, events: this.w.events.length - this.start };
+    if (this.result.slots > 0 && (used.agentDays >= this.cap.agentDays || used.events >= this.cap.events)) {
+      this.ended = this.result.stop = "cap";
+      return false;
+    }
+    const r = advance(this.reg, this.w, to, {
+      runSeed: this.opts.runSeed,
+      mode: "timelapse",
+      cause: "timelapse",
+      includePov: true,
+      ...this.opts.overrides ? { interrupts: this.opts.overrides } : {},
+      unitCap: { agentDays: this.cap.agentDays - used.agentDays, events: this.cap.events - used.events },
+      slotsBefore: this.result.slots,
+      ...this.resolved.stopWhen ? { stopWhen: this.resolved.stopWhen } : {}
+    });
+    const acc = this.result;
+    acc.slots += r.slots;
+    acc.agentDays += r.agentDays;
+    acc.stops.push(...r.stops);
+    acc.notes.push(...r.notes);
+    acc.rules.push(...r.rules);
+    acc.tracks.push(...r.tracks);
+    if (r.stop === "target")
+      return true;
+    this.ended = acc.stop = r.stop;
+    acc.stoppedBy = r.stoppedBy;
+    return false;
+  }
+  apply(events) {
+    return this.w.applyAll(events);
+  }
+  finish(stop) {
+    if (stop === null)
+      this.advanceTo(this.to);
+    const w = this.w;
+    const result = { ...this.result, to: w.state.clock, events: w.events.length - this.start, ...stop ? { stop: stop.by === "mind" ? "interrupt" : "cap" } : {} };
+    const summary = { type: "timelapse", from: this.from, to: result.to, target: this.target, stoppedBy: stop?.by === "mind" ? "mind" : result.stoppedBy, segment: this.opts.segment ?? 1, ...stop?.by === "mind" ? { mind: stop.entity } : {} };
+    w.apply(summary);
+    const remaining = result.stop === "cap" ? Math.max(0, this.to - result.to) : 0;
+    const montage = buildMontage(this.reg, w.world, this.before, w.state, w.events.slice(this.start), w.state.time.montage);
+    return {
+      ok: true,
+      result,
+      summary,
+      remaining,
+      chip: remaining > 0 ? { kind: "continue_timelapse", target: this.target.type === "duration" ? { type: "duration", minutes: remaining } : this.target, remaining } : null,
+      montage,
+      ...stop?.by === "mind" ? { mindName: playerKnows(this.reg, w.world, w.state, w.world.pov, stop.entity) ? own(w.state.entities, stop.entity)?.name ?? null : null } : {}
+    };
+  }
+}
 function runTimelapse(reg, w, target, opts) {
-  if (clockPaused(w.world, w.state))
-    return { code: "paused", reason: "The clock is paused; resume it first." };
-  const resolved = resolveTarget(reg, w.world, w.state, target);
-  if ("code" in resolved)
-    return resolved;
-  const before = structuredClone(w.state);
-  const start = w.events.length;
-  const from = w.state.clock;
-  const result = advance(reg, w, resolved.to, {
-    runSeed: opts.runSeed,
-    mode: "timelapse",
-    cause: "timelapse",
-    includePov: true,
-    ...opts.overrides ? { interrupts: opts.overrides } : {},
-    unitCap: clampUnitCap(opts.unitCap ?? w.state.time.unitCap),
-    ...resolved.stopWhen ? { stopWhen: resolved.stopWhen } : {}
-  });
-  const summary = { type: "timelapse", from, to: result.to, target, stoppedBy: result.stoppedBy, segment: opts.segment ?? 1 };
-  w.apply(summary);
-  const remaining = result.stop === "cap" ? resolved.to - result.to : 0;
-  const montage = buildMontage(reg, w.world, before, w.state, w.events.slice(start), w.state.time.montage);
-  return {
-    ok: true,
-    result,
-    summary,
-    remaining,
-    chip: result.stop === "cap" ? { kind: "continue_timelapse", target: target.type === "duration" ? { type: "duration", minutes: remaining } : target, remaining } : null,
-    montage
-  };
+  const run = TimelapseRun.start(reg, w, target, opts);
+  return "code" in run ? run : run.finish(null);
+}
+function replaySkip(reg, w, target, record, opts) {
+  const run = TimelapseRun.start(reg, w, target, opts);
+  if ("code" in run)
+    return run;
+  const stopAt = record.stop?.at ?? Infinity;
+  for (const beat of record.beats) {
+    if (beat.at > stopAt)
+      break;
+    run.advanceTo(beat.at);
+    if (run.clock !== beat.at)
+      return run.finish(null);
+    run.apply(beat.events);
+  }
+  if (record.stop) {
+    run.advanceTo(record.stop.at);
+    if (run.clock === record.stop.at)
+      return run.finish(record.stop);
+  }
+  return run.finish(null);
 }
 function speedThrough(state, activity, remainingMinutes) {
   const policy = own(state.time.speedThrough, activity);
@@ -12262,7 +12469,8 @@ var PERSON = {
     needs: { type: "list", label: "Needs", domain: "castlife", level: 4, locked: true },
     appointments: { type: "list", label: "Appointments", domain: "castlife", level: 2 },
     trips: { type: "list", label: "Trips", domain: "castlife", level: 1 },
-    chores: { type: "list", label: "Chores", domain: "castlife", level: 3 }
+    chores: { type: "list", label: "Chores", domain: "castlife", level: 3 },
+    birthday: { type: "date", label: "Birthday (MM-DD or YYYY-MM-DD)", domain: "castlife", level: 3 }
   }
 };
 function asMode(v) {
@@ -16430,6 +16638,13 @@ var weatherPack = {
     });
     r.query("weather.travel_factor", (ctx, place, mode) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : own(stateAt(ctx, place)?.travel ?? {}, mode) ?? 1);
     r.query("weather.closed_modes", (ctx, place) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? [] : stateAt(ctx, place)?.closes ?? []);
+    r.query("weather.season", (ctx, at) => ctx.levelOf(ctx.world.pov, "weather") < 1 ? null : seasonAt(ctx, at));
+    r.query("weather.foul", (ctx, place) => {
+      if (ctx.levelOf(ctx.world.pov, "weather") < 2)
+        return null;
+      const st = stateAt(ctx, place);
+      return st ? st.closes.length > 0 || Object.keys(st.travel).length > 0 : null;
+    });
     r.query("weather.fix", (ctx) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2)
         return null;
@@ -16860,11 +17075,237 @@ function regardView(ctx, from, to) {
   return axesOf(ctx).map((a) => ({ axis: a.label, band: bandOf(bands, axes[a.id] ?? 0)?.label ?? "neutral", value: axes[a.id] ?? 0 }));
 }
 
+// src/shared/minds.ts
+var FIDELITIES = ["live", "near", "far", "background"];
+var WORLD_MINDS_KEYS = ["secrecy", "weights", "thresholds", "always", "never", "memory"];
+var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
+  here: 45,
+  nearby: 20,
+  mentioned: 40,
+  regard: 10,
+  knows: 10,
+  owner: 15,
+  track: 8,
+  roles: { antagonist: 20 },
+  rule: 5,
+  pending: 15,
+  band: { principal: 15, supporting: 5, background: 0 },
+  recent: 10
+});
+var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
+var DEFAULT_MINDS_MEMORY = Object.freeze({
+  witness: { show: 8 },
+  recall: { recent: 4, relevant: 4, tokens: 1200 },
+  notes: { show: 8, keep: 24 },
+  commitments: { show: 8 },
+  salience: { halfLifeDays: 7, floor: 0.5 },
+  consolidate: { enabled: true, periodDays: 1 }
+});
+var DEFAULT_WORLD_MINDS = Object.freeze({
+  secrecy: "brief",
+  weights: DEFAULT_FIDELITY_WEIGHTS,
+  thresholds: DEFAULT_FIDELITY_THRESHOLDS,
+  always: null,
+  never: null,
+  memory: DEFAULT_MINDS_MEMORY
+});
+var MINDS_RANGES = {
+  weight: [-100, 200],
+  threshold: [0, 1000],
+  show: [0, 64],
+  keep: [1, 64],
+  recallTokens: [0, 8000],
+  halfLifeDays: [0.1, 3650],
+  floor: [0, 5],
+  periodDays: [0.1, 365]
+};
+var num3 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
+var whole3 = (v, range, fallback) => Math.round(num3(v, range, fallback));
+var obj = (v) => isRecord(v) ? v : {};
+function selectorOrNull(v) {
+  if (!isRecord(v))
+    return null;
+  const out = {};
+  const list = (x) => Array.isArray(x) && x.every((s) => typeof s === "string") ? x.slice(0, 200) : undefined;
+  const ids = list(v.ids);
+  const kind = list(v.kind);
+  const tier = list(v.tier);
+  const memberOf = list(v.memberOf);
+  const tag = list(v.tag);
+  if (ids)
+    out.ids = ids;
+  if (kind)
+    out.kind = kind;
+  if (tier)
+    out.tier = tier;
+  if (memberOf)
+    out.memberOf = memberOf;
+  if (tag)
+    out.tag = tag;
+  if (isRecord(v.class)) {
+    const classes = {};
+    for (const [facet, values] of Object.entries(v.class)) {
+      const vs = list(values);
+      if (safeKey(facet) && vs)
+        classes[facet] = vs;
+    }
+    out.class = classes;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
+  const m = obj(raw);
+  const witness = obj(m.witness);
+  const recall = obj(m.recall);
+  const notes = obj(m.notes);
+  const commitments = obj(m.commitments);
+  const salience = obj(m.salience);
+  const consolidate = obj(m.consolidate);
+  return {
+    witness: { show: whole3(witness.show, MINDS_RANGES.show, base.witness.show) },
+    recall: { recent: whole3(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole3(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole3(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
+    notes: { show: whole3(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole3(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
+    commitments: { show: whole3(commitments.show, MINDS_RANGES.show, base.commitments.show) },
+    salience: { halfLifeDays: num3(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num3(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num3(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+  };
+}
+function worldMindsOf(world) {
+  const raw = obj(world.minds);
+  const w = obj(raw.weights);
+  const band = obj(w.band);
+  const d = DEFAULT_FIDELITY_WEIGHTS;
+  const weight = (v, fallback) => num3(v, MINDS_RANGES.weight, fallback);
+  const roles = {};
+  const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
+  for (const [value, points] of Object.entries(rawRoles))
+    if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
+      roles[value] = weight(points, 0);
+  const t = obj(raw.thresholds);
+  const far = num3(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num3(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num3(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  return {
+    secrecy: raw.secrecy === "full" ? "full" : "brief",
+    weights: {
+      here: weight(w.here, d.here),
+      nearby: weight(w.nearby, d.nearby),
+      mentioned: weight(w.mentioned, d.mentioned),
+      regard: weight(w.regard, d.regard),
+      knows: weight(w.knows, d.knows),
+      owner: weight(w.owner, d.owner),
+      track: weight(w.track, d.track),
+      roles,
+      rule: weight(w.rule, d.rule),
+      pending: weight(w.pending, d.pending),
+      band: { principal: weight(band.principal, d.band.principal), supporting: weight(band.supporting, d.band.supporting), background: weight(band.background, d.band.background) },
+      recent: weight(w.recent, d.recent)
+    },
+    thresholds: { live, near, far },
+    always: selectorOrNull(raw.always),
+    never: selectorOrNull(raw.never),
+    memory: memoryConfigOf(raw.memory)
+  };
+}
+var MIND_PURPOSES = ["mind", "memory", "skip", "consolidate"];
+function isMindPurpose(purpose) {
+  return MIND_PURPOSES.includes(purpose);
+}
+var MINDS_PRESETS = Object.freeze({
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+});
+function defaultMindsSettings(preset = "standard") {
+  return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
+}
+var MINDS_DEFAULTS = Object.freeze(defaultMindsSettings());
+var PLAN_KINDS = ["errand", "meet", "visit", "work", "rest", "leisure", "other"];
+var PLAN_PRIORITY = { min: 1, max: 5, normal: 3 };
+var COMMITMENT_KINDS = ["promise", "debt", "grudge", "favour", "plan", "other"];
+var COMMITMENT_STATUSES = ["open", "kept", "broken", "released"];
+var MINDS_KEEP = { notes: 64, openCommitments: 48, closedCommitments: 16, openPlans: 24, closedPlans: 16, witness: 48, presence: 400 };
+var MIND_TEXT_CAPS = {
+  monologue: 1200,
+  depiction: 600,
+  intent: 300,
+  reaction: 200,
+  reactions: 4,
+  plans: 4,
+  planWhat: 160,
+  mood: 40,
+  interrupt: 200,
+  note: 300,
+  notes: 4,
+  commitment: 240,
+  commitments: 3,
+  summary: 900,
+  told: 240,
+  tolds: 3,
+  reason: 160
+};
+var MINDS_EVENTS = {
+  round: "minds.round",
+  mind: "minds.mind",
+  memory: "minds.memory",
+  presence: "minds.presence",
+  plan: "minds.plan",
+  planEdit: "minds.plan_edit",
+  noteEdit: "minds.note_edit",
+  commitment: "minds.commitment",
+  commitmentEdit: "minds.commitment_edit",
+  consolidated: "minds.consolidated",
+  pin: "minds.pin",
+  refresh: "minds.refresh",
+  skip: "minds.skip"
+};
+var MINDS_SLOT = "minds";
+var MIND_PROMPT_DEFAULTS = Object.freeze({
+  mind: [
+    "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
+    "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue."
+  ].join(`
+`),
+  memory: "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places."
+  ].join(`
+`),
+  consolidate: "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true."
+});
+var MIND_ANSWER_FORMATS = Object.freeze({
+  mind: [
+    'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "mood": "...", "interrupt": {"reason": "..."}}',
+    "- monologue: their private reasoning in the first person, at most six sentences.",
+    "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
+    "- intent: what they mean to do next, in one sentence.",
+    '- reactions: up to three short conditional reactions ("if pressed about the cellar, changes the subject").',
+    "- plans: only real intentions for later, with local times; priority 1 (whenever it fits) to 5 (it must happen). Leave the list empty when there are none.",
+    "- mood: one or two words.",
+    "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise."
+  ].join(`
+`),
+  memory: [
+    'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
+    "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
+    "- plans: intentions with times that this turn formed.",
+    "- told: what they told whom in this turn, in a few words each.",
+    "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
+    "Use empty lists for anything the turn didn't give."
+  ].join(`
+`),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.'
+});
+
 // src/engine/plan-day.ts
 var IDLE_OPTION = "idle";
 var IDLE_STEP = 30;
-function utilityAt(o, t) {
-  const u = typeof o.utility === "number" ? o.utility : o.utility(t);
+function utilityAt(o, t, laid) {
+  const u = typeof o.utility === "number" ? o.utility : o.utility(t, laid);
   return Number.isFinite(u) ? u : 0;
 }
 function tieKey(agent, dayStart, at) {
@@ -16884,12 +17325,12 @@ function planDay(input) {
       fi++;
     const f = fixed[fi];
     if (f && f.start <= t) {
-      blocks.push({ start: t, end: Math.min(f.end, input.end), option: `fixed:${f.label}`, label: f.label, activity: f.activity, place: f.place ?? null, utility: 0, reasons: [f.reason], fixed: true });
+      blocks.push({ start: t, end: Math.min(f.end, input.end), option: f.option ?? `fixed:${f.label}`, label: f.label, activity: f.activity, place: f.place ?? null, utility: 0, reasons: [f.reason], fixed: true });
       t = Math.min(f.end, input.end);
       continue;
     }
     const gapEnd = f ? Math.min(f.start, input.end) : input.end;
-    const candidates = input.options.filter((o) => o.duration > 0 && (o.repeat || !used.has(o.id)) && (!o.window || o.window.from <= t && t < o.window.to)).map((o) => ({ o, u: utilityAt(o, t) })).sort((a, b) => b.u - a.u || a.o.id.localeCompare(b.o.id));
+    const candidates = input.options.filter((o) => o.duration > 0 && (o.repeat || !used.has(o.id)) && (!o.window || o.window.from <= t && t < o.window.to)).map((o) => ({ o, u: utilityAt(o, t, blocks) })).sort((a, b) => b.u - a.u || a.o.id.localeCompare(b.o.id));
     const best = candidates[0];
     if (!best || best.u <= 0) {
       const opens = input.options.filter((o) => (o.repeat || !used.has(o.id)) && o.window && o.window.from > t).map((o) => o.window?.from ?? gapEnd);
@@ -16928,11 +17369,187 @@ function planDay(input) {
       ties.push({ key, at: t, options: tied.map((c) => ({ id: c.o.id, utility: c.u })), chosen: pick, via });
     }
     const end = Math.min(t + chosen.o.duration, gapEnd);
-    blocks.push({ start: t, end, option: chosen.o.id, label: chosen.o.label, activity: chosen.o.activity, place: chosen.o.place ?? null, utility: chosen.u, reasons: chosen.o.reasons, fixed: false });
+    blocks.push({ start: t, end, option: chosen.o.id, label: chosen.o.label, activity: chosen.o.activity, place: chosen.o.place ?? null, utility: chosen.u, reasons: [...chosen.o.reasons, ...chosen.o.because?.(t, blocks) ?? []], fixed: false });
     used.add(chosen.o.id);
     t = end;
   }
   return { agent: input.agent, start: input.start, end: input.end, blocks, ties, tieZone };
+}
+
+// src/packs/castlife/core/places.ts
+function homeOf(ctx, who) {
+  const h = own(ctx.state.entities, who)?.fields.home;
+  return typeof h === "string" ? h : null;
+}
+function workPlace(ctx, who) {
+  const employer = own(ctx.state.entities, who)?.fields.employer;
+  if (typeof employer !== "string")
+    return null;
+  if (own(ctx.world.places, employer))
+    return employer;
+  return placeOfEntity(ctx.state, employer);
+}
+function placeOfType(ctx, sceneType, near) {
+  const ids = Object.keys(ctx.world.places).sort();
+  const parent = near ? own(ctx.world.places, near)?.parent : undefined;
+  return ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.parent === parent) ?? ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.visibility !== "secret") ?? null;
+}
+
+// src/packs/castlife/core/commitments.ts
+var PLAYED = {
+  errand: { minutes: 45, hours: [9, 18], activity: "errand", label: "Errand" },
+  meet: { minutes: 90, hours: [10, 22], activity: "socialize", label: "Meeting someone" },
+  visit: { minutes: 120, hours: [10, 21], activity: "visiting", label: "A visit" },
+  work: { minutes: 240, hours: [6, 20], activity: "work", label: "Work" },
+  rest: { minutes: 60, hours: [0, 24], activity: "rest", label: "Rest" },
+  leisure: { minutes: 90, hours: [9, 22], activity: "leisure", label: "Time out" },
+  other: { minutes: 60, hours: [8, 21], activity: "busy", label: "Busy" }
+};
+var SEARCH_DAYS = 14;
+function cutAround(blocks, cutters) {
+  return cutters.reduce((list, cutter) => list.flatMap((c) => {
+    if (c.end <= cutter.start || c.start >= cutter.end)
+      return [c];
+    const parts = [];
+    if (c.start < cutter.start)
+      parts.push({ ...c, end: cutter.start });
+    if (c.end > cutter.end)
+      parts.push({ ...c, start: cutter.end });
+    return parts;
+  }), blocks);
+}
+function personPlaceFor(ctx, who, at) {
+  let best = null;
+  for (const s of allSchedules(ctx.registry, ctx.world)) {
+    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
+      continue;
+    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
+    const a = activeSlot(ctx.world, s, at);
+    if (a && typeof a.slot.value === "string" && (!best || rank < best.rank))
+      best = { rank, place: a.slot.value };
+  }
+  return best?.place ?? null;
+}
+function authored(ctx, who, start, end) {
+  const ranked = [];
+  for (const s of allSchedules(ctx.registry, ctx.world)) {
+    if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
+      continue;
+    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
+    const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
+    for (const e of edges) {
+      if (e.edge !== "start")
+        continue;
+      const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
+      const value = s.slots[e.slot]?.value;
+      if (!close || typeof value !== "string" || close.at <= start || e.at >= end)
+        continue;
+      const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
+      const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
+      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind }, rank });
+    }
+  }
+  const routine = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
+  const f = own(ctx.state.entities, who)?.fields;
+  const appointments = [];
+  for (const raw of Array.isArray(f?.appointments) ? f.appointments : []) {
+    const a = objOf(raw);
+    const at = numOf(a.at, NaN);
+    const until = at + numOf(a.minutes, 60);
+    if (!(until > start && at < end))
+      continue;
+    appointments.push({ start: at, end: until, label: strOf(a.label, "Appointment"), activity: "appointment", place: strOf(a.place) || null, reason: "appointment", kind: "appointment" });
+  }
+  const trips = [];
+  for (const raw of Array.isArray(f?.trips) ? f.trips : []) {
+    const t = objOf(raw);
+    const from = numOf(t.from, NaN);
+    const until = numOf(t.until, NaN);
+    if (!(until > start && from < end))
+      continue;
+    trips.push({ start: from, end: until, label: strOf(t.label, "Away"), activity: "trip", place: strOf(t.place) || null, reason: "trip", kind: "trip" });
+  }
+  return { routine, appointments, trips };
+}
+function planTier(ctx, who) {
+  return optionalQuery(ctx, "minds.tier")?.(ctx, who) ?? "background";
+}
+function plansOf(ctx, who, tier = planTier(ctx, who)) {
+  if (tier === "background" || who === ctx.world.pov)
+    return [];
+  return (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).filter((p) => p.status === "open" && p.when.to > p.when.from);
+}
+function tight(p) {
+  return p.when.to - p.when.from <= 2 * PLAYED[p.kind].minutes;
+}
+function cutsRoutine(p, tier) {
+  return p.priority >= 4 || tier !== "far" && p.priority >= 3 && tight(p);
+}
+function precedence(a, b) {
+  return b.priority - a.priority || a.made - b.made || a.id.localeCompare(b.id);
+}
+function planBlock(ctx, who, p, start, end) {
+  const played = PLAYED[p.kind];
+  const place = p.where !== null && own(ctx.world.places, p.where) ? p.where : p.kind === "rest" ? homeOf(ctx, who) : null;
+  return { start, end, label: played.label, activity: p.kind === "visit" && p.with.length > 0 ? "socialize" : played.activity, place, reason: "their own plan", kind: "plan", plan: p.id, option: `plan:${p.id}` };
+}
+function placed(ctx, who, p, tier, a) {
+  if (tight(p))
+    return planBlock(ctx, who, p, p.when.from, p.when.to);
+  const cal = calendarOf(ctx.world);
+  const { minutes, hours } = PLAYED[p.kind];
+  const to = Math.min(p.when.to, p.when.from + SEARCH_DAYS * MINUTES_PER_DAY);
+  const blockers = [...a.trips, ...p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(p, tier) ? [] : a.routine];
+  const candidates = new Set([p.when.from]);
+  for (const b of blockers)
+    if (b.end > p.when.from && b.end < to)
+      candidates.add(b.end);
+  for (let day = dateAt(cal, p.when.from).dayIndex;clockAt(cal, day, 0) < to; day++)
+    candidates.add(clockAt(cal, day, hours[0] * 60));
+  for (const c of [...candidates].sort((x, y) => x - y)) {
+    if (c < p.when.from || c >= to)
+      continue;
+    const day = dateAt(cal, c).dayIndex;
+    const start = Math.max(c, clockAt(cal, day, hours[0] * 60));
+    const end = start + minutes;
+    if (end > Math.min(to, clockAt(cal, day, hours[1] * 60)))
+      continue;
+    if (!blockers.some((b) => b.start < end && b.end > start))
+      return planBlock(ctx, who, p, start, end);
+  }
+  return null;
+}
+function commitments(ctx, who, start, end) {
+  const tier = planTier(ctx, who);
+  const plans = plansOf(ctx, who, tier).filter((p) => p.when.to > start && p.when.from < end).sort(precedence);
+  const from = Math.min(start, ...plans.map((p) => p.when.from));
+  const to = Math.max(end, ...plans.map((p) => Math.min(p.when.to, p.when.from + SEARCH_DAYS * MINUTES_PER_DAY)));
+  const a = authored(ctx, who, from, to);
+  const laid = [];
+  for (const p of plans) {
+    const block = placed(ctx, who, p, tier, a);
+    if (block)
+      laid.push({ p, block });
+  }
+  const pieces = [];
+  laid.forEach(({ p, block }, i) => {
+    const cutters = [...laid.slice(0, i).map((l) => l.block), ...p.priority >= 5 ? [] : a.appointments, ...cutsRoutine(p, tier) ? [] : a.routine];
+    pieces.push(...cutAround([block], cutters));
+  });
+  const routine = cutAround(a.routine, laid.filter((l) => cutsRoutine(l.p, tier)).map((l) => l.block));
+  const appointments = cutAround(a.appointments, laid.filter((l) => l.p.priority >= 5).map((l) => l.block));
+  return [...cutAround([...routine, ...appointments, ...pieces], a.trips), ...a.trips].filter((c) => c.end > start && c.start < end).sort((x, y) => x.start - y.start);
+}
+function laidPlans(ctx, who, plans) {
+  const out = new Map(plans.map((p) => [p.id, []]));
+  if (plans.length === 0)
+    return out;
+  const from = Math.min(...plans.map((p) => p.when.from));
+  const to = Math.max(...plans.map((p) => p.when.to));
+  for (const c of commitments(ctx, who, from, to))
+    if (c.plan !== undefined)
+      out.get(c.plan)?.push(c);
+  return out;
 }
 
 // src/packs/castlife/core/cues.ts
@@ -17090,6 +17707,49 @@ function cueIssues(world) {
   return issues;
 }
 
+// src/packs/castlife/core/occasions.ts
+var FOND = 30;
+function birthdayOf(v) {
+  const m = typeof v === "string" ? /^\s*(?:(-?\d{1,6})-)?(\d{1,2})-(\d{1,2})\s*$/.exec(v) : null;
+  if (!m)
+    return null;
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  return month >= 1 && day >= 1 && day <= 31 ? { month, day, year: m[1] === undefined ? null : Number(m[1]) } : null;
+}
+function birthdayOn(cal, v, date) {
+  const b = birthdayOf(v);
+  if (!b || b.month !== date.month)
+    return false;
+  const last = cal.system.monthLength(date.year, date.month);
+  return b.day === date.day || b.day > last && date.day === last;
+}
+function calendarDay(ctx, cal, day) {
+  const date = dateAt(cal, clockAt(cal, day, 0));
+  const holidays = ctx.levelOf(ctx.world.pov, "calendar") >= 4 ? holidaysOn(cal, day).map((h) => ({ id: h.id, label: h.label, dayOff: h.dayOff })) : [];
+  return { date, weekend: date.weekday === 0 || date.weekday === 6, holidays };
+}
+function occasionOf(ctx, who, day) {
+  const cal = calendarOf(ctx.world);
+  const { date, weekend, holidays } = calendarDay(ctx, cal, day);
+  const regard = optionalQuery(ctx, "regard");
+  const friends = regard ? Object.keys(ctx.state.entities).sort().filter((other) => {
+    const e = own(ctx.state.entities, other);
+    return other !== who && !!e && kindIs(ctx.registry, ctx.world, e.kind, "person") && !isGone(ctx.state, other) && acts(ctx.world, ctx.state, other) && birthdayOn(cal, e.fields.birthday, date) && regard(ctx, who, other) >= FOND;
+  }) : [];
+  const home = own(ctx.state.entities, who)?.fields.home;
+  const place = typeof home === "string" && own(ctx.world.places, home) ? home : null;
+  return {
+    weekend,
+    dayOff: weekend || holidays.some((h) => h.dayOff),
+    holidays,
+    birthday: birthdayOn(cal, own(ctx.state.entities, who)?.fields.birthday, date),
+    friends,
+    season: optionalQuery(ctx, "weather.season")?.(ctx, clockAt(cal, day, 12 * 60)) ?? null,
+    foul: place ? optionalQuery(ctx, "weather.foul")?.(ctx, place) ?? null : null
+  };
+}
+
 // src/packs/castlife/core/index.ts
 var NEEDS = {
   hunger: { rate: 4, satisfiedBy: ["eat", "meal", "lunch", "dinner", "breakfast"], label: "hungry", daily: [420, 750, 1110] },
@@ -17098,100 +17758,33 @@ var NEEDS = {
   fun: { rate: 1, satisfiedBy: ["leisure", "exercise", "drinks", "socialize"], label: "bored", daily: [1200] }
 };
 var NEED_ALERT = 80;
-function needValue(ctx, who, need, at = ctx.state.clock) {
+function satisfies(activity, need) {
+  return own(NEEDS, need)?.satisfiedBy.some((w) => activity.includes(w)) ?? false;
+}
+function needIn(ctx, who, need, at, blocks) {
   const def = own(NEEDS, need);
   if (!def)
     return 0;
   const n = objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need));
-  if (typeof n.t !== "number" && who !== ctx.world.pov) {
+  if (typeof n.t === "number" || who === ctx.world.pov) {
+    const v = numOf(n.v, 20);
+    const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
+    return Math.max(0, Math.min(100, v + def.rate * Math.max(0, at - t) / 60));
+  }
+  let met = -Infinity;
+  for (const b of blocks)
+    if (b.start <= at && satisfies(b.activity, need))
+      met = Math.max(met, Math.min(b.end, at));
+  if (met === -Infinity) {
     const minute = dateAt(calendarOf(ctx.world), at).minuteOfDay;
-    const since = Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
-    return Math.min(100, def.rate * since / 60);
+    met = at - Math.min(...def.daily.map((t) => (minute - t + MINUTES_PER_DAY) % MINUTES_PER_DAY));
   }
-  const v = numOf(n.v, 20);
-  const t = numOf(n.t, minutesBetween(ctx.world.calendar.epoch, ctx.world.start.at));
-  return Math.max(0, Math.min(100, v + def.rate * Math.max(0, at - t) / 60));
+  return Math.min(100, def.rate * (at - met) / 60);
 }
-function personPlaceFor(ctx, who, at) {
-  let best = null;
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
-    if (s.target !== "place" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
-      continue;
-    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
-    const a = activeSlot(ctx.world, s, at);
-    if (a && typeof a.slot.value === "string" && (!best || rank < best.rank))
-      best = { rank, place: a.slot.value };
-  }
-  return best?.place ?? null;
-}
-function homeOf(ctx, who) {
-  const h = own(ctx.state.entities, who)?.fields.home;
-  return typeof h === "string" ? h : null;
-}
-function workPlace(ctx, who) {
-  const employer = own(ctx.state.entities, who)?.fields.employer;
-  if (typeof employer !== "string")
-    return null;
-  if (own(ctx.world.places, employer))
-    return employer;
-  return placeOfEntity(ctx.state, employer);
-}
-function cutAround(blocks, cutters) {
-  return cutters.reduce((list, cutter) => list.flatMap((c) => {
-    if (c.end <= cutter.start || c.start >= cutter.end)
-      return [c];
-    const parts = [];
-    if (c.start < cutter.start)
-      parts.push({ ...c, end: cutter.start });
-    if (c.end > cutter.end)
-      parts.push({ ...c, start: cutter.end });
-    return parts;
-  }), blocks);
-}
-function commitments(ctx, who, start, end) {
-  const ranked = [];
-  for (const s of allSchedules(ctx.registry, ctx.world)) {
-    if (s.target !== "activity" || !scheduleOwners(ctx.registry, ctx.world, ctx.state, s).includes(who))
-      continue;
-    const rank = ownerRank(ctx.registry, ctx.world, ctx.state, s) ?? Number.MAX_SAFE_INTEGER;
-    const edges = scheduleInstants(ctx.world, [s], start - MINUTES_PER_DAY, end + MINUTES_PER_DAY);
-    for (const e of edges) {
-      if (e.edge !== "start")
-        continue;
-      const close = edges.find((x) => x.edge === "end" && x.occurrence === e.occurrence);
-      const value = s.slots[e.slot]?.value;
-      if (!close || typeof value !== "string" || close.at <= start || e.at >= end)
-        continue;
-      const kind = /school|class/.test(value) ? "school" : /work|shift/.test(value) ? "work" : "other";
-      const place = personPlaceFor(ctx, who, e.at) ?? (kind === "work" ? workPlace(ctx, who) : null) ?? homeOf(ctx, who);
-      ranked.push({ block: { start: e.at, end: close.at, label: value.replace(/_/g, " "), activity: value, place, reason: kind === "other" ? "commitment" : kind, kind }, rank });
-    }
-  }
-  const out = ranked.flatMap(({ block, rank }) => cutAround([block], ranked.filter((r) => r.rank < rank).map((r) => r.block)));
-  const f = own(ctx.state.entities, who)?.fields;
-  for (const raw of Array.isArray(f?.appointments) ? f.appointments : []) {
-    const a = objOf(raw);
-    const at = numOf(a.at, NaN);
-    const until = at + numOf(a.minutes, 60);
-    if (!(until > start && at < end))
-      continue;
-    out.push({ start: at, end: until, label: strOf(a.label, "Appointment"), activity: "appointment", place: strOf(a.place) || null, reason: "appointment", kind: "appointment" });
-  }
-  const trips = [];
-  for (const raw of Array.isArray(f?.trips) ? f.trips : []) {
-    const t = objOf(raw);
-    const from = numOf(t.from, NaN);
-    const until = numOf(t.until, NaN);
-    if (!(until > start && from < end))
-      continue;
-    trips.push({ start: from, end: until, label: strOf(t.label, "Away"), activity: "trip", place: strOf(t.place) || null, reason: "trip", kind: "trip" });
-  }
-  return [...cutAround(out, trips), ...trips].sort((a, b) => a.start - b.start);
-}
-function placeOfType(ctx, sceneType, near) {
-  const ids = Object.keys(ctx.world.places).sort();
-  const parent = near ? own(ctx.world.places, near)?.parent : undefined;
-  return ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.parent === parent) ?? ids.find((id) => own(ctx.world.places, id)?.sceneType === sceneType && own(ctx.world.places, id)?.visibility !== "secret") ?? null;
+function needValue(ctx, who, need, at = ctx.state.clock) {
+  const recorded = typeof objOf(own(objOf(own(ctx.state.entities, who)?.fields.needs), need)).t === "number";
+  const planned = !recorded && who !== ctx.world.pov && own(ctx.state.entities, who)?.agent === true && ctx.levelOf(who, "castlife") >= 3;
+  return needIn(ctx, who, need, at, planned ? dayPlan(ctx, who, dateAt(calendarOf(ctx.world), at).dayIndex).blocks : []);
 }
 function within3(dayStart, fromH, toH) {
   return { from: dayStart + fromH * 60, to: dayStart + toH * 60 };
@@ -17210,16 +17803,25 @@ function shownActivity(ctx, who, activity) {
 function dayOptions(ctx, who, dayStart) {
   const level = ctx.levelOf(who, "castlife");
   const home = homeOf(ctx, who);
-  const need = (n) => level >= 4 ? needValue(ctx, who, n, dayStart + 12 * 60) : 0;
   const cal = calendarOf(ctx.world);
   const hourOf = (t) => dateAt(cal, t).minuteOfDay / 60;
-  const pressed = (n, word) => need(n) >= 50 ? [`${word} (${n} ${Math.round(need(n))})`] : [];
+  const need = (n, t, laid) => level >= 4 ? needIn(ctx, who, n, t, laid) : 0;
+  const pressed = (n, word) => (t, laid) => {
+    const v = need(n, t, laid);
+    return v >= 50 ? [`${word} (${n} ${Math.round(v)})`] : [];
+  };
+  const occasion = occasionOf(ctx, who, dateAt(cal, dayStart).dayIndex);
+  const off = occasion.dayOff;
+  const company = placeOfType(ctx, "conversation", home) ?? home;
+  const outdoors = occasion.foul ? home : placeOfType(ctx, "exploration", home) ?? home;
+  const outside = (occasion.season === "summer" ? 0.5 : occasion.season === "winter" ? -0.5 : 0) - (occasion.foul ? 1 : 0);
+  const unwind = [...off ? ["a day off"] : [], ...occasion.season === "summer" || occasion.season === "winter" ? [occasion.season] : [], ...occasion.foul ? ["bad weather"] : []];
   const options = [
     { id: "sleep", label: "Sleep", activity: "sleep", place: home, duration: 480, repeat: true, reasons: ["night"], utility: (t) => hourOf(t) >= 21.5 || hourOf(t) < 6 ? 10 : 0 },
-    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: within3(dayStart, 6, 10), utility: 4 + need("hunger") / 20, reasons: ["morning meal", ...pressed("hunger", "hungry")] },
-    { id: "lunch", label: "Lunch", activity: "lunch", place: placeOfType(ctx, "conversation", home) ?? home, duration: 45, window: within3(dayStart, 11, 14), utility: 4 + need("hunger") / 20, reasons: ["midday meal", ...pressed("hunger", "hungry")] },
-    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within3(dayStart, 17, 21), utility: 4.5 + need("hunger") / 20, reasons: ["evening meal", ...pressed("hunger", "hungry")] },
-    { id: "leisure", label: "Time out", activity: "leisure", place: placeOfType(ctx, "exploration", home) ?? home, duration: 60, window: within3(dayStart, 9, 20), utility: 1.5 + need("fun") / 30, reasons: ["unwind", ...pressed("fun", "bored")] }
+    { id: "breakfast", label: "Breakfast", activity: "breakfast", place: home, duration: 30, window: off ? within3(dayStart, 7, 11) : within3(dayStart, 6, 10), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: off ? ["morning meal", "a slow morning"] : ["morning meal"], because: pressed("hunger", "hungry") },
+    { id: "lunch", label: "Lunch", activity: "lunch", place: company, duration: 45, window: within3(dayStart, 11, 14), utility: (t, laid) => 4 + need("hunger", t, laid) / 20, reasons: ["midday meal"], because: pressed("hunger", "hungry") },
+    { id: "dinner", label: "Dinner", activity: "dinner", place: home, duration: 60, window: within3(dayStart, 17, 21), utility: (t, laid) => 4.5 + need("hunger", t, laid) / 20, reasons: ["evening meal"], because: pressed("hunger", "hungry") },
+    { id: "leisure", label: "Time out", activity: "leisure", place: outdoors, duration: 60, window: within3(dayStart, 9, off ? 22 : 20), utility: (t, laid) => 1.5 + (off ? 1 : 0) + outside + need("fun", t, laid) / 30, reasons: ["unwind", ...unwind], because: pressed("fun", "bored") }
   ];
   const social = optionalQuery(ctx, "regard");
   let fondness = 0;
@@ -17228,7 +17830,7 @@ function dayOptions(ctx, who, dayStart) {
       if (other !== who && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, other)?.kind ?? "", "person"))
         fondness = Math.max(fondness, social(ctx, who, other));
   }
-  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: placeOfType(ctx, "conversation", home) ?? home, duration: 90, window: within3(dayStart, 17, 22), utility: 2.5 + fondness / 50 + need("social") / 25, reasons: ["company", ...fondness >= 30 ? ["a close friend"] : [], ...pressed("social", "lonely")] });
+  options.push({ id: "socialize", label: "See friends", activity: "socialize", place: company, duration: 90, window: off ? within3(dayStart, 12, 23) : within3(dayStart, 17, 22), utility: (t, laid) => 2.5 + (off ? 1 : 0) - (occasion.foul ? 0.5 : 0) + fondness / 50 + need("social", t, laid) / 25, reasons: ["company", ...fondness >= FOND ? ["a close friend"] : [], ...off ? ["a day off"] : []], because: pressed("social", "lonely") });
   const chores = own(ctx.state.entities, who)?.fields.chores;
   if (Array.isArray(chores)) {
     chores.forEach((raw, i) => {
@@ -17244,6 +17846,15 @@ function dayOptions(ctx, who, dayStart) {
       const where = placeOfEntity(ctx.state, g.borrower) ?? placeOfEntity(ctx.state, g.thing);
       options.push({ id: `retrieve:${g.thing}`, label: `Get ${own(ctx.state.entities, g.thing)?.name ?? g.thing} back from ${own(ctx.state.entities, g.borrower)?.name ?? g.borrower}`, activity: `retrieve:${g.thing}`, place: where, duration: 45, window: within3(dayStart, 8, 20), utility: 7, reasons: ["overdue loan"] });
     }
+  }
+  for (const h of occasion.holidays) {
+    options.push(h.dayOff ? { id: `holiday:${h.id}`, label: h.label, activity: "socialize", place: home, duration: 180, window: within3(dayStart, 12, 20), utility: 5.5, reasons: [h.label] } : { id: `holiday:${h.id}`, label: h.label, activity: "leisure", place: company, duration: 90, window: within3(dayStart, 17, 22), utility: 3, reasons: [h.label] });
+  }
+  if (occasion.birthday)
+    options.push({ id: "birthday", label: "Birthday", activity: "socialize", place: company, duration: 150, window: within3(dayStart, 17, 23), utility: 6.5, reasons: ["their birthday"] });
+  for (const friend of occasion.friends.slice(0, 2)) {
+    const theirs = homeOf(ctx, friend);
+    options.push({ id: `birthday:${friend}`, label: "A friend's birthday", activity: "socialize", place: theirs !== null && own(ctx.world.places, theirs) ? theirs : company, duration: 90, window: within3(dayStart, 17, 22), utility: 4 + (social?.(ctx, who, friend) ?? 0) / 50, reasons: ["a friend's birthday"] });
   }
   return options;
 }
@@ -17282,6 +17893,90 @@ var ACQUAINT_CHANCE = 0.15;
 function acquainted(state, a, b) {
   return !!own(state.entities, a)?.relations.some((r) => r.type === "regard" && r.to === b) || !!own(state.entities, b)?.relations.some((r) => r.type === "regard" && r.to === a);
 }
+function takeUp(ctx, who, place, activity, at) {
+  const out = [];
+  const e = own(ctx.state.entities, who);
+  if (!e || routineStays(ctx, who, place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true)
+    return out;
+  if (!held2(ctx.state, who, "place", at) && place && own(ctx.world.places, place) && placeOfEntity(ctx.state, who) !== place) {
+    out.push({ type: "set", entity: who, field: "place", value: place });
+    if (who !== ctx.world.pov && place === placeOfEntity(ctx.state, ctx.world.pov))
+      out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
+  }
+  if (!held2(ctx.state, who, "activity", at) && e.fields.activity !== activity)
+    out.push({ type: "set", entity: who, field: "activity", value: activity });
+  return out;
+}
+function planOutcomes(ctx, who, slot) {
+  if (who === ctx.world.pov)
+    return [];
+  const due = (optionalQuery(ctx, "minds.plans")?.(ctx, who) ?? []).filter((p) => p.status === "open" && p.when.from <= slot.end);
+  if (due.length === 0)
+    return [];
+  const tier = planTier(ctx, who);
+  const laid = laidPlans(ctx, who, tier === "background" ? [] : due);
+  const out = [];
+  for (const p of due) {
+    const blocks = laid.get(p.id) ?? [];
+    const last = Math.max(...blocks.map((b) => b.end));
+    if (blocks.length > 0 && last <= slot.end)
+      out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "done", at: last, reason: null } });
+    else if (blocks.length === 0 && p.when.to <= slot.end)
+      out.push({ type: MINDS_EVENTS.plan, data: { entity: who, plan: p.id, status: "dropped", at: p.when.to, reason: tier === "background" ? "routine only" : "no time for it" } });
+  }
+  return out;
+}
+var INVITE_LEAD = 6 * 60;
+function planAsks(ctx, who) {
+  const pov = ctx.world.pov;
+  const plans = plansOf(ctx, who).filter((p) => p.with.includes(pov));
+  if (plans.length === 0)
+    return [];
+  const cal = calendarOf(ctx.world);
+  const laid = laidPlans(ctx, who, plans);
+  return plans.flatMap((p) => {
+    const first = laid.get(p.id)?.[0];
+    return first ? [{ plan: p.id, ask: Math.max(first.start - INVITE_LEAD, p.made, clockAt(cal, dateAt(cal, first.start).dayIndex, 0)), at: first.start, place: first.place ?? null }] : [];
+  });
+}
+function planInvitation(ctx, who, ask) {
+  const key = `${who}:plan:${ask.plan}`;
+  const given = sliceOf(ctx.state, "castlife").invitations;
+  if (!acts2(ctx, ctx.world.pov) || Array.isArray(given) && given.some((i) => objOf(i).key === key))
+    return [];
+  const text = invitationText(ctx, who, ask.place, ask.at, ctx.world.pov);
+  return [{ type: "castlife.invitation", data: { agent: who, place: ask.place, at: ask.at, text, key } }, { type: ENGINE_EVENTS.signal, data: { class: "invitation", text, entity: who } }];
+}
+function planMoments(ctx, who, slot) {
+  if (plansOf(ctx, who).length === 0)
+    return [];
+  const inside = (at) => at > slot.start && at < slot.end;
+  const out = [];
+  for (const c of commitments(ctx, who, slot.start, slot.end)) {
+    if (c.plan === undefined)
+      continue;
+    if (inside(c.start))
+      out.push({ at: c.start, key: `start:${c.plan}` });
+    if (inside(c.end))
+      out.push({ at: c.end, key: `end:${c.plan}` });
+  }
+  if (ctx.levelOf(who, "castlife") >= 4) {
+    for (const a of planAsks(ctx, who))
+      if (inside(a.ask))
+        out.push({ at: a.ask, key: `invite:${a.plan}` });
+  }
+  return out;
+}
+function atPlanMoment(ctx, who, moment) {
+  if (moment.key.startsWith("invite:")) {
+    const ask = planAsks(ctx, who).find((a) => `invite:${a.plan}` === moment.key);
+    return ask ? planInvitation(ctx, who, ask) : [];
+  }
+  const block = dayPlan(ctx, who, dateAt(calendarOf(ctx.world), moment.at).dayIndex).blocks.find((b) => b.start <= moment.at && moment.at < b.end);
+  if (!block)
+    return [];
+  return takeUp(ctx, who, block.place ?? (moment.key.startsWith("end:") ? homeOf(ctx, who) : null), block.activity.startsWith("retrieve:") ? "errand" : block.activity, moment.at);
+}
 function stepAgent2(slot, ctx, rngFor, who) {
   const out = [];
   const e = own(ctx.state.entities, who);
@@ -17296,7 +17991,6 @@ function stepAgent2(slot, ctx, rngFor, who) {
   if (!block)
     return out;
   const pov = ctx.world.pov;
-  const povPlace = placeOfEntity(ctx.state, pov);
   if (block.activity.startsWith("retrieve:")) {
     const thing = block.activity.slice("retrieve:".length);
     const lent = own(ctx.state.entities, thing)?.fields.owner === who && Object.values(ctx.state.entities).some((x) => x.relations.some((r) => r.type === "uses" && r.to === thing));
@@ -17307,15 +18001,7 @@ function stepAgent2(slot, ctx, rngFor, who) {
         out.push(...got, { type: ENGINE_EVENTS.note, data: { text: `${e.name} got ${own(ctx.state.entities, thing)?.name ?? thing} back.`, entity: who, visibility: "known_by" } });
     }
   }
-  const activity = block.activity.startsWith("retrieve:") ? "errand" : block.activity;
-  const stays = routineStays(ctx, who, block.place) || optionalQuery(ctx, "combat.engaged")?.(ctx, who) === true;
-  if (!stays && !held2(ctx.state, who, "place", slot.end) && block.place && own(ctx.world.places, block.place) && placeOfEntity(ctx.state, who) !== block.place) {
-    out.push({ type: "set", entity: who, field: "place", value: block.place });
-    if (who !== pov && block.place === povPlace)
-      out.push({ type: ENGINE_EVENTS.signal, data: { class: "arrival", text: `${e.name} arrives.`, entity: who } });
-  }
-  if (!stays && !held2(ctx.state, who, "activity", slot.end) && e.fields.activity !== activity)
-    out.push({ type: "set", entity: who, field: "activity", value: activity });
+  out.push(...takeUp(ctx, who, block.place, block.activity.startsWith("retrieve:") ? "errand" : block.activity, slot.end), ...planOutcomes(ctx, who, slot));
   if (level < 4)
     return out;
   if (who === pov) {
@@ -17337,6 +18023,11 @@ function stepAgent2(slot, ctx, rngFor, who) {
         out.push(...appraise(ctx, who, other, kind, `${kind} at ${own(ctx.world.places, block.place)?.name ?? block.place}`, true));
     }
   }
+  for (const a of planAsks(ctx, who))
+    if (a.ask > slot.start && a.ask <= slot.end)
+      out.push(...planInvitation(ctx, who, a));
+  if (optionalQuery(ctx, "minds.on")?.(ctx) === true)
+    return out;
   const regard = optionalQuery(ctx, "regard");
   const hour = dateAt(cal, slot.start).minuteOfDay / 60;
   if (regard && acts2(ctx, pov) && !block.fixed && hour >= 12 && hour < 20 && regard(ctx, who, pov) >= 20) {
@@ -17404,7 +18095,7 @@ var EVENTS2 = [
         return;
       const at = numOf(e.data.at, state.clock);
       const need = strOf(e.data.need);
-      const v = Math.max(0, Math.min(100, needValue({ world: ctx.world, state }, strOf(e.data.entity), need, at) + numOf(e.data.delta)));
+      const v = Math.max(0, Math.min(100, needValue(ctx, strOf(e.data.entity), need, at) + numOf(e.data.delta)));
       who.fields.needs = { ...objOf(who.fields.needs), [need]: { v, t: at } };
     },
     touches: (e) => [{ entity: strOf(e.data.entity), field: "needs" }],
@@ -17424,7 +18115,7 @@ var EVENTS2 = [
     apply: (e, state) => {
       const s = mutableSlice(state, "castlife");
       const list = Array.isArray(s.invitations) ? s.invitations.slice(-9) : [];
-      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text) });
+      list.push({ agent: strOf(e.data.agent), place: e.data.place ?? null, at: numOf(e.data.at), text: strOf(e.data.text), ...typeof e.data.key === "string" ? { key: e.data.key } : {} });
       s.invitations = list;
     },
     describe: (e, ctx, viewer) => invitationText(ctx, strOf(e.data.agent), typeof e.data.place === "string" ? e.data.place : null, numOf(e.data.at), viewer)
@@ -17550,7 +18241,8 @@ function stanceCast(ctx) {
   const { registry: reg, world, state } = ctx;
   const pov = world.pov;
   const here = placeOfEntity(state, pov);
-  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false);
+  const minded = new Set(optionalQuery(ctx, "minds.minded")?.(ctx) ?? []);
+  const people = here === null ? [] : Object.keys(state.entities).sort().filter((id) => id !== pov && placeOfEntity(state, id) === here && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && canSeeEntity(reg, world, state, pov, id) && !isGone(state, id) && povLife(world, state, id)?.acts !== false && !minded.has(id));
   let check = null;
   const safe = (text) => {
     if (!check) {
@@ -17609,9 +18301,10 @@ var castlifePack = {
   register(r) {
     for (const def of EVENTS2)
       r.event(def);
-    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [] });
+    r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: atPlanMoment });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.query("castlife.activity", shownActivity);
+    r.query("castlife.commitments", (ctx, who, start, end) => commitments(ctx, who, start, end).map((c) => ({ start: c.start, end: c.end, activity: c.activity, place: c.place ?? null, kind: c.kind, label: c.label, ...c.plan !== undefined ? { plan: c.plan } : {} })));
     r.query("castlife.tie_zones", (ctx) => {
       const out = [];
       const decided = decisions(ctx.state);
@@ -17700,6 +18393,10 @@ var castlifePack = {
     r.renderer({ slot: "stance", render: stanceLines });
     r.renderer({ slot: "stance", hint: true, render: stanceCues });
     r.lint({ code: "castlife.cues", check: cueIssues });
+    r.lint({
+      code: "castlife.birthday",
+      check: (world) => Object.values(world.entities).flatMap((e) => e.fields.birthday === undefined || e.fields.birthday === null || birthdayOf(e.fields.birthday) ? [] : [{ severity: "warning", code: "castlife.birthday", message: `${e.name}'s birthday doesn't read as a date: write it MM-DD, or YYYY-MM-DD with the year they were born.`, path: `entities.${e.id}.fields.birthday` }])
+    });
     r.lint({
       code: "castlife.double_booking",
       check(world) {
@@ -19485,6 +20182,926 @@ var combatPack = {
   }
 };
 var core_default11 = combatPack;
+
+// src/packs/minds/core/state.ts
+var PACK5 = "minds";
+var EMPTY_SLICE = { round: 0, on: false, chars: {}, presence: [] };
+function emptyCharacter() {
+  return { mind: null, plans: [], notes: [], commitments: [], witness: [], summary: "", pin: null, refresh: false, lastPresent: null, consolidated: null };
+}
+function readSlice(state) {
+  const raw = state.packs[PACK5];
+  if (!raw)
+    return EMPTY_SLICE;
+  const s = raw;
+  return { round: s.round ?? 0, on: s.on ?? false, chars: s.chars ?? {}, presence: s.presence ?? [] };
+}
+function readCharacter(state, id) {
+  return own(readSlice(state).chars, id) ?? emptyCharacter();
+}
+function writeSlice(state) {
+  const s = state.packs[PACK5] ?? {};
+  s.round ??= 0;
+  s.on ??= false;
+  s.chars ??= {};
+  s.presence ??= [];
+  const full = s;
+  state.packs[PACK5] = full;
+  return full;
+}
+function writeCharacter(state, id) {
+  const s = writeSlice(state);
+  const c = own(s.chars, id) ?? emptyCharacter();
+  s.chars[id] = c;
+  return c;
+}
+function putPlan(c, plan) {
+  const i = c.plans.findIndex((p) => p.id === plan.id);
+  if (i >= 0)
+    c.plans[i] = plan;
+  else
+    c.plans.push(plan);
+  boundPlans(c);
+}
+function boundPlans(c) {
+  const open = c.plans.filter((p) => p.status === "open");
+  const closed = c.plans.filter((p) => p.status !== "open");
+  const keptOpen = open.slice(Math.max(0, open.length - MINDS_KEEP.openPlans));
+  const keptClosed = closed.slice(Math.max(0, closed.length - MINDS_KEEP.closedPlans));
+  const keep = new Set([...keptOpen, ...keptClosed]);
+  c.plans = c.plans.filter((p) => keep.has(p));
+}
+function putCommitment(c, commitment) {
+  const i = c.commitments.findIndex((x) => x.id === commitment.id);
+  if (i >= 0)
+    c.commitments[i] = commitment;
+  else
+    c.commitments.push(commitment);
+  boundCommitments(c);
+}
+function boundCommitments(c) {
+  const open = c.commitments.filter((x) => x.status === "open");
+  const closed = c.commitments.filter((x) => x.status !== "open");
+  const keep = new Set([...open.slice(Math.max(0, open.length - MINDS_KEEP.openCommitments)), ...closed.slice(Math.max(0, closed.length - MINDS_KEEP.closedCommitments))]);
+  c.commitments = c.commitments.filter((x) => keep.has(x));
+}
+function putNote(c, note) {
+  const i = c.notes.findIndex((n) => n.id === note.id);
+  if (i >= 0)
+    c.notes[i] = note;
+  else
+    c.notes.push(note);
+  while (c.notes.length > MINDS_KEEP.notes) {
+    let drop = 0;
+    for (let j = 1;j < c.notes.length; j++) {
+      const a = c.notes[j];
+      const b = c.notes[drop];
+      if (a && b && (a.salience < b.salience || a.salience === b.salience && a.at < b.at))
+        drop = j;
+    }
+    c.notes.splice(drop, 1);
+  }
+}
+function addWitness(c, entry) {
+  c.witness.push(entry);
+  if (c.witness.length > MINDS_KEEP.witness)
+    c.witness.splice(0, c.witness.length - MINDS_KEEP.witness);
+}
+function openPlans(c) {
+  return c.plans.filter((p) => p.status === "open").sort((a, b) => a.when.from - b.when.from || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+function openCommitments(c) {
+  return c.commitments.filter((x) => x.status === "open");
+}
+
+// src/packs/minds/core/events.ts
+var str4 = (v) => typeof v === "string";
+var finite2 = (v) => typeof v === "number" && Number.isFinite(v);
+var ids = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+var texts = ids;
+function bad(reason) {
+  return { code: "bad_event", reason };
+}
+function isFidelity(v) {
+  return typeof v === "string" && FIDELITIES.includes(v);
+}
+function isPlan(v) {
+  if (!isRecord(v) || !isRecord(v.when))
+    return false;
+  return str4(v.id) && v.id !== "" && str4(v.what) && typeof v.kind === "string" && PLAN_KINDS.includes(v.kind) && finite2(v.when.from) && finite2(v.when.to) && v.when.to >= v.when.from && (v.where === null || str4(v.where)) && ids(v.with) && finite2(v.priority) && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max && (v.status === "open" || v.status === "done" || v.status === "dropped") && finite2(v.made) && (v.source === "mind" || v.source === "memory" || v.source === "gm") && (v.closed === null || finite2(v.closed)) && (v.reason === null || str4(v.reason));
+}
+function isNote(v) {
+  return isRecord(v) && str4(v.id) && v.id !== "" && str4(v.text) && finite2(v.salience) && v.salience >= 0 && v.salience <= 5 && finite2(v.at);
+}
+function isCommitment(v) {
+  return isRecord(v) && str4(v.id) && v.id !== "" && typeof v.kind === "string" && COMMITMENT_KINDS.includes(v.kind) && ids(v.with) && str4(v.text) && (v.due === null || finite2(v.due)) && typeof v.status === "string" && COMMITMENT_STATUSES.includes(v.status) && finite2(v.made) && (v.closed === null || finite2(v.closed));
+}
+function planOf(v) {
+  return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason };
+}
+function noteOf(v) {
+  return { id: v.id, text: v.text, salience: v.salience, at: v.at };
+}
+function commitmentOf(v) {
+  return { id: v.id, kind: v.kind, with: [...v.with], text: v.text, due: v.due, status: v.status, made: v.made, closed: v.closed };
+}
+function person(ctx, data) {
+  return str4(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
+}
+function nameOf5(ctx, id) {
+  return own(ctx.state.entities, id)?.name ?? id;
+}
+var PLAN_STATUSES = ["open", "done", "dropped"];
+var round = {
+  type: MINDS_EVENTS.round,
+  validate: (e) => finite2(e.data.at) && typeof e.data.on === "boolean" ? null : bad("a minds round needs its clock and whether minds are on"),
+  apply: (e, state) => {
+    const s = writeSlice(state);
+    s.round += 1;
+    s.on = e.data.on === true;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : e.data.on === true ? "Minds round" : "Minds switched off"
+};
+function validMind(data) {
+  const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
+  if (!finite2(at) || !(place === null || str4(place)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str4(reason))
+    return bad("a mind needs its clock, place, level, moment and reason");
+  if (!str4(monologue) || !str4(depiction) || !str4(intent) || !texts(reactions) || !Array.isArray(plans) || !plans.every((p) => isPlan(p)))
+    return bad("a mind needs its monologue, depiction, intent, reactions and plans");
+  if (!(mood === null || str4(mood)) || !(interrupt === null || isRecord(interrupt) && str4(interrupt.reason)) || typeof withheld !== "boolean")
+    return bad("a mind's mood, interrupt or withheld flag is malformed");
+  return null;
+}
+var mind = {
+  type: MINDS_EVENTS.mind,
+  validate: (e, ctx) => person(ctx, e.data) ?? validMind(e.data),
+  apply: (e, state) => {
+    const d = e.data;
+    if (!str4(d.entity))
+      return;
+    const s = writeSlice(state);
+    const c = writeCharacter(state, d.entity);
+    const plans = Array.isArray(d.plans) ? d.plans.filter((p) => isPlan(p)).map(planOf) : [];
+    const record = {
+      at: finite2(d.at) ? d.at : state.clock,
+      round: s.round,
+      level: isFidelity(d.level) ? d.level : "background",
+      place: str4(d.place) ? d.place : null,
+      moment: d.moment === "beat" ? "beat" : "turn",
+      reason: str4(d.reason) ? d.reason : "",
+      monologue: str4(d.monologue) ? d.monologue : "",
+      depiction: str4(d.depiction) ? d.depiction : "",
+      intent: str4(d.intent) ? d.intent : "",
+      reactions: texts(d.reactions) ? [...d.reactions] : [],
+      plans: plans.map((p) => p.id),
+      mood: str4(d.mood) ? d.mood : null,
+      interrupt: isRecord(d.interrupt) && str4(d.interrupt.reason) ? d.interrupt.reason : null,
+      withheld: d.withheld === true
+    };
+    c.mind = record;
+    c.refresh = false;
+    for (const p of plans)
+      putPlan(c, p);
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s mind (${String(e.data.level)}): ${str4(e.data.intent) && e.data.intent !== "" ? e.data.intent : "no intent"}`
+};
+function validMemory(data) {
+  const { at, notes, commitments, resolved, plans, told, summary } = data;
+  if (!finite2(at) || !Array.isArray(notes) || !notes.every((n) => isNote(n)) || !Array.isArray(commitments) || !commitments.every((c) => isCommitment(c)))
+    return bad("a memory needs its clock, notes and commitments");
+  if (!Array.isArray(resolved) || !resolved.every((r) => isRecord(r) && str4(r.id) && (r.status === "kept" || r.status === "broken" || r.status === "released")))
+    return bad("a memory's resolved commitments are malformed");
+  if (!Array.isArray(plans) || !plans.every((p) => isPlan(p)) || !Array.isArray(told) || !told.every((t) => isRecord(t) && ids(t.to) && str4(t.what)) || !(summary === null || str4(summary)))
+    return bad("a memory's plans, told or summary are malformed");
+  return null;
+}
+var memory = {
+  type: MINDS_EVENTS.memory,
+  validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
+  apply: (e, state) => {
+    const d = e.data;
+    if (!str4(d.entity))
+      return;
+    const who = d.entity;
+    const at = finite2(d.at) ? d.at : state.clock;
+    const c = writeCharacter(state, who);
+    for (const n of Array.isArray(d.notes) ? d.notes : [])
+      if (isNote(n))
+        putNote(c, noteOf(n));
+    for (const x of Array.isArray(d.commitments) ? d.commitments : [])
+      if (isCommitment(x))
+        putCommitment(c, commitmentOf(x));
+    for (const r of Array.isArray(d.resolved) ? d.resolved : []) {
+      if (!isRecord(r) || !str4(r.id))
+        continue;
+      const open = c.commitments.find((x) => x.id === r.id && x.status === "open");
+      if (open && (r.status === "kept" || r.status === "broken" || r.status === "released"))
+        putCommitment(c, { ...open, status: r.status, closed: at });
+    }
+    for (const p of Array.isArray(d.plans) ? d.plans : [])
+      if (isPlan(p))
+        putPlan(c, planOf(p));
+    if (str4(d.summary))
+      c.summary = d.summary;
+    for (const t of Array.isArray(d.told) ? d.told : []) {
+      if (!isRecord(t) || !ids(t.to) || !str4(t.what))
+        continue;
+      for (const to of t.to)
+        if (to !== who && own(state.entities, to))
+          addWitness(writeCharacter(state, to), { at, what: t.what, how: "told", by: who, place: null });
+    }
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const n = Array.isArray(e.data.notes) ? e.data.notes.length : 0;
+    const c = Array.isArray(e.data.commitments) ? e.data.commitments.length : 0;
+    return `${nameOf5(ctx, String(e.data.entity))} remembers the turn: ${n} note${n === 1 ? "" : "s"}, ${c} new commitment${c === 1 ? "" : "s"}`;
+  }
+};
+var presence = {
+  type: MINDS_EVENTS.presence,
+  validate: (e) => finite2(e.data.at) && (e.data.msg === null || str4(e.data.msg)) && (e.data.place === null || str4(e.data.place)) && ids(e.data.who) && texts(e.data.saw) ? null : bad("a presence record needs its clock, message, place, who and what they saw"),
+  apply: (e, state) => {
+    const d = e.data;
+    const at = finite2(d.at) ? d.at : state.clock;
+    const place = str4(d.place) ? d.place : null;
+    const who = ids(d.who) ? d.who.filter((id) => own(state.entities, id)) : [];
+    const s = writeSlice(state);
+    s.presence.push({ msg: str4(d.msg) ? d.msg : null, at, place, who: [...who] });
+    if (s.presence.length > MINDS_KEEP.presence)
+      s.presence.splice(0, s.presence.length - MINDS_KEEP.presence);
+    const saw = texts(d.saw) ? d.saw : [];
+    for (const id of who) {
+      const c = writeCharacter(state, id);
+      c.lastPresent = at;
+      for (const what of saw)
+        addWitness(c, { at, what, how: "saw", by: null, place });
+    }
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `Present: ${ids(e.data.who) && e.data.who.length > 0 ? e.data.who.map((id) => nameOf5(ctx, id)).join(", ") : "no one"}`
+};
+var planStatus = {
+  type: MINDS_EVENTS.plan,
+  validate: (e, ctx) => {
+    const d = e.data;
+    if (!str4(d.plan) || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str4(d.reason)))
+      return bad("a plan's status needs the plan, a status, its clock and a reason or null");
+    const missing = person(ctx, d);
+    if (missing)
+      return missing;
+    return readCharacter(ctx.state, String(d.entity)).plans.some((p) => p.id === d.plan) ? null : { code: "missing_plan", reason: "that plan isn't theirs any more" };
+  },
+  apply: (e, state) => {
+    const d = e.data;
+    const c = writeCharacter(state, String(d.entity));
+    const p = c.plans.find((x) => x.id === d.plan);
+    if (!p || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status))
+      return;
+    const status = d.status;
+    putPlan(c, { ...p, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state.clock, reason: str4(d.reason) ? d.reason : null });
+  },
+  describe: (e, ctx, viewer) => {
+    if (viewer !== undefined)
+      return "";
+    const plan = readCharacter(ctx.state, String(e.data.entity)).plans.find((p) => p.id === e.data.plan);
+    return `${nameOf5(ctx, String(e.data.entity))}'s plan ${plan ? `"${plan.what}"` : String(e.data.plan)}: ${String(e.data.status)}`;
+  }
+};
+function editDef(type, key, valid, list, put, remove) {
+  return {
+    type,
+    validate: (e, ctx) => {
+      const d = e.data;
+      const missing = person(ctx, d);
+      if (missing)
+        return missing;
+      const id = d[key];
+      if (!str4(id) || id === "")
+        return bad(`a ${key} edit needs the ${key}'s id`);
+      if (d.value === null)
+        return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: `that ${key} isn't theirs any more` };
+      return valid(d.value) && isRecord(d.value) && d.value.id === id ? null : bad(`a ${key} edit's value is malformed`);
+    },
+    apply: (e, state) => {
+      const d = e.data;
+      const who = String(d.entity);
+      if (d.value === null)
+        remove(state, who, String(d[key]));
+      else if (d.value !== undefined && valid(d.value))
+        put(state, who, d.value);
+    },
+    describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s ${key} ${e.data.value === null ? "deleted" : "edited"}`
+  };
+}
+var planEdit = editDef(MINDS_EVENTS.planEdit, "plan", isPlan, (c) => c.plans, (state, who, v) => {
+  if (isPlan(v))
+    putPlan(writeCharacter(state, who), planOf(v));
+}, (state, who, id) => {
+  const c = writeCharacter(state, who);
+  c.plans = c.plans.filter((p) => p.id !== id);
+});
+var noteEdit = editDef(MINDS_EVENTS.noteEdit, "note", isNote, (c) => c.notes, (state, who, v) => {
+  if (isNote(v))
+    putNote(writeCharacter(state, who), noteOf(v));
+}, (state, who, id) => {
+  const c = writeCharacter(state, who);
+  c.notes = c.notes.filter((n) => n.id !== id);
+});
+var commitmentEdit = editDef(MINDS_EVENTS.commitmentEdit, "commitment", isCommitment, (c) => c.commitments, (state, who, v) => {
+  if (isCommitment(v))
+    putCommitment(writeCharacter(state, who), commitmentOf(v));
+}, (state, who, id) => {
+  const c = writeCharacter(state, who);
+  c.commitments = c.commitments.filter((x) => x.id !== id);
+});
+var commitmentStatus = {
+  type: MINDS_EVENTS.commitment,
+  validate: (e, ctx) => {
+    const d = e.data;
+    if (!str4(d.commitment) || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str4(d.reason)))
+      return bad("a commitment's status needs the commitment, a status, its clock and a reason or null");
+    const missing = person(ctx, d);
+    if (missing)
+      return missing;
+    return readCharacter(ctx.state, String(d.entity)).commitments.some((x) => x.id === d.commitment) ? null : { code: "missing_commitment", reason: "that commitment isn't theirs any more" };
+  },
+  apply: (e, state) => {
+    const d = e.data;
+    const c = writeCharacter(state, String(d.entity));
+    const x = c.commitments.find((y) => y.id === d.commitment);
+    if (!x || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status))
+      return;
+    const status = d.status;
+    putCommitment(c, { ...x, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state.clock });
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s commitment: ${String(e.data.status)}`
+};
+var consolidated = {
+  type: MINDS_EVENTS.consolidated,
+  validate: (e, ctx) => person(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str4(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
+  apply: (e, state) => {
+    const d = e.data;
+    const c = writeCharacter(state, String(d.entity));
+    const gone = new Set(ids(d.notes) ? d.notes : []);
+    c.notes = c.notes.filter((n) => !gone.has(n.id));
+    if (str4(d.summary))
+      c.summary = d.summary;
+    c.consolidated = finite2(d.at) ? d.at : state.clock;
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}'s older notes folded into their summary`
+};
+var pin = {
+  type: MINDS_EVENTS.pin,
+  validate: (e, ctx) => person(ctx, e.data) ?? (e.data.level === null || isFidelity(e.data.level) ? null : bad("a pin is a fidelity level or null")),
+  apply: (e, state) => {
+    writeCharacter(state, String(e.data.entity)).pin = isFidelity(e.data.level) ? e.data.level : null;
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}: fidelity ${e.data.level === null ? "unpinned" : `pinned at ${String(e.data.level)}`}`
+};
+var refresh = {
+  type: MINDS_EVENTS.refresh,
+  validate: (e, ctx) => person(ctx, e.data),
+  apply: (e, state) => {
+    writeCharacter(state, String(e.data.entity)).refresh = true;
+  },
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf5(ctx, String(e.data.entity))}: a fresh mind next turn`
+};
+var skip = {
+  type: MINDS_EVENTS.skip,
+  validate: (e) => finite2(e.data.from) && finite2(e.data.to) && Array.isArray(e.data.beats) && e.data.beats.every((b) => isRecord(b) && finite2(b.at) && str4(b.reason) && (b.source === "scan" || b.source === "model")) ? null : bad("a skip's beats need their span and each beat's clock, reason and source"),
+  apply: () => {
+    return;
+  },
+  describe: (e, _ctx, viewer) => viewer !== undefined ? "" : `Time skip beats: ${Array.isArray(e.data.beats) ? e.data.beats.length : 0}`
+};
+var MINDS_EVENT_DEFS = [round, mind, memory, presence, planStatus, planEdit, noteEdit, commitmentStatus, commitmentEdit, consolidated, pin, refresh, skip];
+function mindsOn(ctx) {
+  return readSlice(ctx.state).on;
+}
+
+// src/packs/minds/core/edit.ts
+function reject13(code, reason) {
+  return { code, reason };
+}
+function capText(text, max) {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max)
+    return t;
+  const cut = t.slice(0, max + 1);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > max * 0.6 ? cut.slice(0, at) : t.slice(0, max)).replace(/[\s,;:.]+$/, "")}…`;
+}
+var text3 = (v, max) => typeof v === "string" && v.trim() !== "" ? capText(v, max) : null;
+var minutes = (v) => typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
+function peopleIn(ctx, v) {
+  if (v === undefined)
+    return [];
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string"))
+    return reject13("bad_value", "who it's with is a list of people");
+  const ids = v;
+  for (const id of ids)
+    if (!own(ctx.state.entities, id))
+      return reject13("missing_entity", `there's no ${labelOf(ctx, id)}`);
+  return [...new Set(ids)];
+}
+function noteFrom(ctx, who, id, v, before) {
+  const body = text3(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
+  if (body === null)
+    return reject13("bad_value", "a note needs its text");
+  const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
+  if (salience === null)
+    return reject13("bad_value", "a note's salience is 1 to 5");
+  return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
+}
+function commitmentFrom(ctx, who, id, v, before) {
+  const body = text3(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
+  if (body === null)
+    return reject13("bad_value", "a commitment needs its text");
+  const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
+  if (kind === null)
+    return reject13("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
+  const status = v.status === undefined ? before?.status ?? "open" : COMMITMENT_STATUSES.includes(v.status) ? v.status : null;
+  if (status === null)
+    return reject13("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
+  const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
+  if (!Array.isArray(withList))
+    return withList;
+  const due = v.due === undefined ? before?.due ?? null : v.due === null ? null : minutes(v.due);
+  if (v.due !== undefined && v.due !== null && due === null)
+    return reject13("bad_value", "a commitment's due time is game minutes");
+  const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
+  return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
+}
+function planFrom(ctx, who, id, v, before) {
+  const what = text3(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
+  if (what === null)
+    return reject13("bad_value", "a plan needs what it is");
+  const when = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
+  if (!when || when.from === null || when.to === null || when.to < when.from)
+    return reject13("bad_value", "a plan needs when, from and to in game minutes, to not before from");
+  const kind = v.kind === undefined ? before?.kind ?? "other" : PLAN_KINDS.includes(v.kind) ? v.kind : null;
+  if (kind === null)
+    return reject13("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
+  const where = v.where === undefined ? before?.where ?? null : v.where === null ? null : typeof v.where === "string" && own(ctx.world.places, v.where) ? v.where : undefined;
+  if (where === undefined)
+    return reject13("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
+  const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
+  if (!Array.isArray(withList))
+    return withList;
+  const priority = v.priority === undefined ? before?.priority ?? PLAN_PRIORITY.normal : typeof v.priority === "number" && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max ? Math.round(v.priority) : null;
+  if (priority === null)
+    return reject13("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
+  const statuses = ["open", "done", "dropped"];
+  const status = v.status === undefined ? before?.status ?? "open" : statuses.includes(v.status) ? v.status : null;
+  if (status === null)
+    return reject13("bad_value", "a plan's status is open, done or dropped");
+  const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
+  return {
+    id: id ?? `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`,
+    what,
+    kind,
+    when: { from: when.from, to: when.to },
+    where,
+    with: withList,
+    priority,
+    status,
+    made: before?.made ?? ctx.state.clock,
+    source: before?.source ?? "gm",
+    closed,
+    reason: status === "open" ? null : before?.reason ?? "GM edit"
+  };
+}
+function mindEdit(ctx, op) {
+  const { world, state, registry } = ctx;
+  const e = own(state.entities, op.entity);
+  if (!e)
+    return reject13("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
+  if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person"))
+    return reject13("no_mind", `${e.name} doesn't have a mind`);
+  if (op.op === "mind_pin")
+    return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
+  if (op.op === "mind_refresh")
+    return [{ type: MINDS_EVENTS.refresh, data: { entity: op.entity } }];
+  const c = readCharacter(state, op.entity);
+  const value = op.value;
+  if (op.part === "note") {
+    const before = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
+    if (op.id !== null && !before)
+      return reject13("missing_note", `${e.name} has no such note`);
+    if (value === null)
+      return op.id === null ? reject13("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
+    const note = noteFrom(ctx, op.entity, op.id, value, before);
+    return "code" in note ? note : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note.id, value: note } }];
+  }
+  if (op.part === "commitment") {
+    const before = op.id === null ? undefined : c.commitments.find((x) => x.id === op.id);
+    if (op.id !== null && !before)
+      return reject13("missing_commitment", `${e.name} has no such commitment`);
+    if (value === null)
+      return op.id === null ? reject13("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
+    const commitment = commitmentFrom(ctx, op.entity, op.id, value, before);
+    return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment } }];
+  }
+  const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
+  if (op.id !== null && !before)
+    return reject13("missing_plan", `${e.name} has no such plan`);
+  if (value === null)
+    return op.id === null ? reject13("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
+  const plan = planFrom(ctx, op.entity, op.id, value, before);
+  return "code" in plan ? plan : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan.id, value: plan } }];
+}
+
+// src/packs/minds/core/fidelity.ts
+function mindCandidates(ctx) {
+  const { registry: reg, world, state } = ctx;
+  return Object.keys(state.entities).sort().filter((id) => id !== world.pov && kindIs(reg, world, own(state.entities, id)?.kind ?? "", "person") && !isGone(state, id) && acts(world, state, id));
+}
+var NAME_FILLER = { mr: true, mrs: true, ms: true, miss: true, dr: true, sir: true, lady: true, lord: true, dame: true, the: true, of: true, de: true, van: true, von: true, la: true, le: true, old: true, young: true, captain: true, constable: true, father: true, mother: true, sister: true, brother: true, aunt: true, uncle: true };
+function words3(text) {
+  return text.toLowerCase().replace(/['’]s\b/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+function namedIn(name, said) {
+  const own = words3(name);
+  if (own.length === 0 || said.length === 0)
+    return false;
+  const whole = own.join(" ");
+  const joined = ` ${said.join(" ")} `;
+  if (joined.includes(` ${whole} `))
+    return true;
+  const present = new Set(said);
+  return own.some((w) => w.length >= 3 && !NAME_FILLER[w] && present.has(w));
+}
+function namesIn(value, ids, out) {
+  if (typeof value === "string") {
+    if (ids.has(value))
+      out.add(value);
+    let found = [];
+    try {
+      found = identifiers(value);
+    } catch {}
+    for (const id of found)
+      if (ids.has(id))
+        out.add(id);
+  } else if (Array.isArray(value))
+    for (const v of value)
+      namesIn(v, ids, out);
+  else if (isRecord(value))
+    for (const v of Object.values(value))
+      namesIn(v, ids, out);
+}
+var refsCache = new WeakMap;
+function worldRefs(world) {
+  const hit = refsCache.get(world);
+  if (hit)
+    return hit;
+  const ids = new Set(Object.keys(world.entities));
+  const tracks = new Map;
+  for (const [id, t] of Object.entries(world.tracks)) {
+    const out = new Set;
+    namesIn(t.stages, ids, out);
+    if (t.knownBy?.ids) {
+      for (const x of t.knownBy.ids)
+        if (ids.has(x))
+          out.add(x);
+    }
+    tracks.set(id, out);
+  }
+  const rules = new Set;
+  for (const r of Object.values(world.rules))
+    namesIn(r, ids, rules);
+  const refs = { tracks, rules };
+  refsCache.set(world, refs);
+  return refs;
+}
+function liveTracks(world, state) {
+  return Object.keys(world.tracks).sort().filter((id) => {
+    const t = own(world.tracks, id);
+    const stage = currentStage(world, state, id);
+    return t !== undefined && stage !== null && !isTerminal(t, stage);
+  });
+}
+function closeBy(world, a, b) {
+  if (a === null || b === null || a === b)
+    return false;
+  const parent = (p) => own(world.places, p)?.parent ?? null;
+  return parent(a) === b || parent(b) === a || parent(a) !== null && parent(a) === parent(b);
+}
+function reason(out, label, points) {
+  if (points !== 0)
+    out.push({ label, points: Math.round(points * 10) / 10 });
+  return points;
+}
+function pendingWith(ctx, id) {
+  const { world, state } = ctx;
+  const pov = world.pov;
+  let n = 0;
+  const invited = ctx.registry.formulas.get("invited");
+  if (invited && invited(ctx, id) === true)
+    n++;
+  const now = state.clock;
+  const appointments = (who, other) => {
+    const list = own(state.entities, who)?.fields.appointments;
+    return (Array.isArray(list) ? list : []).filter((raw) => {
+      const a = objOf(raw);
+      const withList = Array.isArray(a.with) ? a.with : [];
+      return typeof a.at === "number" && a.at >= now && withList.includes(other);
+    }).length;
+  };
+  n += appointments(id, pov) + appointments(pov, id);
+  const c = readCharacter(state, id);
+  n += openPlans(c).filter((p) => p.with.includes(pov) && p.when.to >= now).length;
+  n += openCommitments(c).filter((x) => x.with.includes(pov)).length;
+  return n;
+}
+function fidelityOf(ctx, texts, config = worldMindsOf(ctx.world)) {
+  const { registry: reg, world, state } = ctx;
+  const pov = world.pov;
+  const w = config.weights;
+  const here = placeOfEntity(state, pov);
+  const said = words3(`${texts.user}
+${texts.reply}`);
+  const refs = worldRefs(world);
+  const tracks = liveTracks(world, state);
+  const regard = optionalQuery(ctx, "regard");
+  const out = [];
+  for (const id of mindCandidates(ctx)) {
+    const e = own(state.entities, id);
+    if (!e)
+      continue;
+    const reasons = [];
+    let score = 0;
+    const place = placeOfEntity(state, id);
+    if (here !== null && place === here)
+      score += reason(reasons, "In the scene", w.here);
+    else if (closeBy(world, place, here))
+      score += reason(reasons, "Close by", w.nearby);
+    if (namedIn(e.name, said))
+      score += reason(reasons, "Named this turn", w.mentioned);
+    if (regard) {
+      const strongest = Math.max(Math.abs(regard(ctx, id, pov)), Math.abs(regard(ctx, pov, id)));
+      score += reason(reasons, "Regard with you", w.regard * Math.min(1, strongest / 100));
+    }
+    if (knows(state, id, pov) || knows(state, pov, id))
+      score += reason(reasons, "Knows you", w.knows);
+    const owned = tracks.filter((t) => own(world.tracks, t)?.owner === id);
+    if (owned.length > 0)
+      score += reason(reasons, "Owns a story track", w.owner);
+    const named = tracks.filter((t) => own(world.tracks, t)?.owner !== id && refs.tracks.get(t)?.has(id)).length;
+    if (named > 0)
+      score += reason(reasons, `In ${Math.min(3, named)} story track${named === 1 ? "" : "s"}`, w.track * Math.min(3, named));
+    let roles = 0;
+    for (const [value, points] of Object.entries(w.roles)) {
+      const held = Object.keys(world.classifications).some((facet) => classValues(world, state, id, facet).some((v) => v === value || valueWithin(world, facet, v, value)));
+      if (held)
+        roles += points;
+    }
+    score += reason(reasons, "Story role", roles);
+    if (refs.rules.has(id))
+      score += reason(reasons, "Named by a world rule", w.rule);
+    const pending = Math.min(3, pendingWith(ctx, id));
+    if (pending > 0)
+      score += reason(reasons, `${pending} pending with you`, w.pending * pending);
+    const band = tierBand(world, e.tier);
+    if (band)
+      score += reason(reasons, band === "principal" ? "Lead" : band === "supporting" ? "Supporting" : "Background tier", w.band[band]);
+    const last = Math.max(readCharacter(state, id).lastPresent ?? Number.NEGATIVE_INFINITY, lastSighting(state, id)?.at ?? Number.NEGATIVE_INFINITY);
+    if (Number.isFinite(last))
+      score += reason(reasons, "Seen with you lately", w.recent * Math.max(0, 1 - (state.clock - last) / 1440));
+    const gm = readCharacter(state, id).pin;
+    const never = config.never !== null && selectorMatches(reg, world, state, config.never, id);
+    const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
+    const author = never ? "background" : always ? "live" : null;
+    const t = config.thresholds;
+    const scored = score >= t.live ? "live" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    const level = gm ?? author ?? scored;
+    if (gm)
+      reasons.push({ label: `Pinned at ${gm} by the GM`, points: 0 });
+    else if (author)
+      reasons.push({ label: never ? "The author: never a mind" : "The author: always Live", points: 0 });
+    out.push({ entity: id, level, score: Math.round(score * 10) / 10, reasons, pin: { gm, author } });
+  }
+  const rank = { live: 0, near: 1, far: 2, background: 3 };
+  return out.sort((a, b) => rank[a.level] - rank[b.level] || b.score - a.score || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0));
+}
+
+// src/packs/minds/core/lint.ts
+var WEIGHT_KEYS = ["here", "nearby", "mentioned", "regard", "knows", "owner", "track", "rule", "pending", "recent"];
+var MEMORY_PARTS = {
+  witness: { show: { range: MINDS_RANGES.show, whole: true } },
+  recall: { recent: { range: MINDS_RANGES.show, whole: true }, relevant: { range: MINDS_RANGES.show, whole: true }, tokens: { range: MINDS_RANGES.recallTokens, whole: true } },
+  notes: { show: { range: MINDS_RANGES.show, whole: true }, keep: { range: MINDS_RANGES.keep, whole: true } },
+  commitments: { show: { range: MINDS_RANGES.show, whole: true } },
+  salience: { halfLifeDays: { range: MINDS_RANGES.halfLifeDays, whole: false }, floor: { range: MINDS_RANGES.floor, whole: false } },
+  consolidate: { enabled: "bool", periodDays: { range: MINDS_RANGES.periodDays, whole: false } }
+};
+function configIssues(world, registry) {
+  const raw = world.minds;
+  if (raw === undefined)
+    return [];
+  const out = [];
+  const err = (path, message) => void out.push({ severity: "error", path, code: "minds.config", message });
+  const warn = (path, message) => void out.push({ severity: "warning", path, code: "minds.config", message });
+  if (!isRecord(raw)) {
+    err("minds", "The minds config is an object (secrecy, weights, thresholds, always, never, memory); the defaults play instead.");
+    return out;
+  }
+  for (const key of Object.keys(raw))
+    if (!WORLD_MINDS_KEYS.includes(key))
+      warn(`minds.${key}`, `"${key}" isn't part of the minds config; nothing reads it.`);
+  if (raw.secrecy !== undefined && raw.secrecy !== "full" && raw.secrecy !== "brief")
+    err("minds.secrecy", 'Secrecy is "full" (the narrator gets each mind to depict) or "brief" (a leak-checked depiction only); "brief" plays instead.');
+  const number = (path, v, [lo, hi], whole) => {
+    if (v === undefined)
+      return;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < lo || v > hi || whole && !Number.isInteger(v))
+      err(path, `${whole ? "A whole number" : "A number"} from ${lo} to ${hi}; the default plays instead.`);
+  };
+  const weights = raw.weights;
+  if (weights !== undefined && !isRecord(weights))
+    err("minds.weights", "The weights are an object of points by input; the defaults play instead.");
+  if (isRecord(weights)) {
+    for (const key of WEIGHT_KEYS)
+      number(`minds.weights.${key}`, weights[key], MINDS_RANGES.weight, false);
+    const band = weights.band;
+    if (band !== undefined && !isRecord(band))
+      err("minds.weights.band", "The band weights are an object: principal, supporting and background.");
+    if (isRecord(band))
+      for (const b of ["principal", "supporting", "background"])
+        number(`minds.weights.band.${b}`, band[b], MINDS_RANGES.weight, false);
+    const roles = weights.roles;
+    if (roles !== undefined && !isRecord(roles))
+      err("minds.weights.roles", "The role weights are an object of points by classification value.");
+    if (isRecord(roles)) {
+      for (const [value, points] of Object.entries(roles)) {
+        number(`minds.weights.roles.${value}`, points, MINDS_RANGES.weight, false);
+        const held = Object.values(world.classifications).some((facet) => isRecord(facet.values) && hasOwn(facet.values, value));
+        if (!held)
+          warn(`minds.weights.roles.${value}`, `No classification of this world has a value "${value}", so this weight never counts.`);
+      }
+    }
+    for (const key of Object.keys(weights))
+      if (!WEIGHT_KEYS.includes(key) && key !== "band" && key !== "roles")
+        warn(`minds.weights.${key}`, `"${key}" isn't a focus input; nothing reads it.`);
+  }
+  const thresholds = raw.thresholds;
+  if (thresholds !== undefined && !isRecord(thresholds))
+    err("minds.thresholds", "The thresholds are an object: live, near and far.");
+  if (isRecord(thresholds)) {
+    for (const key of ["live", "near", "far"])
+      number(`minds.thresholds.${key}`, thresholds[key], MINDS_RANGES.threshold, false);
+    const { live, near, far } = thresholds;
+    if (typeof live === "number" && typeof near === "number" && live < near)
+      warn("minds.thresholds.live", "Live is below Near: Live plays at Near's threshold.");
+    if (typeof near === "number" && typeof far === "number" && near < far)
+      warn("minds.thresholds.near", "Near is below Far: Near plays at Far's threshold.");
+  }
+  for (const key of ["always", "never"]) {
+    const sel = raw[key];
+    if (sel === undefined || sel === null)
+      continue;
+    if (!isRecord(sel)) {
+      err(`minds.${key}`, `"${key}" is a selector or null.`);
+      continue;
+    }
+    if (Object.keys(sel).length === 0)
+      warn(`minds.${key}`, `An empty selector here pins no one; leave "${key}" out instead.`);
+    if (registry)
+      for (const problem of selectorProblems(registry, world, sel))
+        err(`minds.${key}`, `The "${key}" selector ${problem}.`);
+  }
+  const memory = raw.memory;
+  if (memory !== undefined && !isRecord(memory))
+    err("minds.memory", "The memory defaults are an object; the built-in defaults play instead.");
+  if (isRecord(memory)) {
+    for (const [part, fields] of Object.entries(memory)) {
+      const spec = hasOwn(MEMORY_PARTS, part) ? MEMORY_PARTS[part] : undefined;
+      if (!spec) {
+        warn(`minds.memory.${part}`, `"${part}" isn't a memory layer; nothing reads it.`);
+        continue;
+      }
+      if (!isRecord(fields)) {
+        err(`minds.memory.${part}`, `The ${part} settings are an object.`);
+        continue;
+      }
+      for (const [key, v] of Object.entries(fields)) {
+        const field = hasOwn(spec, key) ? spec[key] : undefined;
+        if (!field)
+          warn(`minds.memory.${part}.${key}`, `"${key}" isn't a ${part} setting; nothing reads it.`);
+        else if (field === "bool") {
+          if (typeof v !== "boolean")
+            err(`minds.memory.${part}.${key}`, "On (true) or off (false); the default plays instead.");
+        } else
+          number(`minds.memory.${part}.${key}`, v, field.range, field.whole);
+      }
+    }
+  }
+  return out;
+}
+function stepIssues(world) {
+  const out = [];
+  const first = new Map;
+  for (const id of Object.keys(world.steps).sort()) {
+    const t = world.steps[id];
+    if (!t || !isMindPurpose(t.purpose))
+      continue;
+    if (t.signals.length > 0)
+      out.push({ severity: "info", path: `steps.${id}.signals`, code: "minds.step_signals", message: `Minds run on their own cadence (Settings → Minds), so a ${t.purpose} template's signals are ignored.` });
+    const earlier = first.get(t.purpose);
+    if (earlier !== undefined)
+      out.push({ severity: "warning", path: `steps.${id}`, code: "minds.step_duplicate", message: `The world has another ${t.purpose} template ("${earlier}"); only that one, the first by id, is used.` });
+    else
+      first.set(t.purpose, id);
+  }
+  return out;
+}
+var MINDS_LINTS = [
+  { code: "minds.config", check: (world, registry) => configIssues(world, registry) },
+  { code: "minds.steps", check: (world) => stepIssues(world) }
+];
+
+// src/packs/minds/core/section.ts
+function clause(text) {
+  return text.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
+}
+function mindLines(ctx) {
+  const { registry: reg, world, state } = ctx;
+  const slice = readSlice(state);
+  if (!slice.on)
+    return [];
+  const pov = world.pov;
+  const here = placeOfEntity(state, pov);
+  const secrecy = worldMindsOf(world).secrecy;
+  let check = null;
+  const safe = (text) => {
+    if (!check) {
+      const secrets = unrevealedSecrets(reg, world, state);
+      const hidden = hiddenNameCheck(reg, world, state, pov);
+      check = (t) => findLeaks(t, secrets).length === 0 && !hidden(t);
+    }
+    return check(text);
+  };
+  const out = [];
+  for (const id of Object.keys(slice.chars).sort()) {
+    const m = own(slice.chars, id)?.mind;
+    const e = own(state.entities, id);
+    if (!m || !e || m.round !== slice.round || id === pov || isGone(state, id) || !acts(world, state, id))
+      continue;
+    const present = here !== null && placeOfEntity(state, id) === here && canSeeEntity(reg, world, state, pov, id);
+    if (!present && m.interrupt === null)
+      continue;
+    const name = present || playerKnows(reg, world, state, pov, id) ? e.name : "Someone";
+    if (secrecy === "full") {
+      const parts = [`${name}'s mind: ${clause(m.monologue)}.`];
+      if (m.intent !== "")
+        parts.push(`Intends: ${clause(m.intent)}.`);
+      if (m.reactions.length > 0)
+        parts.push(`Reactions: ${m.reactions.map(clause).join("; ")}.`);
+      if (m.mood)
+        parts.push(`Mood: ${clause(m.mood)}.`);
+      if (m.depiction !== "")
+        parts.push(`Shows: ${clause(m.depiction)}.`);
+      if (m.interrupt)
+        parts.push(`Interrupts the skip: ${clause(m.interrupt)}.`);
+      out.push({ entity: id, line: parts.join(" ") });
+      continue;
+    }
+    if (m.withheld || m.depiction.trim() === "" || !safe(m.depiction))
+      continue;
+    const interrupt = m.interrupt && safe(m.interrupt) ? ` Interrupts the skip: ${clause(m.interrupt)}.` : "";
+    out.push({ entity: id, line: `${name}: ${clause(m.depiction)}.${interrupt}` });
+  }
+  return out;
+}
+function minded(ctx) {
+  return mindLines(ctx).map((l) => l.entity);
+}
+
+// src/packs/minds/core/index.ts
+var mindsPack = {
+  id: PACK5,
+  label: "Minds",
+  version: 1,
+  domain: null,
+  requires: [],
+  register(r) {
+    for (const def of MINDS_EVENT_DEFS)
+      r.event(def);
+    r.service("minds.edit", mindEdit);
+    r.query("minds.plans", (ctx, who) => openPlans(readCharacter(ctx.state, who)));
+    r.query("minds.tier", (ctx, who) => {
+      const c = readCharacter(ctx.state, who);
+      return c.pin ?? c.mind?.level ?? "background";
+    });
+    r.query("minds.minded", minded);
+    r.query("minds.on", mindsOn);
+    r.query("minds.fidelity", (ctx, texts) => fidelityOf(ctx, texts));
+    r.renderer({ slot: MINDS_SLOT, render: (ctx) => mindLines(ctx).map((l) => l.line) });
+    for (const rule of MINDS_LINTS)
+      r.lint(rule);
+  }
+};
+var core_default12 = mindsPack;
 // src/packs/starters/fantasy_town.json
 var fantasy_town_default = {
   format: "lre-world-v1",
@@ -19575,7 +21192,8 @@ var fantasy_town_default = {
       }
     },
     story: { version: 1, config: { flags: { ferry_running: true, market_open: true } } },
-    combat: { version: 1, config: {} }
+    combat: { version: 1, config: {} },
+    minds: { version: 1, config: {} }
   },
   pins: {
     generators: { money: 1, gear: 1, vehicles: 1 },
@@ -26962,7 +28580,8 @@ var mystery_manor_default = {
       }
     },
     story: { version: 1, config: { flags: { causeway_open: true, phone_working: true, alaric_alive: true, ledger_page_intact: true } } },
-    combat: { version: 1, config: {} }
+    combat: { version: 1, config: {} },
+    minds: { version: 1, config: {} }
   },
   pins: {
     generators: { money: 1, gear: 1, vehicles: 1 },
@@ -34604,7 +36223,8 @@ var modern_slice_of_life_default = {
       }
     },
     story: { version: 1, config: { flags: { shop_open: true, ferry_running: true } } },
-    combat: { version: 1, config: {} }
+    combat: { version: 1, config: {} },
+    minds: { version: 1, config: {} }
   },
   pins: {
     generators: { money: 1, gear: 1, vehicles: 1 },
@@ -43813,7 +45433,7 @@ var STARTER_INFO = [
 ];
 
 // src/packs/index.ts
-var ALL_PACKS = [enginePack, core_default, core_default2, core_default3, core_default4, core_default5, core_default6, core_default7, core_default8, core_default9, core_default10, core_default11];
+var ALL_PACKS = [enginePack, core_default, core_default2, core_default3, core_default4, core_default5, core_default6, core_default7, core_default8, core_default9, core_default10, core_default11, core_default12];
 
 // src/engine/beats.ts
 var MAX_BEATS = 6;
@@ -43855,6 +45475,8 @@ function outline2(reg, world, state, input, rng, max = MAX_BEATS) {
     const stop = tl.result.stops[0];
     if (stop && signalVisible(reg, world, state, pov, stop))
       lines.push(`Time passes until it's interrupted: ${stop.text}. Narrate the interval from the Montage; don't add events.`);
+    else if (tl.summary.stoppedBy === "mind")
+      lines.push(`Time passes until ${tl.mindName ?? "someone"} steps in; how they do is in the Minds section. Narrate the interval from the Montage; don't add events.`);
     else
       lines.push("Time passes. Narrate the interval from the Montage; don't add events.");
   }
@@ -43925,13 +45547,20 @@ function queueStop(w, res, since, scene, speeding) {
   });
   return signalled ? "interruption" : null;
 }
+function turnStart(reg, w, runSeed) {
+  w.applyAll(pauseBookkeeping(w.world, w.state));
+  materializeAll(reg, w, w.world.pov, runSeed);
+}
+function timelapseOptions(intent, runSeed) {
+  const seg = intent.params.segment;
+  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 } };
+}
 function planTurn(input) {
   const reg = input.registry;
   const w = new Working(reg, input.world, input.state);
   const rng = createRng(input.seed);
   const chips = [];
-  w.applyAll(pauseBookkeeping(w.world, w.state));
-  materializeAll(reg, w, w.world.pov, input.runSeed);
+  turnStart(reg, w, input.runSeed);
   const from = w.state.clock;
   const intent = input.intent;
   const resolutions = [];
@@ -43939,9 +45568,8 @@ function planTurn(input) {
   let timelapse = null;
   const combat = [];
   if (intent?.action === TIMELAPSE_ACTION) {
-    const target = parseTarget(intent.params.target);
-    const seg = intent.params.segment;
-    const outcome = !target ? { code: "bad_target", reason: "no timelapse target" } : fightHoldsClock(w.ctx) ? { code: "in_fight", reason: IN_FIGHT } : runTimelapse(reg, w, target, { runSeed: input.runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 });
+    const { target, opts } = timelapseOptions(intent, input.runSeed);
+    const outcome = !target ? { code: "bad_target", reason: "no timelapse target" } : fightHoldsClock(w.ctx) ? { code: "in_fight", reason: IN_FIGHT } : input.skip ? replaySkip(reg, w, target, input.skip, opts) : runTimelapse(reg, w, target, opts);
     if ("code" in outcome)
       w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
     else
@@ -45318,6 +46946,153 @@ What a patch leaves must pass the shape checks the Studio seam's \`validate\` ma
 Every editor write that changes a table (\`put\` or \`remove\` on \`tables\`, a \`profile\`, or a patch) gives that table its content's revision, \`hashJson({schema, columns, rows})\`, and pins the world to it in \`pins.tables\`. A removed table loses its pin. A revision the client sends is never used.
 
 A commit is refused as \`conflict\` when a stored draft began on a head other than the current one ("the world changed since this draft began; reload it"), since committing it would put back what was made head since. Discarding the draft, or restoring a revision onto the head, clears the way.
+
+## 24. Character minds
+
+Simulated perspectives drive the characters, and the mechanics ground them. Each character the story is close to gets a **mind**: one model call made as that character, on a context scoped to what they know, blind to every other mind. It never writes narration or dialogue. It answers with how they read the moment, what they intend and how they come across, and the narrator depicts it. Concrete outcomes (money, moves, time) are still settled after the reply, from what was actually written (§5.1, §9.4). Every answer is recorded as an event (\`minds.*\`, the \`minds\` pack), so a fold, a Re-narrate and the background lane never call a model.
+
+### 24.1 The fidelity ladder
+- **Levels:** Live, Near, Far, Background. A character's level is recomputed every turn and at every time-skip beat, as a pure function of the state and the turn's texts (the player's latest message and the reply before it; none inside \`advance\` or at a beat).
+- **Focus score:** the sum of the world's weights for each input that holds:
+  - **Proximity:** in the POV's scene, else close by (under the same parent place).
+  - **Engagement:** named or addressed in the latest message or reply. A name counts whole, or by a word of it that singles them out; honorifics never count.
+  - **Their relationship to the POV:** regard either way, scaled by its size, and a \`knows\` relation either way.
+  - **Story involvement:** they own a track under way; up to three tracks under way name them in their stages; their role facet values, a value nested under a weighted one counting as it (a villain under antagonist); and they are named by a world rule.
+  - **Pending interactions with the POV:** an invitation, an appointment together, an open plan or commitment with the POV, up to three.
+  - **Tier and recency:** the detail band of their tier, and being seen with the POV lately (all of it right after, nothing a day later).
+- **Who decides:** the GM's pin in the chat decides first. Then the author's \`never\` selector (always Background), which wins over \`always\` (always Live). Then the score against the world's thresholds, each read as at least the next one down. The GM view shows each input's points and any pin.
+- **Who thinks this turn** (the user's cadence, §24.6):
+  - Live characters think every turn, best score first, up to the Live limit ("none" for no limit).
+  - Near characters, and Live ones past the limit, think on their triggers: their first mind, a rise on the ladder, entering the POV's scene, being named, a number of turns, or a number of game minutes since their last mind.
+  - Far characters think on their first mind, a rise on the ladder, or their period.
+  - These refreshes share the refresh limit, the most pressing first. A GM's request for a fresh mind always runs.
+  - Background characters follow routine only.
+
+### 24.2 The world's minds config
+\`world.minds\` (optional; a world without it plays with the defaults, \`worldMindsOf\`):
+- **\`secrecy\`:** \`brief\` (the default) or \`full\` (§24.3).
+- **\`weights\`:** points for each input of §24.1, from −100 to 200 (\`roles\` by classification value).
+- **\`thresholds\`:** the lowest score for \`live\`, \`near\` and \`far\`.
+- **\`always\` and \`never\`:** selectors, or null.
+- **\`memory\`:** the defaults for §24.4: the witness lines shown, recall's recent and relevant turns and tokens, the notes shown and kept, the open commitments shown, salience's half-life in game days and fade floor, and consolidation (on or off, and its period in game days).
+
+A value out of range or of the wrong kind plays as its default, and lint (\`minds.config\`) says so. The world JSON Schema describes the part (\`$defs/minds\`). Build writes it whole as the \`minds\` part.
+
+### 24.3 What the narrator gets: the Minds section
+- **The section:** a section of its own (slot \`minds\`, outlet \`lre_minds\`). Every world has it, even one that defines its own sections. It takes this round's minds for the people at the POV's place that the POV can see, plus anyone whose mind interrupted a time skip. A mind from an earlier round isn't the narrator's.
+- **Its budget:** a token budget of its own (Settings → Minds), apart from the section budget, so minds never crowd out Scene or People. When the section is over its budget it is left out for that turn, as a clipped section is.
+- **\`full\` secrecy:** each mind's monologue, intent, conditional reactions, mood and depiction go to the narrator. The section's note says to depict them, never to state a thought, and never to let one character act on another's mind. Under \`full\` the narrator may read a character's own secrets in their monologue; that is the author's choice.
+- **\`brief\` secrecy:** only the depiction, written as behaviour anyone present could see. It is screened as Stance's cues are: an unrevealed secret (\`findLeaks\`) or a name the POV can't see (\`namesHidden\`) withholds it. The screen runs when the mind is recorded (the event is marked \`withheld\`, and the inspector shows \`leak_blocked\`), and again when the section is drawn. The monologue stays in the GM view.
+- **Stance:** whoever has a line in the Minds section is left out of Stance (\`minds.minded\`). Stance still tells of everyone else with the POV.
+
+### 24.4 Memory
+Four layers, each tunable (the world's defaults, then the user's overrides):
+- **Witness log:** who saw or was told each notable event. After each reply, \`minds.presence\` records who was in the POV's scene (everyone acting at its place, seen by the POV or not) and the turn's notable lines, which reach each of their logs as seen. A \`memory\` answer's \`told\` reaches each listener's log as told. Life-state knowledge keeps its own record (§8).
+- **Recall by presence:** the chat turns a character was there for, built here from the presence records, since the host's memory can't filter by who was present. It reads the turns' messages through the host's chat (the player's message and the reply as displayed, hidden JSON blocks left out). It takes the latest \`recall.recent\`, plus the \`recall.relevant\` that share the most words with the moment, oldest first, within \`recall.tokens\`. A character never recalls a turn they weren't present for.
+- **Model-written notes:** after each reply, the \`memory\` step runs once for each present character whose level the user chose (Standard: Live; Full: Live and Near). It is written from their perspective and based only on what was written: up to three notes with a salience from 1 to 5, the commitments the turn made and resolved, plans with times, what they told whom, and their summary when the turn changed it.
+- **Commitments:** promises, debts, grudges, favours and plans with someone. They stay until kept, broken or released.
+- **Salience and consolidation:**
+  - A note's salience halves every half-life. One under the floor has faded and is no longer shown.
+  - Notes past the number kept, and faded ones, are folded into the character's summary by the \`consolidate\` step, at most once per period per character and for at most two characters a turn.
+  - The state keeps hard bounds whatever the settings say: 64 notes (the least salient go), 48 open and 16 closed commitments, 24 open and 16 closed plans, 48 witness lines and 400 presence records.
+
+### 24.5 A mind's call
+- **The context**, built only from what the character knows:
+  - their entity's fields and their Lumiverse character card when the world links one (\`characterId\`);
+  - their summary, notes, commitments, plans, witness log and last mind;
+  - the scene as they perceive it: who they can see, and how they stand toward each;
+  - the occasion: clock, day part, holidays, weather;
+  - their own life: a plain money summary (\`economy.summary\`), the day's schedule, and their agendas, the truth of their own secrets included;
+  - lore read as them: public entries, \`known_by\` entries by what they know, and of the secrets whose gate doesn't hold only their own (an entry that links them);
+  - recall by presence, told to ignore narration of other people's private thoughts;
+  - the moment: what the POV just said and did if they are with the POV; else a note that they aren't.
+- **Never in it:** the GM view, another character's mind, or a turn they weren't present for.
+- **The answer:** JSON \`{monologue, depiction, intent, reactions[], plans[{what, kind, when{from, to}, where?, with?[], priority}], mood?, interrupt?{reason}}\`.
+  - Lengths are capped.
+  - Plans resolve to place and people ids and game minutes, and one with no time, or wholly past, is dropped.
+  - \`interrupt\` counts only at a time-skip beat.
+  - An answer that isn't JSON gets one repair call. One that says nothing records no mind.
+- **Prompts:** the steps are \`mind\`, \`memory\`, \`skip\` and \`consolidate\`. Each has built-in instructions (\`MIND_PROMPT_DEFAULTS\`).
+  - **Precedence:** the world's step template for the purpose (the first by id), then the user's own prompt (Settings → Minds, with a reset to the default), then the built-in.
+  - **Placeholders:** \`{{character}}\`, \`{{world}}\`, \`{{pov}}\`, \`{{place}}\` and \`{{clock}}\` are filled.
+  - **Answer format:** the engine appends the purpose's answer format (\`MIND_ANSWER_FORMATS\`), which no template replaces, and then the preset's \`RPEngine · <purpose>\` block (§6.8).
+  - **Lint:** a minds template's signals are ignored (\`minds.step_signals\`), and a second template for one purpose is never used (\`minds.step_duplicate\`).
+- **Calls:** every mind is its own call, made in parallel on the pre phase's wall clock, apart from its call count. The inspector lists each call (§6.5) with no text: purpose, phase, level, outcome, time, tokens, whose prompt it ran, and the character by name only when the POV knows them, else "Someone".
+
+### 24.6 Settings and cost
+- **The user's minds settings** (\`UserSettings.minds\`, Settings → Minds): on or off; the Live limit; the Near triggers and their counts; the Far period; the refresh limit; the levels that get memory; the Minds section's budget; memory overrides; prompt overrides; and a time skip's caps (beats per skip, minds per beat). "No limit" is \`"none"\`.
+- **Model use presets:** a preset sets all of these but the prompts and memory overrides.
+  - **Lean:** minds off.
+  - **Standard:** a Live limit of 3, two refreshes a turn, memory for Live.
+  - **Full:** no limits, memory for Live and Near.
+- **When minds run:** whenever they are on and the purpose's step card isn't switched off. An unsaved card runs with the defaults, and a saved one sets the connection, the tokens and the lore.
+- **Cost:** minds' calls aren't counted in §5.3's per-preset tables. A turn makes one call per mind that runs, and after the reply one \`memory\` call per present character at a chosen level and the occasional \`consolidate\`.
+
+### 24.7 Time skips
+A timelapse turn (§9.2: the palette, a chip or typed time) is a **time skip** while minds are on: before the reply, the skip finds its beats, lets the minds of the people each beat involves think there, and may stop where one of them would interrupt it (\`backend/skip.ts\`). The background lane and Re-narrate never run one, and minds off leaves a plain timelapse.
+- **The state it starts from** is exactly the plan's: the fold before the turn's target, the turn's decisions and its minds round, and the turn's first steps (§5.1). So it reaches each beat in the state the plan will.
+- **The beat scan** finds the following without a model, only up to where the skip would end on its own:
+  - the POV's appointments;
+  - the plans of Live and Near characters (as recorded: the GM's pin, else their latest mind's level) that involve the POV, where the planner lays them (§24.8);
+  - from a scratch run of the skip: invitations to the POV, story moments (a track changing stage; a time rule, or one that interrupts or tells a beat), and the POV's money (paydays, bills, statements, declines, at their own instants).
+
+  Beats at the same minute are one.
+- **The \`skip\` step** is off unless the user turns it on. Its prompt is the world's template, else the user's own, else the built-in, and the answer format follows it. It is given the span, the beats found and what the people involved plan, and proposes at most five more beats, each a local time inside the span with a reason. Its reasons, like the scan's, are recorded in \`minds.skip\` for the GM only: no mind and no player surface is given them, since they may come of someone's private intent.
+- **The caps:**
+  - **Beats per skip** (\`minds.skip.maxBeats\`) keep the weightiest: plans with the POV, then invitations, its appointments, story moments, its money, and the step's last.
+  - **Minds per beat** (\`maxMindsPerBeat\`) keep the people the beat names first, then whoever is with the POV at Live or Near by fidelity at that moment, best score first.
+
+  \`"none"\` is no cap, and the before-the-reply clock still bounds it.
+- **Running it:** one timelapse segment, run beat by beat under one unit cap (only its first slot runs whatever the cap).
+  - At each beat, each of its people thinks in a call of their own, blind to the others, and the reason they are given names only the time.
+  - Their \`minds.mind\` events apply at that moment, so their plans shape what follows.
+  - Past the last beat the skip runs to its end, where whoever is with the POV thinks once more, within the Live limit, as the turn's own minds for the Minds section.
+- **Stops:**
+  - **A mind's \`interrupt\`** stops the skip at its beat. The summary records \`stoppedBy: "mind"\` and who. The stop chip reads "Timelapse stopped: <name>" (or "someone", for a character the POV doesn't know) and offers Continue to the original target. The Outcome line and the outline say who stepped in; the Minds section tells how.
+  - **The before-the-reply clock** (Settings → Model use, at most 105 s) running out stops the skip at the next beat; whatever that beat's minds finished stays. The summary names no stop, and the Continue timelapse chip offers the time left; the turn never fails.
+  - Any other stop (a \`stop\`-class signal, the unit cap) is the timelapse's own (§9.2).
+- **Recording:** the skip's record is each beat with the events decided there, and where it stopped. The plan replays it: the same segment stops at the same beats, in the same state, and applies the same events. The turn's events are therefore an ordinary timelapse record (§4.3), coarsened, holding \`minds.skip\` (the beats, their times, reasons and sources) and each beat's minds. A re-fold or a Re-narrate reads them, and a Re-run asks again.
+
+### 24.8 The planner
+The Cast life planner (§8) lays each character's own plans into their days and lives them; plans already recorded drive it whether minds are on or off, on the background lane too.
+- **Laying a plan.** A character's open plans (\`minds.plans\`, from a mind, the memory step or the GM) become blocks of their day:
+  - **A tight window** (at most twice what its kind takes) is the plan's own time.
+  - **A wider window** gets its kind's length (an errand 45 minutes, a meeting 90, a visit 120, work 240, rest 60, leisure 90, other 60). It goes at the first time in the window, within its kind's hours (errands 9 to 18, meetings 10 to 22, visits 10 to 21), that trips, appointments and, for a plan that doesn't take its time from routine, the routine leave free. The search covers the window's first 14 days.
+- **Precedence:**
+  - A plan takes its time from routine (work, school) when it is strong (priority 4 or 5), or, for a Live or Near character, ordinary (3) at a set time.
+  - A Far character's routine bends only for strong plans, and a Background character follows routine only.
+  - A plan that must happen (5) overrides appointments too.
+  - Plans cut each other by priority, then age, and a trip overrides everything.
+
+  Laying is a pure function of the plans and the authored commitments, never of the clock or of where anyone stands. A plan therefore lands at the same time however often, and from whatever timelapse segment, its day is planned.
+- **Living it:**
+  - A plan's block starts and ends at its own minute, between slot steps: an agent process's moments (\`ProcessDef.instants\`), applied among the schedule edges in a turn and a timelapse, for an agent stepped through the slot before. Catch-up steps by slot.
+  - At the start the character goes to the plan's place (home for rest).
+  - After the end they take up whatever follows, going home when that names no place.
+- **Settling it:** at each slot step a \`minds.plan\` event marks a plan done once every block laid for it has passed. It marks one dropped once its window has passed with nothing laid: "no time for it" (routine, appointments or a trip left no room), or "routine only" for a Background character. Each records its own time, so a late catch-up settles it alike.
+- **What the player sees:** a plan's block shows its kind ("Errand", "Meeting someone", "A visit", "Work", "Rest", "Time out", "Busy") and "their own plan", never the plan's words, which are the character's private intent. The GM view shows the plan whole (§24.9).
+- **Occasions.** A day's occasion shapes its options:
+  - **A day off** (the weekend, or a holiday that gives one) makes a slow morning (breakfast 7 to 11) and more time for leisure and friends.
+  - **Holidays and observances** (Calendar 4) each bring an option of their own.
+  - **Birthdays:** a person's own birthday and a close friend's (regard 30 and up) bring theirs. The \`birthday\` field is \`MM-DD\`, or \`YYYY-MM-DD\` with the year they were born. 29 February falls on the 28th in a common year, and lint flags a birthday that doesn't read as a date.
+  - **Season and weather:** summer draws people outdoors, winter and bad weather keep them in.
+- **Needs** (Cast life 4) follow the plan. An NPC's need is met at the end of the latest block that meets it, or now while they're in it, and the routine's times stand in before the day has met it. Options weigh needs as the day so far leaves them, so a plan through the lunch hour leaves them hungry for dinner.
+- **Invitations** (Cast life 4) come from plans with the POV. One is asked at most 6 hours before the meeting, never before the meeting's day or before the plan was made, and only once (it is keyed by the plan). Its text never names a place the POV can't see. The old formula invitations run only while minds are off.
+- **Stance** leaves out whoever the Minds section tells of (§6.6, §24.3).
+
+### 24.9 The GM view
+- **What it shows:** per character, their level, score and each input's points, the pins, whether a fresh mind is asked for, their latest mind (monologue, depiction, intent, reactions, mood, interrupt, and whether its depiction was withheld), their plans, notes (with their salience now, and whether faded), commitments, witness log and summary.
+- **The controls,** each an \`lre.edit\` operation, so one \`fix\` entry with its Undo:
+  - pin a level, or unpin (\`mind_pin\`);
+  - ask for a fresh mind next turn (\`mind_refresh\`);
+  - add, edit or delete a note, commitment or plan (\`mind_memory\`; a value names only the fields that change).
+- **Player surfaces:** never any of it. Every minds event words nothing for a player's line, so no Journal note, chip, Cast or other panel tells a mind. The inspector's traces carry no text.
+
+### 24.10 Determinism
+- **Events:** every model answer is recorded as an event: \`minds.round\` and \`minds.mind\` before the plan; \`minds.presence\`, \`minds.memory\` and \`minds.consolidated\` with the reply's read. Each apply reads only its own data, the minds slice and the clock, never an entity's fields, so a coarsened record (L21) folds the same.
+- **Swipes:** a Re-narrate copies its source's pre-reply events, so it reuses the pre phase's minds. A Re-run asks again. A Re-read edit writes the memory again from the edited text.
+- **No model calls:** the background lane (Playtest, Check world) runs no model and records no mind. Plans already recorded still drive the planner (§24.8).
+- **Replay:** a replay, a restart or the other fold gives the same minds state. The property suite generates minds turns, replies that record presence and memory, and GM minds controls, and checks them on every view.
 `;
 
 // docs/EXPRESSIONS.md
@@ -45346,6 +47121,7 @@ Each section the engine fills has an outlet named \`lre_\` and its slot. Put \`{
 | \`quest\` | Quest: the stories and goals you can see | \`{{outlet::lre_quest}}\` |
 | \`outline\` | Outline: the engine's beats for the reply, with the brief and prose outline | \`{{outlet::lre_outline}}\` |
 | \`stance\` | Stance: how the people here behave, with the cues their secrets give | \`{{outlet::lre_stance}}\` |
+| \`minds\` | Minds: each character's mind this turn, scoped to what they know (under \`brief\` secrecy, only how they come across). It has its own token budget (Settings → Minds), apart from the section budget | \`{{outlet::lre_minds}}\` |
 | — | The narrator rules (below) | \`{{outlet::lre_narrator}}\` |
 
 A world may define sections of its own (Build → Sections); each one's outlet is \`lre_\` and its id, so a section \`weather\` goes to \`{{outlet::lre_weather}}\`. Outlet names are matched without regard to case, as Lumiverse matches them.
@@ -45377,6 +47153,10 @@ The engine makes small model calls of its own around each turn. A switched-off b
 | \`RPEngine · judge\` | Rates how well your described approach suits an action | How generous to be, and what a good plan looks like in your genre |
 | \`RPEngine · contradiction\` | Checks the reply against the engine's facts | What the narrator may add without it counting (weather, small talk, thoughts) |
 | \`RPEngine · puzzle.answer\` | Judges whether a typed answer matches a puzzle's | How loose to be about wording and spelling |
+| \`RPEngine · mind\` | Thinks as one character at a time, from only what that character knows, and gives the narrator their mind | How your preset's characters think: how candid or scheming, how far ahead they plan |
+| \`RPEngine · memory\` | Writes down, as each character present, what they'll remember of the reply: notes, promises and debts, plans | What your preset's characters hold on to: slights, kindnesses, money, promises |
+| \`RPEngine · skip\` | Finds the moments worth stopping at inside a time skip | How often your preset wants a skip interrupted |
+| \`RPEngine · consolidate\` | Folds a character's older notes into their summary | What a summary should keep in your preset's story |
 
 How the engine reads a guidance block:
 
@@ -45434,7 +47214,7 @@ Don't name a price the sections don't give.
 var RECIPES_default = "# LumiRPEngine recipes\n\nSmall worlds that each show one thing working end to end. Every recipe here is a fragment of a world document: the parts it adds to a new world (Build's **Blank** template, or `newWorld` in the [studio API](STUDIO.md)). Merge it object by object: a collection gains the items shown, an item gains the fields shown, and a list replaces the one already there. In Build, enter each item in its editor; a studio merges the JSON. A new world has no data tables, so a recipe that needs one carries the whole table, rows and all; Build's **Data tables** editor only edits a table a world already has, so in Build start that recipe from a template, whose copy of the table you edit. `test/docs/recipes.test.ts` builds every fragment on this page and plays it through the engine, so what each recipe says happens does happen.\n\nThe formulas are explained in [EXPRESSIONS.md](EXPRESSIONS.md), and every effect, function and pack kind used here is listed in the [reference](REFERENCE.md). Fights are set up in the user guide's [Combat and encounters](USER-GUIDE.md#combat-and-encounters).\n\n## XP and levels\n\nA progression keeps experience in one field and the level in another. After any effect changes an entity's XP (an award, a quest reward, a ✎ fix), the engine raises its level to the last threshold reached, one level at a time, and runs `onLevel` for each level gained. Here sparring earns 150 XP, Level 2 starts at 300, and every level adds a point of Grit. The maximum hit points are derived from the level, so the pool grows with it, and the sheet shows the level, the XP to the next one, and the pool as a bar.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"xp\": { \"type\": \"number\", \"label\": \"XP\", \"min\": 0, \"default\": 0 },\n        \"level\": { \"type\": \"number\", \"label\": \"Level\", \"min\": 1, \"default\": 1 },\n        \"grit\": { \"type\": \"number\", \"label\": \"Grit\", \"default\": 10 },\n        \"hp_max\": { \"type\": \"number\", \"label\": \"Max HP\", \"derived\": \"8 + self.level * 4\" },\n        \"hp\": { \"type\": \"number\", \"label\": \"Hit points\", \"pool\": { \"max\": \"hp_max\" } }\n      }\n    }\n  },\n  \"actions\": {\n    \"spar\": {\n      \"id\": \"spar\",\n      \"label\": \"Spar at the yard\",\n      \"params\": {},\n      \"requires\": [],\n      \"outcomes\": { \"default\": [{ \"type\": \"award\", \"args\": { \"entity\": \"self\", \"progression\": \"adventurer\", \"amount\": 150 } }] },\n      \"duration\": \"60\",\n      \"lexicon\": [\"spar\"]\n    }\n  },\n  \"ruleset\": {\n    \"progression\": {\n      \"adventurer\": {\n        \"label\": \"Level\",\n        \"xpField\": \"xp\",\n        \"levelField\": \"level\",\n        \"thresholds\": [0, 300, 900, 2700],\n        \"maxLevel\": 4,\n        \"kind\": \"person\",\n        \"onLevel\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"grit\", \"delta\": 1 } }]\n      }\n    },\n    \"sheet\": {\n      \"sections\": [{ \"id\": \"growth\", \"label\": \"Growth\", \"rows\": [{ \"progression\": \"adventurer\" }, { \"pool\": \"hp\" }, { \"field\": \"grit\" }] }]\n    }\n  }\n}\n```\n\n**Try it.** In Playtest, type *I spar* three times. The second spar reaches 300 XP: you reach Level 2, Grit goes from 10 to 11, the Journal says \"You reached Level 2.\", and your hit points can now reach 16. The third leaves you at 450 XP, still Level 2.\n\nThe thresholds can come from a data table instead (`\"thresholds\": { \"table\": \"xp_levels\", \"column\": \"xp\" }`, read in row order). `onLevel` sees `level` and `from` in its formulas, so `\"delta\": \"=level % 2 == 0 ? 1 : 0\"` adds a point only on even levels.\n\n## A skill challenge\n\nA puzzle track that opens after three successful checks, under the **Balanced** adjudication policy. Each lock is a little harder than the last (the DC is 12, then 14, then 16). Balanced rolls every check between two limits: a check with a 95 % chance or better passes without a roll (\"No roll needed\"), one with 5 % or worse fails without one (\"Too hard to try\"), and a close roll is told to the narrator as a close call. A failed attempt stands until something changes: an hour passes, the odds change, or you leave and come back.\n\n```json\n{\n  \"kinds\": {\n    \"person\": {\n      \"fields\": {\n        \"finesse\": { \"type\": \"number\", \"label\": \"Finesse\", \"default\": 0 },\n        \"locks_open\": { \"type\": \"number\", \"label\": \"Locks open\", \"min\": 0, \"default\": 0 }\n      }\n    }\n  },\n  \"entities\": { \"you\": { \"fields\": { \"finesse\": 4 } } },\n  \"checks\": {\n    \"tumbler\": { \"id\": \"tumbler\", \"dice\": \"1d20\", \"modifier\": \"self.finesse\", \"dc\": \"12 + self.locks_open * 2\" }\n  },\n  \"actions\": {\n    \"work_lock\": {\n      \"id\": \"work_lock\",\n      \"label\": \"Work a lock\",\n      \"params\": {},\n      \"requires\": [\"stage.vault_door == 'locked'\"],\n      \"check\": \"tumbler\",\n      \"outcomes\": {\n        \"success\": [{ \"type\": \"add\", \"args\": { \"entity\": \"self\", \"field\": \"locks_open\", \"delta\": 1 } }],\n        \"failure\": [{ \"type\": \"note\", \"args\": { \"text\": \"A tumbler slips back into place.\" } }]\n      },\n      \"duration\": \"10\",\n      \"lexicon\": [\"work the lock\", \"pick the lock\"]\n    }\n  },\n  \"tracks\": {\n    \"vault_door\": {\n      \"id\": \"vault_door\",\n      \"kind\": \"puzzle\",\n      \"label\": \"The vault door\",\n      \"start\": \"locked\",\n      \"visibility\": \"public\",\n      \"stages\": {\n        \"locked\": {\n          \"label\": \"Three locks hold the door\",\n          \"objectives\": [{ \"label\": \"Open all three locks\", \"when\": \"pov.locks_open >= 3\" }],\n          \"next\": [{ \"to\": \"open\", \"when\": \"pov.locks_open >= 3\" }],\n          \"hints\": [\"Each lock gives a little under steady hands.\"]\n        },\n        \"open\": { \"label\": \"The door swings open\", \"next\": [] }\n      }\n    }\n  },\n  \"ruleset\": {\n    \"adjudication\": {\n      \"preset\": \"balanced\",\n      \"checks\": \"every\",\n      \"riskyAt\": 0.75,\n      \"trivialAt\": 0.95,\n      \"impossibleAt\": 0.05,\n      \"description\": { \"weight\": \"bonus\", \"max\": 2, \"advantageAt\": 2 },\n      \"authority\": \"hybrid\",\n      \"closeBy\": 2,\n      \"retry\": \"changed\",\n      \"retryAfter\": 60\n    }\n  }\n}\n```\n\n**Try it.** Type *I work the lock* until the door opens. With Finesse 4 each lock rolls (a 65 %, then 55 %, then 45 % chance), and the palette shows the odds before you choose. Raise Finesse to 15 and every lock is a sure thing: three tries, no rolls, and the door is open. Lower it to −30 and no lock can be picked: each try fails without a roll.\n\nA named preset always plays as its own values, so to change one, set `\"preset\": \"custom\"`. The policy here is the world's default; a player can pick another for a chat in **Settings → Checks**. The check names no `pass`, so `success` counts as passing, the outcome a DC check reads when it isn't failed. To have the player's described approach count, keep `description.weight` at `bonus`: the judge step rates it, and the rating adds to the roll.\n\n## A shop with a priced catalog\n\nThe Buy action prices what you ask for from the world's `economy.catalog` table, finding the row by its id or by its name (with an `economy.categories` table, naming a whole category prices from its band instead). A row's `price_cents` is a band in minor units of the world's currency; a price drawn from it varies a little around `typical`, so a fixed price sets `min`, `typical` and `max` alike. At Money 2 the shop takes cash from the buyer's cash account and declines what they can't cover, and at Gear 1 or more a physical thing you buy (the categories `tools_hardware`, `groceries_staples`, `clothing` and the like) comes into being in your hands.\n\n```json\n{\n  \"realism\": { \"levels\": { \"money\": 2 } },\n  \"places\": { \"store\": { \"id\": \"store\", \"name\": \"Hollow Creek General Store\", \"fields\": {} } },\n  \"start\": { \"place\": \"store\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"store\" } },\n    \"purse\": { \"id\": \"purse\", \"kind\": \"account\", \"name\": \"Your purse\", \"tier\": \"background\", \"fields\": { \"owner\": \"you\", \"type\": \"cash\", \"opening\": 2000 }, \"relations\": [] }\n  },\n  \"tables\": {\n    \"economy.catalog\": {\n      \"id\": \"economy.catalog\",\n      \"pack\": \"economy\",\n      \"schema\": \"lre-table/economy.catalog/v1\",\n      \"revision\": \"05c9407d21cade2a99c5351d90b8e57d\",\n      \"label\": \"Hollow Creek General Store\",\n      \"columns\": {\n        \"name\": { \"type\": \"text\" },\n        \"category\": { \"type\": \"text\" },\n        \"unit\": { \"type\": \"text\" },\n        \"price_cents\": { \"type\": \"band\", \"unit\": \"cents\" }\n      },\n      \"rows\": {\n        \"lantern\": { \"name\": \"Brass lantern\", \"category\": \"tools_hardware\", \"unit\": \"each\", \"price_cents\": { \"min\": 1250, \"typical\": 1250, \"max\": 1250 } },\n        \"rope\": { \"name\": \"Hemp rope\", \"category\": \"tools_hardware\", \"unit\": \"50 ft\", \"price_cents\": { \"min\": 600, \"typical\": 800, \"max\": 1000 } },\n        \"jerky\": { \"name\": \"Beef jerky\", \"category\": \"groceries_staples\", \"unit\": \"bag\", \"price_cents\": { \"min\": 350, \"typical\": 350, \"max\": 350 } }\n      }\n    }\n  }\n}\n```\n\n**Try it.** With $20.00 in your purse, *I buy a brass lantern* costs $12.50 and puts the lantern in your hands; *I buy beef jerky* costs $3.50. A second lantern is declined: $4.00 doesn't cover it. Rope costs between $6.00 and $10.00, close to $8.00.\n\nThe `revision` is computed from the table's schema, columns and rows, never written by hand: whenever a table is saved to a draft (by Build's table editor, or by an agent's patch), the engine computes it and pins it in `pins.tables`, and a studio computes the same hash. For a store that charges more than the world's usual prices, the `economy.price_modifier` effect raises a category, or everything, at one place (`\"percent\": 25` is a quarter dearer).\n\n## Secret lore behind a track\n\nA secret track reveals the mayor's debt once you reach the mill office, and a lore entry holds the secret itself. The entry is `secret`, so its `gate` keeps it shut until the track reaches `revealed`, and its `audience` names the one helper that may read it before then: `npc.choose`, the step that decides what NPCs do. No helper that writes prose for the narrator is in the audience, so nothing it reads can reach the story early.\n\n```json\n{\n  \"places\": {\n    \"mill\": { \"id\": \"mill\", \"name\": \"The mill\", \"fields\": {} },\n    \"mill_office\": { \"id\": \"mill_office\", \"name\": \"The mill office\", \"parent\": \"mill\", \"fields\": {} }\n  },\n  \"start\": { \"place\": \"mill\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"mill\" } },\n    \"hale\": { \"id\": \"hale\", \"kind\": \"person\", \"name\": \"Mayor Hale\", \"tier\": \"supporting\", \"fields\": { \"place\": \"mill\" }, \"relations\": [] }\n  },\n  \"tracks\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"kind\": \"secret\",\n      \"label\": \"The mayor's debt\",\n      \"owner\": \"hale\",\n      \"start\": \"hidden\",\n      \"visibility\": \"secret\",\n      \"stages\": {\n        \"hidden\": {\n          \"label\": \"The mill's books don't add up\",\n          \"cue\": \"The miller won't meet your eye when the mayor's name comes up.\",\n          \"next\": [{ \"to\": \"revealed\", \"when\": \"at(pov, 'mill_office')\" }]\n        },\n        \"revealed\": {\n          \"label\": \"The mayor owes the mill\",\n          \"truth\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts.\",\n          \"next\": []\n        }\n      }\n    }\n  },\n  \"lore\": {\n    \"hale_debt\": {\n      \"id\": \"hale_debt\",\n      \"title\": \"Hale's debt\",\n      \"content\": \"Mayor Hale borrowed the mill's grain money to cover his gambling debts. He means to repay it before the harvest audit.\",\n      \"keys\": [\"mayor\", \"debt\", \"grain money\"],\n      \"links\": [\"hale\", \"mill\"],\n      \"secret\": true,\n      \"gate\": \"stage.hale_debt == 'revealed'\",\n      \"audience\": [\"npc.choose\"]\n    }\n  }\n}\n```\n\n**Try it.** Check world runs a day without a leak: the truth never shows in a section. In Playtest, *I go to the mill office* reveals the track, and from then on the gate holds.\n\nLint guards the secret. The entry repeats the track's truth, so without `\"secret\": true` it is an error (`secret_truth`); a secret entry needs a gate (`no_gate`); and putting a prose step such as `brief` in the audience is a warning (`prose_audience`). The GM view shows every track with its truth whatever the player knows.\n\n## A room on the grid\n\nA walled garden drawn as a grid map, with the optional grid system on: walls and doors steer you, things lie in cells, and stepping into a zone fires a rule. The potting shed is a room behind a door, an iron key lies on the path, and the fountain is a zone. Cells outside every room (the paths here) count as the map's own place, the garden.\n\n```json\n{\n  \"mapSettings\": { \"display\": \"knowledge\", \"grid\": { \"movement\": true, \"sightRadius\": 3 } },\n  \"places\": { \"garden\": { \"id\": \"garden\", \"name\": \"The walled garden\", \"fields\": {} } },\n  \"start\": { \"place\": \"garden\" },\n  \"entities\": {\n    \"you\": { \"fields\": { \"place\": \"garden\" } },\n    \"key\": { \"id\": \"key\", \"kind\": \"item\", \"name\": \"Iron key\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] }\n  },\n  \"maps\": {\n    \"garden\": {\n      \"id\": \"garden\",\n      \"scope\": \"garden\",\n      \"title\": \"The walled garden\",\n      \"cellMeters\": 2,\n      \"layout\": [\"#########\", \"#sss#...#\", \"#sss+.F.#\", \"#sss#.K.#\", \"######+##\"],\n      \"legend\": { \"s\": { \"place\": \"shed\" }, \"F\": { \"zone\": \"fountain\" }, \"K\": { \"item\": \"key\" } },\n      \"places\": [{ \"id\": \"shed\", \"name\": \"Potting shed\" }]\n    }\n  },\n  \"rules\": {\n    \"fountain_coins\": {\n      \"id\": \"fountain_coins\",\n      \"on\": { \"zone\": \"fountain\", \"in\": \"garden\" },\n      \"do\": [{ \"type\": \"note\", \"args\": { \"text\": \"Coins glint under the water.\" } }]\n    }\n  }\n}\n```\n\n**Try it.** You start at the gate in the bottom wall, x 6 and y 4 (x counts from the left, y from the top, both from 0). On the map, tap the fountain two squares up and **Walk here**: the rule fires and the Journal notes the coins. Standing there doesn't fire it again; stepping off and back on does. The key lies on the square below the fountain, close enough to **Take** from where you stand. Walk to the shed and you're in the potting shed: its door is the only way in.\n\nA zone trigger without `who` counts only the POV; `\"who\": { \"kind\": [\"person\"] }` counts anyone. Each room's area is also a zone named by the room, so `{ \"zone\": \"shed\", \"in\": \"garden\" }` fires on stepping into the shed. Lint checks the zone and cell triggers against the map.\n\n## A family\n\nA family is a group (the Relationships pack's `family` kind) whose members hold `member_of`, with kinship between them. `parent_of` and `child_of` are each other's inverse and `spouse_of` is symmetric, so the engine keeps both sides: the `link` and `unlink` effects write and remove the other side with them, and a chat starts with any side the world left out. Write both sides, as here, and lint has nothing to say. A schedule owned by the group applies to every member who isn't a group, so one schedule brings the whole family home for supper.\n\n```json\n{\n  \"places\": {\n    \"okafor_house\": { \"id\": \"okafor_house\", \"name\": \"The Okafor house\", \"fields\": {} },\n    \"bakery\": { \"id\": \"bakery\", \"name\": \"Okafor's Bakery\", \"fields\": {} }\n  },\n  \"start\": { \"at\": \"2026-01-01T17:00\" },\n  \"entities\": {\n    \"okafors\": { \"id\": \"okafors\", \"kind\": \"family\", \"name\": \"The Okafors\", \"tier\": \"background\", \"fields\": {}, \"relations\": [] },\n    \"ada\": {\n      \"id\": \"ada\",\n      \"kind\": \"person\",\n      \"name\": \"Ada Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Mother\" } },\n        { \"type\": \"spouse_of\", \"to\": \"emeka\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"emeka\": {\n      \"id\": \"emeka\",\n      \"kind\": \"person\",\n      \"name\": \"Emeka Okafor\",\n      \"tier\": \"supporting\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Father\" } },\n        { \"type\": \"spouse_of\", \"to\": \"ada\" },\n        { \"type\": \"parent_of\", \"to\": \"tobi\" }\n      ]\n    },\n    \"tobi\": {\n      \"id\": \"tobi\",\n      \"kind\": \"person\",\n      \"name\": \"Tobi Okafor\",\n      \"tier\": \"background\",\n      \"fields\": { \"place\": \"bakery\" },\n      \"relations\": [\n        { \"type\": \"member_of\", \"to\": \"okafors\", \"fields\": { \"role\": \"Son\" } },\n        { \"type\": \"child_of\", \"to\": \"ada\" },\n        { \"type\": \"child_of\", \"to\": \"emeka\" }\n      ]\n    }\n  },\n  \"schedules\": {\n    \"okafor_supper\": {\n      \"id\": \"okafor_supper\",\n      \"owner\": \"okafors\",\n      \"target\": \"place\",\n      \"recurrence\": { \"every\": \"day\" },\n      \"slots\": [{ \"start\": \"18:00\", \"end\": \"20:00\", \"value\": \"okafor_house\" }]\n    }\n  }\n}\n```\n\n**Try it.** The day starts at five in the afternoon with the family at the bakery. Timelapse an hour and a half: at six they all go home for supper. Formulas can ask about them: `member_of(tobi, 'okafors')` is true, and so is `has_rel(ada, 'parent_of', 'tobi')`.\n\nA selector picks the family wherever one is asked for: `{ \"memberOf\": [\"okafors\"] }` matches the three of them, for a schedule's owner, a rule's `who`, an action parameter's candidates or who knows a secret (`knownBy`). The person's own schedule wins over the group's for the same field, so Tobi can keep his own Saturday plans.\n";
 
 // docs/REFERENCE.md
-var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `member_of(entity, group)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.signal`, `engine.told`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `contradiction` | `decision`, `text`, `effects` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n\nSignals: `agents_present`, `always`, `beat`, `classifier`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.satisfy` | `need`, `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |\n| `rest` | Rest |  |  | `default` | `30` | rest, relax, take a break |\n| `sleep` | Go to bed |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |\n\n### Events\n\nIts own: `castlife.decision`, `castlife.invitation`, `castlife.need`.\n\n### Panels and slots\n\nPanels: `castlife.cast`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.cues`, `castlife.double_booking`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `end_turn` | End turn |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | text |  | `\"none\"` |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 4 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money |  | `3500` |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number |  | `1` |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `owner` | Owner | ref |  |  |  |  | live from money 2 |\n| `payment` | Loan payment | money |  |  |  |  | live from money 4 |\n| `remaining_months` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 4 |\n| `statement_day` | Statement day | number | 1 … 28 | `1` |  |  | live from money 4 |\n| `symbol` | Holding | text |  | `\"broad_us_equity_index\"` |  |  | live from money 4 |\n| `type` | Type | enum: cash, checking, savings, card, loan, brokerage |  |  |  |  | live from money 2 |\n| `units` | Units held | number | ≥ 0 |  |  |  | live from money 4; locked |\n\n#### `business`: Business\n\nExtends `thing`.\n\nNo fields of its own.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?` |\n| `economy.invest` | `cents`, `owner?`, `sell?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?` |\n| `economy.pay_card` | `card`, `from?`, `cents?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?` |\n\n### Formula functions\n\n- `balance(account)`\n- `can_afford(who, cents)`\n- `net_worth(who)`\n- `price(item)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `buy` | Buy | `item: text`, `qty?: number`, `price?: money`, `method?: text` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `invest` | Invest | `amount: money` |  | `default` | `2` | invest, buy stocks, buy shares |\n| `move_money` | Transfer between accounts | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |\n| `pay` | Pay | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card | `card: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card |\n| `sell_investments` | Sell investments | `amount: money` |  | `default` | `2` | sell stocks, sell shares, cash out |\n\n### Events\n\nIts own: `economy.anchor`, `economy.card_paid`, `economy.decline`, `economy.modifier`, `economy.note`, `economy.price`, `economy.statement`, `economy.txn`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `purchase` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.banking` | `money` | 4 | the world |\n| `economy.bills` | `money` | 3 | the world |\n| `economy.cards` | `money` | 3 | the world |\n| `economy.living` | `money` | 3 | the world |\n| `economy.markets` | `money` | 4 | the world |\n| `economy.payroll` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto, ±25 a turn; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm, ±10 a turn |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.give` | `item`, `from`, `to` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `drop` | Drop | `item: ref → item` |  | `default` | `1` | drop, put down, leave |\n| `give` | Give | `item: ref → item`, `to: ref → person` |  | `default` | `1` | give, hand, pass |\n| `lend` | Lend | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `reclaim` | Take back | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `take` | Take | `item: ref → item` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | `item: ref → item` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | `item: ref → item` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `give` | `ref` |\n| `quantity` | `number` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |\n\n### Lint codes\n\n`gear.kits`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `group`: Group\n\nExtends `thing`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Panels and slots\n\nPanels: none. Slots it writes: `people`.\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `attempt` | Attempt | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `distance_km(from, to, mode)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `go` | Go to | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `answer` | Answer | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.leaky_label`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto, ±30 a turn |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to)`\n- `fuel_ok(vehicle, to)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `drive` | Drive | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |\n| `refuel` | Refuel | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
+var REFERENCE_default = "# LumiRPEngine reference\n\n<!-- Generated by `bun run reference` (scripts/reference/build.ts). Edit the packs, then run it again. -->\n\nWhat the engine and its packs register, as the registry has it: kinds and their fields, effects and the arguments they read, formula functions, actions, events, proposal channels, panels, slots, data tables and lint codes. Arguments and parameters marked `?` may be left out. The formula language is in [EXPRESSIONS.md](EXPRESSIONS.md), worked examples are in [RECIPES.md](RECIPES.md), and the [user guide](USER-GUIDE.md#authoring) shows the editors.\n\nEngine `0.1.0` · world format `lre-world-v1` · packs `engine` 1, `calendar` 1, `space` 1, `economy` 1, `gear` 1, `vehicles` 1, `weather` 1, `relationships` 1, `castlife` 1, `sheets` 1, `story` 1, `combat` 1, `minds` 1.\n\n## Contents\n\n- [Engine built-ins](#engine-built-ins)\n- [Calendar & time pack](#calendar--time-pack-calendar)\n- [Cast life pack](#cast-life-pack-castlife)\n- [Combat pack](#combat-pack-combat)\n- [Economy pack](#economy-pack-economy)\n- [Gear & containers pack](#gear--containers-pack-gear)\n- [Minds pack](#minds-pack-minds)\n- [Relationships pack](#relationships-pack-relationships)\n- [Character sheets pack](#character-sheets-pack-sheets)\n- [Space & travel pack](#space--travel-pack-space)\n- [Story pack](#story-pack-story)\n- [Vehicles pack](#vehicles-pack-vehicles)\n- [Weather pack](#weather-pack-weather)\n\n## Engine built-ins\n\n### Core effects\n\n| Effect | Arguments |\n|---|---|\n| `add` | `entity`, `field`, `delta` |\n| `award` | `entity`, `progression`, `amount` |\n| `beat` | `hint` |\n| `check` | `check`, `actor?`, `target?`, `outcomes` |\n| `life` | `entity`, `to?`, `tell?` |\n| `link` | `rel`, `from`, `to`, `until?`, `fields?` |\n| `move` | `entity`, `to` |\n| `note` | `text`, `visibility?` |\n| `post` | `lines`, `memo?` |\n| `recover` | `entity`, `field`, `amount?`, `full?` |\n| `set` | `entity`, `field`, `value` |\n| `signal` | `class`, `text`, `entity?`, `visibility?` |\n| `spawn` | `kind`, `name`, `id?`, `tier?`, `fields?`, `relations?`, `agent?`, `place?`, `class?`, `tags?` |\n| `stage` | `track`, `to` |\n| `unlink` | `rel`, `from`, `to` |\n\n### Formula functions\n\nMath: `abs`, `ceil`, `clamp`, `floor`, `max`, `min`, `round`. `min` and `max` take any number of arguments.\n\nThe engine's own:\n\n- `at(entity, place)`\n- `attempts(track)`\n- `band(entity, field)`\n- `count_at(place, kind?)`\n- `days(n)`\n- `field(entity, field)`\n- `fired(rule)`\n- `has_rel(entity, type, to?)`\n- `holiday()`\n- `hours(n)`\n- `knows(entity, subject)`\n- `level(entity, domain)`\n- `next_time(time)`\n- `place(entity)`\n- `rel(entity, type, to?)`\n- `rel_count(entity, type)`\n- `rel_field(from, type, to, field)`\n- `revealed(track, stage?)`\n- `roll(notation)`: effect arguments only\n- `since(track)`\n- `stage(track)`\n- `table(table, key, column)`\n- `table_step(table, value, column)`\n- `today_at(time)`\n\nTaxonomy and life states:\n\n- `band_of(entity)`\n- `has_tag(entity, tag)`\n- `in_class(entity, facet, value)`\n- `kind_is(entity, kind)`\n- `life_of(entity)`\n- `member_of(entity, group)`\n- `tier_of(entity)`\n\n### Events\n\nCore: `add`, `clock`, `link`, `materialize`, `post`, `set`, `spawn`, `stage`, `timelapse`, `unlink`.\n\nEngine bookkeeping: `engine.adjudged`, `engine.attempt`, `engine.beat`, `engine.caught`, `engine.check`, `engine.choice`, `engine.class`, `engine.cursor`, `engine.entity`, `engine.fired`, `engine.life`, `engine.note`, `engine.observed`, `engine.pause`, `engine.revealed`, `engine.signal`, `engine.told`.\n\n### Relation types\n\nBuilt in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `regard`, `route`. Packs add the typed ones below.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `knows` | `knows` |\n| `life` | `life` |\n| `spawn` | `spawn` |\n\n### Step purposes\n\n| Purpose | Outputs a world template may declare |\n|---|---|\n| `brief` | `text` |\n| `choices` | `text`, `effects` |\n| `consolidate` | `text` |\n| `contradiction` | `decision`, `text`, `effects` |\n| `extract` | `text`, `effects` |\n| `interpret` | `decision`, `text` |\n| `judge` | `decision`, `text` |\n| `memory` | `text` |\n| `mind` | `text` |\n| `npc.choose` | `decision`, `text` |\n| `outline` | `text` |\n| `puzzle.answer` | `decision`, `text` |\n| `skip` | `text` |\n\nSignals: `agents_present`, `always`, `beat`, `classifier`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.\n\nTemplate placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.\n\n### Sections\n\nThe slots a world gets when it defines none, kept in rank order on the section budget.\n\n| Slot | Label | Rank |\n|---|---|---|\n| `outcome` | Outcome | 0 |\n| `montage` | Montage | 1 |\n| `scene` | Scene | 2 |\n| `people` | People | 3 |\n| `money` | Money | 4 |\n| `gear` | Gear | 5 |\n| `vehicles` | Vehicles | 6 |\n| `quest` | Quest | 7 |\n| `outline` | Outline | 8 |\n| `stance` | Stance | 9 |\n| `minds` | Minds | 10 |\n\n### Realism\n\nDomains: `money`, `gear`, `vehicles`, `castlife`, `relationships`, `space`, `calendar`, `weather`, `sheets`; each at a level from 0 to 4.\n\nDetail bands: `principal` (Leads), `supporting` (Supporting), `background` (Background).\n\nInterrupt classes: `invitation`, `bill`, `decline`, `incident`, `quest`, `rule`, `arrival`, `overdue`, `needs`, `weather`.\n\n### Adjudication presets\n\n| Value | `narrative` | `balanced` | `crunchy` |\n|---|---|---|---|\n| `checks` | `\"risky\"` | `\"every\"` | `\"every\"` |\n| `riskyAt` | `0.75` | `0.75` | `0.75` |\n| `trivialAt` | `null` | `0.95` | `null` |\n| `impossibleAt` | `null` | `0.05` | `null` |\n| `description` | `{\"weight\":\"none\",\"max\":3,\"advantageAt\":2}` | `{\"weight\":\"bonus\",\"max\":2,\"advantageAt\":2}` | `{\"weight\":\"none\",\"max\":2,\"advantageAt\":2}` |\n| `authority` | `\"narrative\"` | `\"hybrid\"` | `\"mechanics\"` |\n| `closeBy` | `2` | `2` | `2` |\n| `retry` | `\"changed\"` | `\"changed\"` | `\"free\"` |\n| `retryAfter` | `60` | `60` | `60` |\n\n## Calendar & time pack (`calendar`)\n\nVersion 1 · realism domain `calendar` · requires none.\n\n### Formula functions\n\n- `days_until(date)`\n- `is_day_off()`\n- `is_weekend()`\n- `minutes_until(at)`\n- `weekday_name()`\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `time_advance` | `duration` |\n\n### Panels and slots\n\nPanels: `calendar.calendar`. Slots it writes: `scene`.\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `calendar.dst` | Daylight saving time, time zones and daylight hours | `lre-table/calendar.dst/v1` | start (json), end (json), duration_weeks_approx (int), exceptions (list), standard_offsets_h (json), note (text), daylight_hours (json) | 1 |\n| `calendar.holidays` | Federal holidays | `lre-table/calendar.holidays/v1` | name (text), rule_type (enum), month (int), day (int, optional), weekday (enum, optional), n (int, optional), federal_paid_day_off (bool), private_sector_paid_day_off (enum), observed_if_weekend (text, optional) | 11 |\n| `calendar.observances` | Common observances | `lre-table/calendar.observances/v1` | name (text), rule_type (enum), month (int, optional), day (int, optional), weekday (enum, optional), n (int, optional), base (ref, optional), offset_days (int, optional), algorithm (text, optional), window (text, optional), start (text, optional), end (text, optional), rule_text (text, optional), rule_note (text, optional) | 30 |\n| `calendar.school` | School year | `lre-table/calendar.school/v1` | title (text), values (json) | 2 |\n| `calendar.shifts` | Work shift patterns | `lre-table/calendar.shifts/v1` | name (text), description (text), days_per_week (number), typical_start (text), typical_shift_h (number), typical_hours_per_week (int), weekend_work (enum), notes (text) | 24 |\n| `calendar.work` | Work norms | `lre-table/calendar.work/v1` | full_time_hours_per_week (number), standard_work_year_h (int), overtime (text), vacation_days_after_1_year (int), vacation_days_after_5_years (int), vacation_days_after_10_years (int), sick_days_per_year (int), paid_time_off_note (text), paid_holidays_per_year (int), meal_break (text) | 1 |\n\n### Lint codes\n\n`calendar.epoch`, `calendar.schedule_times`, `calendar.unit_cap`.\n\n## Cast life pack (`castlife`)\n\nVersion 1 · realism domain `castlife` · requires `gear`, `relationships`, `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `castlife.decide` | `key`, `choice` |\n| `castlife.override` | `who`, `minutes?`, `place?`, `activity?` |\n| `castlife.satisfy` | `need`, `entity?` |\n\n### Formula functions\n\n- `busy(who)`\n- `invited(host)`\n- `need(who, need)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `accept_invitation` | Accept invitation | `host: ref → person` |  | `default` | `1` | accept, sure, let's, count me in |\n| `eat` | Eat |  |  | `default` | `30` | eat, have lunch, have dinner, grab a bite |\n| `rest` | Rest |  |  | `default` | `30` | rest, relax, take a break |\n| `sleep` | Go to bed |  |  | `default` | `5` | go to bed, sleep, turn in, hit the sack |\n\n### Events\n\nIts own: `castlife.decision`, `castlife.invitation`, `castlife.need`.\n\n### Panels and slots\n\nPanels: `castlife.cast`. Slots it writes: `people`, `stance`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `castlife.agents` | `castlife` | 3 | each agent |\n| `castlife.trips` | `castlife` | 1 | the world |\n\n### Lint codes\n\n`castlife.birthday`, `castlife.cues`, `castlife.double_booking`.\n\n## Combat pack (`combat`)\n\nVersion 1 · realism domain none · requires none.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `hostile` | Hostile to | `*` | `*` | many_many | yes |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `combat.end` | `winner?` |\n| `combat.end_turn` | `who?` |\n| `combat.spend` | `who?`, `cost` |\n| `combat.start` | `foes?` |\n\n### Formula functions\n\n- `budget_left(e, budget)`\n- `can_fight(e)`\n- `encounter_round()`\n- `has_turn(e)`\n- `in_encounter(e)`\n- `is_ally(a, b)`\n- `is_down(e)`\n- `is_foe(a, b)`\n- `standing(side)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `end_turn` | End turn |  |  | `default` | `0` | end my turn, end turn |\n| `fight` | Fight | `target: ref` |  | `default` | `0` | start a fight, pick a fight, draw my weapon |\n\n### Events\n\nIts own: `combat.act`, `combat.decision`, `combat.down`, `combat.end`, `combat.spend`, `combat.start`, `combat.turn`.\n\n### Panels and slots\n\nPanels: `combat.encounter`. Slots it writes: none.\n\n## Economy pack (`economy`)\n\nVersion 1 · realism domain `money` · requires `space`.\n\n### Kinds\n\n#### `account`: Account\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `apr_pct` | APR % | number | ≥ 0 |  |  |  | live from money 4 |\n| `apy_pct` | APY % | number | ≥ 0 |  |  |  | live from money 4 |\n| `autopay` | Autopay | text |  | `\"none\"` |  |  | live from money 3 |\n| `due_day` | Due day of month | number | 1 … 31 |  |  |  | live from money 4 |\n| `institution` | Institution | text |  |  |  |  | live from money 3 |\n| `limit` | Credit limit | money | ≥ 0 |  |  |  | live from money 3 |\n| `min_floor` | Minimum payment floor | money |  | `3500` |  |  | live from money 4 |\n| `min_pct` | Minimum payment % of balance | number |  | `1` |  |  | live from money 4 |\n| `opening` | Opening balance | money |  |  |  |  | locked |\n| `owner` | Owner | ref |  |  |  |  | live from money 2 |\n| `payment` | Loan payment | money |  |  |  |  | live from money 4 |\n| `remaining_months` | Months left (loans) | number | ≥ 0 |  |  |  | live from money 4 |\n| `statement_day` | Statement day | number | 1 … 28 | `1` |  |  | live from money 4 |\n| `symbol` | Holding | text |  | `\"broad_us_equity_index\"` |  |  | live from money 4 |\n| `type` | Type | enum: cash, checking, savings, card, loan, brokerage |  |  |  |  | live from money 2 |\n| `units` | Units held | number | ≥ 0 |  |  |  | live from money 4; locked |\n\n#### `business`: Business\n\nExtends `thing`.\n\nNo fields of its own.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `economy.buy` | `item?`, `category?`, `qty?`, `price?`, `exact?`, `stated?`, `name?`, `payer?`, `method?`, `from?`, `payee?`, `keep?` |\n| `economy.invest` | `cents`, `owner?`, `sell?` |\n| `economy.lose` | `item`, `thief?` |\n| `economy.move` | `from`, `to`, `cents`, `memo?` |\n| `economy.pay_card` | `card`, `from?`, `cents?` |\n| `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |\n| `economy.transfer` | `to`, `cents`, `from?`, `memo?`, `method?` |\n\n### Formula functions\n\n- `balance(account)`\n- `can_afford(who, cents)`\n- `net_worth(who)`\n- `price(item)`\n- `wealth(who)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `buy` | Buy | `item: text`, `qty?: number`, `price?: money`, `method?: text` |  | `default` | `5` | buy, purchase, order, pick up a |\n| `invest` | Invest | `amount: money` |  | `default` | `2` | invest, buy stocks, buy shares |\n| `move_money` | Transfer between accounts | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |\n| `pay` | Pay | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |\n| `pay_card` | Pay card | `card: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card |\n| `sell_investments` | Sell investments | `amount: money` |  | `default` | `2` | sell stocks, sell shares, cash out |\n\n### Events\n\nIts own: `economy.anchor`, `economy.card_paid`, `economy.decline`, `economy.modifier`, `economy.note`, `economy.price`, `economy.statement`, `economy.txn`.\n\nChecks it adds to: `post`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `purchase` | `money` |\n| `transfer` | `money` |\n\n### Panels and slots\n\nPanels: `economy.money`. Slots it writes: `money`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `economy.accounts` | `money` | 3 | the world |\n| `economy.banking` | `money` | 4 | the world |\n| `economy.bills` | `money` | 3 | the world |\n| `economy.cards` | `money` | 3 | the world |\n| `economy.living` | `money` | 3 | the world |\n| `economy.markets` | `money` | 4 | the world |\n| `economy.payroll` | `money` | 3 | the world |\n\nDetail on demand: `money` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `economy.catalog` | Price catalog | `lre-table/economy.catalog/v1` | name (text), category (ref), unit (text), price_cents (band), notes (text, optional) | 340 |\n| `economy.categories` | Price categories | `lre-table/economy.categories/v1` | name (text), basis (text), notes (text, optional), price_unit_note (text, optional), item_count (int), price_cents (band) | 19 |\n| `economy.finance` | Finance parameters | `lre-table/economy.finance/v1` | title (text), values (json) | 7 |\n| `economy.occupations` | Occupations and pay | `lre-table/economy.occupations/v1` | title (text), category (enum), median_cents_per_h (int), median_cents_per_year (int), typical_earnings_cents_per_year (int), schedule_pattern (ref), typical_hours_per_week (number), weeks_per_year (number), weekend_work (enum), shifts (list), pay_frequency (enum), benefits (enum), benefits_note (text), withholding_rate_pct (number), description (text), wage_basis (text), tipped (bool, optional), tipped_cash_wage_cents_per_h (int, optional), self_employed (bool, optional), fica_exempt (bool, optional), estimated_tax_set_aside_pct (number, optional), withholding_note (text, optional) | 56 |\n| `economy.regions` | Regions (US states, DC and the national baseline) | `lre-table/economy.regions/v1` | name (text), abbr (text), scope (enum), census_region (enum, optional), census_division (enum, optional), time_zones (list, optional), observes_dst (bool, optional), state_income_tax_effective_pct (number, optional), local_income_tax_pct_typical (number, optional), sales_tax_combined_avg_pct (number), cost_of_living_multiplier (number), median_rent_1br_cents_per_month (int), median_rent_2br_cents_per_month (int), residential_electricity_cents_per_kwh (number), minimum_wage_cents_per_h (int), notes (text, optional) | 52 |\n\n### Lint codes\n\n`economy.accounts`, `economy.unpriced_cap`.\n\n## Gear & containers pack (`gear`)\n\nVersion 1 · realism domain `gear` · requires `space`.\n\n### Kinds\n\n#### `container`: Container\n\nExtends `item`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `capacity_l` | Capacity (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `max_load_kg` | Max load (kg) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `stock` | Contents category (sampled when first opened) | text |  |  |  |  |  |\n\n#### `item`: Item\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `catalog` | Catalog item | text (row of economy.catalog) |  |  |  |  |  |\n| `category` | Category | text |  |  |  |  |  |\n| `condition` | Condition | number | 0 … 100 | `100` |  |  | live from gear 3; bound auto, ±25 a turn; bands: broken, worn, good, like new |\n| `consumable` | Consumable | bool |  |  |  |  | live from gear 4 |\n| `from_kit` | From kit | ref |  |  |  |  | locked |\n| `notable` | Notable | bool |  |  |  |  | live from gear 1 |\n| `overdue` | Overdue | bool |  |  |  |  | locked |\n| `piece` | Kit piece | text |  |  |  |  | locked |\n| `qty` | Quantity | number | ≥ 0 | `1` |  |  | live from gear 2; bound confirm, ±10 a turn |\n| `slot` | Equip slot | text |  |  |  |  | live from gear 3 |\n| `uses` | Uses left | number | ≥ 0 |  |  |  | live from gear 4 |\n| `volume_l` | Volume (l) | number | ≥ 0 |  |  |  | live from gear 2 |\n| `weight_g` | Weight (g) | number | ≥ 0 |  |  |  | live from gear 2 |\n\n#### `kit`: Kit\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `kit` | Kit template | text |  |  |  |  | live from gear 3 |\n| `piece_count` | Piece count | number |  |  |  |  | live from gear 3 |\n| `pieces` | Pieces | list |  |  |  |  | live from gear 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `equipped` | Equipped by | `item` | `*` | many_one |  |  | `slot` |\n| `uses` | Uses (granted until) | `*` | `*` | many_many |  |  | none |\n| `worn_by` | Worn by | `item` | `*` | many_one |  |  | `slot` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `gear.drop` | `item`, `place?` |\n| `gear.give` | `item`, `from`, `to` |\n| `gear.lend` | `item`, `to`, `until?`, `said?` |\n| `gear.lose` | `item`, `thief?` |\n| `gear.receive` | `name`, `to`, `from?` |\n| `gear.remove` | `item` |\n| `gear.retrieve` | `item` |\n| `gear.take_piece` | `kit`, `piece`, `to` |\n| `gear.transfer` | `item`, `to` |\n| `gear.use` | `item`, `user?` |\n| `gear.wear` | `item`, `wearer`, `slot?` |\n\n### Formula functions\n\n- `carried_kg(holder)`\n- `carries(holder, item)`\n- `has_item(holder, what)`\n- `kit_complete(kit)`\n- `kit_present(kit)`\n- `lent_out(thing)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `drop` | Drop | `item: ref → item` |  | `default` | `1` | drop, put down, leave |\n| `give` | Give | `item: ref → item`, `to: ref → person` |  | `default` | `1` | give, hand, pass |\n| `lend` | Lend | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |\n| `lose` | Lose something | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |\n| `reclaim` | Take back | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |\n| `remove` | Take off | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |\n| `take` | Take | `item: ref → item` |  | `default` | `1` | take, pick up, grab |\n| `take_piece` | Take from a kit | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |\n| `use` | Use | `item: ref → item` |  | `default` | `5` | use, apply |\n| `wear` | Wear or equip | `item: ref → item` |  | `default` | `2` | wear, put on, equip |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `give` | `ref` |\n| `quantity` | `number` |\n\n### Panels and slots\n\nPanels: `gear.gear`. Slots it writes: `gear`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `gear.grants` | `gear` | 1 | the world |\n\nDetail on demand: `gear` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `gear.containers` | Containers | `lre-table/gear.containers/v1` | name (text), capacity_l (number), max_load_kg (number), empty_weight_g (int), location (enum), equip_slot (ref), price_cents (band), notes (text, optional) | 34 |\n| `gear.items` | Gear items | `lre-table/gear.items/v1` | name (text), category (enum), equip_slot (ref), weight_g (int), volume_l (number), price_cents (band), notes (text, optional) | 90 |\n| `gear.kits` | Kits | `lre-table/gear.kits/v1` | name (text), recommended_container (ref), description (text), piece_count (int), pieces_total_weight_g (number), packed_volume_l (number), price_cents (band), pieces (list), notes (text, optional) | 5 |\n| `gear.slots` | Equip slots | `lre-table/gear.slots/v1` | description (text) | 20 |\n\n### Lint codes\n\n`gear.kits`.\n\n## Minds pack (`minds`)\n\nVersion 1 · realism domain none · requires none.\n\n### Events\n\nIts own: `minds.commitment`, `minds.commitment_edit`, `minds.consolidated`, `minds.memory`, `minds.mind`, `minds.note_edit`, `minds.pin`, `minds.plan`, `minds.plan_edit`, `minds.presence`, `minds.refresh`, `minds.round`, `minds.skip`.\n\n### Panels and slots\n\nPanels: none. Slots it writes: `minds`.\n\n### Lint codes\n\n`minds.config`, `minds.steps`.\n\n## Relationships pack (`relationships`)\n\nVersion 1 · realism domain `relationships` · requires `space`.\n\n### Kinds\n\n#### `company`: Company\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `faction`: Faction\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `family`: Family\n\nExtends `group`.\n\nNo fields of its own.\n\n#### `group`: Group\n\nExtends `thing`.\n\nNo fields of its own.\n\n#### `household`: Household\n\nExtends `group`.\n\nNo fields of its own.\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `child_of` | Child of | `person` | `person` | many_many |  | `parent_of` | none |\n| `knows` | Knows | `*` | `*` | many_many |  |  | none |\n| `member_of` | Member of | `*` | `group` | many_many |  |  | `rank`, `role`, `since` |\n| `parent_of` | Parent of | `person` | `person` | many_many |  | `child_of` | none |\n| `partner_of` | Partner of | `person` | `person` | many_many | yes |  | `since` |\n| `regard` | Regard | `*` | `*` | many_many |  |  | `respect`, `trust`, `warmth` |\n| `sibling_of` | Sibling of | `person` | `person` | many_many | yes |  | none |\n| `spouse_of` | Spouse of | `person` | `person` | many_many | yes |  | `since` |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `relationships.adjust` | `from`, `to`, `delta`, `axis?`, `why?` |\n| `relationships.appraise` | `from`, `to`, `appraisal`, `why?`, `mutual?` |\n\n### Formula functions\n\n- `faction_regard(group, to)`\n- `regard(from, to, axis)`\n- `regard_band(from, to)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `chat_with` | Chat with | `target: ref → person` |  | `default` | `15` | chat with, talk to, catch up with |\n| `give_gift` | Give a gift | `target: ref → person` |  | `default` | `5` | give a gift, surprise |\n\n### Events\n\nIts own: `relationships.regard`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `regard` | `number` |\n\n### Panels and slots\n\nPanels: none. Slots it writes: `people`.\n\n### Lint codes\n\n`relationships.axes`.\n\n## Character sheets pack (`sheets`)\n\nVersion 1 · realism domain `sheets` · requires `space`.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `sheets.condition` | `condition`, `who?`, `label?`, `mod?`, `minutes?`, `clear?` |\n\n### Formula functions\n\n- `condition_mod(who)`\n- `derived(who, id)`\n- `difficulty_of(v)`\n- `has_condition(who, id)`\n- `stat(who, stat)`\n- `stat_mod(who, stat)`\n- `stat_word(who, stat)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `attempt` | Attempt | `stat: text`, `difficulty?: text` | `1d20` | `failure`, `great`, `success` | `5` | try to, attempt, check |\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `condition` | `list` |\n\n### Panels and slots\n\nPanels: `sheets.you`. Slots it writes: `outcome`.\n\n### Lint codes\n\n`sheets.stat_range`.\n\n## Space & travel pack (`space`)\n\nVersion 1 · realism domain `space` · requires `calendar`.\n\n### Kinds\n\n#### `person`: Person\n\nExtends `thing`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `activity` | Activity | text |  | `\"idle\"` |  |  | live from castlife 1 |\n| `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |\n| `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |\n| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |\n| `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `chores` | Chores | list |  |  |  |  | live from castlife 3 |\n| `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |\n| `employer` | Employer | ref |  |  |  |  | live from money 3 |\n| `grit` | Grit | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `home` | Home | ref |  |  |  |  | live from space 1 |\n| `might` | Might | number | 3 … 18 |  |  |  | live from sheets 1 |\n| `needs` | Needs | list |  |  |  |  | live from castlife 4; locked |\n| `occupation` | Occupation | text (row of economy.occupations) |  |  |  |  | live from money 3 |\n| `region` | Region | text (row of economy.regions) |  |  |  |  | live from money 3 |\n| `scene` | Scene type | text |  |  |  |  |  |\n| `trips` | Trips | list |  |  |  |  | live from castlife 1 |\n| `wealth` | Wealth | text |  |  |  |  | live from money 1 |\n| `wits` | Wits | number | 3 … 18 |  |  |  | live from sheets 1 |\n\n#### `thing`: Thing\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `owner` | Owner | ref |  |  |  |  |  |\n| `place` | Place | ref |  |  |  |  | live from space 1 |\n| `x` | Grid x | number |  |  |  |  | live from space 3 |\n| `y` | Grid y | number |  |  |  |  | live from space 3 |\n\n### Relation types\n\n| Relation | Label | From | To | Cardinality | Symmetric | Inverse | Fields |\n|---|---|---|---|---|---|---|---|\n| `in` | In | `*` | `*` | many_one |  |  | none |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `space.set_route` | `route`, `open?` |\n| `space.step` | `x`, `y`, `entity?` |\n\n### Formula functions\n\n- `distance_km(from, to, mode)`\n- `grid_minutes(place, x, y)`\n- `grid_reachable(place, x, y)`\n- `on_grid(thing)`\n- `reach(a, b)`\n- `route_exists(from, to, mode)`\n- `route_open(route)`\n- `travel_minutes(from, to, mode)`\n- `within(place, ancestor)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `go` | Go to | `to: ref → place` |  | `default` | `level.space < 2 ? (level.space < 1 ? 0 : 15) : travel_minutes(here, to, 'walk')` | go to, walk to, head to, head over to, leave for |\n| `step` | Move on the map | `x: number`, `y: number` |  | `default` | `grid_minutes(here, x, y)` | walk over to, cross to, move to |\n\n### Events\n\nIts own: `space.pos`, `space.route`.\n\n### Proposals\n\n| Proposal | Bound by |\n|---|---|\n| `location` | `ref` |\n\n### Panels and slots\n\nPanels: `space.map`. Slots it writes: `scene`.\n\n### Lint codes\n\n`space.grid`, `space.maps`, `space.references`.\n\n## Story pack (`story`)\n\nVersion 1 · realism domain none · requires none.\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `story.answer` | `track`, `answer`, `decision?` |\n| `story.flag` | `name`, `value?` |\n\n### Formula functions\n\n- `flag(name)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `answer` | Answer | `puzzle?: text`, `answer: text`, `decision?: number` |  | `default` | `1` | the answer is, i think it's, solve, answer, the code is, the combination is, try the combination, dial, enter the code |\n\n### Events\n\nIts own: `story.flag`.\n\n### Panels and slots\n\nPanels: `story.quests`. Slots it writes: `quest`.\n\n### Lint codes\n\n`story.leaky_label`.\n\n## Vehicles pack (`vehicles`)\n\nVersion 1 · realism domain `vehicles` · requires `economy`, `gear`, `space`.\n\n### Kinds\n\n#### `vehicle`: Vehicle\n\nExtends `container`.\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `class` | Vehicle class | text |  |  |  |  |  |\n| `engine_hours` | Engine hours | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `fuel_pct` | Fuel % | number | 0 … 100 |  |  |  | live from vehicles 2; bound auto, ±30 a turn |\n| `home` | Home base | ref |  |  |  |  | live from vehicles 3 |\n| `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |\n| `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |\n| `status` | Status | enum: ok, needs_service, broken |  | `\"ok\"` |  |  | live from vehicles 1; bound confirm |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `vehicles.drive` | `vehicle`, `to`, `driver?`, `riders?` |\n| `vehicles.refuel` | `vehicle`, `payer?`, `pct?` |\n| `vehicles.service` | `vehicle`, `payer?`, `repair?` |\n\n### Formula functions\n\n- `drive_minutes(vehicle, to)`\n- `fuel_ok(vehicle, to)`\n- `fuel_pct(vehicle)`\n\n### Actions\n\n| Action | Label | Parameters | Check | Outcomes | Minutes | Lexicon |\n|---|---|---|---|---|---|---|\n| `drive` | Drive | `vehicle: ref → vehicle`, `to: ref → place` |  | `default` | `drive_minutes(vehicle, to)` | drive to, drive over to, take the truck, take the car, sail to, ride to |\n| `refuel` | Refuel | `vehicle: ref → vehicle` |  | `default` | `10` | refuel, fill up, gas up, charge the car |\n| `repair_vehicle` | Repair | `vehicle: ref → vehicle` |  | `default` | `180` | repair, fix the truck, fix the car, get it towed |\n| `service_vehicle` | Service | `vehicle: ref → vehicle` |  | `default` | `60` | service, oil change, tune up |\n\n### Panels and slots\n\nPanels: `vehicles.garage`. Slots it writes: `vehicles`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `vehicles.upkeep` | `vehicles` | 4 | the world |\n\nDetail on demand: `vehicles` (version 1).\n\n### Data tables\n\n| Table | Label | Schema | Columns | Default rows |\n|---|---|---|---|---|\n| `vehicles.classes` | Vehicle classes | `lre-table/vehicles.classes/v1` | name (text), domain (enum), fuel_type (enum), factor_guide (ref), tank_capacity_gal (number, optional), tank_capacity_l (number, optional), usable_battery_kwh (number, optional), consumption_unit (enum), consumption (json), range_mi (int, optional), range_h (number, optional), price_new_cents (band), price_used_cents (band), insurance_liability_cents_per_month (int), insurance_full_cents_per_month (int), registration_cents_per_year (band), annual_maintenance_cents_per_year (int), maintenance (json), passengers (int), cargo_l (number), payload_kg (number), towing_kg (number, optional), charging (json, optional), notes (text) | 19 |\n| `vehicles.factors` | Consumption factor guides | `lre-table/vehicles.factors/v1` | basis (text), factors (json), note (text, optional) | 3 |\n\n### Lint codes\n\n`vehicles.classes`.\n\n## Weather pack (`weather`)\n\nVersion 1 · realism domain `weather` · requires `space`.\n\n### Kinds\n\n#### `region`: Weather region\n\n| Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |\n|---|---|---|---|---|---|---|---|\n| `climate` | Climate | text |  | `\"temperate\"` |  |  |  |\n| `temp_c` | Temperature (°C) | number |  |  |  |  | live from weather 3; bound never |\n| `weather` | Weather | text |  | `\"clear\"` |  |  | live from weather 2; bound never |\n| `weather_hold` | Weather held until | number |  |  |  |  | live from weather 2; locked |\n| `weather_hold_until` | Weather held until (condition) | text |  |  |  |  | live from weather 2; locked |\n\n### Effects\n\n| Effect | Arguments |\n|---|---|\n| `weather.clear` | `region`, `state?` |\n| `weather.set` | `region`, `state`, `minutes?`, `until?` |\n\n### Formula functions\n\n- `season()`\n- `weather(place)`\n\n### Panels and slots\n\nPanels: `weather.now`. Slots it writes: `scene`.\n\n### Simulation\n\n| Process | Domain | From level | Steps |\n|---|---|---|---|\n| `weather.climate` | `weather` | 2 | the world |\n\n### Lint codes\n\n`weather.climates`.\n";
 
 // docs/STUDIO.md
 var STUDIO_default = `# LumiRPEngine studio contract
@@ -45630,7 +47410,7 @@ This guide is for two kinds of people: players, who want to chat in a world that
 
 - [How it works in one page](#how-it-works-in-one-page)
 - **Playing:** [Play](#play) · [Swipes, edits and branches](#swipes-edits-and-branches) · [Time controls](#time-controls) · [Realism](#realism)
-- **Tuning:** [Model use](#model-use) · [Extraction modes](#extraction-modes) · [The Context inspector](#the-context-inspector)
+- **Tuning:** [Model use](#model-use) · [Character minds](#character-minds) · [Extraction modes](#extraction-modes) · [The Context inspector](#the-context-inspector)
 - **Building:** [Authoring](#authoring)
 - [Troubleshooting](#troubleshooting)
 
@@ -45787,11 +47567,12 @@ When the world uses the **grid system**, you stand on a square of the grid you'r
 
 The **GM view** shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show the GM view** to open it, and **Hide** to put it away. Its data is fetched only while it is open, so none of it travels with what Play shows you. Looking never changes your chat; only the edits you save do. The [GM guide](GM-GUIDE.md) covers running a chat from here.
 
-It has five tabs, and a sixth, **Fight**, while a fight is under way:
+It has six tabs, and a seventh, **Fight**, while a fight is under way:
 
 - **Entities**: every person, item, vehicle, group and account in the world, including the ones spawned during this chat and the removed ones, with a search box and a kind filter. Badges mark **You**, **Removed**, **Spawned**, **Agent** (someone who lives off-screen) and anything that isn't public. Tap one to open its form.
 - **Places**: every place, with its visibility (public, discoverable, secret and so on).
 - **Tracks**: every quest, secret and agenda, with every stage and its truth. Pick a stage to move the track there.
+- **Minds**: every character's place on the fidelity ladder and why, their latest mind, plans, commitments, notes and summary, with pins and edits ([Minds in the GM view](#minds-in-the-gm-view)).
 - **Money**: everyone else's money (below).
 - **Fight**: everyone in the fight, seen or not, in initiative order, with HP exact and the round's acts.
 - **Edits**: the corrections in force on this version of the story, worded in full, and any change that didn't apply after a reply, with the exact reason.
@@ -46039,6 +47820,10 @@ The number is the most steps a turn can run: each step takes one call from its p
 | \`extract\` (Extract changes) | After the reply | Reads the reply for changes. See [Extraction modes](#extraction-modes). |
 | \`contradiction\` (Contradiction check) | After the reply | Checks the reply against the established facts. If it finds a clash, a **The reply contradicts the facts** chip appears, and the next turn is told the correction. |
 | \`choices\` (Suggested choices) | After the reply | Offers next-step options as **Suggested choices** chips. |
+| \`mind\` (Character minds) | Before the reply, and at time-skip beats | One call per character, as that character: their monologue, depiction, intent, reactions and plans. Runs on its own cadence; see [Character minds](#character-minds). |
+| \`memory\` (Character memory) | After the reply | Per character in the scene at the levels you pick: the notes, commitments and plans they take from what the reply said. |
+| \`skip\` (Time-skip beats) | Before a time skip | Proposes further moments in the skip worth stopping at, beside the ones the engine finds. |
+| \`consolidate\` (Memory consolidation) | After the reply | Folds a character's faded and surplus notes into their summary. |
 
 A step runs when one of its **signals** fires (in **Settings → Steps and connections**, each step lists its signals). \`always\` fires every turn; \`never\` turns the step off and wins over the rest. The others:
 
@@ -46081,6 +47866,52 @@ The call meter shows each turn's calls, seconds and tokens ("This turn: n calls 
 ### Engine tokens versus your context
 
 The engine's sections are a fixed overhead in every prompt, up to the engine budget. Nothing checks that budget against your connection's context size, so keep it well inside it: if the fixed part of the prompt is larger than the context, Lumiverse drops the chat history, including your latest message.
+
+## Character minds
+
+With **character minds** on, the people near the story think for themselves. Each one's mind is its own model call, made as that character and scoped to what they know: their own fields and character card, the lore they may know, the turns they were present for, what they saw or were told, their notes, commitments and summary, the scene as they see it, and their own life (money, work, today's plans, their own agendas and secrets, how they feel about the people present). Minds are blind to each other, so no mind decides what another character says or does. A mind answers with an inner monologue, a **depiction** (how they come across), what they intend, their reactions and their plans, and the narrator is told how to depict it. After the reply, the concrete changes (money, moves) are still read from what the reply actually says, and the characters' memory is written from it.
+
+Each mind is recorded on the turn, so swipes and branches keep it: **Re-narrate** reuses the turn's minds, **Re-run** asks again, and Playtest and Check world never call a model for them.
+
+### The fidelity ladder
+
+Every turn, and at each beat of a time skip, each character gets a focus score and a level from it:
+
+- **Live**: they think every turn, best score first, up to your Live limit.
+- **Near**: they think again when something calls for it: they come into the scene, they are named, or their mind is old enough (the Near refresh).
+- **Far**: they think now and then, on the Far refresh period, and their plans shape their day.
+- **Background**: no mind; they follow their routine.
+
+The score adds up proximity, being named, their feelings toward you, how they figure in the story (quests, secrets, agendas, story roles, rules that name them), what is pending between you (invitations, appointments, plans, commitments), their tier and how recently you saw them. The world sets the weights and thresholds, and who is always Live or never gets a mind ([Character minds in a world](#character-minds-in-a-world)); the GM view can pin anyone at a level.
+
+### Memory
+
+Each character remembers in four layers: a **witness log** of what they saw happen or were told; **recall** of the turns they were present for (and only those: what was narrated of other people's private thoughts is ignored); **notes** written after a reply, for the levels you pick, which fade with time unless they matter; and **commitments** (promises, debts, grudges, favours, plans with someone) that stay until they are kept, broken or released. Faded and surplus notes can be folded into the character's **summary**. The world sets the defaults; your Settings can override any of them.
+
+### Settings → Minds
+
+- **Character minds**: on or off. Off, no character gets a mind, and the engine's own rules decide invitations as before.
+- **Live minds a turn**: a number, or **no limit**.
+- **Near refresh**: when they come into the scene or it changes; when the latest message or reply names them; every so many turns; when their mind is so many game minutes old. Each number can be turned off.
+- **Far refresh**: every so many game minutes, or never.
+- **Memory notes after the reply**: which levels of the characters in the scene get the memory step.
+- **Minds section budget (tokens)**: the narrator's Minds section has its own budget, apart from the section budget, so minds never crowd out Scene or People.
+- **Time skips**: how many beats a skip may stop at, and how many minds think at each beat; either can be **no limit**.
+- **Memory**: your own value for any of the world's memory settings (see [Character minds in a world](#character-minds-in-a-world)); **Use the world's** goes back to the world's.
+- **Prompts**: the instructions for each minds step (Character minds, Character memory, Time-skip beats, Memory consolidation), each with its built-in default shown beneath it. **Save** keeps your own; **Reset to the default** goes back to the built-in. Saving the built-in text unchanged keeps no copy, so you get later improvements to it. A world's own step template for a step wins over yours.
+
+The **Model use** presets set minds too: **Lean** turns them off; **Standard** runs up to 3 Live minds a turn with memory notes for Live characters; **Full** has no Live limit, with notes for Live and Near. Picking a preset resets everything above but your prompts and memory; changing any of it makes the preset **Custom**. Where each minds step runs (its connection, model, max tokens and lore) is in **Settings → Steps and connections**, as for the other steps.
+
+### Minds in the GM view
+
+The GM view's **Minds** tab lists every character but you, closest on the ladder first, with their level, score, when they last thought, and badges for a pin or a refresh asked for; search by name or filter by level. It shows the chat's clock and the world's secrecy. Tap someone to see:
+
+- **Fidelity**: their level and score, each thing that added to it, and the author's pin. **Pin their fidelity** keeps them at a level in this chat whatever their score (**By score** unpins), and **Refresh their mind next turn** asks for a fresh mind on the next turn, whatever the refresh settings say.
+- **Latest mind**: when and why it ran, where they were, their mood, monologue, depiction, intent and reactions, and whether it interrupted a time skip. A **to the narrator** badge marks what the narrator got under the world's secrecy, and a warning says when a depiction was kept from the narrator because it gave something away.
+- **Plans**, **Commitments** and **Memory notes**: each with ✎ to edit and ✕ to delete, and an **Add** button. A plan has what it is, its kind, when it starts (hours from now) and how long it lasts, where, with whom, a priority from 1 (whenever it fits) to 5 (it must happen) and its status. A commitment has its kind, its text, who it is with, an optional due time (hours from now) and its status. A note has its text and a salience from 1 to 5, and shows how much it has faded.
+- **Summary** and **Witnessed**: what they have folded into their summary, and what they saw or were told.
+
+Each change is a GM edit like any other: one correction with its own **Undo**. Minds stay in the GM view: nothing a mind thinks reaches Play, the Journal, Cast or chips.
 
 ## Extraction modes
 
@@ -46127,6 +47958,8 @@ The **Context** panel in Play shows what the engine put into the prompt for each
 
 **Lore the helpers read** lists, for each model step of the generation, what it read of the world's lore ([Lore for the helpers](#lore-for-the-helpers)): its searches (the prefetch and each lookup) with how many entries each found, the entries it was given with their tokens (and *cut to fit* when shortened), its lookups and whether they went as tools or the ask form, and why a lookup didn't happen. It shows only what you may know. A secret entry isn't there at all: not listed, and not counted in what a search found. An NPC's choice shows only whose choice it is (*Dev's choice*), never what they might do: it reads *private*, its lookups show as —, and nothing it found is counted or listed. A choice made only by people you haven't met or can't see isn't listed. A step that may read a secret shows its lookups as — with how many entries they found, never what it asked. Any other search that would name a secret, a secret entry, someone you haven't met or a place you don't know is withheld, unless you or the reply said those words that turn; a name counts as it does in a judged approach's reason (see [Lore for the helpers](#lore-for-the-helpers)), so someone counts by any word of their name, however short.
 
+**Minds** lists the generation's minds calls ([Character minds](#character-minds)): whose mind it was, which step (a mind, a memory, a time skip's beats or consolidation), their level, when it ran (before the reply, after it, or in a time skip), whose prompt it used (the world's, yours or the built-in), and how it went: **recorded**, **reused** (a Re-narrate keeps the minds it had), **failed**, **over the limit** (it waited for a later turn) or **kept from the narrator** (its depiction gave something away, so the narrator got none of it), with its seconds and tokens. Never a word of what a mind thought or said: that is in the GM view. Someone you haven't met shows as *Someone*.
+
 ### The Stance section
 
 **Stance** tells the narrator how the people with you stand toward you and what they are about, in a line or two each. It lists only the people you can see where you are: someone hidden from you gets no line, and no line names them.
@@ -46165,7 +47998,7 @@ Anything the engine inserts into the prompt, a name, a price, a number, a model'
 
 ## Authoring
 
-You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults, tiers, time defaults, ruleset and the lore lookup table), its **Content** lists (Entities, Places, Maps, Routes, Grids, Kinds, Classifications, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Playtest**, **Check world** and, with a chat open, **Attach to this chat**. Edit an item and **Save to draft**, or **Revert**.
+You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults, tiers, time defaults, ruleset, the lore lookup table and minds), its **Content** lists (Entities, Places, Maps, Routes, Grids, Kinds, Classifications, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Playtest**, **Check world** and, with a chat open, **Attach to this chat**. Edit an item and **Save to draft**, or **Revert**.
 
 For the formulas you write in requirements, checks, derived fields and rules, see [EXPRESSIONS.md](EXPRESSIONS.md); for every kind, field, effect, function and lint code the packs offer, the [reference](REFERENCE.md); and for small worlds to copy from, [RECIPES.md](RECIPES.md).
 
@@ -46189,6 +48022,7 @@ What you can define:
 - **Tiers**: the world's own ranks of importance. Each has a label, a band (Leads, Supporting or Background), a place in the order (↑ and ↓), an optional description, and whether its people live their own day (agendas and plans) by default; **+ Add tier** makes a new one, and a tier still in use can't be removed. **New people join** picks the tier for people the story introduces (by default the first Background tier). An entity's editor picks its tier from these, and its **Lives their own day** choice can follow the tier ("As its tier"); lint flags an entity whose tier the world doesn't have.
 - **Section templates**: how a section's lines are wrapped when they go into the prompt, and where they go. A template may use only the engine's \`{{lines}}\` marker; any other macro, control character or \`<user>\`-style shorthand in one is a lint error (\`section_macro\`), because it would run beside the engine's own values. Stance's template opens with its note to the narrator, which you can reword there. A world with no sections of its own gets the shipped ones; once it lists its own, it gets only those, so list \`stance\` to keep it. **Position** is \`{"type":"chat_depth","role":"system","depth":1,"direction":"from_end"}\` (that many messages from the end of the chat, or from its start), \`{"type":"outlet","name":"…"}\` (only where a \`{{outlet::…}}\` macro of that name stands, in your preset or a card, and nowhere else) or \`{"type":"native"}\` (where the section's entry sits in the world's book, which you can move in Lumiverse's World Info editor; a new one starts before the character). When you change a section's Position and commit, its entry in the world's book moves to match.
 - **Step templates**: your own wording for a model step, per purpose (interpret, NPC choices, contradiction, puzzle answers, judging your approach, brief, outline, extract, suggested choices), with an output (text, decision, or \`effects\` for the steps that read changes, which run after the reply only) and the signals it runs on (a template's own signals replace the step's). The brief, outline, extract and suggested-choices templates, and every \`effects\` template, can use engine placeholders: \`{{world}}\`, \`{{pov}}\`, \`{{place}}\`, \`{{clock}}\`, \`{{scene}}\`, \`{{present}}\`, \`{{facts}}\`, \`{{outcome}}\`, \`{{beats}}\`, \`{{brief}}\`, \`{{user}}\`, \`{{reply}}\` and \`{{recent}}\`. An interpret template fills in only \`{{world}}\` and \`{{pov}}\`, and none at all on a Decision connection; NPC-choice, puzzle-answer and judge templates, and a contradiction template with a decision output, are sent as you wrote them, with nothing filled in. \`{{brief}}\` is this turn's brief (an outline template that uses it waits for the brief; it's empty in the brief step itself), and \`{{recent}}\` is the Journal's last five lines before this turn, where each ✎ fix or GM edit you can see takes a line of its own. They are all player-visible: a line that would reveal an unrevealed truth is dropped before the call. A template whose output can't be used by its purpose, an unknown signal and an unknown placeholder are lint warnings. Changes a step template proposes with \`effects\` are checked and bounded exactly like extraction, and money in them is stated as a plain amount in the world's currency (8 for $8), which the engine converts. Which steps run at all is still your choice, in **Settings → Steps and connections**. A world made with an earlier version keeps its step templates, except those for lore selection, which no longer exists.
+- **Step templates for minds**: the four minds steps (Character minds, Character memory, Time-skip beats, Memory consolidation) take templates too, with output **text**; **Build → World → Minds** lists them and starts new ones from the built-in prompts (see [Character minds in a world](#character-minds-in-a-world)).
 
 Formulas use a small, safe expression language: numbers, comparisons and a fixed set of functions. They can't run code and they always produce a finite number. \`table(id, key, column)\` reads a cell of one of the world's data tables, and \`table_step(id, value, column)\` reads the row whose number key is the largest at or below \`value\` (a level table keyed by XP, say). \`roll(notation)\` works only in an effect's arguments (a value that starts with \`=\`): the effect's event records the result, so a replay or a swipe sees the same number. Anywhere else a roll would change the odds you were shown and what the engine reads, so it is a lint error and reads as nothing. For classifications and groups: \`kind_is(e, 'person')\` (a kind or one inheriting from it), \`in_class(e, 'role', 'antagonist')\` (a value or one nested under it), \`has_tag(e, 'smuggler')\`, \`member_of(e, harlows)\` (directly or through a member group), \`tier_of(e)\` and \`band_of(e)\` (the band its tier belongs to).
 
@@ -46318,6 +48152,21 @@ A classification is for you and the GM side unless you tick **Players can see th
 ### Selectors
 
 A **selector** picks entities by rule, with one editor wherever you need one (a schedule's owner, an action parameter's candidates): **Kind** (or one inheriting from it), **Tier**, a value of each classification (or one nested under it), **Tag**, **Member of** (directly or through a member group) and **Only these entities**. An entity must pass every constraint you set, and within one constraint any of its values will do; a selector with nothing set matches everyone.
+
+### Character minds in a world
+
+**Build → World → Minds** sets how the world's characters think (see [Character minds](#character-minds) for what they do in play). Nothing here is required: a world without it plays with the defaults, and **Use the defaults** takes the world's own settings out again. **Save to draft** saves the card whole; **Revert** drops your changes.
+
+- **What the narrator gets of a mind** (secrecy):
+  - **Brief**, the default: the narrator gets only a short description of how each character comes across (what they do, how they look and sound). It is checked first, and left out if it would give away a secret or name someone the player hasn't met. Their private thoughts and what they mean to do stay in the GM view. The safest choice against spoilers, with less for the narrator to work with.
+  - **Full**: the narrator also gets each character's inner monologue and what they mean to do, told to show them through behaviour and never say them outright. Richer, more consistent characters, but a careless narrator could let a thought or a secret slip.
+
+  Either way, the player never sees a mind.
+- **Focus weights**: the points each thing adds to a character's focus score: being in the player's scene, close by, named in the latest message or reply, strong feelings toward the player either way, knowing the player, owning a quest, secret or agenda under way, each track that names them, being named by a world rule, each pending invitation, appointment, plan or commitment with the player, their tier's band, and being seen with the player lately. **Role values** add points for a classification value (an antagonist, say), and a value nested under it counts as it. Weights run from −100 to 200; a negative one pushes a character away.
+- **Thresholds**: the lowest score for **Live**, **Near** and **Far**; under Far is Background. Live should be at least Near, and Near at least Far; out of order, the lower ones are raised to match.
+- **Always Live** and **Never a mind**: two [selectors](#selectors). Never wins over Always. A selector with nothing set picks no one here (not everyone), and the player's own character never gets a mind.
+- **Memory defaults**: how many witness-log lines, recalled turns (the latest, and the ones that best match the moment, with their token budget), notes and open commitments a mind sees; how many notes a character keeps before the oldest are folded into their summary; how fast a note's salience halves (in days of game time) and the salience under which it has faded; and whether faded and surplus notes are folded into the summary. A player's own **Settings → Minds → Memory** wins over these.
+- **Step templates**: the world's own prompts for the four minds steps. **New template** starts one from the built-in prompt and opens it in the step-template editor; each template already there opens the same way. A world's template wins over the player's own prompt and the built-in one.
 
 ### Lore books
 
