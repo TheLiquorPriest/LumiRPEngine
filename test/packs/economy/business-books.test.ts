@@ -61,13 +61,13 @@ describe("business books: invoices", () => {
 function hiddenPartner(): Working {
   const { w } = setup((wd) => {
     wd.entities.dana = { ...entity("dana", "person", "Dana Vale", { place: "cafe", region: "oh" }), visibility: "secret" };
-    wd.entities.dana_checking = account("dana_checking", "dana", "checking", 50_000);
+    wd.entities.acct_dv = account("acct_dv", "dana", "checking", 50_000);
     wd.entities.daybreak!.fields.owners = [
       { party: "you", role: "owner", share: 60 },
       { party: "dana", role: "owner", share: 40 },
     ];
-    wd.entities.job_dana = entity("job_dana", "job", "Barista", { worker: "dana", employer: "daybreak", title: "Barista", occupation: "barista", splits: [{ to: "dana_checking", pct: 100 }] });
-    wd.entities.inv_dana = entity("inv_dana", "invoice", "Catering", { business: "daybreak", customer: "dana", cents: 40_000, memo: "Catering", issued: "2026-10-01", due: "2026-11-01" });
+    wd.entities.job_barista = entity("job_barista", "job", "Barista", { worker: "dana", employer: "daybreak", title: "Barista", occupation: "barista", splits: [{ to: "acct_dv", pct: 100 }] });
+    wd.entities.inv_catering = entity("inv_catering", "invoice", "Catering", { business: "daybreak", customer: "dana", cents: 40_000, memo: "Catering", issued: "2026-10-01", due: "2026-11-01" });
   });
   return w;
 }
@@ -84,5 +84,13 @@ describe("business books: dashboards", () => {
     expect(b?.owners.map((o) => o.name)).toEqual(["Alex Rivera", "Dana Vale"]);
     expect(b?.employees.map((j) => j.worker)).toEqual(["Dana Vale"]);
     expect(b?.invoices.map((i) => i.customerName)).toEqual(["Dana Vale"]);
+  });
+
+  test("the player's view of their business names nobody they can't see, by name or by id", () => {
+    const b = cafe(hiddenPartner(), true);
+    expect(b?.owners.map((o) => o.name)).toEqual(["Alex Rivera", "an owner"]);
+    expect(b?.employees.map((j) => j.worker)).toEqual(["an employee"]);
+    expect(b?.invoices.map((i) => i.customerName)).toEqual(["a customer"]);
+    expect(JSON.stringify(b).toLowerCase()).not.toContain("dana");
   });
 });

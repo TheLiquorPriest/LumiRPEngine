@@ -542,15 +542,19 @@ function distributionFlow(ctx: ReadContext, api: FinanceApi, business: EntityId)
 
 // ---------------------------------------------------------------- views
 
-/** A name as `viewer` may read it: anyone the player can't see reads as `fallback` (DESIGN §7); with no viewer (the GM's views) everyone is named. */
+/** Whether `viewer` (the player; null for the GM) can't see `id`: their views carry neither its name nor its id (DESIGN §7). */
+function hiddenFrom(ctx: ReadContext, viewer: EntityId | null, id: string): boolean {
+  return viewer !== null && own(ctx.state.entities, id) !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id);
+}
+
+/** A name as `viewer` may read it: anyone hidden from them reads as `fallback`; the GM's views name everyone. */
 function shownName(ctx: ReadContext, viewer: EntityId | null, id: string, fallback: string): string {
   if (!own(ctx.state.entities, id)) return id;
-  if (viewer !== null && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id)) return fallback;
-  return labelOf(ctx, id);
+  return hiddenFrom(ctx, viewer, id) ? fallback : labelOf(ctx, id);
 }
 
 function ownerLines(ctx: ReadContext, api: FinanceApi, viewer: EntityId | null, business: EntityId): OwnerLine[] {
-  return api.ownersOf(ctx.state, business).map((o) => ({ party: o.party, name: shownName(ctx, viewer, o.party, "an owner"), role: o.role, share: api.shareOf(ctx.state, business, o.party) }));
+  return api.ownersOf(ctx.state, business).map((o) => ({ party: hiddenFrom(ctx, viewer, o.party) ? "" : o.party, name: shownName(ctx, viewer, o.party, "an owner"), role: o.role, share: api.shareOf(ctx.state, business, o.party) }));
 }
 
 /** The next time a flow of this business falls due, as the dashboards print it. */
@@ -580,12 +584,14 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
   const invoices = allInvoices(ctx)
     .filter((i) => i.business === business || i.party === business)
     .sort((a, b) => b.issued - a.issued)
-    .map((i) => ({ id: i.id, business: i.business, customer: i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...(i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}), flow: `invoice:${i.id}`, customerName: i.party ? shownName(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
+    .map((i) => ({ id: i.id, business: hiddenFrom(ctx, viewer, i.business) ? "" : i.business, customer: i.party !== null && hiddenFrom(ctx, viewer, i.party) ? "" : i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...(i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}), flow: `invoice:${i.id}`, customerName: i.party ? shownName(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
   const employees = allJobs(ctx)
     .filter((j) => j.business === business && j.status !== "ended")
     .map((j) => {
       const v = jobView(ctx, api, j);
-      return { ...v, worker: shownName(ctx, viewer, j.worker, "an employee") };
+      if (!hiddenFrom(ctx, viewer, j.worker)) return v;
+      // Where their pay goes, and to whom, would name them too.
+      return { ...v, worker: "an employee", workerId: "", splits: [], spec: { ...v.spec, worker: "", splits: [], deductions: [] } };
     });
   const owed = payablesOf(ctx.state, business);
   const taxes: BusinessView["taxes"] = [];
