@@ -12,6 +12,7 @@ import { compile } from "../../src/engine/expr";
 import type { Node } from "../../src/engine/expr";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
+import { ASSET_CLASSES } from "../../src/shared/finance";
 
 type Rec = Record<string, unknown>;
 
@@ -472,6 +473,8 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
   }
   for (const h of recs(t.households)) for (const [i, m] of recs(h.members).entries()) need(`household ${text(h.id)}.members[${i}]`, m.id, "character");
   const assets = rec(rec(t.economy).assets);
+  // An asset of a class the holdings module doesn't know is worth nothing and never shows.
+  for (const [id, asset] of Object.entries(assets)) if (!(ASSET_CLASSES as readonly string[]).includes(text(rec(asset).class))) err(`economy.assets.${id}: class "${text(rec(asset).class)}" isn't one of ${ASSET_CLASSES.join(", ")}`);
   for (const r of recs(t.records)) {
     const where = `record ${text(r.id)}`;
     if (!["business", "invoice", "property", "holding", "trust"].includes(text(r.kind))) err(`${where}: kind "${text(r.kind)}" isn't a money record (business, invoice, property, holding or trust)`);
