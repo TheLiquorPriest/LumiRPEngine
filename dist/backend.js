@@ -4904,6 +4904,14 @@ var BOOKKEEPING = new Set([
   "economy.price",
   "economy.txn",
   "economy.flow_run",
+  "economy.quote",
+  "economy.mint",
+  "economy.lots",
+  "economy.income",
+  "economy.exercise",
+  "economy.dispose",
+  "economy.acquire",
+  "economy.stake_route",
   "story.flag",
   "combat.turn",
   "combat.spend",
@@ -12423,7 +12431,7 @@ function registerBusiness(r) {
   core.effect({ type: "economy.owner_draw", args: ["business", "cents", "owner?", "by?"], resolve: (args, ctx) => ownerDraw(ctx, api, args) });
   core.effect({ type: "economy.distribute", args: ["business", "cents?", "by?"], resolve: (args, ctx) => distribute(ctx, api, args) });
   core.formula("may_draw", (ctx, who, business) => mayDraw(api, ctx.state, String(who ?? ""), String(business ?? "")));
-  core.action({ id: "invoice_issue", label: "Send an invoice", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["manages(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
+  core.action({ id: "invoice_issue", label: "Send an invoice", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["manages(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "=params.customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
   core.action({ id: "invoice_pay", label: "Pay an invoice", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or manages(self, invoice.customer)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
   core.action({ id: "invoice_void", label: "Void an invoice", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["manages(self, invoice.business)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
   core.action({ id: "owner_draw", label: "Take an owner's draw", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money" } }, requires: ["may_draw(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.owner_draw", args: { business: "business", cents: "=amount", owner: "self", by: "self" } }] }, duration: "5", lexicon: ["take a draw", "pay myself", "take money out of the business"], observable: "checks their phone" });
@@ -13859,7 +13867,7 @@ function holdingIncome(api, ctx, holding, at) {
   const route = routeOf(ctx.state, holding);
   const price = priceOf2(ctx, a, at);
   if (route.reinvest && price > 0) {
-    const memo = `${name} ${kind} reinvested`;
+    const memo = `${name} ${kind} reinvested: ${formatMoney(cents, ctx.world.currency)}`;
     return {
       cents,
       lines: [
@@ -13869,7 +13877,8 @@ function holdingIncome(api, ctx, holding, at) {
       memo,
       kind: "income",
       category,
-      extra: [{ type: "economy.income", data: { source: holding, cents, kind, reinvested: true } }, lotsChange(ctx.state, holding, roundQty(cents / price), cents, "reinvest", memo)]
+      extra: [{ type: "economy.income", data: { source: holding, cents, kind, reinvested: true } }, lotsChange(ctx.state, holding, roundQty(cents / price), cents, "reinvest", `${name} ${kind} reinvested`)],
+      quiet: true
     };
   }
   const account = accountOfHolding(ctx.state, holding);
@@ -13877,7 +13886,7 @@ function holdingIncome(api, ctx, holding, at) {
   const paid = payout(api, ctx, holdingOwners(api, ctx.state, holding), cents, issuer, to, account);
   if (paid.paid <= 0)
     return null;
-  return { cents: paid.paid, lines: paid.lines, memo: `${name} ${kind}`, kind: "income", category, extra: [{ type: "economy.income", data: { source: holding, cents: paid.paid, kind } }] };
+  return { cents: paid.paid, lines: paid.lines, memo: `${name} ${kind}`, kind: "income", category, extra: [{ type: "economy.income", data: { source: holding, cents: paid.paid, kind } }], quiet: true };
 }
 function sourceOwners(api, state, source) {
   return own(state.entities, source)?.kind === "holding" ? holdingOwners(api, state, source) : api.ownersOf(state, source);
@@ -13915,7 +13924,7 @@ function incomeEvent(api) {
       for (const p of byShare(shares, cents))
         recordIncome(state, ctx.world, p.party, kind, p.cents);
     },
-    describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str9(e, "source"))} paid ${str9(e, "kind")} of ${numOf(e.data.cents)}`
+    describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str9(e, "source"))}: ${formatMoney(numOf(e.data.cents), ctx.world.currency)} ${str9(e, "kind") === "profit" ? "profit share" : str9(e, "kind")}`
   };
 }
 function registerIncome(r) {
@@ -14521,8 +14530,7 @@ function payingSide(owners, shares) {
     return { from: first };
   return { from: first, shares: owners.map((o) => ({ party: o.party, pct: shares[o.party] ?? 0 })) };
 }
-function rentSide(api, ctx, id) {
-  const rentTo = strOf(fieldsOf(ctx.state, id).rent_to);
+function rentSide(api, ctx, id, rentTo = strOf(fieldsOf(ctx.state, id).rent_to)) {
   if (rentTo !== "" && own(ctx.state.entities, rentTo)?.kind === "account")
     return { to: rentTo };
   const { owners, shares } = payers(api, ctx.state, id);
@@ -14762,7 +14770,7 @@ function buyProperty(api, ctx, x) {
     mortgage = `${x.property}:mortgage`;
     for (let i = 2;own(ctx.state.entities, mortgage); i++)
       mortgage = `${x.property}:mortgage:${i}`;
-    const opened = api.openAccount(ctx, { id: mortgage, name: `Mortgage, ${e.name}`, product: "mortgage", owners: [{ party: x.party, role: "owner" }], cents: financed, ...x.term_months ? { term_months: x.term_months } : {}, ...x.apr_pct !== undefined ? { apr_pct: x.apr_pct } : {}, secured_by: x.property });
+    const opened = api.openAccount(ctx, { id: mortgage, name: `Mortgage, ${e.name}`, product: "mortgage", owners: [{ party: x.party, role: "owner" }], cents: financed, into: api.outside(`closing:${x.property}`), ...x.term_months ? { term_months: x.term_months } : {}, ...x.apr_pct !== undefined ? { apr_pct: x.apr_pct } : {}, secured_by: x.property });
     if (isRejection4(opened))
       return opened;
     events.push(...opened);
@@ -14821,6 +14829,27 @@ function moveLeases(api, ctx, property, sellers, buyer) {
     out.push(deposit ? { type: "set", entity: l.id, field: "to", value: deposit } : { type: "set", entity: l.id, field: "end", value: dateText3(ctx.world, ctx.state.clock) });
   }
   return out;
+}
+function routeRent(api, ctx, property, route) {
+  const out = strOf(fieldsOf(ctx.state, property).rent_to) === route ? [] : [{ type: "set", entity: property, field: "rent_to", value: route === "" ? null : route }];
+  const side = rentSide(api, ctx, property, route);
+  if (!side)
+    return out;
+  const owners = api.ownersOf(ctx.state, property).map((o) => o.party);
+  const splits = side.splits ? side.splits : null;
+  for (const l of authoredLeases(ctx, property)) {
+    if (l.status !== "active" || l.end !== null && l.end <= ctx.state.clock)
+      continue;
+    const f = fieldsOf(ctx.state, l.id);
+    const to = strOf(f.to);
+    if (!owners.includes(to) && !api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party)))
+      continue;
+    if (to !== side.to)
+      out.push({ type: "set", entity: l.id, field: "to", value: side.to });
+    if (JSON.stringify(f.splits ?? null) !== JSON.stringify(splits))
+      out.push({ type: "set", entity: l.id, field: "splits", value: splits });
+  }
+  return unit2(out);
 }
 function sellProperty(api, ctx, x) {
   const e = own(ctx.state.entities, x.property);
@@ -14954,7 +14983,7 @@ function propertyView(api, ctx, id, party, flows) {
   const e = own(ctx.state.entities, id);
   const value = propertyValue(ctx.state, id);
   const loans = securedLoans(api, ctx.state, id);
-  const loan = loans[0];
+  const loan = loans.find((l) => l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
   const place = strOf(e?.fields.place);
   const asking = num4(e?.fields.asking_price);
@@ -15022,7 +15051,7 @@ function registerProperty(r) {
     if (!COSTS.includes(cost))
       return null;
     const cents = costOf(ctx, strOf(args.property), cost);
-    return cents > 0 ? { cents, memo: flow.label, kind: "payment", category: flow.category ?? "property" } : null;
+    return cents > 0 ? { cents, memo: flow.label, kind: "payment", category: flow.category ?? "property", ...cost === "upkeep" ? { quiet: true } : {} } : null;
   };
   r.amount(PROPERTY_COST_PROVIDER, provider);
   const n = (a, k) => typeof a[k] === "number" && Number.isFinite(a[k]) ? a[k] : undefined;
@@ -15324,9 +15353,7 @@ function setRentRoute(api, ctx, party, property, to) {
     if (!api.accountsOf(ctx, party, "worth").includes(route) && !api.accountsOf(ctx, party, "spend").includes(route))
       return reject7("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, party)}'s`);
   }
-  if (strOf(own(ctx.state.entities, property)?.fields.rent_to) === route)
-    return [];
-  return [{ type: "set", entity: property, field: "rent_to", value: route === "" ? null : route }];
+  return routeRent(api, ctx, property, route);
 }
 function about(ctx, cents) {
   const abs = Math.abs(cents);
@@ -16293,6 +16320,14 @@ function featureAt(ctx, who, field) {
   }
   return null;
 }
+function cashNeedsAMachine(ctx, who) {
+  if (!featureFor(ctx, who, "atm"))
+    return false;
+  return Object.values(ctx.world.places).some((p) => ["atm", "branch"].some((f) => {
+    const bank = objOf(p.fields[f]).bank;
+    return typeof bank === "string" && bank !== "";
+  }));
+}
 function debitCard(ctx, who, account) {
   return cardsOn(ctx.state, account).find((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === who && cardProblem(ctx, c, who) === null) ?? null;
 }
@@ -16311,7 +16346,7 @@ function withdraw(ctx, who, account, raw) {
   if (!p)
     return reject8("missing_account", "no such account");
   const t = traitsOf(ctx, account);
-  const atTop = featureFor(ctx, who, "atm");
+  const atTop = cashNeedsAMachine(ctx, who);
   const lines = [{ account: wallet, amount: cents }];
   const extra = [];
   let fees = 0;
@@ -16385,7 +16420,7 @@ function deposit(ctx, who, account, raw) {
     return reject8("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
   let held = false;
   let where = "";
-  if (featureFor(ctx, who, "atm")) {
+  if (cashNeedsAMachine(ctx, who)) {
     const branch = featureAt(ctx, who, "branch");
     const atm = featureAt(ctx, who, "atm");
     if (branch && branch.feature.bank === p.institution)
@@ -17186,7 +17221,7 @@ function runOccurrence(hooks, run, flow, at, rng, retry) {
     if (applied.length > 0 || attempt.events.length === 0) {
       const next = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
       run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
-      if (who && flow.kind !== "living" && attempt.paid > 0)
+      if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0)
         run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
       return;
     }
@@ -18453,17 +18488,21 @@ function householdView(hooks, ctx, viewer, household, flows) {
 function buildFinanceView(hooks, ctx, party, player) {
   const viewer = { pov: player ? ctx.world.pov : null };
   const e = own(ctx.state.entities, party);
-  const level = ctx.levelOf(party, "money");
+  const kind = partyKindOf(ctx, party);
+  const members = kind === "household" ? membersOf(ctx.registry, ctx.world, ctx.state, party) : [];
+  const level = Math.max(ctx.levelOf(party, "money"), ...members.map((m) => ctx.levelOf(m, "money")));
   const tog = toggles(ctx.world);
   const detail = level >= 4 || Object.values(tog).some((v) => v === true);
   const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));
   const mine = accountsOf(ctx, party);
-  const empty = { party, name: e?.name ?? party, partyKind: partyKindOf(ctx, party), level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
+  const empty = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
   if (level === 0)
     return empty;
   const worth = netWorthParts(hooks, ctx, party, (id) => shown2(ctx, id));
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
+  if (kind === "household" && level >= 3 && mine.length === 0)
+    return { ...empty, band, cash: { band }, opened, household: householdView(hooks, ctx, viewer, party, allFlows(hooks, ctx)) };
   if (level === 1 || mine.length === 0)
     return { ...empty, band, cash: { band }, opened };
   const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
@@ -18534,7 +18573,7 @@ function buildFinanceView(hooks, ctx, party, player) {
   const recent = shownAccounts.flatMap((id) => journalOf(ctx.state, id)).sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1)).slice(0, 10).map((j) => journalLine(ctx, viewer, j));
   const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
   const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));
-  const household = householdOf(ctx, party);
+  const household = kind === "household" ? party : householdOf(ctx, party);
   const view = {
     ...empty,
     band,
@@ -19693,9 +19732,9 @@ function registerEffects(r, hooks) {
   r.effect({ type: "economy.flow_status", args: ["flow", "status", "who?"], resolve: (a, ctx) => setFlowStatus(ctx, actor(ctx, a), strOf(a.flow), a.status === "paused" ? "paused" : a.status === "ended" ? "ended" : "active") });
   r.effect({ type: "economy.apply_credit", args: ["product", "cents?", "term?", "secured_by?", "who?"], resolve: (a, ctx) => applyForCredit(ctx, actor(ctx, a), strOf(a.product), typeof a.cents === "number" && a.cents > 0 ? Math.round(a.cents) : undefined, typeof a.term === "number" && a.term > 0 ? Math.round(a.term) : undefined, strOf(a.secured_by) || undefined) });
   r.effect({ type: "economy.set_pay_prefs", args: ["tiers", "who?"], resolve: (a, ctx) => setPayPrefs(ctx, actor(ctx, a), a.tiers) });
-  r.effect({ type: "economy.close_account", args: ["account"], resolve: (a, ctx) => closeAccount(ctx, strOf(a.account)) });
-  r.effect({ type: "economy.set_status", args: ["account", "status"], resolve: (a, ctx) => setStatus(ctx, strOf(a.account), strOf(a.status)) });
-  r.effect({ type: "economy.release_hold", args: ["account", "hold"], resolve: (a, ctx) => releaseHold(ctx, strOf(a.account), strOf(a.hold)) });
+  r.effect({ type: "economy.close_account", args: ["account"], gm: true, resolve: (a, ctx) => closeAccount(ctx, strOf(a.account)) });
+  r.effect({ type: "economy.set_status", args: ["account", "status"], gm: true, resolve: (a, ctx) => setStatus(ctx, strOf(a.account), strOf(a.status)) });
+  r.effect({ type: "economy.release_hold", args: ["account", "hold"], gm: true, resolve: (a, ctx) => releaseHold(ctx, strOf(a.account), strOf(a.hold)) });
 }
 function registerActions(r) {
   const phone = { duration: "2", observable: "checks their phone" };
@@ -43463,13 +43502,13 @@ var modern_slice_of_life_default = {
         employer: "rusty_anchor",
         occupation: "bartender",
         basis: "hourly",
-        rate: 1650,
+        rate: 213,
         status: "active",
         hours_per_week: 32,
         pay_every: "weekly",
         pay_weekday: 5,
         shift_pattern: "bar_night",
-        tipped: true
+        tips_per_hour: 1437
       },
       relations: []
     },
@@ -53312,7 +53351,13 @@ function migrateMoney(doc) {
   }
   for (const e of added)
     entities[e.id] = e;
-  const packs = economy && Object.keys(assets).length > 0 ? { ...doc.packs, economy: { ...economy, config: { ...economy.config, assets } } } : doc.packs;
+  const config = { ...economy?.config };
+  if (Object.keys(assets).length > 0)
+    config.assets = assets;
+  const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
+  if (!(typeof config.region === "string" && config.region !== "") && typeof pov?.fields.region === "string" && pov.fields.region !== "")
+    config.region = pov.fields.region;
+  const packs = economy ? { ...doc.packs, economy: { ...economy, config } } : doc.packs;
   return { ...doc, entities, packs };
 }
 
@@ -63460,7 +63505,7 @@ class Runtime {
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792440879" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792443333" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {

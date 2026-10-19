@@ -5697,6 +5697,16 @@ function kindFields(doc, kindId) {
     Object.assign(out, doc.kinds[id]?.fields ?? {});
   return out;
 }
+function fieldEditorFor(editors, doc, kindId, field) {
+  const seen = [];
+  for (let id = kindId;id && !seen.includes(id); id = doc.kinds[id]?.extends) {
+    seen.push(id);
+    const found = editors.find((def) => def.kind === id && def.field === field);
+    if (found)
+      return found;
+  }
+  return;
+}
 function Issues(props) {
   return /* @__PURE__ */ u3(M, {
     children: props.issues.map((issue) => /* @__PURE__ */ u3("span", {
@@ -6179,6 +6189,18 @@ function KindFieldsInput(props) {
             mono: true,
             issues,
             onChange: () => {}
+          }, key, false, undefined, this);
+        const own = fieldEditorFor(props.ctx.fieldEditors ?? [], props.ctx.doc, props.kind, key);
+        if (own)
+          return /* @__PURE__ */ u3(own.component, {
+            doc: props.ctx.doc,
+            entity: { id: props.entityId, kind: props.kind, fields: values },
+            field: key,
+            def,
+            value: values[key],
+            lint: issues,
+            path: `${props.path}.${key}`,
+            onChange: (next) => set(key, next)
           }, key, false, undefined, this);
         switch (def.type) {
           case "number":
@@ -6680,6 +6702,7 @@ function FieldInput(props) {
       return /* @__PURE__ */ u3(KindFieldsInput, {
         value: props.value,
         kind: typeof props.parent.kind === "string" ? props.parent.kind : "",
+        entityId: typeof props.parent.id === "string" ? props.parent.id : "",
         ctx,
         path,
         onChange: props.onChange
@@ -13090,9 +13113,38 @@ function SchemaEditor(props) {
       /* @__PURE__ */ u3(SchemaFields, {
         specs: COLLECTION_SPECS[props.collection],
         value,
-        ctx: { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [] },
+        ctx: { doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields },
         onChange: setValue
       }, undefined, false, undefined, this),
+      props.collection === "places" ? app.catalog.placeFields.map((def) => {
+        const fields = isRecord(value.fields) ? value.fields : {};
+        return /* @__PURE__ */ u3("section", {
+          class: "lre-card",
+          "data-lre-place-field": def.field,
+          children: [
+            /* @__PURE__ */ u3("div", {
+              class: "lre-h",
+              children: def.label
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(def.component, {
+              doc: formDoc,
+              place: { id, fields },
+              field: def.field,
+              value: fields[def.field],
+              lint: lintAt(draft?.lint ?? [], `${path}.fields.${def.field}`),
+              path: `${path}.fields.${def.field}`,
+              onChange: (next) => {
+                const out = { ...fields };
+                if (next === undefined)
+                  delete out[def.field];
+                else
+                  out[def.field] = next;
+                setValue({ ...value, fields: out });
+              }
+            }, undefined, false, undefined, this)
+          ]
+        }, def.field, true, undefined, this);
+      }) : null,
       /* @__PURE__ */ u3("div", {
         class: "lre-savebar",
         children: [
@@ -17247,6 +17299,8 @@ var CLASS_TRAITS = Object.freeze({
   retirement: traits("Retirement", { asset: true, investment: true, locked: true })
 });
 var LEGACY_TYPE_CLASS = Object.freeze({ cash: "cash", checking: "checking", savings: "savings", card: "credit_card", loan: "loan", brokerage: "brokerage" });
+var PARTY_KINDS = ["person", "business", "trust", "household"];
+var OWNER_ROLES = ["owner", "joint", "custodian", "beneficiary", "trustee", "authorized_user"];
 var ROLE_RIGHTS = Object.freeze({
   owner: { spend: true, worth: true, sees: true, manage: true },
   joint: { spend: true, worth: true, sees: true, manage: true },
@@ -17255,6 +17309,42 @@ var ROLE_RIGHTS = Object.freeze({
   trustee: { spend: true, worth: false, sees: true, manage: true },
   authorized_user: { spend: true, worth: false, sees: true, manage: false }
 });
+var OVERDRAFT_POLICIES = ["decline", "fee", "linked"];
+var ACCOUNT_STATUSES = ["open", "frozen", "collections", "charged_off", "closed", "paid_off", "matured"];
+var AUTOPAY_MODES = ["none", "minimum", "statement", "full", "fixed"];
+var CARD_NETWORKS = ["debit", "credit", "charge"];
+var CARD_STATES = ["active", "frozen", "lost", "cancelled"];
+var FLOW_KINDS = ["transfer", "bill", "rent", "utility", "subscription", "premium", "loan_payment", "card_payment", "savings", "income", "payroll", "allowance", "living", "tax", "distribution", "invoice", "draw", "other"];
+var FLOW_SHORTFALLS = ["skip", "partial", "retry", "fallback", "overdraft", "defer"];
+var FLOW_STATUSES = ["active", "paused", "ended"];
+var TXN_KINDS = ["purchase", "payment", "transfer", "income", "fee", "interest", "withdrawal", "deposit", "refund", "adjustment", "opening", "rewards", "sale"];
+var DELINQUENCY_STAGES = ["current", "late", "30", "60", "90", "120", "collections", "charged_off"];
+var CREDIT_TIERS = ["super_prime", "prime", "nonprime", "subprime", "deep_subprime"];
+var FINANCE_FEATURES = [
+  "flows",
+  "cards",
+  "payment_prefs",
+  "households",
+  "living_costs",
+  "statements",
+  "interest",
+  "fees",
+  "delinquency",
+  "credit",
+  "atm",
+  "holds",
+  "daily_limits",
+  "overdraft",
+  "average_daily",
+  "withholding",
+  "tax_brackets",
+  "sales_tax",
+  "business_tax",
+  "capital_gains",
+  "investments",
+  "options",
+  "property"
+];
 var FEATURE_DEFS = Object.freeze({
   flows: { label: "Standing payments and income", floor: 2, on: 3 },
   cards: { label: "Payment cards", floor: 2, on: 3 },
@@ -17280,6 +17370,46 @@ var FEATURE_DEFS = Object.freeze({
   options: { label: "Options", floor: 3, on: 4 },
   property: { label: "Property values, leases and upkeep", floor: 3, on: 3 }
 });
+var PAY_BASES = ["salary", "hourly", "per_shift", "commission", "tips", "stipend"];
+var PAY_EVERY = ["weekly", "biweekly", "semimonthly", "monthly", "per_job", "custom"];
+var INVOICE_STATES = ["open", "paid", "late", "void"];
+var ASSET_CLASSES = ["security", "fund", "bond", "option", "property", "business_stake", "crypto", "other"];
+var FINANCE_ACTIONS = {
+  buy: "buy",
+  pay: "pay",
+  transfer: "move_money",
+  payCard: "pay_card",
+  withdraw: "withdraw_cash",
+  deposit: "deposit_cash",
+  cardFreeze: "card_freeze",
+  cardUnfreeze: "card_unfreeze",
+  cardLost: "card_report_lost",
+  cardReplace: "card_replace",
+  autopay: "set_autopay",
+  flowCreate: "flow_create",
+  flowUpdate: "flow_update",
+  flowPause: "flow_pause",
+  flowResume: "flow_resume",
+  flowDelete: "flow_delete",
+  applyCredit: "apply_credit",
+  payPrefs: "set_pay_prefs",
+  hire: "job_hire",
+  fire: "job_end",
+  raise: "job_raise",
+  invoiceIssue: "invoice_issue",
+  invoicePay: "invoice_pay",
+  invoiceVoid: "invoice_void",
+  draw: "owner_draw",
+  distribute: "distribute_profit",
+  trade: "trade",
+  exercise: "exercise_option",
+  route: "route_distributions",
+  propertyBuy: "property_buy",
+  propertySell: "property_sell",
+  leaseStart: "lease_start",
+  leaseEnd: "lease_end",
+  stakeSell: "stake_sell"
+};
 
 // src/engine/pack-kit.ts
 function bandOfJson(v) {
@@ -17866,6 +17996,14 @@ var BOOKKEEPING = new Set([
   "economy.price",
   "economy.txn",
   "economy.flow_run",
+  "economy.quote",
+  "economy.mint",
+  "economy.lots",
+  "economy.income",
+  "economy.exercise",
+  "economy.dispose",
+  "economy.acquire",
+  "economy.stake_route",
   "story.flag",
   "combat.turn",
   "combat.spend",
@@ -17889,6 +18027,14 @@ var TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdM
 // src/packs/economy/core/model.ts
 var CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
 var BANK_PREFIX = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
+var WEALTH_BANDS = [
+  { label: "broke", min: -Infinity, max: 1e4, typical: 5000 },
+  { label: "poor", min: 1e4, max: 200000, typical: 45000 },
+  { label: "modest", min: 200000, max: 2000000, typical: 630000 },
+  { label: "comfortable", min: 2000000, max: 20000000, typical: 6300000 },
+  { label: "rich", min: 20000000, max: 200000000, typical: 63000000 },
+  { label: "wealthy", min: 200000000, max: Infinity, typical: 500000000 }
+];
 function derivedUnpricedCap(world) {
   let top = 0;
   for (const table of ["economy.catalog", "economy.categories"])
@@ -17897,240 +18043,6020 @@ function derivedUnpricedCap(world) {
   return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
 
+// src/packs/economy/ui/forms.tsx
+function SelectField(props) {
+  return /* @__PURE__ */ u3("label", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        value: props.value,
+        disabled: props.disabled,
+        onChange: (event) => props.onChange(event.currentTarget.value),
+        children: [
+          props.empty !== undefined ? /* @__PURE__ */ u3("option", {
+            value: "",
+            children: props.empty
+          }, undefined, false, undefined, this) : null,
+          props.options.map((o) => /* @__PURE__ */ u3("option", {
+            value: o.value,
+            children: o.label
+          }, o.value, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function TextField(props) {
+  return /* @__PURE__ */ u3("label", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      props.type === "date" ? /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        type: "date",
+        value: props.value,
+        onInput: (event) => props.onInput(event.currentTarget.value)
+      }, undefined, false, undefined, this) : props.type === "time" ? /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        type: "time",
+        value: props.value,
+        onInput: (event) => props.onInput(event.currentTarget.value)
+      }, undefined, false, undefined, this) : props.list ? /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        type: "text",
+        list: props.list,
+        placeholder: props.placeholder,
+        value: props.value,
+        onInput: (event) => props.onInput(event.currentTarget.value)
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        type: "text",
+        placeholder: props.placeholder,
+        value: props.value,
+        onInput: (event) => props.onInput(event.currentTarget.value)
+      }, undefined, false, undefined, this),
+      props.hint ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: props.hint
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function NumberField(props) {
+  const [text, setText] = d2(props.value === null ? "" : String(props.value));
+  const parsed = text.trim() === "" ? null : Number(text);
+  const bad = parsed !== null && (!Number.isFinite(parsed) || props.min !== undefined && parsed < props.min || props.max !== undefined && parsed > props.max);
+  return /* @__PURE__ */ u3("label", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("input", {
+        class: bad ? "lre-input invalid" : "lre-input",
+        inputMode: "decimal",
+        placeholder: props.placeholder,
+        value: text,
+        onInput: (event) => {
+          const next = event.currentTarget.value;
+          setText(next);
+          const n = next.trim() === "" ? null : Number(next);
+          if (n === null)
+            props.onChange(null);
+          else if (Number.isFinite(n) && (props.min === undefined || n >= props.min) && (props.max === undefined || n <= props.max))
+            props.onChange(n);
+        }
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function AmountField(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(MoneyInput, {
+        currency: props.currency,
+        value: props.value,
+        onInput: props.onInput,
+        label: props.label,
+        invalid: props.invalid,
+        placeholder: props.placeholder,
+        unit: props.unit
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Reveal(props) {
+  const [open, setOpen] = d2(false);
+  if (!open) {
+    return /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: props.primary ? "lre-btn small primary" : "lre-btn small",
+      disabled: props.disabled,
+      onClick: () => setOpen(true),
+      children: props.label
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-card lre-stack",
+    "data-lre-form": props.label,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-spread",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: props.label
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small ghost",
+            onClick: () => setOpen(false),
+            children: "Cancel"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      props.children(() => setOpen(false))
+    ]
+  }, undefined, true, undefined, this);
+}
+var WEEKDAY_CHOICES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((label, i) => ({ value: String(i), label }));
+var MONTH_CHOICES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((label, i) => ({ value: String(i + 1), label }));
+
 // src/packs/economy/ui/config.tsx
+function toggleOf(config, feature) {
+  const set = isRecord(config.features) ? config.features[feature] : undefined;
+  return set === true ? "on" : set === false ? "off" : "level";
+}
+function withToggle(config, feature, state) {
+  const features = isRecord(config.features) ? { ...config.features } : {};
+  if (state === "level")
+    delete features[feature];
+  else
+    features[feature] = state === "on";
+  const { features: _old, ...rest } = config;
+  return Object.keys(features).length > 0 ? { ...rest, features } : { ...rest };
+}
+function regionChoices(world) {
+  const rows = world.tables["economy.regions"]?.rows ?? {};
+  const choices = Object.entries(rows).map(([id, row]) => ({ value: id, label: typeof row.name === "string" && row.name !== "" ? row.name : id, national: row.scope === "national" }));
+  choices.sort((a, b) => Number(b.national) - Number(a.national) || a.label.localeCompare(b.label));
+  return choices.map(({ value, label }) => ({ value, label }));
+}
+function withRegion(config, region) {
+  const { region: _old, ...rest } = config;
+  return region === "" ? { ...rest } : { ...rest, region };
+}
+function withLivingCost(config, band, cents) {
+  const costs = isRecord(config.livingCosts) ? { ...config.livingCosts } : {};
+  if (cents === undefined)
+    delete costs[band];
+  else
+    costs[band] = Math.round(cents);
+  const { livingCosts: _old, ...rest } = config;
+  return Object.keys(costs).length > 0 ? { ...rest, livingCosts: costs } : { ...rest };
+}
+var money = (key, label, unit) => ({ kind: "number", key, label: `${label} (${unit})`, min: 0, step: 1, optional: true });
+var pct = (key, label) => ({ kind: "number", key, label: `${label} (%)`, min: 0, optional: true });
+function productSpecs(currency) {
+  const unit = minorUnitPlural(currency);
+  return [
+    { kind: "text", key: "label", label: "Name" },
+    { kind: "enum", key: "class", label: "Class", values: ACCOUNT_CLASSES },
+    { kind: "text", key: "institution", label: "Institution", optional: true },
+    { kind: "json", key: "limit", label: `Credit limit (${unit}; null: no preset limit, as a charge card)`, optional: true },
+    pct("apr_pct", "APR"),
+    pct("apy_pct", "APY"),
+    { kind: "enum", key: "interest", label: "Interest method", values: ["monthly_simple", "average_daily"], optional: true },
+    pct("penalty_apr_pct", "Penalty APR, from 60 days late"),
+    pct("cash_advance_apr_pct", "Cash advance APR"),
+    { kind: "number", key: "statement_day", label: "Statement day", min: 1, max: 28, step: 1, optional: true },
+    { kind: "number", key: "due_days", label: "Days from statement to due date", min: 0, step: 1, optional: true },
+    { kind: "object", key: "minimum", label: "Minimum payment", optional: true, fields: [pct("pct", "Of the statement balance"), money("floor", "At least", unit), { kind: "bool", key: "plus_interest", label: "Plus the cycle's interest and fees" }] },
+    {
+      kind: "object",
+      key: "fees",
+      label: "Fees",
+      optional: true,
+      fields: [money("annual", "Annual", unit), money("late_first", "Late, first", unit), money("late_repeat", "Late, again within six cycles", unit), money("overdraft", "Overdraft item", unit), money("nsf", "Returned item", unit), money("atm", "Other banks' machines", unit), pct("cash_advance_pct", "Cash advance"), money("cash_advance_min", "Cash advance at least", unit), money("maintenance", "Monthly maintenance", unit), money("maintenance_waive", "Maintenance waived from a balance of", unit), money("card_replacement", "Card replacement", unit)]
+    },
+    pct("rewards_pct", "Rewards on purchases"),
+    money("daily_purchase_limit", "Daily card purchases", unit),
+    money("daily_atm_limit", "Daily cash machine withdrawals", unit),
+    { kind: "number", key: "hold_days", label: "Days a machine deposit stays on hold", min: 0, step: 1, optional: true },
+    { kind: "enum", key: "overdraft", label: "Overdraft policy", values: OVERDRAFT_POLICIES, optional: true },
+    money("overdraft_limit", "How far a fee overdraft may go", unit),
+    { kind: "number", key: "term_months", label: "Term (months)", min: 0, step: 1, optional: true },
+    { kind: "bool", key: "secured", label: "Secured by an asset (a mortgage, a car loan)" }
+  ];
+}
+function assetSpecs(currency) {
+  const unit = minorUnitPlural(currency);
+  return [
+    { kind: "text", key: "label", label: "Name" },
+    { kind: "enum", key: "class", label: "Class", values: ASSET_CLASSES },
+    { kind: "text", key: "symbol", label: "Symbol", optional: true },
+    money("price", "Price per unit at the start", unit),
+    { kind: "text", key: "model", label: "Price path (a finance table recipe; empty: the class's)", optional: true },
+    { kind: "number", key: "annual_return_pct", label: "Return a year (%)", optional: true },
+    pct("annual_volatility_pct", "Volatility a year"),
+    pct("yield_pct", "Pays out a year, of its value"),
+    { kind: "number", key: "pays_per_year", label: "Payouts a year", min: 0, step: 1, optional: true },
+    { kind: "number", key: "correlation", label: "Follows its class's market (0–1)", min: 0, max: 1, step: 0.05, optional: true },
+    money("face", "Bond: face value", unit),
+    pct("coupon_pct", "Bond: coupon"),
+    { kind: "text", key: "maturity", label: "Bond: matures (YYYY-MM-DD)", optional: true },
+    { kind: "text", key: "underlying", label: "Option: underlying asset id", optional: true },
+    money("strike", "Option: strike", unit),
+    { kind: "text", key: "expiry", label: "Option: expires (YYYY-MM-DD)", optional: true },
+    { kind: "enum", key: "right", label: "Option: right", values: ["call", "put"], optional: true },
+    { kind: "number", key: "multiplier", label: "Units per contract", min: 1, step: 1, optional: true },
+    { kind: "enum", key: "settlement", label: "Option: settled", values: ["physical", "cash"], optional: true },
+    { kind: "ref", key: "entity", label: "Stands for (a business or a property)", collection: "entities", optional: true }
+  ];
+}
+function FeatureToggles(props) {
+  return /* @__PURE__ */ u3(Card, {
+    title: "Money features (Custom)",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "Each runs from its usual Money level; switch one on to run it from its lowest level, or off. The dashboards show the full books for what runs."
+      }, undefined, false, undefined, this),
+      FINANCE_FEATURES.map((f) => {
+        const def = FEATURE_DEFS[f];
+        return /* @__PURE__ */ u3(Row, {
+          k: def.label,
+          sub: `usually from Money ${def.on}; can run from ${def.floor}`,
+          v: /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            style: { width: "auto" },
+            "aria-label": def.label,
+            value: toggleOf(props.config, f),
+            onChange: (event) => props.onChange(withToggle(props.config, f, event.currentTarget.value === "on" ? "on" : event.currentTarget.value === "off" ? "off" : "level")),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "level",
+                children: "By level"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("option", {
+                value: "on",
+                children: "On"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("option", {
+                value: "off",
+                children: "Off"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        }, f, false, undefined, this);
+      })
+    ]
+  }, undefined, true, undefined, this);
+}
+function Region(props) {
+  const region = typeof props.config.region === "string" ? props.config.region : "";
+  const choices = regionChoices(props.world);
+  const options = region === "" || choices.some((c) => c.value === region) ? choices : [{ value: region, label: `${region} (not in the regions table)` }, ...choices];
+  return /* @__PURE__ */ u3(Card, {
+    title: "Region",
+    children: [
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Region",
+        value: region,
+        empty: "Not set: the national averages",
+        options,
+        onChange: (v) => props.onChange(withRegion(props.config, v))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "Prices, rents and taxes follow its cost of living and rates for anyone who doesn't name a region of their own."
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function LivingCosts(props) {
+  const currency = props.world.currency;
+  const costs = isRecord(props.config.livingCosts) ? props.config.livingCosts : {};
+  const own = Object.keys(costs).length > 0;
+  return /* @__PURE__ */ u3(Card, {
+    title: "Living costs",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: own ? "What someone in each wealth band spends a week. A band left empty spends nothing." : "Each band's week is priced from the catalog's grocery baskets. Set any band and these amounts replace that for every band."
+      }, undefined, false, undefined, this),
+      WEALTH_BANDS.map((b) => /* @__PURE__ */ u3(MinorMoneyInput, {
+        label: `${humanize(b.label)}, a week`,
+        value: costs[b.label],
+        currency,
+        min: 0,
+        optional: true,
+        issues: lintAt(props.lint, `packs.economy.config.livingCosts.${b.label}`),
+        onChange: (v) => props.onChange(withLivingCost(props.config, b.label, typeof v === "number" ? v : undefined))
+      }, b.label, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
 function EconomyConfig(props) {
   const currency = props.world.currency;
   const derived = derivedUnpricedCap(props.world);
   const { unpricedCap, ...rest } = props.config;
-  return /* @__PURE__ */ u3(Card, {
-    title: "Narrated prices",
-    children: /* @__PURE__ */ u3(MinorMoneyInput, {
-      label: "Narrated-price cap",
-      value: unpricedCap,
-      currency,
-      min: 1,
-      optional: true,
-      placeholder: formatMoneyInput(derived, currency, "minor"),
-      hint: `Empty uses ${formatMoney(derived, currency)}, the highest price band in the catalog and categories. A price the player states is never capped.`,
-      issues: lintAt(props.lint, "packs.economy.config.unpricedCap"),
-      onChange: (value) => props.onChange(value === undefined ? rest : { ...rest, unpricedCap: value })
-    }, undefined, false, undefined, this)
-  }, undefined, false, undefined, this);
-}
-
-// src/packs/economy/ui/gm.tsx
-function PersonMoney(props) {
-  const { money: m, section } = props;
-  const [amount, setAmount] = d2("");
-  const valid = adjustOp(m.party, amount, section.currency, false) !== null;
-  const netWorth = m.overview?.netWorth ?? null;
-  return /* @__PURE__ */ u3(Card, {
-    title: `Money · ${m.name}`,
-    aside: /* @__PURE__ */ u3("span", {
-      class: "lre-badge",
-      children: [
-        "Money ",
-        m.level
-      ]
-    }, undefined, true, undefined, this),
+  const ctx = { doc: props.world, lint: props.lint, path: "packs.economy.config", identifiers: [], functions: [] };
+  const specs = [
+    { kind: "record", key: "products", label: "Products: the world's own accounts, by id", keyLabel: "Product id", item: { kind: "object", key: "", label: "Product", fields: productSpecs(currency) } },
+    { kind: "record", key: "assets", label: "Assets: what holdings hold, by id", keyLabel: "Asset id", item: { kind: "object", key: "", label: "Asset", fields: assetSpecs(currency) } }
+  ];
+  return /* @__PURE__ */ u3(M, {
     children: [
-      m.band ? /* @__PURE__ */ u3(Row, {
-        k: "Band",
-        v: m.band
-      }, undefined, false, undefined, this) : null,
-      netWorth !== null ? /* @__PURE__ */ u3(Row, {
-        k: "Net worth",
-        v: formatMoney(netWorth, section.currency)
-      }, undefined, false, undefined, this) : null,
-      !m.opened ? /* @__PURE__ */ u3("div", {
-        class: "lre-small lre-muted",
-        children: "Not opened yet: these are the opening balances it will start from."
-      }, undefined, false, undefined, this) : null,
-      m.accounts.map((a) => /* @__PURE__ */ u3(Row, {
-        k: a.name,
-        sub: a.classLabel,
-        v: /* @__PURE__ */ u3("span", {
-          class: "lre-inline",
-          children: [
-            formatMoney(a.cents, section.currency),
-            /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-btn small",
-              "aria-label": `Add to ${a.name}`,
-              disabled: section.busy || !valid,
-              onClick: () => {
-                const op = adjustOp(a.id, amount, section.currency, false);
-                if (op)
-                  section.edit([op]);
-              },
-              children: "+"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-btn small",
-              "aria-label": `Take from ${a.name}`,
-              disabled: section.busy || !valid,
-              onClick: () => {
-                const op = adjustOp(a.id, amount, section.currency, true);
-                if (op)
-                  section.edit([op]);
-              },
-              children: "−"
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, a.id, false, undefined, this)),
-      m.accounts.length > 0 ? /* @__PURE__ */ u3("input", {
-        class: "lre-input",
-        "aria-label": `Amount for ${m.name}`,
-        placeholder: "Amount to add or take",
-        value: amount,
-        onInput: (event) => setAmount(event.currentTarget.value)
-      }, undefined, false, undefined, this) : null,
-      m.recent.map((r, i) => /* @__PURE__ */ u3(Row, {
-        k: r.memo,
-        sub: `${r.at} · ${r.account}`,
-        v: formatMoney(r.cents, section.currency)
-      }, `r${i}`, false, undefined, this)),
-      m.notes.map((n, i) => /* @__PURE__ */ u3(Row, {
-        k: n.text,
-        sub: n.at
-      }, `n${i}`, false, undefined, this))
+      /* @__PURE__ */ u3(Card, {
+        title: "Narrated prices",
+        children: /* @__PURE__ */ u3(MinorMoneyInput, {
+          label: "Narrated-price cap",
+          value: unpricedCap,
+          currency,
+          min: 1,
+          optional: true,
+          placeholder: formatMoneyInput(derived, currency, "minor"),
+          hint: `Empty uses ${formatMoney(derived, currency)}, the highest price band in the catalog and categories. A price the player states is never capped.`,
+          issues: lintAt(props.lint, "packs.economy.config.unpricedCap"),
+          onChange: (value) => props.onChange(value === undefined ? rest : { ...rest, unpricedCap: value })
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Region, {
+        ...props
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(LivingCosts, {
+        ...props
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(FeatureToggles, {
+        ...props
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Products and assets",
+        children: /* @__PURE__ */ u3(SchemaFields, {
+          specs,
+          value: props.config,
+          ctx,
+          onChange: (next) => props.onChange(next)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
     ]
   }, undefined, true, undefined, this);
 }
-function GmMoneySection(props) {
-  if (props.gm.money.length === 0)
-    return /* @__PURE__ */ u3(Empty, {
-      children: "No one else's money is tracked."
-    }, undefined, false, undefined, this);
+
+// src/packs/economy/ui/pay-prefs.tsx
+var PAY_METHODS = [
+  { value: "cash", label: "Cash" },
+  { value: "debit", label: "Debit card" },
+  { value: "credit", label: "Credit card" },
+  { value: "charge", label: "Charge card" },
+  { value: "checking", label: "From checking" },
+  { value: "savings", label: "From savings" }
+];
+function tierText(tier, uses, currency) {
+  const how = [...PAY_METHODS, ...uses].find((u) => u.value === tier.use)?.label ?? tier.use;
+  const parts = [how];
+  if (tier.min !== undefined)
+    parts.push(`from ${formatMoney(tier.min, currency)}`);
+  if (tier.max !== undefined)
+    parts.push(`up to ${formatMoney(tier.max, currency)}`);
+  if (tier.categories && tier.categories.length > 0)
+    parts.push(`for ${tier.categories.map(humanize).join(", ")}`);
+  if (tier.except && tier.except.length > 0)
+    parts.push(`not ${tier.except.map(humanize).join(", ")}`);
+  return parts.join(" · ");
+}
+function listOf(text) {
+  return text.split(",").map((s) => s.trim()).filter((s) => s !== "");
+}
+function TierRow(props) {
+  const { tier } = props;
+  const [min, setMin] = d2(tier.min === undefined ? "" : formatMoneyInput(tier.min, props.currency, props.unit));
+  const [max, setMax] = d2(tier.max === undefined ? "" : formatMoneyInput(tier.max, props.currency, props.unit));
+  const options = [...PAY_METHODS, ...props.uses];
+  const amount = (text) => text.trim() === "" ? undefined : parseMoneyInput(text, props.currency, props.unit);
+  const listId = `lre-pay-categories-${props.index}`;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-card lre-stack",
+    "data-lre-pay-tier": props.index,
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-spread",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: [
+              "Tier ",
+              props.index + 1
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-inline",
+            children: [
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn small ghost",
+                "aria-label": `Move tier ${props.index + 1} up`,
+                disabled: props.index === 0,
+                onClick: () => props.onChange(tier, -1),
+                children: "↑"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn small ghost",
+                "aria-label": `Move tier ${props.index + 1} down`,
+                disabled: props.index === props.count - 1,
+                onClick: () => props.onChange(tier, 1),
+                children: "↓"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn small danger",
+                "aria-label": `Remove tier ${props.index + 1}`,
+                onClick: () => props.onChange(null),
+                children: "✕"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Pay with"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            value: tier.use,
+            onChange: (event) => props.onChange({ ...tier, use: event.currentTarget.value }),
+            children: [
+              options.some((o) => o.value === tier.use) ? null : /* @__PURE__ */ u3("option", {
+                value: tier.use,
+                children: tier.use
+              }, undefined, false, undefined, this),
+              options.map((o) => /* @__PURE__ */ u3("option", {
+                value: o.value,
+                children: o.label
+              }, o.value, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            style: { flex: 1 },
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                children: "From (amount)"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(MoneyInput, {
+                currency: props.currency,
+                unit: props.unit,
+                label: `Tier ${props.index + 1} from`,
+                value: min,
+                invalid: amount(min) === null,
+                onInput: (text) => {
+                  setMin(text);
+                  const n = amount(text);
+                  if (n !== null)
+                    props.onChange({ ...tier, min: n });
+                }
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-field",
+            style: { flex: 1 },
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                children: "Up to (amount)"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(MoneyInput, {
+                currency: props.currency,
+                unit: props.unit,
+                label: `Tier ${props.index + 1} up to`,
+                value: max,
+                invalid: amount(max) === null,
+                onInput: (text) => {
+                  setMax(text);
+                  const n = amount(text);
+                  if (n !== null)
+                    props.onChange({ ...tier, max: n });
+                }
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Only for (categories, comma separated; empty: anything)"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            list: listId,
+            value: (tier.categories ?? []).join(", "),
+            onChange: (event) => props.onChange({ ...tier, categories: listOf(event.currentTarget.value) })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Never for (categories)"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            list: listId,
+            value: (tier.except ?? []).join(", "),
+            onChange: (event) => props.onChange({ ...tier, except: listOf(event.currentTarget.value) })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("datalist", {
+        id: listId,
+        children: props.categories.map((c) => /* @__PURE__ */ u3("option", {
+          value: c
+        }, c, false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PayTiersEditor(props) {
+  const tiers = props.value;
+  const change = (index, next, move) => {
+    const out = [...tiers];
+    if (next === null)
+      out.splice(index, 1);
+    else if (move !== undefined) {
+      const to = index + move;
+      if (to < 0 || to >= out.length)
+        return;
+      out.splice(index, 1);
+      out.splice(to, 0, next);
+    } else
+      out[index] = next;
+    props.onChange(out.map((t) => ({ use: t.use, ...t.min !== undefined ? { min: t.min } : {}, ...t.max !== undefined ? { max: t.max } : {}, ...t.categories && t.categories.length > 0 ? { categories: t.categories } : {}, ...t.except && t.except.length > 0 ? { except: t.except } : {} })));
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-pay-prefs": true,
+    children: [
+      tiers.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "No tiers: the engine's defaults for their wealth and character pay."
+      }, undefined, false, undefined, this) : null,
+      tiers.map((tier, i) => /* @__PURE__ */ u3(TierRow, {
+        tier,
+        index: i,
+        count: tiers.length,
+        uses: props.uses,
+        categories: props.categories,
+        currency: props.currency,
+        unit: props.unit ?? "major",
+        onChange: (next, move) => change(i, next, move)
+      }, `${i}:${tier.use}`, false, undefined, this)),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small",
+        onClick: () => props.onChange([...tiers, { use: "debit" }]),
+        children: "+ Add a tier"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "When no tier fits or covers the amount, any account they may spend from that covers it pays."
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/economy/ui/field-editors.tsx
+function recordsOf(value) {
+  return Array.isArray(value) ? value.filter((v) => isRecord(v)) : [];
+}
+function numbersOf(value) {
+  return Array.isArray(value) ? [...new Set(value.filter((v) => typeof v === "number" && Number.isFinite(v)))].sort((a, b) => a - b) : [];
+}
+function compact2(o) {
+  const out = {};
+  for (const [k, v] of Object.entries(o))
+    if (v !== undefined && v !== null && v !== "")
+      out[k] = v;
+  return out;
+}
+function entityChoices(doc, kinds) {
+  return Object.values(doc.entities).filter((e) => kinds.some((k) => kindIs(doc, e.kind, k))).map((e) => ({ value: e.id, label: `${e.name} (${e.id})` })).sort((a, b) => a.label.localeCompare(b.label));
+}
+function Shell(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-field",
+    "data-lre-money-field": props.label,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: props.children
+      }, undefined, false, undefined, this),
+      props.lint.map((issue) => /* @__PURE__ */ u3("span", {
+        class: issue.severity === "error" ? "lre-small lre-neg" : "lre-small lre-warn",
+        children: issue.message
+      }, `${issue.path}:${issue.code}`, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function RecordList(props) {
+  const set = (i, next) => props.onChange(props.items.map((item, j) => j === i ? next : item));
   return /* @__PURE__ */ u3(M, {
-    children: props.gm.money.map((m) => /* @__PURE__ */ u3(PersonMoney, {
-      money: m,
-      section: props
-    }, m.party, false, undefined, this))
+    children: [
+      props.items.map((item, i) => /* @__PURE__ */ u3("div", {
+        class: "lre-card lre-stack",
+        children: [
+          props.row(item, (next) => set(i, next), i),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small danger",
+            onClick: () => props.onChange(props.items.length > 1 ? props.items.filter((_, j) => j !== i) : undefined),
+            children: "Remove"
+          }, undefined, false, undefined, this)
+        ]
+      }, i, true, undefined, this)),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small",
+        onClick: () => props.onChange([...props.items, props.blank]),
+        children: props.add
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var label = (p) => p.def.label ?? humanize(p.field);
+function OwnersField(p) {
+  const parties = entityChoices(p.doc, ["person", "business", "trust", "household"]);
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3(RecordList, {
+      items: recordsOf(p.value),
+      add: "+ Add an owner",
+      blank: { party: "", role: "owner" },
+      onChange: p.onChange,
+      row: (o, set) => /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(SelectField, {
+            label: "Who",
+            value: typeof o.party === "string" ? o.party : "",
+            empty: "Choose",
+            options: parties,
+            onChange: (party) => set({ ...o, party })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SelectField, {
+            label: "Role",
+            value: typeof o.role === "string" ? o.role : "owner",
+            options: OWNER_ROLES.map((r) => ({ value: r, label: humanize(r) })),
+            onChange: (role) => set({ ...o, role })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberField, {
+            label: "Share of its worth (%; empty: equal parts)",
+            value: typeof o.share === "number" ? o.share : null,
+            min: 0,
+            max: 100,
+            onChange: (share) => set(compact2({ ...o, share: share ?? undefined }))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function ProductField(p) {
+  const products = p.doc.packs.economy?.config.products;
+  const own = isRecord(products) ? Object.entries(products).map(([id, def]) => ({ value: id, label: `${isRecord(def) && typeof def.label === "string" ? def.label : id} (the world's)` })) : [];
+  const classes = ACCOUNT_CLASSES.map((c) => ({ value: c, label: `${CLASS_TRAITS[c].label} (built in)` }));
+  const value = typeof p.value === "string" ? p.value : "";
+  const known = [...own, ...classes].some((c) => c.value === value);
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3(SelectField, {
+      label: "Product",
+      value,
+      empty: "Choose",
+      options: [...own, ...classes, ...known || value === "" ? [] : [{ value, label: `${value} (not defined)` }]],
+      onChange: (next) => p.onChange(next === "" ? undefined : next)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function SplitsField(p) {
+  const accounts = entityChoices(p.doc, ["account"]);
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "Fixed amounts go first, then percentages of what's left; the rest goes to the main account."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(RecordList, {
+        items: recordsOf(p.value),
+        add: "+ Add a split",
+        blank: { to: "", pct: 10 },
+        onChange: p.onChange,
+        row: (s, set) => /* @__PURE__ */ u3(M, {
+          children: [
+            /* @__PURE__ */ u3(SelectField, {
+              label: "To",
+              value: typeof s.to === "string" ? s.to : "",
+              empty: "Choose an account",
+              options: accounts,
+              onChange: (to) => set({ ...s, to })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(MinorMoneyInput, {
+              label: "Fixed amount",
+              value: s.cents,
+              currency: p.doc.currency,
+              min: 0,
+              optional: true,
+              issues: [],
+              onChange: (cents) => set(compact2({ ...s, cents, pct: cents === undefined ? s.pct : undefined }))
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(NumberField, {
+              label: "Or a percentage",
+              value: typeof s.pct === "number" ? s.pct : null,
+              min: 0,
+              max: 100,
+              onChange: (pct) => set(compact2({ ...s, pct: pct ?? undefined, cents: pct === null ? s.cents : undefined }))
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function householdMembers(doc, household) {
+  return Object.values(doc.entities).filter((e) => e.relations.some((r) => r.type === "member_of" && r.to === household)).map((e) => e.id).sort();
+}
+function equalShares(members) {
+  const base = members.length === 0 ? 0 : Math.floor(100 / members.length);
+  return members.map((party, i) => ({ party, pct: base + (i < 100 - base * members.length ? 1 : 0) }));
+}
+function SharesField(p) {
+  const parties = entityChoices(p.doc, ["person", "business", "trust"]);
+  const accounts = entityChoices(p.doc, ["account"]);
+  const households = entityChoices(p.doc, ["household"]);
+  const shares = recordsOf(p.value);
+  const total = shares.reduce((sum, s) => sum + (typeof s.pct === "number" ? s.pct : 0), 0);
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: [
+      households.length > 0 ? /* @__PURE__ */ u3(SelectField, {
+        label: "Split equally among a household's members",
+        value: "",
+        empty: "Choose a household",
+        options: households,
+        onChange: (h) => h !== "" && p.onChange(equalShares(householdMembers(p.doc, h)))
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(RecordList, {
+        items: shares,
+        add: "+ Add a share",
+        blank: { party: "", pct: 0 },
+        onChange: p.onChange,
+        row: (s, set) => /* @__PURE__ */ u3(M, {
+          children: [
+            /* @__PURE__ */ u3(SelectField, {
+              label: "Who",
+              value: typeof s.party === "string" ? s.party : "",
+              empty: "Choose",
+              options: parties,
+              onChange: (party) => set({ ...s, party })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(NumberField, {
+              label: "Their part (%)",
+              value: typeof s.pct === "number" ? s.pct : null,
+              min: 0,
+              max: 100,
+              onChange: (pct) => set({ ...s, pct: pct ?? 0 })
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3(SelectField, {
+              label: "Paid from",
+              value: typeof s.from === "string" ? s.from : "",
+              empty: "As their preferences choose",
+              options: accounts,
+              onChange: (from) => set(compact2({ ...s, from }))
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      shares.length > 0 ? /* @__PURE__ */ u3("span", {
+        class: total === 100 ? "lre-small lre-muted" : "lre-small lre-warn",
+        children: [
+          "Parts add up to ",
+          total,
+          "%",
+          total === 100 ? "" : " (they should make 100%)",
+          "."
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function NumberToggles(p) {
+  const on = numbersOf(p.value);
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3("div", {
+      class: "lre-seg",
+      role: "group",
+      "aria-label": label(p),
+      children: p.choices.map((c) => {
+        const n = Number(c.value);
+        const pressed = on.includes(n);
+        return /* @__PURE__ */ u3("button", {
+          type: "button",
+          "aria-pressed": pressed,
+          onClick: () => p.onChange(pressed ? on.filter((x) => x !== n) : [...on, n].sort((a, b) => a - b)),
+          children: c.label.slice(0, 3)
+        }, c.value, false, undefined, this);
+      })
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+var WeekdaysField = (p) => /* @__PURE__ */ u3(NumberToggles, {
+  ...p,
+  choices: WEEKDAY_CHOICES
+}, undefined, false, undefined, this);
+var MonthsField = (p) => /* @__PURE__ */ u3(NumberToggles, {
+  ...p,
+  choices: MONTH_CHOICES
+}, undefined, false, undefined, this);
+function monthDays(text) {
+  const parts = text.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  const days = parts.map(Number);
+  return days.every((d) => Number.isInteger(d) && (d === -1 || d >= 1 && d <= 31)) ? [...new Set(days)].sort((a, b) => a - b) : null;
+}
+function MonthDaysField(p) {
+  const now = numbersOf(p.value).join(", ");
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3(TextField, {
+      label: "Days (comma separated; -1 is the last day)",
+      value: now,
+      onInput: (text) => {
+        const days = monthDays(text);
+        if (days !== null)
+          p.onChange(days);
+      }
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function HolidaysField(p) {
+  const on = Array.isArray(p.value) ? p.value.filter((v) => typeof v === "string") : [];
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: [
+      p.doc.calendar.holidays.length === 0 ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "The calendar has no holidays."
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: p.doc.calendar.holidays.map((h) => {
+          const pressed = on.includes(h.id);
+          return /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: pressed ? "lre-btn small primary" : "lre-btn small",
+            "aria-pressed": pressed,
+            onClick: () => p.onChange(pressed ? on.filter((x) => x !== h.id) : [...on, h.id]),
+            children: h.label
+          }, h.id, false, undefined, this);
+        })
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function LotsField(p) {
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3(RecordList, {
+      items: recordsOf(p.value),
+      add: "+ Add a lot",
+      blank: { qty: 1, cost: 0, at: p.doc.start.at.slice(0, 10) },
+      onChange: p.onChange,
+      row: (l, set) => /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(NumberField, {
+            label: "Units",
+            value: typeof l.qty === "number" ? l.qty : null,
+            min: 0,
+            onChange: (qty) => set({ ...l, qty: qty ?? 0 })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(MinorMoneyInput, {
+            label: "What it cost in all",
+            value: l.cost,
+            currency: p.doc.currency,
+            min: 0,
+            issues: [],
+            onChange: (cost) => set({ ...l, cost: cost ?? 0 })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(TextField, {
+            label: "Bought",
+            type: "date",
+            value: typeof l.at === "string" ? l.at.slice(0, 10) : "",
+            onInput: (at) => set({ ...l, at })
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function RouteField(p) {
+  const accounts = entityChoices(p.doc, ["account"]);
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3(SelectField, {
+      label: "Distributions go to",
+      value: typeof p.value === "string" ? p.value : "",
+      options: [{ value: "", label: "The usual place (its account's cash, else the deposit account)" }, { value: "reinvest", label: "Reinvested" }, ...accounts],
+      onChange: (to) => p.onChange(to === "" ? undefined : to)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function AssetField(p) {
+  const assets = p.doc.packs.economy?.config.assets;
+  const own = isRecord(assets) ? Object.entries(assets).map(([id, def]) => ({ value: id, label: `${isRecord(def) && typeof def.label === "string" ? def.label : id} (${id})` })) : [];
+  const value = typeof p.value === "string" ? p.value : "";
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3(SelectField, {
+      label: "Asset (the economy pack's assets)",
+      value,
+      empty: "Choose",
+      options: own.some((o) => o.value === value) || value === "" ? own : [...own, { value, label: `${value} (not defined)` }],
+      onChange: (next) => p.onChange(next === "" ? undefined : next)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function DeductionsField(p) {
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3(RecordList, {
+      items: recordsOf(p.value),
+      add: "+ Add a deduction",
+      blank: { label: "401(k)", kind: "retirement", pretax: true, pct: 5 },
+      onChange: p.onChange,
+      row: (d, set) => /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(TextField, {
+            label: "Name",
+            value: typeof d.label === "string" ? d.label : "",
+            onInput: (text) => set({ ...d, label: text })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SelectField, {
+            label: "Kind",
+            value: typeof d.kind === "string" ? d.kind : "other",
+            options: ["retirement", "health", "other"].map((k) => ({ value: k, label: humanize(k) })),
+            onChange: (kind) => set({ ...d, kind })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("label", {
+            class: "lre-row",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "k",
+                children: "Taken before income tax"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-check",
+                children: /* @__PURE__ */ u3("input", {
+                  type: "checkbox",
+                  checked: d.pretax === true,
+                  onChange: (event) => set({ ...d, pretax: event.currentTarget.checked })
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(MinorMoneyInput, {
+            label: "Fixed amount each payday",
+            value: d.cents,
+            currency: p.doc.currency,
+            min: 0,
+            optional: true,
+            issues: [],
+            onChange: (cents) => set(compact2({ ...d, cents, pct: cents === undefined ? d.pct : undefined }))
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberField, {
+            label: "Or a percentage of pay",
+            value: typeof d.pct === "number" ? d.pct : null,
+            min: 0,
+            max: 100,
+            onChange: (pct) => set(compact2({ ...d, pct: pct ?? undefined, cents: pct === null ? d.cents : undefined }))
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberField, {
+            label: "Employer match (% of pay)",
+            value: typeof d.match_pct === "number" ? d.match_pct : null,
+            min: 0,
+            max: 100,
+            onChange: (match) => set(compact2({ ...d, match_pct: match ?? undefined }))
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SelectField, {
+            label: "Goes to",
+            value: typeof d.to === "string" ? d.to : "",
+            empty: "An outside payee",
+            options: entityChoices(p.doc, ["account"]),
+            onChange: (to) => set(compact2({ ...d, to }))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function PlacesField(p) {
+  const on = Array.isArray(p.value) ? p.value.filter((v) => typeof v === "string") : [];
+  const places = Object.values(p.doc.places).map((pl) => ({ value: pl.id, label: pl.name }));
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: [
+      on.map((id) => /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small",
+        "aria-label": `Remove ${p.doc.places[id]?.name ?? id}`,
+        onClick: () => p.onChange(on.length > 1 ? on.filter((x) => x !== id) : undefined),
+        children: [
+          p.doc.places[id]?.name ?? id,
+          " ✕"
+        ]
+      }, id, true, undefined, this)),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Add a place",
+        value: "",
+        empty: "+ Add…",
+        options: places.filter((pl) => !on.includes(pl.value)),
+        onChange: (id) => id !== "" && p.onChange([...on, id])
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PayPrefsField(p) {
+  const mine = Object.values(p.doc.entities).filter((e) => kindIs(p.doc, e.kind, "account") && recordsOf(e.fields.owners).some((o) => o.party === p.entity.id) || kindIs(p.doc, e.kind, "card") && e.fields.holder === p.entity.id);
+  const categories = Object.keys(p.doc.tables["economy.categories"]?.rows ?? {}).sort();
+  const tiers = recordsOf(p.value).flatMap((t) => typeof t.use === "string" ? [{ use: t.use, ...typeof t.min === "number" ? { min: t.min } : {}, ...typeof t.max === "number" ? { max: t.max } : {}, ...Array.isArray(t.categories) ? { categories: t.categories.filter((c) => typeof c === "string") } : {}, ...Array.isArray(t.except) ? { except: t.except.filter((c) => typeof c === "string") } : {} }] : []);
+  return /* @__PURE__ */ u3(Shell, {
+    label: label(p),
+    lint: p.lint,
+    children: /* @__PURE__ */ u3(PayTiersEditor, {
+      value: tiers,
+      uses: mine.map((e) => ({ value: e.id, label: e.name })),
+      categories,
+      currency: p.doc.currency,
+      unit: "minor",
+      onChange: (next) => p.onChange(next.length === 0 ? undefined : next.map((t) => compact2({ use: t.use, min: t.min, max: t.max, categories: t.categories && t.categories.length > 0 ? t.categories : undefined, except: t.except && t.except.length > 0 ? t.except : undefined })))
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+var MONEY_FIELD_EDITORS = [
+  ...["account", "business", "holding", "property", "trust"].map((kind) => ({ kind, field: "owners", component: OwnersField })),
+  { kind: "account", field: "product", component: ProductField },
+  { kind: "flow", field: "splits", component: SplitsField },
+  { kind: "job", field: "splits", component: SplitsField },
+  { kind: "flow", field: "shares", component: SharesField },
+  { kind: "flow", field: "weekdays", component: WeekdaysField },
+  { kind: "job", field: "pay_weekdays", component: WeekdaysField },
+  { kind: "flow", field: "months", component: MonthsField },
+  { kind: "job", field: "pay_months", component: MonthsField },
+  { kind: "flow", field: "days", component: MonthDaysField },
+  { kind: "job", field: "pay_days", component: MonthDaysField },
+  { kind: "flow", field: "except", component: HolidaysField },
+  { kind: "job", field: "pay_except", component: HolidaysField },
+  { kind: "holding", field: "lots", component: LotsField },
+  { kind: "holding", field: "route", component: RouteField },
+  { kind: "holding", field: "asset", component: AssetField },
+  { kind: "job", field: "deductions", component: DeductionsField },
+  { kind: "business", field: "places", component: PlacesField },
+  { kind: "business", field: "trading_days", component: WeekdaysField },
+  { kind: "person", field: "pay_prefs", component: PayPrefsField }
+];
+function AtmField(p) {
+  const atm = isRecord(p.value) ? p.value : null;
+  if (!atm) {
+    return /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: "lre-btn small",
+      onClick: () => p.onChange({ bank: "" }),
+      children: "+ A cash machine here"
+    }, undefined, false, undefined, this);
+  }
+  const set = (patch) => p.onChange(compact2({ ...atm, ...patch, bank: typeof patch.bank === "string" ? patch.bank : atm.bank }));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-atm": p.place.id,
+    children: [
+      /* @__PURE__ */ u3(TextField, {
+        label: "Bank (its customers pay no out-of-network fee)",
+        value: typeof atm.bank === "string" ? atm.bank : "",
+        onInput: (bank) => set({ bank })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(MinorMoneyInput, {
+        label: "Surcharge",
+        value: atm.fee,
+        currency: p.doc.currency,
+        min: 0,
+        optional: true,
+        issues: p.lint.filter((i) => i.path.endsWith(".fee")),
+        onChange: (fee) => set({ fee })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(MinorMoneyInput, {
+        label: "Most it pays out at once",
+        value: atm.limit,
+        currency: p.doc.currency,
+        min: 1,
+        optional: true,
+        issues: p.lint.filter((i) => i.path.endsWith(".limit")),
+        onChange: (limit) => set({ limit })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-row",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "k",
+            children: "Takes deposits (held for the account's hold days)"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-check",
+            children: /* @__PURE__ */ u3("input", {
+              type: "checkbox",
+              checked: atm.deposits === true,
+              onChange: (event) => set({ deposits: event.currentTarget.checked || undefined })
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small danger",
+        onClick: () => p.onChange(undefined),
+        children: "No cash machine"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BranchField(p) {
+  const branch = isRecord(p.value) ? p.value : null;
+  if (!branch) {
+    return /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: "lre-btn small",
+      onClick: () => p.onChange({ bank: "" }),
+      children: "+ A bank branch here"
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-branch": p.place.id,
+    children: [
+      /* @__PURE__ */ u3(TextField, {
+        label: "Bank (its customers withdraw and deposit at the counter)",
+        value: typeof branch.bank === "string" ? branch.bank : "",
+        onInput: (bank) => p.onChange({ bank })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small danger",
+        onClick: () => p.onChange(undefined),
+        children: "No branch"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var MONEY_PLACE_FIELDS = [
+  { field: "atm", label: "Cash machine", component: AtmField },
+  { field: "branch", label: "Bank branch", component: BranchField }
+];
+
+// src/packs/economy/ui/decode.ts
+function nullableNum(value) {
+  return optNum(value) ?? null;
+}
+function nullableStr(value) {
+  return typeof value === "string" ? value : null;
+}
+function nullableOf(value, values) {
+  return values.find((v) => v === value) ?? null;
+}
+function numbers(value) {
+  return Array.isArray(value) ? value.filter((v) => typeof v === "number" && Number.isFinite(v)) : [];
+}
+function idName(value) {
+  const o = obj(value);
+  return o && typeof o.id === "string" ? { id: o.id, name: str(o.name, o.id) } : null;
+}
+function journalLine(o) {
+  return {
+    id: str(o.id),
+    at: str(o.at),
+    memo: str(o.memo),
+    cents: num(o.cents),
+    account: str(o.account),
+    accountId: str(o.accountId),
+    kind: nullableOf(o.kind, TXN_KINDS),
+    category: nullableStr(o.category),
+    counterparty: nullableStr(o.counterparty),
+    card: nullableStr(o.card),
+    status: o.status === "pending" ? "pending" : "posted"
+  };
+}
+function ownerLine(o) {
+  return typeof o.party === "string" ? { party: o.party, name: str(o.name, o.party), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share) } : null;
+}
+function card(o) {
+  if (typeof o.id !== "string")
+    return null;
+  return {
+    id: o.id,
+    name: str(o.name, o.id),
+    network: oneOf(o.network, CARD_NETWORKS, "debit"),
+    state: oneOf(o.state, CARD_STATES, "active"),
+    holder: str(o.holder),
+    holderId: str(o.holderId),
+    account: str(o.account),
+    last4: nullableStr(o.last4),
+    item: nullableStr(o.item),
+    dailyPurchaseLimit: nullableNum(o.dailyPurchaseLimit),
+    dailyAtmLimit: nullableNum(o.dailyAtmLimit),
+    spentToday: num(o.spentToday)
+  };
+}
+function statement(o) {
+  return {
+    at: str(o.at),
+    closing: num(o.closing),
+    interest: num(o.interest),
+    fees: num(o.fees),
+    minimum: num(o.minimum),
+    due: str(o.due),
+    paid: num(o.paid),
+    apr: num(o.apr),
+    stage: oneOf(o.stage, DELINQUENCY_STAGES, "current"),
+    state: oneOf(o.state, ["paid", "minimum", "open", "late"], "open")
+  };
+}
+function account(o) {
+  if (typeof o.id !== "string")
+    return null;
+  const product = obj(o.product);
+  const autopay = obj(o.autopay);
+  const due = obj(o.due);
+  const loan = obj(o.loan);
+  return {
+    id: o.id,
+    name: str(o.name, o.id),
+    class: oneOf(o.class, ACCOUNT_CLASSES, "checking"),
+    classLabel: str(o.classLabel),
+    product: { id: str(product?.id), label: str(product?.label) },
+    institution: nullableStr(o.institution),
+    status: oneOf(o.status, ACCOUNT_STATUSES, "open"),
+    cents: num(o.cents),
+    available: nullableNum(o.available),
+    owners: list(o.owners, ownerLine),
+    role: nullableOf(o.role, OWNER_ROLES),
+    limit: nullableNum(o.limit),
+    aprPct: nullableNum(o.aprPct),
+    apyPct: nullableNum(o.apyPct),
+    terms: list(o.terms, (t) => ({ label: str(t.label), value: str(t.value) })),
+    autopay: autopay ? { mode: oneOf(autopay.mode, AUTOPAY_MODES, "none"), from: nullableStr(autopay.from), fromName: nullableStr(autopay.fromName), cents: nullableNum(autopay.cents) } : null,
+    due: due ? { label: str(due.label), cents: num(due.cents), at: str(due.at) } : null,
+    statements: list(o.statements, statement),
+    cards: list(o.cards, card),
+    pending: list(o.pending, journalLine),
+    holds: list(o.holds, (h) => ({ id: str(h.id), cents: num(h.cents), until: str(h.until), kind: h.kind === "authorization" ? "authorization" : "deposit", memo: str(h.memo) })),
+    transactions: list(o.transactions, journalLine),
+    securedBy: idName(o.securedBy),
+    loan: loan ? { payment: num(loan.payment), monthsLeft: num(loan.monthsLeft), payoff: num(loan.payoff) } : null
+  };
+}
+function flowAmount(value) {
+  const o = obj(value) ?? {};
+  if (typeof o.fixed === "number")
+    return { fixed: o.fixed };
+  if (typeof o.formula === "string")
+    return { formula: o.formula };
+  if (typeof o.table === "string")
+    return { table: o.table, row: str(o.row), ...typeof o.column === "string" ? { column: o.column } : {}, ...typeof o.scale === "number" ? { scale: o.scale } : {} };
+  const range = obj(o.range);
+  if (range)
+    return { range: { min: num(range.min), max: num(range.max) } };
+  if (typeof o.percent === "number")
+    return { percent: o.percent, ...typeof o.of === "string" ? { of: o.of } : {} };
+  if (o.due === "minimum" || o.due === "statement" || o.due === "balance")
+    return { due: o.due };
+  if (typeof o.provider === "string")
+    return { provider: o.provider, ...isRecord(o.args) ? { args: JSON.parse(JSON.stringify(o.args)) } : {} };
+  return { fixed: 0 };
+}
+function flowSchedule(value) {
+  const o = obj(value) ?? {};
+  const out = {};
+  const every = nullableOf(o.every, ["day", "week", "month", "year"]);
+  if (every)
+    out.every = every;
+  if (typeof o.interval === "number")
+    out.interval = o.interval;
+  if (Array.isArray(o.weekdays))
+    out.weekdays = numbers(o.weekdays);
+  if (Array.isArray(o.days))
+    out.days = numbers(o.days);
+  if (Array.isArray(o.months))
+    out.months = numbers(o.months);
+  if (Array.isArray(o.except))
+    out.except = strings(o.except);
+  const roll = nullableOf(o.roll, ["none", "before", "after"]);
+  if (roll)
+    out.roll = roll;
+  if (typeof o.at === "string")
+    out.at = o.at;
+  if (typeof o.once === "string" || typeof o.once === "number")
+    out.once = o.once;
+  return out;
+}
+function decodeFlow(o) {
+  return {
+    id: str(o.id),
+    label: str(o.label),
+    kind: oneOf(o.kind, FLOW_KINDS, "other"),
+    from: str(o.from),
+    to: str(o.to),
+    ...Array.isArray(o.splits) ? { splits: list(o.splits, (s) => typeof s.to === "string" ? { to: s.to, ...typeof s.cents === "number" ? { cents: s.cents } : {}, ...typeof s.pct === "number" ? { pct: s.pct } : {} } : null) } : {},
+    ...Array.isArray(o.shares) ? { shares: list(o.shares, (s) => typeof s.party === "string" ? { party: s.party, pct: num(s.pct), ...typeof s.from === "string" ? { from: s.from } : {} } : null) } : {},
+    amount: flowAmount(o.amount),
+    schedule: flowSchedule(o.schedule),
+    ...typeof o.start === "string" ? { start: o.start } : {},
+    ...typeof o.end === "string" ? { end: o.end } : {},
+    ...typeof o.count === "number" ? { count: o.count } : {},
+    shortfall: oneOf(o.shortfall, FLOW_SHORTFALLS, "skip"),
+    ...typeof o.retry_days === "number" ? { retry_days: o.retry_days } : {},
+    ...typeof o.retries === "number" ? { retries: o.retries } : {},
+    ...typeof o.fallback === "string" ? { fallback: o.fallback } : {},
+    ...typeof o.category === "string" ? { category: o.category } : {},
+    ...typeof o.link === "string" ? { link: o.link } : {},
+    status: oneOf(o.status, FLOW_STATUSES, "active"),
+    ...typeof o.method === "string" ? { method: o.method } : {},
+    source: str(o.source, "entity")
+  };
+}
+function flowView(o) {
+  if (typeof o.id !== "string")
+    return null;
+  return {
+    id: o.id,
+    label: str(o.label, o.id),
+    kind: oneOf(o.kind, FLOW_KINDS, "other"),
+    from: str(o.from),
+    to: str(o.to),
+    amount: str(o.amount),
+    cents: nullableNum(o.cents),
+    schedule: str(o.schedule),
+    next: nullableStr(o.next),
+    shortfall: oneOf(o.shortfall, FLOW_SHORTFALLS, "skip"),
+    status: oneOf(o.status, FLOW_STATUSES, "active"),
+    category: nullableStr(o.category),
+    link: idName(o.link),
+    editable: bool(o.editable),
+    source: str(o.source, "entity"),
+    done: num(o.done),
+    missed: num(o.missed),
+    deferred: num(o.deferred),
+    spec: decodeFlow({ id: o.id, ...obj(o.spec) ?? {} })
+  };
+}
+function jobSpec(o) {
+  const spec = { worker: str(o.worker), employer: str(o.employer), basis: oneOf(o.basis, PAY_BASES, "salary"), rate: num(o.rate), pay_every: oneOf(o.pay_every, PAY_EVERY, "biweekly") };
+  for (const [key, value] of Object.entries(o))
+    if (!(key in spec) && value !== undefined)
+      spec[key] = JSON.parse(JSON.stringify(value));
+  return spec;
+}
+function job(o) {
+  if (typeof o.id !== "string")
+    return null;
+  const hours = obj(o.hours);
+  const last = obj(o.lastPay);
+  return {
+    id: o.id,
+    title: str(o.title),
+    employer: str(o.employer),
+    employerId: nullableStr(o.employerId),
+    worker: str(o.worker),
+    workerId: str(o.workerId),
+    basis: oneOf(o.basis, PAY_BASES, "salary"),
+    pay: str(o.pay),
+    rate: num(o.rate),
+    payEvery: oneOf(o.payEvery, PAY_EVERY, "biweekly"),
+    schedule: str(o.schedule),
+    nextPay: nullableStr(o.nextPay),
+    grossPerPeriod: nullableNum(o.grossPerPeriod),
+    status: oneOf(o.status, ["active", "leave", "ended"], "active"),
+    hours: hours ? { scheduled: num(hours.scheduled), attended: num(hours.attended) } : null,
+    lastPay: last ? { at: str(last.at), gross: num(last.gross), taxes: num(last.taxes), deductions: num(last.deductions), net: num(last.net) } : null,
+    deductions: list(o.deductions, (d) => ({ label: str(d.label), value: str(d.value) })),
+    splits: list(o.splits, (s) => ({ to: str(s.to), value: str(s.value) })),
+    spec: jobSpec(obj(o.spec) ?? {})
+  };
+}
+function holding(o) {
+  if (typeof o.id !== "string")
+    return null;
+  const asset = obj(o.asset) ?? {};
+  const option = obj(o.option);
+  const route = obj(o.route);
+  return {
+    id: o.id,
+    account: nullableStr(o.account),
+    asset: { id: str(asset.id), label: str(asset.label, str(asset.id)), class: oneOf(asset.class, ASSET_CLASSES, "other"), symbol: nullableStr(asset.symbol) },
+    qty: num(o.qty),
+    price: num(o.price),
+    value: num(o.value),
+    cost: num(o.cost),
+    gain: num(o.gain),
+    lots: list(o.lots, (l) => ({ qty: num(l.qty), cost: num(l.cost), at: str(l.at), gain: num(l.gain), term: l.term === "long" ? "long" : "short" })),
+    option: option ? { right: option.right === "put" ? "put" : "call", underlying: str(option.underlying), strike: num(option.strike), expiry: str(option.expiry), inTheMoney: bool(option.inTheMoney) } : null,
+    route: route ? { to: nullableStr(route.to), reinvest: bool(route.reinvest) } : null
+  };
+}
+function property(o) {
+  if (typeof o.id !== "string")
+    return null;
+  const mortgage = obj(o.mortgage);
+  return {
+    id: o.id,
+    name: str(o.name, o.id),
+    place: nullableStr(o.place),
+    owners: list(o.owners, ownerLine),
+    share: num(o.share),
+    value: num(o.value),
+    equity: num(o.equity),
+    mortgage: mortgage && typeof mortgage.id === "string" ? { id: mortgage.id, name: str(mortgage.name, mortgage.id), owed: num(mortgage.owed), payment: nullableNum(mortgage.payment), monthsLeft: nullableNum(mortgage.monthsLeft) } : null,
+    leases: list(o.leases, (l) => ({ flow: str(l.flow), tenant: str(l.tenant), rent: num(l.rent), start: nullableStr(l.start), end: nullableStr(l.end), state: oneOf(l.state, ["let", "vacant", "ended"], "let") })),
+    costs: list(o.costs, flowView),
+    forSale: nullableNum(o.forSale)
+  };
+}
+function credit(o) {
+  const factors = obj(o.factors);
+  return {
+    person: str(o.person),
+    score: nullableNum(o.score),
+    band: nullableStr(o.band),
+    tier: nullableOf(o.tier, CREDIT_TIERS),
+    asOf: nullableStr(o.asOf),
+    factors: factors ? { payment: num(factors.payment), utilisation: num(factors.utilisation), age: num(factors.age), mix: num(factors.mix), recent: num(factors.recent) } : null,
+    history: list(o.history, (h) => ({ at: str(h.at), score: num(h.score) })),
+    utilisationPct: num(o.utilisationPct),
+    ageMonths: num(o.ageMonths),
+    onTimePct: num(o.onTimePct),
+    accounts: list(o.accounts, (a) => typeof a.id === "string" ? { id: a.id, name: str(a.name, a.id), class: oneOf(a.class, ACCOUNT_CLASSES, "credit_card"), status: oneOf(a.status, ACCOUNT_STATUSES, "open"), limit: nullableNum(a.limit), owed: num(a.owed), opened: nullableStr(a.opened), late30: num(a.late30), late60: num(a.late60), late90: num(a.late90) } : null),
+    inquiries: list(o.inquiries, (i) => ({ at: str(i.at), note: str(i.note) })),
+    marks: list(o.marks, (m) => ({ at: str(m.at), kind: str(m.kind), note: str(m.note) })),
+    offers: list(o.offers, (f) => typeof f.product === "string" ? { product: f.product, label: str(f.label, f.product), class: oneOf(f.class, ACCOUNT_CLASSES, "credit_card"), aprPct: nullableNum(f.aprPct), limit: nullableNum(f.limit) } : null)
+  };
+}
+function payTier(o) {
+  if (typeof o.use !== "string")
+    return null;
+  return {
+    use: o.use,
+    ...typeof o.min === "number" ? { min: o.min } : {},
+    ...typeof o.max === "number" ? { max: o.max } : {},
+    ...Array.isArray(o.categories) ? { categories: strings(o.categories) } : {},
+    ...Array.isArray(o.except) ? { except: strings(o.except) } : {}
+  };
+}
+function decodeFinanceView(value) {
+  if (!isRecord(value) || typeof value.party !== "string" || typeof value.level !== "number")
+    return null;
+  const overview = obj(value.overview);
+  const flow = overview ? obj(overview.cashFlow) : null;
+  const cash = obj(value.cash);
+  const investments = obj(value.investments);
+  const household = obj(value.household);
+  const report = obj(value.credit);
+  return {
+    party: value.party,
+    name: str(value.name, value.party),
+    partyKind: oneOf(value.partyKind, PARTY_KINDS, "person"),
+    level: num(value.level),
+    detail: bool(value.detail),
+    features: strings(value.features).flatMap((f) => FINANCE_FEATURES.filter((known) => known === f)),
+    band: nullableStr(value.band),
+    opened: value.opened !== false,
+    cash: cash ? typeof cash.cents === "number" ? { cents: cash.cents } : { band: str(cash.band) } : null,
+    overview: overview ? {
+      netWorth: nullableNum(overview.netWorth),
+      assets: nullableNum(overview.assets),
+      liabilities: nullableNum(overview.liabilities),
+      breakdown: list(overview.breakdown, (b) => ({ label: str(b.label), cents: num(b.cents) })),
+      cashFlow: flow ? { period: str(flow.period), in: num(flow.in), out: num(flow.out), byCategory: list(flow.byCategory, (c) => ({ category: str(c.category), cents: num(c.cents) })), nextIn: num(flow.nextIn), nextOut: num(flow.nextOut) } : null,
+      upcoming: list(overview.upcoming, (u) => ({ at: str(u.at), clock: num(u.clock), label: str(u.label), cents: num(u.cents), flow: nullableStr(u.flow), account: nullableStr(u.account) })),
+      alerts: list(overview.alerts, (a) => ({ tone: oneOf(a.tone, ["info", "warn", "neg"], "info"), text: str(a.text), ...typeof a.account === "string" ? { account: a.account } : {}, ...typeof a.flow === "string" ? { flow: a.flow } : {} }))
+    } : null,
+    accounts: list(value.accounts, account),
+    cards: list(value.cards, card),
+    flows: list(value.flows, flowView),
+    jobs: list(value.jobs, job),
+    businesses: list(value.businesses, (b) => {
+      if (typeof b.id !== "string")
+        return null;
+      const books = obj(b.books) ?? {};
+      return {
+        id: b.id,
+        name: str(b.name, b.id),
+        role: nullableOf(b.role, OWNER_ROLES),
+        owners: list(b.owners, ownerLine),
+        accounts: strings(b.accounts),
+        places: list(b.places, (p) => typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id) } : null),
+        books: { period: str(books.period), revenue: num(books.revenue), expenses: num(books.expenses), payroll: num(books.payroll), taxes: num(books.taxes), profit: num(books.profit), lines: list(books.lines, (l) => ({ category: str(l.category), cents: num(l.cents) })) },
+        months: list(b.months, (m) => ({ period: str(m.period), revenue: num(m.revenue), expenses: num(m.expenses), profit: num(m.profit) })),
+        sales: list(b.sales, journalLine),
+        invoices: list(b.invoices, (i) => typeof i.id === "string" ? {
+          id: i.id,
+          business: str(i.business, b.id),
+          customer: str(i.customer),
+          cents: num(i.cents),
+          memo: str(i.memo),
+          issued: num(i.issued),
+          due: num(i.due),
+          state: oneOf(i.state, INVOICE_STATES, "open"),
+          ...typeof i.paid === "number" ? { paid: i.paid } : {},
+          ...typeof i.late_fee === "number" ? { late_fee: i.late_fee } : {},
+          ...typeof i.days_late === "number" ? { days_late: i.days_late } : {},
+          ...typeof i.flow === "string" ? { flow: i.flow } : {},
+          customerName: str(i.customerName, str(i.customer)),
+          issuedAt: str(i.issuedAt),
+          dueAt: str(i.dueAt)
+        } : null),
+        employees: list(b.employees, job),
+        taxes: list(b.taxes, (t) => ({ label: str(t.label), cents: num(t.cents), due: nullableStr(t.due) }))
+      };
+    }),
+    investments: investments ? {
+      value: num(investments.value),
+      cost: num(investments.cost),
+      unrealised: num(investments.unrealised),
+      realised: num(investments.realised),
+      ...typeof investments.income === "number" ? { income: investments.income } : {},
+      ...typeof investments.realisedShort === "number" ? { realisedShort: investments.realisedShort } : {},
+      ...typeof investments.realisedLong === "number" ? { realisedLong: investments.realisedLong } : {},
+      taxDue: obj(investments.taxDue) ? { cents: num(obj(investments.taxDue)?.cents), at: str(obj(investments.taxDue)?.at) } : null,
+      holdings: list(investments.holdings, holding),
+      market: list(investments.market, (m) => typeof m.asset === "string" ? { asset: m.asset, label: str(m.label, m.asset), class: oneOf(m.class, ASSET_CLASSES, "other"), symbol: nullableStr(m.symbol), price: num(m.price) } : null),
+      accounts: strings(investments.accounts)
+    } : null,
+    properties: list(value.properties, property),
+    credit: report ? credit(report) : null,
+    household: household && typeof household.id === "string" ? {
+      id: household.id,
+      name: str(household.name, household.id),
+      members: list(household.members, (m) => typeof m.id === "string" ? { id: m.id, name: str(m.name, m.id), role: str(m.role), share: num(m.share) } : null),
+      accounts: strings(household.accounts),
+      flows: list(household.flows, flowView),
+      monthly: { total: num(obj(household.monthly)?.total), parts: list(obj(household.monthly)?.parts, (p) => typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id), cents: num(p.cents) } : null) }
+    } : null,
+    recent: list(value.recent, journalLine),
+    notes: list(value.notes, (n) => ({ at: str(n.at), text: str(n.text) })),
+    payPrefs: list(value.payPrefs, payTier)
+  };
+}
+
+// src/packs/economy/ui/requests.ts
+function actionRequest(chatId, body) {
+  return { type: "lre.action", chatId, action: body.action, params: body.params, source: "palette" };
+}
+function amountOf(text, currency) {
+  const cents = parseMoneyInput(text, currency);
+  return cents !== null && cents > 0 ? cents : null;
+}
+function transferAction(from, to, cents) {
+  return { action: FINANCE_ACTIONS.transfer, params: { from, to, amount: cents } };
+}
+function payCardAction(account, from, cents) {
+  const params = { card: account };
+  if (from)
+    params.from = from;
+  if (cents !== null)
+    params.amount = cents;
+  return { action: FINANCE_ACTIONS.payCard, params };
+}
+function cashAction(kind, account, cents) {
+  return { action: kind === "withdraw" ? FINANCE_ACTIONS.withdraw : FINANCE_ACTIONS.deposit, params: { account, amount: cents } };
+}
+function autopayAction(account, mode, from, cents) {
+  const params = { account, mode };
+  if (mode !== "none" && from)
+    params.from = from;
+  if (mode === "fixed" && cents !== null)
+    params.amount = cents;
+  return { action: FINANCE_ACTIONS.autopay, params };
+}
+function autopayOps(account, was, mode, from, cents) {
+  const ops = [];
+  if (was?.mode !== mode)
+    ops.push({ op: "set", entity: account, field: "autopay", value: mode });
+  if (mode !== "none" && from && was?.from !== from)
+    ops.push({ op: "set", entity: account, field: "autopay_from", value: from });
+  if (mode === "fixed" && cents !== null && was?.cents !== cents)
+    ops.push({ op: "set", entity: account, field: "autopay_cents", value: cents });
+  return ops;
+}
+function cardChanges(state) {
+  switch (state) {
+    case "active":
+      return ["freeze", "lost", "replace"];
+    case "frozen":
+      return ["unfreeze", "lost", "replace"];
+    case "lost":
+      return ["replace"];
+    case "cancelled":
+      return [];
+  }
+}
+function cardAction(card, change) {
+  const action = { freeze: FINANCE_ACTIONS.cardFreeze, unfreeze: FINANCE_ACTIONS.cardUnfreeze, lost: FINANCE_ACTIONS.cardLost, replace: FINANCE_ACTIONS.cardReplace }[change];
+  return { action, params: { card } };
+}
+function blankFlowForm(from) {
+  return { label: "", kind: "transfer", from, to: "", amount: "", every: "month", interval: 1, day: 1, weekday: null, month: null, at: "", start: "", end: "", count: null, roll: "", shortfall: "skip", retryDays: null, retries: null, fallback: "", category: "" };
+}
+function flowFormOf(flow, currency) {
+  const s = flow.schedule;
+  const once = typeof s.once === "string" && s.once !== "" ? s.once : null;
+  const fixed = "fixed" in flow.amount ? flow.amount.fixed : null;
+  const decimals = Math.max(0, Math.min(6, Math.trunc(currency.decimals)));
+  return {
+    label: flow.label,
+    kind: flow.kind,
+    from: flow.from,
+    to: flow.to,
+    amount: fixed === null ? "" : (fixed / 10 ** decimals).toFixed(decimals),
+    every: once ? "once" : s.every ?? "month",
+    interval: s.interval ?? 1,
+    day: s.days?.[0] ?? null,
+    weekday: s.weekdays?.[0] ?? null,
+    month: s.months?.[0] ?? null,
+    at: once ? once.slice(11, 16) : s.at ?? "",
+    start: once ? once.slice(0, 10) : flow.start ?? "",
+    end: flow.end ?? "",
+    count: flow.count ?? null,
+    roll: s.roll ?? "",
+    shortfall: flow.shortfall,
+    retryDays: flow.retry_days ?? null,
+    retries: flow.retries ?? null,
+    fallback: flow.fallback ?? "",
+    category: flow.category ?? ""
+  };
+}
+function flowFormProblem(form, currency, requireAmount) {
+  if (form.label.trim() === "")
+    return "Give it a name.";
+  if (form.from.trim() === "" || form.to.trim() === "")
+    return "Say where the money comes from and where it goes.";
+  if (form.from === form.to)
+    return "It can't pay itself.";
+  if ((requireAmount || form.amount.trim() !== "") && amountOf(form.amount, currency) === null)
+    return "Type an amount above zero.";
+  if (form.every === "once" && !/^\d{4}-\d{2}-\d{2}$/.test(form.start))
+    return "Pick the day it happens.";
+  if (!Number.isInteger(form.interval) || form.interval < 1)
+    return "Repeat every 1 or more.";
+  if ((form.every === "month" || form.every === "year") && form.day !== null && !(form.day === -1 || Number.isInteger(form.day) && form.day >= 1 && form.day <= 31))
+    return "A day of the month is 1–31, or the last day.";
+  if (form.every === "week" && form.weekday === null)
+    return "Pick a weekday.";
+  if (form.every === "year" && form.month === null)
+    return "Pick a month.";
+  if (form.at !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.at))
+    return "A time is HH:MM.";
+  if (form.every !== "once" && form.start !== "" && form.end !== "" && form.end < form.start)
+    return "It ends before it starts.";
+  if (form.count !== null && !(Number.isInteger(form.count) && form.count >= 1))
+    return "A count is a whole number from 1.";
+  if (form.shortfall === "fallback" && form.fallback === "")
+    return "Pick the account that pays when this one can't.";
+  if (form.shortfall === "retry" && (form.retryDays !== null && !(Number.isInteger(form.retryDays) && form.retryDays >= 1) || form.retries !== null && !(Number.isInteger(form.retries) && form.retries >= 1)))
+    return "Retries are whole numbers from 1.";
+  return null;
+}
+function flowParams(form, currency) {
+  const params = { label: form.label.trim(), kind: form.kind, from: form.from, to: form.to.trim(), every: form.every, shortfall: form.shortfall };
+  const cents = amountOf(form.amount, currency);
+  if (cents !== null)
+    params.amount = cents;
+  if (form.every === "once")
+    params.once = `${form.start}T${form.at || "09:00"}`;
+  else {
+    if (form.interval > 1)
+      params.interval = form.interval;
+    if ((form.every === "month" || form.every === "year") && form.day !== null)
+      params.day = form.day;
+    if (form.every === "week" && form.weekday !== null)
+      params.weekday = form.weekday;
+    if (form.every === "year" && form.month !== null)
+      params.month = form.month;
+    if (form.at !== "")
+      params.at = form.at;
+    if (form.start !== "")
+      params.start = form.start;
+    if (form.end !== "")
+      params.end = form.end;
+    if (form.count !== null)
+      params.count = form.count;
+    if (form.roll !== "")
+      params.roll = form.roll;
+  }
+  if (form.shortfall === "retry") {
+    if (form.retryDays !== null)
+      params.retry_days = form.retryDays;
+    if (form.retries !== null)
+      params.retries = form.retries;
+  }
+  if (form.shortfall === "fallback" && form.fallback !== "")
+    params.fallback = form.fallback;
+  if (form.category.trim() !== "")
+    params.category = form.category.trim();
+  return params;
+}
+function flowCreateAction(form, currency) {
+  return { action: FINANCE_ACTIONS.flowCreate, params: flowParams(form, currency) };
+}
+var SCHEDULE_PARAMS = ["every", "interval", "day", "weekday", "month", "at", "once", "roll"];
+function flowUpdateAction(flow, form, currency) {
+  const was = flowParams(flowFormOf(flow, currency), currency);
+  const now = flowParams(form, currency);
+  const changed = {};
+  for (const [key, value] of Object.entries(now))
+    if (JSON.stringify(was[key] ?? null) !== JSON.stringify(value))
+      changed[key] = value;
+  if (SCHEDULE_PARAMS.some((key) => (key in changed))) {
+    for (const key of SCHEDULE_PARAMS)
+      if (now[key] !== undefined)
+        changed[key] = now[key];
+  }
+  return Object.keys(changed).length === 0 ? null : { action: FINANCE_ACTIONS.flowUpdate, params: { flow: flow.id, ...changed } };
+}
+function flowStatusAction(flow, change) {
+  return { action: change === "pause" ? FINANCE_ACTIONS.flowPause : change === "resume" ? FINANCE_ACTIONS.flowResume : FINANCE_ACTIONS.flowDelete, params: { flow } };
+}
+function flowFieldsOf(form, currency) {
+  const fields = { flow_kind: form.kind, from: form.from, to: form.to.trim(), shortfall: form.shortfall };
+  const cents = amountOf(form.amount, currency);
+  if (cents !== null)
+    fields.amount_cents = cents;
+  if (form.every === "once")
+    fields.once = `${form.start}T${form.at || "09:00"}`;
+  else {
+    fields.every = form.every;
+    if (form.interval > 1)
+      fields.interval = form.interval;
+    if ((form.every === "month" || form.every === "year") && form.day !== null)
+      fields.days = [form.day];
+    if (form.every === "week" && form.weekday !== null)
+      fields.weekdays = [form.weekday];
+    if (form.every === "year" && form.month !== null)
+      fields.months = [form.month];
+    if (form.at !== "")
+      fields.at = form.at;
+    if (form.start !== "")
+      fields.start = form.start;
+    if (form.end !== "")
+      fields.end = form.end;
+    if (form.count !== null)
+      fields.count = form.count;
+    if (form.roll !== "")
+      fields.roll = form.roll;
+  }
+  if (form.shortfall === "retry") {
+    if (form.retryDays !== null)
+      fields.retry_days = form.retryDays;
+    if (form.retries !== null)
+      fields.retries = form.retries;
+  }
+  if (form.shortfall === "fallback" && form.fallback !== "")
+    fields.fallback = form.fallback;
+  if (form.category.trim() !== "")
+    fields.category = form.category.trim();
+  return fields;
+}
+function newIdFor(prefix, label, taken) {
+  const base = `${prefix}_${label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "new"}`;
+  if (!taken.has(base))
+    return base;
+  for (let n = 2;; n += 1)
+    if (!taken.has(`${base}_${n}`))
+      return `${base}_${n}`;
+}
+function flowSpawnOps(id, form, currency) {
+  const fields = { ...flowFieldsOf(form, currency), status: "active" };
+  return [{ op: "spawn", kind: "flow", name: form.label.trim(), id }, ...Object.entries(fields).map(([field, value]) => ({ op: "set", entity: id, field, value }))];
+}
+function flowEditOps(flow, form, currency) {
+  const was = flowFieldsOf(flowFormOf(flow, currency), currency);
+  const now = flowFieldsOf(form, currency);
+  const ops = [];
+  for (const [field, value] of Object.entries(now))
+    if (JSON.stringify(was[field] ?? null) !== JSON.stringify(value))
+      ops.push({ op: "set", entity: flow.id, field, value });
+  for (const field of ["weekdays", "days", "months"])
+    if (was[field] !== undefined && now[field] === undefined)
+      ops.push({ op: "set", entity: flow.id, field, value: [] });
+  if (was.once !== undefined && now.once === undefined)
+    ops.push({ op: "set", entity: flow.id, field: "once", value: "" });
+  return ops;
+}
+function flowStatusOps(flow, status) {
+  return [{ op: "set", entity: flow, field: "status", value: status }];
+}
+function applyCreditAction(product, cents) {
+  return { action: FINANCE_ACTIONS.applyCredit, params: cents === null ? { product } : { product, amount: cents } };
+}
+function payTiersValue(tiers) {
+  return tiers.map((t) => ({ use: t.use, ...t.min !== undefined ? { min: t.min } : {}, ...t.max !== undefined ? { max: t.max } : {}, ...t.categories && t.categories.length > 0 ? { categories: [...t.categories] } : {}, ...t.except && t.except.length > 0 ? { except: [...t.except] } : {} }));
+}
+function payPrefsAction(tiers) {
+  return { action: FINANCE_ACTIONS.payPrefs, params: { tiers: JSON.stringify(payTiersValue(tiers)) } };
+}
+function payPrefsOps(person, tiers) {
+  return [{ op: "set", entity: person, field: "pay_prefs", value: payTiersValue(tiers) }];
+}
+function hireAction(form, currency) {
+  const rate = form.rate.trim() === "" ? null : amountOf(form.rate, currency);
+  if (form.business === "" || form.worker === "" || form.rate.trim() !== "" && rate === null)
+    return null;
+  const params = { business: form.business, worker: form.worker };
+  if (form.title.trim() !== "")
+    params.title = form.title.trim();
+  if (form.basis !== "")
+    params.basis = form.basis;
+  if (rate !== null)
+    params.rate = rate;
+  if (form.hoursPerWeek !== null)
+    params.hours_per_week = form.hoursPerWeek;
+  if (form.payEvery !== "")
+    params.pay_every = form.payEvery;
+  return { action: FINANCE_ACTIONS.hire, params };
+}
+function jobEndAction(job) {
+  return { action: FINANCE_ACTIONS.fire, params: { job } };
+}
+function raiseAction(job, rate) {
+  return { action: FINANCE_ACTIONS.raise, params: { job, rate } };
+}
+function invoiceIssueAction(business, customer, cents, memo, days) {
+  const params = { business, ..."id" in customer ? { customer: customer.id } : { customer_name: customer.name.trim() }, amount: cents };
+  if (memo.trim() !== "")
+    params.memo = memo.trim();
+  if (days !== null)
+    params.days = days;
+  return { action: FINANCE_ACTIONS.invoiceIssue, params };
+}
+function invoiceAction(invoice, change) {
+  return { action: change === "pay" ? FINANCE_ACTIONS.invoicePay : FINANCE_ACTIONS.invoiceVoid, params: { invoice } };
+}
+function drawAction(business, cents) {
+  return { action: FINANCE_ACTIONS.draw, params: { business, amount: cents } };
+}
+function distributeAction(business, cents) {
+  return { action: FINANCE_ACTIONS.distribute, params: cents === null ? { business } : { business, amount: cents } };
+}
+function tradeAction(form, currency) {
+  const params = { side: form.side };
+  if (form.holding !== "")
+    params.holding = form.holding;
+  else if (form.side === "sell")
+    return "Pick what to sell.";
+  else if (form.asset === "")
+    return "Pick what to buy.";
+  else {
+    params.asset = form.asset;
+    if (form.account !== "")
+      params.account = form.account;
+  }
+  if (form.qty !== null) {
+    if (!(form.qty > 0))
+      return "A quantity is above zero.";
+    params.qty = form.qty;
+  } else if (form.amount.trim() !== "") {
+    const cents = amountOf(form.amount, currency);
+    if (cents === null)
+      return "Type an amount above zero.";
+    params.amount = cents;
+  } else if (form.side === "buy")
+    return "Say how many, or how much to spend.";
+  if (form.side === "buy" && form.from !== "")
+    params.from = form.from;
+  if (form.side === "sell" && form.to !== "")
+    params.to = form.to;
+  if (form.option && form.holding === "") {
+    const strike = amountOf(form.option.strike, currency);
+    if (strike === null || !/^\d{4}-\d{2}-\d{2}$/.test(form.option.expiry))
+      return "An option needs a strike and an expiry date.";
+    params.right = form.option.right;
+    params.strike = strike;
+    params.expiry = form.option.expiry;
+  }
+  return { action: FINANCE_ACTIONS.trade, params };
+}
+function exerciseAction(holding, qty, opts = {}) {
+  return { action: FINANCE_ACTIONS.exercise, params: { holding, ...qty !== null ? { qty } : {}, ...opts.from ? { from: opts.from } : {}, ...opts.to ? { to: opts.to } : {} } };
+}
+function routeAction(target, to) {
+  return { action: FINANCE_ACTIONS.route, params: { ...target, to } };
+}
+function routeOps(target, party, to) {
+  return [{ op: "effect", effect: "economy.route", args: { ...target, party, to } }];
+}
+function propertyBuyAction(property, price, opts = {}) {
+  return { action: FINANCE_ACTIONS.propertyBuy, params: { property, price, ...opts.from ? { from: opts.from } : {}, ...opts.down !== undefined ? { down: opts.down } : {}, ...opts.termMonths !== undefined ? { term_months: opts.termMonths } : {}, ...opts.aprPct !== undefined ? { apr_pct: opts.aprPct } : {} } };
+}
+function propertySellAction(property, price, opts = {}) {
+  return { action: FINANCE_ACTIONS.propertySell, params: { property, price, ...opts.buyer ? { buyer: opts.buyer } : {}, ...opts.to ? { to: opts.to } : {} } };
+}
+function leaseStartAction(property, tenant, rent, opts = {}) {
+  return { action: FINANCE_ACTIONS.leaseStart, params: { property, tenant, rent, ...opts.months !== undefined ? { months: opts.months } : {}, ...opts.day !== undefined ? { day: opts.day } : {}, ...opts.unit ? { unit: opts.unit } : {} } };
+}
+function leaseEndAction(lease, on) {
+  return { action: FINANCE_ACTIONS.leaseEnd, params: on ? { lease, on } : { lease } };
+}
+function stakeSellAction(business, share, price, buyer) {
+  return { action: FINANCE_ACTIONS.stakeSell, params: { business, share, price, ...buyer ? { buyer } : {} } };
+}
+function setPriceOps(asset, price) {
+  return [{ op: "effect", effect: "economy.set_price", args: { asset, price } }];
+}
+function closeAccountOps(account) {
+  return [{ op: "effect", effect: "economy.close_account", args: { account } }];
+}
+function releaseHoldOps(account, hold) {
+  return [{ op: "effect", effect: "economy.release_hold", args: { account, hold } }];
+}
+function accountStatusOps(account, status) {
+  return [{ op: "effect", effect: "economy.set_status", args: { account, status } }];
+}
+function jobSpawnOps(id, name, fields) {
+  return [{ op: "spawn", kind: "job", name, id }, ...Object.entries({ ...fields, status: "active" }).map(([field, value]) => ({ op: "set", entity: id, field, value }))];
+}
+
+// src/packs/economy/ui/layout.ts
+var SECTION_LABELS = { overview: "Overview", accounts: "Accounts", flows: "Flows", jobs: "Jobs", businesses: "Businesses", investments: "Investments", properties: "Properties", credit: "Credit", household: "Household" };
+function hubTabs(view) {
+  if (view.level <= 0)
+    return [];
+  const tabs = [{ id: "overview", label: SECTION_LABELS.overview, dot: view.overview?.alerts.some((a) => a.tone !== "info") ?? false }];
+  if (view.level === 1)
+    return tabs;
+  const hasAccounts = view.accounts.length > 0;
+  if (hasAccounts)
+    tabs.push({ id: "accounts", label: SECTION_LABELS.accounts, dot: view.accounts.some((a) => a.status !== "open" || a.statements.some((s) => s.state === "late") || a.cards.some((c) => c.state === "lost")) });
+  if (hasAccounts && view.features.includes("flows") || view.flows.length > 0)
+    tabs.push({ id: "flows", label: SECTION_LABELS.flows, dot: view.flows.some((f) => f.missed > 0 && f.status === "active") });
+  if (view.jobs.length > 0)
+    tabs.push({ id: "jobs", label: SECTION_LABELS.jobs, dot: false });
+  if (view.businesses.length > 0)
+    tabs.push({ id: "businesses", label: SECTION_LABELS.businesses, dot: view.businesses.some((b) => b.invoices.some((i) => i.state === "late")) });
+  if (view.investments !== null)
+    tabs.push({ id: "investments", label: SECTION_LABELS.investments, dot: false });
+  if (view.properties.length > 0)
+    tabs.push({ id: "properties", label: SECTION_LABELS.properties, dot: view.properties.some((p) => p.leases.some((l) => l.state === "vacant")) });
+  if (view.credit !== null)
+    tabs.push({ id: "credit", label: SECTION_LABELS.credit, dot: view.credit.marks.length > 0 });
+  if (view.household !== null)
+    tabs.push({ id: "household", label: SECTION_LABELS.household, dot: false });
+  return tabs;
+}
+var GROUP_LABELS = { cash: "Cash", banking: "Bank accounts", credit: "Cards and credit lines", loans: "Loans", investing: "Investment accounts" };
+function groupOf(account) {
+  const t = CLASS_TRAITS[account.class];
+  if (t.cash)
+    return "cash";
+  if (t.investment)
+    return "investing";
+  if (t.installment)
+    return "loans";
+  if (t.revolving)
+    return "credit";
+  return "banking";
+}
+function accountGroups(accounts) {
+  const order = ["cash", "banking", "credit", "loans", "investing"];
+  return order.map((group) => ({ group, label: GROUP_LABELS[group], accounts: accounts.filter((a) => groupOf(a) === group) })).filter((g) => g.accounts.length > 0);
+}
+function rights(role) {
+  return role ? ROLE_RIGHTS[role] : { spend: false, worth: false, sees: false, manage: false };
+}
+function accountControls(view, account) {
+  if (view.level < 2 || account.status === "closed" || account.status === "charged_off" || account.status === "paid_off")
+    return [];
+  const t = CLASS_TRAITS[account.class];
+  const r = rights(account.role);
+  const out = [];
+  if ((t.revolving || t.installment) && account.cents < 0 && paySources(view).some((a) => a.id !== account.id))
+    out.push("pay");
+  if (r.spend && account.status === "open" && moveSources(view).some((a) => a.id === account.id) && transferTargets(view, account.id).length > 0)
+    out.push("transfer");
+  if (account.autopay !== null && r.manage)
+    out.push("autopay");
+  const holdsCash = view.accounts.some((a) => CLASS_TRAITS[a.class].cash && rights(a.role).spend);
+  if (holdsCash && r.spend && account.status === "open" && t.asset && !t.cash && !t.locked && !t.investment && t.depositRank !== null)
+    out.push("withdraw", "deposit");
+  return out;
+}
+function paySources(view) {
+  return view.accounts.filter((a) => {
+    const t = CLASS_TRAITS[a.class];
+    return t.pays && t.asset && !t.locked && a.status === "open" && rights(a.role).spend;
+  });
+}
+function moveSources(view) {
+  return view.accounts.filter((a) => {
+    const t = CLASS_TRAITS[a.class];
+    return t.asset && !t.cash && !t.locked && a.status === "open" && rights(a.role).spend;
+  });
+}
+function transferTargets(view, from) {
+  return view.accounts.filter((a) => a.id !== from && CLASS_TRAITS[a.class].asset && !CLASS_TRAITS[a.class].cash && a.status === "open" && rights(a.role).sees);
+}
+function cardControls(view, card) {
+  const account = view.accounts.find((a) => a.id === card.account);
+  if (card.holderId !== view.party && !rights(account?.role ?? null).manage)
+    return [];
+  return cardChanges(card.state);
+}
+function flowControls(view, flow) {
+  if (flow.editable) {
+    const out = [];
+    if (flow.status !== "ended")
+      out.push("edit");
+    if (flow.status === "active")
+      out.push("pause");
+    if (flow.status === "paused")
+      out.push("resume");
+    if (flow.kind === "rent" && flow.link !== null && flow.status !== "ended" && view.features.includes("property"))
+      out.push("end_lease");
+    out.push("delete");
+    return out;
+  }
+  const billed = flow.spec.from === view.party || view.businesses.some((b) => b.id === flow.spec.from && rights(b.role).manage);
+  return view.level >= 3 && flow.source === "invoice" && flow.link !== null && billed ? ["pay_now"] : [];
+}
+function jobControls(view, job, employer) {
+  if (view.level < 3 || job.status === "ended")
+    return [];
+  const out = job.workerId === view.party ? ["quit"] : [];
+  if (employer && rights(employer.role).manage)
+    out.push("raise", "let_go");
+  return out;
+}
+function businessControls(view, business) {
+  if (view.level < 3)
+    return [];
+  const r = rights(business.role);
+  const out = r.manage ? ["hire", "invoice", "draw", "distribute"] : [];
+  if (r.worth && view.features.includes("investments"))
+    out.push("stake");
+  return out;
+}
+function invoiceControls(view, business, invoice) {
+  if (view.level < 3 || invoice.state !== "open" && invoice.state !== "late")
+    return [];
+  const out = rights(business.role).manage ? ["void"] : [];
+  if (invoice.customer === view.party)
+    out.push("pay");
+  return out;
+}
+function holdingControls(view, holding) {
+  if (!view.features.includes("investments"))
+    return [];
+  if (holding.account !== null && !rights(view.accounts.find((a) => a.id === holding.account)?.role ?? null).spend)
+    return [];
+  return holding.option && view.features.includes("options") ? ["buy", "sell", "exercise"] : ["buy", "sell"];
+}
+function propertyControls(view, property) {
+  if (!view.features.includes("property"))
+    return [];
+  if (property.share > 0)
+    return ["let", "sell"];
+  return property.forSale !== null && property.forSale !== undefined ? ["buy"] : [];
+}
+function endableLeases(view, property) {
+  if (!propertyControls(view, property).includes("let"))
+    return [];
+  return property.leases.filter((l) => l.state === "let" && view.flows.some((f) => f.id === l.flow)).map((l) => l.flow);
+}
+function flowSources(view) {
+  return paySources(view).filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ id: a.id, label: a.name }));
+}
+function knownPeople(palette) {
+  const pay = palette?.entries.find((e) => e.action === "pay");
+  return (pay?.options ?? []).flatMap((o) => typeof o.params.to === "string" ? [{ id: o.params.to, label: o.label }] : []);
+}
+function flowTargets(view, palette) {
+  const own = view.accounts.filter((a) => a.status === "open" && !CLASS_TRAITS[a.class].cash && rights(a.role).sees).map((a) => ({ id: a.id, label: `${a.name} (yours)` }));
+  return [...own, ...knownPeople(palette).filter((p) => !own.some((o) => o.id === p.id))];
+}
+function utilisation(account) {
+  return account.limit !== null && account.limit > 0 ? Math.round(Math.max(0, -account.cents) * 100 / account.limit) : null;
+}
+function shows(view, feature) {
+  return view.detail || view.features.includes(feature);
+}
+function overviewBlocks(view) {
+  const assets = view.detail || shows(view, "investments") || shows(view, "property");
+  return { assets, breakdown: assets, cashFlowByCategory: view.detail, cashFlowAhead: view.detail, upcoming: view.detail ? 20 : 5, recent: view.detail ? 20 : 5 };
+}
+function accountBlocks(view, account) {
+  const t = CLASS_TRAITS[account.class];
+  return {
+    available: account.available !== null && (t.revolving || shows(view, "holds") || shows(view, "overdraft")),
+    terms: view.detail && account.terms.length > 0,
+    statements: shows(view, "statements") && account.statements.length > 0,
+    pending: shows(view, "holds") && account.pending.length > 0,
+    holds: shows(view, "holds") && account.holds.length > 0,
+    owners: account.owners.length > 1 || view.detail && account.owners.length > 0,
+    cardLimits: shows(view, "daily_limits"),
+    transactions: view.detail ? 40 : 5
+  };
+}
+function investmentBlocks(view) {
+  return { lots: shows(view, "capital_gains"), gains: shows(view, "capital_gains"), income: view.detail };
+}
+function creditBlocks(view) {
+  return { factors: view.detail, report: view.detail, history: view.detail ? 12 : 0 };
+}
+function workBlocks(view) {
+  return { withholding: shows(view, "withholding"), deductions: view.detail, books: view.detail, sales: view.detail, taxes: shows(view, "business_tax") || shows(view, "sales_tax") };
+}
+
+// src/frontend/play/gm.tsx
+function nameOf(gm, id) {
+  if (id === null)
+    return "—";
+  return gm.entities.find((e) => e.id === id)?.name ?? gm.places.find((p) => p.id === id)?.name ?? id;
+}
+function shown(value, field, editor) {
+  if (value === null || value === undefined)
+    return "—";
+  if (field.type === "money" && typeof value === "number")
+    return formatMoney(value, editor.currency);
+  if (field.type === "ref" && typeof value === "string")
+    return nameOf(editor.gm, value);
+  if (typeof value === "boolean")
+    return value ? "yes" : "no";
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+function textOf(value, field, currency) {
+  if (field.type === "money" && typeof value === "number")
+    return (value / 10 ** currency.decimals).toFixed(currency.decimals);
+  if (value === null || value === undefined)
+    return "";
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+function parse(entity, field, text, currency) {
+  if (field.extra && field.type !== "number" && field.type !== "bool" && text.trim() !== "" && /^[[{"]/.test(text.trim())) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  return parseFixValue({ entity: entity.id, field: field.id, type: field.type, value: field.value, ...field.min !== undefined ? { min: field.min } : {}, ...field.max !== undefined ? { max: field.max } : {} }, text, currency);
+}
+function FieldRow(props) {
+  const { entity, field, editor } = props;
+  const [text, setText] = d2(null);
+  const refs = field.type === "ref" ? [...editor.gm.places.map((p) => ({ value: p.id, label: p.name })), ...editor.gm.entities.filter((e) => !field.ref || e.kind === field.ref).map((e) => ({ value: e.id, label: e.name }))] : [];
+  const options = field.type === "enum" ? (field.values ?? []).map((v) => ({ value: v, label: v })) : field.type === "bool" ? [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] : refs;
+  const value = text === null ? null : field.type === "ref" ? text === "" ? null : text : field.type === "enum" ? text : parse(entity, field, text, editor.currency);
+  const bounds = field.min !== undefined || field.max !== undefined ? ` (${field.min ?? "…"}–${field.max ?? "…"})` : "";
+  if (text === null) {
+    const label = `${field.label}${field.locked ? " \uD83D\uDD12" : ""}`;
+    const edit = field.derived ? null : /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: "lre-btn small ghost",
+      "aria-label": `Edit ${field.label}`,
+      onClick: () => setText(field.type === "bool" ? String(field.value === true) : textOf(field.value, field, editor.currency)),
+      children: "✎"
+    }, undefined, false, undefined, this);
+    const note = field.derived ? "worked out" : field.extra ? "not in the kind" : null;
+    if (field.type === "text" || field.extra)
+      return /* @__PURE__ */ u3(Row, {
+        k: label,
+        sub: [shown(field.value, field, editor), note].filter((s) => s !== null).join(" · "),
+        v: edit
+      }, undefined, false, undefined, this);
+    return /* @__PURE__ */ u3(Row, {
+      k: label,
+      sub: note ?? undefined,
+      v: /* @__PURE__ */ u3("span", {
+        class: "lre-inline",
+        children: [
+          shown(field.value, field, editor),
+          edit
+        ]
+      }, undefined, true, undefined, this)
+    }, undefined, false, undefined, this);
+  }
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (value === null && field.type !== "ref")
+        return;
+      editor.edit([{ op: "set", entity: entity.id, field: field.id, value }]).then((ok) => ok && setText(null));
+    },
+    children: [
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: [
+              field.label,
+              bounds
+            ]
+          }, undefined, true, undefined, this),
+          options.length > 0 || field.type === "ref" ? /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            value: text,
+            onChange: (event) => setText(event.currentTarget.value),
+            children: [
+              field.type === "ref" ? /* @__PURE__ */ u3("option", {
+                value: "",
+                children: "None"
+              }, undefined, false, undefined, this) : null,
+              options.map((o) => /* @__PURE__ */ u3("option", {
+                value: o.value,
+                children: o.label
+              }, o.value, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this) : /* @__PURE__ */ u3("input", {
+            class: value === null ? "lre-input invalid" : "lre-input",
+            value: text,
+            onInput: (event) => setText(event.currentTarget.value)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("button", {
+            type: "submit",
+            class: "lre-btn primary",
+            disabled: editor.busy || value === null && field.type !== "ref",
+            children: "Save"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn ghost",
+            onClick: () => setText(null),
+            children: "Cancel"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function EntityState(props) {
+  const { entity, editor } = props;
+  const [tier, setTier] = d2(entity.tier);
+  const [agent, setAgent] = d2(entity.agent);
+  const [levels, setLevels] = d2(Object.fromEntries(entity.levels.map((l) => [l.domain, l.override])));
+  const op = entityStateOp(entity, tier, agent, levels);
+  return /* @__PURE__ */ u3(Card, {
+    title: "Simulation",
+    children: [
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Tier"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            value: tier,
+            onChange: (event) => setTier(event.currentTarget.value),
+            children: editor.gm.tiers.map((t) => /* @__PURE__ */ u3("option", {
+              value: t.id,
+              children: t.label
+            }, t.id, false, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      entity.pov ? null : /* @__PURE__ */ u3("label", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            type: "checkbox",
+            checked: agent,
+            onChange: (event) => setAgent(event.currentTarget.checked)
+          }, undefined, false, undefined, this),
+          " Lives their own day (agendas and plans)"
+        ]
+      }, undefined, true, undefined, this),
+      entity.levels.map((l) => /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: [
+              editor.gm.domains.find((d) => d.id === l.domain)?.label ?? l.domain,
+              " · now ",
+              l.level
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            value: levels[l.domain] === null || levels[l.domain] === undefined ? "" : String(levels[l.domain]),
+            onChange: (event) => setLevels({ ...levels, [l.domain]: event.currentTarget.value === "" ? null : Number(event.currentTarget.value) }),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: "From the tier"
+              }, undefined, false, undefined, this),
+              [0, 1, 2, 3, 4].map((n) => /* @__PURE__ */ u3("option", {
+                value: String(n),
+                children: [
+                  "Level ",
+                  n
+                ]
+              }, n, true, undefined, this))
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, l.domain, true, undefined, this)),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn primary",
+        disabled: editor.busy || op === null,
+        onClick: () => op && void editor.edit([op]),
+        children: "Save"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Classification(props) {
+  const { entity, editor } = props;
+  const [classes, setClasses] = d2(entity.class);
+  const [tags, setTags] = d2(entity.tags);
+  const op = classifyOp(entity, classes, tags);
+  const suggestions = [...new Set(editor.gm.entities.flatMap((e) => e.tags))].sort((a, b) => a.localeCompare(b));
+  return /* @__PURE__ */ u3(Card, {
+    title: "Classification",
+    children: [
+      /* @__PURE__ */ u3(ClassesInput, {
+        label: "Classes",
+        value: classes,
+        doc: editor.gm,
+        onChange: (next) => setClasses(next ?? {})
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TagListInput, {
+        label: "Tags",
+        value: tags,
+        suggestions,
+        onChange: setTags
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn primary",
+        disabled: editor.busy || op === null,
+        onClick: () => op && void editor.edit([op]),
+        children: "Save"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Life(props) {
+  const { entity, editor } = props;
+  const [to, setTo] = d2(entity.life.state);
+  const [tell, setTell] = d2([]);
+  const op = lifeEditOp(entity, to, tell);
+  const name = (id) => editor.gm.entities.find((e) => e.id === id)?.pov ? "You" : editor.gm.entities.find((e) => e.id === id)?.name ?? id;
+  const others = editor.gm.entities.filter((e) => e.id !== entity.id && !e.gone && !tell.includes(e.id));
+  const { everyone, aware, unaware } = entity.life;
+  return /* @__PURE__ */ u3(Card, {
+    title: "Life",
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "Known to",
+        v: everyone ? unaware.length > 0 ? `everyone but ${unaware.map((p) => name(p.id)).join(", ")}` : "everyone" : aware.length > 0 ? aware.map((p) => name(p.id)).join(", ") : "no one"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Life state"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            value: to,
+            onChange: (event) => setTo(event.currentTarget.value),
+            children: editor.gm.lifeStates.map((s) => /* @__PURE__ */ u3("option", {
+              value: s.id,
+              children: [
+                s.label,
+                s.acts ? "" : " (doesn't act)"
+              ]
+            }, s.id, true, undefined, this))
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      tell.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        style: { flexWrap: "wrap" },
+        children: tell.map((id) => /* @__PURE__ */ u3("button", {
+          type: "button",
+          class: "lre-btn small",
+          "aria-label": `Don't tell ${name(id)}`,
+          onClick: () => setTell(tell.filter((t) => t !== id)),
+          children: [
+            name(id),
+            " ✕"
+          ]
+        }, id, true, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        value: "",
+        "aria-label": "Tell someone",
+        onChange: (event) => event.currentTarget.value ? setTell([...tell, event.currentTarget.value]) : undefined,
+        children: [
+          /* @__PURE__ */ u3("option", {
+            value: "",
+            children: "+ Tell someone…"
+          }, undefined, false, undefined, this),
+          others.map((e) => /* @__PURE__ */ u3("option", {
+            value: e.id,
+            children: e.pov ? "You" : e.name
+          }, e.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn primary",
+        disabled: editor.busy || op === null,
+        onClick: () => op && void editor.edit([op]),
+        children: "Save"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function relationDetail(r, gm) {
+  const defs = gm.relationTypes.find((t) => t.id === r.type)?.fields ?? [];
+  const parts = Object.entries(r.fields ?? {}).map(([id, v]) => `${defs.find((d) => d.id === id)?.label ?? id} ${typeof v === "string" ? v : JSON.stringify(v)}`);
+  if (r.value !== undefined)
+    parts.push(`now ${r.value}`);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+function Relations(props) {
+  const { entity, editor } = props;
+  const types = editor.gm.relationTypes.filter((t) => t.id !== "in");
+  const [type, setType] = d2(types[0]?.id ?? "knows");
+  const [to, setTo] = d2("");
+  const [inputs, setInputs] = d2({});
+  const defs = types.find((t) => t.id === type)?.fields ?? [];
+  const fields = relationFields(defs, inputs, entity.relations.find((r) => r.type === type && r.to === to)?.fields);
+  return /* @__PURE__ */ u3(Card, {
+    title: "Relations",
+    children: [
+      entity.relations.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "None."
+      }, undefined, false, undefined, this) : null,
+      entity.relations.map((r) => /* @__PURE__ */ u3(Row, {
+        k: `${editor.gm.relationTypes.find((t) => t.id === r.type)?.label ?? r.type} → ${r.toName}`,
+        sub: relationDetail(r, editor.gm),
+        v: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            r.type === "in" ? null : /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small ghost",
+              "aria-label": `Edit ${r.type} ${r.toName}`,
+              onClick: () => (setType(r.type), setTo(r.to), setInputs(Object.fromEntries(Object.entries(r.fields ?? {}).map(([id, v]) => [id, typeof v === "string" ? v : JSON.stringify(v)])))),
+              children: "✎"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small danger",
+              disabled: editor.busy,
+              onClick: () => void editor.edit([{ op: "unlink", rel: r.type, from: entity.id, to: r.to }]),
+              children: "Remove"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, `${r.type}:${r.to}`, false, undefined, this)),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        "data-lre-gm-relation-form": true,
+        children: [
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            "aria-label": "Relation",
+            value: type,
+            onChange: (event) => (setType(event.currentTarget.value), setInputs({})),
+            children: types.map((t) => /* @__PURE__ */ u3("option", {
+              value: t.id,
+              children: t.label
+            }, t.id, false, undefined, this))
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            "aria-label": "To",
+            value: to,
+            onChange: (event) => setTo(event.currentTarget.value),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: "To…"
+              }, undefined, false, undefined, this),
+              editor.gm.entities.filter((e) => e.id !== entity.id).map((e) => /* @__PURE__ */ u3("option", {
+                value: e.id,
+                children: e.name
+              }, e.id, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this),
+          defs.map((d) => /* @__PURE__ */ u3("label", {
+            class: "lre-field",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "label",
+                children: [
+                  d.label,
+                  d.min !== undefined || d.max !== undefined ? ` (${d.min ?? "…"}–${d.max ?? "…"})` : ""
+                ]
+              }, undefined, true, undefined, this),
+              d.type === "enum" || d.type === "bool" ? /* @__PURE__ */ u3("select", {
+                class: "lre-input",
+                value: inputs[d.id] ?? "",
+                onChange: (event) => setInputs({ ...inputs, [d.id]: event.currentTarget.value }),
+                children: [
+                  /* @__PURE__ */ u3("option", {
+                    value: "",
+                    children: "None"
+                  }, undefined, false, undefined, this),
+                  (d.type === "bool" ? ["true", "false"] : d.values ?? []).map((v) => /* @__PURE__ */ u3("option", {
+                    value: v,
+                    children: d.type === "bool" ? v === "true" ? "Yes" : "No" : v
+                  }, v, false, undefined, this))
+                ]
+              }, undefined, true, undefined, this) : /* @__PURE__ */ u3("input", {
+                class: inputs[d.id] && relationFields([d], inputs) === null ? "lre-input invalid" : "lre-input",
+                inputMode: d.type === "number" ? "decimal" : undefined,
+                value: inputs[d.id] ?? "",
+                onInput: (event) => setInputs({ ...inputs, [d.id]: event.currentTarget.value })
+              }, undefined, false, undefined, this)
+            ]
+          }, d.id, true, undefined, this)),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn",
+            disabled: editor.busy || to === "" || fields === null,
+            onClick: () => fields && void editor.edit([{ op: "link", rel: type, from: entity.id, to, ...Object.keys(fields).length > 0 ? { fields } : {} }]),
+            children: "Add or update"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Placement(props) {
+  const { entity, editor } = props;
+  const [amount, setAmount] = d2("");
+  const add = adjustOp(entity.id, amount, editor.currency, false);
+  const take = adjustOp(entity.id, amount, editor.currency, true);
+  return /* @__PURE__ */ u3(Card, {
+    title: "Placement",
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "At",
+        v: nameOf(editor.gm, entity.place)
+      }, undefined, false, undefined, this),
+      entity.holder ? /* @__PURE__ */ u3(Row, {
+        k: "Inside",
+        v: nameOf(editor.gm, entity.holder)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Move to a place",
+        value: "",
+        onChange: (event) => event.currentTarget.value !== "" && void editor.edit([{ op: "move", entity: entity.id, to: event.currentTarget.value }]),
+        children: [
+          /* @__PURE__ */ u3("option", {
+            value: "",
+            children: "Move to a place…"
+          }, undefined, false, undefined, this),
+          editor.gm.places.map((p) => /* @__PURE__ */ u3("option", {
+            value: p.id,
+            children: p.name
+          }, p.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Put inside",
+        value: "",
+        onChange: (event) => event.currentTarget.value !== "" && void editor.edit([{ op: "put", entity: entity.id, into: event.currentTarget.value }]),
+        children: [
+          /* @__PURE__ */ u3("option", {
+            value: "",
+            children: "Put inside…"
+          }, undefined, false, undefined, this),
+          editor.gm.entities.filter((e) => e.id !== entity.id).map((e) => /* @__PURE__ */ u3("option", {
+            value: e.id,
+            children: e.name
+          }, e.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      entity.holder ? /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn",
+        disabled: editor.busy,
+        onClick: () => void editor.edit([{ op: "put", entity: entity.id, into: null }]),
+        children: "Take out"
+      }, undefined, false, undefined, this) : null,
+      entity.balance !== undefined ? /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: "Balance",
+            v: formatMoney(entity.balance, editor.currency)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("input", {
+            class: add === null && amount !== "" ? "lre-input invalid" : "lre-input",
+            "aria-label": "Amount",
+            placeholder: "Amount",
+            value: amount,
+            onInput: (event) => setAmount(event.currentTarget.value)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-inline",
+            children: [
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn",
+                disabled: editor.busy || add === null,
+                onClick: () => add && void editor.edit([add]),
+                children: "Add"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn",
+                disabled: editor.busy || take === null,
+                onClick: () => take && void editor.edit([take]),
+                children: "Take"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function EntityEditor(props) {
+  const { entity, editor } = props;
+  const numbers = entity.fields.filter((f) => !f.derived && (f.type === "number" || f.type === "money" || f.type === "duration"));
+  const [addField, setAddField] = d2(numbers[0]?.id ?? "");
+  const [delta, setDelta] = d2("");
+  const amount = Number(delta);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-gm-entity": entity.id,
+    children: [
+      /* @__PURE__ */ u3(Card, {
+        title: entity.name,
+        aside: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            entity.gone ? /* @__PURE__ */ u3("span", {
+              class: "lre-badge neg",
+              children: "Removed"
+            }, undefined, false, undefined, this) : null,
+            entity.life.state !== "alive" ? /* @__PURE__ */ u3("span", {
+              class: "lre-badge neg",
+              children: entity.life.label
+            }, undefined, false, undefined, this) : null,
+            entity.visibility !== "public" ? /* @__PURE__ */ u3("span", {
+              class: "lre-badge warn",
+              children: entity.visibility.replace(/_/g, " ")
+            }, undefined, false, undefined, this) : null,
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small ghost",
+              onClick: props.onClose,
+              children: "All"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: "Kind",
+            v: editor.gm.kinds.find((k) => k.id === entity.kind)?.label ?? entity.kind,
+            sub: entity.spawned ? "spawned in this chat" : undefined
+          }, undefined, false, undefined, this),
+          entity.pov ? null : entity.gone ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn primary",
+            disabled: editor.busy,
+            onClick: () => void editor.edit([{ op: "restore", entity: entity.id }]),
+            children: "Restore"
+          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn danger",
+            disabled: editor.busy,
+            onClick: () => void editor.edit([{ op: "despawn", entity: entity.id }]),
+            children: "Remove from the world"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Fields",
+        children: [
+          entity.fields.map((f) => /* @__PURE__ */ u3(FieldRow, {
+            entity,
+            field: f,
+            editor
+          }, f.id, false, undefined, this)),
+          numbers.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-inline",
+            children: [
+              /* @__PURE__ */ u3("select", {
+                class: "lre-input",
+                "aria-label": "Add to",
+                value: addField,
+                onChange: (event) => setAddField(event.currentTarget.value),
+                children: numbers.map((f) => /* @__PURE__ */ u3("option", {
+                  value: f.id,
+                  children: f.label
+                }, f.id, false, undefined, this))
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("input", {
+                class: "lre-input",
+                inputMode: "decimal",
+                "aria-label": "Amount to add",
+                placeholder: "+/−",
+                value: delta,
+                onInput: (event) => setDelta(event.currentTarget.value)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn",
+                disabled: editor.busy || delta.trim() === "" || !Number.isFinite(amount) || amount === 0,
+                onClick: () => void editor.edit([{ op: "add", entity: entity.id, field: addField, delta: amount }]).then((ok) => ok && setDelta("")),
+                children: "Add"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      entity.sheet?.map((section) => /* @__PURE__ */ u3(Card, {
+        title: section.title,
+        children: section.rows.map((row) => /* @__PURE__ */ u3(Row, {
+          k: row.label,
+          v: row.value,
+          sub: row.detail
+        }, row.label, false, undefined, this))
+      }, section.title, false, undefined, this)),
+      /* @__PURE__ */ u3(Placement, {
+        entity,
+        editor
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Relations, {
+        entity,
+        editor
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(EntityState, {
+        entity,
+        editor
+      }, `${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`, false, undefined, this),
+      /* @__PURE__ */ u3(Life, {
+        entity,
+        editor
+      }, JSON.stringify(entity.life), false, undefined, this),
+      /* @__PURE__ */ u3(Classification, {
+        entity,
+        editor
+      }, JSON.stringify([entity.class, entity.tags]), false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Spawn(props) {
+  const { editor } = props;
+  const [kind, setKind] = d2(editor.gm.kinds.find((k) => k.id === "person")?.id ?? editor.gm.kinds[0]?.id ?? "");
+  const [name, setName] = d2("");
+  const [place, setPlace] = d2("");
+  const [tier, setTier] = d2("");
+  return /* @__PURE__ */ u3(Card, {
+    title: "Spawn",
+    children: [
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Kind",
+        value: kind,
+        onChange: (event) => setKind(event.currentTarget.value),
+        children: editor.gm.kinds.map((k) => /* @__PURE__ */ u3("option", {
+          value: k.id,
+          children: k.label
+        }, k.id, false, undefined, this))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        "aria-label": "Name",
+        placeholder: "Name",
+        value: name,
+        onInput: (event) => setName(event.currentTarget.value)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Place",
+        value: place,
+        onChange: (event) => setPlace(event.currentTarget.value),
+        children: [
+          /* @__PURE__ */ u3("option", {
+            value: "",
+            children: "No place"
+          }, undefined, false, undefined, this),
+          editor.gm.places.map((p) => /* @__PURE__ */ u3("option", {
+            value: p.id,
+            children: p.name
+          }, p.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        "aria-label": "Tier",
+        value: tier,
+        onChange: (event) => setTier(event.currentTarget.value),
+        children: [
+          /* @__PURE__ */ u3("option", {
+            value: "",
+            children: "The world's tier for new people"
+          }, undefined, false, undefined, this),
+          editor.gm.tiers.map((t) => /* @__PURE__ */ u3("option", {
+            value: t.id,
+            children: t.label
+          }, t.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn primary",
+        disabled: editor.busy || name.trim() === "" || kind === "",
+        onClick: () => void editor.edit([{ op: "spawn", kind, name: name.trim(), ...place ? { place } : {}, ...tier ? { tier } : {} }]).then((ok) => ok && setName("")),
+        children: "Spawn"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Entities(props) {
+  const { editor } = props;
+  const [query, setQuery] = d2("");
+  const [kind, setKind] = d2("");
+  const [open, setOpen] = d2(null);
+  const selected = editor.gm.entities.find((e) => e.id === open);
+  if (selected)
+    return /* @__PURE__ */ u3(EntityEditor, {
+      entity: selected,
+      editor,
+      onClose: () => setOpen(null)
+    }, undefined, false, undefined, this);
+  const q = query.trim().toLowerCase();
+  const list = editor.gm.entities.filter((e) => (kind === "" || e.kind === kind) && (q === "" || e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q))).sort((a, b) => Number(a.gone) - Number(b.gone) || a.name.localeCompare(b.name));
+  const kinds = editor.gm.kinds.filter((k) => editor.gm.entities.some((e) => e.kind === k.id));
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          /* @__PURE__ */ u3("input", {
+            class: "lre-input",
+            type: "search",
+            "aria-label": "Search",
+            placeholder: "Search by name",
+            value: query,
+            onInput: (event) => setQuery(event.currentTarget.value)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            "aria-label": "Kind",
+            value: kind,
+            onChange: (event) => setKind(event.currentTarget.value),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "",
+                children: "Every kind"
+              }, undefined, false, undefined, this),
+              kinds.map((k) => /* @__PURE__ */ u3("option", {
+                value: k.id,
+                children: k.label
+              }, k.id, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: `${list.length} of ${editor.gm.entities.length}`,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-list",
+          "data-lre-gm-list": "entities",
+          children: list.map((e) => /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-item",
+            onClick: () => setOpen(e.id),
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "grow",
+                children: [
+                  e.name,
+                  /* @__PURE__ */ u3("span", {
+                    class: "sub",
+                    children: editor.gm.kinds.find((k) => k.id === e.kind)?.label ?? e.kind
+                  }, undefined, false, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              e.pov ? /* @__PURE__ */ u3("span", {
+                class: "lre-badge accent",
+                children: "You"
+              }, undefined, false, undefined, this) : null,
+              e.gone ? /* @__PURE__ */ u3("span", {
+                class: "lre-badge neg",
+                children: "Removed"
+              }, undefined, false, undefined, this) : null,
+              e.life.state !== "alive" ? /* @__PURE__ */ u3("span", {
+                class: "lre-badge neg",
+                children: e.life.label
+              }, undefined, false, undefined, this) : null,
+              e.spawned ? /* @__PURE__ */ u3("span", {
+                class: "lre-badge",
+                children: "Spawned"
+              }, undefined, false, undefined, this) : null,
+              e.agent ? /* @__PURE__ */ u3("span", {
+                class: "lre-badge",
+                children: "Own day"
+              }, undefined, false, undefined, this) : null,
+              e.visibility !== "public" ? /* @__PURE__ */ u3("span", {
+                class: "lre-badge warn",
+                children: e.visibility.replace(/_/g, " ")
+              }, undefined, false, undefined, this) : null
+            ]
+          }, e.id, true, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Spawn, {
+        editor
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function Body(props) {
+  const { editor } = props;
+  const app = useApp();
+  const [section, setSection] = d2("entities");
+  const panelId = P2();
+  const { gm } = editor;
+  const packTab = app.catalog.gmSections.find((def) => def.id === section);
+  const fight = gm.encounter === null ? null : decodeEncounterView(gm.encounter);
+  const shown = section === "fight" && !fight ? "entities" : section;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    children: [
+      /* @__PURE__ */ u3(Tabs, {
+        label: "GM view",
+        panelId,
+        value: shown,
+        tabs: [
+          { id: "entities", label: "Entities" },
+          { id: "places", label: "Places" },
+          { id: "tracks", label: "Tracks" },
+          ...app.catalog.gmSections.map((def) => ({ id: def.id, label: def.label })),
+          ...fight ? [{ id: "fight", label: "Fight" }] : [],
+          { id: "edits", label: "Edits" }
+        ],
+        onChange: setSection
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        ...tabPanel(panelId, shown),
+        children: [
+          shown === "fight" && fight ? /* @__PURE__ */ u3(EncounterCard, {
+            view: fight
+          }, undefined, false, undefined, this) : null,
+          shown === "entities" ? /* @__PURE__ */ u3(Entities, {
+            editor
+          }, undefined, false, undefined, this) : null,
+          section === "places" ? /* @__PURE__ */ u3(Card, {
+            title: "Places",
+            children: gm.places.map((p) => /* @__PURE__ */ u3(Row, {
+              k: p.name,
+              sub: p.parent ? `in ${nameOf(gm, p.parent)}` : undefined,
+              v: /* @__PURE__ */ u3("span", {
+                class: p.visibility === "public" ? "lre-badge" : "lre-badge warn",
+                children: p.visibility.replace(/_/g, " ")
+              }, undefined, false, undefined, this)
+            }, p.id, false, undefined, this))
+          }, undefined, false, undefined, this) : null,
+          section === "tracks" ? gm.tracks.map((t) => /* @__PURE__ */ u3(Card, {
+            title: t.label,
+            aside: /* @__PURE__ */ u3("span", {
+              class: "lre-badge",
+              children: t.kind
+            }, undefined, false, undefined, this),
+            children: [
+              t.owner ? /* @__PURE__ */ u3(Row, {
+                k: "Owner",
+                v: t.owner
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3("select", {
+                class: "lre-input",
+                "aria-label": `${t.label} stage`,
+                value: t.stage,
+                disabled: editor.busy,
+                onChange: (event) => void editor.edit([{ op: "stage", track: t.id, to: event.currentTarget.value }]),
+                children: t.stages.map((s) => /* @__PURE__ */ u3("option", {
+                  value: s.id,
+                  children: s.label
+                }, s.id, false, undefined, this))
+              }, undefined, false, undefined, this),
+              t.stages.filter((s) => s.truth).map((s) => /* @__PURE__ */ u3(Row, {
+                k: s.label,
+                v: s.truth
+              }, s.id, false, undefined, this))
+            ]
+          }, t.id, true, undefined, this)) : null,
+          packTab ? /* @__PURE__ */ u3(packTab.component, {
+            ...props.section,
+            gm,
+            busy: editor.busy,
+            edit: editor.edit
+          }, undefined, false, undefined, this) : null,
+          section === "edits" ? /* @__PURE__ */ u3(Card, {
+            title: "Corrections in force",
+            children: [
+              gm.refused.map((r) => /* @__PURE__ */ u3(Row, {
+                k: "Didn't apply after a reply",
+                v: r.reason,
+                tone: "warn"
+              }, r.id, false, undefined, this)),
+              gm.edits.length === 0 ? /* @__PURE__ */ u3(Empty, {
+                children: "No corrections on this path."
+              }, undefined, false, undefined, this) : gm.edits.map((e) => /* @__PURE__ */ u3(Row, {
+                k: e.lines.join(" · ") || "(bookkeeping)"
+              }, `${e.messageId}:${e.seq}`, false, undefined, this))
+            ]
+          }, undefined, true, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn ghost",
+        onClick: () => app.ui.update((ui) => ({ ...ui, section: "build" })),
+        children: "Kinds and places are the world's: edit them in Build"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function GmPanel(props) {
+  const app = useApp();
+  const [revealed, setRevealed] = d2(false);
+  const [gm, setGm] = d2(null);
+  const [busy, run] = useBusy();
+  const load = async () => {
+    const view = await app.request({ type: "lre.gm", chatId: props.chatId });
+    if (view)
+      setGm(view);
+  };
+  A(() => {
+    if (revealed)
+      load();
+  }, [revealed, props.chatId, props.state.status, props.state.chips.length, props.state.journal.length]);
+  if (!revealed) {
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-panel": "core.gm",
+      children: [
+        /* @__PURE__ */ u3("div", {
+          class: "lre-banner warn",
+          children: [
+            /* @__PURE__ */ u3("strong", {
+              children: "Spoilers ahead"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("span", {
+              children: "The GM view shows and edits everything: secrets, hidden agendas, unrevealed truths, removed people and everyone's money. Each edit is a correction with its own Undo."
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3("button", {
+          type: "button",
+          class: "lre-btn primary",
+          onClick: () => setRevealed(true),
+          children: "Show the GM view"
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  }
+  const editor = gm ? {
+    gm,
+    currency: props.state.currency ?? DEFAULT_CURRENCY,
+    busy,
+    edit: (ops) => new Promise((resolve) => run(async () => {
+      const result = await app.request(editRequest(props.chatId, ops));
+      if (result?.pending)
+        app.toast("Saved — it applies when the reply finishes.", "info");
+      if (result)
+        await load();
+      resolve(result !== null);
+    }))
+  } : null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-panel": "core.gm",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-spread",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "lre-preview-label",
+            children: "GM view"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small",
+            onClick: () => (setRevealed(false), setGm(null)),
+            children: "Hide"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      editor ? /* @__PURE__ */ u3(Body, {
+        editor,
+        section: { chatId: props.chatId, currency: editor.currency, reload: load, send: props.send }
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
+        children: "Loading the GM view…"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/economy/ui/lines.tsx
+function TxnRows(props) {
+  const [all, setAll] = d2(false);
+  if (props.lines.length === 0)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "No transactions yet."
+    }, undefined, false, undefined, this);
+  const shown = all ? props.lines : props.lines.slice(0, props.max);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      shown.map((t, i) => /* @__PURE__ */ u3(Row, {
+        k: t.memo,
+        sub: [t.at, props.account ? t.account : null, t.category ? humanize(t.category) : null, t.counterparty, t.card, t.status === "pending" ? "pending" : null].filter((s) => s !== null && s !== "").join(" · "),
+        v: `${t.cents > 0 ? "+" : ""}${formatMoney(t.cents, props.currency)}`,
+        tone: t.cents < 0 ? "neg" : "pos"
+      }, `${t.id}:${i}`, false, undefined, this)),
+      props.lines.length > shown.length ? /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small ghost",
+        onClick: () => setAll(true),
+        children: [
+          "Show all ",
+          props.lines.length
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function EntityFields(props) {
+  const entity = props.controls.gm.entities.find((e) => e.id === props.entity);
+  if (!entity)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "Not in the world."
+    }, undefined, false, undefined, this);
+  const fields = props.only ? props.only.flatMap((id) => entity.fields.filter((f) => f.id === id)) : entity.fields;
+  return /* @__PURE__ */ u3(M, {
+    children: fields.map((f) => /* @__PURE__ */ u3(FieldRow, {
+      entity,
+      field: f,
+      editor: props.controls
+    }, f.id, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+function AmountAction(props) {
+  const [text, setText] = d2("");
+  const empty = text.trim() === "";
+  const cents = empty ? null : amountOf(text, props.currency);
+  const ok = empty ? props.optional !== undefined : cents !== null;
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (ok)
+        props.submit(cents).then((sent) => sent && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(AmountField, {
+        label: props.label,
+        value: text,
+        currency: props.currency,
+        onInput: setText,
+        invalid: !empty && cents === null,
+        placeholder: props.optional
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: props.busy || !ok,
+        children: props.go
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/economy/ui/flows.tsx
+var EVERY = [
+  { value: "once", label: "Once" },
+  { value: "day", label: "Every day" },
+  { value: "week", label: "Every week" },
+  { value: "month", label: "Every month" },
+  { value: "year", label: "Every year" }
+];
+var DAYS = [...Array.from({ length: 31 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) })), { value: "-1", label: "The last day" }];
+var OTHER = "__other";
+function endpoints(view, controls) {
+  if (controls.mode === "player")
+    return { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, controls.palette).map((t) => ({ value: t.id, label: t.label })) };
+  const accounts = view.accounts.filter((a) => !CLASS_TRAITS[a.class].cash).map((a) => ({ value: a.id, label: a.name }));
+  const parties = controls.gm.entities.filter((e) => !e.gone && (e.kind === "person" || e.kind === "business" || e.kind === "trust" || e.kind === "household")).map((e) => ({ value: e.id, label: `${e.name} (${e.kind})` }));
+  return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
+}
+function FlowFormView(props) {
+  const { view, controls, flow } = props;
+  const ends = endpoints(view, controls);
+  const [form, setForm] = d2(() => flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(ends.from[0]?.value ?? "") });
+  const [more, setMore] = d2(false);
+  const typedTo = form.to !== "" && !ends.to.some((t) => t.value === form.to);
+  const [otherTo, setOtherTo] = d2(typedTo);
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const problem = flowFormProblem(form, controls.currency, flow === undefined || "fixed" in flow.spec.amount);
+  const submit = async () => {
+    if (controls.mode === "player") {
+      if (!flow)
+        return controls.act(flowCreateAction(form, controls.currency));
+      const update = flowUpdateAction(flow.spec, form, controls.currency);
+      return update === null || controls.act(update);
+    }
+    if (!flow)
+      return controls.edit(flowSpawnOps(newIdFor("flow", form.label, new Set(controls.gm.entities.map((e) => e.id))), form, controls.currency));
+    const ops = flowEditOps(flow.spec, form, controls.currency);
+    return ops.length === 0 || controls.edit(ops);
+  };
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    "data-lre-flow-form": flow?.id ?? "new",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (problem === null)
+        submit().then((ok) => ok && props.onDone());
+    },
+    children: [
+      controls.mode === "player" || !flow ? /* @__PURE__ */ u3(TextField, {
+        label: "Name",
+        value: form.label,
+        onInput: (label) => set({ label }),
+        placeholder: "Rent, Savings, Allowance…"
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Kind",
+        value: form.kind,
+        options: FLOW_KINDS.map((k) => ({ value: k, label: humanize(k) })),
+        onChange: (v) => set({ kind: FLOW_KINDS.find((k) => k === v) ?? "transfer" })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "From",
+        value: form.from,
+        empty: "Choose",
+        options: ends.from.some((f) => f.value === form.from) || form.from === "" ? ends.from : [...ends.from, { value: form.from, label: form.from }],
+        onChange: (from) => set({ from })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "To",
+        value: otherTo ? OTHER : form.to,
+        empty: "Choose",
+        options: [...ends.to, { value: OTHER, label: "Someone else (type the name)" }],
+        onChange: (v) => {
+          setOtherTo(v === OTHER);
+          set({ to: v === OTHER ? "" : v });
+        }
+      }, undefined, false, undefined, this),
+      otherTo ? /* @__PURE__ */ u3(TextField, {
+        label: "Paid to (a name outside the world)",
+        value: form.to,
+        onInput: (to) => set({ to }),
+        placeholder: "Harbor Mutual"
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(AmountField, {
+        label: flow && !("fixed" in flow.spec.amount) ? `Amount (empty keeps ${flow.amount})` : "Amount",
+        value: form.amount,
+        currency: controls.currency,
+        onInput: (amount) => set({ amount }),
+        invalid: form.amount.trim() !== "" && amountOf(form.amount, controls.currency) === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "When",
+        value: form.every,
+        options: EVERY,
+        onChange: (v) => set({ every: EVERY.find((e) => e.value === v)?.value ?? "month" })
+      }, undefined, false, undefined, this),
+      form.every === "week" ? /* @__PURE__ */ u3(SelectField, {
+        label: "On",
+        value: form.weekday === null ? "" : String(form.weekday),
+        empty: "Choose a weekday",
+        options: WEEKDAY_CHOICES,
+        onChange: (v) => set({ weekday: v === "" ? null : Number(v) })
+      }, undefined, false, undefined, this) : null,
+      form.every === "year" ? /* @__PURE__ */ u3(SelectField, {
+        label: "Month",
+        value: form.month === null ? "" : String(form.month),
+        empty: "Choose a month",
+        options: MONTH_CHOICES,
+        onChange: (v) => set({ month: v === "" ? null : Number(v) })
+      }, undefined, false, undefined, this) : null,
+      form.every === "month" || form.every === "year" ? /* @__PURE__ */ u3(SelectField, {
+        label: "Day of the month",
+        value: form.day === null ? "" : String(form.day),
+        empty: "The day it starts",
+        options: DAYS,
+        onChange: (v) => set({ day: v === "" ? null : Number(v) })
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(TextField, {
+        label: form.every === "once" ? "On" : "Starts",
+        type: "date",
+        value: form.start,
+        onInput: (start) => set({ start })
+      }, undefined, false, undefined, this),
+      form.every === "once" ? /* @__PURE__ */ u3(TextField, {
+        label: "At (time of day)",
+        type: "time",
+        value: form.at,
+        onInput: (at) => set({ at })
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small ghost",
+        "aria-expanded": more,
+        onClick: () => setMore(!more),
+        children: more ? "Fewer options" : "More options"
+      }, undefined, false, undefined, this),
+      more ? /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          form.every !== "once" ? /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3(NumberField, {
+                label: "Every Nth time (2 with weekly is every other week)",
+                value: form.interval,
+                min: 1,
+                onChange: (n) => set({ interval: n ?? 1 })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(TextField, {
+                label: "At (time of day)",
+                type: "time",
+                value: form.at,
+                onInput: (at) => set({ at })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(TextField, {
+                label: "Ends",
+                type: "date",
+                value: form.end,
+                onInput: (end) => set({ end })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(NumberField, {
+                label: "At most this many times",
+                value: form.count,
+                min: 1,
+                onChange: (count) => set({ count })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(SelectField, {
+                label: "A due day off a business day",
+                value: form.roll,
+                empty: "As the engine does",
+                options: [{ value: "none", label: "Stays" }, { value: "before", label: "Moves to the business day before" }, { value: "after", label: "Moves to the business day after" }],
+                onChange: (v) => set({ roll: v === "none" || v === "before" || v === "after" ? v : "" })
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
+          /* @__PURE__ */ u3(SelectField, {
+            label: "When the money isn't there",
+            value: form.shortfall,
+            options: FLOW_SHORTFALLS.map((s) => ({ value: s, label: SHORTFALL_LABEL[s] })),
+            onChange: (v) => set({ shortfall: FLOW_SHORTFALLS.find((s) => s === v) ?? "skip" })
+          }, undefined, false, undefined, this),
+          form.shortfall === "retry" ? /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3(NumberField, {
+                label: "Try again after (days)",
+                value: form.retryDays,
+                min: 1,
+                onChange: (retryDays) => set({ retryDays })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(NumberField, {
+                label: "Tries at most",
+                value: form.retries,
+                min: 1,
+                onChange: (retries) => set({ retries })
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
+          form.shortfall === "fallback" ? /* @__PURE__ */ u3(SelectField, {
+            label: "Then pay from",
+            value: form.fallback,
+            empty: "Choose an account",
+            options: ends.from.filter((f) => f.value !== form.from),
+            onChange: (fallback) => set({ fallback })
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(TextField, {
+            label: "Category (for the books)",
+            value: form.category,
+            onInput: (category) => set({ category }),
+            placeholder: "housing, utilities, savings…"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      problem ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: problem
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || problem !== null,
+        children: flow ? "Save" : form.every === "once" ? "Schedule it" : "Set it up"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+var SHORTFALL_LABEL = {
+  skip: "Skip that time",
+  partial: "Pay what there is",
+  retry: "Try again later",
+  fallback: "Pay from another account",
+  overdraft: "Go into overdraft as the account allows",
+  defer: "Carry it to the next time"
+};
+function FlowRow(props) {
+  const app = useApp();
+  const { view, flow: f, controls } = props;
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const sub = [`${f.from} → ${f.to}`, f.schedule, f.next ? `next ${f.next}` : null, view.detail ? SHORTFALL_LABEL[f.shortfall].toLowerCase() : null, view.detail && f.done + f.missed > 0 ? `${f.done} paid, ${f.missed} missed${f.deferred > 0 ? `, ${fmt(f.deferred)} carried` : ""}` : null, f.link ? `for ${f.link.name}` : null].filter((s) => s !== null);
+  const remove = async () => {
+    if (!await app.host.confirm("Delete", `Delete ${f.label}? It won't run again.`, "danger", "Delete"))
+      return;
+    if (controls.mode === "player")
+      await controls.act(flowStatusAction(f.id, "delete"));
+    else
+      await controls.edit([{ op: "despawn", entity: f.id }]);
+  };
+  const can = flowControls(view, f);
+  const link = f.link?.id ?? null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-flow": f.id,
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: f.label,
+        sub: sub.join(" · "),
+        v: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            f.amount,
+            /* @__PURE__ */ u3("span", {
+              class: f.status === "active" ? f.missed > 0 ? "lre-badge warn" : "lre-badge pos" : "lre-badge",
+              children: humanize(f.status)
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      controls.mode === "player" ? can.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          can.includes("edit") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Edit",
+            children: (close) => /* @__PURE__ */ u3(FlowFormView, {
+              view,
+              controls,
+              flow: f,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("pause") ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small",
+            disabled: controls.busy,
+            onClick: () => void controls.act(flowStatusAction(f.id, "pause")),
+            children: "Pause"
+          }, undefined, false, undefined, this) : null,
+          can.includes("resume") ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small",
+            disabled: controls.busy,
+            onClick: () => void controls.act(flowStatusAction(f.id, "resume")),
+            children: "Resume"
+          }, undefined, false, undefined, this) : null,
+          can.includes("end_lease") ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small",
+            disabled: controls.busy,
+            onClick: () => void (async () => await app.host.confirm("End the lease", `Give notice on ${f.label}? It ends today.`, "warning", "End it") && controls.act(leaseEndAction(f.id)))(),
+            children: "End the lease"
+          }, undefined, false, undefined, this) : null,
+          can.includes("delete") ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small danger",
+            disabled: controls.busy,
+            onClick: () => void remove(),
+            children: "Delete"
+          }, undefined, false, undefined, this) : null,
+          can.includes("pay_now") && link !== null ? /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn small primary",
+                disabled: controls.busy,
+                onClick: () => void controls.act(invoiceAction(link, "pay")),
+                children: "Pay now"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-small lre-muted",
+                children: "Otherwise it's paid when it falls due, if the money's there."
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: [
+          "Set by its ",
+          humanize(f.source).toLowerCase(),
+          "; change it there."
+        ]
+      }, undefined, true, undefined, this) : /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          f.source === "entity" ? /* @__PURE__ */ u3(Reveal, {
+            label: "Edit",
+            children: (close) => /* @__PURE__ */ u3(FlowFormView, {
+              view,
+              controls,
+              flow: f,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          f.source === "entity" ? /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            style: { width: "auto" },
+            "aria-label": `${f.label}: status`,
+            value: f.status,
+            disabled: controls.busy,
+            onChange: (event) => void controls.edit(flowStatusOps(f.id, event.currentTarget.value === "paused" ? "paused" : event.currentTarget.value === "ended" ? "ended" : "active")),
+            children: [
+              /* @__PURE__ */ u3("option", {
+                value: "active",
+                children: "Active"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("option", {
+                value: "paused",
+                children: "Paused"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("option", {
+                value: "ended",
+                children: "Ended"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : /* @__PURE__ */ u3("span", {
+            class: "lre-small lre-muted",
+            children: [
+              "Derived from its ",
+              humanize(f.source).toLowerCase(),
+              ": edit that."
+            ]
+          }, undefined, true, undefined, this),
+          f.source === "entity" ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small danger",
+            disabled: controls.busy,
+            onClick: () => void remove(),
+            children: "Delete"
+          }, undefined, false, undefined, this) : null,
+          f.source === "entity" ? /* @__PURE__ */ u3(Reveal, {
+            label: "Flow fields",
+            children: () => /* @__PURE__ */ u3(EntityFields, {
+              controls,
+              entity: f.id
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function FlowsSection(props) {
+  const { view, controls } = props;
+  const groups = ["active", "paused", "ended"].map((status) => ({ status, flows: view.flows.filter((f) => f.status === status) })).filter((g) => g.flows.length > 0);
+  const canCreate = controls.mode === "gm" || view.features.includes("flows") && flowSources(view).length > 0;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      canCreate ? /* @__PURE__ */ u3(Reveal, {
+        label: "New standing payment or one-off",
+        primary: true,
+        children: (close) => /* @__PURE__ */ u3(FlowFormView, {
+          view,
+          controls,
+          onDone: close
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      groups.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "No standing payments, income or one-offs."
+      }, undefined, false, undefined, this) : null,
+      groups.map((g) => /* @__PURE__ */ u3(Card, {
+        title: humanize(g.status),
+        children: g.flows.map((f) => /* @__PURE__ */ u3(FlowRow, {
+          view,
+          flow: f,
+          controls
+        }, f.id, false, undefined, this))
+      }, g.status, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/economy/ui/assets.tsx
+function routeChoices(view, reinvest) {
+  return [{ value: " ", label: "The usual place (its account's cash, else the deposit account)" }, ...reinvest ? [{ value: "reinvest", label: "Reinvested" }] : [], ...view.accounts.filter((a) => a.role !== null && ROLE_RIGHTS[a.role].sees).map((a) => ({ value: a.id, label: a.name }))];
+}
+function RouteControl(props) {
+  const { view, controls } = props;
+  if (controls.mode === "player" && view.level < 3)
+    return null;
+  return /* @__PURE__ */ u3(SelectField, {
+    label: props.label,
+    value: props.now === null ? "" : props.now === "" ? " " : props.now,
+    empty: props.now === null ? "Choose" : undefined,
+    options: routeChoices(view, props.reinvest),
+    disabled: controls.busy,
+    onChange: (picked) => {
+      if (picked === "")
+        return;
+      const to = picked.trim();
+      if (controls.mode === "player")
+        controls.act(routeAction(props.target, to));
+      else
+        controls.edit(routeOps(props.target, view.party, to));
+    }
+  }, undefined, false, undefined, this);
+}
+function TradeFormView(props) {
+  const { view, controls } = props;
+  const inv = view.investments;
+  const market = inv?.market ?? [];
+  const options = view.features.includes("options");
+  const accounts = (inv?.accounts ?? []).map((id) => ({ value: id, label: view.accounts.find((a) => a.id === id)?.name ?? id }));
+  const [form, setForm] = d2({ side: props.side, holding: props.holding?.id ?? "", asset: props.holding?.asset.id ?? market[0]?.asset ?? "", account: accounts[0]?.value ?? "", qty: null, amount: "", from: "", to: "", option: null });
+  const result = tradeAction(form, controls.currency);
+  const price = props.holding?.price ?? market.find((m) => m.asset === form.asset)?.price ?? null;
+  const sources = moveSources(view).map((a) => ({ value: a.id, label: `${a.name} (${formatMoney(a.available ?? a.cents, controls.currency)})` }));
+  const targets = transferTargets(view, "").map((a) => ({ value: a.id, label: a.name }));
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (typeof result !== "string")
+        controls.act(result).then((ok) => ok && props.onDone());
+    },
+    children: [
+      !props.holding ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(SelectField, {
+            label: "What",
+            value: form.asset,
+            empty: "Choose",
+            options: market.map((m) => ({ value: m.asset, label: `${m.label}${m.symbol ? ` (${m.symbol})` : ""} · ${formatMoney(m.price, controls.currency)}` })),
+            onChange: (asset) => setForm({ ...form, asset })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(SelectField, {
+            label: "Held in",
+            value: form.account,
+            empty: "Held directly",
+            options: accounts,
+            onChange: (account) => setForm({ ...form, account })
+          }, undefined, false, undefined, this),
+          options ? /* @__PURE__ */ u3("label", {
+            class: "lre-row",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "k",
+                children: "An option on it"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-check",
+                children: /* @__PURE__ */ u3("input", {
+                  type: "checkbox",
+                  checked: form.option !== null,
+                  onChange: (event) => setForm({ ...form, option: event.currentTarget.checked ? { right: "call", strike: "", expiry: "" } : null })
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
+          form.option ? /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3(SelectField, {
+                label: "Right",
+                value: form.option.right,
+                options: [{ value: "call", label: "Call (the right to buy)" }, { value: "put", label: "Put (the right to sell)" }],
+                onChange: (right) => form.option && setForm({ ...form, option: { ...form.option, right: right === "put" ? "put" : "call" } })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(AmountField, {
+                label: "Strike",
+                value: form.option.strike,
+                currency: controls.currency,
+                onInput: (strike) => form.option && setForm({ ...form, option: { ...form.option, strike } })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(TextField, {
+                label: "Expires",
+                type: "date",
+                value: form.option.expiry,
+                onInput: (expiry) => form.option && setForm({ ...form, option: { ...form.option, expiry } })
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      price !== null ? /* @__PURE__ */ u3(Row, {
+        k: "Price now",
+        v: formatMoney(price, controls.currency)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(NumberField, {
+        label: form.option || props.holding?.option ? "Contracts" : "Units",
+        value: form.qty,
+        min: 0,
+        onChange: (qty) => setForm({ ...form, qty })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountField, {
+        label: form.side === "buy" ? "Or spend" : "Or raise",
+        value: form.amount,
+        currency: controls.currency,
+        onInput: (amount) => setForm({ ...form, amount }),
+        invalid: form.amount.trim() !== "" && amountOf(form.amount, controls.currency) === null,
+        placeholder: form.side === "sell" ? "Empty: sell it all" : undefined
+      }, undefined, false, undefined, this),
+      form.side === "buy" ? /* @__PURE__ */ u3(SelectField, {
+        label: "Pay from",
+        value: form.from,
+        empty: "The account it's held in, else your usual account",
+        options: sources,
+        onChange: (from) => setForm({ ...form, from })
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(SelectField, {
+        label: "The money goes to",
+        value: form.to,
+        empty: "The account it's held in, else your usual account",
+        options: targets,
+        onChange: (to) => setForm({ ...form, to })
+      }, undefined, false, undefined, this),
+      typeof result === "string" ? /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: result
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || typeof result === "string",
+        children: form.side === "buy" ? "Buy" : "Sell"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ExerciseForm(props) {
+  const { view, holding: h, controls } = props;
+  const [qty, setQty] = d2(null);
+  const [account, setAccount] = d2("");
+  const call = h.option?.right !== "put";
+  const choices = (call ? moveSources(view) : transferTargets(view, "")).map((a) => ({ value: a.id, label: a.name }));
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      controls.act(exerciseAction(h.id, qty, account === "" ? {} : call ? { from: account } : { to: account })).then((ok) => ok && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(NumberField, {
+        label: `Contracts (of ${h.qty}; empty: all)`,
+        value: qty,
+        min: 1,
+        max: h.qty,
+        onChange: setQty
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: call ? "Pay the strike from" : "The strike goes to",
+        value: account,
+        empty: "The account it's held in, else your usual account",
+        options: choices,
+        onChange: setAccount
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || qty !== null && !(qty >= 1 && qty <= h.qty),
+        children: "Exercise"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function HoldingCard(props) {
+  const { view, holding: h, controls } = props;
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const blocks = investmentBlocks(view);
+  const accountName = h.account ? view.accounts.find((a) => a.id === h.account)?.name ?? h.account : "held directly";
+  const now = h.route ? h.route.reinvest ? "reinvest" : h.route.to ?? "" : "";
+  const can = holdingControls(view, h);
+  return /* @__PURE__ */ u3(Card, {
+    title: `${h.asset.label}${h.asset.symbol ? ` (${h.asset.symbol})` : ""}`,
+    aside: /* @__PURE__ */ u3("span", {
+      class: "lre-badge",
+      children: humanize(h.asset.class)
+    }, undefined, false, undefined, this),
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: `${h.qty} × ${fmt(h.price)}`,
+        sub: accountName,
+        v: fmt(h.value)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Cost",
+        v: fmt(h.cost)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Gain",
+        v: `${h.gain > 0 ? "+" : ""}${fmt(h.gain)}`,
+        tone: h.gain < 0 ? "neg" : "pos"
+      }, undefined, false, undefined, this),
+      h.option ? /* @__PURE__ */ u3(Row, {
+        k: `${humanize(h.option.right)} on ${h.option.underlying} at ${fmt(h.option.strike)}`,
+        sub: `expires ${h.option.expiry}`,
+        v: /* @__PURE__ */ u3("span", {
+          class: h.option.inTheMoney ? "lre-badge pos" : "lre-badge",
+          children: h.option.inTheMoney ? "in the money" : "out of the money"
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      blocks.lots && h.lots.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Lots"
+          }, undefined, false, undefined, this),
+          h.lots.map((l, i) => /* @__PURE__ */ u3(Row, {
+            k: `${l.qty} bought ${l.at}`,
+            sub: `cost ${fmt(l.cost)} · ${l.term} term`,
+            v: `${l.gain > 0 ? "+" : ""}${fmt(l.gain)}`,
+            tone: l.gain < 0 ? "neg" : "pos"
+          }, `${l.at}:${i}`, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      !h.option ? /* @__PURE__ */ u3(RouteControl, {
+        view,
+        controls,
+        target: { holding: h.id },
+        now,
+        reinvest: true,
+        label: "Distributions go to"
+      }, undefined, false, undefined, this) : null,
+      controls.mode === "player" ? can.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          can.includes("buy") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Buy more",
+            children: (close) => /* @__PURE__ */ u3(TradeFormView, {
+              view,
+              controls,
+              side: "buy",
+              holding: h,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("sell") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Sell",
+            children: (close) => /* @__PURE__ */ u3(TradeFormView, {
+              view,
+              controls,
+              side: "sell",
+              holding: h,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("exercise") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Exercise",
+            primary: true,
+            children: (close) => /* @__PURE__ */ u3(ExerciseForm, {
+              view,
+              holding: h,
+              controls,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null : /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          h.asset.class !== "option" && h.asset.class !== "property" && h.asset.class !== "business_stake" ? /* @__PURE__ */ u3(Reveal, {
+            label: "Set its price",
+            children: (close) => /* @__PURE__ */ u3(AmountAction, {
+              label: `Price per unit (now ${fmt(h.price)})`,
+              go: "Set the price",
+              currency: controls.currency,
+              busy: controls.busy,
+              submit: (cents) => cents === null ? Promise.resolve(false) : controls.edit(setPriceOps(h.asset.id, cents)),
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Reveal, {
+            label: "Holding fields",
+            children: () => /* @__PURE__ */ u3(EntityFields, {
+              controls,
+              entity: h.id
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function InvestmentsSection(props) {
+  const { view, controls } = props;
+  const inv = view.investments;
+  if (!inv)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "No investments."
+    }, undefined, false, undefined, this);
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const blocks = investmentBlocks(view);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Card, {
+        title: "Investments",
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: "Worth now",
+            v: fmt(inv.value)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "Cost",
+            v: fmt(inv.cost)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "Gain not yet taken",
+            v: `${inv.unrealised > 0 ? "+" : ""}${fmt(inv.unrealised)}`,
+            tone: inv.unrealised < 0 ? "neg" : "pos"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "Gain taken",
+            sub: blocks.gains && inv.realisedShort !== undefined && inv.realisedLong !== undefined ? `${fmt(inv.realisedShort)} short term · ${fmt(inv.realisedLong)} long term` : undefined,
+            v: fmt(inv.realised)
+          }, undefined, false, undefined, this),
+          blocks.income && inv.income !== undefined ? /* @__PURE__ */ u3(Row, {
+            k: "Paid out this year",
+            v: fmt(inv.income),
+            tone: "pos"
+          }, undefined, false, undefined, this) : null,
+          blocks.gains && inv.taxDue ? /* @__PURE__ */ u3(Row, {
+            k: "Tax on gains",
+            sub: `due ${inv.taxDue.at}`,
+            v: fmt(inv.taxDue.cents),
+            tone: "warn"
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      controls.mode === "player" && view.features.includes("investments") && (inv.market ?? []).length > 0 ? /* @__PURE__ */ u3(Reveal, {
+        label: "Buy something new",
+        primary: true,
+        children: (close) => /* @__PURE__ */ u3(TradeFormView, {
+          view,
+          controls,
+          side: "buy",
+          onDone: close
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      inv.holdings.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "Nothing held."
+      }, undefined, false, undefined, this) : inv.holdings.map((h) => /* @__PURE__ */ u3(HoldingCard, {
+        view,
+        holding: h,
+        controls
+      }, h.id, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function LeaseForm(props) {
+  const { controls } = props;
+  const [tenant, setTenant] = d2("");
+  const [rent, setRent] = d2("");
+  const [months, setMonths] = d2(12);
+  const [day, setDay] = d2(1);
+  const [unit, setUnit] = d2("");
+  const cents = amountOf(rent, controls.currency);
+  const ok = tenant !== "" && cents !== null && (day === null || day >= 1 && day <= 28);
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (ok && cents !== null)
+        controls.act(leaseStartAction(props.property.id, tenant, cents, { ...months !== null ? { months } : {}, ...day !== null ? { day } : {}, ...unit.trim() !== "" ? { unit: unit.trim() } : {} })).then((done) => done && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Tenant",
+        value: tenant,
+        empty: "Choose someone",
+        options: knownPeople(controls.palette).map((p) => ({ value: p.id, label: p.label })),
+        onChange: setTenant
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Rent a month",
+        value: rent,
+        currency: controls.currency,
+        onInput: setRent,
+        invalid: rent.trim() !== "" && cents === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberField, {
+        label: "Months",
+        value: months,
+        min: 1,
+        onChange: setMonths
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberField, {
+        label: "Due on day (1–28)",
+        value: day,
+        min: 1,
+        max: 28,
+        onChange: setDay
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TextField, {
+        label: "Unit (if it has several)",
+        value: unit,
+        onInput: setUnit
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || !ok,
+        children: "Start the lease"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function SellForm(props) {
+  const { controls } = props;
+  const [price, setPrice] = d2(String(props.property.value / 10 ** controls.currency.decimals));
+  const [buyer, setBuyer] = d2("");
+  const cents = amountOf(price, controls.currency);
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (cents !== null)
+        controls.act(propertySellAction(props.property.id, cents, buyer ? { buyer } : {})).then((ok) => ok && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Price",
+        value: price,
+        currency: controls.currency,
+        onInput: setPrice,
+        invalid: cents === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Buyer",
+        value: buyer,
+        empty: "Whoever buys",
+        options: knownPeople(controls.palette).map((p) => ({ value: p.id, label: p.label })),
+        onChange: setBuyer
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-small lre-muted",
+        children: "A mortgage on it is paid off from the price first."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || cents === null,
+        children: "Sell"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BuyForm(props) {
+  const { view, controls } = props;
+  const asking = props.property.forSale ?? props.property.value;
+  const [price, setPrice] = d2(String(asking / 10 ** controls.currency.decimals));
+  const [down, setDown] = d2("");
+  const [term, setTerm] = d2(null);
+  const [from, setFrom] = d2("");
+  const cents = amountOf(price, controls.currency);
+  const downCents = down.trim() === "" ? null : amountOf(down, controls.currency);
+  const ok = cents !== null && (down.trim() === "" || downCents !== null);
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (ok && cents !== null)
+        controls.act(propertyBuyAction(props.property.id, cents, { ...from ? { from } : {}, ...downCents !== null ? { down: downCents } : {}, ...term !== null ? { termMonths: term } : {} })).then((done) => done && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Offer",
+        value: price,
+        currency: controls.currency,
+        onInput: setPrice,
+        invalid: cents === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Down payment (empty: pay it all)",
+        value: down,
+        currency: controls.currency,
+        onInput: setDown,
+        invalid: down.trim() !== "" && downCents === null
+      }, undefined, false, undefined, this),
+      downCents !== null ? /* @__PURE__ */ u3(NumberField, {
+        label: "Mortgage term (months)",
+        value: term,
+        min: 1,
+        onChange: setTerm
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Paid from",
+        value: from,
+        empty: "Your usual account",
+        options: moveSources(view).map((a) => ({ value: a.id, label: a.name })),
+        onChange: setFrom
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || !ok,
+        children: "Buy"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PropertyCard(props) {
+  const app = useApp();
+  const { view, property: p, controls } = props;
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const owns = p.share > 0;
+  const can = propertyControls(view, p);
+  const endable = endableLeases(view, p);
+  return /* @__PURE__ */ u3(Card, {
+    title: `\uD83C\uDFE0 ${p.name}`,
+    aside: /* @__PURE__ */ u3("span", {
+      class: owns ? "lre-badge" : "lre-badge accent",
+      children: owns ? `${Math.round(p.share * 10) / 10}% yours` : "For sale"
+    }, undefined, false, undefined, this),
+    children: [
+      p.place ? /* @__PURE__ */ u3(Row, {
+        k: "At",
+        v: p.place
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Row, {
+        k: "Value",
+        v: fmt(p.value)
+      }, undefined, false, undefined, this),
+      p.forSale !== null && p.forSale !== undefined ? /* @__PURE__ */ u3(Row, {
+        k: "Asking",
+        v: fmt(p.forSale)
+      }, undefined, false, undefined, this) : null,
+      owns ? /* @__PURE__ */ u3(Row, {
+        k: "Equity",
+        v: fmt(p.equity),
+        tone: p.equity < 0 ? "neg" : undefined
+      }, undefined, false, undefined, this) : null,
+      p.mortgage ? /* @__PURE__ */ u3(Row, {
+        k: `Mortgage: ${p.mortgage.name}`,
+        sub: [p.mortgage.payment !== null ? `${fmt(p.mortgage.payment)} a month` : null, p.mortgage.monthsLeft !== null ? `${p.mortgage.monthsLeft} months left` : null].filter((s) => s !== null).join(" · "),
+        v: fmt(-Math.abs(p.mortgage.owed)),
+        tone: "neg"
+      }, undefined, false, undefined, this) : null,
+      p.leases.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: "Leases"
+      }, undefined, false, undefined, this) : null,
+      p.leases.map((l, i) => /* @__PURE__ */ u3(Row, {
+        k: l.tenant || "No tenant",
+        sub: [l.start ? `from ${l.start}` : null, l.end ? `to ${l.end}` : null].filter((s) => s !== null).join(" "),
+        v: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            fmt(l.rent),
+            /* @__PURE__ */ u3("span", {
+              class: l.state === "vacant" ? "lre-badge warn" : "lre-badge",
+              children: l.state
+            }, undefined, false, undefined, this),
+            controls.mode === "player" && endable.includes(l.flow) ? /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small",
+              disabled: controls.busy,
+              onClick: () => void (async () => await app.host.confirm("End lease", `End ${l.tenant}'s lease?`, "warning", "End") && controls.act(leaseEndAction(l.flow)))(),
+              children: "End"
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this)
+      }, l.flow || `vacant:${i}`, false, undefined, this)),
+      p.costs.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: "Running costs"
+      }, undefined, false, undefined, this) : null,
+      p.costs.map((f) => /* @__PURE__ */ u3(FlowRow, {
+        view,
+        flow: f,
+        controls
+      }, f.id, false, undefined, this)),
+      owns ? /* @__PURE__ */ u3(RouteControl, {
+        view,
+        controls,
+        target: { property: p.id },
+        now: null,
+        reinvest: false,
+        label: "Rent goes to"
+      }, undefined, false, undefined, this) : null,
+      controls.mode === "player" ? can.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          can.includes("let") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Let it",
+            children: (close) => /* @__PURE__ */ u3(LeaseForm, {
+              property: p,
+              controls,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("sell") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Sell",
+            children: (close) => /* @__PURE__ */ u3(SellForm, {
+              property: p,
+              controls,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("buy") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Buy",
+            primary: true,
+            children: (close) => /* @__PURE__ */ u3(BuyForm, {
+              view,
+              property: p,
+              controls,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null : /* @__PURE__ */ u3(Reveal, {
+        label: "Property fields",
+        children: () => /* @__PURE__ */ u3(EntityFields, {
+          controls,
+          entity: p.id
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PropertiesSection(props) {
+  const { view, controls } = props;
+  return view.properties.length === 0 ? /* @__PURE__ */ u3(Empty, {
+    children: "No property."
+  }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+    children: view.properties.map((p) => /* @__PURE__ */ u3(PropertyCard, {
+      view,
+      property: p,
+      controls
+    }, p.id, false, undefined, this))
   }, undefined, false, undefined, this);
 }
 
-// src/packs/economy/ui/panel.tsx
-var CLASS_ICON = {
-  cash: "\uD83D\uDCB5",
-  checking: "\uD83C\uDFE6",
-  business_checking: "\uD83C\uDFE6",
-  savings: "\uD83D\uDC16",
-  money_market: "\uD83D\uDC16",
-  cd: "\uD83D\uDD12",
-  trust: "\uD83C\uDFDB",
-  escrow: "\uD83C\uDFDB",
-  credit_card: "\uD83D\uDCB3",
-  charge_card: "\uD83D\uDCB3",
-  line_of_credit: "\uD83D\uDCB3",
-  loan: "\uD83D\uDCC4",
-  mortgage: "\uD83C\uDFE0",
-  brokerage: "\uD83D\uDCC8",
-  retirement: "\uD83D\uDCC8"
-};
-function decodeMoneyView(value) {
-  if (!isRecord(value) || !Array.isArray(value.accounts) && typeof value.band !== "string")
-    return null;
-  const overview = isRecord(value.overview) ? value.overview : null;
-  return {
-    level: num(value.level, 1),
-    band: typeof value.band === "string" ? value.band : null,
-    netWorthCents: overview && typeof overview.netWorth === "number" ? overview.netWorth : null,
-    cash: isRecord(value.cash) ? typeof value.cash.cents === "number" ? { cents: value.cash.cents } : { band: str(value.cash.band) } : null,
-    accounts: list(value.accounts, (a) => {
-      const due = isRecord(a.due) ? { label: str(a.due.label), cents: num(a.due.cents) } : undefined;
-      const limitCents = optNum(a.limit);
-      const aprPct = optNum(a.aprPct);
-      return typeof a.id === "string" ? { id: a.id, name: str(a.name, a.id), class: oneOf(a.class, ACCOUNT_CLASSES, "checking"), cents: num(a.cents), ...limitCents !== undefined ? { limitCents } : {}, ...aprPct !== undefined ? { aprPct } : {}, ...due ? { due } : {} } : null;
-    }),
-    recent: list(value.recent, (t) => ({ at: str(t.at), memo: str(t.memo), cents: num(t.cents), account: str(t.account) })),
-    upcoming: list(overview?.upcoming, (u) => ({ at: str(u.at), label: str(u.label), cents: num(u.cents) }))
-  };
+// src/packs/economy/ui/accounts.tsx
+var GROUP_ICON = { cash: "\uD83D\uDCB5", banking: "\uD83C\uDFE6", credit: "\uD83D\uDCB3", loans: "\uD83D\uDCC4", investing: "\uD83D\uDCC8" };
+var CARD_CHANGE_LABEL = { freeze: "Freeze", unfreeze: "Unfreeze", lost: "Report lost", replace: "Replace" };
+function autopayText(autopay, currency) {
+  const from = autopay.fromName ? `, from ${autopay.fromName}` : "";
+  switch (autopay.mode) {
+    case "none":
+      return "Off";
+    case "minimum":
+      return `The minimum due${from}`;
+    case "statement":
+      return `The statement balance${from}`;
+    case "full":
+      return `The whole balance${from}`;
+    case "fixed":
+      return `${autopay.cents !== null ? formatMoney(autopay.cents, currency) : "A fixed amount"}${from}`;
+  }
 }
-function MoneyPanel(props) {
-  const view = decodeMoneyView(props.view);
-  if (props.view === null || props.view === undefined)
-    return /* @__PURE__ */ u3(Empty, {
-      children: "Money is off in this world."
-    }, undefined, false, undefined, this);
-  if (!view)
-    return /* @__PURE__ */ u3(JsonView, {
-      value: props.view
-    }, undefined, false, undefined, this);
+var AUTOPAY_LABEL = { none: "Off", minimum: "The minimum due", statement: "The statement balance", full: "The whole balance", fixed: "A fixed amount" };
+function AutopayForm(props) {
+  const { account, controls } = props;
+  const was = account.autopay;
+  const sources = paySources(props.view).filter((a) => a.id !== account.id && !CLASS_TRAITS[a.class].cash);
+  const [mode, setMode] = d2(was?.mode ?? "none");
+  const [from, setFrom] = d2(was?.from ?? sources[0]?.id ?? "");
+  const [amount, setAmount] = d2(was?.cents !== null && was?.cents !== undefined ? String(was.cents / 10 ** controls.currency.decimals) : "");
+  const cents = mode === "fixed" ? amountOf(amount, controls.currency) : null;
+  const ok = mode === "none" || from !== "" && (mode !== "fixed" || cents !== null);
+  const submit = async () => {
+    if (controls.mode === "player")
+      return controls.act(autopayAction(account.id, mode, from || null, cents));
+    const ops = autopayOps(account.id, was, mode, from || null, cents);
+    return ops.length === 0 || controls.edit(ops);
+  };
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (ok)
+        submit().then((done) => done && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Pays",
+        value: mode,
+        options: AUTOPAY_MODES.map((m) => ({ value: m, label: AUTOPAY_LABEL[m] })),
+        onChange: (v) => setMode(AUTOPAY_MODES.find((m) => m === v) ?? "none")
+      }, undefined, false, undefined, this),
+      mode !== "none" ? /* @__PURE__ */ u3(SelectField, {
+        label: "From",
+        value: from,
+        empty: "Choose an account",
+        options: sources.map((a) => ({ value: a.id, label: a.name })),
+        onChange: setFrom
+      }, undefined, false, undefined, this) : null,
+      mode === "fixed" ? /* @__PURE__ */ u3(AmountField, {
+        label: "Amount each month",
+        value: amount,
+        currency: controls.currency,
+        onInput: setAmount,
+        invalid: amount.trim() !== "" && cents === null
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || !ok,
+        children: "Save autopay"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function PayForm(props) {
+  const { account, controls } = props;
+  const sources = paySources(props.view).filter((a) => a.id !== account.id);
+  const [from, setFrom] = d2(sources.find((a) => CLASS_TRAITS[a.class].transactional)?.id ?? sources[0]?.id ?? "");
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
-    "data-lre-panel": "economy.money",
+    children: [
+      account.due ? /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn",
+        disabled: controls.busy || from === "",
+        onClick: () => void controls.act(payCardAction(account.id, from || null, account.due?.cents ?? null)).then((ok) => ok && props.onDone()),
+        children: [
+          "Pay ",
+          account.due.label.toLowerCase(),
+          " (",
+          formatMoney(account.due.cents, controls.currency),
+          ")"
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3(SelectField, {
+        label: "From",
+        value: from,
+        options: sources.map((a) => ({ value: a.id, label: `${a.name} (${formatMoney(a.available ?? a.cents, controls.currency)})` })),
+        onChange: setFrom
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountAction, {
+        label: "Amount",
+        go: "Pay",
+        optional: "The whole balance",
+        currency: controls.currency,
+        busy: controls.busy || from === "",
+        submit: (cents) => controls.act(payCardAction(account.id, from || null, cents)),
+        onDone: props.onDone
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function TransferForm(props) {
+  const { account, controls } = props;
+  const targets = transferTargets(props.view, account.id);
+  const [to, setTo] = d2(targets[0]?.id ?? "");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    children: [
+      /* @__PURE__ */ u3(SelectField, {
+        label: "To",
+        value: to,
+        options: targets.map((a) => ({ value: a.id, label: a.name })),
+        onChange: setTo
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountAction, {
+        label: "Amount",
+        go: "Transfer",
+        currency: controls.currency,
+        busy: controls.busy || to === "",
+        submit: (cents) => cents === null ? Promise.resolve(false) : controls.act(transferAction(account.id, to, cents)),
+        onDone: props.onDone
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function CardRow(props) {
+  const app = useApp();
+  const { view, card, controls } = props;
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const limits = accountBlocks(view, view.accounts.find((a) => a.id === card.account) ?? view.accounts[0] ?? emptyAccount(card.account)).cardLimits;
+  const sub = [humanize(card.network), card.last4 ? `··${card.last4}` : null, card.holderId === view.party ? null : `held by ${card.holder}`, limits && card.dailyPurchaseLimit !== null ? `${fmt(card.spentToday)} of ${fmt(card.dailyPurchaseLimit)} spent today` : null, limits && card.dailyAtmLimit !== null ? `cash machines ${fmt(card.dailyAtmLimit)} a day` : null].filter((s) => s !== null);
+  const tone = card.state === "active" ? "lre-badge" : card.state === "frozen" ? "lre-badge warn" : "lre-badge neg";
+  const change = (c) => async () => {
+    if (controls.mode !== "player")
+      return;
+    if (c === "lost" && !await app.host.confirm("Report lost", `Report ${card.name} lost? It stops working at once; you can ask for a replacement.`, "warning", "Report lost"))
+      return;
+    await controls.act(cardAction(card.id, c));
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-card": card.id,
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: `\uD83D\uDCB3 ${card.name}`,
+        sub: sub.join(" · "),
+        v: /* @__PURE__ */ u3("span", {
+          class: tone,
+          children: humanize(card.state)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      controls.mode === "player" ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: cardControls(view, card).map((c) => /* @__PURE__ */ u3("button", {
+          type: "button",
+          class: c === "lost" ? "lre-btn small danger" : "lre-btn small",
+          disabled: controls.busy,
+          onClick: () => void change(c)(),
+          children: CARD_CHANGE_LABEL[c]
+        }, c, false, undefined, this))
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        children: [
+          /* @__PURE__ */ u3(SelectField, {
+            label: `${card.name}: state`,
+            value: card.state,
+            options: CARD_STATES.map((s) => ({ value: s, label: humanize(s) })),
+            disabled: controls.busy,
+            onChange: (v) => void controls.edit([{ op: "set", entity: card.id, field: "state", value: v }])
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Reveal, {
+            label: "Card fields",
+            children: () => /* @__PURE__ */ u3(EntityFields, {
+              controls,
+              entity: card.id
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function emptyAccount(id) {
+  return { id, name: id, class: "checking", classLabel: "", product: { id: "", label: "" }, institution: null, status: "open", cents: 0, available: null, owners: [], role: null, limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null };
+}
+function AccountCard(props) {
+  const app = useApp();
+  const { view, account: a, controls } = props;
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const t = CLASS_TRAITS[a.class];
+  const blocks = accountBlocks(view, a);
+  const used = utilisation(a);
+  const owed = t.liability && a.cents <= 0;
+  const detailLine = [a.product.label && a.product.label !== a.classLabel ? a.product.label : null, a.institution].filter((s) => s !== null && s !== "").join(" · ");
+  return /* @__PURE__ */ u3(Card, {
+    title: `${GROUP_ICON[groupOf(a)]} ${a.name}`,
+    aside: /* @__PURE__ */ u3("span", {
+      class: a.status === "open" ? "lre-badge" : "lre-badge warn",
+      children: a.status === "open" ? a.classLabel || t.label : humanize(a.status)
+    }, undefined, false, undefined, this),
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: t.liability ? owed ? "Owed" : "In credit" : "Balance",
+        sub: detailLine || undefined,
+        v: fmt(t.liability ? Math.abs(a.cents) : a.cents),
+        tone: t.liability && a.cents < 0 || !t.liability && a.cents < 0 ? "neg" : undefined
+      }, undefined, false, undefined, this),
+      blocks.available && a.available !== null ? /* @__PURE__ */ u3(Row, {
+        k: "Available",
+        v: fmt(a.available)
+      }, undefined, false, undefined, this) : null,
+      a.limit !== null ? /* @__PURE__ */ u3(Row, {
+        k: "Limit",
+        sub: used !== null ? `${used}% used` : undefined,
+        v: fmt(a.limit),
+        tone: used !== null && used > 30 ? "warn" : undefined
+      }, undefined, false, undefined, this) : null,
+      a.aprPct !== null && t.liability ? /* @__PURE__ */ u3(Row, {
+        k: "Rate",
+        v: `${a.aprPct}% APR`
+      }, undefined, false, undefined, this) : null,
+      a.apyPct !== null && !t.liability ? /* @__PURE__ */ u3(Row, {
+        k: "Interest",
+        v: `${a.apyPct}% APY`
+      }, undefined, false, undefined, this) : null,
+      a.due ? /* @__PURE__ */ u3(Row, {
+        k: a.due.label,
+        sub: a.due.at,
+        v: fmt(a.due.cents),
+        tone: "warn"
+      }, undefined, false, undefined, this) : null,
+      a.loan ? /* @__PURE__ */ u3(Row, {
+        k: "Monthly payment",
+        sub: `${a.loan.monthsLeft} month${a.loan.monthsLeft === 1 ? "" : "s"} left`,
+        v: fmt(a.loan.payment)
+      }, undefined, false, undefined, this) : null,
+      a.loan ? /* @__PURE__ */ u3(Row, {
+        k: "To pay it off",
+        v: fmt(a.loan.payoff)
+      }, undefined, false, undefined, this) : null,
+      a.securedBy ? /* @__PURE__ */ u3(Row, {
+        k: "Secured by",
+        v: a.securedBy.name
+      }, undefined, false, undefined, this) : null,
+      a.autopay !== null ? /* @__PURE__ */ u3(Row, {
+        k: "Autopay",
+        v: autopayText(a.autopay, controls.currency)
+      }, undefined, false, undefined, this) : null,
+      blocks.owners ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Owners"
+          }, undefined, false, undefined, this),
+          a.owners.map((o) => /* @__PURE__ */ u3(Row, {
+            k: o.name,
+            sub: humanize(o.role),
+            v: o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined
+          }, o.party, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      blocks.terms ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Terms"
+          }, undefined, false, undefined, this),
+          a.terms.map((term) => /* @__PURE__ */ u3(Row, {
+            k: term.label,
+            v: term.value
+          }, term.label, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      blocks.statements ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Statements"
+          }, undefined, false, undefined, this),
+          a.statements.map((s, i) => /* @__PURE__ */ u3(Row, {
+            k: `Closed ${s.at}`,
+            sub: [`due ${s.due}`, `minimum ${fmt(s.minimum)}`, `paid ${fmt(s.paid)}`, s.interest > 0 ? `interest ${fmt(s.interest)}` : null, s.fees > 0 ? `fees ${fmt(s.fees)}` : null, s.stage !== "current" ? `${humanize(s.stage)}${/^\d+$/.test(s.stage) ? " days late" : ""}` : null].filter((x) => x !== null).join(" · "),
+            v: /* @__PURE__ */ u3("span", {
+              class: "lre-inline",
+              children: [
+                fmt(s.closing),
+                /* @__PURE__ */ u3("span", {
+                  class: s.state === "late" ? "lre-badge neg" : s.state === "open" ? "lre-badge warn" : "lre-badge pos",
+                  children: s.state === "minimum" ? "minimum paid" : s.state
+                }, undefined, false, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, `${s.at}:${i}`, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      blocks.pending ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Pending"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(TxnRows, {
+            lines: a.pending,
+            max: blocks.transactions,
+            currency: controls.currency
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      blocks.holds ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Holds"
+          }, undefined, false, undefined, this),
+          a.holds.map((h) => /* @__PURE__ */ u3(Row, {
+            k: h.memo,
+            sub: `${h.kind === "deposit" ? "deposit on hold" : "card payment held"} until ${h.until}`,
+            v: /* @__PURE__ */ u3("span", {
+              class: "lre-inline",
+              children: [
+                fmt(h.cents),
+                controls.mode === "gm" ? /* @__PURE__ */ u3("button", {
+                  type: "button",
+                  class: "lre-btn small",
+                  disabled: controls.busy,
+                  onClick: () => void controls.edit(releaseHoldOps(a.id, h.id)),
+                  children: "Release"
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this)
+          }, h.id, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      a.cards.map((c) => /* @__PURE__ */ u3(CardRow, {
+        view,
+        card: c,
+        controls
+      }, c.id, false, undefined, this)),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: "Transactions"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TxnRows, {
+        lines: a.transactions,
+        max: blocks.transactions,
+        currency: controls.currency
+      }, undefined, false, undefined, this),
+      controls.mode === "player" ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        "data-lre-account-controls": a.id,
+        children: accountControls(view, a).map((c) => {
+          switch (c) {
+            case "pay":
+              return /* @__PURE__ */ u3(Reveal, {
+                label: "Pay",
+                primary: true,
+                children: (close) => /* @__PURE__ */ u3(PayForm, {
+                  view,
+                  account: a,
+                  controls,
+                  onDone: close
+                }, undefined, false, undefined, this)
+              }, c, false, undefined, this);
+            case "transfer":
+              return /* @__PURE__ */ u3(Reveal, {
+                label: "Transfer",
+                children: (close) => /* @__PURE__ */ u3(TransferForm, {
+                  view,
+                  account: a,
+                  controls,
+                  onDone: close
+                }, undefined, false, undefined, this)
+              }, c, false, undefined, this);
+            case "autopay":
+              return /* @__PURE__ */ u3(Reveal, {
+                label: "Autopay",
+                children: (close) => /* @__PURE__ */ u3(AutopayForm, {
+                  view,
+                  account: a,
+                  controls,
+                  onDone: close
+                }, undefined, false, undefined, this)
+              }, c, false, undefined, this);
+            case "withdraw":
+            case "deposit":
+              return /* @__PURE__ */ u3(Reveal, {
+                label: c === "withdraw" ? "Withdraw cash" : "Deposit cash",
+                children: (close) => /* @__PURE__ */ u3(AmountAction, {
+                  label: "Amount",
+                  go: c === "withdraw" ? "Withdraw" : "Deposit",
+                  currency: controls.currency,
+                  busy: controls.busy,
+                  submit: (cents) => cents === null ? Promise.resolve(false) : controls.act(cashAction(c, a.id, cents)),
+                  onDone: close
+                }, undefined, false, undefined, this)
+              }, c, false, undefined, this);
+          }
+        })
+      }, undefined, false, undefined, this) : /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        "data-lre-account-controls": a.id,
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-inline",
+            children: [
+              /* @__PURE__ */ u3(Reveal, {
+                label: "Add money",
+                children: (close) => /* @__PURE__ */ u3(AmountAction, {
+                  label: "Amount",
+                  go: "Add",
+                  currency: controls.currency,
+                  busy: controls.busy,
+                  submit: (cents) => cents === null ? Promise.resolve(false) : controls.edit([{ op: "adjust", account: a.id, cents }]),
+                  onDone: close
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Reveal, {
+                label: "Take money",
+                children: (close) => /* @__PURE__ */ u3(AmountAction, {
+                  label: "Amount",
+                  go: "Take",
+                  currency: controls.currency,
+                  busy: controls.busy,
+                  submit: (cents) => cents === null ? Promise.resolve(false) : controls.edit([{ op: "adjust", account: a.id, cents: -cents }]),
+                  onDone: close
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this),
+              a.autopay !== null ? /* @__PURE__ */ u3(Reveal, {
+                label: "Autopay",
+                children: (close) => /* @__PURE__ */ u3(AutopayForm, {
+                  view,
+                  account: a,
+                  controls,
+                  onDone: close
+                }, undefined, false, undefined, this)
+              }, undefined, false, undefined, this) : null,
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn small danger",
+                disabled: controls.busy || a.status === "closed" || a.cents !== 0,
+                title: a.cents !== 0 ? "Empty it first: an account closes only when it holds and owes nothing." : undefined,
+                onClick: () => void (async () => {
+                  if (await app.host.confirm("Close account", `Close ${a.name}? Its cards are cancelled.`, "danger", "Close"))
+                    await controls.edit(closeAccountOps(a.id));
+                })(),
+                children: "Close"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this),
+          /* @__PURE__ */ u3(SelectField, {
+            label: `${a.name}: status`,
+            value: a.status,
+            options: ACCOUNT_STATUSES.map((s) => ({ value: s, label: humanize(s) })),
+            disabled: controls.busy,
+            onChange: (v) => void controls.edit(accountStatusOps(a.id, v))
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Reveal, {
+            label: "Account fields",
+            children: () => /* @__PURE__ */ u3(EntityFields, {
+              controls,
+              entity: a.id
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function payUses(view) {
+  return [...view.cards.filter((c) => c.state === "active").map((c) => ({ value: c.id, label: c.name })), ...paySources(view).map((a) => ({ value: a.id, label: a.name }))];
+}
+function PayPrefsCard(props) {
+  const { view, controls } = props;
+  const [draft, setDraft] = d2(null);
+  const uses = payUses(view);
+  const categories = [...new Set([...(view.overview?.cashFlow?.byCategory ?? []).map((b) => b.category), ...view.recent.flatMap((t) => t.category ? [t.category] : [])])].sort();
+  const save = async (tiers) => {
+    const ok = controls.mode === "player" ? await controls.act(payPrefsAction(tiers)) : await controls.edit(payPrefsOps(view.party, tiers));
+    if (ok)
+      setDraft(null);
+  };
+  return /* @__PURE__ */ u3(Card, {
+    title: controls.mode === "player" ? "How you pay" : "How they pay",
+    aside: draft === null ? /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: "lre-btn small",
+      onClick: () => setDraft([...view.payPrefs]),
+      children: "Change"
+    }, undefined, false, undefined, this) : null,
+    children: draft === null ? view.payPrefs.length === 0 ? /* @__PURE__ */ u3(Empty, {
+      children: "The engine's defaults for their wealth and character."
+    }, undefined, false, undefined, this) : view.payPrefs.map((t, i) => /* @__PURE__ */ u3(Row, {
+      k: `${i + 1}. ${tierText(t, uses, controls.currency)}`
+    }, `${i}:${t.use}`, false, undefined, this)) : /* @__PURE__ */ u3(M, {
+      children: [
+        /* @__PURE__ */ u3(PayTiersEditor, {
+          value: draft,
+          uses,
+          categories,
+          currency: controls.currency,
+          onChange: setDraft
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("div", {
+          class: "lre-inline",
+          children: [
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn primary",
+              disabled: controls.busy,
+              onClick: () => void save(draft),
+              children: "Save"
+            }, undefined, false, undefined, this),
+            /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn ghost",
+              onClick: () => setDraft(null),
+              children: "Cancel"
+            }, undefined, false, undefined, this)
+          ]
+        }, undefined, true, undefined, this)
+      ]
+    }, undefined, true, undefined, this)
+  }, undefined, false, undefined, this);
+}
+function AccountsSection(props) {
+  const { view, controls } = props;
+  const groups = accountGroups(view.accounts);
+  const loose = view.cards.filter((c) => !view.accounts.some((a) => a.id === c.account));
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      groups.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "No accounts."
+      }, undefined, false, undefined, this) : null,
+      groups.map((g) => /* @__PURE__ */ u3("section", {
+        class: "lre-stack",
+        "data-lre-account-group": g.group,
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: g.label
+          }, undefined, false, undefined, this),
+          g.accounts.map((a) => /* @__PURE__ */ u3(AccountCard, {
+            view,
+            account: a,
+            controls
+          }, a.id, false, undefined, this))
+        ]
+      }, g.group, true, undefined, this)),
+      loose.length > 0 ? /* @__PURE__ */ u3(Card, {
+        title: "Cards on others' accounts",
+        children: loose.map((c) => /* @__PURE__ */ u3(CardRow, {
+          view,
+          card: c,
+          controls
+        }, c.id, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      view.level >= 2 && (view.features.includes("payment_prefs") || view.payPrefs.length > 0) ? /* @__PURE__ */ u3(PayPrefsCard, {
+        ...props
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/economy/ui/credit.tsx
+function pct2(part) {
+  return `${Math.round(part * 100)}%`;
+}
+function CreditSection(props) {
+  const { view, controls } = props;
+  const [applying, setApplying] = d2(null);
+  const c = view.credit;
+  if (!c)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "No credit report."
+    }, undefined, false, undefined, this);
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const blocks = creditBlocks(view);
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Card, {
+        title: "Credit score",
+        aside: c.asOf ? /* @__PURE__ */ u3("span", {
+          class: "lre-badge",
+          children: [
+            "as of ",
+            c.asOf
+          ]
+        }, undefined, true, undefined, this) : null,
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: c.score !== null ? String(c.score) : "No score yet",
+            sub: [c.band, c.tier ? `${humanize(c.tier)} rates` : null].filter((s) => s !== null).join(" · ") || undefined
+          }, undefined, false, undefined, this),
+          blocks.history > 0 ? c.history.slice(-blocks.history).map((h) => /* @__PURE__ */ u3(Row, {
+            k: h.at,
+            v: String(h.score)
+          }, h.at, false, undefined, this)) : null
+        ]
+      }, undefined, true, undefined, this),
+      blocks.factors && c.factors ? /* @__PURE__ */ u3(Card, {
+        title: "What makes it",
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: "Paying on time",
+            v: pct2(c.factors.payment)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "Credit used",
+            sub: `${c.utilisationPct}% of limits`,
+            v: pct2(c.factors.utilisation)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "Age of accounts",
+            sub: `${c.ageMonths} months on average`,
+            v: pct2(c.factors.age)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "Mix of credit",
+            v: pct2(c.factors.mix)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "New credit",
+            v: pct2(c.factors.recent)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      blocks.report ? /* @__PURE__ */ u3(Card, {
+        title: "Report",
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: "On time",
+            v: `${c.onTimePct}%`
+          }, undefined, false, undefined, this),
+          c.accounts.map((a) => /* @__PURE__ */ u3(Row, {
+            k: a.name,
+            sub: [humanize(a.class), humanize(a.status), a.opened ? `opened ${a.opened}` : null, a.late30 + a.late60 + a.late90 > 0 ? `late ${a.late30}×30 ${a.late60}×60 ${a.late90}×90` : null].filter((s) => s !== null).join(" · "),
+            v: a.limit !== null ? `${fmt(a.owed)} of ${fmt(a.limit)}` : fmt(a.owed)
+          }, a.id, false, undefined, this)),
+          c.inquiries.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Inquiries"
+          }, undefined, false, undefined, this) : null,
+          c.inquiries.map((i, n) => /* @__PURE__ */ u3(Row, {
+            k: i.note,
+            sub: i.at
+          }, `${i.at}:${n}`, false, undefined, this)),
+          c.marks.length > 0 ? /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Marks"
+          }, undefined, false, undefined, this) : null,
+          c.marks.map((m, n) => /* @__PURE__ */ u3(Row, {
+            k: humanize(m.kind),
+            sub: `${m.at} · ${m.note}`,
+            tone: "neg"
+          }, `${m.at}:${n}`, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      c.offers.length > 0 ? /* @__PURE__ */ u3(Card, {
+        title: "Credit you could apply for",
+        children: [
+          c.offers.map((o) => /* @__PURE__ */ u3(Row, {
+            k: o.label,
+            sub: [humanize(o.class), o.aprPct !== null ? `${o.aprPct}% APR` : null, o.limit !== null ? `up to ${fmt(o.limit)}` : null].filter((s) => s !== null).join(" · ")
+          }, o.product, false, undefined, this)),
+          controls.mode === "player" ? /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3(SelectField, {
+                label: "Apply for",
+                value: applying ?? "",
+                empty: "Choose",
+                options: c.offers.map((o) => ({ value: o.product, label: o.label })),
+                onChange: (v) => setApplying(v === "" ? null : v)
+              }, undefined, false, undefined, this),
+              applying !== null ? /* @__PURE__ */ u3(AmountAction, {
+                label: "How much",
+                go: "Apply",
+                optional: "What they offer",
+                currency: controls.currency,
+                busy: controls.busy,
+                submit: (cents) => controls.act(applyCreditAction(applying, cents)),
+                onDone: () => setApplying(null)
+              }, undefined, false, undefined, this) : null
+            ]
+          }, undefined, true, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function HouseholdSection(props) {
+  const { view, controls } = props;
+  const h = view.household;
+  const [adding, setAdding] = d2("");
+  if (!h)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "No household."
+    }, undefined, false, undefined, this);
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const candidates = controls.mode === "gm" ? controls.gm.entities.filter((e) => e.kind === "person" && !e.gone && !h.members.some((m) => m.id === e.id)) : [];
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      /* @__PURE__ */ u3(Card, {
+        title: `\uD83C\uDFE1 ${h.name}`,
+        aside: /* @__PURE__ */ u3("span", {
+          class: "lre-badge",
+          children: [
+            fmt(h.monthly.total),
+            " a month shared"
+          ]
+        }, undefined, true, undefined, this),
+        children: [
+          h.members.map((m) => /* @__PURE__ */ u3(Row, {
+            k: m.name,
+            sub: [m.role ? humanize(m.role) : null, h.monthly.parts.find((p) => p.id === m.id) ? `${fmt(h.monthly.parts.find((p) => p.id === m.id)?.cents ?? 0)} a month` : null].filter((s) => s !== null).join(" · ") || undefined,
+            v: /* @__PURE__ */ u3("span", {
+              class: "lre-inline",
+              children: [
+                m.share > 0 ? `${Math.round(m.share * 10) / 10}%` : null,
+                controls.mode === "gm" ? /* @__PURE__ */ u3("button", {
+                  type: "button",
+                  class: "lre-btn small danger",
+                  disabled: controls.busy,
+                  "aria-label": `Take ${m.name} out of ${h.name}`,
+                  onClick: () => void controls.edit([{ op: "unlink", rel: "member_of", from: m.id, to: h.id }]),
+                  children: "✕"
+                }, undefined, false, undefined, this) : null
+              ]
+            }, undefined, true, undefined, this)
+          }, m.id, false, undefined, this)),
+          controls.mode === "gm" ? /* @__PURE__ */ u3("div", {
+            class: "lre-inline",
+            children: [
+              /* @__PURE__ */ u3(SelectField, {
+                label: "Add a member",
+                value: adding,
+                empty: "Choose someone",
+                options: candidates.map((e) => ({ value: e.id, label: e.name })),
+                onChange: setAdding
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("button", {
+                type: "button",
+                class: "lre-btn small",
+                disabled: controls.busy || adding === "",
+                onClick: () => void controls.edit([{ op: "link", rel: "member_of", from: adding, to: h.id }]).then((ok) => ok && setAdding("")),
+                children: "Add"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
+          h.accounts.length > 0 ? /* @__PURE__ */ u3(Row, {
+            k: "Shared accounts",
+            v: h.accounts.map((id) => view.accounts.find((a) => a.id === id)?.name ?? id).join(", ")
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Card, {
+        title: "Shared costs",
+        children: h.flows.length === 0 ? /* @__PURE__ */ u3(Empty, {
+          children: "No shared costs."
+        }, undefined, false, undefined, this) : h.flows.map((f) => /* @__PURE__ */ u3(FlowRow, {
+          view,
+          flow: f,
+          controls
+        }, f.id, false, undefined, this))
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/economy/ui/work.tsx
+function people(controls) {
+  if (controls.mode === "player")
+    return knownPeople(controls.palette).map((p) => ({ value: p.id, label: p.label }));
+  return controls.gm.entities.filter((e) => !e.gone && (e.kind === "person" || e.kind === "business")).map((e) => ({ value: e.id, label: e.name }));
+}
+function JobCard(props) {
+  const app = useApp();
+  const { view, job: j, controls, employer } = props;
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const blocks = workBlocks(view);
+  const can = jobControls(view, j, employer ?? null);
+  const end = async (words) => {
+    if (controls.mode !== "player")
+      return;
+    if (await app.host.confirm(words, `${words}: ${j.title || "the job"} at ${j.employer}?`, "warning", words))
+      await controls.act(jobEndAction(j.id));
+  };
+  return /* @__PURE__ */ u3(Card, {
+    title: `${j.title || humanize(j.basis)} · ${employer ? j.worker : j.employer}`,
+    aside: /* @__PURE__ */ u3("span", {
+      class: j.status === "active" ? "lre-badge pos" : "lre-badge",
+      children: humanize(j.status)
+    }, undefined, false, undefined, this),
+    children: [
+      /* @__PURE__ */ u3(Row, {
+        k: "Pay",
+        sub: j.schedule,
+        v: j.pay
+      }, undefined, false, undefined, this),
+      j.nextPay ? /* @__PURE__ */ u3(Row, {
+        k: "Next payday",
+        v: j.nextPay
+      }, undefined, false, undefined, this) : null,
+      j.grossPerPeriod !== null ? /* @__PURE__ */ u3(Row, {
+        k: "Each payday, before taxes",
+        v: fmt(j.grossPerPeriod)
+      }, undefined, false, undefined, this) : null,
+      j.hours ? /* @__PURE__ */ u3(Row, {
+        k: "Hours this period",
+        sub: `${j.hours.scheduled} scheduled`,
+        v: String(j.hours.attended)
+      }, undefined, false, undefined, this) : null,
+      j.lastPay ? /* @__PURE__ */ u3(Row, {
+        k: `Last paid ${j.lastPay.at}`,
+        sub: blocks.withholding ? `${fmt(j.lastPay.gross)} gross · ${fmt(-j.lastPay.taxes)} taxes · ${fmt(-j.lastPay.deductions)} deductions` : undefined,
+        v: fmt(j.lastPay.net),
+        tone: "pos"
+      }, undefined, false, undefined, this) : null,
+      blocks.deductions && j.deductions.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Deductions"
+          }, undefined, false, undefined, this),
+          j.deductions.map((d) => /* @__PURE__ */ u3(Row, {
+            k: d.label,
+            v: d.value
+          }, d.label, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      j.splits.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Pay goes to"
+          }, undefined, false, undefined, this),
+          j.splits.map((s) => /* @__PURE__ */ u3(Row, {
+            k: s.to,
+            v: s.value
+          }, s.to, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      controls.mode === "player" && can.length > 0 ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          can.includes("quit") ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small danger",
+            disabled: controls.busy,
+            onClick: () => void end("Quit"),
+            children: "Quit"
+          }, undefined, false, undefined, this) : null,
+          can.includes("raise") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Raise",
+            children: (close) => /* @__PURE__ */ u3(AmountAction, {
+              label: `New rate (now ${j.pay})`,
+              go: "Give the raise",
+              currency: controls.currency,
+              busy: controls.busy,
+              submit: (cents) => cents === null ? Promise.resolve(false) : controls.act(raiseAction(j.id, cents)),
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("let_go") ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small danger",
+            disabled: controls.busy,
+            onClick: () => void end("Let go"),
+            children: "Let go"
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      controls.mode === "gm" ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        children: [
+          j.status !== "ended" ? /* @__PURE__ */ u3("button", {
+            type: "button",
+            class: "lre-btn small danger",
+            disabled: controls.busy,
+            onClick: () => void controls.edit([{ op: "set", entity: j.id, field: "status", value: "ended" }]),
+            children: "End the job"
+          }, undefined, false, undefined, this) : null,
+          /* @__PURE__ */ u3(Reveal, {
+            label: "Job fields",
+            children: () => /* @__PURE__ */ u3(EntityFields, {
+              controls,
+              entity: j.id
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function NewJob(props) {
+  const { view, controls } = props;
+  const [employer, setEmployer] = d2("");
+  const [title, setTitle] = d2("");
+  const [basis, setBasis] = d2("hourly");
+  const [rate, setRate] = d2("");
+  const [every, setEvery] = d2("biweekly");
+  const cents = amountOf(rate, controls.currency);
+  const ok = employer.trim() !== "" && cents !== null;
+  const businesses = controls.gm.entities.filter((e) => e.kind === "business" && !e.gone).map((e) => ({ value: e.id, label: e.name }));
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (!ok || cents === null)
+        return;
+      const name = `${title.trim() || humanize(basis)} at ${businesses.find((b) => b.value === employer)?.label ?? employer.trim()}`;
+      const id = newIdFor("job", `${view.name} ${title || basis}`, new Set(controls.gm.entities.map((e) => e.id)));
+      controls.edit(jobSpawnOps(id, name, { worker: view.party, employer: employer.trim(), ...title.trim() !== "" ? { title: title.trim() } : {}, basis, rate: cents, pay_every: every })).then((done) => done && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(TextField, {
+        label: "Employer (a business's id, or an outside employer's name)",
+        value: employer,
+        onInput: setEmployer,
+        list: "lre-job-employers"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("datalist", {
+        id: "lre-job-employers",
+        children: businesses.map((b) => /* @__PURE__ */ u3("option", {
+          value: b.value,
+          label: b.label
+        }, b.value, false, undefined, this))
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TextField, {
+        label: "Title",
+        value: title,
+        onInput: setTitle
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Paid by",
+        value: basis,
+        options: PAY_BASES.map((b) => ({ value: b, label: humanize(b) })),
+        onChange: setBasis
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Rate (a year, an hour or a shift)",
+        value: rate,
+        currency: controls.currency,
+        onInput: setRate,
+        invalid: rate.trim() !== "" && cents === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Paid",
+        value: every,
+        options: PAY_EVERY.map((p) => ({ value: p, label: humanize(p) })),
+        onChange: setEvery
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || !ok,
+        children: "Add the job"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function JobsSection(props) {
+  const { view, controls } = props;
+  return /* @__PURE__ */ u3(M, {
+    children: [
+      controls.mode === "gm" ? /* @__PURE__ */ u3(Reveal, {
+        label: "Add a job",
+        primary: true,
+        children: (close) => /* @__PURE__ */ u3(NewJob, {
+          view,
+          controls,
+          onDone: close
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      view.jobs.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "No jobs."
+      }, undefined, false, undefined, this) : view.jobs.map((j) => /* @__PURE__ */ u3(JobCard, {
+        view,
+        job: j,
+        controls
+      }, j.id, false, undefined, this))
+    ]
+  }, undefined, true, undefined, this);
+}
+function HireFormView(props) {
+  const { controls } = props;
+  const [form, setForm] = d2({ business: props.business.id, worker: "", title: "", basis: "hourly", rate: "", hoursPerWeek: null, payEvery: "biweekly" });
+  const body = hireAction(form, controls.currency);
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (body)
+        controls.act(body).then((ok) => ok && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Who",
+        value: form.worker,
+        empty: "Choose someone",
+        options: people(controls),
+        onChange: (worker) => setForm({ ...form, worker })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TextField, {
+        label: "Title",
+        value: form.title,
+        onInput: (title) => setForm({ ...form, title })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Paid by",
+        value: form.basis,
+        options: PAY_BASES.map((b) => ({ value: b, label: humanize(b) })),
+        onChange: (basis) => setForm({ ...form, basis })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Rate (a year, an hour or a shift)",
+        value: form.rate,
+        currency: controls.currency,
+        onInput: (rate) => setForm({ ...form, rate }),
+        invalid: form.rate.trim() !== "" && amountOf(form.rate, controls.currency) === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberField, {
+        label: "Hours a week",
+        value: form.hoursPerWeek,
+        min: 0,
+        onChange: (hoursPerWeek) => setForm({ ...form, hoursPerWeek })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Paid",
+        value: form.payEvery,
+        options: PAY_EVERY.map((p) => ({ value: p, label: humanize(p) })),
+        onChange: (payEvery) => setForm({ ...form, payEvery })
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || body === null,
+        children: "Hire"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function InvoiceForm(props) {
+  const { controls } = props;
+  const [customer, setCustomer] = d2("");
+  const [outside, setOutside] = d2("");
+  const [amount, setAmount] = d2("");
+  const [memo, setMemo] = d2("");
+  const [days, setDays] = d2(null);
+  const cents = amountOf(amount, controls.currency);
+  const OUTSIDE = "__outside";
+  const who = customer === OUTSIDE ? outside.trim() !== "" ? { name: outside } : null : customer !== "" ? { id: customer } : null;
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (who && cents !== null)
+        controls.act(invoiceIssueAction(props.business.id, who, cents, memo, days)).then((ok) => ok && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(SelectField, {
+        label: "To",
+        value: customer,
+        empty: "Choose a customer",
+        options: [...people(controls), { value: OUTSIDE, label: "Someone else (type the name)" }],
+        onChange: setCustomer
+      }, undefined, false, undefined, this),
+      customer === OUTSIDE ? /* @__PURE__ */ u3(TextField, {
+        label: "Customer's name",
+        value: outside,
+        onInput: setOutside
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Amount",
+        value: amount,
+        currency: controls.currency,
+        onInput: setAmount,
+        invalid: amount.trim() !== "" && cents === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(TextField, {
+        label: "For",
+        value: memo,
+        onInput: setMemo,
+        placeholder: "Brake job"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(NumberField, {
+        label: "Due in (days; empty: the business's terms)",
+        value: days,
+        min: 0,
+        onChange: setDays
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || who === null || cents === null,
+        children: "Issue the invoice"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function StakeForm(props) {
+  const { controls } = props;
+  const [share, setShare] = d2(null);
+  const [price, setPrice] = d2("");
+  const [buyer, setBuyer] = d2("");
+  const cents = amountOf(price, controls.currency);
+  const ok = share !== null && share > 0 && share <= 100 && cents !== null;
+  return /* @__PURE__ */ u3("form", {
+    class: "lre-stack",
+    onSubmit: (event) => {
+      event.preventDefault();
+      if (ok && share !== null && cents !== null)
+        controls.act(stakeSellAction(props.business.id, share, cents, buyer || undefined)).then((done) => done && props.onDone());
+    },
+    children: [
+      /* @__PURE__ */ u3(NumberField, {
+        label: "Share to sell (%)",
+        value: share,
+        min: 0,
+        max: 100,
+        onChange: setShare
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(AmountField, {
+        label: "Price",
+        value: price,
+        currency: controls.currency,
+        onInput: setPrice,
+        invalid: price.trim() !== "" && cents === null
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(SelectField, {
+        label: "Buyer",
+        value: buyer,
+        empty: "Whoever buys",
+        options: people(controls),
+        onChange: setBuyer
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("button", {
+        type: "submit",
+        class: "lre-btn primary",
+        disabled: controls.busy || !ok,
+        children: "Sell the stake"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BusinessCard(props) {
+  const app = useApp();
+  const { view, business: b, controls } = props;
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const blocks = workBlocks(view);
+  const worth = b.role !== null && ROLE_RIGHTS[b.role].worth;
+  const can = businessControls(view, b);
+  const accountName = (id) => view.accounts.find((a) => a.id === id)?.name ?? (controls.mode === "gm" ? controls.gm.entities.find((e) => e.id === id)?.name ?? id : id);
+  return /* @__PURE__ */ u3(Card, {
+    title: `\uD83C\uDFEA ${b.name}`,
+    aside: b.role ? /* @__PURE__ */ u3("span", {
+      class: "lre-badge",
+      children: humanize(b.role)
+    }, undefined, false, undefined, this) : null,
+    children: [
+      b.owners.map((o) => /* @__PURE__ */ u3(Row, {
+        k: o.name,
+        sub: humanize(o.role),
+        v: o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined
+      }, o.party, false, undefined, this)),
+      b.places.length > 0 ? /* @__PURE__ */ u3(Row, {
+        k: "Trades at",
+        v: b.places.map((p) => p.name).join(", ")
+      }, undefined, false, undefined, this) : null,
+      b.accounts.length > 0 ? /* @__PURE__ */ u3(Row, {
+        k: "Accounts",
+        v: b.accounts.map(accountName).join(", ")
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: [
+          "Books · ",
+          b.books.period
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Revenue",
+        v: fmt(b.books.revenue),
+        tone: "pos"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Expenses",
+        v: fmt(-Math.abs(b.books.expenses)),
+        tone: "neg"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Row, {
+        k: "Payroll",
+        v: fmt(-Math.abs(b.books.payroll)),
+        tone: "neg"
+      }, undefined, false, undefined, this),
+      blocks.taxes ? /* @__PURE__ */ u3(Row, {
+        k: "Taxes",
+        v: fmt(-Math.abs(b.books.taxes)),
+        tone: "neg"
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3(Row, {
+        k: "Profit",
+        v: fmt(b.books.profit),
+        tone: b.books.profit < 0 ? "neg" : "pos"
+      }, undefined, false, undefined, this),
+      blocks.books ? b.books.lines.map((l) => /* @__PURE__ */ u3(Row, {
+        k: humanize(l.category),
+        v: fmt(l.cents),
+        tone: l.cents < 0 ? "neg" : "pos"
+      }, l.category, false, undefined, this)) : null,
+      blocks.books && b.months.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Month by month"
+          }, undefined, false, undefined, this),
+          b.months.map((m) => /* @__PURE__ */ u3(Row, {
+            k: m.period,
+            sub: `${fmt(m.revenue)} in · ${fmt(-Math.abs(m.expenses))} out`,
+            v: fmt(m.profit),
+            tone: m.profit < 0 ? "neg" : "pos"
+          }, m.period, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      blocks.sales && b.sales.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Sales"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(TxnRows, {
+            lines: b.sales,
+            max: 10,
+            currency: controls.currency
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: "Invoices"
+      }, undefined, false, undefined, this),
+      b.invoices.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "No invoices."
+      }, undefined, false, undefined, this) : null,
+      b.invoices.map((i) => /* @__PURE__ */ u3(Row, {
+        k: `${i.customerName}: ${i.memo || "invoice"}`,
+        sub: [`issued ${i.issuedAt}`, `due ${i.dueAt}`, i.days_late ? `${i.days_late} days late` : null, i.late_fee ? `late fee ${fmt(i.late_fee)}` : null].filter((s) => s !== null).join(" · "),
+        v: /* @__PURE__ */ u3("span", {
+          class: "lre-inline",
+          children: [
+            fmt(i.cents),
+            controls.mode === "gm" ? /* @__PURE__ */ u3("select", {
+              class: "lre-input",
+              style: { width: "auto" },
+              "aria-label": `Invoice to ${i.customerName}: state`,
+              value: i.state,
+              disabled: controls.busy,
+              onChange: (event) => void controls.edit([{ op: "set", entity: i.id, field: "state", value: event.currentTarget.value }]),
+              children: INVOICE_STATES.map((s) => /* @__PURE__ */ u3("option", {
+                value: s,
+                children: humanize(s)
+              }, s, false, undefined, this))
+            }, undefined, false, undefined, this) : /* @__PURE__ */ u3("span", {
+              class: i.state === "late" ? "lre-badge neg" : i.state === "paid" ? "lre-badge pos" : "lre-badge",
+              children: i.state
+            }, undefined, false, undefined, this),
+            controls.mode === "player" && invoiceControls(view, b, i).includes("void") ? /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small",
+              disabled: controls.busy,
+              onClick: () => void (async () => await app.host.confirm("Void", `Void the invoice to ${i.customerName}?`, "warning", "Void") && controls.act(invoiceAction(i.id, "void")))(),
+              children: "Void"
+            }, undefined, false, undefined, this) : null,
+            controls.mode === "player" && invoiceControls(view, b, i).includes("pay") ? /* @__PURE__ */ u3("button", {
+              type: "button",
+              class: "lre-btn small primary",
+              disabled: controls.busy,
+              onClick: () => void controls.act(invoiceAction(i.id, "pay")),
+              children: "Pay"
+            }, undefined, false, undefined, this) : null
+          ]
+        }, undefined, true, undefined, this)
+      }, i.id, false, undefined, this)),
+      /* @__PURE__ */ u3("div", {
+        class: "lre-h",
+        children: "Payroll"
+      }, undefined, false, undefined, this),
+      b.employees.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        children: "No one on the payroll."
+      }, undefined, false, undefined, this) : null,
+      b.employees.map((j) => /* @__PURE__ */ u3(JobCard, {
+        view,
+        job: j,
+        controls,
+        employer: b
+      }, j.id, false, undefined, this)),
+      blocks.taxes && b.taxes.length > 0 ? /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3("div", {
+            class: "lre-h",
+            children: "Taxes"
+          }, undefined, false, undefined, this),
+          b.taxes.map((t) => /* @__PURE__ */ u3(Row, {
+            k: t.label,
+            sub: t.due ? `due ${t.due}` : undefined,
+            v: fmt(t.cents)
+          }, t.label, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null,
+      worth ? /* @__PURE__ */ u3(RouteControl, {
+        view,
+        controls,
+        target: { business: b.id },
+        now: null,
+        reinvest: true,
+        label: controls.mode === "player" ? "Your share of its profit goes to" : `${view.name}'s share of its profit goes to`
+      }, undefined, false, undefined, this) : null,
+      controls.mode === "player" ? /* @__PURE__ */ u3("div", {
+        class: "lre-inline",
+        "data-lre-business-controls": b.id,
+        children: [
+          can.includes("hire") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Hire",
+            children: (close) => /* @__PURE__ */ u3(HireFormView, {
+              business: b,
+              controls,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("invoice") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Issue an invoice",
+            children: (close) => /* @__PURE__ */ u3(InvoiceForm, {
+              business: b,
+              controls,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("draw") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Owner's draw",
+            children: (close) => /* @__PURE__ */ u3(AmountAction, {
+              label: "Amount",
+              go: "Draw it",
+              currency: controls.currency,
+              busy: controls.busy,
+              submit: (cents) => cents === null ? Promise.resolve(false) : controls.act(drawAction(b.id, cents)),
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("distribute") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Pay out profit",
+            children: (close) => /* @__PURE__ */ u3(AmountAction, {
+              label: "Amount",
+              go: "Pay it out by share",
+              optional: "Its share of the profit since the last",
+              currency: controls.currency,
+              busy: controls.busy,
+              submit: (cents) => controls.act(distributeAction(b.id, cents)),
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null,
+          can.includes("stake") ? /* @__PURE__ */ u3(Reveal, {
+            label: "Sell a stake",
+            children: (close) => /* @__PURE__ */ u3(StakeForm, {
+              business: b,
+              controls,
+              onDone: close
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : /* @__PURE__ */ u3(Reveal, {
+        label: "Business fields",
+        children: () => /* @__PURE__ */ u3(EntityFields, {
+          controls,
+          entity: b.id
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function BusinessesSection(props) {
+  const { view, controls } = props;
+  return view.businesses.length === 0 ? /* @__PURE__ */ u3(Empty, {
+    children: "No businesses."
+  }, undefined, false, undefined, this) : /* @__PURE__ */ u3(M, {
+    children: view.businesses.map((b) => /* @__PURE__ */ u3(BusinessCard, {
+      view,
+      business: b,
+      controls
+    }, b.id, false, undefined, this))
+  }, undefined, false, undefined, this);
+}
+
+// src/packs/economy/ui/hub.tsx
+function Overview(props) {
+  const { view, controls } = props;
+  const fmt = (cents) => formatMoney(cents, controls.currency);
+  const o = view.overview;
+  const blocks = overviewBlocks(view);
+  return /* @__PURE__ */ u3(M, {
     children: [
       /* @__PURE__ */ u3(Card, {
         title: "Overview",
         aside: /* @__PURE__ */ u3("span", {
           class: "lre-badge",
-          children: [
-            "Money ",
-            view.level
-          ]
-        }, undefined, true, undefined, this),
+          children: view.detail ? `Money ${view.level} · full books` : `Money ${view.level}`
+        }, undefined, false, undefined, this),
         children: [
           view.band ? /* @__PURE__ */ u3(Row, {
             k: "Wealth",
             v: view.band
           }, undefined, false, undefined, this) : null,
-          view.netWorthCents !== null ? /* @__PURE__ */ u3(Row, {
+          !view.opened ? /* @__PURE__ */ u3("div", {
+            class: "lre-small lre-muted",
+            children: "Not opened yet: these are the opening balances the accounts start from."
+          }, undefined, false, undefined, this) : null,
+          o && o.netWorth !== null ? /* @__PURE__ */ u3(Row, {
             k: "Net worth",
-            v: formatCents(view.netWorthCents),
-            tone: view.netWorthCents < 0 ? "neg" : undefined
+            v: fmt(o.netWorth),
+            tone: o.netWorth < 0 ? "neg" : undefined
+          }, undefined, false, undefined, this) : null,
+          blocks.assets && o && o.assets !== null ? /* @__PURE__ */ u3(Row, {
+            k: "Assets",
+            v: fmt(o.assets)
+          }, undefined, false, undefined, this) : null,
+          blocks.assets && o && o.liabilities !== null && o.liabilities !== 0 ? /* @__PURE__ */ u3(Row, {
+            k: "Owed",
+            v: fmt(-Math.abs(o.liabilities)),
+            tone: "neg"
+          }, undefined, false, undefined, this) : null,
+          view.cash && "cents" in view.cash ? /* @__PURE__ */ u3(Row, {
+            k: "Cash on hand",
+            v: fmt(view.cash.cents)
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
-      view.accounts.length > 0 ? /* @__PURE__ */ u3(Card, {
-        title: "Accounts",
-        children: view.accounts.map((a) => {
-          const subs = [
-            a.limitCents !== undefined ? `limit ${formatCents(a.limitCents)}` : null,
-            a.aprPct !== undefined ? `${a.aprPct}% APR` : null,
-            a.due ? `${a.due.label} ${formatCents(a.due.cents)}` : null
-          ].filter((part) => part);
-          return /* @__PURE__ */ u3(Row, {
-            k: /* @__PURE__ */ u3(M, {
-              children: [
-                /* @__PURE__ */ u3("span", {
-                  "aria-hidden": "true",
-                  children: CLASS_ICON[a.class]
-                }, undefined, false, undefined, this),
-                " ",
-                a.name
-              ]
-            }, undefined, true, undefined, this),
-            sub: subs.length > 0 ? subs.join(" · ") : undefined,
-            v: formatCents(a.cents),
-            tone: a.cents < 0 ? "neg" : undefined
-          }, a.id, false, undefined, this);
-        })
+      blocks.breakdown && o && o.breakdown.length > 0 ? /* @__PURE__ */ u3(Card, {
+        title: "What it's made of",
+        children: o.breakdown.map((b) => /* @__PURE__ */ u3(Row, {
+          k: b.label,
+          v: fmt(b.cents),
+          tone: b.cents < 0 ? "neg" : undefined
+        }, b.label, false, undefined, this))
       }, undefined, false, undefined, this) : null,
-      view.upcoming.length > 0 ? /* @__PURE__ */ u3(Card, {
+      o && o.alerts.length > 0 ? /* @__PURE__ */ u3(Card, {
+        title: "Needs attention",
+        children: o.alerts.map((a, i) => /* @__PURE__ */ u3(Row, {
+          k: a.text,
+          tone: a.tone === "info" ? "muted" : a.tone === "neg" ? "neg" : "warn"
+        }, `${a.text}:${i}`, false, undefined, this))
+      }, undefined, false, undefined, this) : null,
+      o && o.cashFlow ? /* @__PURE__ */ u3(Card, {
+        title: `Cash flow · ${o.cashFlow.period}`,
+        children: [
+          /* @__PURE__ */ u3(Row, {
+            k: "Money in",
+            v: fmt(o.cashFlow.in),
+            tone: "pos"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Row, {
+            k: "Money out",
+            v: fmt(-Math.abs(o.cashFlow.out)),
+            tone: "neg"
+          }, undefined, false, undefined, this),
+          blocks.cashFlowByCategory ? o.cashFlow.byCategory.map((b) => /* @__PURE__ */ u3(Row, {
+            k: humanize(b.category),
+            v: fmt(b.cents),
+            tone: b.cents < 0 ? "neg" : "pos"
+          }, b.category, false, undefined, this)) : null,
+          blocks.cashFlowAhead ? /* @__PURE__ */ u3(Row, {
+            k: "The next 30 days",
+            sub: `${fmt(o.cashFlow.nextIn)} coming in`,
+            v: fmt(-Math.abs(o.cashFlow.nextOut))
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this) : null,
+      o && o.upcoming.length > 0 ? /* @__PURE__ */ u3(Card, {
         title: "Coming up",
-        children: view.upcoming.map((u, i) => /* @__PURE__ */ u3(Row, {
+        children: o.upcoming.slice(0, blocks.upcoming).map((u, i) => /* @__PURE__ */ u3(Row, {
           k: u.label,
           sub: u.at,
-          v: formatCents(u.cents),
+          v: fmt(u.cents),
           tone: u.cents < 0 ? "neg" : "pos"
-        }, `${u.at}:${i}`, false, undefined, this))
+        }, `${u.clock}:${i}`, false, undefined, this))
       }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3(Card, {
+      view.level >= 2 ? /* @__PURE__ */ u3(Card, {
         title: "Recent",
-        children: view.recent.length === 0 ? /* @__PURE__ */ u3(Empty, {
-          children: "No transactions yet."
-        }, undefined, false, undefined, this) : view.recent.map((t, i) => /* @__PURE__ */ u3(Row, {
-          k: t.memo,
-          sub: `${t.at} · ${t.account}`,
-          v: `${t.cents > 0 ? "+" : ""}${formatCents(t.cents)}`,
-          tone: t.cents < 0 ? "neg" : "pos"
-        }, `${t.at}:${i}`, false, undefined, this))
-      }, undefined, false, undefined, this)
+        children: /* @__PURE__ */ u3(TxnRows, {
+          lines: view.recent,
+          max: blocks.recent,
+          currency: controls.currency,
+          account: true
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      controls.mode === "gm" && view.notes.length > 0 ? /* @__PURE__ */ u3(Card, {
+        title: "Notes",
+        children: view.notes.map((n, i) => /* @__PURE__ */ u3(Row, {
+          k: n.text,
+          sub: n.at
+        }, `${n.at}:${i}`, false, undefined, this))
+      }, undefined, false, undefined, this) : null
     ]
   }, undefined, true, undefined, this);
+}
+function MoneyHub(props) {
+  const { view } = props;
+  const tabs = hubTabs(view);
+  const [section, setSection] = d2("overview");
+  const panelId = P2();
+  const shown = tabs.some((t) => t.id === section) ? section : "overview";
+  A(() => {
+    if (shown !== section)
+      setSection(shown);
+  }, [shown, section]);
+  if (tabs.length === 0)
+    return /* @__PURE__ */ u3(Empty, {
+      children: [
+        "Money is off for ",
+        view.name,
+        "."
+      ]
+    }, undefined, true, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-money-hub": view.party,
+    children: [
+      tabs.length > 1 ? /* @__PURE__ */ u3(Tabs, {
+        label: props.label,
+        panelId,
+        value: shown,
+        tabs,
+        onChange: setSection
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("div", {
+        class: "lre-stack",
+        ...tabPanel(panelId, shown),
+        "data-lre-money-section": shown,
+        children: [
+          shown === "overview" ? /* @__PURE__ */ u3(Overview, {
+            ...props
+          }, undefined, false, undefined, this) : null,
+          shown === "accounts" ? /* @__PURE__ */ u3(AccountsSection, {
+            ...props
+          }, undefined, false, undefined, this) : null,
+          shown === "flows" ? /* @__PURE__ */ u3(FlowsSection, {
+            ...props
+          }, undefined, false, undefined, this) : null,
+          shown === "jobs" ? /* @__PURE__ */ u3(JobsSection, {
+            ...props
+          }, undefined, false, undefined, this) : null,
+          shown === "businesses" ? /* @__PURE__ */ u3(BusinessesSection, {
+            ...props
+          }, undefined, false, undefined, this) : null,
+          shown === "investments" ? /* @__PURE__ */ u3(InvestmentsSection, {
+            ...props
+          }, undefined, false, undefined, this) : null,
+          shown === "properties" ? /* @__PURE__ */ u3(PropertiesSection, {
+            ...props
+          }, undefined, false, undefined, this) : null,
+          shown === "credit" ? /* @__PURE__ */ u3(CreditSection, {
+            ...props
+          }, undefined, false, undefined, this) : null,
+          shown === "household" ? /* @__PURE__ */ u3(HouseholdSection, {
+            ...props
+          }, undefined, false, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/economy/ui/gm.tsx
+function GmMoneySection(props) {
+  const parties = props.gm.money.map((raw) => ({ raw, view: decodeFinanceView(raw) }));
+  const [query, setQuery] = d2("");
+  const [picked, setPicked] = d2(null);
+  if (parties.length === 0)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "No one's money is tracked."
+    }, undefined, false, undefined, this);
+  const q = query.trim().toLowerCase();
+  const shown = parties.filter((p) => q === "" || (p.view?.name ?? "").toLowerCase().includes(q) || (p.view?.party ?? "").toLowerCase().includes(q));
+  const current = parties.find((p) => p.view !== null && p.view.party === picked) ?? shown.find((p) => p.view !== null) ?? null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-gm-money": true,
+    children: [
+      parties.length > 8 ? /* @__PURE__ */ u3("input", {
+        class: "lre-input",
+        placeholder: "Search",
+        "aria-label": "Search parties",
+        value: query,
+        onInput: (event) => setQuery(event.currentTarget.value)
+      }, undefined, false, undefined, this) : null,
+      /* @__PURE__ */ u3("label", {
+        class: "lre-field",
+        children: [
+          /* @__PURE__ */ u3("span", {
+            class: "label",
+            children: "Whose money"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("select", {
+            class: "lre-input",
+            value: current?.view?.party ?? "",
+            onChange: (event) => setPicked(event.currentTarget.value),
+            children: shown.flatMap((p) => p.view ? [
+              /* @__PURE__ */ u3("option", {
+                value: p.view.party,
+                children: `${p.view.name} · ${p.view.partyKind} · Money ${p.view.level}`
+              }, p.view.party, false, undefined, this)
+            ] : [])
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      current?.view ? /* @__PURE__ */ u3(MoneyHub, {
+        view: current.view,
+        label: `${current.view.name}'s money`,
+        controls: { mode: "gm", busy: props.busy, currency: props.currency, edit: props.edit, gm: props.gm }
+      }, current.view.party, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
+        children: "Nothing to show for that party."
+      }, undefined, false, undefined, this),
+      parties.some((p) => p.view === null) ? /* @__PURE__ */ u3("details", {
+        children: [
+          /* @__PURE__ */ u3("summary", {
+            class: "lre-small lre-muted",
+            children: [
+              "Money this build can't draw (",
+              parties.filter((p) => p.view === null).length,
+              ")"
+            ]
+          }, undefined, true, undefined, this),
+          parties.filter((p) => p.view === null).map((p, i) => /* @__PURE__ */ u3(JsonView, {
+            value: p.raw
+          }, i, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/packs/economy/ui/panel.tsx
+function MoneyPanel(props) {
+  const app = useApp();
+  const [busy, run] = useBusy();
+  if (props.view === null || props.view === undefined)
+    return /* @__PURE__ */ u3(Empty, {
+      children: "Money is off in this world."
+    }, undefined, false, undefined, this);
+  const view = decodeFinanceView(props.view);
+  if (!view)
+    return /* @__PURE__ */ u3(JsonView, {
+      value: props.view
+    }, undefined, false, undefined, this);
+  const controls = {
+    mode: "player",
+    busy,
+    currency: props.state.currency ?? DEFAULT_CURRENCY,
+    palette: props.state.palette,
+    act: (body) => {
+      if (busy)
+        return Promise.resolve(false);
+      const { promise, resolve } = Promise.withResolvers();
+      run(async () => resolve(await app.request(actionRequest(props.chatId, body)) !== null));
+      return promise;
+    }
+  };
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-panel": "economy.money",
+    children: /* @__PURE__ */ u3(MoneyHub, {
+      view,
+      label: "Your money",
+      controls
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
 }
 
 // src/packs/economy/ui/index.ts
@@ -18140,6 +24066,10 @@ var economy = {
     r.panel({ id: "economy.money", label: "Money", order: 30, component: MoneyPanel });
     r.gm({ id: "economy.money", label: "Money", order: 30, component: GmMoneySection });
     r.config(EconomyConfig);
+    for (const def of MONEY_FIELD_EDITORS)
+      r.field(def);
+    for (const def of MONEY_PLACE_FIELDS)
+      r.placeField(def);
   }
 };
 var ui_default4 = economy;
@@ -20166,7 +26096,7 @@ function drawScope(canvas, scope, t, opts) {
 
 // src/packs/space/ui/view.ts
 var TRAVEL_MODES2 = ["walk", "road", "offroad", "water"];
-function numbers(value) {
+function numbers2(value) {
   return Array.isArray(value) ? value.filter((n) => typeof n === "number") : [];
 }
 function decodePlace(p) {
@@ -20198,8 +26128,8 @@ function decodeGrid(value) {
     height: num(grid.height, 1),
     cellMeters: optNum(grid.cellMeters),
     terrain: strings(grid.terrain),
-    blocked: numbers(grid.blocked),
-    areas: areas ? Object.fromEntries(Object.entries(areas).map(([id, cells]) => [id, numbers(cells)])) : {},
+    blocked: numbers2(grid.blocked),
+    areas: areas ? Object.fromEntries(Object.entries(areas).map(([id, cells]) => [id, numbers2(cells)])) : {},
     pov: pov ? { x: num(pov.x), y: num(pov.y) } : undefined,
     seen: optStr(grid.seen),
     items: list(grid.items, decodeItem2)
@@ -22229,1016 +28159,6 @@ function ContextPanel(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/frontend/play/gm.tsx
-function nameOf(gm, id) {
-  if (id === null)
-    return "—";
-  return gm.entities.find((e) => e.id === id)?.name ?? gm.places.find((p) => p.id === id)?.name ?? id;
-}
-function shown(value, field, editor) {
-  if (value === null || value === undefined)
-    return "—";
-  if (field.type === "money" && typeof value === "number")
-    return formatMoney(value, editor.currency);
-  if (field.type === "ref" && typeof value === "string")
-    return nameOf(editor.gm, value);
-  if (typeof value === "boolean")
-    return value ? "yes" : "no";
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
-function textOf(value, field, currency) {
-  if (field.type === "money" && typeof value === "number")
-    return (value / 10 ** currency.decimals).toFixed(currency.decimals);
-  if (value === null || value === undefined)
-    return "";
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
-function parse(entity, field, text, currency) {
-  if (field.extra && field.type !== "number" && field.type !== "bool" && text.trim() !== "" && /^[[{"]/.test(text.trim())) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return null;
-    }
-  }
-  return parseFixValue({ entity: entity.id, field: field.id, type: field.type, value: field.value, ...field.min !== undefined ? { min: field.min } : {}, ...field.max !== undefined ? { max: field.max } : {} }, text, currency);
-}
-function FieldRow(props) {
-  const { entity, field, editor } = props;
-  const [text, setText] = d2(null);
-  const refs = field.type === "ref" ? [...editor.gm.places.map((p) => ({ value: p.id, label: p.name })), ...editor.gm.entities.filter((e) => !field.ref || e.kind === field.ref).map((e) => ({ value: e.id, label: e.name }))] : [];
-  const options = field.type === "enum" ? (field.values ?? []).map((v) => ({ value: v, label: v })) : field.type === "bool" ? [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] : refs;
-  const value = text === null ? null : field.type === "ref" ? text === "" ? null : text : field.type === "enum" ? text : parse(entity, field, text, editor.currency);
-  const bounds = field.min !== undefined || field.max !== undefined ? ` (${field.min ?? "…"}–${field.max ?? "…"})` : "";
-  if (text === null) {
-    const label = `${field.label}${field.locked ? " \uD83D\uDD12" : ""}`;
-    const edit = field.derived ? null : /* @__PURE__ */ u3("button", {
-      type: "button",
-      class: "lre-btn small ghost",
-      "aria-label": `Edit ${field.label}`,
-      onClick: () => setText(field.type === "bool" ? String(field.value === true) : textOf(field.value, field, editor.currency)),
-      children: "✎"
-    }, undefined, false, undefined, this);
-    const note = field.derived ? "worked out" : field.extra ? "not in the kind" : null;
-    if (field.type === "text" || field.extra)
-      return /* @__PURE__ */ u3(Row, {
-        k: label,
-        sub: [shown(field.value, field, editor), note].filter((s) => s !== null).join(" · "),
-        v: edit
-      }, undefined, false, undefined, this);
-    return /* @__PURE__ */ u3(Row, {
-      k: label,
-      sub: note ?? undefined,
-      v: /* @__PURE__ */ u3("span", {
-        class: "lre-inline",
-        children: [
-          shown(field.value, field, editor),
-          edit
-        ]
-      }, undefined, true, undefined, this)
-    }, undefined, false, undefined, this);
-  }
-  return /* @__PURE__ */ u3("form", {
-    class: "lre-stack",
-    onSubmit: (event) => {
-      event.preventDefault();
-      if (value === null && field.type !== "ref")
-        return;
-      editor.edit([{ op: "set", entity: entity.id, field: field.id, value }]).then((ok) => ok && setText(null));
-    },
-    children: [
-      /* @__PURE__ */ u3("label", {
-        class: "lre-field",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "label",
-            children: [
-              field.label,
-              bounds
-            ]
-          }, undefined, true, undefined, this),
-          options.length > 0 || field.type === "ref" ? /* @__PURE__ */ u3("select", {
-            class: "lre-input",
-            value: text,
-            onChange: (event) => setText(event.currentTarget.value),
-            children: [
-              field.type === "ref" ? /* @__PURE__ */ u3("option", {
-                value: "",
-                children: "None"
-              }, undefined, false, undefined, this) : null,
-              options.map((o) => /* @__PURE__ */ u3("option", {
-                value: o.value,
-                children: o.label
-              }, o.value, false, undefined, this))
-            ]
-          }, undefined, true, undefined, this) : /* @__PURE__ */ u3("input", {
-            class: value === null ? "lre-input invalid" : "lre-input",
-            value: text,
-            onInput: (event) => setText(event.currentTarget.value)
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-inline",
-        children: [
-          /* @__PURE__ */ u3("button", {
-            type: "submit",
-            class: "lre-btn primary",
-            disabled: editor.busy || value === null && field.type !== "ref",
-            children: "Save"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("button", {
-            type: "button",
-            class: "lre-btn ghost",
-            onClick: () => setText(null),
-            children: "Cancel"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function EntityState(props) {
-  const { entity, editor } = props;
-  const [tier, setTier] = d2(entity.tier);
-  const [agent, setAgent] = d2(entity.agent);
-  const [levels, setLevels] = d2(Object.fromEntries(entity.levels.map((l) => [l.domain, l.override])));
-  const op = entityStateOp(entity, tier, agent, levels);
-  return /* @__PURE__ */ u3(Card, {
-    title: "Simulation",
-    children: [
-      /* @__PURE__ */ u3("label", {
-        class: "lre-field",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "label",
-            children: "Tier"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("select", {
-            class: "lre-input",
-            value: tier,
-            onChange: (event) => setTier(event.currentTarget.value),
-            children: editor.gm.tiers.map((t) => /* @__PURE__ */ u3("option", {
-              value: t.id,
-              children: t.label
-            }, t.id, false, undefined, this))
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      entity.pov ? null : /* @__PURE__ */ u3("label", {
-        class: "lre-inline",
-        children: [
-          /* @__PURE__ */ u3("input", {
-            type: "checkbox",
-            checked: agent,
-            onChange: (event) => setAgent(event.currentTarget.checked)
-          }, undefined, false, undefined, this),
-          " Lives their own day (agendas and plans)"
-        ]
-      }, undefined, true, undefined, this),
-      entity.levels.map((l) => /* @__PURE__ */ u3("label", {
-        class: "lre-field",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "label",
-            children: [
-              editor.gm.domains.find((d) => d.id === l.domain)?.label ?? l.domain,
-              " · now ",
-              l.level
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ u3("select", {
-            class: "lre-input",
-            value: levels[l.domain] === null || levels[l.domain] === undefined ? "" : String(levels[l.domain]),
-            onChange: (event) => setLevels({ ...levels, [l.domain]: event.currentTarget.value === "" ? null : Number(event.currentTarget.value) }),
-            children: [
-              /* @__PURE__ */ u3("option", {
-                value: "",
-                children: "From the tier"
-              }, undefined, false, undefined, this),
-              [0, 1, 2, 3, 4].map((n) => /* @__PURE__ */ u3("option", {
-                value: String(n),
-                children: [
-                  "Level ",
-                  n
-                ]
-              }, n, true, undefined, this))
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, l.domain, true, undefined, this)),
-      /* @__PURE__ */ u3("button", {
-        type: "button",
-        class: "lre-btn primary",
-        disabled: editor.busy || op === null,
-        onClick: () => op && void editor.edit([op]),
-        children: "Save"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Classification(props) {
-  const { entity, editor } = props;
-  const [classes, setClasses] = d2(entity.class);
-  const [tags, setTags] = d2(entity.tags);
-  const op = classifyOp(entity, classes, tags);
-  const suggestions = [...new Set(editor.gm.entities.flatMap((e) => e.tags))].sort((a, b) => a.localeCompare(b));
-  return /* @__PURE__ */ u3(Card, {
-    title: "Classification",
-    children: [
-      /* @__PURE__ */ u3(ClassesInput, {
-        label: "Classes",
-        value: classes,
-        doc: editor.gm,
-        onChange: (next) => setClasses(next ?? {})
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(TagListInput, {
-        label: "Tags",
-        value: tags,
-        suggestions,
-        onChange: setTags
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("button", {
-        type: "button",
-        class: "lre-btn primary",
-        disabled: editor.busy || op === null,
-        onClick: () => op && void editor.edit([op]),
-        children: "Save"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Life(props) {
-  const { entity, editor } = props;
-  const [to, setTo] = d2(entity.life.state);
-  const [tell, setTell] = d2([]);
-  const op = lifeEditOp(entity, to, tell);
-  const name = (id) => editor.gm.entities.find((e) => e.id === id)?.pov ? "You" : editor.gm.entities.find((e) => e.id === id)?.name ?? id;
-  const others = editor.gm.entities.filter((e) => e.id !== entity.id && !e.gone && !tell.includes(e.id));
-  const { everyone, aware, unaware } = entity.life;
-  return /* @__PURE__ */ u3(Card, {
-    title: "Life",
-    children: [
-      /* @__PURE__ */ u3(Row, {
-        k: "Known to",
-        v: everyone ? unaware.length > 0 ? `everyone but ${unaware.map((p) => name(p.id)).join(", ")}` : "everyone" : aware.length > 0 ? aware.map((p) => name(p.id)).join(", ") : "no one"
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("label", {
-        class: "lre-field",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "label",
-            children: "Life state"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("select", {
-            class: "lre-input",
-            value: to,
-            onChange: (event) => setTo(event.currentTarget.value),
-            children: editor.gm.lifeStates.map((s) => /* @__PURE__ */ u3("option", {
-              value: s.id,
-              children: [
-                s.label,
-                s.acts ? "" : " (doesn't act)"
-              ]
-            }, s.id, true, undefined, this))
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      tell.length > 0 ? /* @__PURE__ */ u3("div", {
-        class: "lre-inline",
-        style: { flexWrap: "wrap" },
-        children: tell.map((id) => /* @__PURE__ */ u3("button", {
-          type: "button",
-          class: "lre-btn small",
-          "aria-label": `Don't tell ${name(id)}`,
-          onClick: () => setTell(tell.filter((t) => t !== id)),
-          children: [
-            name(id),
-            " ✕"
-          ]
-        }, id, true, undefined, this))
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3("select", {
-        class: "lre-input",
-        value: "",
-        "aria-label": "Tell someone",
-        onChange: (event) => event.currentTarget.value ? setTell([...tell, event.currentTarget.value]) : undefined,
-        children: [
-          /* @__PURE__ */ u3("option", {
-            value: "",
-            children: "+ Tell someone…"
-          }, undefined, false, undefined, this),
-          others.map((e) => /* @__PURE__ */ u3("option", {
-            value: e.id,
-            children: e.pov ? "You" : e.name
-          }, e.id, false, undefined, this))
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("button", {
-        type: "button",
-        class: "lre-btn primary",
-        disabled: editor.busy || op === null,
-        onClick: () => op && void editor.edit([op]),
-        children: "Save"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function relationDetail(r, gm) {
-  const defs = gm.relationTypes.find((t) => t.id === r.type)?.fields ?? [];
-  const parts = Object.entries(r.fields ?? {}).map(([id, v]) => `${defs.find((d) => d.id === id)?.label ?? id} ${typeof v === "string" ? v : JSON.stringify(v)}`);
-  if (r.value !== undefined)
-    parts.push(`now ${r.value}`);
-  return parts.length > 0 ? parts.join(" · ") : undefined;
-}
-function Relations(props) {
-  const { entity, editor } = props;
-  const types = editor.gm.relationTypes.filter((t) => t.id !== "in");
-  const [type, setType] = d2(types[0]?.id ?? "knows");
-  const [to, setTo] = d2("");
-  const [inputs, setInputs] = d2({});
-  const defs = types.find((t) => t.id === type)?.fields ?? [];
-  const fields = relationFields(defs, inputs, entity.relations.find((r) => r.type === type && r.to === to)?.fields);
-  return /* @__PURE__ */ u3(Card, {
-    title: "Relations",
-    children: [
-      entity.relations.length === 0 ? /* @__PURE__ */ u3(Empty, {
-        children: "None."
-      }, undefined, false, undefined, this) : null,
-      entity.relations.map((r) => /* @__PURE__ */ u3(Row, {
-        k: `${editor.gm.relationTypes.find((t) => t.id === r.type)?.label ?? r.type} → ${r.toName}`,
-        sub: relationDetail(r, editor.gm),
-        v: /* @__PURE__ */ u3("span", {
-          class: "lre-inline",
-          children: [
-            r.type === "in" ? null : /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-btn small ghost",
-              "aria-label": `Edit ${r.type} ${r.toName}`,
-              onClick: () => (setType(r.type), setTo(r.to), setInputs(Object.fromEntries(Object.entries(r.fields ?? {}).map(([id, v]) => [id, typeof v === "string" ? v : JSON.stringify(v)])))),
-              children: "✎"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-btn small danger",
-              disabled: editor.busy,
-              onClick: () => void editor.edit([{ op: "unlink", rel: r.type, from: entity.id, to: r.to }]),
-              children: "Remove"
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this)
-      }, `${r.type}:${r.to}`, false, undefined, this)),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-stack",
-        "data-lre-gm-relation-form": true,
-        children: [
-          /* @__PURE__ */ u3("select", {
-            class: "lre-input",
-            "aria-label": "Relation",
-            value: type,
-            onChange: (event) => (setType(event.currentTarget.value), setInputs({})),
-            children: types.map((t) => /* @__PURE__ */ u3("option", {
-              value: t.id,
-              children: t.label
-            }, t.id, false, undefined, this))
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("select", {
-            class: "lre-input",
-            "aria-label": "To",
-            value: to,
-            onChange: (event) => setTo(event.currentTarget.value),
-            children: [
-              /* @__PURE__ */ u3("option", {
-                value: "",
-                children: "To…"
-              }, undefined, false, undefined, this),
-              editor.gm.entities.filter((e) => e.id !== entity.id).map((e) => /* @__PURE__ */ u3("option", {
-                value: e.id,
-                children: e.name
-              }, e.id, false, undefined, this))
-            ]
-          }, undefined, true, undefined, this),
-          defs.map((d) => /* @__PURE__ */ u3("label", {
-            class: "lre-field",
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "label",
-                children: [
-                  d.label,
-                  d.min !== undefined || d.max !== undefined ? ` (${d.min ?? "…"}–${d.max ?? "…"})` : ""
-                ]
-              }, undefined, true, undefined, this),
-              d.type === "enum" || d.type === "bool" ? /* @__PURE__ */ u3("select", {
-                class: "lre-input",
-                value: inputs[d.id] ?? "",
-                onChange: (event) => setInputs({ ...inputs, [d.id]: event.currentTarget.value }),
-                children: [
-                  /* @__PURE__ */ u3("option", {
-                    value: "",
-                    children: "None"
-                  }, undefined, false, undefined, this),
-                  (d.type === "bool" ? ["true", "false"] : d.values ?? []).map((v) => /* @__PURE__ */ u3("option", {
-                    value: v,
-                    children: d.type === "bool" ? v === "true" ? "Yes" : "No" : v
-                  }, v, false, undefined, this))
-                ]
-              }, undefined, true, undefined, this) : /* @__PURE__ */ u3("input", {
-                class: inputs[d.id] && relationFields([d], inputs) === null ? "lre-input invalid" : "lre-input",
-                inputMode: d.type === "number" ? "decimal" : undefined,
-                value: inputs[d.id] ?? "",
-                onInput: (event) => setInputs({ ...inputs, [d.id]: event.currentTarget.value })
-              }, undefined, false, undefined, this)
-            ]
-          }, d.id, true, undefined, this)),
-          /* @__PURE__ */ u3("button", {
-            type: "button",
-            class: "lre-btn",
-            disabled: editor.busy || to === "" || fields === null,
-            onClick: () => fields && void editor.edit([{ op: "link", rel: type, from: entity.id, to, ...Object.keys(fields).length > 0 ? { fields } : {} }]),
-            children: "Add or update"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Placement(props) {
-  const { entity, editor } = props;
-  const [amount, setAmount] = d2("");
-  const add = adjustOp(entity.id, amount, editor.currency, false);
-  const take = adjustOp(entity.id, amount, editor.currency, true);
-  return /* @__PURE__ */ u3(Card, {
-    title: "Placement",
-    children: [
-      /* @__PURE__ */ u3(Row, {
-        k: "At",
-        v: nameOf(editor.gm, entity.place)
-      }, undefined, false, undefined, this),
-      entity.holder ? /* @__PURE__ */ u3(Row, {
-        k: "Inside",
-        v: nameOf(editor.gm, entity.holder)
-      }, undefined, false, undefined, this) : null,
-      /* @__PURE__ */ u3("select", {
-        class: "lre-input",
-        "aria-label": "Move to a place",
-        value: "",
-        onChange: (event) => event.currentTarget.value !== "" && void editor.edit([{ op: "move", entity: entity.id, to: event.currentTarget.value }]),
-        children: [
-          /* @__PURE__ */ u3("option", {
-            value: "",
-            children: "Move to a place…"
-          }, undefined, false, undefined, this),
-          editor.gm.places.map((p) => /* @__PURE__ */ u3("option", {
-            value: p.id,
-            children: p.name
-          }, p.id, false, undefined, this))
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("select", {
-        class: "lre-input",
-        "aria-label": "Put inside",
-        value: "",
-        onChange: (event) => event.currentTarget.value !== "" && void editor.edit([{ op: "put", entity: entity.id, into: event.currentTarget.value }]),
-        children: [
-          /* @__PURE__ */ u3("option", {
-            value: "",
-            children: "Put inside…"
-          }, undefined, false, undefined, this),
-          editor.gm.entities.filter((e) => e.id !== entity.id).map((e) => /* @__PURE__ */ u3("option", {
-            value: e.id,
-            children: e.name
-          }, e.id, false, undefined, this))
-        ]
-      }, undefined, true, undefined, this),
-      entity.holder ? /* @__PURE__ */ u3("button", {
-        type: "button",
-        class: "lre-btn",
-        disabled: editor.busy,
-        onClick: () => void editor.edit([{ op: "put", entity: entity.id, into: null }]),
-        children: "Take out"
-      }, undefined, false, undefined, this) : null,
-      entity.balance !== undefined ? /* @__PURE__ */ u3("div", {
-        class: "lre-stack",
-        children: [
-          /* @__PURE__ */ u3(Row, {
-            k: "Balance",
-            v: formatMoney(entity.balance, editor.currency)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("input", {
-            class: add === null && amount !== "" ? "lre-input invalid" : "lre-input",
-            "aria-label": "Amount",
-            placeholder: "Amount",
-            value: amount,
-            onInput: (event) => setAmount(event.currentTarget.value)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("div", {
-            class: "lre-inline",
-            children: [
-              /* @__PURE__ */ u3("button", {
-                type: "button",
-                class: "lre-btn",
-                disabled: editor.busy || add === null,
-                onClick: () => add && void editor.edit([add]),
-                children: "Add"
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("button", {
-                type: "button",
-                class: "lre-btn",
-                disabled: editor.busy || take === null,
-                onClick: () => take && void editor.edit([take]),
-                children: "Take"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this) : null
-    ]
-  }, undefined, true, undefined, this);
-}
-function EntityEditor(props) {
-  const { entity, editor } = props;
-  const numbers = entity.fields.filter((f) => !f.derived && (f.type === "number" || f.type === "money" || f.type === "duration"));
-  const [addField, setAddField] = d2(numbers[0]?.id ?? "");
-  const [delta, setDelta] = d2("");
-  const amount = Number(delta);
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    "data-lre-gm-entity": entity.id,
-    children: [
-      /* @__PURE__ */ u3(Card, {
-        title: entity.name,
-        aside: /* @__PURE__ */ u3("span", {
-          class: "lre-inline",
-          children: [
-            entity.gone ? /* @__PURE__ */ u3("span", {
-              class: "lre-badge neg",
-              children: "Removed"
-            }, undefined, false, undefined, this) : null,
-            entity.life.state !== "alive" ? /* @__PURE__ */ u3("span", {
-              class: "lre-badge neg",
-              children: entity.life.label
-            }, undefined, false, undefined, this) : null,
-            entity.visibility !== "public" ? /* @__PURE__ */ u3("span", {
-              class: "lre-badge warn",
-              children: entity.visibility.replace(/_/g, " ")
-            }, undefined, false, undefined, this) : null,
-            /* @__PURE__ */ u3("button", {
-              type: "button",
-              class: "lre-btn small ghost",
-              onClick: props.onClose,
-              children: "All"
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
-        children: [
-          /* @__PURE__ */ u3(Row, {
-            k: "Kind",
-            v: editor.gm.kinds.find((k) => k.id === entity.kind)?.label ?? entity.kind,
-            sub: entity.spawned ? "spawned in this chat" : undefined
-          }, undefined, false, undefined, this),
-          entity.pov ? null : entity.gone ? /* @__PURE__ */ u3("button", {
-            type: "button",
-            class: "lre-btn primary",
-            disabled: editor.busy,
-            onClick: () => void editor.edit([{ op: "restore", entity: entity.id }]),
-            children: "Restore"
-          }, undefined, false, undefined, this) : /* @__PURE__ */ u3("button", {
-            type: "button",
-            class: "lre-btn danger",
-            disabled: editor.busy,
-            onClick: () => void editor.edit([{ op: "despawn", entity: entity.id }]),
-            children: "Remove from the world"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3(Card, {
-        title: "Fields",
-        children: [
-          entity.fields.map((f) => /* @__PURE__ */ u3(FieldRow, {
-            entity,
-            field: f,
-            editor
-          }, f.id, false, undefined, this)),
-          numbers.length > 0 ? /* @__PURE__ */ u3("div", {
-            class: "lre-inline",
-            children: [
-              /* @__PURE__ */ u3("select", {
-                class: "lre-input",
-                "aria-label": "Add to",
-                value: addField,
-                onChange: (event) => setAddField(event.currentTarget.value),
-                children: numbers.map((f) => /* @__PURE__ */ u3("option", {
-                  value: f.id,
-                  children: f.label
-                }, f.id, false, undefined, this))
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("input", {
-                class: "lre-input",
-                inputMode: "decimal",
-                "aria-label": "Amount to add",
-                placeholder: "+/−",
-                value: delta,
-                onInput: (event) => setDelta(event.currentTarget.value)
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ u3("button", {
-                type: "button",
-                class: "lre-btn",
-                disabled: editor.busy || delta.trim() === "" || !Number.isFinite(amount) || amount === 0,
-                onClick: () => void editor.edit([{ op: "add", entity: entity.id, field: addField, delta: amount }]).then((ok) => ok && setDelta("")),
-                children: "Add"
-              }, undefined, false, undefined, this)
-            ]
-          }, undefined, true, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      entity.sheet?.map((section) => /* @__PURE__ */ u3(Card, {
-        title: section.title,
-        children: section.rows.map((row) => /* @__PURE__ */ u3(Row, {
-          k: row.label,
-          v: row.value,
-          sub: row.detail
-        }, row.label, false, undefined, this))
-      }, section.title, false, undefined, this)),
-      /* @__PURE__ */ u3(Placement, {
-        entity,
-        editor
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Relations, {
-        entity,
-        editor
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(EntityState, {
-        entity,
-        editor
-      }, `${entity.tier}:${entity.agent}:${JSON.stringify(entity.levels)}`, false, undefined, this),
-      /* @__PURE__ */ u3(Life, {
-        entity,
-        editor
-      }, JSON.stringify(entity.life), false, undefined, this),
-      /* @__PURE__ */ u3(Classification, {
-        entity,
-        editor
-      }, JSON.stringify([entity.class, entity.tags]), false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Spawn(props) {
-  const { editor } = props;
-  const [kind, setKind] = d2(editor.gm.kinds.find((k) => k.id === "person")?.id ?? editor.gm.kinds[0]?.id ?? "");
-  const [name, setName] = d2("");
-  const [place, setPlace] = d2("");
-  const [tier, setTier] = d2("");
-  return /* @__PURE__ */ u3(Card, {
-    title: "Spawn",
-    children: [
-      /* @__PURE__ */ u3("select", {
-        class: "lre-input",
-        "aria-label": "Kind",
-        value: kind,
-        onChange: (event) => setKind(event.currentTarget.value),
-        children: editor.gm.kinds.map((k) => /* @__PURE__ */ u3("option", {
-          value: k.id,
-          children: k.label
-        }, k.id, false, undefined, this))
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("input", {
-        class: "lre-input",
-        "aria-label": "Name",
-        placeholder: "Name",
-        value: name,
-        onInput: (event) => setName(event.currentTarget.value)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("select", {
-        class: "lre-input",
-        "aria-label": "Place",
-        value: place,
-        onChange: (event) => setPlace(event.currentTarget.value),
-        children: [
-          /* @__PURE__ */ u3("option", {
-            value: "",
-            children: "No place"
-          }, undefined, false, undefined, this),
-          editor.gm.places.map((p) => /* @__PURE__ */ u3("option", {
-            value: p.id,
-            children: p.name
-          }, p.id, false, undefined, this))
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("select", {
-        class: "lre-input",
-        "aria-label": "Tier",
-        value: tier,
-        onChange: (event) => setTier(event.currentTarget.value),
-        children: [
-          /* @__PURE__ */ u3("option", {
-            value: "",
-            children: "The world's tier for new people"
-          }, undefined, false, undefined, this),
-          editor.gm.tiers.map((t) => /* @__PURE__ */ u3("option", {
-            value: t.id,
-            children: t.label
-          }, t.id, false, undefined, this))
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("button", {
-        type: "button",
-        class: "lre-btn primary",
-        disabled: editor.busy || name.trim() === "" || kind === "",
-        onClick: () => void editor.edit([{ op: "spawn", kind, name: name.trim(), ...place ? { place } : {}, ...tier ? { tier } : {} }]).then((ok) => ok && setName("")),
-        children: "Spawn"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Entities(props) {
-  const { editor } = props;
-  const [query, setQuery] = d2("");
-  const [kind, setKind] = d2("");
-  const [open, setOpen] = d2(null);
-  const selected = editor.gm.entities.find((e) => e.id === open);
-  if (selected)
-    return /* @__PURE__ */ u3(EntityEditor, {
-      entity: selected,
-      editor,
-      onClose: () => setOpen(null)
-    }, undefined, false, undefined, this);
-  const q = query.trim().toLowerCase();
-  const list = editor.gm.entities.filter((e) => (kind === "" || e.kind === kind) && (q === "" || e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q))).sort((a, b) => Number(a.gone) - Number(b.gone) || a.name.localeCompare(b.name));
-  const kinds = editor.gm.kinds.filter((k) => editor.gm.entities.some((e) => e.kind === k.id));
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-inline",
-        children: [
-          /* @__PURE__ */ u3("input", {
-            class: "lre-input",
-            type: "search",
-            "aria-label": "Search",
-            placeholder: "Search by name",
-            value: query,
-            onInput: (event) => setQuery(event.currentTarget.value)
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("select", {
-            class: "lre-input",
-            "aria-label": "Kind",
-            value: kind,
-            onChange: (event) => setKind(event.currentTarget.value),
-            children: [
-              /* @__PURE__ */ u3("option", {
-                value: "",
-                children: "Every kind"
-              }, undefined, false, undefined, this),
-              kinds.map((k) => /* @__PURE__ */ u3("option", {
-                value: k.id,
-                children: k.label
-              }, k.id, false, undefined, this))
-            ]
-          }, undefined, true, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3(Card, {
-        title: `${list.length} of ${editor.gm.entities.length}`,
-        children: /* @__PURE__ */ u3("div", {
-          class: "lre-list",
-          "data-lre-gm-list": "entities",
-          children: list.map((e) => /* @__PURE__ */ u3("button", {
-            type: "button",
-            class: "lre-item",
-            onClick: () => setOpen(e.id),
-            children: [
-              /* @__PURE__ */ u3("span", {
-                class: "grow",
-                children: [
-                  e.name,
-                  /* @__PURE__ */ u3("span", {
-                    class: "sub",
-                    children: editor.gm.kinds.find((k) => k.id === e.kind)?.label ?? e.kind
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              e.pov ? /* @__PURE__ */ u3("span", {
-                class: "lre-badge accent",
-                children: "You"
-              }, undefined, false, undefined, this) : null,
-              e.gone ? /* @__PURE__ */ u3("span", {
-                class: "lre-badge neg",
-                children: "Removed"
-              }, undefined, false, undefined, this) : null,
-              e.life.state !== "alive" ? /* @__PURE__ */ u3("span", {
-                class: "lre-badge neg",
-                children: e.life.label
-              }, undefined, false, undefined, this) : null,
-              e.spawned ? /* @__PURE__ */ u3("span", {
-                class: "lre-badge",
-                children: "Spawned"
-              }, undefined, false, undefined, this) : null,
-              e.agent ? /* @__PURE__ */ u3("span", {
-                class: "lre-badge",
-                children: "Own day"
-              }, undefined, false, undefined, this) : null,
-              e.visibility !== "public" ? /* @__PURE__ */ u3("span", {
-                class: "lre-badge warn",
-                children: e.visibility.replace(/_/g, " ")
-              }, undefined, false, undefined, this) : null
-            ]
-          }, e.id, true, undefined, this))
-        }, undefined, false, undefined, this)
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3(Spawn, {
-        editor
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function Body(props) {
-  const { editor } = props;
-  const app = useApp();
-  const [section, setSection] = d2("entities");
-  const panelId = P2();
-  const { gm } = editor;
-  const packTab = app.catalog.gmSections.find((def) => def.id === section);
-  const fight = gm.encounter === null ? null : decodeEncounterView(gm.encounter);
-  const shown = section === "fight" && !fight ? "entities" : section;
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    children: [
-      /* @__PURE__ */ u3(Tabs, {
-        label: "GM view",
-        panelId,
-        value: shown,
-        tabs: [
-          { id: "entities", label: "Entities" },
-          { id: "places", label: "Places" },
-          { id: "tracks", label: "Tracks" },
-          ...app.catalog.gmSections.map((def) => ({ id: def.id, label: def.label })),
-          ...fight ? [{ id: "fight", label: "Fight" }] : [],
-          { id: "edits", label: "Edits" }
-        ],
-        onChange: setSection
-      }, undefined, false, undefined, this),
-      /* @__PURE__ */ u3("div", {
-        class: "lre-stack",
-        ...tabPanel(panelId, shown),
-        children: [
-          shown === "fight" && fight ? /* @__PURE__ */ u3(EncounterCard, {
-            view: fight
-          }, undefined, false, undefined, this) : null,
-          shown === "entities" ? /* @__PURE__ */ u3(Entities, {
-            editor
-          }, undefined, false, undefined, this) : null,
-          section === "places" ? /* @__PURE__ */ u3(Card, {
-            title: "Places",
-            children: gm.places.map((p) => /* @__PURE__ */ u3(Row, {
-              k: p.name,
-              sub: p.parent ? `in ${nameOf(gm, p.parent)}` : undefined,
-              v: /* @__PURE__ */ u3("span", {
-                class: p.visibility === "public" ? "lre-badge" : "lre-badge warn",
-                children: p.visibility.replace(/_/g, " ")
-              }, undefined, false, undefined, this)
-            }, p.id, false, undefined, this))
-          }, undefined, false, undefined, this) : null,
-          section === "tracks" ? gm.tracks.map((t) => /* @__PURE__ */ u3(Card, {
-            title: t.label,
-            aside: /* @__PURE__ */ u3("span", {
-              class: "lre-badge",
-              children: t.kind
-            }, undefined, false, undefined, this),
-            children: [
-              t.owner ? /* @__PURE__ */ u3(Row, {
-                k: "Owner",
-                v: t.owner
-              }, undefined, false, undefined, this) : null,
-              /* @__PURE__ */ u3("select", {
-                class: "lre-input",
-                "aria-label": `${t.label} stage`,
-                value: t.stage,
-                disabled: editor.busy,
-                onChange: (event) => void editor.edit([{ op: "stage", track: t.id, to: event.currentTarget.value }]),
-                children: t.stages.map((s) => /* @__PURE__ */ u3("option", {
-                  value: s.id,
-                  children: s.label
-                }, s.id, false, undefined, this))
-              }, undefined, false, undefined, this),
-              t.stages.filter((s) => s.truth).map((s) => /* @__PURE__ */ u3(Row, {
-                k: s.label,
-                v: s.truth
-              }, s.id, false, undefined, this))
-            ]
-          }, t.id, true, undefined, this)) : null,
-          packTab ? /* @__PURE__ */ u3(packTab.component, {
-            ...props.section,
-            gm,
-            busy: editor.busy,
-            edit: editor.edit
-          }, undefined, false, undefined, this) : null,
-          section === "edits" ? /* @__PURE__ */ u3(Card, {
-            title: "Corrections in force",
-            children: [
-              gm.refused.map((r) => /* @__PURE__ */ u3(Row, {
-                k: "Didn't apply after a reply",
-                v: r.reason,
-                tone: "warn"
-              }, r.id, false, undefined, this)),
-              gm.edits.length === 0 ? /* @__PURE__ */ u3(Empty, {
-                children: "No corrections on this path."
-              }, undefined, false, undefined, this) : gm.edits.map((e) => /* @__PURE__ */ u3(Row, {
-                k: e.lines.join(" · ") || "(bookkeeping)"
-              }, `${e.messageId}:${e.seq}`, false, undefined, this))
-            ]
-          }, undefined, true, undefined, this) : null
-        ]
-      }, undefined, true, undefined, this),
-      /* @__PURE__ */ u3("button", {
-        type: "button",
-        class: "lre-btn ghost",
-        onClick: () => app.ui.update((ui) => ({ ...ui, section: "build" })),
-        children: "Kinds and places are the world's: edit them in Build"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-function GmPanel(props) {
-  const app = useApp();
-  const [revealed, setRevealed] = d2(false);
-  const [gm, setGm] = d2(null);
-  const [busy, run] = useBusy();
-  const load = async () => {
-    const view = await app.request({ type: "lre.gm", chatId: props.chatId });
-    if (view)
-      setGm(view);
-  };
-  A(() => {
-    if (revealed)
-      load();
-  }, [revealed, props.chatId, props.state.status, props.state.chips.length, props.state.journal.length]);
-  if (!revealed) {
-    return /* @__PURE__ */ u3("div", {
-      class: "lre-stack",
-      "data-lre-panel": "core.gm",
-      children: [
-        /* @__PURE__ */ u3("div", {
-          class: "lre-banner warn",
-          children: [
-            /* @__PURE__ */ u3("strong", {
-              children: "Spoilers ahead"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              children: "The GM view shows and edits everything: secrets, hidden agendas, unrevealed truths, removed people and everyone's money. Each edit is a correction with its own Undo."
-            }, undefined, false, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
-        /* @__PURE__ */ u3("button", {
-          type: "button",
-          class: "lre-btn primary",
-          onClick: () => setRevealed(true),
-          children: "Show the GM view"
-        }, undefined, false, undefined, this)
-      ]
-    }, undefined, true, undefined, this);
-  }
-  const editor = gm ? {
-    gm,
-    currency: props.state.currency ?? DEFAULT_CURRENCY,
-    busy,
-    edit: (ops) => new Promise((resolve) => run(async () => {
-      const result = await app.request(editRequest(props.chatId, ops));
-      if (result?.pending)
-        app.toast("Saved — it applies when the reply finishes.", "info");
-      if (result)
-        await load();
-      resolve(result !== null);
-    }))
-  } : null;
-  return /* @__PURE__ */ u3("div", {
-    class: "lre-stack",
-    "data-lre-panel": "core.gm",
-    children: [
-      /* @__PURE__ */ u3("div", {
-        class: "lre-spread",
-        children: [
-          /* @__PURE__ */ u3("span", {
-            class: "lre-preview-label",
-            children: "GM view"
-          }, undefined, false, undefined, this),
-          /* @__PURE__ */ u3("button", {
-            type: "button",
-            class: "lre-btn small",
-            onClick: () => (setRevealed(false), setGm(null)),
-            children: "Hide"
-          }, undefined, false, undefined, this)
-        ]
-      }, undefined, true, undefined, this),
-      editor ? /* @__PURE__ */ u3(Body, {
-        editor,
-        section: { chatId: props.chatId, currency: editor.currency, reload: load, send: props.send }
-      }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
-        children: "Loading the GM view…"
-      }, undefined, false, undefined, this)
-    ]
-  }, undefined, true, undefined, this);
-}
-
 // src/frontend/play/journal.tsx
 var KIND_LABEL = {
   dropped: "Dropped",
@@ -24038,6 +28958,8 @@ function buildCatalog(packs) {
   const chips = new Map;
   const previews = new Map;
   const gmSections = new Map;
+  const fields = new Map;
+  const placeFields = new Map;
   const ids = new Set;
   for (const pack of packs) {
     if (ids.has(pack.id))
@@ -24073,13 +28995,24 @@ function buildCatalog(packs) {
         if (gmSections.has(def.id))
           throw new Error(`A GM view tab ${def.id} (pack ${pack.id}) is already registered`);
         gmSections.set(def.id, def);
+      },
+      field(def) {
+        const key = `${def.kind}.${def.field}`;
+        if (fields.has(key))
+          throw new Error(`An editor for the field ${key} (pack ${pack.id}) is already registered`);
+        fields.set(key, def);
+      },
+      placeField(def) {
+        if (placeFields.has(def.field))
+          throw new Error(`An editor for the place field ${def.field} (pack ${pack.id}) is already registered`);
+        placeFields.set(def.field, def);
       }
     };
     pack.register(registry);
   }
   const ordered = [...panels.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   const tabs = [...gmSections.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { panels: ordered, editors, configs, chips, previews, gmSections: tabs, packs: [...ids] };
+  return { panels: ordered, editors, configs, chips, previews, gmSections: tabs, fields: [...fields.values()], placeFields: [...placeFields.values()], packs: [...ids] };
 }
 
 // src/frontend/setup.tsx
