@@ -2,11 +2,25 @@
 // to do; and what they report of the engine's findings: lint in severity order, the host macro
 // hazards a change brought in, and what a world holds.
 
+import worldSchemaJson from "../../schemas/lre-world-v1.schema.json";
 import { macrosIn } from "../engine/authoring";
 import { isRecord } from "../shared/json";
 import type { LintIssue } from "../shared/protocol";
 import type { WorldDoc } from "../shared/world";
+import { checkSchema, MAP_SCHEMA, pathText } from "../studio-api";
+import type { Schema } from "../studio-api";
 import { isCollection } from "./diff";
+
+// A JSON module's inferred type spells out every node, which `Schema` describes in general.
+const WORLD_SCHEMA = worldSchemaJson as unknown as Schema;
+
+/**
+ * Where a world departs from the published schema, as warnings naming the path: lint doesn't
+ * know every key, so a misspelled one (`lifeKnowBy`) reads as nothing there, and only this says so.
+ */
+export function schemaIssues(world: unknown): LintIssue[] {
+  return checkSchema(WORLD_SCHEMA, world, [MAP_SCHEMA]).map((p) => ({ severity: "warning", path: pathText(p.path), code: "schema", message: p.message }));
+}
 
 /**
  * One tool's answer. `isError`: the call was refused or failed (MCP's tool error). `failed`: the

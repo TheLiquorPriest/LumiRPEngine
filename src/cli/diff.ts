@@ -3,7 +3,7 @@
 // item the JSON Pointers whose values differ, capped so a large change still fits one answer.
 
 import { hasOwn, isRecord } from "../shared/json";
-import { jsonEqual, parsePointer, pointerOf } from "./pointer";
+import { jsonEqual, parsePointer, pointerOf } from "../shared/json-patch";
 import { clip, nameOf } from "./read";
 
 /** The collections of a world (`lre-world-v1`): objects keyed by id, compared item by item. */

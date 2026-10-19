@@ -165,7 +165,7 @@ The Buy action prices what you ask for from the world's `economy.catalog` table,
 
 **Try it.** With $20.00 in your purse, *I buy a brass lantern* costs $12.50 and puts the lantern in your hands; *I buy beef jerky* costs $3.50. A second lantern is declined: $4.00 doesn't cover it. Rope costs between $6.00 and $10.00, close to $8.00.
 
-The `revision` is computed from the table's schema, columns and rows, never written by hand: when Build saves a table the engine computes it, and a studio computes the same hash. For a store that charges more than the world's usual prices, the `economy.price_modifier` effect raises a category, or everything, at one place (`"percent": 25` is a quarter dearer).
+The `revision` is computed from the table's schema, columns and rows, never written by hand: whenever a table is saved to a draft (by Build's table editor, or by an agent's patch), the engine computes it and pins it in `pins.tables`, and a studio computes the same hash. For a store that charges more than the world's usual prices, the `economy.price_modifier` effect raises a category, or everything, at one place (`"percent": 25` is a quarter dearer).
 
 ## Secret lore behind a track
 

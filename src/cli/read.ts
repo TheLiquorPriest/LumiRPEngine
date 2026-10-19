@@ -3,8 +3,9 @@
 // for one answer comes back as an outline of its keys, with counts and ids to read deeper from by
 // pointer, or as its JSON text page by page from an offset.
 
+import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
-import { getAt, parsePointer, pointerOf } from "./pointer";
+import { getAt, parsePointer, pointerOf } from "../shared/json-patch";
 
 /** The most one answer holds. */
 export const ANSWER_LIMIT = 24_000;
@@ -106,13 +107,15 @@ export function readAt(root: unknown, options: ReadOptions): ReadResult {
   } catch (error) {
     return { ok: false, text: error instanceof Error ? error.message : String(error) };
   }
-  const value = getAt(root, tokens);
+  // Every value read here came from JSON (a world, a schema, an export file).
+  const doc = root as JsonValue;
+  const value = getAt(doc, tokens);
   const where = pointer === "" ? options.what : `${options.what} at ${pointer}`;
   if (value === undefined) {
     // Say what the deepest part that exists holds, so the next pointer can be right.
     let depth = tokens.length - 1;
-    while (depth > 0 && getAt(root, tokens.slice(0, depth)) === undefined) depth--;
-    const parent = getAt(root, tokens.slice(0, depth));
+    while (depth > 0 && getAt(doc, tokens.slice(0, depth)) === undefined) depth--;
+    const parent = getAt(doc, tokens.slice(0, depth));
     const at = pointerOf(tokens.slice(0, depth)) || "the top";
     const keys = Array.isArray(parent) ? [`indexes 0–${parent.length - 1}`] : isRecord(parent) ? Object.keys(parent) : [];
     const holds = keys.length > 0 ? ` ${at} holds ${clip(keys.join(", "), 1500)}.` : ` ${at} is ${kindOf(parent)}.`;

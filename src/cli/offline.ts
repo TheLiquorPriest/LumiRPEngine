@@ -14,7 +14,7 @@ import type { Args } from "./args";
 import { intArg, neededText, textArg, ToolError } from "./args";
 import { BODY_LIMIT, clip, readAt } from "./read";
 import type { ToolResult } from "./report";
-import { contentsOf, json, lintSummary } from "./report";
+import { contentsOf, json, lintSummary, schemaIssues } from "./report";
 import { docs, DOCS, guide } from "./texts";
 
 const STARTER_IDS = STARTER_INFO.filter((t) => hasOwn(STARTER_WORLDS, t.id)).map((t) => t.id);
@@ -117,6 +117,8 @@ export function checkTool(args: Args, readFile: (path: string) => string): ToolR
   }
   const lint = lintSummary(result.issues, 60);
   const hazards = macrosIn(result.world);
+  // Checked after migration, as LumiRPEngine reads it: what an older document lacks is filled in by then.
+  const schema = lintSummary(schemaIssues(result.world), 30);
   const verdict =
     lint.errors > 0
       ? "It loads, but LumiRPEngine won't commit or import it until the errors are fixed."
@@ -135,6 +137,7 @@ export function checkTool(args: Args, readFile: (path: string) => string): ToolR
     moreIssues: lint.more,
     macroHazards: hazards.slice(0, 40),
     moreMacroHazards: Math.max(0, hazards.length - 40),
+    schema: { warnings: schema.warnings, first: schema.first, more: schema.more },
     verdict,
   };
   return { text: json(report), ...(report.ok ? {} : { failed: true as const }) };

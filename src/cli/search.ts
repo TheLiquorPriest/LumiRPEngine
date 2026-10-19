@@ -4,7 +4,7 @@
 
 import { isRecord } from "../shared/json";
 import { isCollection } from "./diff";
-import { pointerOf } from "./pointer";
+import { pointerOf } from "../shared/json-patch";
 import { nameOf } from "./read";
 
 export interface SearchHit {

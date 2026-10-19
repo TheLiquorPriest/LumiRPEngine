@@ -15,10 +15,10 @@ import { LreError } from "./connection";
 import { changesBetween, countsOf, fieldChanges } from "./diff";
 import type { Change, FieldChange } from "./diff";
 import { loadWorld, worldInput } from "./offline";
-import { getAt, jsonEqual, parsePointer } from "./pointer";
+import { getAt, jsonEqual, parsePointer } from "../shared/json-patch";
 import { BODY_LIMIT, clip, jsonText, readAt } from "./read";
 import type { ToolResult } from "./report";
-import { contentsOf, json, lintSummary, newHazards } from "./report";
+import { contentsOf, json, lintSummary, newHazards, schemaIssues } from "./report";
 import { rank, searchDoc, searchWords } from "./search";
 import type { ScoredHit } from "./search";
 
@@ -253,6 +253,7 @@ export function editTool(live: Live, args: Args, serialize: Serialize): Promise<
           items: changes.slice(0, 40),
           moreItems: Math.max(0, changes.length - 40),
           lint: lintSummary(after.lint, 12),
+          schema: lintSummary(schemaIssues(after.draft), 12),
           macroHazards: newHazards(before.draft, after.draft),
           ...(changes.length === 0 ? { note: "The patch applied, but the draft is the same as before." } : {}),
         }),
@@ -353,7 +354,8 @@ export async function diffTool(live: Live, args: Args): Promise<ToolResult> {
     const entry: Shown = { ...change };
     if (change.kind === "changed") {
       const tokens = parsePointer(change.key);
-      const detail = fieldChanges(getAt(from.world, tokens), getAt(to.world, tokens), change.key, 12);
+      // A world document is plain JSON; its interface just doesn't say so.
+      const detail = fieldChanges(getAt(from.world as unknown as JsonValue, tokens), getAt(to.world as unknown as JsonValue, tokens), change.key, 12);
       entry.fields = detail.changes;
       if (detail.more > 0) entry.moreFields = detail.more;
     }

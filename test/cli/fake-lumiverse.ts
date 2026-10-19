@@ -11,6 +11,7 @@ import type { LintIssue, MarkerPreview, WorldChatInfo } from "../../src/shared/p
 import type { RevisionNote, WorldDoc, WorldIndex } from "../../src/shared/world";
 import type { Http, HttpRequest, OpenSocket, SocketEvents } from "../../src/cli/connection";
 import { lint, newWorld, revisionOf } from "../../src/studio-api";
+import { applyPatch, PatchError, readOp } from "../../src/shared/json-patch";
 import { HostConnection } from "../../src/cli/connection";
 import { Live } from "../../src/cli/live";
 import type { ToolContext } from "../../src/cli/tools";
@@ -28,74 +29,7 @@ class Refusal extends Error {
   }
 }
 
-function tokensOf(pointer: string): string[] {
-  if (pointer === "") return [];
-  if (!pointer.startsWith("/")) throw new Refusal("bad_request", `bad pointer ${pointer}`);
-  return pointer
-    .slice(1)
-    .split("/")
-    .map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
-}
 
-/** RFC 6902 on a copy, all or none: enough of it for the tests. */
-function applyPatch(doc: JsonValue, ops: unknown): JsonValue {
-  if (!Array.isArray(ops)) throw new Refusal("bad_request", "ops must be a list");
-  let out: JsonValue = structuredClone(doc);
-  const parentOf = (tokens: string[]): { parent: Record<string, JsonValue> | JsonValue[]; key: string } => {
-    let at: JsonValue = out;
-    for (const t of tokens.slice(0, -1)) {
-      const next: JsonValue | undefined = Array.isArray(at) ? at[Number(t)] : isRecord(at) ? (at as Record<string, JsonValue>)[t] : undefined;
-      if (next === undefined) throw new Refusal("bad_request", `nothing at ${t}`);
-      at = next;
-    }
-    if (!Array.isArray(at) && !isRecord(at)) throw new Refusal("bad_request", "no container");
-    return { parent: at as Record<string, JsonValue> | JsonValue[], key: tokens.at(-1) ?? "" };
-  };
-  const get = (tokens: string[]): JsonValue | undefined => {
-    let at: JsonValue | undefined = out;
-    for (const t of tokens) at = Array.isArray(at) ? at[Number(t)] : isRecord(at) && hasOwn(at, t) ? (at as Record<string, JsonValue>)[t] : undefined;
-    return at;
-  };
-  ops.forEach((raw: unknown, i) => {
-    if (!isRecord(raw) || typeof raw.path !== "string") throw new Refusal("bad_request", `operation ${i + 1}: needs a path`);
-    const tokens = tokensOf(raw.path);
-    const where = `operation ${i + 1}`;
-    const put = (value: JsonValue, replace: boolean): void => {
-      if (tokens.length === 0) {
-        out = value;
-        return;
-      }
-      const { parent, key } = parentOf(tokens);
-      if (Array.isArray(parent)) {
-        const index = key === "-" ? parent.length : Number(key);
-        if (replace) parent[index] = value;
-        else parent.splice(index, 0, value);
-      } else {
-        if (replace && !hasOwn(parent, key)) throw new Refusal("bad_request", `${where}: nothing at ${raw.path} to replace (use add)`);
-        parent[key] = value;
-      }
-    };
-    const remove = (t: string[]): void => {
-      const { parent, key } = parentOf(t);
-      if (Array.isArray(parent)) parent.splice(Number(key), 1);
-      else if (hasOwn(parent, key)) delete parent[key];
-      else throw new Refusal("bad_request", `${where}: nothing at ${raw.path} to remove`);
-    };
-    if (raw.op === "add") put(structuredClone(raw.value as JsonValue), false);
-    else if (raw.op === "replace") put(structuredClone(raw.value as JsonValue), true);
-    else if (raw.op === "remove") remove(tokens);
-    else if (raw.op === "test") {
-      if (JSON.stringify(get(tokens)) !== JSON.stringify(raw.value)) throw new Refusal("bad_request", `${where}: the value at ${raw.path} isn't the one given`);
-    } else if (raw.op === "move" || raw.op === "copy") {
-      const from = tokensOf(String(raw.from));
-      const value = get(from);
-      if (value === undefined) throw new Refusal("bad_request", `${where}: nothing at ${String(raw.from)}`);
-      if (raw.op === "move") remove(from);
-      put(structuredClone(value), false);
-    } else throw new Refusal("bad_request", `${where}: unknown op`);
-  });
-  return out;
-}
 
 interface StoredWorld {
   index: WorldIndex;
@@ -161,8 +95,14 @@ export class FakeLre {
     const current = w.draft?.doc ?? w.revisions.get(w.index.head);
     if (!current) throw new Refusal("internal", "no head");
     let doc: WorldDoc;
-    if (r.op === "patch") doc = applyPatch(current as unknown as JsonValue, r.ops) as unknown as WorldDoc;
-    else if (r.op === "restore") {
+    if (r.op === "patch") {
+      try {
+        doc = applyPatch(current as unknown as JsonValue, (Array.isArray(r.ops) ? r.ops : []).map((op: unknown, i) => readOp(op, i))) as unknown as WorldDoc;
+      } catch (error) {
+        if (error instanceof PatchError) throw new Refusal("bad_request", error.message);
+        throw error;
+      }
+    } else if (r.op === "restore") {
       const from = typeof r.revision === "string" ? w.revisions.get(r.revision) : undefined;
       if (!from) throw new Refusal("not_found", "unknown revision");
       doc = structuredClone(from);
