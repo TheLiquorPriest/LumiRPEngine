@@ -729,7 +729,7 @@ export interface MindCallTrace {
   phase: "pre" | "post" | "skip";
   who: string;
   level: Fidelity;
-  outcome: "recorded" | "reused" | "failed" | "leak_blocked" | "skipped_limit";
+  outcome: "recorded" | "failed" | "leak_blocked";
   ms: number;
   tokens: number;
   /** Whose prompt it ran: the world's template, the user's override, or the built-in. */
