@@ -24,6 +24,7 @@ import { lintStructure } from "./world-lint";
 import { initialState } from "./world-state";
 import { authorLines, playerLines } from "./player-events";
 import { typedIntent } from "./typed-intent";
+import { migrateMoney } from "./money-migrate";
 
 // ---------------------------------------------------------------- documents
 
@@ -163,7 +164,8 @@ export function currencyOf(v: unknown): WorldCurrency | null {
  * (`compileMaps`). Revisions are immutable, so this runs whenever one is read. Returns the same
  * object when nothing changes.
  */
-export function migrateWorld(doc: WorldDoc): WorldDoc {
+export function migrateWorld(stored: WorldDoc): WorldDoc {
+  const doc = migrateMoney(stored);
   const currency: unknown = doc.currency;
   const lore: unknown = doc.lore;
   const loreIndex: unknown = doc.loreIndex;

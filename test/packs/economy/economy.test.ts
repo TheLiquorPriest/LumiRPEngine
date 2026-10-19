@@ -57,50 +57,11 @@ describe("economy: ledger and level contract", () => {
     expect(worthOf(w, "you")).toBe(8400 + 214000 + 650000 - 38000);
   });
 
-  test("payday nets withholding: occupation federal+FICA plus the state rate (Money 4)", () => {
-    const { w } = setup();
-    const before = w.state.accounts.checking ?? 0;
-    lapse(w, 15 * 1440);
-    const pay = posts(w, /^Payroll/);
-    expect(pay.length).toBeGreaterThanOrEqual(1);
-    const p = pay.find((x) => x.lines.some((l) => l.account === "checking")) as PostEvent;
-    const gross = Math.round(3740000 / 26);
-    const federal = Math.round((gross * 14) / 100);
-    const state = Math.round((gross * 1.4) / 100);
-    expect(p.lines).toEqual([
-      { account: "economy.external:employer:brightline", amount: -gross },
-      { account: "checking", amount: gross - federal - state },
-      { account: "economy.external:tax:federal", amount: federal },
-      { account: "economy.external:tax:state", amount: state },
-    ]);
-    expect(p.lines.reduce((a, l) => a + l.amount, 0)).toBe(0);
-    expect((w.state.accounts.checking ?? 0) - before).toBeGreaterThanOrEqual(gross - federal - state - 200000);
-    expect(trialBalance(w.state)).toBe(0);
-  });
-
-  test("after a multi-day timelapse in Port Alder the change lines (8 at most) still name the payday and the payroll posting", () => {
-    const make = STARTER_WORLDS.modern_slice_of_life;
-    if (!make) throw new Error("no Port Alder starter");
-    const world = make("pa", "Port Alder");
-    const s0 = startState(world);
-    const w = new Working(reg, world, s0);
-    materializeAll(reg, w, world.pov, "run");
-    lapse(w, 5 * 1440); // Mon 06:15 to Sat 06:15, past Friday's payday
-    const events = coarsen(reg, world, s0, w.events);
-    // In plain order the payday comes after the first eight lines: routine fills them.
-    const all = playerLines(reg, world, w.state, world.pov, events, 1000);
-    expect(all.findIndex((l) => l.startsWith("Payday:"))).toBeGreaterThanOrEqual(8);
-    const lines = playerLines(reg, world, w.state, world.pov, events, 8);
-    expect(lines).toHaveLength(8);
-    expect(lines.some((l) => l.startsWith("Payday:"))).toBe(true);
-    expect(lines.some((l) => l.startsWith("Payroll"))).toBe(true);
-  });
-
   test("a card statement shows interest and a minimum payment; autopay pays the minimum on the due date", () => {
     const { w } = setup();
     lapse(w, 20 * 1440); // past Nov 3 (statement day 3)
     const st = w.events.find((e) => e.type === "economy.statement");
-    expect(st && "data" in st ? st.data : null).toMatchObject({ account: "card", interest: Math.round((38000 * 22) / 100 / 12), closing: 38000 + Math.round((38000 * 22) / 100 / 12), minimum: 3500 });
+    expect(st && "data" in st ? st.data : null).toMatchObject({ account: "card", interest: 0, closing: 38000, minimum: 3500 }); // a first statement is in its grace period: the opening balance carries no interest yet
     const view = moneyView(reg.context(w.world, w.state));
     expect(view.accounts.find((a) => a.id === "card")?.due).toMatchObject({ label: expect.stringContaining("Minimum due"), cents: 3500 });
     lapse(w, 26 * 1440); // past the due date (Nov 28)

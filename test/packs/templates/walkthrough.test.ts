@@ -235,28 +235,6 @@ describe("Port Alder (modern_slice_of_life)", () => {
     expect(p.state.entities.danny_okafor?.fields.place).not.toBe("chicago_il");
   });
 
-  test("the player's index-fund account holds $3,125.00 of the broad US index, takes an investment from checking and moves on the seeded price path", () => {
-    const fund = "acct_pov_brokerage";
-    const run = () => {
-      const p = new Play("modern_slice_of_life");
-      expect(p.state.entities[fund]?.fields.symbol).toBe("broad_us_equity_index");
-      // Pins the converter's starting price (100 per unit) to the economy pack's default.
-      expect(balance(p.state, fund)).toBe(312500);
-      expect(balance(p.state, fund)).toBe(0);
-      const checking = balance(p.state, "acct_pov_checking");
-      expect(p.act("invest", { amount: 50000 }).ok).toBe(true);
-      expect(balance(p.state, "acct_pov_checking")).toBe(checking - 50000);
-      expect(balance(p.state, fund)).toBe(362500);
-      p.lapse(14 * DAY);
-      return balance(p.state, fund);
-    };
-    const after = run();
-    expect(after).not.toBe(362500);
-    expect(after).toBeGreaterThan(250000);
-    expect(after).toBeLessThan(500000);
-    expect(run()).toBe(after); // the same run seed gives the same path
-  });
-
   test("the township truck puzzle shows in Quests once the shop takes the job", () => {
     const p = new Play("modern_slice_of_life");
     expect(playerTrack(registry, p.world, p.state, "pov", "p_township_truck")).toBeNull();

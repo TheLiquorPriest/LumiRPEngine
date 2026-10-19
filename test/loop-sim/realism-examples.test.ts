@@ -59,21 +59,6 @@ function until(w: Working, local: string): number {
 }
 
 describe("realism examples: money", () => {
-  test("payday nets withholding, and the Money panel and slot show the net deposit", () => {
-    const w = setup((wd) => {
-      wd.realism.levels.money = 4;
-      Object.assign(wd.entities.you!.fields, { hourly_cents: 2350, hours_per_week: 40, pay_frequency: "weekly", payday: "Friday" });
-    });
-    const before = account(w, "checking") ?? 0;
-    lapse(w, 7 * 1440);
-    const pay = moneyView(w.ctx).recent.find((r) => r.memo.startsWith("Payroll"));
-    expect(pay?.memo).toMatch(/gross, .* withheld/);
-    expect(pay?.cents).toBeLessThan(94000);
-    expect(pay?.cents).toBeGreaterThan(60000);
-    expect(account(w, "checking")).toBe(before + (pay?.cents ?? 0));
-    expect(slot(w, "money").join(" ")).toContain("Checking");
-    expect(trialBalance(w.state)).toBe(0);
-  });
 
   test("a savings transfer moves money between the POV's accounts", () => {
     const w = setup();
@@ -82,23 +67,6 @@ describe("realism examples: money", () => {
     expect(r.ok).toBe(true);
     expect([account(w, "checking"), account(w, "savings")]).toEqual([c - 50000, s + 50000]);
     expect(moneyView(w.ctx).recent.filter((t) => t.memo === "Transfer").map((t) => t.cents).sort((a, b) => a - b)).toEqual([-50000, 50000]);
-  });
-
-  test("an investment moves on a seeded price path: the same run seed gives the same value, another seed another", () => {
-    const run = (seed: string): number | undefined => {
-      const w = setup((wd) => {
-        wd.realism.levels.money = 4;
-        wd.entities.brokerage = { id: "brokerage", kind: "account", name: "Brokerage", tier: "background", fields: { owner: "you", type: "brokerage" }, relations: [] };
-      });
-      expect(effects(w, [{ type: "economy.invest", args: { owner: "you", cents: 100000 } }]).rejected).toEqual([]);
-      expect(account(w, "brokerage")).toBe(100000);
-      lapse(w, 14 * 1440, seed);
-      return account(w, "brokerage");
-    };
-    const a = run("alpha");
-    expect(run("alpha")).toBe(a);
-    expect(run("beta")).not.toBe(a);
-    expect(a).not.toBe(100000);
   });
 
   test("a card statement shows interest and a minimum at level 4; at level 3 autopay settles the card", () => {

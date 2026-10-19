@@ -769,7 +769,7 @@ export const FEATURE_DEFS: Readonly<Record<FinanceFeature, FeatureDef>> = Object
   daily_limits: { label: "Daily card limits", floor: 2, on: 4 },
   overdraft: { label: "Overdraft policies", floor: 2, on: 4 },
   average_daily: { label: "Interest on the average daily balance", floor: 3, on: 4 },
-  withholding: { label: "Withholding on pay", floor: 3, on: 4 },
+  withholding: { label: "Withholding on pay", floor: 3, on: 3 },
   tax_brackets: { label: "Tax brackets", floor: 3, on: 4 },
   sales_tax: { label: "Sales tax", floor: 3, on: 4 },
   business_tax: { label: "Business taxes", floor: 3, on: 4 },

@@ -15,6 +15,7 @@ import { defaultTiers, leadTierOf } from "../../src/shared/tiers";
 import type { ActionDef, EffectSpec, EntityDef, FieldDef, GridDef, KindDef, LoreEntryDef, Objective, PackConfig, PlaceDef, Recurrence, RelationInstance, RuleDef, RuleTrigger, ScheduleDef, StageDef, TrackDef, WorldDoc } from "../../src/shared/world";
 import { ENGINE_VERSION, WORLD_FORMAT } from "../../src/shared/world";
 import type { TplAccount, TplBlock, TplCharacter, TplEffect, TplItem, TplKit, TplRule, TplStage, TplVehicle, Template } from "./template";
+import { migrateMoney } from "../../src/engine/money-migrate";
 
 /** Template content the engine has no home for yet (see data-src/templates/README.md). */
 export const DEFERRED = [
@@ -630,7 +631,17 @@ function loreEntries(c: Ctx, entities: Record<string, EntityDef>): Record<string
   return out;
 }
 
+/**
+ * A template as a world. The template format keeps its own money vocabulary (an account's owner and
+ * kind, a character's job and bills); the world it builds is read through the money migration, so
+ * a starter ships in the foundation's shapes (owners and products, flows, jobs) as a migrated
+ * older world would play.
+ */
 export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
+  return migrateMoney(templateWorld(tpl, env));
+}
+
+function templateWorld(tpl: Template, env: ConvertEnv): WorldDoc {
   const c = context(tpl, env);
   const preset = REALISM_PRESETS[tpl.realism.preset];
   const holidays = [...(tpl.calendar.inheritHolidays ? holidaysFromTable(env.tables["calendar.holidays"]) : []), ...tpl.calendar.holidays];

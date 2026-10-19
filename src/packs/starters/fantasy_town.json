@@ -90,7 +90,7 @@
     "combat": {"version": 1, "config": {}}
   },
   "pins": {
-    "generators": {"money": 1, "gear": 1, "vehicles": 1},
+    "generators": {"money": 2, "gear": 1, "vehicles": 1},
     "tables": {
       "calendar.dst": "2a5e1e3d531f68983caa2e2f2d02411b",
       "calendar.holidays": "35b4d12795742dc4d5b4b37e388ce776",
@@ -224,8 +224,7 @@
         "brawn": 13,
         "wits": 10,
         "grace": 8,
-        "heart": 11,
-        "bills": [{"label": "Hearth tax", "payee": "hollis_garrow", "amountCents": 6, "every": "month", "day": 1, "from": "acct_joss_purse"}]
+        "heart": 11
       },
       "relations": [
         {"type": "regard", "to": "marta_dunmore", "fields": {"warmth": 30, "trust": 30, "respect": 40, "t": 0}},
@@ -253,8 +252,7 @@
         "brawn": 15,
         "wits": 11,
         "grace": 10,
-        "heart": 10,
-        "bills": [{"label": "Hearth tax", "payee": "hollis_garrow", "amountCents": 6, "every": "month", "day": 1, "from": "acct_marta_purse"}]
+        "heart": 10
       },
       "relations": [
         {"type": "regard", "to": "joss_tamber", "fields": {"warmth": 30, "trust": 30, "respect": 25, "t": 0}},
@@ -308,8 +306,7 @@
         "brawn": 6,
         "wits": 13,
         "grace": 11,
-        "heart": 15,
-        "bills": [{"label": "Hearth tax", "payee": "hollis_garrow", "amountCents": 4, "every": "month", "day": 1, "from": "acct_wren_purse"}]
+        "heart": 15
       },
       "relations": [
         {"type": "regard", "to": "odo_kettleby", "fields": {"warmth": 35, "trust": 20, "respect": 15, "t": 0}},
@@ -335,8 +332,7 @@
         "brawn": 10,
         "wits": 10,
         "grace": 8,
-        "heart": 11,
-        "bills": [{"label": "Market dues to the reeve", "payee": "hollis_garrow", "amountCents": 20, "every": "month", "day": 1, "from": "acct_kettle_till"}]
+        "heart": 11
       },
       "relations": [
         {"type": "regard", "to": "wren_aldous", "fields": {"warmth": 55, "trust": 25, "respect": 20, "t": 0}},
@@ -716,7 +712,7 @@
       "kind": "account",
       "name": "Your coin purse",
       "tier": "background",
-      "fields": {"owner": "pov", "type": "cash", "opening": 67},
+      "fields": {"opening": 67, "owners": [{"party": "pov", "role": "owner"}], "product": "cash"},
       "relations": [{"type": "in", "to": "pov_purse"}]
     },
     "acct_hollis_strongbox": {
@@ -724,7 +720,7 @@
       "kind": "account",
       "name": "Town strongbox",
       "tier": "background",
-      "fields": {"owner": "hollis_garrow", "type": "cash", "opening": 6170},
+      "fields": {"opening": 6170, "owners": [{"party": "hollis_garrow", "role": "owner"}], "product": "cash"},
       "relations": [{"type": "in", "to": "reeves_strongbox"}]
     },
     "acct_kettle_till": {
@@ -732,7 +728,7 @@
       "kind": "account",
       "name": "The Kettle's till",
       "tier": "background",
-      "fields": {"owner": "odo_kettleby", "type": "cash", "opening": 151},
+      "fields": {"opening": 151, "owners": [{"party": "odo_kettleby", "role": "owner"}], "product": "cash"},
       "relations": []
     },
     "acct_ferry_fares": {
@@ -740,7 +736,7 @@
       "kind": "account",
       "name": "Ferry fare box",
       "tier": "background",
-      "fields": {"owner": "tamsin_reed", "type": "cash", "opening": 100},
+      "fields": {"opening": 100, "owners": [{"party": "tamsin_reed", "role": "owner"}], "product": "cash"},
       "relations": []
     },
     "acct_marta_purse": {
@@ -748,7 +744,7 @@
       "kind": "account",
       "name": "Marta's purse",
       "tier": "background",
-      "fields": {"owner": "marta_dunmore", "type": "cash", "opening": 512},
+      "fields": {"opening": 512, "owners": [{"party": "marta_dunmore", "role": "owner"}], "product": "cash"},
       "relations": []
     },
     "acct_joss_purse": {
@@ -756,7 +752,7 @@
       "kind": "account",
       "name": "Joss's purse",
       "tier": "background",
-      "fields": {"owner": "joss_tamber", "type": "cash", "opening": 83},
+      "fields": {"opening": 83, "owners": [{"party": "joss_tamber", "role": "owner"}], "product": "cash"},
       "relations": []
     },
     "acct_wren_purse": {
@@ -764,7 +760,7 @@
       "kind": "account",
       "name": "Wren's purse",
       "tier": "background",
-      "fields": {"owner": "wren_aldous", "type": "cash", "opening": 149},
+      "fields": {"opening": 149, "owners": [{"party": "wren_aldous", "role": "owner"}], "product": "cash"},
       "relations": []
     },
     "region_wend_vale": {
@@ -773,6 +769,74 @@
       "name": "Temperate river vale",
       "tier": "background",
       "fields": {"climate": "wend_vale", "weather": "clear"},
+      "relations": []
+    },
+    "flow_joss_tamber_hearth_tax": {
+      "id": "flow_joss_tamber_hearth_tax",
+      "kind": "flow",
+      "name": "Hearth tax",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_joss_purse",
+        "to": "hollis_garrow",
+        "amount_cents": 6,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "flow_marta_dunmore_hearth_tax": {
+      "id": "flow_marta_dunmore_hearth_tax",
+      "kind": "flow",
+      "name": "Hearth tax",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_marta_purse",
+        "to": "hollis_garrow",
+        "amount_cents": 6,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "flow_wren_aldous_hearth_tax": {
+      "id": "flow_wren_aldous_hearth_tax",
+      "kind": "flow",
+      "name": "Hearth tax",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_wren_purse",
+        "to": "hollis_garrow",
+        "amount_cents": 4,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "flow_odo_kettleby_market_dues_to_the_reeve": {
+      "id": "flow_odo_kettleby_market_dues_to_the_reeve",
+      "kind": "flow",
+      "name": "Market dues to the reeve",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_kettle_till",
+        "to": "hollis_garrow",
+        "amount_cents": 20,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
       "relations": []
     }
   },
