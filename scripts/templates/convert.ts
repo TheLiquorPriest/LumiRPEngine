@@ -511,7 +511,7 @@ function jobEntity(ch: TplCharacter, job: TplJob): EntityDef | null {
   if (job.deductions) fields.deductions = job.deductions.map((d) => ({ label: d.label, cents: d.cents, ...(d.pretax !== undefined ? { pretax: d.pretax } : {}), ...(d.kind !== undefined ? { kind: d.kind } : {}), ...(d.to !== undefined ? { to: d.to } : {}) }));
   put(fields, "shift_pattern", job.shiftPattern);
   put(fields, "start", job.start);
-  put(fields, "tipped", job.tipped);
+  put(fields, "tips_per_hour", job.tipsPerHourCents);
   return { id: job.id ?? `job_${ch.id}`, kind: "job", name: job.name ?? job.title ?? `${ch.name}'s work`, tier: "background", fields, relations: [] };
 }
 

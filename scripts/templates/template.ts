@@ -56,7 +56,8 @@ export interface TplJob {
   shiftPattern?: string;
   /** The date they started. */
   start?: string;
-  tipped?: boolean;
+  /** Tipped work (DESIGN §26): the tips an hour on top of `rateCents`, which is then the cash wage. */
+  tipsPerHourCents?: number;
 }
 
 export interface TplCharacter {

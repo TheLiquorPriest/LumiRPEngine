@@ -1,7 +1,7 @@
-// Port Alder's money showcase (DESIGN §25), as the starter ships it: the Kowalczyks' household with
-// its joint account, shared groceries and Maddie's savings in Helen's care; the POV's debit and
-// credit cards in the wallet; a standing savings transfer; and the credit union's counter and ATM
-// in Alder Market, with another bank's machine at the fuel station.
+// Port Alder's money showcase (DESIGN §25, §26), as the starter ships it: the Kowalczyks' household
+// with its joint account, shared groceries and Maddie's savings in Helen's care; the POV's debit and
+// credit cards in the wallet; a standing savings transfer; the credit union's counter and ATM in
+// Alder Market, with another bank's machine at the fuel station; and Jess's tipped bar work.
 
 import { describe, expect, test } from "bun:test";
 import type { WorldDoc } from "../../../src/shared/world";
@@ -51,6 +51,26 @@ describe("Port Alder's money", () => {
     if ("code" in out) throw new Error(out.reason);
     const runs = w.events.flatMap((e) => (e.type === "economy.flow_run" && "data" in e && e.data.flow === "flow_pov_savings" ? [e.data] : []));
     expect(runs.map((r) => r.cents)).toEqual([15000]);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("Jess's bartending pays a tipped cash wage plus her tips an hour, every week", () => {
+    const w = portAlder();
+    const job = w.state.entities.job_jess_kowalczyk?.fields;
+    const [wage, tips] = [Number(job?.rate), Number(job?.tips_per_hour)];
+    expect([wage, tips]).toEqual([213, 1437]);
+    expect(w.ctx.query("economy.finance")(w.ctx, "jess_kowalczyk", false).jobs[0]?.pay).toContain("an hour in tips");
+    // Four weeks from Monday 14 September: her Friday paydays from the 25th each pay a full week of shifts.
+    const out = runTimelapse(reg, w, { type: "duration", minutes: 28 * 1440 }, { runSeed: "pa", overrides: ALL_NOTE });
+    if ("code" in out) throw new Error(out.reason);
+    const checks = w.events.flatMap((e) => (e.type === "economy.payslip" && "data" in e && e.data.job === "job_jess_kowalczyk" && Number(e.data.minutes) > 0 ? [e.data] : []));
+    expect(checks.length).toBeGreaterThanOrEqual(3);
+    // Each paycheck is her wage for the hours worked plus her tips for the same hours: far more than the cash wage alone.
+    for (const c of checks) {
+      const minutes = Number(c.minutes);
+      expect(c.gross).toBe(Math.round((wage * minutes) / 60) + Math.round((tips * minutes) / 60));
+      expect(Number(c.gross)).toBeGreaterThan(5 * Math.round((wage * minutes) / 60));
+    }
     expect(trialBalance(w.state)).toBe(0);
   });
 
