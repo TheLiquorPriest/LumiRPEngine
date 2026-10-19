@@ -104,12 +104,12 @@ Who gets a mind is decided each turn by a **focus score**: points for being in t
 
 Money is entities, a few fields and the economy pack's config. Amounts are whole minor units (4250 is $42.50 in a dollar world) and percentages are percent units (22 is 22 %). What runs for someone depends on their Money level: the world's `realism.levels.money`, capped by their tier's band (the POV is never capped). At 0 money is off; at 1 a person's `wealth` band is all there is; at 2 their cash and one everyday account are real, and a payment they can't cover is declined; from 3 all their accounts, and more as below.
 
-| From | What runs |
-|---|---|
-| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate |
-| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains |
+| From | What runs | Its feature ids |
+|---|---|---|
+| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate | `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `property`, `withholding` |
+| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains | `statements`, `interest`, `average_daily`, `fees`, `delinquency`, `credit`, `atm`, `holds`, `daily_limits`, `overdraft`, `tax_brackets`, `sales_tax`, `business_tax`, `investments`, `options`, `capital_gains` |
 
-A world switches a feature on or off for itself in `packs.economy.config.features`, by id (`{"sales_tax": true}`): `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm` (cash machines), `daily_limits` and `overdraft` as low as Money 2; `statements`, `interest`, `fees`, `delinquency`, `credit`, `holds`, `average_daily`, `withholding`, `tax_brackets`, `sales_tax`, `business_tax`, `capital_gains`, `investments`, `options` and `property` as low as Money 3. Lint warns about an id it doesn't know.
+A world switches a feature on or off for itself in `packs.economy.config.features` by its id (`{"sales_tax": true}`), down to its floor: Money 2 for `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm`, `daily_limits` and `overdraft`, Money 3 for the rest. Lint warns about an id it doesn't know.
 
 ### Who owns money
 
@@ -128,7 +128,7 @@ A **party** is a person, or an entity of kind `business`, `trust` or `household`
 
 An `account` entity is one purse, wallet, bank account, card account, loan or investment account: `owners`, `product`, `opening` (the balance at the start, from the holder's side: a debt is negative) and `institution`. `product` is an account class, each a built-in product with the finance tables' terms (`cash`, `checking`, `business_checking`, `savings`, `money_market`, `cd`, `trust`, `escrow`, `credit_card`, `charge_card`, `line_of_credit`, `loan`, `mortgage`, `brokerage`, `retirement`), or one of the world's own products, `packs.economy.config.products` by id. An account's own `limit`, `apr_pct`, `apy_pct`, `statement_day`, `due_day`, `payment`, `months_left`, `overdraft` and the rest win over its product's; `autopay` (`minimum`, `statement`, `full` or `fixed`) with `autopay_from` pays a credit account by itself.
 
-Read `/packs/economy/config` before adding to it: the modern starter's has `assets` but no `products`. Where the world has no `products` map yet, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same, and in the modern starter it is added to by id, as further down. The same goes for entities: `add` on an id that is taken replaces that item whole, so look an id up before you use it.
+Read `/packs/economy/config` before adding to it; the modern starter's has no `products` map yet. Where the world has none, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same, and in the modern starter it is added to by id, as further down. The same goes for entities: `add` on an id that is taken replaces that item whole, so look an id up before you use it.
 
 ```json
 [
@@ -210,15 +210,15 @@ And a 401(k) at the garage: 5 % of the POV's pay before income tax into a retire
 ### Taxes
 
 - **On pay**, withholding runs from Money 3 at a flat rate: the occupation's withholding rate (federal tax, Social Security and Medicare together) and the worker's state rate, plus their region's local rate when they have `local_tax: true`. At Money 4 it goes through the federal brackets and standard deduction for their `filing_status` (`single` when left out, `married_filing_jointly` or `head_of_household`), with Social Security and Medicare, then the state and local rates.
-- **A party's region**, a row of the regions table (`mi`, `il`…), gives the state and local rates of its income tax: its `region` field, else the economy config's `region`, else the national row.
+- **Regions** are rows of the regions table (`mi`, `il`…), with their state, local and sales tax rates. The economy config's `region` is the world's own (the modern starter's is `mi`); without one, what it would cover runs at the national row's rates. A party's income tax follows its own `region` field, else the config's.
 - **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes. A `c_corp` pays corporate tax on its own profit, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.
-- **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else its tax region's: a `tax_region`, a regions row, on it or an enclosing place, else the config's `region`, else the national row. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.
+- **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else that of its tax region: a `tax_region` on it or an enclosing place, else the config's `region`. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.
 
-To charge Michigan's sales tax in the county and every place in it and Chicago's own combined rate there, and to tax the POV's pay at Michigan's typical local rate:
+The modern starter's economy is in Michigan, so a purchase in Chicago is taxed at Michigan's rate. To tax it for Illinois at Chicago's own combined rate, and the POV's pay at Michigan's typical local rate:
 
 ```json
 [
-  { "op": "add", "path": "/places/lakeshore_county/fields/tax_region", "value": "mi" },
+  { "op": "add", "path": "/places/chicago_il/fields/tax_region", "value": "il" },
   { "op": "add", "path": "/places/chicago_il/fields/sales_tax_pct", "value": 10.25 },
   { "op": "add", "path": "/entities/pov/fields/local_tax", "value": true }
 ]

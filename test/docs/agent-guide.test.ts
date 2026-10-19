@@ -1,16 +1,18 @@
-// The JSON Patch examples in docs/AGENT-GUIDE.md's minds and money sections, taken from the page
-// itself and applied in order to the modern starter as lre_edit would: the world still loads, they
-// bring in no lint error or warning, and it still conforms to the published schema. An agent copies
-// these, so a wrong field name or a refused value here is a broken world there.
+// docs/AGENT-GUIDE.md's minds and money sections, held to the engine. Their JSON Patch examples,
+// taken from the page itself and applied in order to the modern starter as lre_edit would: the
+// world still loads, they bring in no lint error or warning, and it still conforms to the
+// published schema. An agent copies these, so a wrong field name or a refused value here is a
+// broken world there. And the money features' levels, which an agent toggles by them.
 
 import { describe, expect, test } from "bun:test";
 import schemaJson from "../../schemas/lre-world-v1.schema.json";
 import { STARTER_WORLDS } from "../../src/packs/index";
+import { FEATURE_DEFS } from "../../src/shared/finance";
 import { isRecord, type JsonValue } from "../../src/shared/json";
 import { applyPatch, getAt, parsePointer, readOp } from "../../src/shared/json-patch";
 import type { WorldDoc } from "../../src/shared/world";
 import { checkSchema, lint, load, MAP_SCHEMA, pathText, type Schema } from "../../src/studio-api";
-import { GUIDE_SECTIONS as SECTIONS, guidePatches as patches } from "../support/agent-guide";
+import { GUIDE_SECTIONS as SECTIONS, guidePatches as patches, guideSection } from "../support/agent-guide";
 
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.
 const WORLD_SCHEMA = schemaJson as unknown as Schema;
@@ -88,5 +90,18 @@ describe("the agent guide's examples", () => {
       for (const key of ["splits", "deductions"]) for (const s of Array.isArray(f[key]) ? f[key] : []) if (isRecord(s)) entity(`${e.id}.${key}`, s.to);
     }
     expect(missing).toEqual([]);
+  });
+});
+
+describe("the agent guide's money features", () => {
+  test("the table puts each feature at the level it runs from, and the toggles say how low each goes, as the engine has them", () => {
+    const money = guideSection("Money");
+    // `| Money 3 | what runs | `flows`, `cards`… |`: each feature's id in the row of its level.
+    const listed = [...money.matchAll(/^\| Money (\d) \| [^|]+ \| (.+) \|$/gm)].flatMap(([, level, ids]) => [...(ids ?? "").matchAll(/`([a-z_]+)`/g)].map(([, id]) => [id ?? "", Number(level)] as const));
+    expect(listed.map(([id]) => id).sort()).toEqual(Object.keys(FEATURE_DEFS).sort());
+    expect(Object.fromEntries(listed)).toEqual(Object.fromEntries(Object.entries(FEATURE_DEFS).map(([id, d]) => [id, d.on])));
+    const lowest = /down to its floor: Money 2 for (.+?), Money 3 for the rest/.exec(money)?.[1] ?? "";
+    expect([...lowest.matchAll(/`([a-z_]+)`/g)].map(([, id]) => id).sort()).toEqual(Object.keys(FEATURE_DEFS).filter((id) => FEATURE_DEFS[id as keyof typeof FEATURE_DEFS].floor === 2).sort());
+    expect(Object.values(FEATURE_DEFS).filter((d) => d.floor !== 2 && d.floor !== 3)).toEqual([]);
   });
 });

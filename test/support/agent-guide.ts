@@ -11,7 +11,7 @@ const PAGE = readFileSync(join(import.meta.dir, "../../docs/AGENT-GUIDE.md"), "u
 export const GUIDE_SECTIONS = ["Character minds", "Money"];
 
 /** The section under the `## ` heading `title`, up to the next one. */
-function section(title: string): string {
+export function guideSection(title: string): string {
   const found = PAGE.split("\n## ").find((s) => s.startsWith(`${title}\n`));
   if (found === undefined) throw new Error(`docs/AGENT-GUIDE.md has no section "${title}"`);
   return found;
@@ -19,6 +19,6 @@ function section(title: string): string {
 
 /** Every JSON block of a section that is a JSON Patch (a list of operations), in page order. */
 export function guidePatches(title: string): unknown[][] {
-  const blocks = [...section(title).matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => JSON.parse(m[1] ?? "null") as unknown);
+  const blocks = [...guideSection(title).matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => JSON.parse(m[1] ?? "null") as unknown);
   return blocks.filter((b): b is unknown[] => Array.isArray(b) && b.every((op) => isRecord(op) && typeof op.op === "string"));
 }
