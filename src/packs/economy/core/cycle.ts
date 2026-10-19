@@ -179,7 +179,7 @@ function closeRevolving(run: Run, account: EntityId, at: number): void {
   }
   const owed = Math.max(0, -balance(ctx.state, account));
   const principal = Math.max(0, owed - interest - fees);
-  const pastDue = prev?.past_due ?? 0;
+  const pastDue = carriedPastDue(prev);
   const regular = owed <= 0 ? 0 : Math.min(owed, Math.max(p.minimum.floor, Math.ceil((principal * p.minimum.pct) / 100 + (p.minimum.plus_interest ? interest + fees : 0))));
   const minimum = Math.min(owed, regular + pastDue);
   const cal = calendarOf(ctx.world);
@@ -194,6 +194,11 @@ function dateLabel(ctx: ReadContext, at: number): string {
   const cal = calendarOf(ctx.world);
   const d = dateAt(cal, at);
   return `${d.day} ${cal.system.monthNames[d.month - 1] ?? d.month}`;
+}
+
+/** What a statement carries as past due: what the last one left unpaid of its minimum (a late payment counts), never more than was past due. */
+function carriedPastDue(prev: CycleState | null): number {
+  return prev ? Math.max(0, Math.min(prev.past_due ?? 0, prev.minimum - prev.paid)) : 0;
 }
 
 /** The level payment that pays `owed` off over `months` at a monthly rate. */
@@ -225,7 +230,7 @@ function billInstallment(run: Run, account: EntityId, at: number): void {
   const payment = typeof e.fields.payment === "number" && e.fields.payment > 0 ? e.fields.payment : Math.round(amortized(owed, rate, months));
   // The last month takes what's left, so a loan finishes at its term.
   const due = months <= 1 ? total : Math.min(total, Math.round(payment));
-  const pastDue = prev?.past_due ?? 0;
+  const pastDue = carriedPastDue(prev);
   const minimum = Math.min(total, due + pastDue);
   const cal = calendarOf(ctx.world);
   run.emit([{ type: FINANCE_EVENTS.statement, data: { account, closing: total, interest, fees: 0, minimum, due: clockAt(cal, dateAt(cal, at).dayIndex, DUE_MINUTE), apr, stage: prev?.stage ?? "current", grace: true, past_due: pastDue, lates: prev?.lates ?? 0, penalty: prev?.penalty === true, months_left: Math.max(0, months - 1), at, streak: prev?.streak ?? 0, ontime: prev?.ontime ?? 0, late30: prev?.late30 ?? 0, late60: prev?.late60 ?? 0, late90: prev?.late90 ?? 0 } }]);
