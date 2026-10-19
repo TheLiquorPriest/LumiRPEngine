@@ -10,7 +10,7 @@
 import type { EntityId } from "../../../shared/ids";
 import { isRecord, safeKey, type JsonObject, type JsonValue } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
-import { ownersIn, ROLE_RIGHTS, worthShares, type HoldingView, type Owner } from "../../../shared/finance";
+import { ownersIn, ROLE_RIGHTS, worthShares, type DistributionRoute, type HoldingView, type Owner } from "../../../shared/finance";
 import { hashParts } from "../../../shared/hash";
 import { formatMoney } from "../../../shared/world";
 import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
@@ -132,6 +132,16 @@ export function routeOf(state: Readonly<WorldState>, holding: EntityId): { reinv
   const route = strOf(own(state.entities, holding)?.fields.route);
   if (route === "reinvest") return { reinvest: true, to: null };
   return { reinvest: false, to: route !== "" && own(state.entities, route)?.kind === "account" ? route : null };
+}
+
+/**
+ * A route as `viewer` may see it (DESIGN §27.11): reinvested, the usual place, or an account by id
+ * when it is one they see; another owner's account shows as `elsewhere`, unnamed.
+ */
+export function shownRoute(api: FinanceApi, ctx: ReadContext, viewer: EntityId, to: EntityId | null, reinvest: boolean): DistributionRoute {
+  if (reinvest) return { to: null, reinvest: true };
+  if (to === null) return { to: null, reinvest: false };
+  return api.accountsOf(ctx, viewer, "sees").includes(to) ? { to, reinvest: false } : { to: null, reinvest: false, elsewhere: true };
 }
 
 // ---------------------------------------------------------------- gains
@@ -388,8 +398,8 @@ export function setRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, hol
 
 // ---------------------------------------------------------------- views and worth
 
-/** A holding as the dashboards draw it; lots and gains only where cost basis is followed. */
-export function holdingView(api: FinanceApi, ctx: ReadContext, holding: EntityId, detail: boolean): HoldingView | null {
+/** A holding as `viewer`'s dashboard draws it; lots and gains only where cost basis is followed. */
+export function holdingView(api: FinanceApi, ctx: ReadContext, holding: EntityId, detail: boolean, viewer: EntityId): HoldingView | null {
   const e = own(ctx.state.entities, holding);
   const a = assetOf(ctx, strOf(e?.fields.asset));
   if (!e || !a) return null;
@@ -411,7 +421,7 @@ export function holdingView(api: FinanceApi, ctx: ReadContext, holding: EntityId
     gain: detail ? value - cost : 0,
     lots: detail ? lots.map((l) => ({ qty: l.qty, cost: l.cost, at: dateText(ctx.world, l.at), gain: Math.round(l.qty * price) - l.cost, term: ctx.state.clock - l.at >= YEAR_MINUTES ? "long" : "short" })) : [],
     option: a.option && under ? { right: a.option.right, underlying: under.label, strike: a.option.strike, expiry: dateText(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf(ctx, under), a.option.strike) > 0 } : null,
-    route: a.pays > 0 || a.bond ? { to: route.to ?? accountOfHolding(ctx.state, holding), reinvest: route.reinvest } : null,
+    route: a.pays > 0 || a.bond ? shownRoute(api, ctx, viewer, route.to, route.reinvest) : null,
   };
 }
 

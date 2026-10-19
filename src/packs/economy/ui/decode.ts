@@ -271,7 +271,6 @@ function holding(o: Obj): HoldingView | null {
   if (typeof o.id !== "string") return null;
   const asset = obj(o.asset) ?? {};
   const option = obj(o.option);
-  const route = obj(o.route);
   return {
     id: o.id,
     account: nullableStr(o.account),
@@ -283,8 +282,14 @@ function holding(o: Obj): HoldingView | null {
     gain: num(o.gain),
     lots: list(o.lots, (l) => ({ qty: num(l.qty), cost: num(l.cost), at: str(l.at), gain: num(l.gain), term: l.term === "long" ? "long" : "short" })),
     option: option ? { right: option.right === "put" ? "put" : "call", underlying: str(option.underlying), strike: num(option.strike), expiry: str(option.expiry), inTheMoney: bool(option.inTheMoney) } : null,
-    route: route ? { to: nullableStr(route.to), reinvest: bool(route.reinvest) } : null,
+    route: distributionRoute(o.route),
   };
+}
+
+/** Where payouts go, as a view sends it; null when it says none. */
+function distributionRoute(value: unknown): HoldingView["route"] {
+  const r = obj(value);
+  return r ? { to: nullableStr(r.to), reinvest: bool(r.reinvest), ...(r.elsewhere === true ? { elsewhere: true as const } : {}) } : null;
 }
 
 function property(o: Obj): PropertyView | null {
@@ -302,6 +307,7 @@ function property(o: Obj): PropertyView | null {
     leases: list(o.leases, (l) => ({ flow: str(l.flow), tenant: str(l.tenant), rent: num(l.rent), start: nullableStr(l.start), end: nullableStr(l.end), state: oneOf(l.state, ["let", "vacant", "ended"] as const, "let") })),
     costs: list(o.costs, flowView),
     forSale: nullableNum(o.forSale),
+    route: distributionRoute(o.route),
   };
 }
 
@@ -406,6 +412,7 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
         ),
         employees: list(b.employees, job),
         taxes: list(b.taxes, (t) => ({ label: str(t.label), cents: num(t.cents), due: nullableStr(t.due) })),
+        route: distributionRoute(b.route),
       };
     }),
     investments: investments

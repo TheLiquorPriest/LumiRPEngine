@@ -5,7 +5,7 @@
 // offered only where the feature runs for them; the GM sets prices, routes and every declared field.
 
 import { useState } from "preact/hooks";
-import { ROLE_RIGHTS, type FinanceView, type HoldingView, type PropertyView } from "../../../shared/finance";
+import { ROLE_RIGHTS, type DistributionRoute, type FinanceView, type HoldingView, type PropertyView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { Card, Empty, Row } from "../../../frontend/components";
@@ -13,7 +13,7 @@ import { humanize } from "../../../frontend/format";
 import { FlowRow } from "./flows";
 import { AmountField, NumberField, Reveal, SelectField, TextField, type Choice } from "./forms";
 import type { HubControls, PlayerControls, SectionProps } from "./hub";
-import { endableLeases, holdingControls, investmentBlocks, knownPeople, moveSources, propertyControls, transferTargets } from "./layout";
+import { endableLeases, holdingControls, investmentBlocks, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets } from "./layout";
 import { AmountAction, EntityFields } from "./lines";
 import { amountOf, exerciseAction, leaseEndAction, leaseStartAction, propertyBuyAction, propertySellAction, routeAction, routeOps, setPriceOps, tradeAction, type RouteTarget, type TradeForm } from "./requests";
 
@@ -24,22 +24,25 @@ function routeChoices(view: FinanceView, reinvest: boolean): Choice[] {
 
 /**
  * Where a holding's dividends, a property's rent or a business share's profit go: the player's
- * route action, or the GM's `economy.route` for the party. `now` is the route in force when the
- * view says it (a holding's), else null and the picker starts unset. The usual place travels as "".
+ * route action, or the GM's `economy.route` for the party. The picker opens on the route the view
+ * says is in force (`routePick`); another owner's account shows as such and can't be picked. The
+ * usual place travels as "".
  */
-export function RouteControl(props: { view: FinanceView; controls: HubControls; target: RouteTarget; now: string | null; reinvest: boolean; label: string }) {
+export function RouteControl(props: { view: FinanceView; controls: HubControls; target: RouteTarget; route: DistributionRoute | null; reinvest: boolean; label: string }) {
   const { view, controls } = props;
   // Routing is an action from Money 3; the GM routes at any level.
   if (controls.mode === "player" && view.level < 3) return null;
+  const pick = routePick(props.route);
+  const choices = routeChoices(view, props.reinvest);
   return (
     <SelectField
       label={props.label}
-      value={props.now === null ? "" : props.now === "" ? " " : props.now}
-      empty={props.now === null ? "Choose" : undefined}
-      options={routeChoices(view, props.reinvest)}
+      value={pick}
+      empty={pick === "" ? "Choose" : undefined}
+      options={pick === ROUTE_ELSEWHERE ? [...choices, { value: ROUTE_ELSEWHERE, label: "Another owner's account" }] : choices}
       disabled={controls.busy}
       onChange={(picked) => {
-        if (picked === "") return;
+        if (picked === "" || picked === ROUTE_ELSEWHERE) return;
         const to = picked.trim();
         if (controls.mode === "player") void controls.act(routeAction(props.target, to));
         else void controls.edit(routeOps(props.target, view.party, to));
@@ -131,7 +134,6 @@ function HoldingCard(props: { view: FinanceView; holding: HoldingView; controls:
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const blocks = investmentBlocks(view);
   const accountName = h.account ? (view.accounts.find((a) => a.id === h.account)?.name ?? h.account) : "held directly";
-  const now = h.route ? (h.route.reinvest ? "reinvest" : (h.route.to ?? "")) : "";
   const can = holdingControls(view, h);
   return (
     <Card title={`${h.asset.label}${h.asset.symbol ? ` (${h.asset.symbol})` : ""}`} aside={<span class="lre-badge">{humanize(h.asset.class)}</span>}>
@@ -147,7 +149,7 @@ function HoldingCard(props: { view: FinanceView; holding: HoldingView; controls:
           ))}
         </>
       ) : null}
-      {!h.option ? <RouteControl view={view} controls={controls} target={{ holding: h.id }} now={now} reinvest label="Distributions go to" /> : null}
+      {!h.option ? <RouteControl view={view} controls={controls} target={{ holding: h.id }} route={h.route} reinvest label="Distributions go to" /> : null}
       {controls.mode === "player" ? (
         can.length > 0 ? (
           <div class="lre-inline">
@@ -308,7 +310,7 @@ function PropertyCard(props: { view: FinanceView; property: PropertyView; contro
       {p.costs.map((f) => (
         <FlowRow key={f.id} view={view} flow={f} controls={controls} />
       ))}
-      {owns ? <RouteControl view={view} controls={controls} target={{ property: p.id }} now={null} reinvest={false} label="Rent goes to" /> : null}
+      {owns ? <RouteControl view={view} controls={controls} target={{ property: p.id }} route={p.route} reinvest={false} label="Rent goes to" /> : null}
       {controls.mode === "player" ? (
         can.length > 0 ? (
           <div class="lre-inline">

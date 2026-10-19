@@ -554,6 +554,8 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
       const b = businessBooks(api, ctx, business, from, from + 1);
       return { period: m, revenue: b.revenue, expenses: b.expenses, profit: b.profit };
     });
+  // Where the viewer's share of its profit goes, when they hold one: the holdings module routes it (`economy.stake_route`).
+  const routed = api.shareOf(ctx.state, business, viewer) > 0 ? (optionalQuery(ctx, "economy.stake_route")?.(ctx, viewer, business) ?? null) : undefined;
   return {
     id: business,
     name: labelOf(ctx, business),
@@ -567,6 +569,7 @@ export function businessView(ctx: ReadContext, api: FinanceApi, business: Entity
     invoices,
     employees,
     taxes,
+    route: routed === undefined ? null : routed === null ? { to: null, reinvest: false } : "reinvest" in routed ? { to: null, reinvest: true } : { to: routed.account, reinvest: false },
   };
 }
 
