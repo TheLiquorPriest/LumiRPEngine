@@ -68,6 +68,12 @@ test("edit, draft, commit, history, restore and diff against the real backend, w
   expect((edit.schema as { first: { path: string; code: string }[] }).first).toEqual(expect.arrayContaining([expect.objectContaining({ path: "entities.mara.lifeKnowBy", code: "schema" })]));
   const stale = await callTool("lre_edit", { worldId, ops: [{ op: "remove", path: "/entities/mara" }], expectVersion: 0 }, ctx);
   expect(stale.isError).toBe(true);
+  // A failing `test` op is the patch's own precondition, not a stale draft: its message says which op, and nothing lands.
+  const failed = await callTool("lre_edit", { worldId, ops: [{ op: "replace", path: "/name", value: "Not this" }, { op: "test", path: "/name", value: "Elsewhere" }] }, ctx);
+  expect(failed.isError).toBe(true);
+  expect(failed.text).toContain("operation");
+  expect(failed.text).not.toContain("written since you read it");
+  expect(await call("lre_draft", { worldId })).toMatchObject({ version: 1, name: "Harbor" });
 
   await call("lre_edit", { worldId, ops: [{ op: "move", from: "/entities/mara/lifeKnowBy", path: "/entities/mara/tags" }], expectVersion: 1 });
   const draft = await call("lre_draft", { worldId });

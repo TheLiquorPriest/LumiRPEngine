@@ -237,9 +237,14 @@ export function editTool(live: Live, args: Args, serialize: Serialize): Promise<
         after = await live.conn.request("lre.editor", { op: "patch", worldId, base: before.base, version: before.version, ops });
       } catch (error) {
         if (!(error instanceof LreError)) throw error;
-        // Without expectVersion the edit is meant for the draft as it is: read it again once and apply.
-        if (error.code === "conflict" && expected === undefined && attempt === 1) continue;
-        if (error.code === "conflict") throw stale(worldId, (await live.draft(worldId)).version, expected ?? before.version);
+        if (error.code === "conflict") {
+          // A conflict while the draft still stands where it was read is the patch's own `test` failing: retrying can't help.
+          const now = await live.draft(worldId);
+          if (now.version === before.version && now.base === before.base) throw new ToolError(`Nothing changed: ${error.message}`);
+          // Without expectVersion the edit is meant for the draft as it is: read it again once and apply.
+          if (expected === undefined && attempt === 1) continue;
+          throw stale(worldId, now.version, expected ?? before.version);
+        }
         if (error.code === "bad_request" || error.code === "validation") throw new ToolError(`Nothing changed: LumiRPEngine refused the patch. ${error.message}`);
         throw error;
       }
