@@ -117,7 +117,7 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string }) {
     });
   return (
     <Card title="Step templates">
-      <div class="lre-small lre-muted">A world's template for a step wins over the player's own prompt and the built-in one. A new template starts from the built-in prompt.</div>
+      <div class="lre-small lre-muted">A world's template for a step wins over the player's own prompt and the built-in one; only a step's first template (by id) is used, and its signals are ignored. A new template starts from the built-in prompt.</div>
       {MIND_PURPOSES.map((purpose) => {
         const templates = Object.values(props.doc.steps).filter((t) => t.purpose === purpose).sort((a, b) => a.id.localeCompare(b.id));
         return (
@@ -125,17 +125,20 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string }) {
             <Row
               k={STEP_LABEL[purpose]}
               v={
-                <button type="button" class="lre-btn small" disabled={busy} onClick={() => add(purpose)}>
-                  New template
-                </button>
+                templates.length === 0 ? (
+                  <button type="button" class="lre-btn small" disabled={busy} onClick={() => add(purpose)}>
+                    New template
+                  </button>
+                ) : undefined
               }
               sub={templates.length === 0 ? "None: the player's prompt, else the built-in" : undefined}
             />
-            {templates.map((t) => (
+            {templates.map((t, i) => (
               <button key={t.id} type="button" class="lre-item" onClick={() => open(t.id)}>
                 <span class="grow">
                   <code>{t.id}</code>
                 </span>
+                {i > 0 ? <span class="lre-badge warn">Not used</span> : null}
                 <span class="lre-dim" aria-hidden="true">
                   ›
                 </span>

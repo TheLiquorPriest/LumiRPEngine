@@ -9,7 +9,7 @@ import type { Fidelity, MindPurpose, MindsMemoryConfig, MindsSettings } from "..
 import { FIDELITIES, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_RANGES } from "../../shared/minds";
 
 /** The fields a Model use preset sets; changing one makes the preset Custom. */
-export type MindsPolicy = Partial<Pick<MindsSettings, "enabled" | "liveLimit" | "farRefreshMinutes" | "memoryLevels" | "tokens">> & {
+export type MindsPolicy = Partial<Pick<MindsSettings, "enabled" | "liveLimit" | "farRefreshMinutes" | "refreshLimit" | "memoryLevels" | "tokens">> & {
   nearRefresh?: Partial<MindsSettings["nearRefresh"]>;
   skip?: Partial<MindsSettings["skip"]>;
 };
@@ -19,6 +19,7 @@ export function mindsPolicyPatch(change: MindsPolicy): JsonObject {
   if (change.enabled !== undefined) minds.enabled = change.enabled;
   if (change.liveLimit !== undefined) minds.liveLimit = change.liveLimit;
   if (change.farRefreshMinutes !== undefined) minds.farRefreshMinutes = change.farRefreshMinutes;
+  if (change.refreshLimit !== undefined) minds.refreshLimit = change.refreshLimit;
   if (change.tokens !== undefined) minds.tokens = change.tokens;
   if (change.memoryLevels !== undefined) minds.memoryLevels = FIDELITIES.filter((f) => f !== "background" && change.memoryLevels?.includes(f));
   if (change.nearRefresh) minds.nearRefresh = { ...change.nearRefresh };
@@ -63,7 +64,7 @@ export const MEMORY_FIELDS: readonly MemoryField[] = [
   { part: "salience", key: "halfLifeDays", label: "A note's salience halves every (days)", range: MINDS_RANGES.halfLifeDays, step: 1 },
   { part: "salience", key: "floor", label: "Under this salience a note has faded", range: MINDS_RANGES.floor, step: 0.1 },
   { part: "consolidate", key: "enabled", label: "Fold faded and surplus notes into the summary" },
-  { part: "consolidate", key: "periodDays", label: "Fold a character's notes at most every (days)", range: MINDS_RANGES.periodDays, step: 1 },
+  { part: "consolidate", key: "periodDays", label: "Fold a character's notes at most every (days)", range: MINDS_RANGES.periodDays, step: 0.5 },
 ];
 
 /** A memory field's value in a config. */
