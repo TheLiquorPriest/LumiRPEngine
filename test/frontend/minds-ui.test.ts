@@ -112,7 +112,7 @@ describe("Build → World → Minds", () => {
     config.thresholds = { live: 80, near: 40, far: 10 };
     config.always = { tag: ["lead"] };
     config.never = { kind: ["animal"] };
-    config.memory = { ...config.memory, notes: { show: 3, keep: 12 }, salience: { halfLifeDays: 2.5, floor: 1 }, consolidate: { enabled: false } };
+    config.memory = { ...config.memory, notes: { show: 3, keep: 12 }, salience: { halfLifeDays: 2.5, floor: 1 }, consolidate: { enabled: false, periodDays: 3 } };
     const set = rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "set", part: "minds", value: mindsPartValue(config) }));
     expect(worldMindsOf(set.draft as WorldDoc)).toEqual(config);
     const got = rig.body(await rig.send({ type: "lre.editor", worldId, base: null, op: "get" }));
