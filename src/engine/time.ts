@@ -402,17 +402,23 @@ export function runTimelapse(reg: Registry, w: Working, target: TimelapseTarget,
 
 /**
  * A time skip replayed from its record (DESIGN §24.7): the same segment, stopping at each recorded
- * beat to apply what was decided there, then on to the target, or stopped where the record says.
- * A beat the run no longer reaches (it ended on its own first) and every beat after it are left out.
+ * beat to apply what was decided there, then on to the target, or stopped where the record says (at a
+ * beat whose minds gave nothing, too). A beat the run no longer reaches (it ended on its own first) and
+ * every beat after it are left out.
  */
 export function replaySkip(reg: Registry, w: Working, target: TimelapseTarget, record: SkipRecord, opts: TimelapseOptions): TimelapseOutcome | Rejection {
   const run = TimelapseRun.start(reg, w, target, opts);
   if ("code" in run) return run;
+  const stopAt = record.stop?.at ?? Infinity;
   for (const beat of record.beats) {
+    if (beat.at > stopAt) break;
     run.advanceTo(beat.at);
-    if (run.clock !== beat.at) break;
+    if (run.clock !== beat.at) return run.finish(null);
     run.apply(beat.events);
-    if (record.stop?.at === beat.at) return run.finish(record.stop);
+  }
+  if (record.stop) {
+    run.advanceTo(record.stop.at);
+    if (run.clock === record.stop.at) return run.finish(record.stop);
   }
   return run.finish(null);
 }

@@ -16,7 +16,8 @@ import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateVi
 import type { ActionDef, AdjudicationDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
 import { MINDS_SLOT, worldMindsOf, type MindCallTrace } from "../shared/minds";
-import { postMinds, preMinds, type MindsDeps } from "./minds";
+import { mindsOn, postMinds, preMinds, runMinds, type MindsDeps } from "./minds";
+import { runSkip, type BeatMinds, type SkipRun } from "./skip";
 import { fightOffers } from "../packs/combat/core/index";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
@@ -503,6 +504,8 @@ export class Runtime implements TurnHooks {
   private readonly mindTraces = new Map<string, MindCallTrace[]>();
   /** What the minds need of the backend: the runner, the pre and post phases and the time skip read it (`backend/minds.ts`). */
   readonly minds: MindsDeps;
+  /** The minds a time skip runs at its beats (DESIGN §24.7): `runMinds` on this runtime's deps, which tests replace with a fake. */
+  beatMinds: BeatMinds = (input) => runMinds(this.minds, input);
 
   constructor(options: RuntimeOptions) {
     this.host = options.host;
@@ -722,6 +725,22 @@ export class Runtime implements TurnHooks {
     bridge.setMinds(text, minds.events);
     this.addMindTraces(input.chatId, p.generationId, minds.traces, true);
     if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${minds.traces.length} mind(s), ${budget.spent} pre call(s)`, input.userId);
+    // A timelapse with minds on is a time skip (DESIGN §24.7): its beats and the minds at them are
+    // found and recorded now, from exactly the state the plan starts from, and the plan replays them.
+    const intent = bridge.intentOf(text);
+    const base = intent?.action === TIMELAPSE_ACTION && mindsOn(settings) ? input.core.planState(p.generationId, input.observed) : null;
+    let skip: SkipRun | null = null;
+    if (intent && base) {
+      const start = new Working(this.registry, base.world, base.state);
+      start.applyAll(bridge.prePlan(text));
+      try {
+        skip = await runSkip({ registry: this.registry, steps: this.steps, minds: this.beatMinds }, { chatId: input.chatId, userId: input.userId, world: base.world, state: start.state, intent, runSeed: bridge.runSeed, settings, guidance: preset.guidance, signal: budget.signal });
+      } catch (error) {
+        this.host.log("warn", `[LumiRPEngine] time skip not run: ${error instanceof Error ? error.message : String(error)}`, input.userId);
+      }
+      if (skip) this.addMindTraces(input.chatId, p.generationId, skip.traces);
+    }
+    bridge.setSkip(text, skip?.record ?? null);
   }
 
   /**

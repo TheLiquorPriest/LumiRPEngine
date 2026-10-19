@@ -816,7 +816,7 @@ export const castlifePack: PackDef = {
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []), instants: planMoments, atInstant: atPlanMoment });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.query("castlife.activity", shownActivity);
-    r.query("castlife.commitments", (ctx, who, start, end) => commitments(ctx, who, start, end).map((c) => ({ start: c.start, end: c.end, activity: c.activity, place: c.place ?? null, kind: c.kind, label: c.label })));
+    r.query("castlife.commitments", (ctx, who, start, end) => commitments(ctx, who, start, end).map((c) => ({ start: c.start, end: c.end, activity: c.activity, place: c.place ?? null, kind: c.kind, label: c.label, ...(c.plan !== undefined ? { plan: c.plan } : {}) })));
     r.query("castlife.tie_zones", (ctx) => {
       const out: { key: string; agent: EntityId; options: string[] }[] = [];
       const decided = decisions(ctx.state);

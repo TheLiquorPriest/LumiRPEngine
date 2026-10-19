@@ -1,0 +1,162 @@
+// Time skips (DESIGN §24.7) on the whole backend with fake steps: the beats a skip finds, the minds at
+// them, a mind's interrupt stopping the skip at its time with the stop chip, the caps, the `skip`
+// step's beats recorded, the before-the-reply clock running out, Re-run asking again and replay.
+
+import { describe, expect, test } from "bun:test";
+import type { LedgerEvent } from "../../src/shared/ledger";
+import type { JsonObject } from "../../src/shared/json";
+import { calendarOf, clockAt, dateAt, formatHHMM } from "../../src/engine/calendar";
+import { placeOfEntity } from "../../src/engine/scope";
+import { toChain } from "../../src/backend/ledger-io";
+import type { BeatMinds } from "../../src/backend/skip";
+import { Rig } from "../support/rig";
+
+const MARCUS = "marcus_delgado";
+
+async function folded(rig: Rig, chatId: string) {
+  const core = await rig.rt.ledger.core(chatId, rig.host.userId);
+  if (!core) throw new Error("not a world chat");
+  const observed = toChain(await rig.host.chats.messages(chatId, rig.host.userId));
+  const state = core.fold(observed).state;
+  const world = core.worldAt(state.revision);
+  if (!world) throw new Error("no world");
+  const head = core.chain(observed).at(-1);
+  return { state, world, record: head?.ledger?.swipes[String(head.swipeId)] };
+}
+
+/** Port Alder after one ordinary turn, with every helper call answered with nothing. */
+async function portAlder(): Promise<{ rig: Rig; chatId: string; day: number; at: (day: number, hhmm: string) => number }> {
+  const rig = new Rig({ shipped: true });
+  rig.host.quietReply = () => "{}";
+  const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
+  const chatId = rig.host.createChat("Morning.");
+  rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+  await rig.turn(chatId, "I look around the shop.", "The shop is quiet.");
+  const { state, world } = await folded(rig, chatId);
+  const cal = calendarOf(world);
+  return { rig, chatId, day: dateAt(cal, state.clock).dayIndex, at: (day, hhmm) => clockAt(cal, day, Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3))) };
+}
+
+/** Marcus, pinned Live, plans to meet the player character at these times. */
+async function marcusPlans(rig: Rig, chatId: string, times: readonly number[]): Promise<void> {
+  const ops: JsonObject[] = [{ op: "mind_pin", entity: MARCUS, level: "live" }];
+  for (const [i, from] of times.entries()) ops.push({ op: "mind_memory", entity: MARCUS, part: "plan", id: null, value: { what: `Talk to Jordan about the books (${i + 1})`, kind: "meet", when: { from, to: from + 60 }, with: ["pov"], priority: 4 } });
+  rig.body(await rig.send({ type: "lre.edit", chatId, ops }));
+}
+
+/**
+ * A fake runner: a mind for each person asked, interrupting where `interrupts` says; every call kept.
+ * A slow one is still thinking when the before-the-reply clock runs out: it waits for that signal (the
+ * behaviour under test is the real pre-phase deadline) and then gives what finished, nothing.
+ */
+function fakeMinds(calls: { at: number; who: string[]; reason: string }[], interrupts: (who: string, at: number) => boolean, slow = false): BeatMinds {
+  return async (input) => {
+    calls.push({ at: input.moment.at, who: [...input.who], reason: input.moment.reason });
+    if (slow && !input.signal.aborted) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      input.signal.addEventListener("abort", () => resolve(), { once: true });
+      await promise;
+    }
+    if (input.signal.aborted) return { events: [], traces: [] };
+    const events: LedgerEvent[] = input.who.map((id) => ({
+      type: "minds.mind",
+      data: { entity: id, at: input.moment.at, place: placeOfEntity(input.state, id), level: input.levels[id] ?? "near", moment: "beat", reason: input.moment.reason, monologue: "Something has to be said.", depiction: "restless", intent: "Find Jordan.", reactions: [], plans: [], mood: null, interrupt: interrupts(id, input.moment.at) ? { reason: "He comes looking for Jordan." } : null, withheld: false },
+    }));
+    return { events, traces: [] };
+  };
+}
+
+/** A timelapse of `days`, where invitations only note (the plan's own invitation would end it first otherwise). */
+async function skipDays(rig: Rig, chatId: string, days: number): Promise<void> {
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides: { invitation: "note" } }, source: "palette" }));
+  const g = await rig.host.start(chatId, { type: "normal" });
+  await rig.host.finish(g, "Days pass.");
+}
+
+const ofType = (events: readonly LedgerEvent[] | undefined, type: string): LedgerEvent[] => (events ?? []).filter((e) => e.type === type);
+
+describe("time skips", () => {
+  test("a 3-day skip finds the beats, runs the minds at them and stops on an interrupt at its time, with the chip; replay is identical", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    const meet = at(day + 1, "19:00");
+    await marcusPlans(rig, chatId, [meet]);
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, (who, when) => who === MARCUS && when === meet);
+    await skipDays(rig, chatId, 3);
+    const { state, record } = await folded(rig, chatId);
+    expect(calls.some((c) => c.at === meet && c.who.includes(MARCUS))).toBe(true);
+    const skip = ofType(record?.events, "minds.skip")[0];
+    expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([expect.objectContaining({ at: meet, source: "scan" })]));
+    const summary = record?.events.find((e) => e.type === "timelapse");
+    expect(summary).toMatchObject({ stoppedBy: "mind", mind: MARCUS, to: meet });
+    expect(state.clock).toBe(meet);
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
+    expect(chip?.label).toMatch(/^Timelapse stopped: (Marcus Delgado|someone)$/);
+    // The minds' words never reach a player surface: the Journal and chips hold none of them.
+    expect(JSON.stringify(await rig.rt.view(chatId, rig.host.userId))).not.toContain("Something has to be said");
+    // Replay folds the record as it stands, with no model asked again.
+    const before = calls.length;
+    const again = rig.restart();
+    again.rt.beatMinds = fakeMinds(calls, () => false);
+    expect((await folded(again, chatId)).state).toEqual(state);
+    expect(calls.length).toBe(before);
+  });
+
+  test("Re-run asks the minds again", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    await marcusPlans(rig, chatId, [at(day + 1, "19:00")]);
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, () => false);
+    await skipDays(rig, chatId, 2);
+    const first = calls.length;
+    expect(first).toBeGreaterThan(0);
+    const g = await rig.host.start(chatId, { type: "swipe" });
+    await rig.host.finish(g, "Days pass, again.");
+    expect(calls.length).toBeGreaterThan(first);
+  });
+
+  test("the beats per skip and the minds per beat keep to their caps", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { skip: { maxBeats: 2, maxMindsPerBeat: 1 } } } }));
+    await marcusPlans(rig, chatId, [at(day + 1, "19:00"), at(day + 2, "12:30"), at(day + 2, "19:00")]);
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, () => false);
+    await skipDays(rig, chatId, 3);
+    const beats = calls.filter((c) => !c.reason.startsWith("The time skip ends"));
+    expect(beats.length).toBeLessThanOrEqual(2);
+    expect(beats.every((c) => c.who.length <= 1)).toBe(true);
+    const skip = ofType((await folded(rig, chatId)).record?.events, "minds.skip")[0];
+    expect(skip && "data" in skip && Array.isArray(skip.data.beats) ? skip.data.beats.length : -1).toBe(2);
+  });
+
+  test("the skip step's beats are recorded with the scanned ones", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    const { world } = await folded(rig, chatId);
+    const festival = at(day + 1, "15:00");
+    const d = dateAt(calendarOf(world), festival);
+    const stamp = `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ${formatHHMM(d.minuteOfDay)}`;
+    rig.host.quietReply = (req) => (req.messages.some((m) => m.content.includes("skipping ahead in time")) ? JSON.stringify({ beats: [{ at: stamp, reason: "The harbour festival" }] }) : "{}");
+    rig.rt.beatMinds = fakeMinds([], () => false);
+    await skipDays(rig, chatId, 2);
+    const skip = ofType((await folded(rig, chatId)).record?.events, "minds.skip")[0];
+    expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([{ at: festival, reason: "The harbour festival", source: "model" }]));
+  });
+
+  test("when the before-the-reply clock runs out the skip stops at a beat, keeps what it ran and offers Continue; the turn commits", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { budgets: { pre: { calls: 4, ms: 250 } } } } }));
+    await marcusPlans(rig, chatId, [at(day + 1, "19:00"), at(day + 2, "19:00")]);
+    rig.rt.beatMinds = fakeMinds([], () => false, true);
+    await skipDays(rig, chatId, 3);
+    const { state, record } = await folded(rig, chatId);
+    expect(record?.status).toBe("ok");
+    // It stopped at its first beat, the one whose minds were still thinking, well short of the target.
+    const skip = ofType(record?.events, "minds.skip")[0];
+    const first = skip && "data" in skip && Array.isArray(skip.data.beats) && typeof (skip.data.beats[0] as JsonObject | undefined)?.at === "number" ? Number((skip.data.beats[0] as JsonObject).at) : NaN;
+    expect(state.clock).toBe(first);
+    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: null, to: first });
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
+    expect(chip?.label).toMatch(/^Continue timelapse/);
+  });
+});

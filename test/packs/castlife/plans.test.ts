@@ -107,7 +107,7 @@ describe("castlife: characters' own plans", () => {
     const w = riverton();
     record(w, [pin("jordan", "live"), planEdit("jordan", plan(w, "p2", { priority: 2, when: { from: at(w, 0, "00:00"), to: at(w, 1, "23:59") } }))]);
     const laid = w.ctx.query("castlife.commitments")(w.ctx, "jordan", at(w, 0, "00:00"), at(w, 2, "00:00")).filter((c) => c.kind === "plan");
-    expect(laid).toEqual([{ start: at(w, 1, "09:00"), end: at(w, 1, "09:45"), activity: "errand", place: "bank", kind: "plan", label: "Errand" }]);
+    expect(laid).toEqual([{ start: at(w, 1, "09:00"), end: at(w, 1, "09:45"), activity: "errand", place: "bank", kind: "plan", label: "Errand", plan: "p2" }]);
   });
 
   test("an NPC's needs follow what their plan has them do: a plan through the lunch hour leaves them hungry", () => {

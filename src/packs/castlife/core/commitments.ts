@@ -31,6 +31,8 @@ export interface CommitmentBlock {
   place: PlaceId | null;
   kind: CommitmentKind;
   label: string;
+  /** The plan a block was laid from: for a time skip's beats (DESIGN §24.7). */
+  plan?: string;
 }
 
 /**

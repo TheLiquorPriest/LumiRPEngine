@@ -15,7 +15,7 @@ import type { Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
 import type { WorldState } from "../engine/state";
 import type { InterpretOutput, PostTurnInput, TurnPlanInput } from "../engine/steps";
-import { applyTimeAdvance } from "../engine/time";
+import { applyTimeAdvance, type SkipRecord } from "../engine/time";
 import type { EngineTurnPlan } from "../engine/turn";
 import { Working } from "../engine/working";
 
@@ -138,6 +138,8 @@ export class TurnBridge implements TurnModel {
   private readonly prose = new Map<string, PlanProse>();
   /** A typed timelapse longer than a turn may run (`interpret`), offered as a chip instead, keyed like `intents`. */
   private readonly offers = new Map<string, TimelapseTarget>();
+  /** A timelapse turn's time skip as its pre phase ran it (DESIGN §24.7), keyed like `intents`: the plan replays it. */
+  private readonly skips = new Map<string, SkipRecord>();
 
   constructor(
     private readonly registry: Registry,
@@ -227,6 +229,13 @@ export class TurnBridge implements TurnModel {
     return [...(this.decisions.get(userText) ?? []), ...(this.minds.get(userText) ?? [])];
   }
 
+  /** The time skip for the turn whose last user text is `userText` (null clears it): the plan replays its beats. */
+  setSkip(userText: string, record: SkipRecord | null): void {
+    if (record) this.skips.set(userText, record);
+    else this.skips.delete(userText);
+    trim(this.skips);
+  }
+
   setOffer(userText: string, target: TimelapseTarget | null): void {
     if (target) this.offers.set(userText, target);
     else this.offers.delete(userText);
@@ -285,6 +294,7 @@ export class TurnBridge implements TurnModel {
       kind: input.kind,
       userTexts: input.userTexts,
       intent: this.intents.get(last) ?? null,
+      skip: this.skips.get(last) ?? null,
     });
     this.plans.set(input.seed, result);
     trim(this.plans);
