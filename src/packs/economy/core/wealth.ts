@@ -17,7 +17,7 @@ import { registerGains, taxEstimate } from "./gains";
 import { holdingsWorth, holdingView, lotsOf, qtyOf, registerHoldings, setRoute, visibleHoldings } from "./holdings";
 import { registerIncome } from "./income";
 import { registerOptions } from "./options";
-import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, registerProperty, securedLoans, visibleProperties } from "./property";
+import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, registerProperty, routeRent, securedLoans, visibleProperties } from "./property";
 import { gainsIn, incomeIn } from "./records";
 import { businessIds, businessValue, registerStakes, setStakeRoute, stakeWorth } from "./stakes";
 
@@ -31,8 +31,7 @@ function setRentRoute(api: FinanceApi, ctx: ReadContext, party: EntityId, proper
     if (own(ctx.state.entities, route)?.kind !== "account") return reject("not_account", `${labelOf(ctx, route)} isn't an account`);
     if (!api.accountsOf(ctx, party, "worth").includes(route) && !api.accountsOf(ctx, party, "spend").includes(route)) return reject("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, party)}'s`);
   }
-  if (strOf(own(ctx.state.entities, property)?.fields.rent_to) === route) return [];
-  return [{ type: "set", entity: property, field: "rent_to", value: route === "" ? null : route }];
+  return routeRent(api, ctx, property, route);
 }
 
 /** A rough amount in words: two significant figures, for a mind's summary ("about $410,000"). */
