@@ -1,9 +1,10 @@
 // The inspector's history (DESIGN §6.5): the last interceptor runs per chat with their sections,
-// clipping and delivery badges, the lore each model step read (§5.4), and the last delivery check
-// by slot. Kept in `userStorage/runs/<chatId>/inspector.json` and read when the chat is first
-// viewed or generates, so the inspector shows the same history after a restart. A history written
-// before the traces withheld a secret-reading step's lookups (`v: 1`) keeps its searches' kinds and
-// counts but not their text: there is no telling now which of them carried what.
+// clipping and delivery badges, the lore each model step read (§5.4), the minds calls (§24.5, no
+// text), and the last delivery check by slot. Kept in `userStorage/runs/<chatId>/inspector.json` and
+// read when the chat is first viewed or generates, so the inspector shows the same history after a
+// restart. A history written before the traces withheld a secret-reading step's lookups (`v: 1`)
+// keeps its searches' kinds and counts but not their text: there is no telling now which of them
+// carried what.
 
 import type { ChatId, UserId } from "../shared/ids";
 import { runDir } from "../shared/ids";
@@ -11,6 +12,8 @@ import { hasOwn, isRecord } from "../shared/json";
 import { LORE_AUDIENCE } from "../shared/lore";
 import { LORE_POLICIES } from "../shared/settings";
 import type { ContextGeneration, LoreStepTrace } from "../shared/state-view";
+import type { MindCallTrace } from "../shared/minds";
+import { FIDELITIES, MIND_PURPOSES } from "../shared/minds";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -82,6 +85,28 @@ function loreTracesOf(raw: unknown, legacy: boolean): LoreStepTrace[] | undefine
   return out;
 }
 
+const MIND_PHASES: readonly MindCallTrace["phase"][] = ["pre", "post", "skip"];
+const MIND_OUTCOMES: readonly MindCallTrace["outcome"][] = ["recorded", "reused", "failed", "leak_blocked", "skipped_limit"];
+const MIND_PROMPTS: readonly MindCallTrace["prompt"][] = ["world", "override", "default"];
+
+/**
+ * A record's minds call traces as stored: the well-formed ones, each with only the fields a trace has,
+ * so nothing else a damaged or older file carries (a mind's text) can reach the inspector.
+ */
+export function mindTracesOf(raw: unknown): MindCallTrace[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.flatMap((t): MindCallTrace[] => {
+    if (!isRecord(t) || typeof t.who !== "string" || typeof t.ms !== "number" || typeof t.tokens !== "number") return [];
+    const purpose = MIND_PURPOSES.find((p) => p === t.purpose);
+    const phase = MIND_PHASES.find((p) => p === t.phase);
+    const level = FIDELITIES.find((f) => f === t.level);
+    const outcome = MIND_OUTCOMES.find((o) => o === t.outcome);
+    const prompt = MIND_PROMPTS.find((p) => p === t.prompt);
+    if (!purpose || !phase || !level || !outcome || !prompt) return [];
+    return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt }];
+  });
+}
+
 function deliveryOf(raw: unknown): Delivery {
   const out: Delivery = {};
   if (!isRecord(raw)) return out;
@@ -121,9 +146,10 @@ export class InspectorLog {
     const legacy = isRecord(raw) && raw.v !== FORMAT;
     const log: ChatLog = {
       userId,
-      records: records.map(({ lore, ...r }) => {
+      records: records.map(({ lore, minds, ...r }) => {
         const traces = loreTracesOf(lore, legacy);
-        return traces ? { ...r, lore: traces } : r;
+        const calls = mindTracesOf(minds);
+        return { ...r, ...(traces ? { lore: traces } : {}), ...(calls ? { minds: calls } : {}) };
       }),
       delivery: isRecord(raw) ? deliveryOf(raw.delivery) : {},
     };

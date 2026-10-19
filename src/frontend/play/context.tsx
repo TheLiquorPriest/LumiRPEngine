@@ -4,7 +4,8 @@
 // they reached the model. Built by the backend as `core.context`: an unrevealed secret entry isn't
 // in it at all, a search that would name a secret or someone the player hasn't met is withheld, a
 // step that may read a secret or an NPC's private options shows its lookups without their text
-// ("—"), and an NPC choice, being private, shows no counts and no entries.
+// ("—"), and an NPC choice, being private, shows no counts and no entries. The minds calls show
+// whose mind ran, at which level, how it went and what it cost: never a word of what a mind said.
 
 import { useEffect, useState } from "preact/hooks";
 import { isRecord } from "../../shared/json";
@@ -17,6 +18,9 @@ import { list, num, oneOf, optNum, str, strings } from "../decode";
 import type { PanelProps } from "../registry";
 import { STEP_LABEL } from "../settings/steps";
 import type { ContextView, LoreStepTrace } from "../../shared/state-view";
+import type { MindCallTrace } from "../../shared/minds";
+import { FIDELITIES, MIND_PURPOSES } from "../../shared/minds";
+import { FIDELITY_LABEL } from "../../packs/minds/ui/ops";
 
 const POLICY_LABEL: Record<LorePolicy, string> = { none: "lore off", prefetch: "prefetch", lookup: "lookups", "prefetch+lookup": "prefetch and lookups" };
 const TRANSPORT_LABEL: Record<LoreStepTrace["transport"], string> = { none: "", tools: "tools", need: "ask form" };
@@ -33,6 +37,29 @@ function decodeLore(value: unknown): LoreStepTrace[] {
     ...(t.private === true ? { private: true as const } : {}),
     lookups: num(t.lookups),
     notes: strings(t.notes),
+  }));
+}
+
+const MIND_OUTCOME: Record<MindCallTrace["outcome"], { text: string; tone: string }> = {
+  recorded: { text: "recorded", tone: "pos" },
+  reused: { text: "reused", tone: "" },
+  failed: { text: "failed", tone: "neg" },
+  leak_blocked: { text: "kept from the narrator", tone: "warn" },
+  skipped_limit: { text: "over the limit", tone: "" },
+};
+const MIND_PHASE: Record<MindCallTrace["phase"], string> = { pre: "Before the reply", post: "After the reply", skip: "In a time skip" };
+const MIND_PROMPT: Record<MindCallTrace["prompt"], string> = { world: "the world's prompt", override: "your prompt", default: "the built-in prompt" };
+
+function decodeMinds(value: unknown): MindCallTrace[] {
+  return list(value, (t) => ({
+    purpose: oneOf(t.purpose, MIND_PURPOSES, "mind"),
+    phase: oneOf(t.phase, ["pre", "post", "skip"] as const, "pre"),
+    who: str(t.who, "Someone"),
+    level: oneOf(t.level, FIDELITIES, "near"),
+    outcome: oneOf(t.outcome, ["recorded", "reused", "failed", "leak_blocked", "skipped_limit"] as const, "failed"),
+    ms: num(t.ms),
+    tokens: num(t.tokens),
+    prompt: oneOf(t.prompt, ["world", "override", "default"] as const, "default"),
   }));
 }
 
@@ -57,6 +84,7 @@ export function decodeContextView(value: unknown): ContextView | null {
         sections: list(g.sections, (s) => ({ slot: str(s.slot), label: str(s.label, str(s.slot)), tokens: num(s.tokens), clipped: s.clipped === true, delivery: oneOf(s.delivery, DELIVERY, "unchecked") })),
         budget: { sections: num(budget.sections), used: num(budget.used) },
         lore: decodeLore(g.lore),
+        minds: decodeMinds(g.minds),
       };
     }),
   };
@@ -160,6 +188,23 @@ export function ContextPanel(props: PanelProps) {
                     </div>
                   ))}
                 </div>
+              ))}
+            </Card>
+          ) : null}
+          {(generation.minds ?? []).length > 0 ? (
+            <Card title="Minds">
+              {(generation.minds ?? []).map((m, i) => (
+                <Row
+                  key={`${m.phase}:${m.purpose}:${i}`}
+                  k={`${m.who} · ${STEP_LABEL[m.purpose]}`}
+                  v={
+                    <span class="lre-inline">
+                      {m.outcome === "skipped_limit" || m.outcome === "reused" ? null : `${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
+                      <span class={`lre-badge ${MIND_OUTCOME[m.outcome].tone}`}>{MIND_OUTCOME[m.outcome].text}</span>
+                    </span>
+                  }
+                  sub={`${FIDELITY_LABEL[m.level]} · ${MIND_PHASE[m.phase]} · ${MIND_PROMPT[m.prompt]}`}
+                />
               ))}
             </Card>
           ) : null}
