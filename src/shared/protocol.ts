@@ -11,7 +11,7 @@ import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, 
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
-import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, MapDisplay, RelationTypeDef, WorldDoc, WorldIndex } from "./world";
+import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, MapDisplay, RelationTypeDef, RevisionNote, WorldDoc, WorldIndex } from "./world";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -350,10 +350,12 @@ export type JsonPatchOp =
  * RFC 6902 operations to the whole draft, all of them or none. `restore` makes the draft a copy of
  * one of the world's revisions, which a commit then makes head again (DESIGN §23).
  *
- * `version`, when sent, is the draft version the client last saw: a write is refused with
- * `conflict` when the stored draft has moved on since. Each write counts one, and a new draft
- * counts on from the last one the world had, so a version never names two drafts of one world.
- * Every result carries the current one (0 while no draft is stored).
+ * `version` names a state of the world's working copy, and is never reused within a world: each
+ * write counts one, and so does a discard or commit (which drops the draft) and a Studio install
+ * that moves the head while no draft is stored. With no draft stored it is the world's count
+ * (`WorldIndex.draftVersion`; 0 for a world never edited), and a new draft starts one above it.
+ * A request that sends `version` is refused with `conflict` when the working copy has moved on
+ * from it; one without it is not checked. Every result carries the current one.
  */
 export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: RevisionId | null; version?: number } & (
     | { op: "get" }
@@ -369,8 +371,9 @@ export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: Re
 /**
  * World operations. `sheet` previews the Sheet Designer's layout: the draft world with `ruleset` in
  * place of its own, read on `entity` (the POV by default) as a new chat would start; nothing is saved.
- * `commit`'s `note` goes into the world's history. `templates` lists the starter worlds `create`
- * takes; `chats` lists the user's chats that play a world (one world's, with `worldId`).
+ * `commit`'s `note` goes into the world's history, and its `version`, when sent, is checked as an
+ * editor write's is (DESIGN §23). `templates` lists the starter worlds `create` takes; `chats` lists
+ * the user's chats that play a world (one world's with `worldId`, one chat with `chatId`).
  */
 export type WorldRequest = Request<"lre.world"> &
   (
@@ -378,7 +381,7 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "get"; worldId: WorldId; revision?: RevisionId }
     | { op: "create"; name: string; template: string | null }
     | { op: "delete"; worldId: WorldId }
-    | { op: "commit"; worldId: WorldId; base: RevisionId | null; note?: string }
+    | { op: "commit"; worldId: WorldId; base: RevisionId | null; note?: string; version?: number }
     | { op: "import"; file: JsonValue }
     | { op: "export"; worldId: WorldId; revision?: RevisionId }
     | { op: "lint"; worldId: WorldId }
@@ -386,7 +389,7 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "upgrade"; chatId: ChatId; to: RevisionId; merge?: UpgradePicks }
     | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
     | { op: "templates" }
-    | { op: "chats"; worldId?: WorldId }
+    | { op: "chats"; worldId?: WorldId; chatId?: ChatId }
   );
 
 /** A starter world `lre.world create` can start from. */
@@ -397,13 +400,18 @@ export interface TemplateInfo {
   summary: string;
 }
 
-/** A chat that plays a world, and whether it is behind the world's head. */
+/**
+ * A chat that plays a world: the revision it plays now (after any Upgrade), and whether that is
+ * behind the world's head. `revision` is null, with `reason`, when the chat's ledger can't be read;
+ * `behind` is then false.
+ */
 export interface WorldChatInfo {
   chatId: ChatId;
   name: string;
   worldId: WorldId;
-  revision: RevisionId;
+  revision: RevisionId | null;
   behind: boolean;
+  reason?: string;
 }
 
 /**
@@ -537,7 +545,7 @@ export interface ResultBodies {
   "lre.keep": { pending: boolean };
   "lre.settings.get": SettingsResult;
   "lre.settings.set": SettingsResult;
-  /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head; `version`: the stored draft's version, never repeated for the world (0 when none is stored). */
+  /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head; `version`: the working copy's version (see `EditorRequest`). */
   "lre.editor": { draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean; version: number };
   /**
    * `get` also carries `packKinds` and `packRelations`: every kind (label, extends, fields) and
@@ -546,8 +554,10 @@ export interface ResultBodies {
    * function a formula may call outside an effect's arguments (the math built-ins, the engine's and
    * the packs' formulas), for the expression editor. `sheet` answers the `sheet` preview: the
    * sections, or null when the ruleset designs no sheet. `templates` and `chats` answer their ops.
+   * `get` carries the world's `history` (oldest first; `list` leaves it out). `upgrade` says
+   * `pending` when the chat is mid-turn: its Upgrade lands when the turn ends.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[] };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[]; history?: RevisionNote[]; pending?: boolean };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
@@ -588,14 +598,17 @@ export interface ErrorMessage extends Envelope<"lre.error"> {
 }
 
 /**
- * A world's draft changed: written, discarded or committed (DESIGN §23). Sent to every session of
- * the user, so a Build open on that world reloads a draft another window or an outside agent wrote.
+ * A world's working copy changed: its draft written, discarded or committed, or its head moved by
+ * a Studio install (DESIGN §23). Sent to every session of the user after the reply to the request
+ * that changed it, so a Build open on that world reloads what another window or an outside agent did.
  */
 export interface DraftChanged extends Envelope<"lre.draft.changed"> {
   worldId: WorldId;
-  /** The stored draft's write count now (0 when no draft is stored). */
+  /** The working copy's version now (see `EditorRequest`). */
   version: number;
   stored: boolean;
+  /** The revision the draft started from, or the head when none is stored. */
+  base: RevisionId | null;
 }
 
 export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged;

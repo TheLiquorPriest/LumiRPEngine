@@ -1179,8 +1179,10 @@ export interface WorldIndex {
   head: string;
   loreBookId: string | null;
   revisions: string[];
-  /** Oldest first, one note per time a revision became head; worlds made before it was kept have none. */
-  history?: RevisionNote[];
-  /** The version the world's last dropped (discarded or committed) draft reached: a new draft counts on from it. Absent until one is dropped. */
+  /**
+   * The version of the world's working copy while no draft is stored (DESIGN §23): the next one
+   * after the last discard, commit or Studio install. A new draft starts one above it; absent until
+   * the first. The world's history is kept beside the index (`history.json`), not in it.
+   */
   draftVersion?: number;
 }
