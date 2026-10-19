@@ -20873,7 +20873,10 @@ ${texts.reply}`);
     const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
     const author = never ? "background" : always ? "live" : null;
     const t = config.thresholds;
-    const scored = score >= t.live ? "live" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    const atHand = here !== null && place === here || closeBy(world, place, here) || namedIn(e.name, said);
+    const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    if (score >= t.live && !atHand)
+      reasons.push({ label: "Not at hand, so Near at most", points: 0 });
     const level = gm ?? author ?? scored;
     if (gm)
       reasons.push({ label: `Pinned at ${gm} by the GM`, points: 0 });
@@ -46960,7 +46963,7 @@ Simulated perspectives drive the characters, and the mechanics ground them. Each
   - **Story involvement:** they own a track under way; up to three tracks under way name them in their stages; their role facet values, a value nested under a weighted one counting as it (a villain under antagonist); and they are named by a world rule.
   - **Pending interactions with the POV:** an invitation, an appointment together, an open plan or commitment with the POV, up to three.
   - **Tier and recency:** the detail band of their tier, and being seen with the POV lately (all of it right after, nothing a day later).
-- **Who decides:** the GM's pin in the chat decides first. Then the author's \`never\` selector (always Background), which wins over \`always\` (always Live). Then the score against the world's thresholds, each read as at least the next one down. The GM view shows each input's points and any pin.
+- **Who decides:** the GM's pin in the chat decides first. Then the author's \`never\` selector (always Background), which wins over \`always\` (always Live). Then the score against the world's thresholds, each read as at least the next one down. Live is only for people at hand: someone neither in the POV's scene, close by nor named this turn is Near at most, however high their score, so a Live slot never goes to someone across town while a person in the room has none. The GM view shows each input's points, any pin and that cap.
 - **Who thinks this turn** (the user's cadence, §24.6):
   - Live characters think every turn, best score first, up to the Live limit ("none" for no limit).
   - Near characters, and Live ones past the limit, think on their triggers: their first mind, a rise on the ladder, entering the POV's scene, being named, a number of turns, or a number of game minutes since their last mind.
@@ -47006,6 +47009,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - lore read as them: public entries, \`known_by\` entries by what they know, and of the secrets whose gate doesn't hold only their own (an entry that links them);
   - recall by presence, told to ignore narration of other people's private thoughts;
   - the moment: what the POV just said and did if they are with the POV; else a note that they aren't.
+  - Wherever story text appears (recall, the moment, the memory step's turn), a line says that its "you" is the POV, never the character. Narration speaks to the POV in the second person, and a mind told "You are X" would otherwise take it as itself.
 - **Never in it:** the GM view, another character's mind, or a turn they weren't present for.
 - **The answer:** JSON \`{monologue, depiction, intent, reactions[], plans[{what, kind, when{from, to}, where?, with?[], priority}], mood?, interrupt?{reason}}\`.
   - Lengths are capped.
@@ -47877,7 +47881,7 @@ Each mind is recorded on the turn, so swipes and branches keep it: **Re-narrate*
 
 Every turn, and at each beat of a time skip, each character gets a focus score and a level from it:
 
-- **Live**: they think every turn, best score first, up to your Live limit.
+- **Live**: they think every turn, best score first, up to your Live limit. Only people at hand are Live: in your scene, close by, or named this turn. Anyone else is Near at most, however much of the story they carry.
 - **Near**: they think again when something calls for it: they come into the scene, they are named, or their mind is old enough (the Near refresh).
 - **Far**: they think now and then, on the Far refresh period, and their plans shape their day.
 - **Background**: no mind; they follow their routine.

@@ -19193,7 +19193,10 @@ ${texts.reply}`);
     const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
     const author = never ? "background" : always ? "live" : null;
     const t = config.thresholds;
-    const scored = score >= t.live ? "live" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    const atHand = here !== null && place === here || closeBy(world, place, here) || namedIn(e.name, said);
+    const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    if (score >= t.live && !atHand)
+      reasons.push({ label: "Not at hand, so Near at most", points: 0 });
     const level = gm ?? author ?? scored;
     if (gm)
       reasons.push({ label: `Pinned at ${gm} by the GM`, points: 0 });

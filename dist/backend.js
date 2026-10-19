@@ -18592,7 +18592,10 @@ ${texts.reply}`);
     const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
     const author = never ? "background" : always ? "live" : null;
     const t = config.thresholds;
-    const scored = score >= t.live ? "live" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    const atHand = here !== null && place === here || closeBy(world, place, here) || namedIn(e.name, said);
+    const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    if (score >= t.live && !atHand)
+      reasons.push({ label: "Not at hand, so Near at most", points: 0 });
     const level = gm ?? author ?? scored;
     if (gm)
       reasons.push({ label: `Pinned at ${gm} by the GM`, points: 0 });
@@ -50102,6 +50105,11 @@ function povLabel(scope) {
   const known = knows(state, who, pov) || knows(state, pov, who) || !!own(state.entities, who)?.relations.some((r) => r.type === "regard" && r.to === pov) || !!own(state.entities, pov)?.relations.some((r) => r.type === "regard" && r.to === who);
   return known ? nameOf5(scope, pov) : "a stranger";
 }
+function storyVoice(scope) {
+  const pov = povLabel(scope);
+  const them = pov === "a stranger" ? "that stranger" : pov;
+  return `The story is told to ${pov === "a stranger" ? "a stranger, the player character" : `${pov}, the player character`}: in the story's text, "you" and "your" mean ${them}, never you.`;
+}
 function presentTurns(state, who) {
   const out = [];
   for (const p of readSlice(state).presence)
@@ -50249,8 +50257,8 @@ function mindContext(scope) {
     block("What you remember, and what you saw or were told", memoryLines(scope, c)),
     last ? block(`Your last thoughts (${formatClock(cal, last.at)})`, [last.monologue, last.intent !== "" ? `You meant to: ${last.intent}` : "", last.mood ? `You felt ${last.mood}.` : ""].filter((l) => l !== "")) : "",
     block("What you know of the world", loreLines(scope, place)),
-    block("Turns you were there for (ignore any narration of other people's private thoughts)", recall.map((t) => t.text)),
-    block("Now", now)
+    block("Turns you were there for (ignore any narration of other people's private thoughts)", recall.length > 0 ? [storyVoice(scope), ...recall.map((t) => t.text)] : []),
+    block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now)
   ].filter((p) => p !== "");
   return clip(parts.join(`
 
@@ -50268,7 +50276,7 @@ function memoryContext(scope, turn) {
     block("Your open commitments (by id)", commitments),
     block("Your plans", plans),
     block("What you remember", memoryLines(scope, c)),
-    block("The turn just written", [turn.user.trim() !== "" ? `Player: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== ""))
+    block("The turn just written", [storyVoice(scope), turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== ""))
   ].filter((p) => p !== "");
   return clip(parts.join(`
 
@@ -54594,7 +54602,7 @@ class Runtime {
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792436552" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792436998" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
