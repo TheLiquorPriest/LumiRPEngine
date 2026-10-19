@@ -6,6 +6,7 @@ import type { LedgerEvent, PackEvent, PostEvent } from "../../../src/shared/ledg
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { applyEffects } from "../../../src/engine/effects";
 import { materializeAll } from "../../../src/engine/materialize";
+import { migrateMoney } from "../../../src/engine/money-migrate";
 import { rowOf } from "../../../src/engine/pack-kit";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
 import { createRng } from "../../../src/engine/rng";
@@ -218,6 +219,43 @@ describe("work: businesses", () => {
     const price = bought!.lines.filter((l) => l.amount > 0 && l.account !== ext("tax:sales:mi")).reduce((a, l) => a + l.amount, 0);
     expect(tax).toBe(salesTaxOn(price, 6));
     expect(tax).toBeGreaterThan(0);
+  });
+
+  test("an older Port Alder world saved without the economy's region migrates to Michigan's and charges 6%; one whose economy names a region keeps it", () => {
+    // Port Alder as worlds made before templates named the economy's region kept it: an account in
+    // the old shape, and the region only on its people (or, for the second, the economy naming one).
+    const older = (region?: string): WorldDoc => {
+      const make = STARTER_WORLDS.modern_slice_of_life;
+      if (!make) throw new Error("no Port Alder starter");
+      const world = make("pa", "Port Alder");
+      const config = world.packs.economy!.config;
+      delete config.region;
+      if (region) config.region = region;
+      const checking = world.entities.acct_pov_checking!.fields;
+      delete checking.owners;
+      delete checking.product;
+      Object.assign(checking, { owner: world.pov, type: "checking" });
+      return world;
+    };
+    const buy = (doc: WorldDoc) => {
+      const w = new Working(reg, doc, startState(doc));
+      materializeAll(reg, w, doc.pov, "run");
+      expect(act(w, "economy.buy", { payer: doc.pov, item: "latte_16oz" }).rejected).toEqual([]);
+      const [bought] = posts(w, /^Bought/);
+      const tax = bought!.lines.find((l) => l.account.startsWith(ext("tax:sales:")));
+      const price = bought!.lines.filter((l) => l.amount > 0 && l !== tax).reduce((a, l) => a + l.amount, 0);
+      return { region: doc.packs.economy?.config.region, account: tax?.account, tax: tax?.amount ?? 0, price, pct: salesTaxPct(w.ctx, placeOfEntity(w.state, doc.pov)) };
+    };
+    const base = older();
+    expect(base.packs.economy?.config.region).toBeUndefined();
+    expect(base.entities[base.pov]?.fields.region).toBe("mi");
+    const mi = buy(migrateMoney(base));
+    expect(mi).toMatchObject({ region: "mi", account: ext("tax:sales:mi"), pct: 6 });
+    expect(mi.tax).toBe(salesTaxOn(mi.price, 6));
+    const oh = buy(migrateMoney(older("oh")));
+    expect(oh).toMatchObject({ region: "oh", account: ext("tax:sales:oh") });
+    expect(oh.pct).not.toBe(6);
+    expect(oh.tax).toBe(salesTaxOn(oh.price, oh.pct));
   });
 
   test("sales tax applies only at the top level: at Money 3 a purchase costs its listed price, and the business neither collects nor remits", () => {

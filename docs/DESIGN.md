@@ -1415,6 +1415,7 @@ Each feature in `FEATURE_DEFS` has a floor (the lowest level it can run at) and 
 - a deposit account's `apr_pct` to its `apy_pct`;
 - a party's `bills` to flow entities, dropping a lender's bill that the loan's own autopay already pays, and linking a car insurance bill to the owner's vehicle;
 - a person's occupation and payroll fields to a job;
+- an economy config that names no region to the POV's `region`, so sales tax at its places runs at the rate its people's income tax does;
 - a brokerage's units of a symbol to a holding of that asset (`<account>:<symbol>`, the id the holdings module's trades add to), with the symbol added to the world's assets.
 
 Only a world with the old shapes is migrated, so a migrated world has nothing left to migrate. The starter templates are written in the foundation's vocabulary (`data-src/templates/README.md`).

@@ -1,9 +1,9 @@
-// Older worlds' money in the foundation's shapes (DESIGN §25.13): an account's single `owner`
+// Older worlds' money in the foundation's shapes (DESIGN §25.14): an account's single `owner`
 // becomes its owners list and its `type` a product; a loan's `remaining_months` its `months_left`;
 // an autopay sentence ("minimum from acct_x") a mode and the account it pays from; a deposit's
 // `apr_pct` its `apy_pct`; a party's `bills` list flow entities; a person's pay (their
-// occupation and the payroll fields beside it) a job entity; and a brokerage's units of a symbol
-// a holding of that asset. Read on every revision
+// occupation and the payroll fields beside it) a job entity; a brokerage's units of a symbol
+// a holding of that asset; and an economy that names no region the POV's. Read on every revision
 // (`migrateWorld`), so a world stored before the rebuild plays as one authored after it. A world
 // with none of the old shapes is returned as it is: an author's choice not to give someone a job
 // is never overridden.
@@ -183,6 +183,12 @@ export function migrateMoney(doc: WorldDoc): WorldDoc {
     entities[id] = next;
   }
   for (const e of added) entities[e.id] = e;
-  const packs = economy && Object.keys(assets).length > 0 ? { ...doc.packs, economy: { ...economy, config: { ...economy.config, assets } } } : doc.packs;
+  const config: JsonObject = { ...economy?.config };
+  if (Object.keys(assets).length > 0) config.assets = assets;
+  // A world saved before templates gave the economy their region kept it only on its people, so its
+  // sales tax ran at the national rate while their income tax ran at the region's.
+  const pov = hasOwn(doc.entities, doc.pov) ? doc.entities[doc.pov] : undefined;
+  if (!(typeof config.region === "string" && config.region !== "") && typeof pov?.fields.region === "string" && pov.fields.region !== "") config.region = pov.fields.region;
+  const packs = economy ? { ...doc.packs, economy: { ...economy, config } } : doc.packs;
   return { ...doc, entities, packs };
 }
