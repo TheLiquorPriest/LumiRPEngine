@@ -1177,3 +1177,100 @@ What a patch leaves must pass the shape checks the Studio seam's `validate` make
 Every editor write that changes a table (`put` or `remove` on `tables`, a `profile`, or a patch) gives that table its content's revision, `hashJson({schema, columns, rows})`, and pins the world to it in `pins.tables`. A removed table loses its pin. A revision the client sends is never used.
 
 A commit is refused as `conflict` when a stored draft began on a head other than the current one ("the world changed since this draft began; reload it"), since committing it would put back what was made head since. Discarding the draft, or restoring a revision onto the head, clears the way.
+
+## 24. Character minds
+
+Simulated perspectives drive the characters, and the mechanics ground them. Each character the story is close to gets a **mind**: one model call made as that character, on a context scoped to what they know, blind to every other mind. It never writes narration or dialogue. It answers with how they read the moment, what they intend and how they come across, and the narrator depicts it. Concrete outcomes (money, moves, time) are still settled after the reply, from what was actually written (§5.1, §9.4). Every answer is recorded as an event (`minds.*`, the `minds` pack), so a fold, a Re-narrate and the background lane never call a model.
+
+### 24.1 The fidelity ladder
+- **Levels:** Live, Near, Far, Background. A character's level is recomputed every turn and at every time-skip beat, as a pure function of the state and the turn's texts (the player's latest message and the reply before it; none inside `advance` or at a beat).
+- **Focus score:** the sum of the world's weights for each input that holds:
+  - **Proximity:** in the POV's scene, else close by (under the same parent place).
+  - **Engagement:** named or addressed in the latest message or reply. A name counts whole, or by a word of it that singles them out; honorifics never count.
+  - **Their relationship to the POV:** regard either way, scaled by its size, and a `knows` relation either way.
+  - **Story involvement:** they own a track under way; up to three tracks under way name them in their stages; their role facet values, a value nested under a weighted one counting as it (a villain under antagonist); and they are named by a world rule.
+  - **Pending interactions with the POV:** an invitation, an appointment together, an open plan or commitment with the POV, up to three.
+  - **Tier and recency:** the detail band of their tier, and being seen with the POV lately (all of it right after, nothing a day later).
+- **Who decides:** the GM's pin in the chat decides first. Then the author's `never` selector (always Background), which wins over `always` (always Live). Then the score against the world's thresholds, each read as at least the next one down. The GM view shows each input's points and any pin.
+- **Who thinks this turn** (the user's cadence, §24.6):
+  - Live characters think every turn, best score first, up to the Live limit ("none" for no limit).
+  - Near characters, and Live ones past the limit, think on their triggers: their first mind, a rise on the ladder, entering the POV's scene, being named, a number of turns, or a number of game minutes since their last mind.
+  - Far characters think on their first mind, a rise on the ladder, or their period.
+  - These refreshes share the refresh limit, the most pressing first. A GM's request for a fresh mind always runs.
+  - Background characters follow routine only.
+
+### 24.2 The world's minds config
+`world.minds` (optional; a world without it plays with the defaults, `worldMindsOf`):
+- **`secrecy`:** `brief` (the default) or `full` (§24.3).
+- **`weights`:** points for each input of §24.1, from −100 to 200 (`roles` by classification value).
+- **`thresholds`:** the lowest score for `live`, `near` and `far`.
+- **`always` and `never`:** selectors, or null.
+- **`memory`:** the defaults for §24.4: the witness lines shown, recall's recent and relevant turns and tokens, the notes shown and kept, the open commitments shown, salience's half-life in game days and fade floor, and consolidation (on or off, and its period in game days).
+
+A value out of range or of the wrong kind plays as its default, and lint (`minds.config`) says so. The world JSON Schema describes the part (`$defs/minds`). Build writes it whole as the `minds` part.
+
+### 24.3 What the narrator gets: the Minds section
+- **The section:** a section of its own (slot `minds`, outlet `lre_minds`). Every world has it, even one that defines its own sections. It takes this round's minds for the people at the POV's place that the POV can see, plus anyone whose mind interrupted a time skip. A mind from an earlier round isn't the narrator's.
+- **Its budget:** a token budget of its own (Settings → Minds), apart from the section budget, so minds never crowd out Scene or People. When the section is over its budget it is left out for that turn, as a clipped section is.
+- **`full` secrecy:** each mind's monologue, intent, conditional reactions, mood and depiction go to the narrator. The section's note says to depict them, never to state a thought, and never to let one character act on another's mind. Under `full` the narrator may read a character's own secrets in their monologue; that is the author's choice.
+- **`brief` secrecy:** only the depiction, written as behaviour anyone present could see. It is screened as Stance's cues are: an unrevealed secret (`findLeaks`) or a name the POV can't see (`namesHidden`) withholds it. The screen runs when the mind is recorded (the event is marked `withheld`, and the inspector shows `leak_blocked`), and again when the section is drawn. The monologue stays in the GM view.
+- **Stance:** whoever has a line in the Minds section is left out of Stance (`minds.minded`). Stance still tells of everyone else with the POV.
+
+### 24.4 Memory
+Four layers, each tunable (the world's defaults, then the user's overrides):
+- **Witness log:** who saw or was told each notable event. After each reply, `minds.presence` records who was in the POV's scene (everyone acting at its place, seen by the POV or not) and the turn's notable lines, which reach each of their logs as seen. A `memory` answer's `told` reaches each listener's log as told. Life-state knowledge keeps its own record (§8).
+- **Recall by presence:** the chat turns a character was there for, built here from the presence records, since the host's memory can't filter by who was present. It reads the turns' messages through the host's chat (the player's message and the reply as displayed, hidden JSON blocks left out). It takes the latest `recall.recent`, plus the `recall.relevant` that share the most words with the moment, oldest first, within `recall.tokens`. A character never recalls a turn they weren't present for.
+- **Model-written notes:** after each reply, the `memory` step runs once for each present character whose level the user chose (Standard: Live; Full: Live and Near). It is written from their perspective and based only on what was written: up to three notes with a salience from 1 to 5, the commitments the turn made and resolved, plans with times, what they told whom, and their summary when the turn changed it.
+- **Commitments:** promises, debts, grudges, favours and plans with someone. They stay until kept, broken or released.
+- **Salience and consolidation:**
+  - A note's salience halves every half-life. One under the floor has faded and is no longer shown.
+  - Notes past the number kept, and faded ones, are folded into the character's summary by the `consolidate` step, at most once per period per character and for at most two characters a turn.
+  - The state keeps hard bounds whatever the settings say: 64 notes (the least salient go), 48 open and 16 closed commitments, 24 open and 16 closed plans, 48 witness lines and 400 presence records.
+
+### 24.5 A mind's call
+- **The context**, built only from what the character knows:
+  - their entity's fields and their Lumiverse character card when the world links one (`characterId`);
+  - their summary, notes, commitments, plans, witness log and last mind;
+  - the scene as they perceive it: who they can see, and how they stand toward each;
+  - the occasion: clock, day part, holidays, weather;
+  - their own life: a plain money summary (`economy.summary`), the day's schedule, and their agendas, the truth of their own secrets included;
+  - lore read as them: public entries, `known_by` entries by what they know, and of the secrets whose gate doesn't hold only their own (an entry that links them);
+  - recall by presence, told to ignore narration of other people's private thoughts;
+  - the moment: what the POV just said and did if they are with the POV; else a note that they aren't.
+- **Never in it:** the GM view, another character's mind, or a turn they weren't present for.
+- **The answer:** JSON `{monologue, depiction, intent, reactions[], plans[{what, kind, when{from, to}, where?, with?[], priority}], mood?, interrupt?{reason}}`.
+  - Lengths are capped.
+  - Plans resolve to place and people ids and game minutes, and one with no time, or wholly past, is dropped.
+  - `interrupt` counts only at a time-skip beat.
+  - An answer that isn't JSON gets one repair call. One that says nothing records no mind.
+- **Prompts:** the steps are `mind`, `memory`, `skip` and `consolidate`. Each has built-in instructions (`MIND_PROMPT_DEFAULTS`).
+  - **Precedence:** the world's step template for the purpose (the first by id), then the user's own prompt (Settings → Minds, with a reset to the default), then the built-in.
+  - **Placeholders:** `{{character}}`, `{{world}}`, `{{pov}}`, `{{place}}` and `{{clock}}` are filled.
+  - **Answer format:** the engine appends the purpose's answer format (`MIND_ANSWER_FORMATS`), which no template replaces, and then the preset's `RPEngine · <purpose>` block (§6.8).
+  - **Lint:** a minds template's signals are ignored (`minds.step_signals`), and a second template for one purpose is never used (`minds.step_duplicate`).
+- **Calls:** every mind is its own call, made in parallel on the pre phase's wall clock, apart from its call count. The inspector lists each call (§6.5) with no text: purpose, phase, level, outcome, time, tokens, whose prompt it ran, and the character by name only when the POV knows them, else "Someone".
+
+### 24.6 Settings and cost
+- **The user's minds settings** (`UserSettings.minds`, Settings → Minds): on or off; the Live limit; the Near triggers and their counts; the Far period; the refresh limit; the levels that get memory; the Minds section's budget; memory overrides; prompt overrides; and a time skip's caps (beats per skip, minds per beat). "No limit" is `"none"`.
+- **Model use presets:** a preset sets all of these but the prompts and memory overrides.
+  - **Lean:** minds off.
+  - **Standard:** a Live limit of 3, two refreshes a turn, memory for Live.
+  - **Full:** no limits, memory for Live and Near.
+- **When minds run:** whenever they are on and the purpose's step card isn't switched off. An unsaved card runs with the defaults, and a saved one sets the connection, the tokens and the lore.
+- **Cost:** minds' calls aren't counted in §5.3's per-preset tables. A turn makes one call per mind that runs, and after the reply one `memory` call per present character at a chosen level and the occasional `consolidate`.
+
+<!-- §24.7 Time skips and §24.8 The planner -->
+
+### 24.9 The GM view
+- **What it shows:** per character, their level, score and each input's points, the pins, whether a fresh mind is asked for, their latest mind (monologue, depiction, intent, reactions, mood, interrupt, and whether its depiction was withheld), their plans, notes (with their salience now, and whether faded), commitments, witness log and summary.
+- **The controls,** each an `lre.edit` operation, so one `fix` entry with its Undo:
+  - pin a level, or unpin (`mind_pin`);
+  - ask for a fresh mind next turn (`mind_refresh`);
+  - add, edit or delete a note, commitment or plan (`mind_memory`; a value names only the fields that change).
+- **Player surfaces:** never any of it. Every minds event words nothing for a player's line, so no Journal note, chip, Cast or other panel tells a mind. The inspector's traces carry no text.
+
+### 24.10 Determinism
+- **Events:** every model answer is recorded as an event: `minds.round` and `minds.mind` before the plan; `minds.presence`, `minds.memory` and `minds.consolidated` with the reply's read. Each apply reads only its own data, the minds slice and the clock, never an entity's fields, so a coarsened record (L21) folds the same.
+- **Swipes:** a Re-narrate copies its source's pre-reply events, so it reuses the pre phase's minds. A Re-run asks again. A Re-read edit writes the memory again from the edited text.
+- **No model calls:** the background lane (Playtest, Check world) runs no model and records no mind. Plans already recorded still drive the planner (§24.8).
+- **Replay:** a replay, a restart or the other fold gives the same minds state. The property suite generates minds turns, replies that record presence and memory, and GM minds controls, and checks them on every view.
