@@ -20,7 +20,7 @@ import type { FinanceHooks, FlowPosting } from "./module";
 import { cycleOf, flowRunOf, reject } from "./journal";
 import { accountsOf, availableOf, balance, canSpend, classOf, external, hasLedger, holdersOf, priceOf, productOf, statusOf, traitsOf } from "./model";
 import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, overdraftEvents, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
-import type { Run } from "./run";
+import { Run } from "./run";
 
 export const DEFAULT_FLOW_MINUTE = 9 * 60;
 
@@ -644,11 +644,16 @@ function bounceFee(ctx: ReadContext, flow: Flow, at: number): LedgerEvent[] {
   return asUnit(posting(lines, { memo: "Returned payment fee", kind: "fee", category: "nsf", flow: flow.id, at }));
 }
 
-/** A shared flow (a household's rent): each party pays its share, from its own means; all or none. */
+/**
+ * A shared flow (a household's rent): each party pays its share, from its own means; all or none.
+ * Each share is checked against the books the shares before it leave, so two shares from one
+ * account can't both spend what covers one, and they go as one unit.
+ */
 function sharedAttempt(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, cents: number, at: number): Attempt | Rejection {
   const shares = flow.shares ?? [];
   const total = shares.reduce((a, s) => a + Math.max(0, s.pct), 0);
   if (total <= 0) return reject("bad_flow", `${flow.label} has no shares`);
+  const trial = new Run(ctx);
   const events: LedgerEvent[] = [];
   let left = cents;
   for (const [i, s] of shares.entries()) {
@@ -656,11 +661,12 @@ function sharedAttempt(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, cents:
     left -= part;
     if (part <= 0) continue;
     const share: Flow = { ...flow, from: s.from ?? s.party, label: flow.label };
-    const paid = payFrom(hooks, { ...ctx }, share, s.from ?? s.party, part, at, true);
+    const paid = payFrom(hooks, trial.ctx, share, s.from ?? s.party, part, at, true);
     if ("code" in paid) return reject("declined", `${labelOf(ctx, s.party)}'s share: ${paid.reason}`);
+    if (trial.emit(asUnit(paid.events)).length === 0) return reject("declined", `${labelOf(ctx, s.party)}'s share can't be covered`);
     events.push(...paid.events);
   }
-  return { events, paid: cents };
+  return { events: asUnit(events), paid: cents };
 }
 
 /** What a payer side would choose to pay a flow from, for views (null when it can't say). */
