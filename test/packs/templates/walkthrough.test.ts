@@ -243,9 +243,10 @@ describe("Port Alder (modern_slice_of_life)", () => {
       const checking = balance(p.state, "acct_pov_checking");
       expect(p.act("trade", { side: "buy", asset: "broad_us_equity_index", account: fund, amount: 50000, from: "acct_pov_checking" }).ok).toBe(true);
       expect(balance(p.state, "acct_pov_checking")).toBe(checking - 50000);
-      const holding = Object.keys(p.state.entities).find((id) => p.state.entities[id]?.kind === "holding" && p.state.entities[id]?.fields.account === fund) ?? "";
-      const value = (): number => holdingValue(registry.context(p.world, p.state), holding);
-      // The $3,125.00 the account held, at the starting 100 a unit, and the $500.00 just bought.
+      // The buy adds to the starter's holding of the fund, not a second one beside it.
+      expect(Object.keys(p.state.entities).filter((id) => p.state.entities[id]?.kind === "holding" && p.state.entities[id]?.fields.asset === "broad_us_equity_index")).toEqual(["hold_pov_index"]);
+      const value = (): number => holdingValue(registry.context(p.world, p.state), "hold_pov_index");
+      // The 31.25 units the account held, at the starting 100 a unit, and the $500.00 just bought.
       expect(value()).toBe(362500);
       p.lapse(14 * DAY);
       return value();
