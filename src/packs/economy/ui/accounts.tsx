@@ -294,7 +294,7 @@ function PayPrefsCard(props: SectionProps) {
     if (ok) setDraft(null);
   };
   return (
-    <Card title="How they pay" aside={draft === null ? <button type="button" class="lre-btn small" onClick={() => setDraft([...view.payPrefs])}>Change</button> : null}>
+    <Card title={controls.mode === "player" ? "How you pay" : "How they pay"} aside={draft === null ? <button type="button" class="lre-btn small" onClick={() => setDraft([...view.payPrefs])}>Change</button> : null}>
       {draft === null ? (
         view.payPrefs.length === 0 ? (
           <Empty>The engine's defaults for their wealth and character.</Empty>

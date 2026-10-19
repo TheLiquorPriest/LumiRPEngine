@@ -482,6 +482,21 @@ describe("GM view → Money: each control is one edit", () => {
     expect((await chat.hub()).flows.find((f) => f.id === mineId)).toMatchObject({ from: "Your checking account", amount: "$40.00", editable: true });
   });
 
+  test("the GM adds someone to a household and takes them out; the POV's Money shows who shares their home", async () => {
+    const chat = await MoneyChat.start();
+    accepted(await chat.edit([{ op: "spawn", kind: "household", name: "Unit 2B", id: "unit_2b" }, { op: "link", rel: "member_of", from: "pov", to: "unit_2b" }]));
+    let mine = await chat.hub();
+    expect(hubTabs(mine).map((t) => t.id)).toContain("household");
+    expect(mine.household?.members.map((m) => m.id)).toEqual(["pov"]);
+    // As the household's Add a member and its ✕ send them.
+    accepted(await chat.edit([{ op: "link", rel: "member_of", from: DANNY, to: "unit_2b" }]));
+    mine = await chat.hub();
+    expect(mine.household?.members.map((m) => m.id).sort()).toEqual([DANNY, "pov"]);
+    expect((await chat.party("unit_2b")).partyKind).toBe("household");
+    accepted(await chat.edit([{ op: "unlink", rel: "member_of", from: DANNY, to: "unit_2b" }]));
+    expect((await chat.hub()).household?.members.map((m) => m.id)).toEqual(["pov"]);
+  });
+
   test("the GM sets anyone's payment preferences", async () => {
     const chat = await MoneyChat.start();
     const tiers: PayTier[] = [{ use: "cash", max: chat.cents("20") }, { use: "debit" }];

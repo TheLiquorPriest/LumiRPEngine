@@ -35,10 +35,6 @@ export function transferAction(from: EntityId, to: EntityId, cents: number): Act
   return { action: FINANCE_ACTIONS.transfer, params: { from, to, amount: cents } };
 }
 
-export function payAction(to: EntityId, cents: number): ActionBody {
-  return { action: FINANCE_ACTIONS.pay, params: { to, amount: cents } };
-}
-
 /** A payment toward a card, a line or a loan, from the account named (else the holder's checking); with no amount, the whole balance. */
 export function payCardAction(account: EntityId, from: EntityId | null, cents: number | null): ActionBody {
   const params: JsonObject = { card: account };
