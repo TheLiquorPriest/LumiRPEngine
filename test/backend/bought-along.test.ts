@@ -76,15 +76,15 @@ describe("a narrated purchase that tells the turn's own Buy again", () => {
 
   // Shaped like "decaf coffee for Danny, $4.50" after a typed $3 coffee, with an item the catalog
   // doesn't price, so the Buy costs exactly the $3 typed (a catalogued coffee costs the catalog's price).
-  // At the top Money level a chip shows the price with its sales tax (7% here).
+  // At the top Money level a chip shows the price with its sales tax (Michigan's 6% in Port Alder).
   test("the same head noun at a price more than 25% off asks: a $4.50 'tin kazoo' after a typed $3 kazoo", async () => {
-    expect(await chipsAfter("kazoo", 3, { item: "tin kazoo", price: 4.5 })).toEqual([expect.stringMatching(/^Also bought tin kazoo\?.*\$4\.82/)]);
+    expect(await chipsAfter("kazoo", 3, { item: "tin kazoo", price: 4.5 })).toEqual([expect.stringMatching(/^Also bought tin kazoo\?.*\$4\.77/)]);
     expect(await chipsAfter("kazoo", 3, { item: "tin kazoo", price: 3.5 })).toEqual([]);
   });
 
   test("a different head noun keeps its chip: 'lantern oil' after a typed lantern, 'credit card reader' after a holder", async () => {
     // No catalog row is lantern oil, so the narrated $6 is its price.
-    expect(await chipsAfter("lantern", 40, { item: "lantern oil", price: 6 })).toEqual(["Bought lantern oil: $6.42"]);
+    expect(await chipsAfter("lantern", 40, { item: "lantern oil", price: 6 })).toEqual(["Bought lantern oil: $6.36"]);
     expect(await chipsAfter("credit card holder", 12, { item: "credit card reader", price: 12 })).toEqual([expect.stringMatching(/^Bought credit card reader: /)]);
   });
 

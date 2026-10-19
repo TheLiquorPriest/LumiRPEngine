@@ -10,6 +10,7 @@
     "economy": {
       "version": 1,
       "config": {
+        "region": "mi",
         "assets": {
           "broad_us_equity_index": {
             "label": "Broad US equity index fund",
