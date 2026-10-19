@@ -193,6 +193,7 @@ export const ROW_SPECS: Record<string, RowSpec> = {
     row(f, node) {
       const shared = {
         sales_tax_combined_avg_pct: f.take("sales_tax_combined_avg_pct"),
+        property_tax_effective_pct: f.take("property_tax_effective_pct"),
         cost_of_living_multiplier: f.take("cost_of_living_multiplier"),
         median_rent_1br_cents_per_month: f.take("median_rent_1br_cents_per_month"),
         median_rent_2br_cents_per_month: f.take("median_rent_2br_cents_per_month"),

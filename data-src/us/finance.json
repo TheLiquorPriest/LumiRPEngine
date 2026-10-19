@@ -371,9 +371,47 @@
       "annual_return_pct": 3.8,
       "annual_volatility_pct": 0.5
     },
+    "crypto": {
+      "description": "A large digital currency (bitcoin-like) for seeded price paths; it trades every day of the year and pays nothing.",
+      "annual_return_arithmetic_pct": 20,
+      "annual_volatility_pct": 65,
+      "dividend_yield_pct": 0,
+      "basis": "Realised volatility of the largest digital currencies ran about 50-80% a year through 2020-2025; their long-run return is far less certain than equities', so a modest drift is used."
+    },
     "real_estate_home_price_appreciation_pct": {
       "typical": 4.0,
       "volatility_pct": 5.0
+    },
+    "asset_classes": {
+      "note": "How each class of holding follows the rows above: its recipe (`model`), what it differs by, how closely it moves with its market (0-1) and how often it pays a year. An asset's own figures override its class.",
+      "security": {
+        "model": "broad_us_equity_index",
+        "annual_volatility_pct": 28,
+        "correlation": 0.6,
+        "pays_per_year": 4,
+        "note": "A single large company's stock: the index's return with about 1.75 times its swings."
+      },
+      "fund": {
+        "model": "broad_us_equity_index",
+        "correlation": 0.95,
+        "pays_per_year": 4
+      },
+      "bond": {
+        "model": "bonds_aggregate",
+        "correlation": 0.9,
+        "pays_per_year": 12,
+        "note": "A bond fund pays monthly; a single bond with a face value and maturity pays its coupon twice a year."
+      },
+      "crypto": {
+        "model": "crypto",
+        "correlation": 0.8,
+        "pays_per_year": 0,
+        "trades_daily": true
+      },
+      "property": {
+        "model": "real_estate_home_price_appreciation_pct",
+        "correlation": 0.7
+      }
     },
     "retirement_account_limits_cents": {
       "k401_employee_deferral_2025": 2350000,
@@ -557,7 +595,34 @@
         0,
         15,
         20
-      ]
+      ],
+      "thresholds_single_cents": [
+        4835000,
+        53340000
+      ],
+      "thresholds_married_filing_jointly_cents": [
+        9670000,
+        60005000
+      ],
+      "thresholds_head_of_household_cents": [
+        6475000,
+        56670000
+      ],
+      "note": "2025 taxable-income thresholds at which the 15% and 20% rates begin (IRS Rev. Proc. 2024-40); long gains and qualified dividends stack on top of ordinary income."
+    },
+    "net_investment_income_tax": {
+      "pct": 3.8,
+      "threshold_single_cents": 20000000,
+      "threshold_married_filing_jointly_cents": 25000000,
+      "threshold_head_of_household_cents": 20000000,
+      "note": "On the lesser of net investment income and modified AGI over the threshold; the thresholds are not indexed."
+    },
+    "capital_loss_limit_cents": 300000,
+    "home_sale_exclusion_cents": {
+      "single": 25000000,
+      "married_filing_jointly": 50000000,
+      "head_of_household": 25000000,
+      "note": "Gain excluded on selling a main home owned and lived in for two of the last five years (IRC section 121)."
     },
     "irs_standard_mileage_cents_per_mile_2025": 70,
     "effective_withholding_note": "occupations.json withholding_rate_pct was computed from these parameters."
