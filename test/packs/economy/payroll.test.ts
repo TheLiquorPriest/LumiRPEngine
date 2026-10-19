@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
-import { act, entity, lapse, packEvents, paid, payslips, setup } from "./work-world";
+import { account, act, entity, ext, lapse, line, packEvents, paid, payslips, posts, setup } from "./work-world";
 
 const DAY = 1440;
 
@@ -31,6 +31,68 @@ describe("payroll: paydays", () => {
     expect(runs.map((e) => e.data.outcome)).toEqual(["skipped", "paid"]);
     // Friday the 23rd pays both weeks: the one the 16th couldn't, and its own.
     expect(paid(w, "job_driver").map((d) => [d.minutes, d.gross])).toEqual([[2 * 40 * 60, 2 * 40 * 2000]]);
+  });
+
+  test("semimonthly and monthly salaries pay each period on its own days", () => {
+    const { world, w } = setup((wd) => {
+      wd.entities.job_semi = entity("job_semi", "job", "Semi", { worker: "rosa", employer: "Riverton temps", title: "Semi", occupation: "office_clerk", basis: "salary", rate: 4_800_000, pay_every: "semimonthly", pay_roll: "none", start: "2025-01-06" });
+      wd.entities.job_month = entity("job_month", "job", "Month", { worker: "maya", employer: "Riverton books", title: "Month", occupation: "office_clerk", basis: "salary", rate: 4_800_000, pay_every: "monthly", pay_roll: "none", start: "2025-01-06" });
+    });
+    lapse(w, 31 * DAY);
+    const cal = calendarOf(world);
+    const days = (job: string): number[] => packEvents(w, "economy.flow_run").filter((e) => e.data.flow === `pay:${job}`).map((e) => e.data.at as number);
+    // The 15th and the last day; and the last day of the month, Saturday 31 October unrolled.
+    expect(days("job_semi")).toEqual([clockOfLocal(cal, "2026-10-31T09:00"), clockOfLocal(cal, "2026-11-15T09:00")]);
+    expect(paid(w, "job_semi").map((d) => d.gross)).toEqual([200_000, 200_000]);
+    expect(days("job_month")).toEqual([clockOfLocal(cal, "2026-10-31T09:00")]);
+    expect(paid(w, "job_month").map((d) => d.gross)).toEqual([400_000]);
+  });
+
+  test("a custom cycle, every fourth Wednesday from its anchor, pays four weeks of hours each time", () => {
+    const { world, w } = setup((wd) => void (wd.entities.job_four = entity("job_four", "job", "Yard", { worker: "rosa", employer: "Riverton yard", title: "Yard", occupation: "office_clerk", basis: "hourly", rate: 2000, hours: "contract", hours_per_week: 40, weeks_per_year: 52, pay_every: "custom", pay_unit: "week", pay_interval: 4, pay_weekdays: [3], pay_anchor: "2026-10-21", start: "2025-01-06" })));
+    lapse(w, 36 * DAY);
+    const cal = calendarOf(world);
+    expect(packEvents(w, "economy.flow_run").filter((e) => e.data.flow === "pay:job_four").map((e) => e.data.at)).toEqual([clockOfLocal(cal, "2026-10-21T09:00"), clockOfLocal(cal, "2026-11-18T09:00")]);
+    expect(paid(w, "job_four").map((d) => [d.minutes, d.gross])).toEqual([
+      [160 * 60, 160 * 2000],
+      [160 * 60, 160 * 2000],
+    ]);
+  });
+});
+
+describe("payroll: commission, deductions and the match", () => {
+  test("a commission job is paid its share of the sales made while its worker is at work", () => {
+    // Maya works the café's counter on commission; the player buys a latte there on Friday morning.
+    const { w } = setup((wd) => {
+      wd.entities.you!.fields.place = "cafe";
+      wd.entities.job_counter = entity("job_counter", "job", "Counter", { worker: "maya", employer: "daybreak", title: "Counter", basis: "commission", commission_pct: 10, hours: "contract", pay_every: "weekly", pay_weekday: 5, start: "2025-01-06" });
+    });
+    expect(act(w, "economy.buy", { payer: "you", item: "latte_16oz", method: "debit" }).rejected).toEqual([]);
+    const sale = packEvents(w, "economy.sale")[0]?.data.cents as number;
+    expect(packEvents(w, "economy.commission").map((e) => e.data)).toEqual([{ job: "job_counter", cents: sale, since: 0 }]);
+    lapse(w, 8 * DAY);
+    expect(paid(w, "job_counter").map((d) => d.gross)).toEqual([Math.round(sale / 10)]);
+  });
+
+  test("pre-tax deductions come off taxable pay, and the employer matches the retirement one into the worker's own account", () => {
+    const { w } = setup((wd) => {
+      wd.entities.rosa_401k = account("rosa_401k", "rosa", "retirement", 0);
+      wd.entities.job_dock = entity("job_dock", "job", "Dock", { worker: "rosa", employer: "brightline", title: "Dock", occupation: "office_clerk", basis: "hourly", rate: 2000, hours: "contract", hours_per_week: 40, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06", deductions: [{ label: "401(k)", pct: 5, pretax: true, kind: "retirement", match_pct: 3, to: "rosa_401k" }, { label: "Health", cents: 2500, pretax: true, kind: "health" }] });
+    });
+    lapse(w, DAY);
+    const [check] = posts(w, /^Payroll/).filter((p) => line(p, "rosa_checking") > 0);
+    // $800 gross: $40 to the 401(k) and $24 matched; $25 health; the office clerk's flat 14% and Ohio's 1.4% on the $735 left taxable.
+    const taxable = 80_000 - 4000 - 2500;
+    const federal = Math.round((taxable * 14) / 100);
+    const state = Math.round((taxable * 1.4) / 100);
+    expect(check?.lines).toEqual([
+      { account: "bl_operating", amount: -(80_000 + 2400) },
+      { account: "rosa_checking", amount: 80_000 - 4000 - 2500 - federal - state },
+      { account: "rosa_401k", amount: 4000 + 2400 },
+      { account: ext("payee:health"), amount: 2500 },
+      { account: ext("tax:federal"), amount: federal },
+      { account: ext("tax:state"), amount: state },
+    ]);
   });
 });
 

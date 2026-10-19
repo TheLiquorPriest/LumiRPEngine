@@ -381,9 +381,12 @@ function scheduledPaydays(ctx: ReadContext, api: FinanceApi, job: Job, fromDay: 
   return days.filter((d) => (first === undefined || d >= first) && d <= target);
 }
 
-/** Where a weekly or biweekly payroll flow counts its weeks from: the job's anchor. */
+/**
+ * Where a payroll flow counts its intervals from: the job's anchor, for the cycles that count from
+ * one (weekly, biweekly and custom), as its paydays do.
+ */
 function flowStart(cal: Calendar, job: Job): string | undefined {
-  return job.anchor !== null && (job.every === "weekly" || job.every === "biweekly") ? dateText(cal, job.anchor) : undefined;
+  return job.anchor !== null && (job.every === "weekly" || job.every === "biweekly" || job.every === "custom") ? dateText(cal, job.anchor) : undefined;
 }
 
 /**
