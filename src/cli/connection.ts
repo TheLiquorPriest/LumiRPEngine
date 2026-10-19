@@ -271,6 +271,8 @@ export class HostConnection implements Connection {
   private seq = 0;
   private prefix = "";
   private ping: Timer | null = null;
+  /** The token the open socket was made with. Lumiverse trusts a socket for its life, so a logout or a new login drops it here. */
+  private openedToken: string | null = null;
   /** Settles the open in progress when CONNECTED (or AUTH_ERROR) arrives. */
   private greeting: { resolve(): void; reject(error: Error): void } | null = null;
   private readonly timeoutMs: number;
@@ -329,7 +331,12 @@ export class HostConnection implements Connection {
   }
 
   private ensure(): Promise<Opened> {
-    if (this.opened !== null && this.socket !== null) return Promise.resolve(this.opened);
+    if (this.opened !== null && this.socket !== null) {
+      // One small read per request: after `lumirpengine logout` the running server stops, and after a new login it reconnects as that.
+      const saved = this.options.credentials();
+      if (saved !== null && saved.token === this.openedToken) return Promise.resolve(this.opened);
+      this.close();
+    }
     this.opening ??= this.open().finally(() => {
       this.opening = null;
     });
@@ -362,6 +369,7 @@ export class HostConnection implements Connection {
   private async open(): Promise<Opened> {
     // Read now, not when the connection was made: a reconnect after `lumirpengine login` uses the new token.
     const { token } = this.signedIn();
+    this.openedToken = token;
     const extension = await this.findExtension(token);
     // A ticket lives 30 s and works once; one refused on the way gets one more try with a new ticket.
     for (let attempt = 1; ; attempt++) {

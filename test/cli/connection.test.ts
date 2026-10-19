@@ -32,6 +32,26 @@ describe("the connection", () => {
     expect(fake.requests.filter((r) => !r.url.includes("/api/auth/")).every((r) => r.headers.Authorization === `Bearer ${token}`)).toBe(true);
   });
 
+  test("a logout stops a running connection, and a new login reconnects as it", async () => {
+    const fake = new FakeLumiverse();
+    const first = await signIn(fake.http, fake.base, USER.username, USER.password);
+    let saved: { username: string; token: string } | null = { username: USER.username, token: first };
+    const conn = new HostConnection({ base: fake.base, credentials: () => saved, http: fake.http, openSocket: fake.openSocket, client: { name: "lumirpengine", version: "0.0.1" } });
+    await conn.request("lre.world", { op: "list" });
+    expect(fake.sockets).toHaveLength(1);
+    // Lumiverse keeps trusting an open socket after sign-out, so the client must drop it itself.
+    saved = null;
+    await expect(conn.request("lre.world", { op: "list" })).rejects.toThrow("Not signed in");
+    expect(fake.sockets).toHaveLength(1);
+    const second = await signIn(fake.http, fake.base, USER.username, USER.password);
+    saved = { username: USER.username, token: second };
+    await conn.request("lre.world", { op: "list" });
+    expect(fake.sockets).toHaveLength(2);
+    const tickets = fake.requests.filter((r) => r.url.endsWith("/api/v1/ws-ticket"));
+    expect(tickets.at(-1)?.headers.Authorization).toBe(`Bearer ${second}`);
+    conn.close();
+  });
+
   test("opens the socket as a widget with a fresh frontend session, and sends nothing before CONNECTED", async () => {
     const fake = new FakeLumiverse();
     fake.holdConnected = true;
