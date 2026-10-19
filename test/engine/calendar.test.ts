@@ -4,9 +4,11 @@ import {
   civilFromDays,
   clockOfLocal,
   clockOfPhrase,
+  clockOfStamp,
   dateAt,
   daysFromCivil,
   formatClock,
+  formatStamp,
   holidaysOn,
   nextTimeOfDay,
   placeOffset,
@@ -126,5 +128,25 @@ describe("calendar arithmetic", () => {
     expect([later.year, later.month, later.day]).toEqual([101, 1, 1]);
     expect(formatClock(cal, 0)).toContain("Thaw");
     expect(holidaysOn(cal, 24).map((h) => h.id)).toEqual(["f"]);
+  });
+
+  test("a stamp reads back to its clock, and only a day the calendar has at a time of day reads", () => {
+    const world = baseWorld();
+    const greg = calendarOf(world);
+    const at = clockOfLocal(greg, "2024-02-29T18:05");
+    expect(formatStamp(greg, at)).toBe("2024-02-29 18:05");
+    expect(clockOfStamp(greg, "2024-02-29 18:05")).toBe(at);
+    expect(clockOfStamp(greg, " 2024-02-29T18:05 ")).toBe(at);
+    expect(formatStamp(greg, at, -180)).toBe("2024-02-29 15:05");
+    for (const text of ["2023-02-29 18:05", "2024-13-01 10:00", "2024-00-10 10:00", "2024-04-31 10:00", "2024-02-29 24:00", "2024-02-29 18:60", "2024-02-29", "18:05", "Friday 18:05"]) expect(clockOfStamp(greg, text)).toBeNull();
+    world.calendar = { ...world.calendar, system: "custom", epoch: "0100-02-01T06:00", custom: { monthLengths: [10, 20], monthNames: ["Frost", "Thaw"], weekdayNames: ["A", "B", "C"] } };
+    const custom = calendarOf(world);
+    expect(formatStamp(custom, 20 * 1440)).toBe("0101-01-01 06:00");
+    expect(clockOfStamp(custom, "0101-01-01 06:00")).toBe(20 * 1440);
+    expect(clockOfStamp(custom, "0100-02-20 06:00")).not.toBeNull();
+    expect(clockOfStamp(custom, "0100-01-11 06:00")).toBeNull();
+    expect(clockOfStamp(custom, "0100-03-01 06:00")).toBeNull();
+    const before = clockOfStamp(custom, "-0002-02-03 07:30");
+    expect(before === null ? null : formatStamp(custom, before)).toBe("-0002-02-03 07:30");
   });
 });

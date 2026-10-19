@@ -12,7 +12,7 @@ import type { Fidelity, MindCallTrace, MindsSettings } from "../shared/minds";
 import { limitOf, MIND_TEXT_CAPS, MINDS_EVENTS } from "../shared/minds";
 import type { ModelUseSettings } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
-import { calendarOf, dateAt, formatClock, formatHHMM } from "../engine/calendar";
+import { calendarOf, formatClock, formatStamp } from "../engine/calendar";
 import { ENGINE_EVENTS } from "../engine/engine-pack";
 import { acts } from "../engine/life";
 import { optionalQuery, own } from "../engine/pack-kit";
@@ -147,12 +147,6 @@ export interface SkipRun {
   traces: MindCallTrace[];
 }
 
-/** A clock reading as the `skip` step reads it: `YYYY-MM-DD HH:MM`, local. */
-function stamp(world: WorldDoc, at: number): string {
-  const d = dateAt(calendarOf(world), at);
-  return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ${formatHHMM(d.minuteOfDay)}`;
-}
-
 /**
  * The `skip` step (DESIGN §24.7), when the user turned it on: further beats the model proposes inside
  * the span, from the beats found and what the people involved plan. Its prompt is the world's
@@ -163,12 +157,13 @@ async function proposedBeats(deps: SkipDeps, input: SkipInput, state: Readonly<W
   const config = mindsStepConfig(input.settings.modelUse, "skip");
   if (!config || input.signal.aborted) return [];
   const ctx = deps.registry.context(input.world, state);
+  const cal = calendarOf(input.world);
   const plans = optionalQuery(ctx, "minds.plans");
   const intents = [...new Set(scanned.beats.flatMap((b) => b.who))].flatMap((id) => {
     const theirs = plans?.(ctx, id) ?? [];
-    return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${stamp(input.world, p.when.from)})`).join("; ")}`] : [];
+    return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${formatStamp(cal, p.when.from)})`).join("; ")}`] : [];
   });
-  const user = [`The skip runs from ${stamp(input.world, scanned.from)} to ${stamp(input.world, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${stamp(input.world, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
+  const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:\n${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join("\n")}` : "No moments found.", intents.length > 0 ? `What the people involved plan:\n${intents.join("\n")}` : ""].filter((part) => part !== "").join("\n\n");
   const raw = await deps.steps.helperJson("skip", mindPrompt("skip", input.world, input.settings.minds, { world: input.world.name }).text, user, config, input.userId, input.signal, { lore: null, guidance: input.guidance?.skip ?? "" });
   if (!isRecord(raw) || !Array.isArray(raw.beats)) return [];
   const out: Beat[] = [];

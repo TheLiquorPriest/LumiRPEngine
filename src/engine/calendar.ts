@@ -209,6 +209,28 @@ export function dayIndexOfText(cal: Calendar, text: string): number {
   return dayIndexOf(cal, Number(m[1]), Number(m[2]), Number(m[3]));
 }
 
+/** A local `YYYY-MM-DD HH:MM` with the time zone's offset applied: how a helper reads a day and time, and writes one back. */
+export function formatStamp(cal: Calendar, clock: number, offsetMinutes = 0): string {
+  const d = dateAt(cal, clock + offsetMinutes);
+  return `${d.year < 0 ? "-" : ""}${String(Math.abs(d.year)).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ${formatHHMM(d.minuteOfDay)}`;
+}
+
+/**
+ * The clock of a local `YYYY-MM-DD HH:MM` (a `T` between them reads too), or null unless it is exactly
+ * that: a day the calendar has (no 30 February, no thirteenth month of twelve) at a time of day from
+ * 00:00 to 23:59. Unlike `clockOfLocal`, it never guesses a time the text leaves out.
+ */
+export function clockOfStamp(cal: Calendar, text: string): number | null {
+  const m = /^\s*(-?\d{1,6})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})\s*$/.exec(text);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const minute = Number(m[4]) * 60 + Number(m[5]);
+  if (month < 1 || month > cal.system.months || day < 1 || day > cal.system.monthLength(year, month) || Number(m[4]) > 23 || Number(m[5]) > 59) return null;
+  return clockAt(cal, dayIndexOf(cal, year, month, day), minute);
+}
+
 /** The next clock reading after `clock` (strictly) at local time `minuteOfDay`. */
 export function nextTimeOfDay(cal: Calendar, clock: number, minuteOfDay: number): number {
   const d = dateAt(cal, clock);
