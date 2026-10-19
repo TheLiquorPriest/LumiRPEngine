@@ -2,10 +2,11 @@
 // topics as a table of contents. Edits stay local until Save to draft. Suggestions come from the
 // entries: their titles, aliases and keywords for terms, the topics they name for topics.
 
-import { useEffect, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { hasOwn } from "../../shared/json";
 import { addToLoreIndex, loreIndexJson, loreTerm, termSuggestions, topicIdOf, topicSuggestions } from "../../shared/lore";
+import { useHeld } from "./held";
 import type { LintIssue } from "../../shared/protocol";
 import type { LoreIndex, WorldDoc } from "../../shared/world";
 import { Card, Empty, Seg, useBusy } from "../components";
@@ -241,7 +242,7 @@ export function LookupTableEditor(props: { doc: WorldDoc; lint: readonly LintIss
   const [value, setValue] = useState<LoreIndex>(initial);
   const [tab, setTab] = useState<"terms" | "topics">("terms");
   const [busy, run] = useBusy();
-  useEffect(() => setValue(initial), [JSON.stringify(initial)]);
+  useHeld(value, setValue, initial, `${props.doc.id}/loreIndex`);
   const changed = JSON.stringify(value) !== JSON.stringify(initial);
   return (
     <div class="lre-stack" data-lre-editor="part:loreIndex">

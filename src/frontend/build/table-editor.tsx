@@ -2,7 +2,7 @@
 // edited through their column contract (bands keep min ≤ typical ≤ max, refs pick rows of the
 // referenced table); saving writes the table to the draft and the backend computes its revision.
 
-import { useEffect, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
 import { minorUnitPlural } from "../../shared/money";
@@ -11,6 +11,7 @@ import type { WorldCurrency } from "../../shared/world";
 import { useApp } from "../app";
 import { Card, Empty, Row, useBusy } from "../components";
 import type { EditorProps } from "../registry";
+import { useHeld } from "./held";
 
 const PAGE = 40;
 
@@ -176,7 +177,7 @@ export function TableEditor(props: EditorProps) {
   const [page, setPage] = useState(0);
   const [newRow, setNewRow] = useState("");
   const [busy, run] = useBusy();
-  useEffect(() => setTable(stored ? structuredClone(stored) : null), [stored?.revision, id]);
+  useHeld(table, setTable, stored ?? null, `${props.world.id}/tables/${id ?? ""}`, stored?.revision ?? "");
   if (!id) return <TableList {...props} />;
   if (!table) return <Empty>New tables come from packs; edit an existing table's copy instead.</Empty>;
   const columns = Object.entries(table.columns);

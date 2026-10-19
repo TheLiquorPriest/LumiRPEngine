@@ -16,6 +16,7 @@ import type { EditorProps } from "../registry";
 import { useSelect } from "../store";
 import { CheckView, issueTarget } from "./check";
 import { commitDraft, discardDraft, draftSend, loadDraft } from "./draft";
+import { ChangedElsewhere, useHeld } from "./held";
 import { JobView } from "./jobs";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
@@ -165,6 +166,7 @@ function WithDraft(props: { worldId: string; children: ComponentChildren }) {
           Commit{errors > 0 ? ` (${errors}⚠)` : ""}
         </button>
       </div>
+      <ChangedElsewhere />
       {props.children}
     </div>
   );
@@ -544,7 +546,7 @@ export function SchemaEditor(props: EditorProps) {
   const initial: JsonObject = isRecord(stored) ? (stored as JsonObject) : newItem(props.collection, id, props.world);
   const [value, setValue] = useState<JsonObject>(initial);
   const [busy, run] = useBusy();
-  useEffect(() => setValue(initial), [JSON.stringify(stored)]);
+  useHeld(value, setValue, initial, `${props.world.id}/${props.collection}/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
   // Pickers and kind-typed fields see the packs' kinds and relation types too (DESIGN §13); the world's own win.
   const formDoc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds }, relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
@@ -639,7 +641,7 @@ function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" 
   const initial = draft ? partValue(draft.doc, props.part) : {};
   const [value, setValue] = useState<JsonObject>(initial);
   const [busy, run] = useBusy();
-  useEffect(() => setValue(initial), [JSON.stringify(initial)]);
+  useHeld(value, setValue, initial, `${draft?.worldId ?? ""}/${props.part}`);
   const identifiers = useMemo(() => (draft ? worldIdentifiers(draft.doc) : []), [draft?.doc]);
   if (!draft) return null;
   const changed = JSON.stringify(value) !== JSON.stringify(initial);

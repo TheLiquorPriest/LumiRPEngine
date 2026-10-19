@@ -224,8 +224,8 @@ export class ProtocolClient {
         }
         return;
       case "lre.draft.changed":
-        if (typeof payload.worldId === "string" && typeof payload.version === "number" && typeof payload.stored === "boolean") {
-          const push: DraftChanged = { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId: payload.worldId, version: payload.version, stored: payload.stored };
+        if (typeof payload.worldId === "string" && typeof payload.version === "number" && typeof payload.stored === "boolean" && (typeof payload.base === "string" || payload.base === null)) {
+          const push: DraftChanged = { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId: payload.worldId, version: payload.version, stored: payload.stored, base: payload.base };
           for (const listener of this.draftListeners) listener(push);
         }
         return;

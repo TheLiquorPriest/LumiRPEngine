@@ -7,7 +7,7 @@ import type { SpindleFloatWidgetHandle, SpindleFrontendContext } from "lumiverse
 import type { App, Draft, Toast, UiState } from "./app";
 import { AppContext, makeRequest } from "./app";
 import { trackJobs } from "./build/jobs";
-import { trackDraft } from "./build/draft";
+import { recheckDraft, trackDraft } from "./build/draft";
 import { MessageChips, messageIdFromScope } from "./chips";
 import { Toasts } from "./components";
 import { Drawer } from "./drawer";
@@ -96,6 +96,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   cleanups.push(() => set.destroy());
   // A draft another window or an outside agent changes is reloaded in Build (DESIGN §23).
   cleanups.push(trackDraft(app));
+  // A socket that dropped may have missed a push: Build reads its draft again once the page is back.
+  const recheck = (): void => void recheckDraft(app);
+  const visible = (): void => {
+    if (document.visibilityState === "visible") recheck();
+  };
+  window.addEventListener("online", recheck);
+  document.addEventListener("visibilitychange", visible);
+  cleanups.push(ctx.events.on("CONNECTED", recheck), () => window.removeEventListener("online", recheck), () => document.removeEventListener("visibilitychange", visible));
 
   // ------------------------------------------------------------ drawer tab
   const tab = host.ui.registerDrawerTab({

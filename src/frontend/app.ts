@@ -68,8 +68,10 @@ export interface HostBridge {
 export interface Draft {
   worldId: WorldId;
   base: RevisionId | null;
-  /** The stored draft's write count as Build last read it (0 when none is stored): a push with another means it changed elsewhere. */
+  /** The working copy's version as Build last read it (DESIGN §23): a push with a newer one means it changed elsewhere. */
   version: number;
+  /** A reload from the backend (a change made elsewhere, or a first load), not Build's own write: forms keep their edits over a reload and follow Build's writes. */
+  reloaded?: boolean;
   doc: WorldDoc;
   lint: LintIssue[];
   dirty: boolean;

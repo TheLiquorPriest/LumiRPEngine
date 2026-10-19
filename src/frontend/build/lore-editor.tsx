@@ -12,6 +12,7 @@ import type { LintIssue, LoreDrift } from "../../shared/protocol";
 import type { LoreEntryDef, LoreSource, StepPurpose, WorldDoc } from "../../shared/world";
 import type { App, BuildRoute } from "../app";
 import { useApp } from "../app";
+import { useHeld } from "./held";
 import { Card, Empty, useBusy } from "../components";
 import { strings } from "../decode";
 import type { EditorProps } from "../registry";
@@ -221,7 +222,7 @@ export function LoreEditor(props: EditorProps) {
   const initial: JsonObject = stored ? (JSON.parse(JSON.stringify(stored)) as JsonObject) : newItem("lore", id, props.world);
   const [value, setValue] = useState<JsonObject>(initial);
   const [busy, run] = useBusy();
-  useEffect(() => setValue(initial), [JSON.stringify(stored)]);
+  useHeld(value, setValue, initial, `${props.world.id}/lore/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
   const lint = draft?.lint ?? [];
   const path = `lore.${id}`;

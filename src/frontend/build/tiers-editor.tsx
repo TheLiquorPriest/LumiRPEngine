@@ -2,10 +2,11 @@
 // caps limit how deeply its people are simulated. Add, rename, reorder, pick a band, say whether its
 // people live their own day (agendas and plans) by default, describe it; and choose the tier new people join.
 
-import { useEffect, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import type { Band, TierId } from "../../shared/ids";
 import { BANDS } from "../../shared/ids";
 import type { JsonValue } from "../../shared/json";
+import { useHeld } from "./held";
 import { safeKey } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
 import { BAND_LABEL, spawnTierOf, tiersInOrder } from "../../shared/tiers";
@@ -63,7 +64,7 @@ export function TiersEditor(props: { doc: WorldDoc; lint: readonly LintIssue[]; 
   const [value, setValue] = useState<TiersValue>(initial);
   const [newId, setNewId] = useState("");
   const [busy, run] = useBusy();
-  useEffect(() => setValue(initial), [JSON.stringify(initial)]);
+  useHeld(value, setValue, initial, `${props.doc.id}/tiers`);
   const ordered = tiersInOrder(value);
   const uses = (id: TierId): number => Object.values(props.doc.entities).filter((e) => e.tier === id).length;
   const edit = (id: TierId, patch: Partial<TierDef>) => setValue({ ...value, tiers: { ...value.tiers, [id]: { ...(value.tiers[id] as TierDef), ...patch } } });

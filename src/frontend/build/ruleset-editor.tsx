@@ -21,6 +21,7 @@ import type { Draft } from "../app";
 import { sheetPreviewRequest } from "../requests";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
+import { useHeld } from "./held";
 import { ExprEditor } from "./expr-editor";
 import { ProfilePicker } from "./profile-picker";
 import { EFFECT, type FieldSpec } from "./schema";
@@ -577,7 +578,7 @@ export function RulesetEditor() {
   const [value, setValue] = useState<RulesetDef>(stored);
   const [busy, run] = useBusy();
   const [picking, setPicking] = useState(false);
-  useEffect(() => setValue(stored), [storedKey]);
+  useHeld(value, setValue, stored, `${draft?.worldId ?? ""}/ruleset`, storedKey);
   // Pickers see the packs' kinds too (DESIGN §13); the world's own win.
   const formDoc = useMemo(() => (draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds }, relations: { ...draft.packRelations, ...draft.doc.relations } } : null), [draft?.doc, draft?.packKinds, draft?.packRelations]);
   const identifiers = useMemo(() => (draft ? worldIdentifiers(draft.doc) : []), [draft?.doc]);
