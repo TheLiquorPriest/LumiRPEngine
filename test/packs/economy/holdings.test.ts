@@ -278,6 +278,27 @@ describe("holdings: options", () => {
   });
 });
 
+describe("holdings: bonds", () => {
+  test("a bond maturing on a Saturday, or on a Friday, pays its face and its last coupon once, and the coupon is the year's interest", () => {
+    const w = setup((world) => {
+      const assets = world.packs.economy?.config.assets;
+      if (assets && typeof assets === "object" && !Array.isArray(assets)) {
+        assets.sat = { label: "Note due Sat 31 Oct", symbol: "SAT", class: "bond", face: 100000, coupon_pct: 6, pays_per_year: 2, maturity: "2026-10-31", price: 100000 };
+        assets.fri = { label: "Note due Fri 30 Oct", symbol: "FRI", class: "bond", face: 100000, coupon_pct: 6, pays_per_year: 2, maturity: "2026-10-30", price: 100000 };
+      }
+      world.entities.h_sat = holding("h_sat", "brokerage", "sat", [{ qty: 10, cost: 1_000_000, at: "2026-01-02" }]);
+      world.entities.h_fri = holding("h_fri", "brokerage", "fri", [{ qty: 10, cost: 1_000_000, at: "2026-01-02" }]);
+    });
+    const before = balance(w, "brokerage");
+    lapseTo(w, "2026-11-03T12:00");
+    // Ten notes of $1,000 at 6 %, twice a year: $300 of interest each, and $10,000 of face.
+    expect(balance(w, "brokerage") - before).toBe(2 * (1_000_000 + 30_000));
+    expect(incomeIn(w.state, "you", 2026).interest).toBe(60_000);
+    expect(qtyOf(lotsOf(w.ctx, "h_sat")) + qtyOf(lotsOf(w.ctx, "h_fri"))).toBe(0);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+});
+
 describe("holdings: property", () => {
   const duplex = (world: WorldDoc, extra: JsonObject = {}): void => {
     world.entities.duplex = { id: "duplex", kind: "property", name: "The duplex", tier: "background", fields: { place: "apartment", owners: [{ party: "you", role: "owner", share: 100 }], value: 30_000_000, units: 2, ...extra }, relations: [] };

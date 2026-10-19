@@ -17,7 +17,7 @@ import type { EventTypeDef, ReadContext, Rejection, SlotInfo } from "../../../en
 import type { FinanceApi, FinanceRegistry } from "./module";
 import { assetOf, instantIn, MARKET_CLOSE, priceOf, reject, type Asset } from "./assets";
 import { accountOfHolding, applyLots, canTrade, findHolding, holdingIds, holdingOwners, lotsChange, lotsOf, marketOf, qtyOf, unit, unitsText } from "./holdings";
-import { payout } from "./income";
+import { holdingIncome, payout } from "./income";
 import { intrinsic, QTY_EPSILON, roundQty, takeFifo } from "./pricing";
 
 function isRejection(v: LedgerEvent[] | Rejection): v is Rejection {
@@ -170,8 +170,13 @@ function settlements(api: FinanceApi, ctx: ReadContext, slot: SlotInfo): LedgerE
     if (a.bond) {
       const cash = Math.round(qty * a.bond.face);
       const label = `${a.label} matured`;
+      // Its last coupon is paid with it, to where its coupons go, and is the year's interest.
+      const coupon = holdingIncome(api, ctx, holding, at.at, true);
+      const paid = coupon?.lines ? api.post(ctx, coupon.lines, { memo: coupon.memo ?? label, kind: "income", category: coupon.category ?? "interest" }) : [];
+      const couponEvents = isRejection(paid) || !coupon ? [] : [...paid, ...(coupon.extra ?? [])];
+      const couponCents = couponEvents.length > 0 && coupon ? coupon.cents : 0;
       const settled = settle(api, ctx, holding, { ...a, option: null }, qty, cash, label);
-      out.push(...(isRejection(settled) ? [] : unit([...settled, ...notes(`${a.label} matured: ${money(cash)} paid out.`)])));
+      out.push(...(isRejection(settled) ? [] : unit([...couponEvents, ...settled, ...notes(`${a.label} matured: ${money(cash + couponCents)} paid out${couponCents > 0 ? `, its last coupon of ${money(couponCents)} with it` : ""}.`)])));
       continue;
     }
     if (!a.option) continue;

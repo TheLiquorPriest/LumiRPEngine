@@ -90,7 +90,9 @@ function incomeFlow(api: FinanceApi, ctx: ReadContext, holding: EntityId): Flow 
     to: route.to ?? account ?? (owners[0] ? owners[0].party : ""),
     amount: { provider: INCOME_PROVIDER, args: { holding } },
     schedule: months.length >= cal.system.months ? { every: "month", days: [due ? due.day : 15], roll: "after" } : { every: "year", months, days: [due ? due.day : 15], roll: "after" },
-    ...(a.bond ? { end: dateText(ctx.world, a.bond.maturity) } : {}),
+    // A bond's last coupon is paid with its redemption at maturity (`economy.settlements`), so the
+    // flow ends the day before: a maturity on a weekend or a holiday can't roll it past the units.
+    ...(a.bond ? { end: dateText(ctx.world, a.bond.maturity - 1440) } : {}),
     shortfall: "skip",
     category: interest ? "interest" : "dividends",
     link: holding,
@@ -103,9 +105,10 @@ function incomeFlow(api: FinanceApi, ctx: ReadContext, holding: EntityId): Flow 
  * One payment of a holding's income: the units held now times what a unit pays, from the asset's
  * issuer, to where it is routed (or reinvested in more units at today's price). Null when it holds
  * nothing or pays nothing today. Its posting is its one line (`quiet`): a reinvestment touches none
- * of the owner's accounts, so its memo carries the amount.
+ * of the owner's accounts, so its memo carries the amount. A bond's last coupon (`last`) is never
+ * reinvested, since the bond is redeemed with it.
  */
-export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: EntityId, at: number): FlowPosting | null {
+export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: EntityId, at: number, last = false): FlowPosting | null {
   const a = assetOf(ctx, strOf(own(ctx.state.entities, holding)?.fields.asset));
   if (!a) return null;
   const qty = qtyOf(lotsOf(ctx, holding));
@@ -119,7 +122,7 @@ export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: Entity
   const category = interest ? "interest" : "dividends";
   const route = routeOf(ctx.state, holding);
   const price = priceOf(ctx, a, at);
-  if (route.reinvest && price > 0) {
+  if (route.reinvest && price > 0 && !last) {
     const memo = `${name} ${kind} reinvested: ${formatMoney(cents, ctx.world.currency)}`;
     return {
       cents,
