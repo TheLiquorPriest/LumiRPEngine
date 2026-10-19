@@ -349,6 +349,8 @@ describe("holdings: property", () => {
     expect(w.state.entities.cabin?.fields.owners).toEqual([{ party: "you", role: "owner", share: 100 }]);
     // Net worth counts the cabin, and the mortgage against it.
     const worth = w.ctx.query("economy.net_worth")(w.ctx, "you") ?? 0;
+    // Its value rises to $220,000, which is what an outside buyer pays.
+    w.apply({ type: "set", entity: "cabin", field: "value", value: 22_000_000 });
     run(w, "economy.property_sell", { party: "you", property: "cabin", price: 22_000_000, to: "checking" });
     expect(balance(w, mortgage)).toBe(0);
     expect(w.state.entities.cabin?.fields.mortgage).toBeNull();
@@ -399,6 +401,22 @@ describe("holdings: property", () => {
     run(w, "economy.property_sell", { party: "you", property: "duplex", price: 500_000, buyer: "jordan" });
     expect(w.state.entities.duplex?.fields.owners).toEqual([{ party: "jordan", role: "owner", share: 80 }, { party: "maya", role: "owner", share: 20 }]);
     expect(w.ctx.query("economy.net_worth")(w.ctx, "maya")).toBe(maya);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+});
+
+describe("holdings: what an outside buyer pays", () => {
+  test("no more than a property is worth, nor than a business is", () => {
+    const w = setup((world) => {
+      world.entities.cabin = { id: "cabin", kind: "property", name: "The cabin", tier: "background", fields: { place: "apartment", owners: [{ party: "you", role: "owner", share: 100 }], value: 20_000_000 }, relations: [] };
+      world.entities.stall = { id: "stall", kind: "business", name: "The stall", tier: "background", fields: { owners: [{ party: "you", role: "owner", share: 100 }], value: 1_000_000 }, relations: [] };
+    });
+    expect(refuse(w, "economy.property_sell", { party: "you", property: "cabin", price: 20_000_001, to: "checking" })).toBe("declined");
+    expect(refuse(w, "economy.stake_sell", { party: "you", business: "stall", share: 100, price: 1_000_001, to: "checking" })).toBe("declined");
+    const checking = balance(w, "checking");
+    run(w, "economy.property_sell", { party: "you", property: "cabin", price: 20_000_000, to: "checking" });
+    run(w, "economy.stake_sell", { party: "you", business: "stall", share: 100, price: 1_000_000, to: "checking" });
+    expect(balance(w, "checking") - checking).toBe(21_000_000);
     expect(trialBalance(w.state)).toBe(0);
   });
 });

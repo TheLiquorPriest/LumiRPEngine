@@ -496,6 +496,9 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
   if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
   if (x.to && !api.accountsOf(ctx, x.party, "worth").includes(x.to) && !api.accountsOf(ctx, x.party, "spend").includes(x.to)) return reject("not_yours", `${labelOf(ctx, x.to)} isn't ${labelOf(ctx, x.party)}'s`);
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
+  // A buyer outside the world pays what the market does: no more than the property is worth.
+  const value = propertyValue(ctx.state, x.property);
+  if (x.buyer === undefined && price > value) return reject("declined", `no buyer outside the world pays more than ${money(value)} for ${e.name}`);
   const memo = `Sold ${share < 100 ? `a ${Math.round(share)}% share of ` : ""}${e.name} for ${money(price)}`;
   // The seller's own loans against it are settled from the proceeds.
   const loans = securedLoans(api, ctx.state, x.property).filter((l) => api.ownersOf(ctx.state, l.loan).some((o) => o.party === x.party) && l.owed > 0);

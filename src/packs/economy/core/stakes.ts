@@ -141,6 +141,9 @@ export function sellStake(api: FinanceApi, ctx: EffectContext | ReadContext, x: 
   if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party || x.buyer === x.business)) return reject("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
   const whole = Math.abs(share - held) < 1e-9;
   if (x.buyer === undefined && !(whole && held >= 100 - 1e-9)) return reject("needs_buyer", `selling part of ${labelOf(ctx, x.business)} needs a buyer in the world`);
+  // A buyer outside the world pays what the market does: no more than the business is worth.
+  const worth = businessValue(api, ctx, x.business);
+  if (x.buyer === undefined && price > worth) return reject("declined", `no buyer outside the world pays more than ${formatMoney(worth, ctx.world.currency)} for ${labelOf(ctx, x.business)}`);
   const to = x.to ?? api.depositAccount(ctx, x.party);
   if (!to) return reject("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
   const memo = `Sold ${Math.round(share * 100) / 100}% of ${labelOf(ctx, x.business)} for ${formatMoney(price, ctx.world.currency)}`;
