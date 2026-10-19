@@ -346,6 +346,19 @@ function restoreOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejec
   return e.agent ? caughtUp(w, entity) : null;
 }
 
+/**
+ * A pack effect the GM may run (`EffectDef.gm`): an asset's price, say, which no entity field holds.
+ * Its arguments are literals, and it resolves through the effect's own checks and the event guards.
+ */
+function effectOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "effect" }>, opts: EditOptions, rng: Rng): Rejection | null {
+  const def = reg.effects.get(op.effect);
+  if (!opts.gm || def?.gm !== true) return reject("not_editable", `${op.effect.replace(/[._]/g, " ")} isn't something the GM view can run`);
+  const before = w.events.length;
+  const rejection = run(reg, w, [{ type: op.effect, args: op.args }], rng);
+  if (rejection) return rejection;
+  return w.events.length === before ? reject("no_change", "nothing to change") : null;
+}
+
 function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: Rng): Rejection | null {
   switch (op.op) {
     case "set":
@@ -385,6 +398,8 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
       const out = edit(w.ctx, op);
       return Array.isArray(out) ? applyAll(w, out) : out;
     }
+    case "effect":
+      return effectOp(reg, w, op, opts, rng);
   }
 }
 
@@ -465,6 +480,8 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
         case "mind_memory":
           if (!str(o.entity) || (o.part !== "note" && o.part !== "commitment" && o.part !== "plan") || !(o.id === null || str(o.id)) || !(o.value === null || isRecord(o.value))) return null;
           return { op: "mind_memory", entity: o.entity, part: o.part, id: o.id, value: o.value as JsonObject | null };
+        case "effect":
+          return str(o.effect) && isRecord(o.args) ? { op: "effect", effect: o.effect, args: o.args as JsonObject } : null;
         default:
           return null;
       }

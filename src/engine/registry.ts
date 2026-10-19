@@ -118,6 +118,11 @@ export interface EffectDef {
   type: string;
   /** The arguments it reads, by name, `?` marking one it can do without (the authors' reference lists them). */
   args: readonly string[];
+  /**
+   * A GM edit may run it (`lre.edit` op `effect`), with literal arguments: a GM control that changes
+   * something no entity field holds, such as an asset's price. Effects without it are never offered there.
+   */
+  gm?: true;
   resolve(args: Record<string, JsonValue>, ctx: EffectContext): LedgerEvent[] | Rejection;
 }
 

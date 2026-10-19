@@ -3,5 +3,9 @@
 
 import type { FinanceModule } from "./module";
 import { registerWork } from "./work";
+import { registerAssets } from "./wealth";
 
-export const FINANCE_MODULES: readonly { id: string; register: FinanceModule }[] = [{ id: "work", register: registerWork }];
+export const FINANCE_MODULES: readonly { id: string; register: FinanceModule }[] = [
+  { id: "work", register: registerWork },
+  { id: "assets", register: registerAssets },
+];

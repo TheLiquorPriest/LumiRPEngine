@@ -128,6 +128,7 @@ export const MAPPINGS: readonly TableMapping[] = [
       state_income_tax_effective_pct: opt(num("pct", "Single filer at about $60,000, after the state standard deduction; excludes local and payroll levies.")),
       local_income_tax_pct_typical: opt(num("pct")),
       sales_tax_combined_avg_pct: num("pct", "State plus average local rate."),
+      property_tax_effective_pct: opt(num("pct", "Effective property tax on owner-occupied homes, a year, percent of value.")),
       cost_of_living_multiplier: num("multiplier", "US = 1.00. Applied by the economy pack at pricing time, never baked into rows."),
       median_rent_1br_cents_per_month: int("cents_per_month"),
       median_rent_2br_cents_per_month: int("cents_per_month"),

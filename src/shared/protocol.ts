@@ -118,6 +118,8 @@ export interface FixRequest extends Request<"lre.fix"> {
  *    and `restore` brings it back.
  *  - `mind_pin`, `mind_refresh`, `mind_memory`: a character's mind (DESIGN §24.9): pin their fidelity,
  *    ask for a fresh mind next turn, edit or delete a note, commitment or plan (`MindEditOp`).
+ *  - `effect` runs a pack effect registered for GM edits (`EffectDef.gm`) with literal arguments:
+ *    what no entity field holds, such as an asset's price.
  */
 export type EditOp =
   | { op: "set"; entity: EntityId; field: FieldId; value: JsonValue }
@@ -135,7 +137,8 @@ export type EditOp =
   | { op: "spawn"; kind: KindId; name: string; id?: EntityId; tier?: TierId; place?: PlaceId; agent?: boolean }
   | { op: "despawn"; entity: EntityId }
   | { op: "restore"; entity: EntityId }
-  | MindEditOp;
+  | MindEditOp
+  | { op: "effect"; effect: string; args: JsonObject };
 
 /** A GM edit on the head (DESIGN §7): the operations in order, all or none, as one `post` entry of kind `fix`; locked fields are writable. */
 export interface EditRequest extends Request<"lre.edit"> {
