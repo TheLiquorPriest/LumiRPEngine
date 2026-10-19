@@ -1896,13 +1896,13 @@
         "employer": "rusty_anchor",
         "occupation": "bartender",
         "basis": "hourly",
-        "rate": 1650,
+        "rate": 213,
         "status": "active",
         "hours_per_week": 32,
         "pay_every": "weekly",
         "pay_weekday": 5,
         "shift_pattern": "bar_night",
-        "tipped": true
+        "tips_per_hour": 1437
       },
       "relations": []
     },
