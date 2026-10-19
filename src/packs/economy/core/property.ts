@@ -660,7 +660,8 @@ export function registerProperty(r: FinanceRegistry): void {
     const cost = strOf(args.cost) as Cost;
     if (!(COSTS as readonly string[]).includes(cost)) return null;
     const cents = costOf(ctx, strOf(args.property), cost);
-    return cents > 0 ? { cents, memo: flow.label, kind: "payment", category: flow.category ?? "property" } : null;
+    // Upkeep is what repairs cost on average, not a bill anyone sends: like living costs, its posting is its one line.
+    return cents > 0 ? { cents, memo: flow.label, kind: "payment", category: flow.category ?? "property", ...(cost === "upkeep" ? { quiet: true } : {}) } : null;
   };
   r.amount(PROPERTY_COST_PROVIDER, provider);
 

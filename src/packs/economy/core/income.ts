@@ -11,6 +11,7 @@
 import type { EntityId } from "../../../shared/ids";
 import type { JsonObject } from "../../../shared/json";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
+import { formatMoney } from "../../../shared/world";
 import { worthShares, type Flow, type Owner } from "../../../shared/finance";
 import { calendarOf, dateAt } from "../../../engine/calendar";
 import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
@@ -101,7 +102,8 @@ function incomeFlow(api: FinanceApi, ctx: ReadContext, holding: EntityId): Flow 
 /**
  * One payment of a holding's income: the units held now times what a unit pays, from the asset's
  * issuer, to where it is routed (or reinvested in more units at today's price). Null when it holds
- * nothing or pays nothing today.
+ * nothing or pays nothing today. Its posting is its one line (`quiet`): a reinvestment touches none
+ * of the owner's accounts, so its memo carries the amount.
  */
 export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: EntityId, at: number): FlowPosting | null {
   const a = assetOf(ctx, strOf(own(ctx.state.entities, holding)?.fields.asset));
@@ -118,7 +120,7 @@ export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: Entity
   const route = routeOf(ctx.state, holding);
   const price = priceOf(ctx, a, at);
   if (route.reinvest && price > 0) {
-    const memo = `${name} ${kind} reinvested`;
+    const memo = `${name} ${kind} reinvested: ${formatMoney(cents, ctx.world.currency)}`;
     return {
       cents,
       lines: [
@@ -128,7 +130,8 @@ export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: Entity
       memo,
       kind: "income",
       category,
-      extra: [{ type: "economy.income", data: { source: holding, cents, kind, reinvested: true } }, lotsChange(ctx.state, holding, roundQty(cents / price), cents, "reinvest", memo)],
+      extra: [{ type: "economy.income", data: { source: holding, cents, kind, reinvested: true } }, lotsChange(ctx.state, holding, roundQty(cents / price), cents, "reinvest", `${name} ${kind} reinvested`)],
+      quiet: true,
     };
   }
   const account = accountOfHolding(ctx.state, holding);
@@ -136,7 +139,7 @@ export function holdingIncome(api: FinanceApi, ctx: ReadContext, holding: Entity
   const to = account && api.traitsOf(ctx, account)?.locked ? account : route.to;
   const paid = payout(api, ctx, holdingOwners(api, ctx.state, holding), cents, issuer, to, account);
   if (paid.paid <= 0) return null;
-  return { cents: paid.paid, lines: paid.lines, memo: `${name} ${kind}`, kind: "income", category, extra: [{ type: "economy.income", data: { source: holding, cents: paid.paid, kind } }] };
+  return { cents: paid.paid, lines: paid.lines, memo: `${name} ${kind}`, kind: "income", category, extra: [{ type: "economy.income", data: { source: holding, cents: paid.paid, kind } }], quiet: true };
 }
 
 // ---------------------------------------------------------------- the income record
@@ -178,7 +181,7 @@ function incomeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
       const shares = worthShares(sourceOwners(api, state, source));
       for (const p of byShare(shares, cents)) recordIncome(state, ctx.world, p.party, kind, p.cents);
     },
-    describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "source"))} paid ${str(e, "kind")} of ${numOf(e.data.cents)}`),
+    describe: (e, ctx, viewer) => (viewer ? "" : `${labelOf(ctx, str(e, "source"))}: ${formatMoney(numOf(e.data.cents), ctx.world.currency)} ${str(e, "kind") === "profit" ? "profit share" : str(e, "kind")}`),
   };
 }
 

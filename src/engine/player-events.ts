@@ -42,6 +42,16 @@ const BOOKKEEPING = new Set<string>([
   // A flow's run carries its schedule state; its posting and its payer's note carry the line, so
   // nobody else's bills, takings or living costs reach the player.
   "economy.flow_run",
+  // The holdings module's books (DESIGN §27.11): marks, contracts listed, lots, income and gains
+  // records, and routes. What anyone hears of a trade, a payout or a sale is its posting.
+  "economy.quote",
+  "economy.mint",
+  "economy.lots",
+  "economy.income",
+  "economy.exercise",
+  "economy.dispose",
+  "economy.acquire",
+  "economy.stake_route",
   "story.flag",
   // A fight's turn order, economy and recorded picks; what anyone did is `combat.act`.
   "combat.turn",
