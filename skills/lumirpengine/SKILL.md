@@ -12,7 +12,7 @@ A LumiRPEngine world is one JSON document (`lre-world-v1`): collections keyed by
 Use whichever is available:
 
 - **MCP** (the `lumirpengine` server; this repo's `.mcp.json` declares it): `lre_guide`, `lre_docs`, `lre_schema`, `lre_templates`, `lre_template`, `lre_check`, `lre_playtest`, `lre_check_world`, `lre_status`, `lre_worlds`, `lre_world`, `lre_search`, `lre_world_create`, `lre_world_import`, `lre_edit`, `lre_draft`, `lre_diff`, `lre_commit`, `lre_discard`, `lre_history`, `lre_restore`, `lre_world_delete`, `lre_world_export`, `lre_chats`, `lre_attach`, `lre_upgrade`.
-- **Shell**: `npx -y github:TheLiquorPriest/LumiRPEngine <command>` (the first run downloads about 14 MB from GitHub; `#<tag or commit>` after the repo pins a version), or `node dist/lumirpengine.js <command>` in a clone. `help` lists the commands; each runs one tool (`world <id>` is `lre_world`, `create` is `lre_world_create`). The user signs in once with `login`; never ask for their password.
+- **Shell**: `lumirpengine <command>` once installed (`npm i -g github:TheLiquorPriest/LumiRPEngine`, about 14 MB from GitHub; `#<tag or commit>` after the repo pins a version), `npx -y github:TheLiquorPriest/LumiRPEngine <command>` without installing (about 7 to 9 s a start, since npx looks GitHub up each time), or `node dist/lumirpengine.js <command>` in a clone. `help` lists the commands; each runs one tool (`world <id>` is `lre_world`, `create` is `lre_world_create`). The user signs in once with `login`; never ask for their password. A harness that runs the server through npx may need a longer start-up timeout (docs/MCP.md).
 
 ## Steps
 

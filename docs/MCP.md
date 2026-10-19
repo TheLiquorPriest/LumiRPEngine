@@ -4,28 +4,47 @@
 
 ## Setup
 
-Sign in once, in a terminal. The password is asked at a hidden prompt (or read from `LUMIVERSE_PASSWORD`), never taken as an argument, and never stored:
+Install it once with npm, then sign in once, in a terminal. The password is asked at a hidden prompt (or read from `LUMIVERSE_PASSWORD`), never taken as an argument, and never stored:
 
 ```bash
-npx -y github:TheLiquorPriest/LumiRPEngine login --url http://localhost:7860 --username you
+npm i -g github:TheLiquorPriest/LumiRPEngine
+lumirpengine login --url http://localhost:7860 --username you
 ```
 
-`--url` is the address you open Lumiverse at in your browser (or set `LUMIVERSE_URL`); `--username` can come from `LUMIVERSE_USERNAME`. Plain `http` to another machine needs `--allow-http` (see [Safety](#safety)). The session token is saved in `~/.config/lumirpengine/credentials.json` (`$XDG_CONFIG_HOME/lumirpengine/` when set, `%APPDATA%\lumirpengine\` on Windows), readable only by you. `status` shows where you are signed in and whether LumiRPEngine answers there; `logout` ends the session on Lumiverse and deletes the token. Sign in again whenever you like: a running `mcp` server uses the new sign-in from its next connection, without a restart.
+`--url` is the address you open Lumiverse at in your browser (or set `LUMIVERSE_URL`); `--username` can come from `LUMIVERSE_USERNAME`. Plain `http` to another machine needs `--allow-http` (see [Safety](#safety)). The session token is saved in `~/.config/lumirpengine/credentials.json` (`$XDG_CONFIG_HOME/lumirpengine/` when set, `%APPDATA%\lumirpengine\` on Windows), readable only by you. `status` shows where you are signed in and whether LumiRPEngine answers there; `logout` ends the session on Lumiverse and deletes the token. Sign in again whenever you like: a running `mcp` server takes up the new sign-in at its next call, without a restart, and after a `logout` it drops its connection at its next call.
 
-The first `npx` run downloads this repo's package from GitHub (about 14 MB) before it starts, so a harness with a short start-up timeout may give up on it once; `npx` needs GitHub reachable to start at all, even for the offline tools. `github:TheLiquorPriest/LumiRPEngine` follows the default branch: pin a release or a commit with `github:TheLiquorPriest/LumiRPEngine#<tag or commit>`, in the commands below too, so that an update reaches you only when you change it.
+The install downloads this repo's package from GitHub (about 14 MB) and puts `lumirpengine` on your PATH. `github:TheLiquorPriest/LumiRPEngine` follows the default branch: pin a release or a commit with `github:TheLiquorPriest/LumiRPEngine#<tag or commit>`, so that an update reaches you only when you install again. The same `npm i -g` updates it, and `npm rm -g lumi-rp-engine` removes it.
 
 Then add the server to your harness. Its config holds no password:
 
 ```bash
-claude mcp add lumirpengine -- npx -y github:TheLiquorPriest/LumiRPEngine mcp
-codex mcp add lumirpengine -- npx -y github:TheLiquorPriest/LumiRPEngine mcp
+claude mcp add lumirpengine -- lumirpengine mcp
+codex mcp add lumirpengine -- lumirpengine mcp
 ```
 
 Cursor (`~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project):
 
 ```json
-{ "mcpServers": { "lumirpengine": { "command": "npx", "args": ["-y", "github:TheLiquorPriest/LumiRPEngine", "mcp"] } } }
+{ "mcpServers": { "lumirpengine": { "command": "lumirpengine", "args": ["mcp"] } } }
 ```
+
+Installed, the server answers a harness in about a tenth of a second (measured on one machine), well inside any start-up timeout.
+
+### Without installing: npx
+
+`npx -y github:TheLiquorPriest/LumiRPEngine <command>` runs any command without an install, `login` and `mcp` included, and takes the same `#<tag or commit>`. But npx looks the GitHub ref up again on every launch, so the server takes about 9 s to answer the first time and still about 7 s after that (on the same machine; yours will differ), and npx needs GitHub reachable to start at all, even for the offline tools. That is close to Codex's default start-up timeout of 10 s, and past the 1 s Codex waits for an optional server before it lists the tools for the first turn. In Codex, give it the time in `~/.codex/config.toml`:
+
+```toml
+# Top-level, above any [table]: how long Codex waits for slow servers before its first tool list (1000 by default).
+mcp_optional_startup_grace_ms = 15000
+
+[mcp_servers.lumirpengine]
+command = "npx"
+args = ["-y", "github:TheLiquorPriest/LumiRPEngine", "mcp"]
+startup_timeout_sec = 60
+```
+
+Any other harness with a start-up timeout needs the same allowance, or the installed command.
 
 In a clone of this repo, `.mcp.json` declares the same server as `node dist/lumirpengine.js mcp`. Signed in to several Lumiverses? Add `--url <base>` after `mcp`. The agent skill is [`skills/lumirpengine/SKILL.md`](../skills/lumirpengine/SKILL.md).
 
@@ -65,6 +84,7 @@ Read-only limits what this MCP server offers, not what your agent can do. An age
 ## Safety
 
 - **The token is a whole-account session.** It is what your browser holds when you are signed in, valid for 7 days and extended by use, and the credentials file is readable by every program you run as yourself, your agent included. `logout` ends the session on Lumiverse as well as deleting it. When Lumiverse can't be reached or doesn't confirm, `logout` says so: the session then stays valid until it expires, after 7 days unused.
+- **To cut an agent off, run `lumirpengine logout` on its machine, or stop its harness.** Lumiverse trusts an open event socket for as long as it stays open, even after the session it was opened with has ended. `logout` on the machine the agent runs on deletes the saved sign-in, and a running `mcp` server then drops its socket at its next call. A session that ends any other way (revoked from elsewhere, expired, or ended by a password change, which ends every other session of the account) leaves a running server able to act until its harness stops it.
 - **Plain `http` to another machine sends it in clear.** Your password at sign-in, and the token on every call after, cross the network readable by anyone on the way, who can then use your account. `login` refuses that unless you pass `--allow-http`, which is saved with the sign-in, so `mcp` and the other commands need no flag. `localhost` and `127.0.0.1` never leave the machine. Before it sends your password, `login` asks Lumiverse as nobody, and stops if the address redirects to https: sign in at the https address instead.
 - **Harness configs hold no password**, only the command. Sign-ins happen in your terminal.
 - **`path` arguments read files on this machine.** `lre_check`, `lre_playtest`, `lre_check_world` and `lre_world_import` read the file a `path` names, with your permissions: an agent can point them at any file you can read, and an error can quote part of one that isn't a world.

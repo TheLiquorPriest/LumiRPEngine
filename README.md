@@ -67,14 +67,15 @@ LumiRPEngine deliberately does **not** request the `characters` permission. Char
 
 ## Your own agent: the CLI and MCP server
 
-`lumirpengine` lets your own agent (Claude Code, Codex, Cursor and the like) or your shell manage your worlds on your Lumiverse: read, search, create, import, edit, check, playtest, commit, restore, delete and export them, and attach and upgrade the chats that play them. It runs on Node 22 or newer with the engine bundled in, so checking and playtesting a world file needs no Lumiverse at all. Sign in once in a terminal (the password is asked at a hidden prompt and never stored), then add the MCP server to your harness:
+`lumirpengine` lets your own agent (Claude Code, Codex, Cursor and the like) or your shell manage your worlds on your Lumiverse: read, search, create, import, edit, check, playtest, commit, restore, delete and export them, and attach and upgrade the chats that play them. It runs on Node 22 or newer with the engine bundled in, so checking and playtesting a world file needs no Lumiverse at all. Install it, sign in once in a terminal (the password is asked at a hidden prompt and never stored), then add the MCP server to your harness:
 
 ```bash
-npx -y github:TheLiquorPriest/LumiRPEngine login --url http://localhost:7860 --username you
-claude mcp add lumirpengine -- npx -y github:TheLiquorPriest/LumiRPEngine mcp
+npm i -g github:TheLiquorPriest/LumiRPEngine
+lumirpengine login --url http://localhost:7860 --username you
+claude mcp add lumirpengine -- lumirpengine mcp
 ```
 
-The first `npx` run downloads about 14 MB from GitHub; add `#<tag or commit>` after the repo name to pin a version. An agent edits the same draft as your Build tab, so you see its changes as it makes them, and a Commit in Build commits its unfinished work too. `--read-only` keeps the MCP server to reading and checking, but an agent with a shell can still run `lumirpengine` without it. Plain `http` to another machine sends your password and session token in clear, so `login` asks for `--allow-http` first. Setup for other harnesses, every tool, safety and troubleshooting are in [MCP.md](docs/MCP.md), and agents read [AGENT-GUIDE.md](docs/AGENT-GUIDE.md).
+The install downloads about 14 MB from GitHub; add `#<tag or commit>` after the repo name to pin a version. Installed, the server starts in a fraction of a second. `npx -y github:TheLiquorPriest/LumiRPEngine <command>` works without installing, but takes about 7 to 9 s to start the server, too slow for some harnesses' start-up timeouts unless they are raised (MCP.md shows Codex's). An agent edits the same draft as your Build tab, so you see its changes as it makes them, and a Commit in Build commits its unfinished work too. `--read-only` keeps the MCP server to reading and checking, but an agent with a shell can still run `lumirpengine` without it. Plain `http` to another machine sends your password and session token in clear, so `login` asks for `--allow-http` first. To cut an agent off, run `lumirpengine logout` on its machine or stop its harness: a running server goes on working after its session is ended any other way. Setup for other harnesses, every tool, safety and troubleshooting are in [MCP.md](docs/MCP.md), and agents read [AGENT-GUIDE.md](docs/AGENT-GUIDE.md).
 
 ## Things to know before you install
 
