@@ -117,7 +117,7 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string }) {
     });
   return (
     <Card title="Step templates">
-      <div class="lre-small lre-muted">A world's template for a step wins over the player's own prompt and the built-in one; only a step's first template (by id) with any text is used, and its signals are ignored. A new template starts from the built-in prompt.</div>
+      <div class="lre-small lre-muted">A world's template for a step wins over the built-in prompt, and a player's own prompt wins over it; only a step's first template (by id) with any text is used, and its signals are ignored. A new template starts from the built-in prompt.</div>
       {MIND_PURPOSES.map((purpose) => {
         const templates = Object.values(props.doc.steps).filter((t) => t.purpose === purpose).sort((a, b) => a.id.localeCompare(b.id));
         const used = worldMindTemplate(props.doc, purpose);
