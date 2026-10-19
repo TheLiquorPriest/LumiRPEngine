@@ -5,7 +5,7 @@
 // lease or a loan derives is changed at its source. The GM edits any flow's fields.
 
 import { useState } from "preact/hooks";
-import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, type FinanceView, type FlowView } from "../../../shared/finance";
+import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, type FinanceView, type Flow, type FlowView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { Card, Empty, Row } from "../../../frontend/components";
@@ -37,7 +37,7 @@ function endpoints(view: FinanceView, controls: HubControls): { from: Choice[]; 
 }
 
 /** A new flow, or the change to one: the player's action, or the GM's edit. */
-export function FlowFormView(props: { view: FinanceView; controls: HubControls; flow?: FlowView; onDone(): void }) {
+export function FlowFormView(props: { view: FinanceView; controls: HubControls; flow?: FlowView & { spec: Flow }; onDone(): void }) {
   const { view, controls, flow } = props;
   const ends = endpoints(view, controls);
   const [form, setForm] = useState<FlowForm>(() => (flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(ends.from[0]?.value ?? "") }));
@@ -128,6 +128,11 @@ const SHORTFALL_LABEL: Readonly<Record<(typeof FLOW_SHORTFALLS)[number], string>
   defer: "Carry it to the next time",
 };
 
+/** Whether a flow carries its stored form (a player's view leaves it out when a side is someone they can't see). */
+function withSpec(f: FlowView): f is FlowView & { spec: Flow } {
+  return f.spec !== null;
+}
+
 /** One flow: what it moves, when, how it has run, and the controls its mode allows. */
 export function FlowRow(props: { view: FinanceView; flow: FlowView; controls: HubControls }) {
   const app = useApp();
@@ -148,7 +153,7 @@ export function FlowRow(props: { view: FinanceView; flow: FlowView; controls: Hu
       {controls.mode === "player" ? (
         can.length > 0 ? (
           <div class="lre-inline">
-            {can.includes("edit") ? <Reveal label="Edit">{(close) => <FlowFormView view={view} controls={controls} flow={f} onDone={close} />}</Reveal> : null}
+            {can.includes("edit") && withSpec(f) ? <Reveal label="Edit">{(close) => <FlowFormView view={view} controls={controls} flow={f} onDone={close} />}</Reveal> : null}
             {can.includes("pause") ? <button type="button" class="lre-btn small" disabled={controls.busy} onClick={() => void controls.act(flowStatusAction(f.id, "pause"))}>Pause</button> : null}
             {can.includes("resume") ? <button type="button" class="lre-btn small" disabled={controls.busy} onClick={() => void controls.act(flowStatusAction(f.id, "resume"))}>Resume</button> : null}
             {can.includes("end_lease") ? (
@@ -175,7 +180,7 @@ export function FlowRow(props: { view: FinanceView; flow: FlowView; controls: Hu
         )
       ) : (
         <div class="lre-inline">
-          {f.source === "entity" ? <Reveal label="Edit">{(close) => <FlowFormView view={view} controls={controls} flow={f} onDone={close} />}</Reveal> : null}
+          {f.source === "entity" && withSpec(f) ? <Reveal label="Edit">{(close) => <FlowFormView view={view} controls={controls} flow={f} onDone={close} />}</Reveal> : null}
           {f.source === "entity" ? (
             <select class="lre-input" style={{ width: "auto" }} aria-label={`${f.label}: status`} value={f.status} disabled={controls.busy} onChange={(event) => void controls.edit(flowStatusOps(f.id, event.currentTarget.value === "paused" ? "paused" : event.currentTarget.value === "ended" ? "ended" : "active"))}>
               <option value="active">Active</option>

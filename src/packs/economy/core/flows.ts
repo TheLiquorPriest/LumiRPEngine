@@ -339,13 +339,13 @@ function outsideAccount(name: string): string {
   return external(name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "outside");
 }
 
-/** Where a payment to a side lands: an account (a credit account takes no more than it owes), a party's deposit account, or outside. */
+/** Where a payment to a side lands: an account, a party's deposit account, or outside; and who the payer's journal line names (an id, or the outside name). */
 function landing(ctx: ReadContext, to: string, cents: number): { account: string; extra: LedgerEvent[]; counterparty: string } {
   const side = sideOf(ctx, to);
-  if ("account" in side) return { account: side.account, extra: [], counterparty: labelOf(ctx, side.account) };
+  if ("account" in side) return { account: side.account, extra: [], counterparty: side.party ?? side.account };
   if ("party" in side) {
     const dest = payeeSide(ctx, { payee: side.party }, cents);
-    return { ...dest, counterparty: labelOf(ctx, side.party) };
+    return { ...dest, counterparty: side.party };
   }
   return { account: outsideAccount(side.outside), extra: [], counterparty: side.outside.replace(/_/g, " ") };
 }

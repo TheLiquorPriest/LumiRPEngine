@@ -19,7 +19,7 @@ import { statementState } from "./cycle";
 import { creditReport } from "./credit";
 import { allFlows, occurrences, occurrenceAmount } from "./flows";
 import { cycleOf, flowRunOf, isOpened, journalOf, NOTES_CAP } from "./journal";
-import { accountsOf, availableOf, balance, classOf, holdsOn, openerOf, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
+import { accountsOf, availableOf, balance, classOf, holdersOf, holdsOn, openerOf, ownersOf, productOf, rightsOf, statusOf, traitsOf, wealthBand } from "./model";
 import { cardsOn, cardRoom, featureFor, isParty, overdraftRoom, tiersOf, toggles } from "./pay";
 import { netWorthParts } from "./worth";
 import { createRng } from "../../../engine/rng";
@@ -31,11 +31,47 @@ interface Viewer {
   pov: EntityId | null;
 }
 
+/**
+ * Whether the viewer may see an entity: the GM sees everything; the player sees the POV, what it
+ * can see, and an account (or a card on one) it holds or that someone it can see holds. An outside
+ * party's name isn't an entity and is always shown.
+ */
+function visible(ctx: ReadContext, viewer: Viewer, id: string): boolean {
+  const pov = viewer.pov;
+  if (pov === null || id === pov) return true;
+  const e = own(ctx.state.entities, id);
+  if (!e) return true;
+  if (!canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, id)) return false;
+  if (e.kind !== "account" && e.kind !== "card") return true;
+  const account = e.kind === "card" ? strOf(e.fields.account) : id;
+  if (rightsOf(ctx.state, account, pov) !== null) return true;
+  const holders = holdersOf(ctx.state, account).filter((h) => own(ctx.state.entities, h));
+  return holders.length === 0 || holders.some((h) => canSeeEntity(ctx.registry, ctx.world, ctx.state, pov, h));
+}
+
 function nameFor(ctx: ReadContext, viewer: Viewer, id: string): string {
   const e = own(ctx.state.entities, id);
   if (!e) return id.replace(/_/g, " ");
-  if (viewer.pov !== null && id !== viewer.pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer.pov, id)) return "someone";
-  return e.name;
+  return visible(ctx, viewer, id) ? e.name : "someone";
+}
+
+/** An entity's id as a view may send it: null for one the viewer can't see. */
+function idFor(ctx: ReadContext, viewer: Viewer, id: string): EntityId | null {
+  return visible(ctx, viewer, id) ? id : null;
+}
+
+/**
+ * A journal line's other side: an entity id as its name (or "someone"), else the outside party's
+ * name, itself masked when it's the name of someone the viewer can't see (a module's, or a line
+ * written before ids were kept).
+ */
+function counterpartyName(ctx: ReadContext, viewer: Viewer, raw: string): string {
+  if (own(ctx.state.entities, raw)) return nameFor(ctx, viewer, raw);
+  if (viewer.pov !== null) {
+    const named = Object.keys(ctx.state.entities).find((id) => ctx.state.entities[id]?.name === raw);
+    if (named !== undefined && !visible(ctx, viewer, named)) return "someone";
+  }
+  return raw;
 }
 
 function when(ctx: ReadContext, at: number): string {
@@ -64,7 +100,7 @@ function shownAvailable(ctx: ReadContext, account: EntityId): number {
 }
 
 function journalLine(ctx: ReadContext, viewer: Viewer, j: JournalEntry): JournalLine {
-  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty: j.counterparty ?? null, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty: j.counterparty ? counterpartyName(ctx, viewer, j.counterparty) : null, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
 
 function cardView(ctx: ReadContext, viewer: Viewer, card: EntityId): CardView {
@@ -82,7 +118,7 @@ function cardView(ctx: ReadContext, viewer: Viewer, card: EntityId): CardView {
     network: f.network === "credit" || f.network === "charge" ? f.network : "debit",
     state: f.state === "frozen" || f.state === "lost" || f.state === "cancelled" ? f.state : "active",
     holder: nameFor(ctx, viewer, holder),
-    holderId: holder,
+    holderId: idFor(ctx, viewer, holder),
     account: strOf(f.account),
     last4: typeof f.last4 === "string" ? f.last4 : null,
     item: typeof f.item === "string" && f.item !== "" ? f.item : null,
@@ -168,20 +204,20 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     status: statusOf(ctx.state, account),
     cents,
     available: level >= 2 ? (t.liability ? (p?.limit === null && cls === "charge_card" ? null : shownAvailable(ctx, account)) : shownAvailable(ctx, account) + overdraftRoom(ctx, account)) : null,
-    owners: owners.map((o) => ({ party: o.party, name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
+    owners: owners.map((o) => ({ party: idFor(ctx, viewer, o.party), name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
     limit: level >= 3 && t.liability ? (p?.limit ?? null) : null,
     aprPct: level >= 4 && t.liability ? (p?.apr_pct ?? null) : null,
     apyPct: level >= 4 && t.earns ? (p?.apy_pct ?? null) : null,
     terms: level >= 3 ? terms(ctx, account, detail) : [],
-    autopay: level >= 3 && (t.revolving || t.installment) ? { mode: (AUTOPAY_MODES as readonly string[]).includes(autopayMode) ? (autopayMode as AutopayMode) : "none", from: autopayFrom || null, fromName: autopayFrom ? nameFor(ctx, viewer, autopayFrom) : null, cents: autopayMode === "fixed" ? numOf(e?.fields.autopay_cents) : null } : null,
+    autopay: level >= 3 && (t.revolving || t.installment) ? { mode: (AUTOPAY_MODES as readonly string[]).includes(autopayMode) ? (autopayMode as AutopayMode) : "none", from: autopayFrom ? idFor(ctx, viewer, autopayFrom) : null, fromName: autopayFrom ? nameFor(ctx, viewer, autopayFrom) : null, cents: autopayMode === "fixed" ? numOf(e?.fields.autopay_cents) : null } : null,
     due: statements ? due : null,
     statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s): s is StatementView => s !== null) : [],
     cards: level >= 3 ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
     pending: detail ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, j)) : [],
     holds: detail ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
     transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, j)) : [],
-    securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
+    securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) && visible(ctx, viewer, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
     loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : (cycle?.minimum ?? 0), monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null,
   };
 }
@@ -242,6 +278,9 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
   }
   const fromSide = own(ctx.state.entities, f.from);
   const payerHolds = fromSide?.kind === "account" ? rightsOf(ctx.state, f.from, party)?.manage === true : f.from === party;
+  // The flow as stored goes out only when every side of it is someone the viewer can see.
+  const sides = [f.from, f.to, f.fallback ?? "", f.link ?? "", ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])].filter((id) => id !== "");
+  const seen = sides.every((id) => visible(ctx, viewer, id));
   return {
     id: f.id,
     label: f.label,
@@ -256,13 +295,14 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     // A one-off flow entity that has run is over. Its run isn't marked ended: a derived flow (autopay) keeps its id while its one-off date moves on.
     status: run.ended || (f.schedule.once !== undefined && run.done > 0 && own(ctx.state.entities, f.id)?.kind === "flow") ? "ended" : f.status,
     category: f.category ?? null,
-    link: f.link && own(ctx.state.entities, f.link) ? { id: f.link, name: nameFor(ctx, viewer, f.link) } : null,
+    link: f.link && own(ctx.state.entities, f.link) && visible(ctx, viewer, f.link) ? { id: f.link, name: nameFor(ctx, viewer, f.link) } : null,
+    payer: fromSide && visible(ctx, viewer, f.from) ? f.from : null,
     editable: f.source === "entity" && payerHolds,
     source: f.source,
     done: run.done,
     missed: run.missed,
     deferred: run.deferred ?? 0,
-    spec: f,
+    spec: seen ? f : null,
   };
 }
 
@@ -293,18 +333,18 @@ function householdView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, ho
     return Math.round((each * per) / Math.max(1, f.schedule.interval ?? 1));
   };
   const total = shared.reduce((a, f) => a + monthlyOf(f), 0);
-  const parts = members.map((m) => ({ id: m, name: nameFor(ctx, viewer, m), cents: shared.reduce((a, f) => a + Math.round((monthlyOf(f) * (f.shares?.find((s) => s.party === m)?.pct ?? (f.shares && f.shares.length > 0 ? 0 : 100 / Math.max(1, members.length)))) / 100), 0) }));
+  const partOf = (m: EntityId): number => shared.reduce((a, f) => a + Math.round((monthlyOf(f) * (f.shares?.find((s) => s.party === m)?.pct ?? (f.shares && f.shares.length > 0 ? 0 : 100 / Math.max(1, members.length)))) / 100), 0);
   return {
     id: household,
     name: nameFor(ctx, viewer, household),
     members: members.map((m) => {
       const rel = own(ctx.state.entities, m)?.relations.find((r) => r.type === MEMBER_OF && r.to === household);
-      const part = parts.find((p) => p.id === m)?.cents ?? 0;
-      return { id: m, name: nameFor(ctx, viewer, m), role: strOf(rel?.fields?.role), share: total > 0 ? Math.round((part * 1000) / total) / 10 : Math.round(1000 / Math.max(1, members.length)) / 10 };
+      const part = partOf(m);
+      return { id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), role: strOf(rel?.fields?.role), share: total > 0 ? Math.round((part * 1000) / total) / 10 : Math.round(1000 / Math.max(1, members.length)) / 10 };
     }),
     accounts: accountsOf(ctx, household).concat(members.length > 1 ? accountsOf(ctx, members[0] ?? household).filter((id) => members.every((m) => rightsOf(ctx.state, id, m) !== null)) : []).filter((id, i, all) => all.indexOf(id) === i),
     flows: shared.map((f) => flowView(hooks, ctx, viewer, household, f)),
-    monthly: { total, parts },
+    monthly: { total, parts: members.map((m) => ({ id: idFor(ctx, viewer, m), name: nameFor(ctx, viewer, m), cents: partOf(m) })) },
   };
 }
 

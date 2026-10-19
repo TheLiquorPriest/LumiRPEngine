@@ -238,7 +238,7 @@ describe("Play → Money: each control plays as the player's turn", () => {
     await chat.play(flowCreateAction(gymForm(CHECKING), chat.currency));
     let view = await chat.hub();
     const gym = view.flows.find((f) => f.label === "Harbor Gym");
-    if (!gym) throw new Error("no Harbor Gym flow");
+    if (!gym?.spec) throw new Error("no Harbor Gym flow with its form");
     expect(gym).toMatchObject({ kind: "subscription", from: "Your checking account", to: "Harbor Gym", amount: "$40.00", schedule: "monthly on the 5th", status: "active", editable: true, source: "entity" });
     expect(view.overview?.upcoming).toContainEqual(expect.objectContaining({ label: "Harbor Gym", cents: -4000, flow: gym.id }));
 
@@ -284,7 +284,7 @@ describe("GM view → Money: each control is one edit", () => {
     expect(account(await chat.party(DANNY), DANNY_CHECKING).cents).toBe(danny.cents + 1500);
     const mine = await chat.hub();
     expect(mine.accounts.some((a) => a.id === DANNY_CHECKING)).toBe(false);
-    expect(mine.flows.some((f) => f.spec.from === DANNY_CHECKING)).toBe(false);
+    expect(mine.flows.some((f) => f.spec?.from === DANNY_CHECKING || f.payer === DANNY_CHECKING)).toBe(false);
   });
 
   test("Take money on an account that hasn't opened yet opens it first, so all the GM view shows can be taken", async () => {
@@ -370,7 +370,7 @@ describe("GM view → Money: each control is one edit", () => {
     accepted(await chat.edit(flowSpawnOps(id, gymForm(DANNY_CHECKING), chat.currency)));
     let danny = await chat.party(DANNY);
     const gym = danny.flows.find((f) => f.id === id);
-    if (!gym) throw new Error("no Harbor Gym flow");
+    if (!gym?.spec) throw new Error("no Harbor Gym flow with its form");
     expect(gym).toMatchObject({ label: "Harbor Gym", from: "Danny's checking", amount: "$40.00", schedule: "monthly on the 5th", status: "active", source: "entity" });
     expect((await chat.hub()).flows.some((f) => f.id === id)).toBe(false);
 

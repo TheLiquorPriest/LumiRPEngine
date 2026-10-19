@@ -534,6 +534,7 @@ export interface JournalEntry {
   memo: string;
   kind?: TxnKind;
   category?: string;
+  /** The other side: the entity id of someone in the world (views name it, or mask it), else an outside party's name. */
   counterparty?: string;
   card?: EntityId;
   flow?: string;
@@ -1187,7 +1188,8 @@ export interface CardView {
   network: CardNetwork;
   state: CardState;
   holder: string;
-  holderId: EntityId;
+  /** Null on a player surface when the player can't see the holder. */
+  holderId: EntityId | null;
   account: EntityId;
   last4: string | null;
   item: EntityId | null;
@@ -1197,7 +1199,8 @@ export interface CardView {
 }
 
 export interface OwnerLine {
-  party: EntityId;
+  /** Null on a player surface for an owner the player can't see (named "someone"). */
+  party: EntityId | null;
   name: string;
   role: OwnerRole;
   share: number;
@@ -1251,14 +1254,16 @@ export interface FlowView {
   status: FlowStatus;
   category: string | null;
   link: { id: EntityId; name: string } | null;
+  /** Who pays: the flow's `from` id when it's an entity the viewer can see, else null. */
+  payer: EntityId | null;
   /** Whether the viewer may change it; a derived flow is changed at its source (`source`). */
   editable: boolean;
   source: string;
   done: number;
   missed: number;
   deferred: number;
-  /** The flow as stored, so an editor can fill its form. */
-  spec: Flow;
+  /** The flow as stored, so an editor can fill its form; null on a player surface when any side of it is someone the player can't see. */
+  spec: Flow | null;
 }
 
 export interface OverviewView {
@@ -1381,11 +1386,12 @@ export interface PropertyView {
 export interface HouseholdView {
   id: EntityId;
   name: string;
-  members: { id: EntityId; name: string; role: string; share: number }[];
+  /** A member the player can't see has a null id and is "someone". */
+  members: { id: EntityId | null; name: string; role: string; share: number }[];
   accounts: EntityId[];
   flows: FlowView[];
   /** The household's shared costs a month, and each member's part. */
-  monthly: { total: number; parts: { id: EntityId; name: string; cents: number }[] };
+  monthly: { total: number; parts: { id: EntityId | null; name: string; cents: number }[] };
 }
 
 /**

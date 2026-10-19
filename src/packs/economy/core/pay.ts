@@ -546,8 +546,10 @@ export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, r
   ]);
   const od = picked && overdraft ? overdraftEvents(ctx, source, total, at) : { before: [], after: [] };
   const holds = picked?.card !== undefined && featureFor(ctx, payer, "holds");
-  const counterparty = opts.payee ? labelOf(ctx, terms?.seller ?? opts.payee) : terms?.seller ? labelOf(ctx, terms.seller) : (opts.counterparty ?? undefined);
-  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty: counterparty.replace(/_/g, " ") } : {}), ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
+  // The other side by id when it's someone in the world (a view names it, or masks it), else the outside party's name.
+  const outside = opts.counterparty === undefined ? undefined : own(ctx.state.entities, opts.counterparty) ? opts.counterparty : opts.counterparty.replace(/_/g, " ");
+  const counterparty = terms?.seller ?? opts.payee ?? outside;
+  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty } : {}), ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
   const spend: LedgerEvent[] = [];
   if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
     const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;

@@ -97,8 +97,8 @@ export function HouseholdSection(props: SectionProps) {
             v={
               <span class="lre-inline">
                 {m.share > 0 ? `${Math.round(m.share * 10) / 10}%` : null}
-                {controls.mode === "gm" ? (
-                  <button type="button" class="lre-btn small danger" disabled={controls.busy} aria-label={`Take ${m.name} out of ${h.name}`} onClick={() => void controls.edit([{ op: "unlink", rel: "member_of", from: m.id, to: h.id }])}>
+                {controls.mode === "gm" && m.id !== null ? (
+                  <button type="button" class="lre-btn small danger" disabled={controls.busy} aria-label={`Take ${m.name} out of ${h.name}`} onClick={() => m.id !== null && void controls.edit([{ op: "unlink", rel: "member_of", from: m.id, to: h.id }])}>
                     ✕
                   </button>
                 ) : null}
