@@ -372,7 +372,8 @@ describe("Play → Money → Properties: each control plays as the player's turn
     expect(find(view.properties, HOUSE).leases.find((l) => l.flow === lease)).toEqual({ flow: lease, tenant: "Danny Okafor", rent: 150000, start: TODAY, end: "2027-09-13", state: "let" });
     expect(endableLeases(view, find(view.properties, HOUSE))).toEqual([lease]);
     expect(find(view.flows, lease)).toMatchObject({ to: "Your savings account", amount: "$1,500.00" });
-    expect(find((await chat.party(DANNY)).flows, lease)).toMatchObject({ from: "Danny Okafor", next: "Thu 1 Oct 2026, 09:00" });
+    // Danny pays it from his checking, his deposit account.
+    expect(find((await chat.party(DANNY)).flows, lease)).toMatchObject({ from: "Danny's checking", next: "Thu 1 Oct 2026, 09:00" });
     expect(await chat.play(leaseEndAction(lease))).toContain("done");
     expect(find((await chat.hub()).properties, HOUSE).leases.find((l) => l.flow === lease)?.end).toBe(TODAY);
     // The GM's routing puts the rent back in checking.
@@ -385,6 +386,8 @@ describe("Play → Money → Properties: each control plays as the player's turn
     await buyHouse(chat);
     const before = await chat.hub();
     expect(await chat.play(propertySellAction(HOUSE, chat.cents("360000"), { buyer: DANNY }))).toContain("doesn't have $360,000.00");
+    // An outside buyer pays no more than it is worth: the GM's ✎ puts its value at $360,000 first.
+    accepted(await chat.edit([{ op: "set", entity: HOUSE, field: "value", value: chat.cents("360000") }]));
     expect(await chat.play(propertySellAction(HOUSE, chat.cents("360000")))).toContain("done");
     const after = await chat.hub();
     expect(after.properties.map((p) => p.id)).not.toContain(HOUSE);

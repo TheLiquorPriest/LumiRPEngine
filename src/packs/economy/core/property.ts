@@ -328,7 +328,7 @@ function managedFlow(api: FinanceApi, ctx: ReadContext, id: EntityId, l: Managed
 }
 
 /** A property's leases as its view lists them: each lease, then a vacant line for each unit without one. */
-function leaseViews(ctx: ReadContext, id: EntityId): LeaseView[] {
+function leaseViews(api: FinanceApi, ctx: ReadContext, id: EntityId): LeaseView[] {
   const now = ctx.state.clock;
   const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
   const out: LeaseView[] = [];
@@ -336,7 +336,9 @@ function leaseViews(ctx: ReadContext, id: EntityId): LeaseView[] {
   for (const l of authoredLeases(ctx, id)) {
     const live = inForce(l, now);
     if (live) let_++;
-    out.push({ flow: l.id, tenant: labelOf(ctx, l.tenant), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
+    // The tenant is whoever holds the account the rent is paid from.
+    const tenant = own(ctx.state.entities, l.tenant)?.kind === "account" ? (api.ownersOf(ctx.state, l.tenant)[0]?.party ?? l.tenant) : l.tenant;
+    out.push({ flow: l.id, tenant: labelOf(ctx, tenant), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
   }
   for (const l of managedLeases(ctx, id)) {
     const from = monthStart(ctx.world, l.from);
@@ -668,7 +670,7 @@ export function propertyView(api: FinanceApi, ctx: ReadContext, id: EntityId, pa
     value,
     equity: value - owed,
     mortgage: loan ? { id: loan.loan, name: labelOf(ctx, loan.loan), owed, payment: num(fieldsOf(ctx.state, loan.loan).payment) ?? null, monthsLeft: num(fieldsOf(ctx.state, loan.loan).months_left) ?? null } : null,
-    leases: leaseViews(ctx, id),
+    leases: leaseViews(api, ctx, id),
     costs: flows.filter((f) => f.link?.id === id && f.kind !== "rent"),
     forSale: asking ?? null,
     // Where its rent goes, for an owner: `rent_to` when it names an account, else the usual place.
