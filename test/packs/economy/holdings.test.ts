@@ -366,4 +366,18 @@ describe("holdings: property", () => {
     expect(value).not.toBe(30_000_000);
     expect(worth(w) - worth(without)).toBeGreaterThan(0);
   });
+
+  test("a property nobody owns sells for what it's worth at least", () => {
+    const w = setup((world) => {
+      world.entities.lot = { id: "lot", kind: "property", name: "The lot", tier: "background", fields: { place: "apartment", owners: [], value: 20_000_000 }, relations: [] };
+      world.entities.savings!.fields.opening = 25_000_000;
+    });
+    expect(refuse(w, "economy.property_buy", { party: "you", property: "lot", price: 1, from: "savings" })).toBe("declined");
+    expect(refuse(w, "economy.property_buy", { party: "you", property: "lot", price: 19_999_999, from: "savings" })).toBe("declined");
+    expect(w.state.entities.lot?.fields.owners).toEqual([]);
+    run(w, "economy.property_buy", { party: "you", property: "lot", from: "savings" });
+    expect(w.state.entities.lot?.fields.owners).toEqual([{ party: "you", role: "owner", share: 100 }]);
+    expect(balance(w, "savings")).toBe(5_000_000);
+    expect(trialBalance(w.state)).toBe(0);
+  });
 });

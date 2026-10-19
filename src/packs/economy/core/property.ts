@@ -375,10 +375,12 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
   if (owners.some((o) => o.party === x.party)) return reject("already_yours", `${e.name} is already ${labelOf(ctx, x.party)}'s`);
   const asking = num(e.fields.asking_price);
   if (owners.length > 0 && asking === undefined) return reject("not_for_sale", `${e.name} isn't for sale`);
-  const price = Math.round(x.price ?? asking ?? propertyValue(ctx.state, x.property));
-  if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
   const money = (c: number): string => formatMoney(c, ctx.world.currency);
-  if (asking !== undefined && price < asking) return reject("declined", `the sellers want ${money(Math.round(asking))} for ${e.name}`);
+  // The least it sells for: its asking price, else (nobody owns it) what it's worth.
+  const floor = Math.round(asking ?? propertyValue(ctx.state, x.property));
+  const price = Math.round(x.price ?? floor);
+  if (!(price > 0)) return reject("bad_amount", "a price is above nothing");
+  if (price < floor) return reject("declined", asking !== undefined ? `the sellers want ${money(floor)} for ${e.name}` : `${e.name} is worth ${money(floor)}`);
   const down = Math.round(x.down ?? price);
   if (down < 0 || down > price) return reject("bad_amount", "a down payment is between nothing and the price");
   const financed = price - down;
