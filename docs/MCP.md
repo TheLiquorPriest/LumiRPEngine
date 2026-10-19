@@ -54,20 +54,20 @@ Every answer is text, JSON for data, of at most about 24,000 characters; a large
 
 | Tool | What it does |
 |---|---|
-| `lre_guide {topic?}` | The agent guide, or one section of it. |
+| `lre_guide {topic?}` | The agent guide, or one section of it ("Money", "Character minds"). |
 | `lre_docs {query, doc?}` | The best-matching sections of the reference, expressions, recipes, design, user guide, Studio contract and presets docs. |
 | `lre_schema {pointer?, schema?, offset?}` | The world (or map) JSON Schema at a pointer. |
 | `lre_templates` / `lre_template {id, pointer?, offset?}` | The starter worlds; one as an export file. |
-| `lre_check {path? \| world?}` | Shape, migration, lint and macro hazards, offline. |
-| `lre_playtest {path? \| world? \| worldId?, source?, turns}` | Typed turns through the bundled engine, no narrator, no model. |
-| `lre_check_world {path? \| world? \| worldId?, source?, days?}` | Simulated days from the start. Both note when the world was written by another engine version. |
+| `lre_check {path? \| world?}` | Shape, migration, lint and macro hazards, offline, with the world's items counted and its entities by kind. |
+| `lre_playtest {path? \| world? \| worldId?, source?, turns}` | Typed turns through the bundled engine, no narrator, no model, so no character mind. |
+| `lre_check_world {path? \| world? \| worldId?, source?, days?}` | Simulated days from the start, flows and pay included. Both note when the world was written by another engine version. |
 | `lre_status` | Host, user, session, LumiRPEngine there and its agent API, this client's versions. |
 | `lre_worlds` | Your worlds, with head and revision count, and the draft's state and version. It reads each world's draft: a request per world. |
 | `lre_world {worldId, source?, pointer?, offset?}` | A world's draft (default), head or a revision. |
-| `lre_search {query, worldId?, collections?, limit?}` | Words in your worlds' heads and stored drafts: world, item and field per hit. It reads every world it searches whole, so pass `worldId` when you can; a world it can't read is listed as skipped. |
+| `lre_search {query, worldId?, collections?, kinds?, limit?}` | Words in your worlds' heads and stored drafts: world, item (with its pointer, and its kind for an entity) and field per hit. Money is mostly entities, so `kinds` (`flow`, `account`, `job`, `household`…) narrows to them; the economy's `products` and `assets` are searched one by one. It reads every world it searches whole, so pass `worldId` when you can; a world it can't read is listed as skipped. |
 | `lre_world_create {name, template?}` / `lre_world_import {path? \| world?}` | A new world, blank, from a starter or from a file. |
 | `lre_edit {worldId, ops, expectVersion?}` | JSON Patch on the draft: the new version, what changed, the first lint issues, new macro hazards. |
-| `lre_draft {worldId}` / `lre_diff {worldId, from?, to?}` | The draft's state, lint and changes; an item-by-item diff with the pointers that differ. |
+| `lre_draft {worldId}` / `lre_diff {worldId, from?, to?}` | The draft's state, lint and changes; an item-by-item diff with the pointers that differ. A pack's products and assets count as items of their own. |
 | `lre_commit {worldId, note?, expectVersion?}` / `lre_discard {worldId, expectVersion?}` | The draft becomes the head (with a note in its history), or goes. With `expectVersion`, refused if the draft moved on since that version. |
 | `lre_history {worldId}` / `lre_restore {worldId, revision, expectVersion?}` | How each revision became head; a draft copied from an old revision. |
 | `lre_world_delete {worldId, confirm?}` | Without `confirm`, what deleting the world would remove and leave behind; with `confirm`, its exact name, deletes it for good. |

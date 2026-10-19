@@ -218,7 +218,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_diff",
-    description: 'What changed between two versions of a world, item by item (added, changed, removed), with the JSON Pointers that differ inside each changed item. from and to are "head", "draft" or a revision: by default, from the head to the draft.',
+    description: 'What changed between two versions of a world, item by item (added, changed, removed; a pack\'s products and assets are items of their own), with the JSON Pointers that differ inside each changed item. from and to are "head", "draft" or a revision: by default, from the head to the draft.',
     inputSchema: object({ worldId: WORLD_ID, from: SOURCE, to: SOURCE }, ["worldId"]),
     write: false,
   },
