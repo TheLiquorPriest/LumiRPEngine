@@ -5,10 +5,10 @@
 
 import type { ComponentType } from "preact";
 import type { JsonObject, JsonValue } from "../shared/json";
-import type { ChatId, PackId, PanelId } from "../shared/ids";
+import type { ChatId, EntityId, FieldId, KindId, PackId, PanelId } from "../shared/ids";
 import type { EditOp, FrontendToBackend, ResultMessage, ErrorMessage, LintIssue, WorldCollection } from "../shared/protocol";
 import type { ChipKind, Chip, GmView, StateView } from "../shared/state-view";
-import type { WorldCurrency, WorldDoc } from "../shared/world";
+import type { FieldDef, WorldCurrency, WorldDoc } from "../shared/world";
 
 /** Requests without the envelope fields; `send` adds `lre` and `reqId`. */
 export type RequestBody = FrontendToBackend extends infer R ? (R extends FrontendToBackend ? Omit<R, "lre" | "reqId"> : never) : never;
@@ -54,6 +54,32 @@ export interface PackConfigProps {
   config: JsonObject;
   lint: readonly LintIssue[];
   onChange(next: JsonObject): void;
+}
+
+/**
+ * A field a pack's kind declares whose value is structured (a person's flows, a job, payment
+ * preferences): Build's entity form draws the pack's own editor for it instead of JSON.
+ */
+export interface FieldEditorProps {
+  /** The draft with the packs' kinds and relation types, as the entity form reads it. */
+  doc: WorldDoc;
+  /** The entity whose field it is, as edited (unsaved changes included). */
+  entity: { id: EntityId; kind: KindId; fields: JsonObject };
+  field: FieldId;
+  def: FieldDef;
+  value: JsonValue | undefined;
+  /** The lint at the field's path and below. */
+  lint: readonly LintIssue[];
+  /** The field's document path (`entities.<id>.fields.<field>`), for lint below it. */
+  path: string;
+  onChange(next: JsonValue | undefined): void;
+}
+
+export interface FieldEditorDef {
+  /** The kind declaring the field; entities of a kind inheriting from it get the editor too. */
+  kind: KindId;
+  field: FieldId;
+  component: ComponentType<FieldEditorProps>;
 }
 
 /** A proposed value of a collection, drawn for a job's review (a map as Play will show it). */
@@ -103,6 +129,8 @@ export interface UiRegistry {
   preview(collection: WorldCollection, component: ComponentType<PreviewProps>): void;
   /** Adds a tab to the GM view; ids are unique across packs. */
   gm(def: GmSectionDef): void;
+  /** Draws one declared field of a kind with the pack's own editor in Build's entity form; one per kind and field. */
+  field(def: FieldEditorDef): void;
 }
 
 export interface UiPackDef {
