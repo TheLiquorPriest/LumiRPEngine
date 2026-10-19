@@ -27,6 +27,7 @@ import type { EngineTurnPlan, QueueStop } from "../engine/turn";
 import { timelapseIntent } from "../engine/turn";
 import { checkOf } from "../engine/checks";
 import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
+import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
 import { calendarOf, dateAt, formatClock, formatHHMM, nextTimeOfDay, weekdayName, type Calendar } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
@@ -211,6 +212,32 @@ export function lentAlong(p: JsonObject, pre: readonly LedgerEvent[], state: Rea
     return false;
   };
   return pre.some((e) => e.type === "link" && e.rel === "uses" && e.from === to && (e.to === item || inside(e.to)));
+}
+
+/**
+ * Whether a narrated transfer tells again a movement of money this turn's own actions made (DESIGN
+ * §9.5): a withdrawal, a deposit, a move between accounts or a payment. That movement is a posting
+ * among the turn's pre-reply events, and the transfer is it told again when both sides name it and
+ * the narration's amount is near what moved. A side names a posting's side when it is an account
+ * the posting drew on (`from`) or paid into (`to`), a party holding one, or a party whose outside
+ * account it moved. Near is the purchase rule's: within ±25% of what left the one side or reached
+ * the other (a machine's fee makes them differ), or no amount stated. Applying it would move the
+ * money twice; a transfer that differs (another amount, another account) stays.
+ */
+export function movedAlong(p: JsonObject, pre: readonly LedgerEvent[], state: Readonly<WorldState>): boolean {
+  if (p.type !== "transfer" || typeof p.from !== "string" || typeof p.to !== "string") return false;
+  const from = p.from.trim();
+  const to = p.to.trim();
+  if (from === "" || to === "") return false;
+  const cents = transferCents(p);
+  const near = (v: number): boolean => !Number.isFinite(cents) || Math.abs(Math.abs(cents) - v) <= 0.25 * v;
+  const names = (side: string, account: string): boolean => account === side || account === `${EXTERNAL_ACCOUNT_PREFIX}${side}` || heldBy(state.entities, account, side);
+  return pre.some((e) => {
+    if (e.type !== "post") return false;
+    const left = e.lines.reduce((sum, l) => sum + (l.amount < 0 && names(from, l.account) ? -l.amount : 0), 0);
+    const reached = e.lines.reduce((sum, l) => sum + (l.amount > 0 && names(to, l.account) ? l.amount : 0), 0);
+    return left > 0 && reached > 0 && (near(left) || near(reached));
+  });
 }
 
 /** A narrated purchase measured against the turn's own Buy: told again (dropped), maybe told again (an "Also bought …?" chip), or not the Buy at all (null). */
@@ -1262,10 +1289,11 @@ export class Runtime implements TurnHooks {
       this.inspector.save(chatId);
     }
     // Proposals naming what the POV can't know (a hidden or unmet entity, a secret place) are dropped,
-    // and so is the turn's own action told again: a give of what it lent, a purchase it made (with
-    // the price the player typed for this turn's Buy, in minor units, when there is one). A purchase
-    // that names the Buy with other things keeps the others, each its own purchase; one that may be
-    // the Buy told again is only ever offered ("Also bought …?").
+    // and so is the turn's own action told again: a give of what it lent, a movement of money it made
+    // (a withdrawal, a deposit, a transfer or a payment), a purchase it made (with the price the player
+    // typed for this turn's Buy, in minor units, when there is one). A purchase that names the Buy with
+    // other things keeps the others, each its own purchase; one that may be the Buy told again is only
+    // ever offered ("Also bought …?").
     const intent = pre ? bridge.intentOf(pre.text) : null;
     // The prices the player typed for this turn's Buys (minor units): the first action's and the queued ones'.
     const typed = intent ? [{ action: intent.action, params: intent.params }, ...(intent.queue ?? [])].flatMap((a) => (a.action === "buy" && typeof a.params.price === "number" ? [a.params.price] : [])) : [];
@@ -1274,7 +1302,7 @@ export class Runtime implements TurnHooks {
       [...extracted, ...effects.flat()].flatMap((p) => splitAlongBuy(p, context.pre, ctx)),
       context.world.pov,
     ).filter((p) => {
-      if (lentAlong(p, context.pre, context.state)) return false;
+      if (lentAlong(p, context.pre, context.state) || movedAlong(p, context.pre, context.state)) return false;
       const along = boughtAlong(p, context.pre, ctx, typed, text);
       if (along === "unsure") unsure.add(p);
       return along !== "retold";
