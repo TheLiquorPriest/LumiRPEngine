@@ -3266,7 +3266,7 @@
       "lkfr": {
         "label": "Lakefront Freight",
         "symbol": "LKFR",
-        "class": "stock",
+        "class": "security",
         "price": 4200,
         "annual_return_pct": 8,
         "annual_volatility_pct": 32,
