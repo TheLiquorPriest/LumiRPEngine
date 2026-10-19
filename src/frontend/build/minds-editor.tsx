@@ -6,7 +6,7 @@
 import { useMemo, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import type { FidelityWeights, MindPurpose, MindsSecrecy, WorldMindsConfig } from "../../shared/minds";
-import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf } from "../../shared/minds";
+import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PURPOSES, MINDS_RANGES, worldMindsOf, worldMindTemplate } from "../../shared/minds";
 import type { WorldDoc } from "../../shared/world";
 import { useApp } from "../app";
 import { Card, HostSwitch, NumberStepper, Row, Seg, useBusy } from "../components";
@@ -26,7 +26,7 @@ export const SECRECY_EXPLAINED: Record<MindsSecrecy, { label: string; text: stri
   },
   full: {
     label: "Full",
-    text: "The narrator also gets each character's inner monologue and what they mean to do, told to show them through behaviour and never say them outright. Richer, more consistent characters; a careless narrator could let a thought or a secret slip.",
+    text: "The narrator also gets each character's inner monologue, what they mean to do, their reactions and their mood, told to show them through behaviour and never say them outright. Richer, more consistent characters; a careless narrator could let a thought or a secret slip.",
   },
 };
 
@@ -117,9 +117,10 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string }) {
     });
   return (
     <Card title="Step templates">
-      <div class="lre-small lre-muted">A world's template for a step wins over the player's own prompt and the built-in one; only a step's first template (by id) is used, and its signals are ignored. A new template starts from the built-in prompt.</div>
+      <div class="lre-small lre-muted">A world's template for a step wins over the built-in prompt, and a player's own prompt wins over it; only a step's first template (by id) with any text is used, and its signals are ignored. A new template starts from the built-in prompt.</div>
       {MIND_PURPOSES.map((purpose) => {
         const templates = Object.values(props.doc.steps).filter((t) => t.purpose === purpose).sort((a, b) => a.id.localeCompare(b.id));
+        const used = worldMindTemplate(props.doc, purpose);
         return (
           <div key={purpose} class="lre-stack" style={{ gap: "2px" }} data-lre-minds-templates={purpose}>
             <Row
@@ -133,12 +134,12 @@ function MindTemplates(props: { doc: WorldDoc; worldId: string }) {
               }
               sub={templates.length === 0 ? "None: the player's prompt, else the built-in" : undefined}
             />
-            {templates.map((t, i) => (
+            {templates.map((t) => (
               <button key={t.id} type="button" class="lre-item" onClick={() => open(t.id)}>
                 <span class="grow">
                   <code>{t.id}</code>
                 </span>
-                {i > 0 ? <span class="lre-badge warn">Not used</span> : null}
+                {t === used ? null : <span class="lre-badge warn">{t.template.trim() === "" ? "Blank: not used" : "Not used"}</span>}
                 <span class="lre-dim" aria-hidden="true">
                   ›
                 </span>

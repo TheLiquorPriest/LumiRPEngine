@@ -5,7 +5,8 @@
 // in it at all, a search that would name a secret or someone the player hasn't met is withheld, a
 // step that may read a secret or an NPC's private options shows its lookups without their text
 // ("—"), and an NPC choice, being private, shows no counts and no entries. The minds calls show
-// whose mind ran, at which level, how it went and what it cost: never a word of what a mind said.
+// whose mind ran, at which level, how it went and what it cost, only for people the player can see
+// and has met, and never a word of what a mind said or whether its depiction was kept back.
 
 import { useEffect, useState } from "preact/hooks";
 import { isRecord } from "../../shared/json";
@@ -42,10 +43,7 @@ function decodeLore(value: unknown): LoreStepTrace[] {
 
 const MIND_OUTCOME: Record<MindCallTrace["outcome"], { text: string; tone: string }> = {
   recorded: { text: "recorded", tone: "pos" },
-  reused: { text: "reused", tone: "" },
   failed: { text: "failed", tone: "neg" },
-  leak_blocked: { text: "kept from the narrator", tone: "warn" },
-  skipped_limit: { text: "over the limit", tone: "" },
 };
 const MIND_PHASE: Record<MindCallTrace["phase"], string> = { pre: "Before the reply", post: "After the reply", skip: "In a time skip" };
 const MIND_PROMPT: Record<MindCallTrace["prompt"], string> = { world: "the world's prompt", override: "your prompt", default: "the built-in prompt" };
@@ -56,7 +54,7 @@ function decodeMinds(value: unknown): MindCallTrace[] {
     phase: oneOf(t.phase, ["pre", "post", "skip"] as const, "pre"),
     who: str(t.who, "Someone"),
     level: oneOf(t.level, FIDELITIES, "near"),
-    outcome: oneOf(t.outcome, ["recorded", "reused", "failed", "leak_blocked", "skipped_limit"] as const, "failed"),
+    outcome: oneOf(t.outcome, ["recorded", "failed"] as const, "failed"),
     ms: num(t.ms),
     tokens: num(t.tokens),
     prompt: oneOf(t.prompt, ["world", "override", "default"] as const, "default"),
@@ -199,7 +197,7 @@ export function ContextPanel(props: PanelProps) {
                   k={`${m.who} · ${STEP_LABEL[m.purpose]}`}
                   v={
                     <span class="lre-inline">
-                      {m.outcome === "skipped_limit" || m.outcome === "reused" ? null : `${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
+                      {`${(m.ms / 1000).toFixed(1)} s · ${m.tokens} tok`}
                       <span class={`lre-badge ${MIND_OUTCOME[m.outcome].tone}`}>{MIND_OUTCOME[m.outcome].text}</span>
                     </span>
                   }

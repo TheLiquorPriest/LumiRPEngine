@@ -16,6 +16,7 @@ import type { LedgerEvent } from "../shared/ledger";
 import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEventData, MindMoment, MindNote, MindPlan, MindPurpose, MindsSettings, PlanKind } from "../shared/minds";
 import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
+import { stepConfigOf } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
 import { calendarOf, clockOfLocal, formatClock, nextTimeOfDay, parseHHMM } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
@@ -32,7 +33,7 @@ import { faded, readCharacter, readSlice, salienceNow } from "../packs/minds/cor
 import type { HostMessage, HostPort } from "./host";
 import { consolidateContext, memoryContext, mindContext, povLabel, type MindScope } from "./minds-context";
 import type { PresetBinding } from "./preset-binding";
-import { HELPER_MAX_TOKENS, type SettingsStore } from "./settings-store";
+import type { SettingsStore } from "./settings-store";
 import type { Steps } from "./steps";
 import { renderTemplate } from "./turn-steps";
 
@@ -73,11 +74,10 @@ export interface RunMindsResult {
   traces: MindCallTrace[];
 }
 
-/** The step card a minds purpose runs with: the saved one, else the defaults; null when the user saved it off. */
+/** The step card a minds purpose runs with (`stepConfigOf`: on with the helper's tokens while unsaved); null when the user saved it off. */
 export function mindsStepConfig(modelUse: ModelUseSettings, purpose: MindPurpose): StepConfig | null {
-  const saved = modelUse.steps[purpose];
-  if (saved && !saved.enabled) return null;
-  return saved ?? { enabled: true, signals: [], maxTokens: HELPER_MAX_TOKENS };
+  const config = stepConfigOf(modelUse.steps, purpose);
+  return config.enabled ? config : null;
 }
 
 /** Whether minds run for this user: on in Settings → Minds, with the `mind` step not switched off. */
@@ -235,7 +235,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const raw = input.signal.aborted ? null : await deps.steps.helperJson("mind", prompt.text, mindContext(scope), config, userId, input.signal, { guidance, usage });
     const ms = Math.round(performance.now() - t0);
     const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
-    return { data, trace: { ...base, outcome: data === null ? "failed" : data.withheld ? "leak_blocked" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source } };
+    return { data, trace: { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source } };
   });
   const results = await Promise.all(calls);
   // Each checked against the state it will fold on: one that doesn't validate is dropped.

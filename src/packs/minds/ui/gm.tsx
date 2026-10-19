@@ -11,12 +11,12 @@ import type { EditOp } from "../../../shared/protocol";
 import { Card, Empty, Row, Seg } from "../../../frontend/components";
 import type { GmSectionProps } from "../../../frontend/registry";
 import type { CommitmentDraft, NoteDraft, PlanFormDraft } from "./ops";
-import { COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
+import { COMMITMENT_KIND_LABEL, COMMITMENT_STATUS_LABEL, commitmentDraft, commitmentOp, deleteOp, FIDELITY_LABEL, narratorGets, noteDraft, noteOp, pinOp, PLAN_KIND_LABEL, PLAN_STATUS_LABEL, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "./ops";
 
 const LEVEL_TONE: Record<Fidelity, string> = { live: "accent", near: "", far: "", background: "" };
 
 const SECRECY_NOTE: Record<MindsGmView["secrecy"], string> = {
-  full: "Full: the narrator gets each mind's monologue and intent, told to show them and never state them.",
+  full: "Full: the narrator gets each mind whole (monologue, intent, reactions, mood and depiction), told to show it and never state it.",
   brief: "Brief: the narrator gets only the depiction, checked for leaks; the monologue and intent stay here.",
 };
 
@@ -244,18 +244,18 @@ function LatestMind(props: { ctx: Ctx; c: MindsGmCharacter }) {
   const { ctx, c } = props;
   const m = c.mind;
   if (!m) return <Card title="Latest mind">{<Empty>No mind yet.</Empty>}</Card>;
-  const full = ctx.view.secrecy === "full";
+  const sent = narratorGets(ctx.view.secrecy, m);
   const toNarrator = <span class="lre-badge">to the narrator</span>;
   return (
     <Card title="Latest mind" aside={<span class="lre-badge">{FIDELITY_LABEL[m.level]}</span>}>
       <Row k="When" v={m.clock} sub={`${m.moment === "beat" ? "At a time-skip beat" : "On a turn"} · ${m.reason}${m.place ? ` · at ${nameIn(ctx.places, m.place)}` : ""}`} />
-      {m.mood ? <Row k="Mood" v={m.mood} /> : null}
-      <Row k={<span class="lre-inline">Monologue {full ? toNarrator : null}</span>} sub={m.monologue || "—"} />
-      <Row k={<span class="lre-inline">Depiction {full || m.withheld ? null : toNarrator}</span>} sub={m.depiction || "—"} />
+      {m.mood ? <Row k={<span class="lre-inline">Mood {sent.mood ? toNarrator : null}</span>} v={m.mood} /> : null}
+      <Row k={<span class="lre-inline">Monologue {sent.monologue ? toNarrator : null}</span>} sub={m.monologue || "—"} />
+      <Row k={<span class="lre-inline">Depiction {sent.depiction ? toNarrator : null}</span>} sub={m.depiction || "—"} />
       {m.withheld ? <div class="lre-banner warn">The depiction gave away a secret or a name you haven't met, so the narrator got none of it this time.</div> : null}
-      <Row k={<span class="lre-inline">Intent {full ? toNarrator : null}</span>} sub={m.intent || "—"} />
-      {m.reactions.length > 0 ? <Row k="Reactions" sub={m.reactions.join(" · ")} /> : null}
-      {m.interrupt ? <Row k="Interrupted the skip" v={m.interrupt} tone="warn" /> : null}
+      <Row k={<span class="lre-inline">Intent {sent.intent ? toNarrator : null}</span>} sub={m.intent || "—"} />
+      {m.reactions.length > 0 ? <Row k={<span class="lre-inline">Reactions {sent.reactions ? toNarrator : null}</span>} sub={m.reactions.join(" · ")} /> : null}
+      {m.interrupt ? <Row k={<span class="lre-inline">Interrupted the skip {sent.interrupt ? toNarrator : null}</span>} v={m.interrupt} tone="warn" /> : null}
     </Card>
   );
 }

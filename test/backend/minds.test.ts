@@ -176,7 +176,7 @@ describe("minds around a turn", () => {
     expect(section(rig, "Minds")).toContain("Priya Nair:");
     const danny = (await headRecord(rig, chatId)).find((e) => e.type === "minds.mind" && "data" in e && e.data.entity === "danny_okafor");
     expect(danny && "data" in danny ? danny.data.withheld : null).toBe(true);
-    expect(rig.rt.inspectorRecords(chatId)?.at(-1)?.minds?.some((t) => t.outcome === "leak_blocked")).toBe(true);
+    expect(rig.rt.inspectorRecords(chatId)?.at(-1)?.minds?.filter((t) => t.purpose === "mind").map((t) => t.outcome)).toEqual(["recorded", "recorded"]);
     // Every player surface: the state view (Journal, Cast, chips and the rest) never carries it.
     expect(JSON.stringify(rig.latestView(chatId))).not.toContain(secret);
     expect(JSON.stringify(rig.host.sent.filter((m) => m.type !== "lre.result"))).not.toContain(secret);

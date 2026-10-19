@@ -4,7 +4,7 @@
 
 import { hasOwn, isRecord } from "../../../shared/json";
 import type { LintIssue } from "../../../shared/protocol";
-import { isMindPurpose, MINDS_RANGES, WORLD_MINDS_KEYS } from "../../../shared/minds";
+import { isMindPurpose, MINDS_RANGES, WORLD_MINDS_KEYS, worldMindTemplate } from "../../../shared/minds";
 import type { WorldDoc } from "../../../shared/world";
 import type { LintRule } from "../../../engine/registry";
 import type { Registry } from "../../../engine/registry-impl";
@@ -98,17 +98,15 @@ function configIssues(world: WorldDoc, registry: Registry | undefined): LintIssu
   return out;
 }
 
-/** Step templates for the minds purposes: their signals never decide anything, and only the first per purpose is used. */
+/** Step templates for the minds purposes: their signals never decide anything, and only the one `worldMindTemplate` picks per purpose is used. */
 function stepIssues(world: WorldDoc): LintIssue[] {
   const out: LintIssue[] = [];
-  const first = new Map<string, string>();
-  for (const id of Object.keys(world.steps).sort()) {
-    const t = world.steps[id];
-    if (!t || !isMindPurpose(t.purpose)) continue;
+  for (const [id, t] of Object.entries(world.steps).sort(([a], [b]) => a.localeCompare(b))) {
+    if (!isMindPurpose(t.purpose)) continue;
     if (t.signals.length > 0) out.push({ severity: "info", path: `steps.${id}.signals`, code: "minds.step_signals", message: `Minds run on their own cadence (Settings → Minds), so a ${t.purpose} template's signals are ignored.` });
-    const earlier = first.get(t.purpose);
-    if (earlier !== undefined) out.push({ severity: "warning", path: `steps.${id}`, code: "minds.step_duplicate", message: `The world has another ${t.purpose} template ("${earlier}"); only that one, the first by id, is used.` });
-    else first.set(t.purpose, id);
+    const used = worldMindTemplate(world, t.purpose);
+    if (t.template.trim() === "") out.push({ severity: "warning", path: `steps.${id}.template`, code: "minds.step_blank", message: `This ${t.purpose} template is blank, so it is skipped${used ? ` and "${used.id}" is used` : ""}.` });
+    else if (used && used !== t) out.push({ severity: "warning", path: `steps.${id}`, code: "minds.step_duplicate", message: `The world has another ${t.purpose} template ("${used.id}"); only that one, the first by id with any text, is used.` });
   }
   return out;
 }

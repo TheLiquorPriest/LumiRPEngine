@@ -2,7 +2,7 @@
 // Minds values, and the GM view's controls, each sent to a real backend and read back.
 
 import { describe, expect, test } from "bun:test";
-import { commitmentDraft, commitmentOp, deleteOp, noteOp, pinOp, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "../../src/packs/minds/ui/ops";
+import { commitmentDraft, commitmentOp, deleteOp, narratorGets, noteOp, pinOp, planDraft, planLasts, planOp, refreshOp, startPlanIn, type MindPart } from "../../src/packs/minds/ui/ops";
 import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, mindsPolicyPatch, mindsPromptPatch, withMemoryLevel } from "../../src/frontend/settings/minds-patch";
 import { mindsPartValue } from "../../src/frontend/build/minds-editor";
 import { decodeContextView } from "../../src/frontend/play/context";
@@ -11,9 +11,20 @@ import { parseEditOps } from "../../src/engine/edits";
 import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
 import type { MindCallTrace, MindsSettings, WorldMindsConfig } from "../../src/shared/minds";
-import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_PRESETS, worldMindsOf } from "../../src/shared/minds";
+import { DEFAULT_WORLD_MINDS, defaultMindsSettings, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
+import { stepUpdatePatch } from "../../src/frontend/settings/steps";
+import { mindPrompt, mindsOn, mindsStepConfig } from "../../src/backend/minds";
+import { lintWorld } from "../../src/engine/authoring";
+import { HELPER_MAX_TOKENS, stepConfigOf, type ModelUseSettings } from "../../src/shared/settings";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { ALL_PACKS } from "../../src/packs/index";
+import { mindLines } from "../../src/packs/minds/core/section";
+import { readCharacter } from "../../src/packs/minds/core/state";
+import { modernUsWorld } from "../packs/riverton";
+import { fold, startState } from "../packs/support";
+import { runDir } from "../../src/shared/ids";
 
 const field = (part: string, key: string) => {
   const f = MEMORY_FIELDS.find((x) => x.part === part && x.key === key);
@@ -99,7 +110,43 @@ describe("Settings → Minds patches", () => {
   });
 });
 
+describe("Settings → Steps with the minds steps", () => {
+  test("on Lean the unsaved minds cards show what runs, and picking a connection on Character minds leaves minds on when they're turned on", async () => {
+    const rig = new Rig();
+    type Read = { minds: MindsSettings; modelUse: ModelUseSettings };
+    const set = async (patch: JsonObject): Promise<Read> => rig.body(await rig.send({ type: "lre.settings.set", patch })).settings as Read;
+    const lean = await set({ modelUse: { preset: "lean" } });
+    for (const purpose of ["mind", "memory", "skip", "consolidate"] as const) {
+      expect(lean.modelUse.steps[purpose]).toBeUndefined();
+      expect(stepConfigOf(lean.modelUse.steps, purpose)).toEqual({ enabled: true, signals: [], maxTokens: HELPER_MAX_TOKENS });
+    }
+    // The card saves its whole config with the change, as the Connection select does.
+    const card = stepConfigOf(lean.modelUse.steps, "mind");
+    await set(stepUpdatePatch("mind", { ...card, route: { provider: "helper", connectionId: "conn-2", model: null } }));
+    const after = await set(mindsPolicyPatch({ enabled: true }));
+    expect(mindsOn(after)).toBe(true);
+    expect(mindsStepConfig(after.modelUse, "mind")).toMatchObject({ enabled: true, maxTokens: HELPER_MAX_TOKENS, route: { connectionId: "conn-2" } });
+  });
+});
+
 describe("Build → World → Minds", () => {
+  test("lint and the editor mark as used the template the runtime runs: a blank one is skipped, ids in the runtime's order", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const w = modernUsWorld("w", "R");
+    const step = (id: string, template: string) => ({ id, purpose: "mind" as const, template, output: "text" as const, signals: [] });
+    w.steps = { ...w.steps, mind_a: step("mind_a", "  \n "), Mind_b: step("Mind_b", "Think as {{character}}, B."), mind_c: step("mind_c", "Think as {{character}}, C.") };
+    const runs = mindPrompt("mind", w, defaultMindsSettings(), { character: "Maya" });
+    expect(runs.source).toBe("world");
+    expect(runs.text.startsWith("Think as Maya, B.")).toBe(true);
+    // The editor's used template, and lint's verdict on each.
+    expect(worldMindTemplate(w, "mind")?.id).toBe("Mind_b");
+    const issues = lintWorld(w, reg).filter((i) => i.code === "minds.step_blank" || i.code === "minds.step_duplicate");
+    expect(issues.map((i) => [i.path, i.code])).toEqual([
+      ["steps.mind_a.template", "minds.step_blank"],
+      ["steps.mind_c", "minds.step_duplicate"],
+    ]);
+  });
+
   test("the defaults save as no config; anything else saves whole, an unset selector left out", () => {
     expect(mindsPartValue(structuredClone(DEFAULT_WORLD_MINDS) as WorldMindsConfig)).toEqual({});
     const edited: WorldMindsConfig = { ...structuredClone(DEFAULT_WORLD_MINDS), secrecy: "full", always: { tag: ["lead"] } } as WorldMindsConfig;
@@ -165,6 +212,23 @@ describe("GM view → Minds controls", () => {
     expect(planOp("dev", null, { ...longer, what: " " })).toBeNull();
     expect(planOp("dev", null, { ...longer, priority: 6 })).toBeNull();
   });
+
+  test("the to-the-narrator badges mark exactly what the Minds section gives the narrator, under each secrecy", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const text: Record<MindPart, string> = { mood: "wary", monologue: "I should keep my head down today", depiction: "keeps glancing at the door", intent: "Get through the shift", reactions: "changes the subject", interrupt: "needs a word before she leaves" };
+    for (const [secrecy, withheld] of [["full", false], ["brief", false], ["brief", true]] as const) {
+      const w = modernUsWorld("w", "R");
+      w.minds = { secrecy } as WorldDoc["minds"];
+      const s0 = fold(reg, w, startState(w), [{ type: "set", entity: "maya", field: "place", value: "apartment" }]);
+      const data = { entity: "maya", at: s0.clock, place: "apartment", level: "live", moment: "beat", reason: "live", monologue: `${text.monologue}.`, depiction: text.depiction, intent: `${text.intent}.`, reactions: [`if asked about money, ${text.reactions}`], plans: [], mood: text.mood, interrupt: { reason: text.interrupt }, withheld };
+      const s = fold(reg, w, s0, [{ type: "minds.round", data: { at: s0.clock, on: true } }, { type: "minds.mind", data }]);
+      const line = mindLines(reg.context(w, s)).map((l) => l.line).join("\n");
+      const record = readCharacter(s, "maya").mind;
+      if (!record) throw new Error("no mind recorded");
+      const sent = narratorGets(secrecy, record);
+      for (const part of Object.keys(text) as MindPart[]) expect([secrecy, withheld, part, sent[part]]).toEqual([secrecy, withheld, part, line.includes(text[part])]);
+    }
+  });
 });
 
 describe("Context inspector → Minds", () => {
@@ -176,11 +240,32 @@ describe("Context inspector → Minds", () => {
     expect(mindTracesOf(undefined)).toBeUndefined();
   });
 
+  test("a trace reads only as an outcome the engine records: reused and over-the-limit calls never happen", () => {
+    expect(mindTracesOf([{ ...trace, outcome: "reused" }, { ...trace, outcome: "skipped_limit" }, { ...trace, outcome: "failed" }])?.map((t) => t.outcome)).toEqual(["failed"]);
+  });
+
   test("the panel reads the traces of a generation", () => {
-    const view = decodeContextView({ warnings: [], generations: [{ id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, minds: [trace, { ...trace, purpose: "memory", phase: "post", who: "Someone", outcome: "leak_blocked" }] }] });
+    const view = decodeContextView({ warnings: [], generations: [{ id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, minds: [trace, { ...trace, purpose: "memory", phase: "post", outcome: "failed" }] }] });
     expect(view?.generations[0]?.minds?.map((m) => [m.who, m.purpose, m.outcome])).toEqual([
       ["Dev", "mind", "recorded"],
-      ["Someone", "memory", "leak_blocked"],
+      ["Dev", "memory", "failed"],
+    ]);
+  });
+
+  test("a history kept by an earlier build reads back screened: no call for someone the POV didn't know, and no depiction shown as kept back", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld("Harbor");
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const minds = [trace, { ...trace, who: "Someone", level: "near" }, { ...trace, purpose: "memory", phase: "post", who: "Someone" }, { ...trace, outcome: "leak_blocked" }];
+    const record = { id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, forced: [], minds };
+    await rig.host.storage.write(`${runDir(chatId)}inspector.json`, JSON.stringify({ v: 2, records: [record], delivery: {} }), rig.host.userId);
+    const reloaded = new Rig({ host: rig.host });
+    const context = decodeContextView((await reloaded.rt.view(chatId, rig.host.userId)).panels["core.context"]);
+    expect(context?.generations.flatMap((g) => g.minds ?? []).map((m) => [m.who, m.outcome])).toEqual([
+      ["Dev", "recorded"],
+      ["Dev", "recorded"],
     ]);
   });
 });

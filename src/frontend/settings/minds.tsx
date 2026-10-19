@@ -128,7 +128,7 @@ export function MindsSection(props: { minds: MindsSettings; patch(patch: JsonObj
         );
       })}
       <div class="lre-h2">Prompts</div>
-      <Row k="A world's own step template for a purpose wins over these (Build → Step templates)." />
+      <Row k="Your prompt wins over the world's own step template for a purpose (Build → Step templates), and that over the built-in." />
       {MIND_PURPOSES.map((purpose) => (
         <PromptEditor key={purpose} purpose={purpose} value={minds.prompts[purpose]} busy={busy} patch={props.patch} />
       ))}

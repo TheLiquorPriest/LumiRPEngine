@@ -8,7 +8,7 @@
 import type { JsonObject, JsonValue } from "./json";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { EntityId, MessageId, PlaceId } from "./ids";
-import type { Selector, StepPurpose } from "./world";
+import type { Selector, StepPurpose, StepTemplateDef, WorldDoc } from "./world";
 
 // ---------------------------------------------------------------- fidelity
 
@@ -285,6 +285,17 @@ export function isMindPurpose(purpose: StepPurpose): purpose is MindPurpose {
   return (MIND_PURPOSES as readonly string[]).includes(purpose);
 }
 
+/**
+ * The world's template for a minds step (DESIGN §24.5), which runs unless the player has a prompt of
+ * their own: the first by id of the purpose's templates with any text, a blank one being skipped. The
+ * runtime, lint and Build → World → Minds all read this, so they agree on which one is used.
+ */
+export function worldMindTemplate(world: Pick<WorldDoc, "steps">, purpose: MindPurpose): StepTemplateDef | undefined {
+  return Object.values(world.steps)
+    .filter((t) => t.purpose === purpose && t.template.trim() !== "")
+    .sort((a, b) => a.id.localeCompare(b.id))[0];
+}
+
 /** The user's overrides of a world's memory config: whatever they set wins, part by part. */
 export type MindsMemoryOverrides = { [K in keyof MindsMemoryConfig]?: Partial<MindsMemoryConfig[K]> };
 
@@ -303,7 +314,7 @@ export interface MindsSettings {
   /** The Minds section's own token budget, apart from the shared section budget (DESIGN §24.3). */
   tokens: number;
   memory: MindsMemoryOverrides;
-  /** The user's own prompt for a purpose; absent, the built-in (`MIND_PROMPT_DEFAULTS`). A world template wins over both. */
+  /** The user's own prompt for a purpose, which wins over a world template; absent, the world's (`worldMindTemplate`), else the built-in (`MIND_PROMPT_DEFAULTS`). */
   prompts: Partial<Record<MindPurpose, string>>;
   /** A time skip's caps (DESIGN §24.7): beats per skip and minds per beat. */
   skip: { maxBeats: Limit; maxMindsPerBeat: Limit };
@@ -723,13 +734,16 @@ export type MindEditOp =
   | { op: "mind_refresh"; entity: EntityId }
   | { op: "mind_memory"; entity: EntityId; part: "note" | "commitment" | "plan"; id: string | null; value: JsonObject | null };
 
-/** One minds model call in the inspector (DESIGN §6.5): never any text, and a stranger to the POV is "Someone". */
+/**
+ * One minds model call in the inspector (DESIGN §6.5), a player surface: never any text, only calls
+ * for people the POV can see and has met, and a withheld depiction reads as a plain `recorded`.
+ */
 export interface MindCallTrace {
   purpose: MindPurpose;
   phase: "pre" | "post" | "skip";
   who: string;
   level: Fidelity;
-  outcome: "recorded" | "reused" | "failed" | "leak_blocked" | "skipped_limit";
+  outcome: "recorded" | "failed";
   ms: number;
   tokens: number;
   /** Whose prompt it ran: the world's template, the user's override, or the built-in. */
