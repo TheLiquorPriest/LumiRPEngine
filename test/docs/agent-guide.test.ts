@@ -9,7 +9,7 @@ import { join } from "node:path";
 import schemaJson from "../../schemas/lre-world-v1.schema.json";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { isRecord, type JsonValue } from "../../src/shared/json";
-import { applyPatch, readOp } from "../../src/shared/json-patch";
+import { applyPatch, getAt, parsePointer, readOp } from "../../src/shared/json-patch";
 import type { WorldDoc } from "../../src/shared/world";
 import { checkSchema, lint, load, MAP_SCHEMA, pathText, type Schema } from "../../src/studio-api";
 
@@ -57,6 +57,22 @@ describe("the agent guide's examples", () => {
     const had = new Set(problems(before));
     expect(problems(loaded.world).filter((p) => !had.has(p))).toEqual([]);
     expect(checkSchema(WORLD_SCHEMA, loaded.world, [MAP_SCHEMA]).map((p) => `${pathText(p.path)}: ${p.message}`)).toEqual([]);
+  });
+
+  test("none of them replaces what the starter has: each add lands on a key that isn't there yet", () => {
+    let doc = modern() as unknown as JsonValue;
+    const replaced: string[] = [];
+    for (const title of SECTIONS) {
+      for (const ops of patches(title)) {
+        for (const [n, raw] of ops.entries()) {
+          const op = readOp(raw, n);
+          // An add onto a key that exists replaces it whole: a starter's flow or asset map would be lost.
+          if (op.op === "add" && !op.path.endsWith("/-") && getAt(doc, parsePointer(op.path)) !== undefined) replaced.push(`${title}: ${op.path}`);
+          doc = applyPatch(doc, [op]);
+        }
+      }
+    }
+    expect(replaced).toEqual([]);
   });
 
   test("every id their entities name is in the starter, so none reads as an outside payer by mistake", () => {

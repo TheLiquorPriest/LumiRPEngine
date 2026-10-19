@@ -128,7 +128,7 @@ A **party** is a person, or an entity of kind `business`, `trust` or `household`
 
 An `account` entity is one purse, wallet, bank account, card account, loan or investment account: `owners`, `product`, `opening` (the balance at the start, from the holder's side: a debt is negative) and `institution`. `product` is an account class, each a built-in product with the finance tables' terms (`cash`, `checking`, `business_checking`, `savings`, `money_market`, `cd`, `trust`, `escrow`, `credit_card`, `charge_card`, `line_of_credit`, `loan`, `mortgage`, `brokerage`, `retirement`), or one of the world's own products, `packs.economy.config.products` by id. An account's own `limit`, `apr_pct`, `apy_pct`, `statement_day`, `due_day`, `payment`, `months_left`, `overdraft` and the rest win over its product's; `autopay` (`minimum`, `statement`, `full` or `fixed`) with `autopay_from` pays a credit account by itself.
 
-Read `/packs/economy/config` before adding to it: the starters' is empty. Where the world has no `products` map yet, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same.
+Read `/packs/economy/config` before adding to it: the modern starter's has `assets` but no `products`. Where the world has no `products` map yet, add the map whole with the first product in it, as below (JSON Patch adds into a map only once it exists); where it has one, add each product by its own path, `/packs/economy/config/products/<id>`, since adding the whole map replaces it and drops every product already in it. `assets` works the same, and in the modern starter it is added to by id, as further down. The same goes for entities: `add` on an id that is taken replaces that item whole, so look an id up before you use it.
 
 ```json
 [
@@ -151,7 +151,7 @@ A **flow** is every scheduled or one-off movement of money: rent, bills, a trans
 - `splits` sends parts elsewhere (fixed `cents` first, then `pct` of the rest); `shares` splits a household's flow between its members by `pct`; `link` ties it to what it belongs to (a property, a job, a loan); `status` is `active`, `paused` or `ended`.
 
 ```json
-[{ "op": "add", "path": "/entities/flow_pov_savings", "value": { "id": "flow_pov_savings", "kind": "flow", "name": "Payday savings", "tier": "background", "fields": { "flow_kind": "savings", "from": "acct_pov_checking", "to": "acct_pov_savings", "amount_cents": 25000, "every": "week", "interval": 2, "weekdays": [5], "start": "2026-09-18", "shortfall": "skip" }, "relations": [] } }]
+[{ "op": "add", "path": "/entities/flow_pov_boat_fund", "value": { "id": "flow_pov_boat_fund", "kind": "flow", "name": "Boat fund", "tier": "background", "fields": { "flow_kind": "savings", "from": "acct_pov_checking", "to": "acct_pov_savings", "amount_cents": 4000, "every": "week", "interval": 2, "weekdays": [5], "start": "2026-09-18", "shortfall": "skip", "category": "savings" }, "relations": [] } }]
 ```
 
 ### Work and business
@@ -172,7 +172,7 @@ An **asset** is defined once, in `packs.economy.config.assets` by id: `label`, `
 
 ```json
 [
-  { "op": "add", "path": "/packs/economy/config/assets", "value": { "glix": { "label": "Great Lakes Index Fund", "class": "fund", "symbol": "GLIX", "price": 11240, "yield_pct": 1.6 } } },
+  { "op": "add", "path": "/packs/economy/config/assets/glix", "value": { "label": "Great Lakes Index Fund", "class": "fund", "symbol": "GLIX", "price": 11240, "yield_pct": 1.6 } },
   { "op": "add", "path": "/entities/hold_pov_glix", "value": { "id": "hold_pov_glix", "kind": "holding", "name": "Great Lakes Index Fund", "tier": "background", "fields": { "account": "acct_pov_brokerage", "asset": "glix", "lots": [{ "qty": 20, "cost": 196000, "at": "2025-03-02" }], "route": "reinvest" }, "relations": [] } }
 ]
 ```

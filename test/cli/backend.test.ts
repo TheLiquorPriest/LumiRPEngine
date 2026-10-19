@@ -124,24 +124,24 @@ test("an agent adds a flow, a holding and a minds config to a starter through lr
   const created = await call("lre_world_create", { name: "Port Alder", template: "modern_slice_of_life" });
   const worldId = String(created.worldId);
   const ops = [
-    // A world's own asset (the starter has no assets map, so it comes whole), and a position in it in the POV's brokerage account.
-    { op: "add", path: "/packs/economy/config/assets", value: { glix: { label: "Great Lakes Index Fund", class: "fund", symbol: "GLIX", price: 11240, yield_pct: 1.6 } } },
+    // A world's own asset, added by its id beside the starter's, and a position in it in the POV's brokerage account.
+    { op: "add", path: "/packs/economy/config/assets/glix", value: { label: "Great Lakes Index Fund", class: "fund", symbol: "GLIX", price: 11240, yield_pct: 1.6 } },
     { op: "add", path: "/entities/hold_pov_glix", value: { id: "hold_pov_glix", kind: "holding", name: "Great Lakes Index Fund", tier: "background", fields: { account: "acct_pov_brokerage", asset: "glix", lots: [{ qty: 20, cost: 196000, at: "2025-03-02" }], route: "reinvest" }, relations: [] } },
-    // Payday savings: every other Friday from the first payday, skipped when checking can't cover it.
-    { op: "add", path: "/entities/flow_pov_savings", value: { id: "flow_pov_savings", kind: "flow", name: "Payday savings", tier: "background", fields: { flow_kind: "savings", from: "acct_pov_checking", to: "acct_pov_savings", amount_cents: 25000, every: "week", interval: 2, weekdays: [5], start: "2026-09-18", shortfall: "skip" }, relations: [] } },
+    // A boat fund: every other Friday from the first payday, skipped when checking can't cover it.
+    { op: "add", path: "/entities/flow_pov_boat_fund", value: { id: "flow_pov_boat_fund", kind: "flow", name: "Boat fund", tier: "background", fields: { flow_kind: "savings", from: "acct_pov_checking", to: "acct_pov_savings", amount_cents: 4000, every: "week", interval: 2, weekdays: [5], start: "2026-09-18", shortfall: "skip" }, relations: [] } },
     { op: "add", path: "/minds", value: { secrecy: "brief", weights: { mentioned: 50 }, thresholds: { live: 60, near: 35, far: 15 }, always: { ids: ["marcus_delgado"] }, memory: { notes: { show: 10, keep: 30 } } } },
   ];
   const edit = await call("lre_edit", { worldId, ops, expectVersion: 0 });
-  // Each change is its own item: the asset under its config map, not as "the economy pack changed".
-  expect(edit).toMatchObject({ version: 1, changed: { entities: { added: 2 }, minds: { added: 1 }, assets: { added: 1 } } });
-  expect(edit.changed).not.toHaveProperty("packs");
+  // Each change is its own item, the asset under its config map, and nothing of the starter's moves with them.
+  expect(edit).toMatchObject({ version: 1 });
+  expect(edit.changed).toEqual({ entities: { added: 2 }, minds: { added: 1 }, assets: { added: 1 } });
   // Clean: no lint error, nothing the schema doesn't know.
   expect((edit.lint as { errors: number }).errors).toBe(0);
   expect(edit.schema).toMatchObject({ warnings: 0 });
   const draft = await call("lre_draft", { worldId });
   expect(draft).toMatchObject({ stored: true, version: 1, lint: { errors: 0 } });
-  const commit = await call("lre_commit", { worldId, note: "Savings, an index fund and minds", expectVersion: 1 });
-  expect(commit).toMatchObject({ worldId, note: "Savings, an index fund and minds", warnings: { errors: 0 } });
+  const commit = await call("lre_commit", { worldId, note: "A boat fund, an index fund and minds", expectVersion: 1 });
+  expect(commit).toMatchObject({ worldId, note: "A boat fund, an index fund and minds", warnings: { errors: 0 } });
   // Committed as written: the head holds the minds config.
   const head = await callTool("lre_world", { worldId, source: "head", pointer: "/minds/always" }, ctx);
   expect(head.text).toContain('"marcus_delgado"');
@@ -150,8 +150,8 @@ test("an agent adds a flow, a holding and a minds config to a starter through lr
   expect(run.days).toHaveLength(5);
   expect(run.lint).toMatchObject({ errors: 0 });
   // Found by kind, with its pointer, among the starter's other entities; the asset in its config map.
-  const flows = (await call("lre_search", { worldId, query: "savings", kinds: ["flow"] })).hits as { kind?: string }[];
-  expect(flows).toContainEqual(expect.objectContaining({ id: "flow_pov_savings", kind: "flow", pointer: "/entities/flow_pov_savings", label: "Payday savings" }));
+  const flows = (await call("lre_search", { worldId, query: "boat fund", kinds: ["flow"] })).hits as { kind?: string }[];
+  expect(flows).toContainEqual(expect.objectContaining({ id: "flow_pov_boat_fund", kind: "flow", pointer: "/entities/flow_pov_boat_fund", label: "Boat fund" }));
   expect(flows.every((h) => h.kind === "flow")).toBe(true);
   const assets = await call("lre_search", { worldId, query: "great lakes", collections: ["assets"] });
   expect(assets.hits).toContainEqual(expect.objectContaining({ id: "glix", collection: "assets", pointer: "/packs/economy/config/assets/glix" }));
