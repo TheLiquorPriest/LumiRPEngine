@@ -23,6 +23,7 @@ import { mindLines } from "../../src/packs/minds/core/section";
 import { readCharacter } from "../../src/packs/minds/core/state";
 import { modernUsWorld } from "../packs/riverton";
 import { fold, startState } from "../packs/support";
+import { runDir } from "../../src/shared/ids";
 
 const field = (part: string, key: string) => {
   const f = MEMORY_FIELDS.find((x) => x.part === part && x.key === key);
@@ -226,10 +227,27 @@ describe("Context inspector → Minds", () => {
   });
 
   test("the panel reads the traces of a generation", () => {
-    const view = decodeContextView({ warnings: [], generations: [{ id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, minds: [trace, { ...trace, purpose: "memory", phase: "post", who: "Someone", outcome: "leak_blocked" }] }] });
+    const view = decodeContextView({ warnings: [], generations: [{ id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, minds: [trace, { ...trace, purpose: "memory", phase: "post", outcome: "failed" }] }] });
     expect(view?.generations[0]?.minds?.map((m) => [m.who, m.purpose, m.outcome])).toEqual([
       ["Dev", "mind", "recorded"],
-      ["Someone", "memory", "leak_blocked"],
+      ["Dev", "memory", "failed"],
+    ]);
+  });
+
+  test("a history kept by an earlier build reads back screened: no call for someone the POV didn't know, and no depiction shown as kept back", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld("Harbor");
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const minds = [trace, { ...trace, who: "Someone", level: "near" }, { ...trace, purpose: "memory", phase: "post", who: "Someone" }, { ...trace, outcome: "leak_blocked" }];
+    const record = { id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, forced: [], minds };
+    await rig.host.storage.write(`${runDir(chatId)}inspector.json`, JSON.stringify({ v: 2, records: [record], delivery: {} }), rig.host.userId);
+    const reloaded = new Rig({ host: rig.host });
+    const context = decodeContextView((await reloaded.rt.view(chatId, rig.host.userId)).panels["core.context"]);
+    expect(context?.generations.flatMap((g) => g.minds ?? []).map((m) => [m.who, m.outcome])).toEqual([
+      ["Dev", "recorded"],
+      ["Dev", "recorded"],
     ]);
   });
 });

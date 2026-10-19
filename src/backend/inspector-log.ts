@@ -86,21 +86,25 @@ function loreTracesOf(raw: unknown, legacy: boolean): LoreStepTrace[] | undefine
 }
 
 const MIND_PHASES: readonly MindCallTrace["phase"][] = ["pre", "post", "skip"];
-const MIND_OUTCOMES: readonly MindCallTrace["outcome"][] = ["recorded", "failed", "leak_blocked"];
+const MIND_OUTCOMES: readonly MindCallTrace["outcome"][] = ["recorded", "failed"];
 const MIND_PROMPTS: readonly MindCallTrace["prompt"][] = ["world", "override", "default"];
+/** How an older build named a person the POV didn't know in a trace; such a trace is no longer kept. */
+const UNKNOWN_PERSON = "Someone";
 
 /**
  * A record's minds call traces as stored: the well-formed ones, each with only the fields a trace has,
- * so nothing else a damaged or older file carries (a mind's text) can reach the inspector.
+ * so nothing else a damaged or older file carries (a mind's text) can reach the inspector. An older
+ * file's traces are screened as new ones are made: a call for someone the POV didn't know is left
+ * out, and one whose depiction was kept from the narrator reads as recorded.
  */
 export function mindTracesOf(raw: unknown): MindCallTrace[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   return raw.flatMap((t): MindCallTrace[] => {
-    if (!isRecord(t) || typeof t.who !== "string" || typeof t.ms !== "number" || typeof t.tokens !== "number") return [];
+    if (!isRecord(t) || typeof t.who !== "string" || t.who === UNKNOWN_PERSON || typeof t.ms !== "number" || typeof t.tokens !== "number") return [];
     const purpose = MIND_PURPOSES.find((p) => p === t.purpose);
     const phase = MIND_PHASES.find((p) => p === t.phase);
     const level = FIDELITIES.find((f) => f === t.level);
-    const outcome = MIND_OUTCOMES.find((o) => o === t.outcome);
+    const outcome = t.outcome === "leak_blocked" ? "recorded" : MIND_OUTCOMES.find((o) => o === t.outcome);
     const prompt = MIND_PROMPTS.find((p) => p === t.prompt);
     if (!purpose || !phase || !level || !outcome || !prompt) return [];
     return [{ purpose, phase, who: t.who, level, outcome, ms: t.ms, tokens: t.tokens, prompt }];

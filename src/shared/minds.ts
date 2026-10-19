@@ -723,13 +723,16 @@ export type MindEditOp =
   | { op: "mind_refresh"; entity: EntityId }
   | { op: "mind_memory"; entity: EntityId; part: "note" | "commitment" | "plan"; id: string | null; value: JsonObject | null };
 
-/** One minds model call in the inspector (DESIGN §6.5): never any text, and a stranger to the POV is "Someone". */
+/**
+ * One minds model call in the inspector (DESIGN §6.5), a player surface: never any text, only calls
+ * for people the POV can see and has met, and a withheld depiction reads as a plain `recorded`.
+ */
 export interface MindCallTrace {
   purpose: MindPurpose;
   phase: "pre" | "post" | "skip";
   who: string;
   level: Fidelity;
-  outcome: "recorded" | "failed" | "leak_blocked";
+  outcome: "recorded" | "failed";
   ms: number;
   tokens: number;
   /** Whose prompt it ran: the world's template, the user's override, or the built-in. */
