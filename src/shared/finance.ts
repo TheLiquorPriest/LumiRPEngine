@@ -1301,6 +1301,10 @@ export interface InvestmentsView {
   realisedLong?: number;
   taxDue?: { cents: number; at: string } | null;
   holdings: HoldingView[];
+  /** Assets the party can buy and doesn't hold, at their price now. */
+  market?: { asset: string; label: string; class: AssetClass; symbol: string | null; price: number }[];
+  /** Accounts that can hold a new position. */
+  accounts?: EntityId[];
 }
 
 export interface PropertyView {
@@ -1312,6 +1316,8 @@ export interface PropertyView {
   share: number;
   value: number;
   equity: number;
+  /** The asking price when it's for sale; a property for sale the party doesn't own comes with share 0. */
+  forSale?: number | null;
   mortgage: { id: EntityId; name: string; owed: number; payment: number | null; monthsLeft: number | null } | null;
   leases: LeaseView[];
   /** Property tax, insurance and upkeep flows. */
