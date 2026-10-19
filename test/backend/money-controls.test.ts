@@ -4,18 +4,11 @@
 // Simulation (Money 4) unless a test sets another level.
 
 import { describe, expect, test } from "bun:test";
-import type { AccountView, FinanceView, PayTier } from "../../src/shared/finance";
-import { isRecord, type JsonObject } from "../../src/shared/json";
-import type { BackendToFrontend, EditOp } from "../../src/shared/protocol";
-import type { Level } from "../../src/shared/ids";
-import { DEFAULT_CURRENCY, type WorldCurrency } from "../../src/shared/world";
-import { adjustOp, editRequest, resolveMarker, timelapseRequest } from "../../src/frontend/requests";
-import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
+import type { PayTier } from "../../src/shared/finance";
+import { adjustOp } from "../../src/frontend/requests";
 import { accountBlocks, accountControls, cardControls, creditBlocks, flowSources, hubTabs, overviewBlocks, paySources, transferTargets } from "../../src/packs/economy/ui/layout";
 import {
   accountStatusOps,
-  actionRequest,
-  amountOf,
   applyCreditAction,
   autopayAction,
   autopayOps,
@@ -39,7 +32,7 @@ import {
   type ActionBody,
   type FlowForm,
 } from "../../src/packs/economy/ui/requests";
-import { Rig } from "../support/rig";
+import { accepted, account, cashOf, MoneyChat, refusal } from "../support/money-chat";
 
 const CHECKING = "acct_pov_checking";
 const SAVINGS = "acct_pov_savings";
@@ -55,135 +48,6 @@ const BANK = "Lakeshore Credit Union";
 /** Alder Market has the bank's branch and machine; the fuel station another bank's machine. */
 const MARKET = "alder_market";
 const FUEL = "shoreline_fuel";
-
-/** The GM view's Money tab: everyone's money as it decodes `lre.gm`, and each entity's declared fields (what its ✎ forms edit). */
-interface GmMoney {
-  money: FinanceView[];
-  fields: Map<string, string[]>;
-}
-
-/** A Port Alder chat and the hub's two ways in: the player's actions and the GM's edits. */
-class MoneyChat {
-  private constructor(
-    readonly rig: Rig,
-    readonly chatId: string,
-    readonly currency: WorldCurrency,
-  ) {}
-
-  /** Port Alder on the shipped packs; `places` adds fields (a cash machine, a branch) to places before the chat starts. */
-  static async start(places: Record<string, JsonObject> = {}): Promise<MoneyChat> {
-    const rig = new Rig({ shipped: true });
-    const worldId = await rig.newWorld("Port Alder", "modern_slice_of_life");
-    if (Object.keys(places).length > 0) {
-      const draft = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId, base: null }));
-      const doc = isRecord(draft.draft) && isRecord(draft.draft.places) ? draft.draft.places : {};
-      for (const [id, fields] of Object.entries(places)) {
-        const place = doc[id];
-        if (!isRecord(place)) throw new Error(`no place ${id}`);
-        const value = { ...place, fields: { ...(isRecord(place.fields) ? place.fields : {}), ...fields } };
-        rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: draft.base, collection: "places", id, value }));
-      }
-      rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: draft.base }));
-    }
-    const chatId = rig.host.createChat("Morning.");
-    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
-    // Picking Play → Money opens the POV's money (play.tsx), which posts the authored openings.
-    rig.body(await rig.send({ type: "lre.view.open", chatId, panel: "economy.money", entity: null }));
-    await rig.rt.push.settle();
-    return new MoneyChat(rig, chatId, (await rig.rt.view(chatId, rig.host.userId)).currency ?? DEFAULT_CURRENCY);
-  }
-
-  /** Play → Money: the POV's money as the panel decodes the view the backend sends. */
-  async hub(): Promise<FinanceView> {
-    const view = decodeFinanceView((await this.rig.rt.view(this.chatId, this.rig.host.userId)).panels["economy.money"]);
-    if (!view) throw new Error("Play → Money can't draw the POV's money");
-    return view;
-  }
-
-  async gm(): Promise<GmMoney> {
-    const body = this.rig.body(await this.rig.send({ type: "lre.gm", chatId: this.chatId }));
-    const money = (Array.isArray(body.money) ? body.money : []).map((raw) => {
-      const view = decodeFinanceView(raw);
-      if (!view) throw new Error("the GM view's Money can't draw a party");
-      return view;
-    });
-    const fields = new Map<string, string[]>();
-    for (const e of Array.isArray(body.entities) ? body.entities : []) {
-      if (isRecord(e) && typeof e.id === "string") fields.set(e.id, Array.isArray(e.fields) ? e.fields.flatMap((f) => (isRecord(f) && typeof f.id === "string" ? [f.id] : [])) : []);
-    }
-    return { money, fields };
-  }
-
-  /** One party's money in the GM view. */
-  async party(id: string): Promise<FinanceView> {
-    const view = (await this.gm()).money.find((m) => m.party === id);
-    if (!view) throw new Error(`the GM view has no money for ${id}`);
-    return view;
-  }
-
-  /** A player control: its action sent as the hub sends it, then the turn it plays as. Returns the turn's outcome lines. */
-  async play(body: ActionBody): Promise<string> {
-    this.rig.body(await this.rig.send(actionRequest(this.chatId, body)));
-    await this.rig.host.settle();
-    const generation = await this.rig.host.start(this.chatId, { type: "normal" });
-    const outcome = this.rig.host.lastInterceptor?.mutated.find((m) => m.content?.startsWith("[Outcome]"))?.content ?? "";
-    await this.rig.host.finish(generation, "Done.");
-    await this.rig.rt.push.settle();
-    return outcome;
-  }
-
-  /** A GM control: its operations as one edit. Returns the reply, a refusal included. */
-  async edit(ops: EditOp[]): Promise<BackendToFrontend> {
-    const reply = await this.rig.send(editRequest(this.chatId, ops));
-    await this.rig.rt.push.settle();
-    return reply;
-  }
-
-  /** Time passing, as the palette's Timelapse sends it. */
-  async timelapse(minutes: number): Promise<void> {
-    const timelapse = (await this.rig.rt.view(this.chatId, this.rig.host.userId)).palette?.timelapse;
-    if (!timelapse) throw new Error("no Timelapse");
-    this.rig.body(await this.rig.send(timelapseRequest(timelapse, { type: "duration", minutes }, {}, this.chatId)));
-    await this.rig.host.settle();
-    const generation = await this.rig.host.start(this.chatId, { type: "normal" });
-    await this.rig.host.finish(generation, "Time passes.");
-    await this.rig.rt.push.settle();
-  }
-
-  /** The POV's Money level, as Play → Realism sets it. */
-  async level(to: Level): Promise<void> {
-    this.rig.body(await this.rig.send(resolveMarker(this.chatId, "money", { entity: "pov" }, to)));
-  }
-
-  /** An amount as typed into a control. */
-  cents(text: string): number {
-    const cents = amountOf(text, this.currency);
-    if (cents === null) throw new Error(`${text} isn't an amount`);
-    return cents;
-  }
-}
-
-function account(view: FinanceView, id: string): AccountView {
-  const a = view.accounts.find((x) => x.id === id);
-  if (!a) throw new Error(`no ${id} in ${view.name}'s money`);
-  return a;
-}
-
-/** Cash on hand as the hub shows it. */
-function cashOf(view: FinanceView): number {
-  return view.cash && "cents" in view.cash ? view.cash.cents : 0;
-}
-
-/** What a refused edit says. */
-function refusal(reply: BackendToFrontend): string {
-  if (reply.type !== "lre.error") throw new Error(`the edit wasn't refused (${reply.type})`);
-  return reply.message;
-}
-
-function accepted(reply: BackendToFrontend): void {
-  if (reply.type === "lre.error") throw new Error(`the edit was refused: ${reply.message}`);
-  expect(reply.type).toBe("lre.result");
-}
 
 /** A $40 gym membership on the 5th of each month, from `from`, as the flow form fills it in. */
 function gymForm(from: string): FlowForm {
@@ -271,7 +135,7 @@ describe("Play → Money: each control plays as the player's turn", () => {
   });
 
   test("at the bank's deposit machine a cash deposit is held; a withdrawal there takes the debit card, and not while it's frozen", async () => {
-    const chat = await MoneyChat.start({ [HOME]: { atm: { bank: BANK, deposits: true } } });
+    const chat = await MoneyChat.start({ places: { [HOME]: { atm: { bank: BANK, deposits: true } } } });
     const before = await chat.hub();
     await chat.play(cashAction("deposit", CHECKING, chat.cents("20")));
     const after = await chat.hub();
@@ -466,7 +330,7 @@ describe("GM view → Money: each control is one edit", () => {
   });
 
   test("Release lets a held deposit go before it lapses", async () => {
-    const chat = await MoneyChat.start({ [HOME]: { atm: { bank: BANK, deposits: true } } });
+    const chat = await MoneyChat.start({ places: { [HOME]: { atm: { bank: BANK, deposits: true } } } });
     await chat.play(cashAction("deposit", CHECKING, chat.cents("20")));
     const held = account(await chat.party("pov"), CHECKING);
     const hold = held.holds[0];
