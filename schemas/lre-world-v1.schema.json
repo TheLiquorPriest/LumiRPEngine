@@ -16,6 +16,7 @@
       "type": "object",
       "description": "Enabled packs by id, each with the pack format version the world was authored against and its config.",
       "propertyNames": { "minLength": 1 },
+      "properties": { "economy": { "type": "object", "required": ["version", "config"], "additionalProperties": false, "properties": { "version": { "type": "integer", "minimum": 1 }, "config": { "$ref": "#/$defs/economyConfig" } } } },
       "additionalProperties": {
         "type": "object",
         "required": ["version", "config"],
@@ -105,6 +106,17 @@
     }
   },
   "$defs": {
+    "economyConfig": {
+      "type": "object",
+      "description": "The economy pack's config (DESIGN §25): the world's account products, its Custom money feature toggles and its assets; other keys (a module's, such as taxes) are allowed.",
+      "properties": {
+        "unpricedCap": { "type": "number", "description": "The most a narrated price nothing else prices is charged, in minor units." },
+        "products": { "type": "object", "description": "Account products by id: a class, and the terms that differ from its defaults.", "additionalProperties": { "type": "object", "required": ["class"], "properties": { "class": { "enum": ["cash", "checking", "business_checking", "savings", "money_market", "cd", "trust", "escrow", "credit_card", "charge_card", "line_of_credit", "loan", "mortgage", "brokerage", "retirement"] }, "label": { "type": "string" }, "institution": { "type": "string" } } } },
+        "features": { "type": "object", "description": "Custom toggles: a money feature switched on from its floor up, or off.", "additionalProperties": { "type": "boolean" } },
+        "assets": { "type": "object", "description": "Assets the holdings module prices, by id.", "additionalProperties": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
     "id": { "type": "string", "minLength": 1 },
     "ids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
     "strings": { "type": "array", "items": { "type": "string" } },
