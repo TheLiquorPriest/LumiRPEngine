@@ -806,11 +806,12 @@ describe("palette on the shipped packs", () => {
     rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
     rig.host.quietReply = (req) => {
       const prompt = req.messages[0]?.content ?? "";
-      if (prompt.includes("You map a player's typed input")) return JSON.stringify({ action: "buy", params: { item: "old brass ship's lantern", price: 84, method: "cash" }, confidence: 0.9 });
-      if (prompt.includes(EXTRACT_MARK)) return JSON.stringify({ proposals: [{ type: "purchase", item: "brass ship's lantern", category: "household", payer: "pov", price: 84, method: "cash" }, { type: "purchase", item: "box of matches", category: "household", payer: "pov", price: 0.5 }] });
+      if (prompt.includes("You map a player's typed input")) return JSON.stringify({ action: "buy", params: { item: "old brass ship's lantern", price: 75, method: "cash" }, confidence: 0.9 });
+      if (prompt.includes(EXTRACT_MARK)) return JSON.stringify({ proposals: [{ type: "purchase", item: "brass ship's lantern", category: "household", payer: "pov", price: 75, method: "cash" }, { type: "purchase", item: "box of matches", category: "household", payer: "pov", price: 0.5 }] });
       return "{}";
     };
-    await rig.turn(chatId, "I buy the old brass ship's lantern and pay her $84 in cash.", "Tessa wraps the brass ship's lantern; you pay her $84 in cash and pocket a box of matches for fifty cents.");
+    // $75 and its sales tax fit the player's cash.
+    await rig.turn(chatId, "I buy the old brass ship's lantern and pay her $75 in cash.", "Tessa wraps the brass ship's lantern; you pay her $75 in cash and pocket a box of matches for fifty cents.");
     const view = await rig.rt.view(chatId, rig.host.userId);
     const offered = view.chips.filter((c) => c.kind === "confirm" || c.kind === "decline").map((c) => `${c.label} ${c.detail ?? ""}`);
     expect(offered.filter((t) => t.includes("lantern"))).toEqual([]);

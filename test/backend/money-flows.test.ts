@@ -75,12 +75,13 @@ describe("a catalog row prices an item only when it names it", () => {
     expect(name(matchCatalog(ctx, "desk lamp", null))).not.toBe("Desk");
   });
 
-  test("a desk lamp typed at $25 costs $25, and an automatic purchase's chip shows what it charged", async () => {
+  test("a desk lamp typed at $25 costs $25 and its sales tax, and an automatic purchase's chip shows what it charged", async () => {
     const { rig, chatId } = await chat();
     rig.body(await rig.send({ type: "lre.settings.set", patch: { extraction: { purchase: { mode: "auto" } } } }));
     script(rig, [{ item: "milk" }], () => JSON.stringify({ action: "buy", params: { item: "desk lamp", price: 25 }, confidence: 0.9 }));
     await rig.turn(chatId, "I buy a desk lamp for $25.", "The clerk rings it up, and you grab some milk too.");
-    expect((await bought(rig, chatId)).find((b) => b.memo === "Bought desk lamp")?.cents).toBe(2500);
+    // At the top Money level the price is charged with its 7% sales tax.
+    expect((await bought(rig, chatId)).find((b) => b.memo === "Bought desk lamp")?.cents).toBe(2675);
     const undo = (await rig.rt.view(chatId, rig.host.userId)).chips.filter((c) => c.kind === "undo").map((c) => c.label);
     expect(undo).toEqual([expect.stringMatching(/^Bought milk: \$\d+\.\d{2} \(priced as Milk, whole\)/)]);
   });
@@ -126,7 +127,7 @@ describe("a narrated purchase nothing prices", () => {
     // Nothing in the catalog is called a whistle, so there's no item to pick here: price or dismiss.
     expect(chip?.actions.map((a) => a.id)).toEqual(["price", "dismiss"]);
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice: "price", payload: { cents: 450 } }));
-    expect((await bought(rig, chatId)).find((b) => b.memo === "Bought tin whistle")?.cents).toBe(450);
+    expect((await bought(rig, chatId)).find((b) => b.memo === "Bought tin whistle")?.cents).toBe(482);
   });
 
   test("a narrated price is capped at the world's cap, and the chip says so and lets the player edit it", async () => {
@@ -143,7 +144,7 @@ describe("a narrated purchase nothing prices", () => {
     const amount = chip?.actions.find((a) => a.input?.type === "money");
     expect(amount).toBeDefined();
     rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip?.id ?? "", choice: amount?.id ?? "", payload: { cents: cap + 100 } }));
-    expect((await bought(rig, chatId)).find((b) => b.memo === "Bought antique astrolabe")?.cents).toBe(cap + 100);
+    expect((await bought(rig, chatId)).find((b) => b.memo === "Bought antique astrolabe")?.cents).toBe(Math.round((cap + 100) * 1.07));
   });
 });
 
