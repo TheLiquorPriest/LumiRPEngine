@@ -276,7 +276,10 @@ function householdOf(ctx: ReadContext, party: EntityId): EntityId | null {
 
 function householdView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, household: EntityId, flows: readonly Flow[]): HouseholdView {
   const members = membersOf(ctx.registry, ctx.world, ctx.state, household);
-  const shared = flows.filter((f) => f.from === household || (f.shares ?? []).length > 0 && (f.shares ?? []).every((s) => members.includes(s.party)) || (own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, household) !== null));
+  // Shared: paid by the household, split among its members only, or paid from an account it holds.
+  const splitAmongMembers = (f: Flow): boolean => (f.shares ?? []).length > 0 && (f.shares ?? []).every((s) => members.includes(s.party));
+  const fromHouseholdAccount = (f: Flow): boolean => own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, household) !== null;
+  const shared = flows.filter((f) => f.from === household || splitAmongMembers(f) || fromHouseholdAccount(f));
   const monthlyOf = (f: Flow): number => {
     const a = f.amount;
     const each = "fixed" in a ? a.fixed : 0;
@@ -342,14 +345,14 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     if (!CLASS_TRAITS[a.class].liability && a.cents < 0) alerts.push({ tone: "neg", text: `${a.name} is overdrawn by ${money(ctx, -a.cents)}.`, account: a.id });
     for (const c of a.cards) if (c.state !== "active") alerts.push({ tone: "warn", text: `${c.name} is ${c.state}.`, account: a.id });
   }
-  for (const v of flowViews) if (v.missed > 0 && v.status === "active" && flowRunOf(ctx.state, v.id).last !== undefined && (flowRunOf(ctx.state, v.id).last ?? 0) > now - 31 * DAY && objOf(own(objOf(sliceOf(ctx.state, "economy").flows), v.id)).missed !== undefined) alerts.push({ tone: "warn", text: `${v.label} was missed.`, flow: v.id });
+  // A flow that missed within the last month: what's owed may still be owed.
+  for (const v of flowViews) if (v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, v.id).last ?? -Infinity) > now - 31 * DAY) alerts.push({ tone: "warn", text: `${v.label} was missed.`, flow: v.id });
   // Money in and out over the last 30 days, by category, from the journal of the accounts shown.
   const since = now - 30 * DAY;
   let pastIn = 0;
   let pastOut = 0;
   const byCategory = new Map<string, number>();
   for (const id of shownAccounts) {
-    if (CLASS_TRAITS[classOf(ctx, id) ?? "checking"].liability && false) continue;
     for (const j of journalOf(ctx.state, id)) {
       if (j.at <= since || j.category === "transfer" || j.kind === "opening") continue;
       if (j.cents > 0) pastIn += j.cents;

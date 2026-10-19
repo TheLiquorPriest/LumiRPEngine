@@ -15,7 +15,7 @@ import { evalNumber } from "../../../engine/expr";
 import { labelOf, numOf, objOf, optionalQuery, own, strOf } from "../../../engine/pack-kit";
 import type { ReadContext, Rejection } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
-import { isGone, scopeEnv } from "../../../engine/scope";
+import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { FinanceHooks, FlowPosting } from "./module";
 import { cycleOf, flowRunOf, reject } from "./journal";
 import { accountsOf, availableOf, balance, classOf, external, hasLedger, holdersOf, priceOf, productOf, statusOf, traitsOf } from "./model";
@@ -292,8 +292,8 @@ function foundationFlows(ctx: ReadContext): Flow[] {
   for (const id of Object.keys(s.entities).sort()) {
     const e = own(s.entities, id);
     if (!e || id === pov || isGone(s, id) || !hasLedger(ctx, id) || !isParty(ctx, id) || e.kind === "household") continue;
-    if (!featureOn(ctx.levelOf(id, "money"), "living_costs", toggles(ctx.world)) || ctx.registry.kinds.get(e.kind)?.id === "business") continue;
-    if (!ctx.registry.kinds.has("person") || !kindIsPerson(ctx, e.kind)) continue;
+    // Living costs are a person's everyday spending; businesses and trusts have none.
+    if (!featureOn(ctx.levelOf(id, "money"), "living_costs", toggles(ctx.world)) || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
     out.push({ id: `living:${id}`, label: "Living costs", kind: "living", from: id, to: "market", amount: { provider: "economy.living" }, schedule: { every: "week", weekdays: [1] }, shortfall: "partial", category: "living", status: "active", method: "auto", source: "living" });
   }
   const insured = new Set(Object.values(s.entities).filter((e) => e.kind === "flow" && !isGone(s, strOf(e.fields.link)) && e.fields.status !== "ended").map((e) => strOf(e.fields.link)));
@@ -304,14 +304,6 @@ function foundationFlows(ctx: ReadContext): Flow[] {
   return out;
 }
 
-function kindIsPerson(ctx: ReadContext, kind: string): boolean {
-  let cur: string | undefined = kind;
-  for (let guard = 0; cur && guard < 32; guard++) {
-    if (cur === "person") return true;
-    cur = own(ctx.world.kinds, cur)?.extends ?? ctx.registry.kinds.get(cur)?.extends;
-  }
-  return false;
-}
 
 /** Every flow in force: flow entities, the foundation's derived flows, and every module's. */
 export function allFlows(hooks: FinanceHooks, ctx: ReadContext): Flow[] {
