@@ -53,6 +53,9 @@ export const NOTE_CAP = 200;
  */
 const PATCH_PROTECTED = ["id", "format", "engineVersion", "pins", "suppressed"] as const;
 
+/** Every part `set` writes: any other name is refused, so a set never reaches the rest of the document. */
+const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true };
+
 export class WorldError extends Error {
   constructor(
     readonly code: "not_found" | "conflict" | "validation" | "bad_request",
@@ -171,6 +174,7 @@ export class WorldStore {
     const raw = await this.readJson(`${worldDir(worldId)}index.json`, userId);
     if (!isRecord(raw) || typeof raw.head !== "string") return null;
     const history = Array.isArray(raw.history) ? raw.history.filter(isRevisionNote) : null;
+    const draftVersion = typeof raw.draftVersion === "number" && Number.isSafeInteger(raw.draftVersion) && raw.draftVersion > 0 ? raw.draftVersion : 0;
     return {
       id: worldId,
       name: typeof raw.name === "string" ? raw.name : worldId,
@@ -178,6 +182,7 @@ export class WorldStore {
       loreBookId: typeof raw.loreBookId === "string" ? raw.loreBookId : null,
       revisions: Array.isArray(raw.revisions) ? raw.revisions.filter((r): r is string => typeof r === "string") : [raw.head],
       ...(history ? { history } : {}),
+      ...(draftVersion > 0 ? { draftVersion } : {}),
     };
   }
 
@@ -223,7 +228,7 @@ export class WorldStore {
    * Writes a document as a new revision and moves the head to it. A head that changes goes into the
    * world's history with what made it head (DESIGN §23); committing the head as it is adds nothing.
    */
-  private async commitDoc(doc: WorldDoc, userId: UserId, loreBookId: string | null, made: { source: HeadSource; note?: string }): Promise<RevisionId> {
+  private async commitDoc(doc: WorldDoc, userId: UserId, loreBookId: string | null, made: { source: HeadSource; note?: string; dropped?: number }): Promise<RevisionId> {
     const issues = lintWorld(doc, this.registry);
     if (issues.some((i) => i.severity === "error")) throw new WorldError("validation", "the world has errors", issues);
     const written = stamped(doc);
@@ -234,7 +239,9 @@ export class WorldStore {
     const revisions = index ? [...index.revisions.filter((r) => r !== rev), rev] : [rev];
     const entry: RevisionNote = { revision: rev, at: Date.now(), source: made.source, ...(made.note !== undefined ? { note: made.note } : {}) };
     const history = index?.head === rev ? index.history : [...(index?.history ?? []), entry];
-    await this.writeJson(`${worldDir(doc.id)}index.json`, { id: doc.id, name: doc.name, head: rev, loreBookId: index?.loreBookId ?? loreBookId, revisions, ...(history ? { history } : {}) }, userId);
+    // A commit drops the draft: the world keeps the count it reached, so the next draft counts on from it.
+    const draftVersion = Math.max(index?.draftVersion ?? 0, made.dropped ?? 0);
+    await this.writeJson(`${worldDir(doc.id)}index.json`, { id: doc.id, name: doc.name, head: rev, loreBookId: index?.loreBookId ?? loreBookId, revisions, ...(history ? { history } : {}), ...(draftVersion > 0 ? { draftVersion } : {}) }, userId);
     await this.onChange?.(doc.id, userId);
     return rev;
   }
@@ -304,6 +311,7 @@ export class WorldStore {
     if (request.version !== undefined && request.version !== draft.version) throw new WorldError("conflict", `the draft changed since you read it (it is at version ${draft.version} now); reload and retry`);
     if (request.op === "discard") {
       await this.host.storage.remove(file, userId).catch(() => undefined);
+      if (draft.stored) await this.keepDraftCount(request.worldId, userId, draft.version);
       const head = await this.draft(request.worldId, userId);
       return { draft: head.doc, lint: lintWorld(head.doc, this.registry), base: head.base, stored: head.stored, version: head.version };
     }
@@ -344,9 +352,16 @@ export class WorldStore {
       doc = compileMaps(doc);
       if (tables) repinTables(tables, doc);
     } else throw new WorldError("bad_request", "unknown editor operation");
-    const version = draft.version + 1;
+    // A new draft counts on from the last one the world had, so a client still holding that one's version can't match it.
+    const version = (draft.stored ? draft.version : ((await this.index(request.worldId, userId))?.draftVersion ?? 0)) + 1;
     await this.writeJson(file, { base, doc, version }, userId);
     return { draft: doc, lint: lint ?? lintWorld(doc, this.registry), base, stored: true, version };
+  }
+
+  /** Keeps the count a dropped draft reached in the world's index (DESIGN §23): the next draft counts on from it, so no version names two drafts. */
+  private async keepDraftCount(worldId: WorldId, userId: UserId, version: number): Promise<void> {
+    const index = await this.index(worldId, userId);
+    if (index && version > (index.draftVersion ?? 0)) await this.writeJson(`${worldDir(worldId)}index.json`, { ...index, draftVersion: version }, userId);
   }
 
   /**
@@ -423,7 +438,7 @@ export class WorldStore {
       const draft = await this.draft(worldId, userId);
       if (base !== null && base !== draft.base) throw new WorldError("conflict", "the world changed; reload and retry");
       if (draft.stored && draft.base !== (await this.index(worldId, userId))?.head) throw new WorldError("conflict", "the world changed since this draft began; reload it");
-      const revision = await this.commitDoc(draft.doc, userId, null, { source: by.source, ...(note !== "" ? { note } : {}) });
+      const revision = await this.commitDoc(draft.doc, userId, null, { source: by.source, ...(note !== "" ? { note } : {}), dropped: draft.stored ? draft.version : 0 });
       await this.host.storage.remove(`${worldDir(worldId)}draft.json`, userId).catch(() => undefined);
       return { revision, lint: lintWorld(draft.doc, this.registry) };
     });
@@ -529,6 +544,7 @@ function repinTables(before: Readonly<Record<string, unknown>>, doc: WorldDoc): 
 }
 
 function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
+  if (!hasOwn(WORLD_PARTS, part)) throw new WorldError("bad_request", `unknown part ${String(part)}`);
   if (!isRecord(value)) throw new WorldError("bad_request", `part ${part} must be an object`);
   if (part === "meta") {
     if (typeof value.name === "string") doc.name = value.name;

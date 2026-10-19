@@ -350,8 +350,10 @@ export type JsonPatchOp =
  * RFC 6902 operations to the whole draft, all of them or none. `restore` makes the draft a copy of
  * one of the world's revisions, which a commit then makes head again (DESIGN §23).
  *
- * `version`, when sent, is the draft's write count the client last saw: a write is refused with
- * `conflict` when the stored draft has moved on since. Every result carries the current count.
+ * `version`, when sent, is the draft version the client last saw: a write is refused with
+ * `conflict` when the stored draft has moved on since. Each write counts one, and a new draft
+ * counts on from the last one the world had, so a version never names two drafts of one world.
+ * Every result carries the current one (0 while no draft is stored).
  */
 export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: RevisionId | null; version?: number } & (
     | { op: "get" }
@@ -535,7 +537,7 @@ export interface ResultBodies {
   "lre.keep": { pending: boolean };
   "lre.settings.get": SettingsResult;
   "lre.settings.set": SettingsResult;
-  /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head; `version`: the stored draft's write count (0 when none is stored). */
+  /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head; `version`: the stored draft's version, never repeated for the world (0 when none is stored). */
   "lre.editor": { draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean; version: number };
   /**
    * `get` also carries `packKinds` and `packRelations`: every kind (label, extends, fields) and

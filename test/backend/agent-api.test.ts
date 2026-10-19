@@ -119,7 +119,42 @@ describe("the draft's version", () => {
     expect((await e.ok({ op: "put", collection: "places", id: "barn", value: place("barn") })).version).toBe(2);
     const discarded = await e.ok({ op: "discard", version: 2 });
     expect([discarded.version, discarded.stored, Object.keys(discarded.draft.places)]).toEqual([0, false, ["home"]]);
-    expect((await e.ok({ op: "set", part: "meta", value: { name: "Again" } })).version).toBe(1);
+    // A new draft counts on from the discarded one's 2.
+    expect((await e.ok({ op: "set", part: "meta", value: { name: "Again" } })).version).toBe(3);
+  });
+
+  test("a version never names two drafts of a world: a client holding a dropped draft's version stays refused", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld();
+    const e = editorOf(rig, worldId);
+    await e.ok({ op: "put", collection: "places", id: "pier", value: place("pier") });
+    const held = (await e.ok({ op: "put", collection: "places", id: "barn", value: place("barn") })).version;
+    expect(held).toBe(2);
+    // The client holding 2 goes quiet; meanwhile the draft is discarded and others write past 2 again.
+    await e.ok({ op: "discard" });
+    const seen: number[] = [];
+    for (let i = 0; i < 3; i++) seen.push((await e.ok({ op: "put", collection: "places", id: `shed${i}`, value: place(`shed${i}`) })).version);
+    expect(seen).toEqual([3, 4, 5]);
+    expect(failure(await e.send({ op: "patch", ops: [{ op: "remove", path: "/places/shed0" }], version: held })).code).toBe("conflict");
+    // A commit drops the draft too, and the count goes on after it.
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    expect([(await e.get()).version, (await indexOf(rig, worldId)).draftVersion]).toEqual([0, 5]);
+    expect((await e.ok({ op: "patch", ops: [{ op: "replace", path: "/name", value: "After" }] })).version).toBe(6);
+    // An index from before the count was kept counts on from the stored draft's own count, or 0.
+    const { draftVersion: _count, ...legacy } = await indexOf(rig, worldId);
+    rig.host.files.set(`${rig.host.userId}/worlds/${worldId}/index.json`, JSON.stringify(legacy));
+    expect((await e.ok({ op: "set", part: "meta", value: { name: "Later" } })).version).toBe(7);
+    await e.ok({ op: "discard" });
+    expect((await e.ok({ op: "set", part: "meta", value: { name: "Fresh" } })).version).toBe(8);
+  });
+
+  test("set writes only the parts it knows: any other name is refused and changes nothing", async () => {
+    const rig = new Rig();
+    const worldId = await rig.newWorld();
+    const e = editorOf(rig, worldId);
+    for (const part of ["entities", "__proto__", "pins", "id"]) expect(failure(await e.send({ op: "set", part, value: {} }))).toEqual({ code: "bad_request", message: `unknown part ${part}` });
+    const after = await e.get();
+    expect([after.stored, after.version, Object.keys(after.draft.entities).length > 0, Object.getPrototypeOf(after.draft) === Object.prototype]).toEqual([false, 0, true, true]);
   });
 
   test("a draft stored before drafts counted their writes reads as version 1", async () => {
@@ -226,7 +261,7 @@ describe("restore, commits and history", () => {
     await e.ok({ op: "put", collection: "places", id: "barn", value: place("barn") });
     const second = String(rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null })).revision);
     const restored = await e.ok({ op: "restore", revision: first });
-    expect([restored.base, restored.stored, restored.version, Object.keys(restored.draft.places).sort()]).toEqual([second, true, 1, ["home", "pier"]]);
+    expect([restored.base, restored.stored, restored.version, Object.keys(restored.draft.places).sort()]).toEqual([second, true, 3, ["home", "pier"]]);
     expect(String(rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null })).revision)).toBe(first);
     const index = await indexOf(rig, worldId);
     expect([index.head, index.revisions.at(-1), index.revisions.length]).toEqual([first, first, 3]);
@@ -358,7 +393,7 @@ describe("pushes and hello", () => {
     const committed = await pushed({ type: "lre.world", op: "commit", worldId, base: null });
     expect(committed.push).toEqual({ lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: 0, stored: false });
     const restored = await pushed({ type: "lre.editor", worldId, base: null, op: "restore", revision: (await indexOf(rig, worldId)).revisions[0] });
-    expect(restored.push).toEqual({ lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: 1, stored: true });
+    expect(restored.push).toEqual({ lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: 3, stored: true });
     const discarded = await pushed({ type: "lre.editor", worldId, base: null, op: "discard" });
     expect(discarded.push).toEqual({ lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: 0, stored: false });
     // A refused write changed nothing, so nothing is pushed.

@@ -1181,4 +1181,6 @@ export interface WorldIndex {
   revisions: string[];
   /** Oldest first, one note per time a revision became head; worlds made before it was kept have none. */
   history?: RevisionNote[];
+  /** The version the world's last dropped (discarded or committed) draft reached: a new draft counts on from it. Absent until one is dropped. */
+  draftVersion?: number;
 }
