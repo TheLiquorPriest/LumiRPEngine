@@ -335,6 +335,7 @@ Extends `thing`.
 | Field | Label | Type | Bounds | Default | Derived | Visibility | Notes |
 |---|---|---|---|---|---|---|---|
 | `collects_sales_tax` | Collects sales tax | bool |  |  |  |  | live from money 4 |
+| `daily_sales` | Walk-in takings a trading day | money | ≥ 0 |  |  |  | live from money 3 |
 | `distribution_every` | Paid out every | enum: month, quarter, year |  |  |  |  | live from money 4 |
 | `distribution_pct` | Profit paid out % | number | 0 … 100 |  |  |  | live from money 4 |
 | `industry` | Industry | text |  |  |  |  | live from money 3 |
@@ -344,7 +345,9 @@ Extends `thing`.
 | `operating_account` | Operating account | ref → account |  |  |  |  | live from money 3 |
 | `owners` | Owners ({party, role, share?}) | list |  |  |  |  | live from money 1 |
 | `places` | Places it trades at | list of ref |  |  |  |  | live from money 3 |
+| `sales_spread_pct` | Takings vary by up to ± % | number | 0 … 100 | `30` |  |  | live from money 3 |
 | `structure` | Structure | enum: sole_proprietorship, partnership, llc, s_corp, c_corp |  |  |  |  | live from money 4 |
+| `trading_days` | Trading days (0 is Sunday) | list of number |  |  |  |  | live from money 3 |
 
 #### `card`: Payment card
 
@@ -498,11 +501,19 @@ Extends `thing`.
 | `economy.card_state` | `card`, `state`, `who?` |
 | `economy.close_account` | `account` |
 | `economy.deposit` | `account`, `cents`, `who?` |
+| `economy.distribute` | `business`, `cents?`, `by?` |
 | `economy.flow_create` | `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |
 | `economy.flow_status` | `flow`, `status`, `who?` |
 | `economy.flow_update` | `flow`, `label?`, `kind?`, `from?`, `to?`, `amount?`, `every?`, `interval?`, `weekday?`, `day?`, `month?`, `at?`, `once?`, `start?`, `end?`, `count?`, `shortfall?`, `retry_days?`, `retries?`, `fallback?`, `roll?`, `category?`, `who?` |
+| `economy.hire` | `business`, `worker`, `title?`, `occupation?`, `basis?`, `rate?`, `hours?`, `hours_per_week?`, `pay_every?`, `start?`, `by?` |
+| `economy.invoice_issue` | `business`, `customer?`, `customer_name?`, `cents`, `memo?`, `days?`, `by?` |
+| `economy.invoice_pay` | `invoice`, `by?` |
+| `economy.invoice_void` | `invoice`, `by?` |
+| `economy.job_end` | `job`, `end?`, `by?` |
+| `economy.job_raise` | `job`, `rate?`, `pct?`, `by?` |
 | `economy.lose` | `item`, `thief?` |
 | `economy.move` | `from`, `to`, `cents`, `memo?` |
+| `economy.owner_draw` | `business`, `cents`, `owner?`, `by?` |
 | `economy.pay_card` | `card`, `from?`, `cents?` |
 | `economy.price_modifier` | `percent`, `scope?`, `place?`, `minutes?`, `id?`, `clear?` |
 | `economy.release_hold` | `account`, `hold` |
@@ -517,8 +528,11 @@ Extends `thing`.
 - `balance(account)`
 - `can_afford(who, cents)`
 - `credit_score(who)`
+- `employs(business, who)`
 - `holds(who, thing)`
 - `is_credit(account)`
+- `manages(who, business)`
+- `may_draw(who, business)`
 - `money_feature(feature, who)`
 - `net_worth(who)`
 - `price(item)`
@@ -536,12 +550,20 @@ Extends `thing`.
 | `card_report_lost` | Report card lost | `card: ref → card` |  | `default` | `2` | report my card lost, my card was stolen, cancel my card |
 | `card_unfreeze` | Unfreeze card | `card: ref → card` |  | `default` | `2` | unfreeze my card, unlock my card |
 | `deposit_cash` | Deposit cash | `account: ref → account`, `amount: money` |  | `default` | `3` | deposit, pay in cash, bank the cash |
+| `distribute_profit` | Distribute profit | `business: ref → business`, `amount?: money` |  | `default` | `10` | distribute profit, pay dividends, pay out the owners |
 | `flow_create` | Set up a standing payment | `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | set up a standing order, schedule a payment, set up a recurring transfer |
 | `flow_delete` | Cancel a standing payment | `flow: ref → flow` |  | `default` | `2` | cancel the standing order, stop the recurring payment |
 | `flow_pause` | Pause a standing payment | `flow: ref → flow` |  | `default` | `2` | pause the standing order |
 | `flow_resume` | Resume a standing payment | `flow: ref → flow` |  | `default` | `2` | resume the standing order |
 | `flow_update` | Change a standing payment | `flow: ref → flow`, `label?: text`, `kind?: text`, `from?: ref → account`, `to?: text`, `amount?: money`, `every?: text`, `interval?: number`, `weekday?: number`, `day?: number`, `month?: number`, `at?: text`, `once?: text`, `start?: text`, `end?: text`, `count?: number`, `shortfall?: text`, `retry_days?: number`, `retries?: number`, `fallback?: text`, `roll?: text`, `category?: text` |  | `default` | `2` | change the standing order, change the recurring payment |
+| `invoice_issue` | Send an invoice | `business: ref → business`, `customer?: ref`, `customer_name?: text`, `amount: money`, `memo?: text`, `days?: number` |  | `default` | `10` | send an invoice, invoice, bill them |
+| `invoice_pay` | Pay an invoice | `invoice: ref → invoice` |  | `default` | `5` | pay the invoice, settle the bill |
+| `invoice_void` | Void an invoice | `invoice: ref → invoice` |  | `default` | `5` | void the invoice, cancel the invoice, write it off |
+| `job_end` | End a job | `job: ref → job` |  | `default` | `10` | fire, let go, quit, resign, hand in my notice |
+| `job_hire` | Hire | `business: ref → business`, `worker: ref → person`, `title?: text`, `basis?: text`, `rate?: money`, `hours_per_week?: number`, `pay_every?: text` |  | `default` | `15` | hire, take on, give a job to |
+| `job_raise` | Give a raise | `job: ref → job`, `rate: money` |  | `default` | `5` | give a raise, raise the pay, pay more |
 | `move_money` | Transfer between accounts | `from: ref → account`, `to: ref → account`, `amount: money` |  | `default` | `2` | transfer, move money, put into savings |
+| `owner_draw` | Take an owner's draw | `business: ref → business`, `amount: money` |  | `default` | `5` | take a draw, pay myself, take money out of the business |
 | `pay` | Pay | `to: ref → person`, `amount: money` |  | `default` | `1` | pay, give money, send money, venmo |
 | `pay_card` | Pay card or loan | `card: ref → account`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | pay off the card, pay the card, pay my credit card, make a loan payment |
 | `set_autopay` | Set autopay | `account: ref → account`, `mode: text`, `from?: ref → account`, `amount?: money` |  | `default` | `2` | set up autopay, turn on autopay, turn off autopay |
@@ -550,7 +572,7 @@ Extends `thing`.
 
 ### Events
 
-Its own: `economy.accrue`, `economy.anchor`, `economy.card_paid`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.flow_run`, `economy.hold`, `economy.modifier`, `economy.note`, `economy.open`, `economy.score`, `economy.settle`, `economy.spend`, `economy.statement`, `economy.status`, `economy.txn`.
+Its own: `economy.accrue`, `economy.anchor`, `economy.card_paid`, `economy.commission`, `economy.credit`, `economy.decline`, `economy.delinquency`, `economy.estimated_tax`, `economy.flow_run`, `economy.hold`, `economy.invoice_paid`, `economy.modifier`, `economy.note`, `economy.open`, `economy.payout`, `economy.payslip`, `economy.remit`, `economy.sale`, `economy.score`, `economy.settle`, `economy.spend`, `economy.statement`, `economy.status`, `economy.timesheet`, `economy.txn`.
 
 Checks it adds to: `post`.
 
@@ -570,7 +592,9 @@ Panels: `economy.money`. Slots it writes: `money`.
 | Process | Domain | From level | Steps |
 |---|---|---|---|
 | `economy.accounts` | `money` | 3 | the world |
+| `economy.invoices` | `money` | 3 | the world |
 | `economy.money` | `money` | 2 | the world |
+| `economy.timesheet` | `money` | 3 | the world |
 
 Detail on demand: `money` (version 2).
 
@@ -586,7 +610,7 @@ Detail on demand: `money` (version 2).
 
 ### Lint codes
 
-`economy.accounts`, `economy.unpriced_cap`.
+`economy.accounts`, `economy.business`, `economy.unpriced_cap`.
 
 ## Gear & containers pack (`gear`)
 

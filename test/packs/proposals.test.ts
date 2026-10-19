@@ -44,9 +44,10 @@ describe("narration proposals", () => {
     expect(propose(w, "purchase", { item: "gum", name: "a pack of gum" })).toBe("unpriced");
     const r = propose(w, "purchase", { item: "gum", name: "a pack of gum", price: 200 });
     expect(typeof r === "string" ? r : r.rejected).toEqual([]);
-    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought a pack of gum")?.cents).toBe(-200);
+    // $2 and its 7% sales tax, at the top Money level.
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought a pack of gum")?.cents).toBe(-214);
     propose(w, "purchase", { item: "antique astrolabe", price: 9_000_000 });
-    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought antique astrolabe")?.cents).toBe(-50_000);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought antique astrolabe")?.cents).toBe(-53_500);
   });
 
   test("without an authored cap, the cap is the dearest catalog row's top price, else 500 of the currency", () => {
@@ -80,7 +81,7 @@ describe("narration proposals", () => {
     const w = setup();
     const gum = resolveAction(reg, w, { action: "buy", params: { item: "gum", price: 200 } }, createRng("g"));
     expect(gum.rejected).toEqual([]);
-    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought gum")?.cents).toBe(-200);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought gum")?.cents).toBe(-214);
     const milk = resolveAction(reg, w, { action: "buy", params: { item: "milk_whole" } }, createRng("m"));
     expect(milk.ok).toBe(true);
     expect(milk.rejected).toEqual([]);
@@ -90,7 +91,7 @@ describe("narration proposals", () => {
     expect(moneyView(w.ctx).recent.some((t) => t.memo === "Bought spare outboard engine")).toBe(false);
     const kayak = resolveAction(reg, w, { action: "buy", params: { item: "used kayak", price: 90_000 } }, createRng("k"));
     expect(kayak.rejected).toEqual([]);
-    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought used kayak")?.cents).toBe(-90_000);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought used kayak")?.cents).toBe(-96_300);
   });
 
   test("free-text buys match a catalog row, preferring what the place sells: beers at a bar are pints", () => {

@@ -126,7 +126,8 @@ describe("economy: ledger and level contract", () => {
   });
 
   test("a 30-day timelapse keeps the books balanced, and the Montage money equals the ledger", () => {
-    const { w, s0 } = setup();
+    // The player's job as a migrated world has it: the occupation's pay, from Brightline.
+    const { w, s0 } = setup((wd) => void (wd.entities.job_you = { id: "job_you", kind: "job", name: "Office clerk", tier: "background", fields: { worker: "you", employer: "brightline", occupation: "office_clerk", status: "active" }, relations: [] }));
     const start = structuredClone(w.state);
     const out = lapse(w, 30 * 1440);
     expect(out.result.to - start.clock).toBe(30 * 1440);

@@ -45,7 +45,8 @@ describe("a typed Buy's way of paying", () => {
   test("a long sentence that says 'pay with my credit card' charges the card when interpret leaves the method out", async () => {
     const none = await buy(null);
     const got = await buy({ item: "old brass ship's lantern", price: 84 });
-    expect(Math.abs(got.card - none.card)).toBe(8400);
+    // $84 and its 7% sales tax, at the top Money level.
+    expect(Math.abs(got.card - none.card)).toBe(8988);
     expect(got.checking).toBe(none.checking);
     expect(got.errors).toEqual([]);
   });
@@ -54,6 +55,6 @@ describe("a typed Buy's way of paying", () => {
     const none = await buy(null);
     const got = await buy({ item: "old brass ship's lantern", price: 84, method: "checking" });
     expect(got.card).toBe(none.card);
-    expect(none.checking - got.checking).toBe(8400);
+    expect(none.checking - got.checking).toBe(8988);
   });
 });

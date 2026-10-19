@@ -128,7 +128,7 @@ describe("change chip and Journal list what applied", () => {
     expect(rig.rt.ledger.errors).toEqual([]);
   });
 
-  test("after a five-day timelapse across a payday, a turn's Journal lines keep the payday, the card interest and the statement, as its change chip does", () => {
+  test("after a five-day timelapse across a payday, a turn's Journal lines keep the payday, its payroll posting and the card statement, as its change chip does", () => {
     const reg = createRegistry(ALL_PACKS);
     const make = STARTER_WORLDS.modern_slice_of_life;
     if (!make) throw new Error("no Port Alder starter");
@@ -140,7 +140,7 @@ describe("change chip and Journal list what applied", () => {
     if ("code" in lapse) throw new Error(lapse.reason);
     const lines = turnLines(reg, world, w.state, coarsen(reg, world, s0, w.events));
     expect(lines).toHaveLength(8);
-    for (const line of ["Payday:", "Your credit card interest:", "Statement:"]) expect(lines.some((l) => l.startsWith(line))).toBe(true);
+    for (const line of ["Payday:", "Payroll:", "Statement:"]) expect(lines.some((l) => l.startsWith(line))).toBe(true);
   });
 });
 

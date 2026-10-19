@@ -1416,3 +1416,138 @@ Each feature in `FEATURE_DEFS` has a floor (the lowest level it can run at) and 
 - a brokerage's units of a symbol to a holding of that asset (`<account>:<symbol>`, the id the holdings module's trades add to), with the symbol added to the world's assets.
 
 Only a world with the old shapes is migrated, so a migrated world has nothing left to migrate. The starter templates are written in the foundation's vocabulary (`data-src/templates/README.md`).
+
+## 26. Work and business
+
+The work module (`packs/economy/core/work.ts`, with `employment.ts`, `business.ts`, `books.ts` and `taxes.ts`) runs on the money foundation (§25). Every payment it makes is a flow or a posting the foundation checks and journals, and every number it keeps lives in the economy pack's slice, written by its own events inside the posting's unit (§4.3 groups). So both folds keep it alike, a rebased view that drops a payment drops its bookkeeping too, and nothing in it calls a model.
+
+### 26.1 Jobs and pay
+
+**A job** is a `job` entity: one worker's employment.
+- **The employer** is either a business in the world, which pays from its operating account (§26.2), or an outside employer by name, which pays from the outside economy. An employer named by a place, as worlds wrote it before businesses were parties, is the business trading there.
+- **The pay basis** is one of: `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period). A rate the job doesn't set comes from its occupation row:
+  - salary: the typical earnings;
+  - hourly: the median wage, or for a tipped occupation the tipped cash wage, with the rest of the median as tips by the hour;
+  - per shift: eight hours at the median.
+
+**The work a job counts.** A job counts only the days from its `start` to its `end` (the last day worked), and inside its `season` (`MM-DD` to `MM-DD`, which may wrap the new year) when it has one. Hourly and per-shift pay count hours, from one of three sources (`hours`):
+- **`scheduled`:** the worker's commitments at the job's workplace, as castlife gives them (`castlife.commitments`). That covers their routine there, after every cut a trip or a plan of their own makes. A shift is a day with work in it.
+- **`attended`:** the player's own timesheet (`economy.timesheet`). When a slot completes, each work block of the player's that ended in it counts if they turned up: they are at the workplace, or arrived there or left it after the block began. Blocks from before the chat began count as attended.
+- **`contract`:** the job's hours a week over the days it counts, thinned to its weeks a year unless a season already says which weeks.
+
+With no source set, a worker who has a routine at the job is paid for it: the player as attended, anyone else as scheduled. A worker with no routine there is paid the contract hours.
+
+**The pay schedule** (`pay_every`):
+- `weekly` and `biweekly`: anchored per job, counted from its `pay_anchor`, else the first payday weekday (`pay_weekday`, Friday by default) on or after its start;
+- `semimonthly`: on the chosen days (`pay_days`, the 15th and the last day by default);
+- `monthly`: on any one day (the last by default);
+- `custom`: a flow schedule, flattened (`pay_unit`, `pay_interval`, `pay_weekdays`, `pay_days`, `pay_months`, `pay_except`);
+- `per_job`: each evening at 21:00, for that day's work.
+
+A payday that falls on a weekend or a day-off holiday rolls to the business day before it (`pay_roll`: `before`, `after` or `none`).
+
+**A paycheck** pays for the work since the last one, up to the start of the day it is paid; a gig's runs up to its payout.
+- **Salary and a stipend** pay each scheduled period the paycheck closes, each prorated by the days the job counted in it. A seasonal salary divides over the periods its season reaches.
+- **Commission** is the job's percentage of the sales credited to it since the last paycheck: sales at the business while the worker is at the workplace, and walk-in takings on days they worked, split evenly among those who qualify.
+- **Tips** are the job's tips an hour times its hours.
+- **Deductions** are fixed amounts or percentages of gross, never more than is left. A pre-tax deduction comes off income-tax wages; a retirement contribution is still FICA wages, a health premium isn't. Each goes to an account of the worker's, or to an outside payee. A business employer adds its match (`match_pct`) to the worker's account.
+- **Withholding** follows §26.3, never taking more than the deductions leave.
+- **The net** is routed across the worker's accounts (`splits`): fixed amounts first, then percentages of the rest; what's left goes to their deposit account.
+
+The paycheck is one posting: the gross, plus the match and, at the top level, the employer's share of FICA, out of the employer's account; the net, deductions and taxes to where they go. Its `economy.payslip` rides with it. The payslip moves the job's record on (what it has paid through; the timesheet and the commission sales start again), adds to the worker's year of pay, and books the cost to a business employer. The payday note goes with it too: a signal for the player, a private note for anyone else (§9.3).
+
+**Payroll as flows.** Each job derives one flow (`pay:<job>`, source `job`) from the employer to the worker, on the job's cycle, from its anchor to the first payday after its last day.
+- It runs at its payer's level: a business's own, or for an outside employer, the worker's (§25).
+- Its shortfall is `skip`. Each paycheck covers everything since the last one paid, so a payday the employer can't cover is paid with the next.
+- A paycheck with nothing earned (a period on leave, out of season, or with no shifts) posts nothing but still moves the record on, so that time is never paid later.
+
+**Hire, fire and raise** are actions for the business's owner and GM edits:
+- **Hire** (`job_hire`) spawns a job. It starts today unless given a date, takes what it doesn't set from the occupation, and joins the business's own pay cycle, so its payroll runs on the same day.
+- **End a job** (`job_end`, also the worker's own way to quit) sets its last day to today. The next payday pays through it.
+- **Raise** (`job_raise`) sets the rate the next paycheck pays.
+
+A GM spawns a job and sets its fields, or sets its `status`, `end` or `rate`. Payroll reads only the fields, so an edit changes payroll exactly as the action would.
+
+**The old payroll.** The person fields (`hourly_cents`, `pay_frequency`, `deposit_to` and the rest) and the 09:00 payroll process are gone, and the world migration turns those fields into jobs (§25). An old chat's payroll left only plain postings, history lines and signals, so it still folds as recorded. The first paycheck after an Upgrade covers only from the day after the last scheduled payday, so it never pays a period twice.
+
+### 26.2 Businesses
+
+A business is a party (§25) with owners and shares, its own accounts and its books. **Its operating account** is where takings land and payroll and payouts come from: its `operating_account` when that is one of its own, else its best deposit account.
+
+**Sales.** A purchase at a place a business trades at (its `places`, else where it stands; the most closely enclosing one wins) pays that business, through the foundation's sale hook:
+- the price goes to the operating account, with the sales tax the business collects on top (§26.3);
+- the tax is owed until it is remitted;
+- the cost of the goods, the share its `margin_pct` doesn't keep, is owed to its suppliers;
+- its commission staff at the workplace are credited.
+
+A business doesn't sell to itself. One with no accounts is paid as any party without them is (§25).
+
+**Walk-in takings.** A business with `daily_sales` takes that much, give or take its `sales_spread_pct`, from customers outside the world. The takings come at closing (17:00) on each of its `trading_days` (Monday to Friday by default), and never on a day-off holiday. Each day's amount is a triangular draw from the occurrence's own seeded generator (§25), and its customers pay sales tax at the business's level. These are its sales when no one in the world shops there.
+
+**Payables** are settled monthly by derived flows: the suppliers on the 10th, the sales tax collected on the 20th, both rolled to the next business day. The sales tax goes to its region's authority (`tax:sales:<region>`). Each flow pays the whole balance owed, so one the business can't cover is paid in full with the next.
+
+**Invoices** are `invoice` entities.
+- **Issuing one** (`invoice_issue`) names the customer (someone in the world, or an outside customer by name), the amount, what it's for, and the days to pay: the business's `invoice_days`, else 30.
+- **Payment is a flow** from the customer, paid as a bill (from an account, never wallet cash). It falls due on the due date and again every week after, until the invoice is paid in full. An outside customer pays on the due date; one in the world pays once their money covers it.
+- **Late.** An invoice still unpaid when its due day ends goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days it stays unpaid. The customer and the business's owners are told.
+- **Paying it now** (`invoice_pay`) is the customer's own action. **Voiding it** (`invoice_void`) is the owner's.
+
+**Expenses** are flows the owners set up from the business's accounts: rent, utilities, loan payments. They reach the books through the journal.
+
+**Owners are paid** in two ways:
+- **Draws.** An owner or joint owner takes a draw (`owner_draw`) from the operating account. A corporation has none: it pays its owners by salary or dividends.
+- **Distributions** (`distribute_profit`) share out an amount among the owners by their share of its worth. With no amount given, the business pays its `distribution_pct` of the profit since its last distribution. A distribution policy (`distribution_pct` with `distribution_every`: month, quarter or year) does the same as a flow on the 10th after each period closes.
+
+Each owner's part goes where the holdings module routes their stake (`economy.stake_route`, else their deposit account). A reinvested part stays in the business. Every part is recorded on the stake (`economy.stake_paid`, §27).
+
+**The books** are kept by calendar month, the last 25 of them:
+- **Revenue** is sales, invoices paid to it, and other money in from the journal (less the takings of sales already booked).
+- **Expenses** are the cost of goods, payroll with the employer's costs, invoices it paid, business income tax, and every other outflow from its accounts by journal category.
+
+Owner draws, distributions, transfers between its own accounts and the sales tax it passes through count as neither. Its receivables are its unpaid invoices. Its payables are the invoices billed to it, the sales tax it holds and what it owes its suppliers. The holdings module values a stake from them (`economy.business_books`, `economy.operating_account`).
+
+**On the dashboards**, a party sees itself when it is a business, and each business it holds a role on:
+- its books for the year and for each of the last 12 months;
+- its last 20 sales;
+- its invoices;
+- its staff, with their pay;
+- what it owes for taxes and to its suppliers, with when each is next paid.
+
+A party's own late invoices, owed or owed to it, are alerts. On the player's surfaces, anyone the player can't see is named only as "a customer", "an employee" or "an owner" (§7). A character's money summary for their mind says how a business of theirs is doing this month, and what they owe on an invoice.
+
+### 26.3 Taxes
+
+**Withholding** (feature `withholding`, from Money 3):
+- **Flat below the top level:** the occupation's federal-plus-FICA rate (`withholding_rate_pct`) and the region's state rate (with its local rate for someone who pays it, `local_tax`), on gross pay less pre-tax deductions.
+- **Brackets at the top level** (feature `tax_brackets`, Money 4). The period's taxable pay is annualized, the standard deduction for the worker's `filing_status` comes off, and the rest goes through the federal brackets of the finance tables and back to one period. Social Security is 6.2 % up to the year's wage base (counting the year's FICA wages so far). Medicare is 1.45 %, with the additional 0.9 % past $200,000. The state and local rates follow.
+
+A contractor (`contractor`, by default the occupation's `self_employed`) has nothing withheld. A student working for their own school pays no FICA.
+
+**Sales tax** (feature `sales_tax`) applies only at the top Money level (4), or under Custom with its toggle on. It runs at the payer's level: below it, a price is as listed, with no tax line. A business below it neither collects nor remits: a taxed customer's tax goes straight to the authority, and its walk-in takings, taxed at its own level, carry none.
+- **The rate** is a place's own `sales_tax_pct`, else the combined rate of its tax region: a `tax_region` on it or an enclosing place, else the economy config's `region`, else the national row.
+- **No tax** falls on a category exempt there (the economy config's `taxes.exempt`, or a place's `tax_exempt`), nor on what a business that doesn't collect (`collects_sales_tax: false`) sells.
+- **Where it goes.** A business holds what it collects until it remits it monthly. On a purchase nobody in the world sells, the tax goes straight to the authority.
+
+**Income tax nobody withholds** is paid as estimated tax, by derived flows on the federal due dates (15 April, June and September, and 15 January), rolled to the next business day. Each payment covers its period: January to March, April and May, June to August, and September to December.
+- **A person's payment** taxes two kinds of income:
+  - their contract pay in the period, from Money 3;
+  - their share of the period's profit from each pass-through business they own (a sole proprietorship, a partnership, an LLC or an S corporation), at the business's `business_tax` level.
+  
+  Below the top level the tax is the occupation's `estimated_tax_set_aside_pct` (15 % without one) plus the state rate. At the top level the income is stacked on the year's wages through the brackets, with self-employment tax (15.3 % of 92.35 %, half of it deductible) on contract pay and on profit from any structure but an S corporation, plus the state rate.
+- **A C corporation** pays the corporate rate (21 %, or the economy config's `taxes.corporatePct`) plus the state rate on the period's profit, from its own account, and books it as its income tax.
+- **A missed payment** is made with the next: each one settles, as well as its own period, any period of the year before that no payment settled.
+
+The holdings module stacks capital gains on the same income through two queries: `economy.ordinary_income` (a person's wages, contract pay and pass-through profit for a year, and their taxable income) and `economy.income_tax` (the brackets).
+
+### 26.4 Records
+
+**The economy slice** keeps:
+- `payroll`: per job, what its last paycheck paid through, the paycheck itself, and the timesheet and commission sales since;
+- `ytd`: per person and year, the last two years of gross pay, FICA wages, withholding, pre-tax deductions and contract pay by month;
+- `books`: per business and month;
+- `payables`: per business, the sales tax and supplier balances;
+- `sales`: per business, its last 20 sales;
+- `estimated`: per payer and period, what estimated tax has paid;
+- `distributed`: per business, when it last distributed.
+
+**The events** are `economy.payslip`, `economy.timesheet`, `economy.commission`, `economy.sale`, `economy.remit`, `economy.invoice_paid`, `economy.payout` and `economy.estimated_tax`. In a timelapse or catch-up record, a job's timesheet entries for one pay period merge into one (minutes add, days join), and so do its commission credits; nothing else merges, so a coarse record folds exactly as the full one. Invoice states, late fees and jobs hired or ended are plain field sets and spawns, so a GM edit of them is the same change.

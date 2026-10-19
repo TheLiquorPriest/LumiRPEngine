@@ -39,6 +39,9 @@ const BOOKKEEPING = new Set<string>([
   "economy.price",
   // The POV's transaction history mirrors its `post` events, which carry the line.
   "economy.txn",
+  // A flow's run carries its schedule state; its posting and its payer's note carry the line, so
+  // nobody else's bills, takings or living costs reach the player.
+  "economy.flow_run",
   "story.flag",
   // A fight's turn order, economy and recorded picks; what anyone did is `combat.act`.
   "combat.turn",
@@ -363,15 +366,17 @@ export function playerLine(reg: Registry, world: WorldDoc, state: Readonly<World
 }
 
 /**
- * How much a line matters when there are more than fit: money, quest stages and signals (a payday,
- * a statement, an invitation) first; routine (activities, other people's moves, needs) last.
+ * How much a line matters when there are more than fit: money and quest stages first (a payday, a
+ * statement); then signals (an invitation, a need); routine (activities, other people's moves) last.
  */
 function lineRank(reg: Registry, world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, e: LedgerEvent): number {
-  if (e.type === "post" || e.type === "stage" || e.type === ENGINE_EVENTS.signal || e.type.startsWith("economy.")) return 0;
+  if (e.type === "post" || e.type === "stage" || e.type.startsWith("economy.")) return 0;
   if ((e.type === "set" || e.type === "add") && fieldDef(reg, world, own(state.entities, e.entity)?.kind ?? "", e.field)?.type === "money") return 0;
-  if (e.type === "set" && (e.field === "activity" || (e.field === "place" && e.entity !== pov))) return 2;
-  if (e.type.startsWith("castlife.")) return 2;
-  return 1;
+  // The economy's notes (a bill paid or declined, a payday) are money lines too.
+  if (e.type === ENGINE_EVENTS.signal) return "data" in e && (e.data.class === "bill" || e.data.class === "decline") ? 0 : 1;
+  if (e.type === "set" && (e.field === "activity" || (e.field === "place" && e.entity !== pov))) return 3;
+  if (e.type.startsWith("castlife.")) return 3;
+  return 2;
 }
 
 /**
