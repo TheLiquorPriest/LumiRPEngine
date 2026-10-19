@@ -304,8 +304,9 @@ export function payTiersValue(tiers: readonly PayTier[]): JsonValue {
   return tiers.map((t) => ({ use: t.use, ...(t.min !== undefined ? { min: t.min } : {}), ...(t.max !== undefined ? { max: t.max } : {}), ...(t.categories && t.categories.length > 0 ? { categories: [...t.categories] } : {}), ...(t.except && t.except.length > 0 ? { except: [...t.except] } : {}) }));
 }
 
+/** How the player pays from now on. An action's params are scalars, so the tiers travel as their JSON text. */
 export function payPrefsAction(tiers: readonly PayTier[]): ActionBody {
-  return { action: FINANCE_ACTIONS.payPrefs, params: { tiers: payTiersValue(tiers) } };
+  return { action: FINANCE_ACTIONS.payPrefs, params: { tiers: JSON.stringify(payTiersValue(tiers)) } };
 }
 
 export function payPrefsOps(person: EntityId, tiers: readonly PayTier[]): EditOp[] {
@@ -449,7 +450,7 @@ export function setPriceOps(asset: string, price: number): EditOp[] {
   return [{ op: "effect", effect: "economy.set_price", args: { asset, price } }];
 }
 
-/** The GM closes an account (`economy.close_account`): what it holds or owes settles as the foundation closes accounts. */
+/** The GM closes an account that holds and owes nothing (`economy.close_account`); its cards are cancelled. */
 export function closeAccountOps(account: EntityId): EditOp[] {
   return [{ op: "effect", effect: "economy.close_account", args: { account } }];
 }

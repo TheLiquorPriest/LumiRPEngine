@@ -214,7 +214,7 @@ describe("the requests the controls send", () => {
     expect(invoiceIssueAction("alder", { id: "mara" }, 42000, "Brake job", null)).toEqual({ action: "invoice_issue", params: { business: "alder", customer: "mara", amount: 42000, memo: "Brake job" } });
     expect(invoiceIssueAction("alder", { name: " Harbor Mutual " }, 9900, "", 30)).toEqual({ action: "invoice_issue", params: { business: "alder", customer_name: "Harbor Mutual", amount: 9900, days: 30 } });
     expect(routeAction({ property: "duplex" }, "chk")).toEqual({ action: "route_distributions", params: { property: "duplex", to: "chk" } });
-    expect(payPrefsAction([{ use: "credit", max: 50000, categories: [] }, { use: "cash", except: ["dining"] }])).toEqual({ action: "set_pay_prefs", params: { tiers: [{ use: "credit", max: 50000 }, { use: "cash", except: ["dining"] }] } });
+    expect(payPrefsAction([{ use: "credit", max: 50000, categories: [] }, { use: "cash", except: ["dining"] }])).toEqual({ action: "set_pay_prefs", params: { tiers: JSON.stringify([{ use: "credit", max: 50000 }, { use: "cash", except: ["dining"] }]) } });
   });
 
   test("the GM's field edits set what changed (a reference left empty is cleared); its other controls run the GM effects", () => {

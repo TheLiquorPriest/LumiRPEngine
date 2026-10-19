@@ -259,10 +259,12 @@ function AccountCard(props: { view: FinanceView; account: AccountView; controls:
             <button
               type="button"
               class="lre-btn small danger"
-              disabled={controls.busy || a.status === "closed"}
+              // The foundation closes only an account that holds and owes nothing (Add or Take money first).
+              disabled={controls.busy || a.status === "closed" || a.cents !== 0}
+              title={a.cents !== 0 ? "Empty it first: an account closes only when it holds and owes nothing." : undefined}
               onClick={() =>
                 void (async () => {
-                  if (await app.host.confirm("Close account", `Close ${a.name}? What it holds or owes is settled as an account closes.`, "danger", "Close")) await controls.edit(closeAccountOps(a.id));
+                  if (await app.host.confirm("Close account", `Close ${a.name}? Its cards are cancelled.`, "danger", "Close")) await controls.edit(closeAccountOps(a.id));
                 })()
               }
             >
