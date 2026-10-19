@@ -342,6 +342,11 @@ export function testModelWith(observe?: (plan: EngineTurnPlan) => void): TurnMod
       else if (verb === "pay") events.push(posting(-(Number(a ?? "0") || 0), "payment"));
       // A purchase paid from the account: the posting and the item are one group (they land together).
       else if (verb === "shop" && a) events.push({ ...posting(-(Number(b ?? "0") || 0), `bought ${a}`), group: `shop:${a}` }, { type: "test.buy", data: { item: a, price: 0 }, group: `shop:${a}` });
+      // A minds round and one character's mind (DESIGN §24), as the pre phase records them; its plan's id follows the seed, so a Re-run thinks anew.
+      else if (verb === "mind" && a) {
+        const place = state.entities[a]?.fields.place;
+        events.push({ type: "minds.round", data: { at: state.clock, on: true } }, { type: "minds.mind", data: { entity: a, at: state.clock, place: typeof place === "string" ? place : null, level: "live", moment: "turn", reason: "live", monologue: "m", depiction: "d", intent: "i", reactions: [], plans: [{ id: `p_${seed.slice(0, 8)}`, what: "Meet Sam", kind: "meet", when: { from: state.clock + 60, to: state.clock + 120 }, where: null, with: [POV], priority: 3, status: "open", made: state.clock, source: "mind", closed: null, reason: null }], mood: null, interrupt: null, withheld: false } });
+      }
       return events;
     },
     read({ state, text }) {
@@ -350,6 +355,12 @@ export function testModelWith(observe?: (plan: EngineTurnPlan) => void): TurnMod
       for (const m of text.matchAll(/\[found:(\d+)\]/g)) events.push({ type: "add", entity: POV, field: "cash", delta: Number(m[1]) });
       for (const m of text.matchAll(/\[lose:(\w+)\]/g)) events.push({ type: "test.lose", data: { item: m[1] ?? "" } });
       for (const m of text.matchAll(/\[pay:(\d+)\]/g)) events.push(posting(-Number(m[1]), "fee"));
+      // Who was there, and their memory of it (DESIGN §24.4), as the post phase records them.
+      for (const m of text.matchAll(/\[recall:(\w+)\]/g)) {
+        const who = m[1] ?? "";
+        events.push({ type: "minds.presence", data: { msg: null, at: state.clock, place: null, who: [who], saw: ["a turn"] } });
+        events.push({ type: "minds.memory", data: { entity: who, at: state.clock, notes: [{ id: `n_${state.clock}`, text: "remembered", salience: 3, at: state.clock }], commitments: [{ id: `c_${state.clock}`, kind: "promise", with: [POV], text: "a promise", due: null, status: "open", made: state.clock, closed: null }], resolved: [], plans: [], told: [{ to: [POV], what: "told" }], summary: null } });
+      }
       return events;
     },
   };

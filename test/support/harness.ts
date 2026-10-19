@@ -18,6 +18,7 @@ import { enginePack } from "../../src/engine/engine-pack";
 import { createRegistry, type Registry } from "../../src/engine/registry-impl";
 import type { QueueStop } from "../../src/engine/turn";
 import combatPack from "../../src/packs/combat/core/index";
+import mindsPack from "../../src/packs/minds/core/index";
 import { FakeHost } from "./fake-host";
 import { testModelWith, testPack, testWorlds } from "./test-pack";
 
@@ -57,7 +58,8 @@ export class Harness {
   private readonly settings: UserSettings;
 
   constructor(seedMode: WorldDoc["seedMode"] = "fresh", options: HarnessOptions = {}) {
-    this.registry = createRegistry([enginePack, testPack, combatPack, ...(options.packs ?? [])]);
+    // Minds' events ride in the generated turns (DESIGN §24): their reducers fold in both folds.
+    this.registry = createRegistry([enginePack, testPack, combatPack, mindsPack, ...(options.packs ?? [])]);
     this.model =
       options.model ??
       testModelWith((plan) => {
