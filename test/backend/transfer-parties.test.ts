@@ -7,6 +7,7 @@ import type { JsonObject } from "../../src/shared/json";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../../src/engine/events";
 import { toChain } from "../../src/backend/ledger-io";
 import { Rig } from "../support/rig";
+import { heldBy } from "../../src/shared/finance";
 
 const EXTRACT_MARK = "propose concrete state changes";
 const DANNY = "danny_okafor";
@@ -33,7 +34,7 @@ async function turn(proposals: JsonObject[]) {
     .reduce((a, id) => a + at(id), 0);
   // Danny's money net of his opening balances: his accounts plus the outside account they came from.
   const danny = Object.keys(state.accounts)
-    .filter((id) => state.entities[id]?.fields.owner === DANNY || id === `${EXTERNAL_ACCOUNT_PREFIX}${DANNY}`)
+    .filter((id) => heldBy(state.entities, id, DANNY) || id === `${EXTERNAL_ACCOUNT_PREFIX}${DANNY}`)
     .reduce((a, id) => a + at(id), 0);
   const pov = { cash: at("acct_pov_cash"), checking: at("acct_pov_checking"), savings: at("acct_pov_savings"), card: at("acct_pov_card"), loan: at("acct_pov_auto_loan"), brokerage: at("acct_pov_brokerage") };
   return { pov, outside, danny, accounts: { ...state.accounts }, chips: view.chips.map((c) => `${c.kind}: ${c.label}`), errors: rig.rt.ledger.errors };

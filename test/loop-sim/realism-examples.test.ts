@@ -69,14 +69,20 @@ describe("realism examples: money", () => {
     expect(moneyView(w.ctx).recent.filter((t) => t.memo === "Transfer").map((t) => t.cents).sort((a, b) => a - b)).toEqual([-50000, 50000]);
   });
 
-  test("a card statement shows interest and a minimum at level 4; at level 3 autopay settles the card", () => {
+  test("a card statement shows a minimum at level 4, and interest once a balance is carried; at level 3 autopay settles the card", () => {
     const w4 = setup((wd) => {
       wd.realism.levels.money = 4;
     });
     lapse(w4, until(w4, "2026-11-03T12:00"));
-    const card = moneyView(w4.ctx).accounts.find((a) => a.id === "card");
-    expect(card?.due?.label).toMatch(/^Minimum due/);
-    expect(card?.cents).toBeLessThan(-38000);
+    const first = moneyView(w4.ctx).accounts.find((a) => a.id === "card");
+    expect(first?.due?.label).toMatch(/^Minimum due/);
+    // The first statement is in its grace period: the opening balance carries no interest yet.
+    expect(first?.cents).toBe(-38000);
+    // Autopay pays only the minimum, so the rest is carried and the next statement charges interest on it.
+    lapse(w4, until(w4, "2026-12-03T12:00"));
+    const minimum = first?.due?.cents ?? 0;
+    expect(minimum).toBeGreaterThan(0);
+    expect(moneyView(w4.ctx).accounts.find((a) => a.id === "card")?.cents).toBeLessThan(-(38000 - minimum));
     const w3 = setup((wd) => {
       wd.realism.levels.money = 3;
     });
@@ -400,13 +406,13 @@ describe("realism examples: materialization persistence", () => {
       const t2 = planTurn({ registry: reg, world, state: s1, runSeed: "r", seed, kind: "normal", userTexts: [""], intent: null });
       expect(moneyView(reg.context(world, fold(reg, world, s1, t2.events))).accounts.map((a) => [a.id, a.name, a.cents])).toEqual(shown.map((a) => [a.id, a.name, a.cents]));
     }
-    // Extension update: a build with economy generator v2 folds the same ledger to the same panel,
-    // and never samples new detail for the world pinned to v1.
+    // Extension update: a build carrying only economy generator v3 folds the same ledger to the same
+    // panel, and never samples new detail for the world pinned to the version it was made with.
     const v2: PackDef = {
       ...economyPack,
       version: 2,
       register(r) {
-        economyPack.register({ ...r, materializer: (def) => r.materializer({ ...def, version: 2, materialize: () => [] }) });
+        economyPack.register({ ...r, materializer: (def) => r.materializer({ ...def, version: 3, versions: [3], materialize: () => [] }) });
       },
     };
     const updated = createRegistry(ALL_PACKS.map((p) => (p.id === "economy" ? v2 : p)));

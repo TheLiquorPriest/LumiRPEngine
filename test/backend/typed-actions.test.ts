@@ -12,6 +12,7 @@ import { unrevealedSecrets } from "../../src/engine/visibility";
 import { isRecord, type JsonObject, type JsonValue } from "../../src/shared/json";
 import type { Chip } from "../../src/shared/state-view";
 import { Rig } from "../support/rig";
+import { heldBy } from "../../src/shared/finance";
 
 const INTERPRET_MARK = "You map a player's typed input";
 
@@ -65,9 +66,13 @@ async function folded(rig: Rig, chatId: string) {
 }
 
 /** The POV's money history (the Money panel's lines). */
+/** What was paid on the POV's own accounts: every journal line but the openings (DESIGN §25.6); a purchase writes one on the account that paid it. */
 async function history(rig: Rig, chatId: string): Promise<JsonValue[]> {
-  const h = (await folded(rig, chatId)).state.packs.economy?.history;
-  return Array.isArray(h) ? h : [];
+  const { state, world } = await folded(rig, chatId);
+  const journal = state.packs.economy?.journal;
+  const lines: JsonValue[] = [];
+  if (isRecord(journal)) for (const [account, entries] of Object.entries(journal)) if (heldBy(state.entities, account, world.pov) && Array.isArray(entries)) lines.push(...entries.filter((j) => !(isRecord(j) && j.kind === "opening")));
+  return lines;
 }
 
 /** The chips on the latest reply. */

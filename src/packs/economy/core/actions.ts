@@ -323,7 +323,7 @@ export function openAccount(ctx: ReadContext, spec: OpenAccount): LedgerEvent[] 
   }
   if (spec.card && (t.revolving || t.transactional)) {
     const cardId = `${id}_card`;
-    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: `${spec.name} card`, tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
+    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: /\bcard$/i.test(spec.name) ? spec.name : `${spec.name} card`, tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
   }
   for (const o of spec.owners) if (o.role === "owner" || o.role === "joint") if (isParty(ctx, o.party) && t.liability) out.push({ type: FINANCE_EVENTS.credit, data: { person: o.party, kind: "opened", account: id } });
   return out;

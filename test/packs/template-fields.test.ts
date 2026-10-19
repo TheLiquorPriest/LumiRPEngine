@@ -15,13 +15,16 @@ import { priceOf } from "../../src/packs/economy/core/model";
 import { routeAt } from "../../src/packs/space/core/travel";
 import { modernUsWorld } from "./riverton";
 import { startState, trialBalance } from "./support";
+import { migrateMoney } from "../../src/engine/money-migrate";
 
 const reg = createRegistry(ALL_PACKS);
 
 function setup(patch: (w: WorldDoc) => void): Working {
-  const world = modernUsWorld("w", "R");
-  world.realism.levels.money = 4;
-  patch(world);
+  const authored = modernUsWorld("w", "R");
+  authored.realism.levels.money = 4;
+  patch(authored);
+  // The fields as a template writes them, read as the converter's world reads them (migrated).
+  const world = migrateMoney(authored);
   const w = new Working(reg, world, startState(world));
   materializeAll(reg, w, world.pov, "run");
   return w;
@@ -46,7 +49,7 @@ describe("template fields: money", () => {
       you.bills = [...(Array.isArray(you.bills) ? you.bills : []), { label: "Auto loan payment", payee: "Lakeshore CU", amountCents: 43631, every: "month", day: 10, from: "checking" }];
     });
     lapse(w, 45);
-    const loan = posts(w, /^Auto loan payment/);
+    const loan = posts(w, /^Auto loan autopay/);
     expect(loan).toHaveLength(1);
     expect(Math.abs((loan[0]?.lines.find((l) => l.account === "loan")?.amount ?? 0) - 43631)).toBeLessThanOrEqual(2);
     const autopay = posts(w, /^Visa card autopay/);

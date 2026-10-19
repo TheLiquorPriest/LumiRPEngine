@@ -209,7 +209,7 @@ describe("economy: pricing and declines", () => {
     expect([card.card < 0, card.cash, card.checking]).toEqual([true, 0, 0]);
     const debit = delta("my debit card");
     expect([debit.checking < 0, debit.cash, debit.card]).toEqual([true, 0, 0]);
-    expect([payMethodOf("savings"), payMethodOf("in cash"), payMethodOf("Visa"), payMethodOf("whatever")]).toEqual(["savings", "cash", "card", "auto"]);
+    expect([payMethodOf("savings"), payMethodOf("in cash"), payMethodOf("Visa"), payMethodOf("whatever")]).toEqual(["savings", "cash", "credit", "auto"]);
   });
 
   test("a narrated purchase whose payer names an account, or a way of paying, is paid by the holder from it", () => {
