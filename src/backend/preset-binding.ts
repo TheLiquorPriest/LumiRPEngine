@@ -22,7 +22,7 @@ import type { HostPort, HostPresetBlock } from "./host";
 export type GuidanceTarget = StepPurpose | "narrator";
 
 /** In the order Settings lists them. */
-export const GUIDANCE_TARGETS: readonly GuidanceTarget[] = ["interpret", "extract", "brief", "outline", "choices", "npc.choose", "judge", "contradiction", "puzzle.answer", "narrator"];
+export const GUIDANCE_TARGETS: readonly GuidanceTarget[] = ["interpret", "extract", "brief", "outline", "choices", "npc.choose", "judge", "contradiction", "puzzle.answer", "mind", "memory", "skip", "consolidate", "narrator"];
 
 /** A guidance block's name is this and its target: "RPEngine · extract". */
 export const GUIDANCE_PREFIX = "RPEngine · ";
@@ -129,6 +129,10 @@ const STARTER: Record<GuidanceTarget, string> = {
   judge: "It rates how well the player's described approach suits the action. Say how generous to be, and what a good plan looks like in this preset's genre.",
   contradiction: "It checks the reply against the engine's facts. Say what this preset's narrator may add without it counting (weather, small talk, inner thoughts).",
   "puzzle.answer": "It judges whether a typed answer matches a puzzle's. Say how loose to be about wording and spelling.",
+  mind: "It thinks as one character at a time, from only what that character knows, and gives the narrator their mind. Say how this preset's characters think: how candid, how scheming, how far ahead they plan.",
+  memory: "It writes down, as each character, what they will remember of a reply. Say what this preset's characters hold on to: slights, kindnesses, money, promises.",
+  skip: "It finds the moments worth stopping at inside a time skip. Say how often this preset wants a skip interrupted.",
+  consolidate: "It folds a character's older notes into their summary. Say what a summary should keep in this preset's story.",
   narrator:
     "In world chats the engine gives this to the narrator with its sections, before the character, or where an enabled block holds {{outlet::lre_narrator}}. Write rules for using the sections: trust the Outcome and narrate the result it states, invent no prices or events.",
 };

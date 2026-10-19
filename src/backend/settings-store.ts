@@ -11,6 +11,7 @@ import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTy
 import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
+import { defaultMindsSettings, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
 import type { HostPort } from "./host";
 import { readStoredJson } from "./stored-json";
 
@@ -73,6 +74,11 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 400)),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 400)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 400)),
+      // Minds run on their own cadence (`UserSettings.minds`): these cards set only where they run and their lore.
+      mind: step(true, ["always"], HELPER, lore("prefetch", 400)),
+      memory: step(true, ["reply"], HELPER, lore("none", 0)),
+      skip: step(true, ["timelapse"], HELPER, lore("prefetch", 300)),
+      consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
     },
     budgets: { pre: { calls: 2, ms: 30_000, lookup: { calls: 2, ms: 15_000 } }, post: { calls: 2, ms: 45_000, lookup: { calls: 1, ms: 20_000 } } },
     tokens: { sections: 600 },
@@ -86,6 +92,10 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
       "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 600)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
+      mind: step(true, ["always"], HELPER, lore("prefetch", 600)),
+      memory: step(true, ["reply"], HELPER, lore("none", 0)),
+      skip: step(true, ["timelapse"], HELPER, lore("prefetch", 400)),
+      consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
     },
     budgets: { pre: { calls: 8, ms: 60_000, lookup: { calls: 3, ms: 30_000 } }, post: { calls: 4, ms: 60_000, lookup: { calls: 2, ms: 30_000 } } },
     tokens: { sections: 1000 },
@@ -114,6 +124,7 @@ export function defaultSettings(): UserSettings {
     extraction: {},
     swipeDefault: "rerun",
     hideJsonBlocks: true,
+    minds: defaultMindsSettings(),
   };
 }
 
@@ -142,14 +153,17 @@ function normalize(raw: unknown): UserSettings {
   // lookups. Standard and Custom fill in from the defaults, which are Standard's.
   const fill = defaultSettings();
   const preset = isRecord(raw.modelUse) ? raw.modelUse.preset : undefined;
-  if (preset === "lean" || preset === "full") fill.modelUse = { preset, ...structuredClone(MODEL_USE_PRESETS[preset]) };
+  if (preset === "lean" || preset === "full") {
+    fill.modelUse = { preset, ...structuredClone(MODEL_USE_PRESETS[preset]) };
+    fill.minds = defaultMindsSettings(preset);
+  }
   const merged = mergePatch(JSON.parse(JSON.stringify(fill)) as JsonValue, JSON.parse(JSON.stringify(raw)) as JsonValue);
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
 
 // ---------------------------------------------------------------- the settings schema
 
-const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"];
+const STEP_PURPOSES: readonly StepPurpose[] = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"];
 /** A phase deadline above this is a typo, not a wish (10 min). */
 const MAX_PHASE_MS = 600_000;
 
@@ -294,6 +308,7 @@ function conform(v: JsonObject, d: UserSettings): UserSettings {
     extraction,
     swipeDefault: oneOf(v.swipeDefault, ["rerun", "renarrate"] as const) ?? d.swipeDefault,
     hideJsonBlocks: typeof v.hideJsonBlocks === "boolean" ? v.hideJsonBlocks : d.hideJsonBlocks,
+    minds: mindsSettingsOf(v.minds, d.minds),
   };
 }
 
@@ -303,7 +318,11 @@ function expandPresets(settings: UserSettings, patch: JsonObject): UserSettings 
   const realism = isRecord(patch.realism) ? patch.realism.preset : undefined;
   if (realism === "story" || realism === "grounded" || realism === "simulation") out.realism = { preset: realism, ...structuredClone(REALISM_PRESETS[realism]) };
   const modelUse = isRecord(patch.modelUse) ? patch.modelUse.preset : undefined;
-  if (modelUse === "lean" || modelUse === "standard" || modelUse === "full") out.modelUse = { preset: modelUse, ...structuredClone(MODEL_USE_PRESETS[modelUse]) };
+  if (modelUse === "lean" || modelUse === "standard" || modelUse === "full") {
+    out.modelUse = { preset: modelUse, ...structuredClone(MODEL_USE_PRESETS[modelUse]) };
+    // A preset is a whole policy for minds too; the user's own prompts and memory overrides stay.
+    out.minds = { ...structuredClone(MINDS_PRESETS[modelUse]), memory: out.minds.memory, prompts: out.minds.prompts };
+  }
   return out;
 }
 

@@ -87,6 +87,7 @@
       }
     },
     "classifications": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/facet" } },
+    "minds": { "$ref": "#/$defs/minds" },
     "ruleset": { "$ref": "#/$defs/ruleset" },
     "seedMode": { "enum": ["fresh", "same_roll"], "description": "Action seeds: a fresh seed per Re-run, or the same roll for the same path and action." },
     "lenientPricing": { "type": "boolean", "description": "Accept a narrated price inside its band." },
@@ -129,7 +130,83 @@
     "band": { "enum": ["principal", "supporting", "background"] },
     "visibility": { "enum": ["public", "known_by", "secret"] },
     "fieldType": { "enum": ["number", "text", "bool", "enum", "ref", "list", "dice", "money", "date", "duration"] },
-    "stepPurpose": { "enum": ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"] },
+    "stepPurpose": { "enum": ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
+    "minds": {
+      "title": "character minds",
+      "type": "object",
+      "description": "Character minds: what the narrator gets of a mind, the fidelity ladder's weights and thresholds, the author's pins and the memory defaults. Every part is optional; one left out, or out of range, reads as the default.",
+      "additionalProperties": false,
+      "properties": {
+        "secrecy": { "enum": ["full", "brief"], "description": "full: the narrator gets each mind's monologue and intent, to depict and never state; brief (the default): only a depiction, checked for leaks." },
+        "weights": {
+          "type": "object",
+          "description": "Points each input adds to a character's focus score, from -100 to 200.",
+          "additionalProperties": false,
+          "properties": {
+            "here": { "type": "number", "minimum": -100, "maximum": 200, "description": "In the POV's scene. Default 45." },
+            "nearby": { "type": "number", "minimum": -100, "maximum": 200, "description": "Under the same parent place as the POV. Default 20." },
+            "mentioned": { "type": "number", "minimum": -100, "maximum": 200, "description": "Named or addressed in the latest message or reply. Default 40." },
+            "regard": { "type": "number", "minimum": -100, "maximum": 200, "description": "The strongest regard axis with the POV at its extreme, scaled by its size. Default 10." },
+            "knows": { "type": "number", "minimum": -100, "maximum": 200, "description": "A knows relation with the POV either way. Default 10." },
+            "owner": { "type": "number", "minimum": -100, "maximum": 200, "description": "Owns a track under way. Default 15." },
+            "track": { "type": "number", "minimum": -100, "maximum": 200, "description": "Each track under way whose stages name them, up to three. Default 8." },
+            "roles": { "type": "object", "description": "Role facet values by value id; a value nested under a weighted one counts as it. Default antagonist 20.", "propertyNames": { "minLength": 1 }, "additionalProperties": { "type": "number", "minimum": -100, "maximum": 200 } },
+            "rule": { "type": "number", "minimum": -100, "maximum": 200, "description": "Named by a world rule. Default 5." },
+            "pending": { "type": "number", "minimum": -100, "maximum": 200, "description": "Each pending interaction with the POV, up to three. Default 15." },
+            "band": {
+              "type": "object",
+              "description": "The detail band their tier maps to. Defaults 15, 5 and 0.",
+              "additionalProperties": false,
+              "properties": { "principal": { "type": "number", "minimum": -100, "maximum": 200 }, "supporting": { "type": "number", "minimum": -100, "maximum": 200 }, "background": { "type": "number", "minimum": -100, "maximum": 200 } }
+            },
+            "recent": { "type": "number", "minimum": -100, "maximum": 200, "description": "Seen with the POV lately, fading over a day. Default 10." }
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "description": "The lowest score for Live, Near and Far; under far is Background. Read in order: live at least near, near at least far. Defaults 60, 35 and 15.",
+          "additionalProperties": false,
+          "properties": { "live": { "type": "number", "minimum": 0, "maximum": 1000 }, "near": { "type": "number", "minimum": 0, "maximum": 1000 }, "far": { "type": "number", "minimum": 0, "maximum": 1000 } }
+        },
+        "always": { "anyOf": [{ "$ref": "#/$defs/selector" }, { "type": "null" }], "description": "People who are always Live." },
+        "never": { "anyOf": [{ "$ref": "#/$defs/selector" }, { "type": "null" }], "description": "People who never get a mind; wins over always." },
+        "memory": {
+          "type": "object",
+          "description": "How minds remember; a user's overrides win.",
+          "additionalProperties": false,
+          "properties": {
+            "witness": { "type": "object", "additionalProperties": false, "properties": { "show": { "type": "integer", "minimum": 0, "maximum": 64, "description": "Witness log lines shown to a mind. Default 8." } } },
+            "recall": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "recent": { "type": "integer", "minimum": 0, "maximum": 64, "description": "The latest turns they were there for. Default 4." },
+                "relevant": { "type": "integer", "minimum": 0, "maximum": 64, "description": "The turns they were there for that best match the moment. Default 4." },
+                "tokens": { "type": "integer", "minimum": 0, "maximum": 8000, "description": "Tokens recall may take. Default 1200." }
+              }
+            },
+            "notes": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "show": { "type": "integer", "minimum": 0, "maximum": 64, "description": "Notes shown to a mind. Default 8." },
+                "keep": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Notes kept before the oldest are folded into the summary. Default 24." }
+              }
+            },
+            "commitments": { "type": "object", "additionalProperties": false, "properties": { "show": { "type": "integer", "minimum": 0, "maximum": 64, "description": "Open commitments shown to a mind; all are kept until resolved. Default 8." } } },
+            "salience": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "halfLifeDays": { "type": "number", "minimum": 0.1, "maximum": 3650, "description": "Game days in which a note's salience halves. Default 7." },
+                "floor": { "type": "number", "minimum": 0, "maximum": 5, "description": "A note under this salience has faded. Default 0.5." }
+              }
+            },
+            "consolidate": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean", "description": "Fold faded and surplus notes into the summary. Default true." } } }
+          }
+        }
+      }
+    },
     "selector": {
       "title": "a selector",
       "type": "object",

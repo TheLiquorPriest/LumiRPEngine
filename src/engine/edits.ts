@@ -376,6 +376,15 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
       return despawnOp(reg, w, op.entity, rng);
     case "restore":
       return restoreOp(reg, w, op.entity, rng);
+    case "mind_pin":
+    case "mind_refresh":
+    case "mind_memory": {
+      // A character's mind is the minds pack's (DESIGN §24.9): it words the control as its events.
+      const edit = optionalService(w.ctx, "minds.edit");
+      if (!edit) return reject("no_minds", "this world has no character minds");
+      const out = edit(w.ctx, op);
+      return Array.isArray(out) ? applyAll(w, out) : out;
+    }
   }
 }
 
@@ -449,6 +458,13 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
         case "despawn":
         case "restore":
           return str(o.entity) ? { op: o.op, entity: o.entity } : null;
+        case "mind_pin":
+          return str(o.entity) && (o.level === null || o.level === "live" || o.level === "near" || o.level === "far" || o.level === "background") ? { op: "mind_pin", entity: o.entity, level: o.level } : null;
+        case "mind_refresh":
+          return str(o.entity) ? { op: "mind_refresh", entity: o.entity } : null;
+        case "mind_memory":
+          if (!str(o.entity) || (o.part !== "note" && o.part !== "commitment" && o.part !== "plan") || !(o.id === null || str(o.id)) || !(o.value === null || isRecord(o.value))) return null;
+          return { op: "mind_memory", entity: o.entity, part: o.part, id: o.id, value: o.value as JsonObject | null };
         default:
           return null;
       }

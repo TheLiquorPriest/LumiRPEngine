@@ -5,6 +5,7 @@
 
 import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "./ids";
 import type { AdjudicationDef, StepPurpose } from "./world";
+import type { MindsSettings } from "./minds";
 
 /** Where a model step runs. `decision` uses `decisions.evaluate`; `helper` a helper JSON call. */
 export interface StepRoute {
@@ -194,4 +195,6 @@ export interface UserSettings {
   swipeDefault: "rerun" | "renarrate";
   /** World chats hide each reply's `<json>…</json>` block on display, after the preset's own display scripts. World Info skips the block either way (DESIGN §6.7). */
   hideJsonBlocks: boolean;
+  /** Character minds (DESIGN §24.6): on or off, the Live limit, refresh policies, memory, the Minds section's budget, prompts and time-skip caps. */
+  minds: MindsSettings;
 }

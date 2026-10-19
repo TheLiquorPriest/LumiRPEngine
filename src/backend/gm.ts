@@ -4,6 +4,7 @@
 // held writes that didn't apply, with their reasons.
 
 import type { GmView } from "../shared/state-view";
+import { worldMindsOf, type MindsSettings } from "../shared/minds";
 import { buildGmWorld } from "../engine/gm-view";
 import type { ChainMessage } from "../engine/ledger/chain";
 import type { LedgerCore } from "../engine/ledger/journal";
@@ -15,7 +16,7 @@ import { appliedEvents } from "./view";
 /** How many edits the GM view lists, newest first. */
 const GM_EDITS = 40;
 
-export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry): GmView | null {
+export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[], registry: Registry, minds: MindsSettings): GmView | null {
   const render = core.renderState(observed);
   if (!render) return null;
   const fold = core.fold(observed);
@@ -29,5 +30,6 @@ export function buildGmView(core: LedgerCore, observed: readonly ChainMessage[],
     ...buildGmWorld(registry, render.world, render.state),
     edits: edits.reverse().slice(0, GM_EDITS),
     refused: (core.journal.refused ?? []).map((r) => ({ id: r.write.id, reason: r.reason })),
+    minds: { enabled: minds.enabled, secrecy: worldMindsOf(render.world).secrecy, characters: [] },
   };
 }

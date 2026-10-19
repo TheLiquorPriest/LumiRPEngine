@@ -21,6 +21,7 @@ import { applyPatch, isPrototypeKey, jsonEqual, measure, parsePointer, PatchErro
 import type { EditorRequest, JsonPatchOp, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
 import type { RevisionNote, RulesetDef, WorldDoc, WorldIndex } from "../shared/world";
 import { DEFAULT_SPAWN_CAP, EXPORT_FORMAT, WORLD_FORMAT } from "../shared/world";
+import { WORLD_MINDS_KEYS, type WorldMindsConfig } from "../shared/minds";
 import { blankWorld, currencyOf, isWorldDoc, lintWorld, macrosIn, migrateWorld, shapeIssues, stamped } from "../engine/authoring";
 import { compileMaps, mapSettingsOf } from "../shared/maps";
 import type { Registry } from "../engine/registry-impl";
@@ -79,7 +80,7 @@ export const NOTE_CAP = 200;
 const PATCH_PROTECTED = ["id", "format", "engineVersion", "pins", "suppressed"] as const;
 
 /** Every part `set` writes: any other name is refused, so a set never reaches the rest of the document. */
-const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true };
+const WORLD_PARTS: Record<WorldPart, true> = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true, minds: true };
 
 export class WorldError extends Error {
   constructor(
@@ -708,6 +709,14 @@ function setPart(doc: WorldDoc, part: WorldPart, value: JsonValue): void {
     const terms = isRecord(value.terms) ? Object.fromEntries(Object.entries(value.terms).flatMap(([term, entries]) => (safeKey(term) ? [[term, ids(entries)]] : []))) : {};
     const topics = isRecord(value.topics) ? Object.fromEntries(Object.entries(value.topics).flatMap(([id, t]) => (safeKey(id) && isRecord(t) ? [[id, { label: typeof t.label === "string" ? t.label : id, entries: ids(t.entries) }]] : []))) : {};
     doc.loreIndex = { terms, topics };
+    return;
+  }
+  // `world.minds` as its editor sends it, its known keys only (lint reports bad values); none set is
+  // no config, so a world saved untouched stays as it was.
+  if (part === "minds") {
+    const kept = Object.fromEntries(WORLD_MINDS_KEYS.filter((key) => value[key] !== undefined).map((key) => [key, value[key] ?? null]));
+    if (Object.keys(kept).length === 0) delete doc.minds;
+    else doc.minds = kept as unknown as WorldMindsConfig;
     return;
   }
   // `calendar`, `realism` and `time` are whole singletons, written as the editors send them.
