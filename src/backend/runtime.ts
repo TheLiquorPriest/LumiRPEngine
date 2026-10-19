@@ -29,7 +29,7 @@ import { checkOf } from "../engine/checks";
 import { applyTimeAdvance, fightHoldsClock, IN_FIGHT, parseOverrides, parseTarget } from "../engine/time";
 import { EXTERNAL_ACCOUNT_PREFIX } from "../engine/events";
 import { boundProposal } from "../engine/bounds";
-import { calendarOf, dateAt, formatClock, formatHHMM, nextTimeOfDay, weekdayName, type Calendar } from "../engine/calendar";
+import { calendarOf, clockOfStamp, dateAt, formatClock, formatHHMM, formatStamp, nextTimeOfDay, placeOffset, weekdayName, type Calendar } from "../engine/calendar";
 import type { ChainMessage } from "../engine/ledger/chain";
 import { LedgerFold } from "../engine/ledger/fold";
 import type { LedgerCore, LedgerEnv } from "../engine/ledger/journal";
@@ -883,9 +883,14 @@ export class Runtime implements TurnHooks {
       return;
     }
     const scene = { place: placeOfEntity(render.state, render.world.pov) };
-    // Letting time pass is an engine action too ("I sleep until the next morning").
+    // Letting time pass is an engine action too ("I sleep until the next morning", "skip ahead to
+    // Friday at 6 PM"). The model is told the day and time as the HUD shows them (the place's time
+    // zone), so it can name a stated day and time exactly.
     const dayParts = render.world.calendar.dayParts.map((d) => d.id);
-    const timelapseEntry = { id: TIMELAPSE_ACTION, label: `Let time pass (wait, sleep, skip ahead): minutes for a stated duration, or until one of ${[...dayParts, "shift", "commitment"].join(", ")} ("next <day part>" for the following day's)`, params: ["minutes", "until"], lexicon: TIMELAPSE_LEXICON };
+    const cal = calendarOf(render.world);
+    const offset = placeOffset(render.world, render.state.clock, placeOfEntity(render.state, render.world.pov));
+    const now = `${weekdayName(cal, dateAt(cal, render.state.clock + offset).weekday)} ${formatStamp(cal, render.state.clock, offset)}`;
+    const timelapseEntry = { id: TIMELAPSE_ACTION, label: `Let time pass (wait, sleep, skip ahead): minutes for a stated duration; until one of ${[...dayParts, "shift", "commitment"].join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${now})`, params: ["minutes", "until", "at"], lexicon: TIMELAPSE_LEXICON };
     // Answer names the open puzzles the player can see, so a typed "I dial 1887" finds it.
     const puzzles = openPuzzleTitles(this.registry, render.world, render.state);
     const labelOf = (a: ActionDef): string => (a.pack === "story" && a.id === "answer" && puzzles.length > 0 ? `${a.label} (open: ${puzzles.join("; ")})` : a.label);
@@ -904,7 +909,7 @@ export class Runtime implements TurnHooks {
       criteria[TIMELAPSE_ACTION] = timelapseEntry.label;
       const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
       const a = answer?.answers.action;
-      const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null } } : offered.find((x) => x.id === a.choice)) : undefined;
+      const chosen = a?.type === "choice" && a.choice !== "none" ? (a.choice === TIMELAPSE_ACTION ? { id: TIMELAPSE_ACTION, params: { minutes: null, until: null, at: null } } : offered.find((x) => x.id === a.choice)) : undefined;
       if (!chosen) result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
       else if (Object.keys(chosen.params).length === 0) result = { action: chosen.id, params: {}, probabilities: a?.type === "choice" ? a.probabilities : { [chosen.id]: 1 } };
       // With no call left to fill its params, the action went unread, as when the call fails: a chip
@@ -946,7 +951,7 @@ export class Runtime implements TurnHooks {
     const timeOnly = result.action === TIMELAPSE_ACTION ? result.params : !result.action && result.then ? result.then : null;
     if (timeOnly) {
       bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
-      const target = interpretedTarget(timeOnly, render.world, render.state.clock, text);
+      const target = interpretedTarget(timeOnly, render.world, render.state, text);
       // A short span runs in the turn; a longer one is offered (a misread can't skip days unasked).
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
       bridge.setOffer(text, over ? target : null);
@@ -998,7 +1003,7 @@ export class Runtime implements TurnHooks {
       queue.push({ action: def.id, params: ready, text: chipText(q.text) });
     }
     bridge.setNext(text, joinActions(next) || null);
-    bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state.clock, text) : null);
+    bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state, text) : null);
     const intent: InterpretOutput = { action: result.action, params, probabilities: result.probabilities, ...(then ? { then } : {}), ...(queue.length > 0 ? { queue } : {}) };
     if (misfit) {
       this.host.log("info", `[LumiRPEngine] interpret: queued ${misfit.label} names nothing in the world; the queue ends before it`, userId);
@@ -1572,7 +1577,7 @@ export class Runtime implements TurnHooks {
     const offer = input.kind === "continue" || plan?.stopped ? undefined : bridge.offerFor(userText);
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
-      const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
+      const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(calendarOf(chipWorld), headState.clock, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
       const detail = offer.type === "duration" && offer.minutes > INTERPRETED_TIMELAPSE_CAP ? "That's longer than one turn runs on its own. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) as JsonValue } });
     }
@@ -2029,9 +2034,18 @@ export const INTERPRETED_TIMELAPSE_CAP = 1440;
 /** A "next" day part closer than this is the one after it: "sleep until the next morning" at 07:14 means tomorrow's. */
 const NEXT_DAY_PART_GAP = 180;
 
-/** A typed timelapse's target from `interpret` params: `until` a day part (or the next one), shift or commitment, else `minutes`. */
-function interpretedTarget(params: JsonObject, world: WorldDoc, now: number, text: string): TimelapseTarget | null {
+/**
+ * A typed timelapse's target from `interpret` params (DESIGN §9.2): `at` a stated day and time
+ * ("YYYY-MM-DD HH:MM", local to where the POV is, as the HUD shows it), else `until` a day part (or
+ * the next one), shift or commitment, else `minutes`. A stated time that has passed or lies beyond a
+ * timelapse's reach is still the target, so the turn refuses it with its note as it does any target
+ * it can't reach; text that isn't a day and time the calendar has is no stated time.
+ */
+export function interpretedTarget(params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, text: string): TimelapseTarget | null {
   const cal = calendarOf(world);
+  const now = state.clock;
+  const local = typeof params.at === "string" ? clockOfStamp(cal, params.at) : null;
+  if (local !== null) return { type: "at", at: local - placeOffset(world, local, placeOfEntity(state, world.pov)) };
   const raw = typeof params.until === "string" ? params.until.trim().toLowerCase() : "";
   const next = /^(the\s+)?(next|tomorrow)\b/.test(raw);
   const until = raw.replace(/^(the\s+)?(next|tomorrow)\s*/, "");
