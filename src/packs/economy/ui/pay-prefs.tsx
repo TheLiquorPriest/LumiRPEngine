@@ -4,7 +4,7 @@
 
 import { useState } from "preact/hooks";
 import type { PayTier } from "../../../shared/finance";
-import { formatMoneyInput, parseMoneyInput } from "../../../shared/money";
+import { formatMoneyInput, parseMoneyInput, type MoneyUnit } from "../../../shared/money";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { humanize } from "../../../frontend/format";
 import { MoneyInput } from "../../../frontend/money-input";
@@ -39,12 +39,12 @@ function listOf(text: string): string[] {
     .filter((s) => s !== "");
 }
 
-function TierRow(props: { tier: PayTier; index: number; count: number; uses: readonly Choice[]; categories: readonly string[]; currency: WorldCurrency; onChange(next: PayTier | null, move?: -1 | 1): void }) {
+function TierRow(props: { tier: PayTier; index: number; count: number; uses: readonly Choice[]; categories: readonly string[]; currency: WorldCurrency; unit: MoneyUnit; onChange(next: PayTier | null, move?: -1 | 1): void }) {
   const { tier } = props;
-  const [min, setMin] = useState(tier.min === undefined ? "" : formatMoneyInput(tier.min, props.currency));
-  const [max, setMax] = useState(tier.max === undefined ? "" : formatMoneyInput(tier.max, props.currency));
+  const [min, setMin] = useState(tier.min === undefined ? "" : formatMoneyInput(tier.min, props.currency, props.unit));
+  const [max, setMax] = useState(tier.max === undefined ? "" : formatMoneyInput(tier.max, props.currency, props.unit));
   const options = [...PAY_METHODS, ...props.uses];
-  const amount = (text: string): number | undefined | null => (text.trim() === "" ? undefined : parseMoneyInput(text, props.currency));
+  const amount = (text: string): number | undefined | null => (text.trim() === "" ? undefined : parseMoneyInput(text, props.currency, props.unit));
   const listId = `lre-pay-categories-${props.index}`;
   return (
     <div class="lre-card lre-stack" data-lre-pay-tier={props.index}>
@@ -78,6 +78,7 @@ function TierRow(props: { tier: PayTier; index: number; count: number; uses: rea
           <span class="label">From (amount)</span>
           <MoneyInput
             currency={props.currency}
+            unit={props.unit}
             label={`Tier ${props.index + 1} from`}
             value={min}
             invalid={amount(min) === null}
@@ -92,6 +93,7 @@ function TierRow(props: { tier: PayTier; index: number; count: number; uses: rea
           <span class="label">Up to (amount)</span>
           <MoneyInput
             currency={props.currency}
+            unit={props.unit}
             label={`Tier ${props.index + 1} up to`}
             value={max}
             invalid={amount(max) === null}
@@ -120,8 +122,8 @@ function TierRow(props: { tier: PayTier; index: number; count: number; uses: rea
   );
 }
 
-/** Tiers in order, as a whole: the first that fits and covers the amount pays. */
-export function PayTiersEditor(props: { value: readonly PayTier[]; uses: readonly Choice[]; categories: readonly string[]; currency: WorldCurrency; onChange(next: PayTier[]): void }) {
+/** Tiers in order, as a whole: the first that fits and covers the amount pays. Build types amounts as whole minor units (`unit`), play as the currency writes them. */
+export function PayTiersEditor(props: { value: readonly PayTier[]; uses: readonly Choice[]; categories: readonly string[]; currency: WorldCurrency; unit?: MoneyUnit; onChange(next: PayTier[]): void }) {
   const tiers = props.value;
   const change = (index: number, next: PayTier | null, move?: -1 | 1) => {
     const out = [...tiers];
@@ -139,7 +141,7 @@ export function PayTiersEditor(props: { value: readonly PayTier[]; uses: readonl
       {tiers.length === 0 ? <span class="lre-small lre-muted">No tiers: the engine's defaults for their wealth and character pay.</span> : null}
       {tiers.map((tier, i) => (
         // Keyed by place and way of paying, so a moved tier's typed amounts move with it.
-        <TierRow key={`${i}:${tier.use}`} tier={tier} index={i} count={tiers.length} uses={props.uses} categories={props.categories} currency={props.currency} onChange={(next, move) => change(i, next, move)} />
+        <TierRow key={`${i}:${tier.use}`} tier={tier} index={i} count={tiers.length} uses={props.uses} categories={props.categories} currency={props.currency} unit={props.unit ?? "major"} onChange={(next, move) => change(i, next, move)} />
       ))}
       <button type="button" class="lre-btn small" onClick={() => props.onChange([...tiers, { use: "debit" }])}>
         + Add a tier

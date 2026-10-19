@@ -589,6 +589,31 @@ export function SchemaEditor(props: EditorProps) {
         ))}
       {PackConfig ? <PackConfig world={props.world} config={isRecord(value.config) ? value.config : {}} lint={lintAt(draft?.lint ?? [], `${path}.config`)} onChange={(config) => setValue({ ...value, config })} /> : null}
       <SchemaFields specs={COLLECTION_SPECS[props.collection]} value={value} ctx={{ doc: formDoc, lint: draft?.lint ?? [], path, identifiers, functions: draft?.functions ?? [], fieldEditors: app.catalog.fields }} onChange={setValue} />
+      {props.collection === "places"
+        ? app.catalog.placeFields.map((def) => {
+            // A pack's place field is edited inside the place's `fields`, which the JSON above shows too.
+            const fields: JsonObject = isRecord(value.fields) ? (value.fields as JsonObject) : {};
+            return (
+              <section key={def.field} class="lre-card" data-lre-place-field={def.field}>
+                <div class="lre-h">{def.label}</div>
+                <def.component
+                  doc={formDoc}
+                  place={{ id, fields }}
+                  field={def.field}
+                  value={fields[def.field]}
+                  lint={lintAt(draft?.lint ?? [], `${path}.fields.${def.field}`)}
+                  path={`${path}.fields.${def.field}`}
+                  onChange={(next) => {
+                    const out: JsonObject = { ...fields };
+                    if (next === undefined) delete out[def.field];
+                    else out[def.field] = next;
+                    setValue({ ...value, fields: out });
+                  }}
+                />
+              </section>
+            );
+          })
+        : null}
       <div class="lre-savebar">
         <button type="button" class="lre-btn primary" disabled={busy || (!changed && !isNew)} onClick={save}>
           {isNew ? "Create" : "Save to draft"}

@@ -82,6 +82,24 @@ export interface FieldEditorDef {
   component: ComponentType<FieldEditorProps>;
 }
 
+/** A field of a place a pack reads (a cash machine, a bank branch): places have no kinds, so their fields are JSON unless a pack draws an editor for one. */
+export interface PlaceFieldEditorProps {
+  doc: WorldDoc;
+  place: { id: string; fields: JsonObject };
+  field: string;
+  value: JsonValue | undefined;
+  lint: readonly LintIssue[];
+  /** The field's document path (`places.<id>.fields.<field>`). */
+  path: string;
+  onChange(next: JsonValue | undefined): void;
+}
+
+export interface PlaceFieldDef {
+  field: string;
+  label: string;
+  component: ComponentType<PlaceFieldEditorProps>;
+}
+
 /** A proposed value of a collection, drawn for a job's review (a map as Play will show it). */
 export interface PreviewProps {
   world: WorldDoc;
@@ -131,6 +149,8 @@ export interface UiRegistry {
   gm(def: GmSectionDef): void;
   /** Draws one declared field of a kind with the pack's own editor in Build's entity form; one per kind and field. */
   field(def: FieldEditorDef): void;
+  /** Draws one field of every place with the pack's own editor in Build's place form; one per field. */
+  placeField(def: PlaceFieldDef): void;
 }
 
 export interface UiPackDef {

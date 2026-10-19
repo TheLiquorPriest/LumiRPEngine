@@ -344,8 +344,9 @@ export function raiseAction(job: EntityId, rate: number): ActionBody {
   return { action: FINANCE_ACTIONS.raise, params: { job, rate } };
 }
 
-export function invoiceIssueAction(business: EntityId, customer: EntityId, cents: number, memo: string, days: number | null): ActionBody {
-  const params: JsonObject = { business, customer, amount: cents };
+/** An invoice to a customer in the world (`customer`) or an outside one by name (`customer_name`). */
+export function invoiceIssueAction(business: EntityId, customer: { id: EntityId } | { name: string }, cents: number, memo: string, days: number | null): ActionBody {
+  const params: JsonObject = { business, ...("id" in customer ? { customer: customer.id } : { customer_name: customer.name.trim() }), amount: cents };
   if (memo.trim() !== "") params.memo = memo.trim();
   if (days !== null) params.days = days;
   return { action: FINANCE_ACTIONS.invoiceIssue, params };

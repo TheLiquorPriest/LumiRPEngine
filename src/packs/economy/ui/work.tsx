@@ -161,23 +161,27 @@ function HireFormView(props: { business: BusinessView; controls: PlayerControls;
 function InvoiceForm(props: { business: BusinessView; controls: PlayerControls; onDone(): void }) {
   const { controls } = props;
   const [customer, setCustomer] = useState("");
+  const [outside, setOutside] = useState("");
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
   const [days, setDays] = useState<number | null>(null);
   const cents = amountOf(amount, controls.currency);
+  const OUTSIDE = "__outside";
+  const who = customer === OUTSIDE ? (outside.trim() !== "" ? { name: outside } : null) : customer !== "" ? { id: customer } : null;
   return (
     <form
       class="lre-stack"
       onSubmit={(event) => {
         event.preventDefault();
-        if (customer !== "" && cents !== null) void controls.act(invoiceIssueAction(props.business.id, customer, cents, memo, days)).then((ok) => ok && props.onDone());
+        if (who && cents !== null) void controls.act(invoiceIssueAction(props.business.id, who, cents, memo, days)).then((ok) => ok && props.onDone());
       }}
     >
-      <SelectField label="To" value={customer} empty="Choose a customer" options={people(controls)} onChange={setCustomer} />
+      <SelectField label="To" value={customer} empty="Choose a customer" options={[...people(controls), { value: OUTSIDE, label: "Someone else (type the name)" }]} onChange={setCustomer} />
+      {customer === OUTSIDE ? <TextField label="Customer's name" value={outside} onInput={setOutside} /> : null}
       <AmountField label="Amount" value={amount} currency={controls.currency} onInput={setAmount} invalid={amount.trim() !== "" && cents === null} />
       <TextField label="For" value={memo} onInput={setMemo} placeholder="Brake job" />
       <NumberField label="Due in (days; empty: the business's terms)" value={days} min={0} onChange={setDays} />
-      <button type="submit" class="lre-btn primary" disabled={controls.busy || customer === "" || cents === null}>
+      <button type="submit" class="lre-btn primary" disabled={controls.busy || who === null || cents === null}>
         Issue the invoice
       </button>
     </form>

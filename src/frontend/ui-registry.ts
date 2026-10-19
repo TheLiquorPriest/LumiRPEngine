@@ -7,7 +7,7 @@ import type { ComponentType } from "preact";
 import type { PackId } from "../shared/ids";
 import type { WorldCollection } from "../shared/protocol";
 import type { ChipKind } from "../shared/state-view";
-import type { ChipProps, EditorDef, FieldEditorDef, GmSectionDef, PackConfigProps, PanelDef, PreviewProps, UiPackDef, UiRegistry } from "./registry";
+import type { ChipProps, EditorDef, FieldEditorDef, GmSectionDef, PackConfigProps, PanelDef, PlaceFieldDef, PreviewProps, UiPackDef, UiRegistry } from "./registry";
 
 export interface UiCatalog {
   /** Play panels in `order`, ties by id. */
@@ -22,6 +22,8 @@ export interface UiCatalog {
   gmSections: readonly GmSectionDef[];
   /** Build's editors for structured fields, by kind and field. */
   fields: readonly FieldEditorDef[];
+  /** Build's editors for place fields, in registration order. */
+  placeFields: readonly PlaceFieldDef[];
   packs: readonly string[];
 }
 
@@ -33,6 +35,7 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
   const previews = new Map<WorldCollection, ComponentType<PreviewProps>>();
   const gmSections = new Map<string, GmSectionDef>();
   const fields = new Map<string, FieldEditorDef>();
+  const placeFields = new Map<string, PlaceFieldDef>();
   const ids = new Set<string>();
   for (const pack of packs) {
     if (ids.has(pack.id)) throw new Error(`UI pack ${pack.id} is registered twice`);
@@ -67,10 +70,14 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
         if (fields.has(key)) throw new Error(`An editor for the field ${key} (pack ${pack.id}) is already registered`);
         fields.set(key, def);
       },
+      placeField(def) {
+        if (placeFields.has(def.field)) throw new Error(`An editor for the place field ${def.field} (pack ${pack.id}) is already registered`);
+        placeFields.set(def.field, def);
+      },
     };
     pack.register(registry);
   }
   const ordered = [...panels.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   const tabs = [...gmSections.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { panels: ordered, editors, configs, chips, previews, gmSections: tabs, fields: [...fields.values()], packs: [...ids] };
+  return { panels: ordered, editors, configs, chips, previews, gmSections: tabs, fields: [...fields.values()], placeFields: [...placeFields.values()], packs: [...ids] };
 }

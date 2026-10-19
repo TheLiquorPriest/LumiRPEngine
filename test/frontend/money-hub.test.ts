@@ -211,7 +211,8 @@ describe("the requests the controls send", () => {
   test("work, credit, routing and payment preferences send the params their actions take", () => {
     expect(hireAction({ business: "alder", worker: "dev", title: " Mechanic ", basis: "hourly", rate: "23.50", hoursPerWeek: 40, payEvery: "biweekly" }, USD)).toEqual({ action: "job_hire", params: { business: "alder", worker: "dev", title: "Mechanic", basis: "hourly", rate: 2350, hours_per_week: 40, pay_every: "biweekly" } });
     expect(hireAction({ business: "alder", worker: "dev", title: "", basis: "", rate: "lots", hoursPerWeek: null, payEvery: "" }, USD)).toBeNull();
-    expect(invoiceIssueAction("alder", "mara", 42000, "Brake job", null)).toEqual({ action: "invoice_issue", params: { business: "alder", customer: "mara", amount: 42000, memo: "Brake job" } });
+    expect(invoiceIssueAction("alder", { id: "mara" }, 42000, "Brake job", null)).toEqual({ action: "invoice_issue", params: { business: "alder", customer: "mara", amount: 42000, memo: "Brake job" } });
+    expect(invoiceIssueAction("alder", { name: " Harbor Mutual " }, 9900, "", 30)).toEqual({ action: "invoice_issue", params: { business: "alder", customer_name: "Harbor Mutual", amount: 9900, days: 30 } });
     expect(routeAction({ property: "duplex" }, "chk")).toEqual({ action: "route_distributions", params: { property: "duplex", to: "chk" } });
     expect(payPrefsAction([{ use: "credit", max: 50000, categories: [] }, { use: "cash", except: ["dining"] }])).toEqual({ action: "set_pay_prefs", params: { tiers: [{ use: "credit", max: 50000 }, { use: "cash", except: ["dining"] }] } });
   });
