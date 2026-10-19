@@ -3,10 +3,10 @@
 // sends.
 
 import { describe, expect, test } from "bun:test";
-import type { AccountView, CardView, FinanceView, Flow } from "../../src/shared/finance";
+import type { AccountView, BusinessView, CardView, FinanceView, Flow, FlowView, HoldingView, PropertyView } from "../../src/shared/finance";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, cardControls, creditBlocks, hubTabs, investmentBlocks, overviewBlocks, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, holdingControls, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import {
   actionRequest,
   autopayAction,
@@ -15,6 +15,7 @@ import {
   cardAction,
   cashAction,
   closeAccountOps,
+  exerciseAction,
   fieldOps,
   flowEditOps,
   flowFormOf,
@@ -28,6 +29,7 @@ import {
   payCardAction,
   payPrefsAction,
   routeAction,
+  routeOps,
   setPriceOps,
   tradeAction,
   transferAction,
@@ -141,6 +143,55 @@ describe("what a party's roles allow", () => {
     const theirs = account({ id: "theirs", class: "checking", role: "authorized_user" });
     expect(cardControls(view({ accounts: [theirs] }), card({ id: "c", account: "theirs", holderId: "mara" }))).toEqual([]);
   });
+
+  const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, owners: [], accounts: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [] });
+  const flow = (over: Partial<FlowView> & Pick<FlowView, "id" | "spec">): FlowView => ({ label: over.id, kind: "bill", from: "", to: "", amount: "", cents: null, schedule: "", next: null, shortfall: "skip", status: "active", category: null, link: null, editable: false, source: "entity", done: 0, missed: 0, deferred: 0, ...over });
+  const bill = (from: string): Flow => ({ id: "invoice:inv1", label: "Invoice", kind: "bill", from, to: "theirs", amount: { fixed: 5000 }, schedule: { once: "2026-10-01T09:00" }, shortfall: "skip", status: "active", source: "invoice" });
+
+  test("an invoice billed to the party or to a business they run is theirs to pay now; one billed to someone else isn't", () => {
+    const runs = view({ level: 3, businesses: [shop("trustee")] });
+    const link = { id: "inv1", name: "Invoice" };
+    expect(flowControls(runs, flow({ id: "invoice:inv1", source: "invoice", link, spec: bill("pov") }))).toEqual(["pay_now"]);
+    expect(flowControls(runs, flow({ id: "invoice:inv1", source: "invoice", link, spec: bill("shop") }))).toEqual(["pay_now"]);
+    expect(flowControls(view({ level: 3, businesses: [shop("beneficiary")] }), flow({ id: "invoice:inv1", source: "invoice", link, spec: bill("shop") }))).toEqual([]);
+    // Below Money 3 an invoice isn't an action; it's paid when it falls due.
+    expect(flowControls(view({ level: 2 }), flow({ id: "invoice:inv1", source: "invoice", link, spec: bill("pov") }))).toEqual([]);
+  });
+
+  test("someone who only shares in a business's worth sells a stake where investments run, and runs nothing", () => {
+    expect(businessControls(view({ level: 4, features: ["investments"] }), shop("beneficiary"))).toEqual(["stake"]);
+    expect(businessControls(view({ level: 3 }), shop("beneficiary"))).toEqual([]);
+    expect(businessControls(view({ level: 3 }), shop("trustee"))).toEqual(["hire", "invoice", "draw", "distribute"]);
+    const invoice = { id: "inv1", business: "shop", customer: "pov", cents: 5000, memo: "", issued: 0, due: 0, state: "paid" as const, customerName: "You", issuedAt: "", dueAt: "" };
+    expect(invoiceControls(view({ level: 3 }), shop("owner"), invoice)).toEqual([]);
+    expect(invoiceControls(view({ level: 3 }), shop("owner"), { ...invoice, state: "late" })).toEqual(["void", "pay"]);
+  });
+
+  test("a holding trades only in an account the party may spend from; an option exercises only where options run", () => {
+    const holding = (over: Partial<HoldingView>): HoldingView => ({ id: "h", account: "brk", asset: { id: "acme", label: "Acme", class: "security", symbol: "ACME" }, qty: 1, price: 100, value: 100, cost: 100, gain: 0, lots: [], option: null, route: null, ...over });
+    const mine = account({ id: "brk", class: "brokerage" });
+    const kids = account({ id: "brk", class: "brokerage", role: "beneficiary" });
+    const call = { right: "call" as const, underlying: "Acme", strike: 90, expiry: "2026-12-18", inTheMoney: true };
+    expect(holdingControls(view({ features: ["investments"], accounts: [mine] }), holding({}))).toEqual(["buy", "sell"]);
+    expect(holdingControls(view({ features: ["investments"], accounts: [kids] }), holding({}))).toEqual([]);
+    expect(holdingControls(view({ features: ["investments"], accounts: [mine] }), holding({ option: call }))).toEqual(["buy", "sell"]);
+    expect(holdingControls(view({ features: ["investments", "options"], accounts: [mine] }), holding({ option: call }))).toEqual(["buy", "sell", "exercise"]);
+    expect(holdingControls(view({ features: [], accounts: [mine] }), holding({}))).toEqual([]);
+  });
+
+  test("an owner ends a lease their books carry; outside tenants of a managed property come and go on their own", () => {
+    const duplex: PropertyView = { id: "duplex", name: "The duplex", place: null, owners: [], share: 100, value: 1, equity: 1, forSale: null, mortgage: null, costs: [], leases: [
+      { flow: "lease:duplex:mara", tenant: "Mara", rent: 120000, start: "2026-01-01", end: "2026-12-31", state: "let" },
+      { flow: "lease:duplex:u2:1", tenant: "Outside tenant", rent: 110000, start: "2026-01-01", end: "2026-12-31", state: "let" },
+      { flow: "", tenant: "", rent: 110000, start: null, end: null, state: "vacant" },
+    ] };
+    const books = view({ features: ["property"], flows: [flow({ id: "lease:duplex:mara", kind: "rent", spec: { ...bill("mara"), id: "lease:duplex:mara", source: "entity" } })] });
+    expect(propertyControls(books, duplex)).toEqual(["let", "sell"]);
+    expect(endableLeases(books, duplex)).toEqual(["lease:duplex:mara"]);
+    expect(endableLeases({ ...books, features: [] }, duplex)).toEqual([]);
+    expect(propertyControls(books, { ...duplex, share: 0 })).toEqual([]);
+    expect(propertyControls(books, { ...duplex, share: 0, forSale: 30000000 })).toEqual(["buy"]);
+  });
 });
 
 describe("the requests the controls send", () => {
@@ -205,13 +256,16 @@ describe("the requests the controls send", () => {
     expect(ops).toContainEqual({ op: "set", entity: "flow_rent_2", field: "status", value: "active" });
   });
 
-  test("a trade names what it buys or sells and how much; an option needs its strike and expiry", () => {
-    const base = { side: "buy" as const, holding: "", asset: "", account: "", qty: null, amount: "", option: null };
+  test("a trade names what it buys or sells and how much, where a buy pays from and a sale's money goes; an option needs its strike and expiry", () => {
+    const base = { side: "buy" as const, holding: "", asset: "", account: "", qty: null, amount: "", from: "", to: "", option: null };
     expect(tradeAction({ ...base, side: "sell" }, USD)).toBe("Pick what to sell.");
     expect(tradeAction({ ...base, asset: "vti", account: "brk", amount: "500" }, USD)).toEqual({ action: "trade", params: { side: "buy", asset: "vti", account: "brk", amount: 50000 } });
-    expect(tradeAction({ ...base, side: "sell", holding: "h1" }, USD)).toEqual({ action: "trade", params: { side: "sell", holding: "h1" } });
+    expect(tradeAction({ ...base, holding: "h1", qty: 5, from: "chk", to: "sav" }, USD)).toEqual({ action: "trade", params: { side: "buy", holding: "h1", qty: 5, from: "chk" } });
+    expect(tradeAction({ ...base, side: "sell", holding: "h1", from: "chk", to: "sav" }, USD)).toEqual({ action: "trade", params: { side: "sell", holding: "h1", to: "sav" } });
     expect(tradeAction({ ...base, asset: "vti", qty: 1, option: { right: "call", strike: "300", expiry: "2027-01" } }, USD)).toBe("An option needs a strike and an expiry date.");
     expect(tradeAction({ ...base, asset: "vti", qty: 1, option: { right: "put", strike: "300", expiry: "2027-01-15" } }, USD)).toEqual({ action: "trade", params: { side: "buy", asset: "vti", qty: 1, right: "put", strike: 30000, expiry: "2027-01-15" } });
+    expect(exerciseAction("opt", null, { from: "chk" })).toEqual({ action: "exercise_option", params: { holding: "opt", from: "chk" } });
+    expect(exerciseAction("opt", 2)).toEqual({ action: "exercise_option", params: { holding: "opt", qty: 2 } });
   });
 
   test("work, credit, routing and payment preferences send the params their actions take", () => {
@@ -229,6 +283,7 @@ describe("the requests the controls send", () => {
       { op: "set", entity: "acct", field: "overdraft_link", value: null },
     ]);
     expect(setPriceOps("vti", 31250)).toEqual([{ op: "effect", effect: "economy.set_price", args: { asset: "vti", price: 31250 } }]);
+    expect(routeOps({ property: "duplex" }, "helen", "sav")).toEqual([{ op: "effect", effect: "economy.route", args: { property: "duplex", party: "helen", to: "sav" } }]);
     expect(closeAccountOps("old")).toEqual([{ op: "effect", effect: "economy.close_account", args: { account: "old" } }]);
   });
 });

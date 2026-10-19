@@ -1,7 +1,8 @@
 // Money → Flows (DESIGN §25): every standing transfer, bill, income and one-off that moves the
 // party's money, with its schedule, what it does when the money isn't there and how it has run.
-// The player creates, edits, pauses, resumes and deletes the ones they may (in-world actions); a
-// flow a job, a lease or a loan derives is changed at its source. The GM edits any flow's fields.
+// The player creates, edits, pauses, resumes and deletes the ones they may (in-world actions),
+// pays an invoice billed to them and gives notice on a lease they rent under; a flow a job, a
+// lease or a loan derives is changed at its source. The GM edits any flow's fields.
 
 import { useState } from "preact/hooks";
 import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, type FinanceView, type FlowView } from "../../../shared/finance";
@@ -11,9 +12,9 @@ import { Card, Empty, Row } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
 import { AmountField, MONTH_CHOICES, NumberField, Reveal, SelectField, TextField, WEEKDAY_CHOICES, type Choice } from "./forms";
 import type { HubControls, SectionProps } from "./hub";
-import { flowSources, flowTargets } from "./layout";
+import { flowControls, flowSources, flowTargets } from "./layout";
 import { EntityFields } from "./lines";
-import { amountOf, blankFlowForm, flowCreateAction, flowEditOps, flowFormOf, flowFormProblem, flowSpawnOps, flowStatusAction, flowStatusOps, flowUpdateAction, newIdFor, type FlowEvery, type FlowForm } from "./requests";
+import { amountOf, blankFlowForm, flowCreateAction, flowEditOps, flowFormOf, flowFormProblem, flowSpawnOps, flowStatusAction, flowStatusOps, flowUpdateAction, invoiceAction, leaseEndAction, newIdFor, type FlowEvery, type FlowForm } from "./requests";
 
 const EVERY: readonly Choice[] = [
   { value: "once", label: "Once" },
@@ -138,18 +139,36 @@ export function FlowRow(props: { view: FinanceView; flow: FlowView; controls: Hu
     if (controls.mode === "player") await controls.act(flowStatusAction(f.id, "delete"));
     else await controls.edit([{ op: "despawn", entity: f.id }]);
   };
+  const can = flowControls(view, f);
+  // An invoice flow links the invoice it pays.
+  const link = f.link?.id ?? null;
   return (
     <div class="lre-stack" data-lre-flow={f.id}>
       <Row k={f.label} sub={sub.join(" · ")} v={<span class="lre-inline">{f.amount}<span class={f.status === "active" ? (f.missed > 0 ? "lre-badge warn" : "lre-badge pos") : "lre-badge"}>{humanize(f.status)}</span></span>} />
       {controls.mode === "player" ? (
-        f.editable ? (
+        can.length > 0 ? (
           <div class="lre-inline">
-            {f.status !== "ended" ? <Reveal label="Edit">{(close) => <FlowFormView view={view} controls={controls} flow={f} onDone={close} />}</Reveal> : null}
-            {f.status === "active" ? <button type="button" class="lre-btn small" disabled={controls.busy} onClick={() => void controls.act(flowStatusAction(f.id, "pause"))}>Pause</button> : null}
-            {f.status === "paused" ? <button type="button" class="lre-btn small" disabled={controls.busy} onClick={() => void controls.act(flowStatusAction(f.id, "resume"))}>Resume</button> : null}
-            <button type="button" class="lre-btn small danger" disabled={controls.busy} onClick={() => void remove()}>
-              Delete
-            </button>
+            {can.includes("edit") ? <Reveal label="Edit">{(close) => <FlowFormView view={view} controls={controls} flow={f} onDone={close} />}</Reveal> : null}
+            {can.includes("pause") ? <button type="button" class="lre-btn small" disabled={controls.busy} onClick={() => void controls.act(flowStatusAction(f.id, "pause"))}>Pause</button> : null}
+            {can.includes("resume") ? <button type="button" class="lre-btn small" disabled={controls.busy} onClick={() => void controls.act(flowStatusAction(f.id, "resume"))}>Resume</button> : null}
+            {can.includes("end_lease") ? (
+              <button type="button" class="lre-btn small" disabled={controls.busy} onClick={() => void (async () => (await app.host.confirm("End the lease", `Give notice on ${f.label}? It ends today.`, "warning", "End it")) && controls.act(leaseEndAction(f.id)))()}>
+                End the lease
+              </button>
+            ) : null}
+            {can.includes("delete") ? (
+              <button type="button" class="lre-btn small danger" disabled={controls.busy} onClick={() => void remove()}>
+                Delete
+              </button>
+            ) : null}
+            {can.includes("pay_now") && link !== null ? (
+              <>
+                <button type="button" class="lre-btn small primary" disabled={controls.busy} onClick={() => void controls.act(invoiceAction(link, "pay"))}>
+                  Pay now
+                </button>
+                <span class="lre-small lre-muted">Otherwise it's paid when it falls due, if the money's there.</span>
+              </>
+            ) : null}
           </div>
         ) : (
           <span class="lre-small lre-muted">Set by its {humanize(f.source).toLowerCase()}; change it there.</span>

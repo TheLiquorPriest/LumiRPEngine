@@ -4,7 +4,7 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type CardView, type FinanceFeature, type FinanceView, type OwnerRole } from "../../../shared/finance";
+import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -61,9 +61,9 @@ export function accountGroups(accounts: readonly AccountView[]): { group: Accoun
   return order.map((group) => ({ group, label: GROUP_LABELS[group], accounts: accounts.filter((a) => groupOf(a) === group) })).filter((g) => g.accounts.length > 0);
 }
 
-/** What the viewing party's role lets it do with an account; no role (the GM looking at it) is no right. */
-function rights(role: OwnerRole | null): { spend: boolean; manage: boolean; sees: boolean } {
-  return role ? ROLE_RIGHTS[role] : { spend: false, manage: false, sees: false };
+/** What the viewing party's role lets it do with an account, a business or a property; no role (the GM looking at it) is no right. */
+function rights(role: OwnerRole | null): RoleRights {
+  return role ? ROLE_RIGHTS[role] : { spend: false, worth: false, sees: false, manage: false };
 }
 
 export type AccountControl = "pay" | "transfer" | "autopay" | "withdraw" | "deposit";
@@ -115,6 +115,84 @@ export function cardControls(view: FinanceView, card: CardView): CardChange[] {
   const account = view.accounts.find((a) => a.id === card.account);
   if (card.holderId !== view.party && !rights(account?.role ?? null).manage) return [];
   return cardChanges(card.state);
+}
+
+export type FlowControl = "edit" | "pause" | "resume" | "end_lease" | "delete" | "pay_now";
+
+/**
+ * The player's controls on one flow, in the order its row shows them. One they may change they
+ * edit, pause, resume and delete, and rent they pay under a lease also ends by notice where
+ * property runs. From Money 3 (where invoices are actions) an invoice billed to them, or to a
+ * business they run, they pay before it falls due. Anything else changes at its source (a job, a
+ * loan, the lease's owner).
+ */
+export function flowControls(view: FinanceView, flow: FlowView): FlowControl[] {
+  if (flow.editable) {
+    const out: FlowControl[] = [];
+    if (flow.status !== "ended") out.push("edit");
+    if (flow.status === "active") out.push("pause");
+    if (flow.status === "paused") out.push("resume");
+    if (flow.kind === "rent" && flow.link !== null && flow.status !== "ended" && view.features.includes("property")) out.push("end_lease");
+    out.push("delete");
+    return out;
+  }
+  const billed = flow.spec.from === view.party || view.businesses.some((b) => b.id === flow.spec.from && rights(b.role).manage);
+  return view.level >= 3 && flow.source === "invoice" && flow.link !== null && billed ? ["pay_now"] : [];
+}
+
+export type JobControl = "quit" | "raise" | "let_go";
+
+/** The player's controls on a job while it lasts, from Money 3 (where work is actions): its worker quits; whoever runs the employer (shown on its payroll) gives a raise or lets them go. */
+export function jobControls(view: FinanceView, job: JobView, employer: BusinessView | null): JobControl[] {
+  if (view.level < 3 || job.status === "ended") return [];
+  const out: JobControl[] = job.workerId === view.party ? ["quit"] : [];
+  if (employer && rights(employer.role).manage) out.push("raise", "let_go");
+  return out;
+}
+
+export type BusinessControl = "hire" | "invoice" | "draw" | "distribute" | "stake";
+
+/** The player's controls on a business from Money 3: running it (hiring, invoicing, drawing, paying out profit) for whoever manages it; selling a stake, where investments run, for whoever holds a share of its worth. */
+export function businessControls(view: FinanceView, business: BusinessView): BusinessControl[] {
+  if (view.level < 3) return [];
+  const r = rights(business.role);
+  const out: BusinessControl[] = r.manage ? ["hire", "invoice", "draw", "distribute"] : [];
+  if (r.worth && view.features.includes("investments")) out.push("stake");
+  return out;
+}
+
+export type InvoiceControl = "void" | "pay";
+
+/** The player's controls on an invoice a business issued, from Money 3 and while it's open or late: whoever runs the business voids it; the customer pays it. */
+export function invoiceControls(view: FinanceView, business: BusinessView, invoice: Invoice): InvoiceControl[] {
+  if (view.level < 3 || (invoice.state !== "open" && invoice.state !== "late")) return [];
+  const out: InvoiceControl[] = rights(business.role).manage ? ["void"] : [];
+  if (invoice.customer === view.party) out.push("pay");
+  return out;
+}
+
+export type HoldingControl = "buy" | "sell" | "exercise";
+
+/** The player's trades on a holding, where investments run for the party and its account is theirs to spend from: buy more, sell, and exercise an option where options run. */
+export function holdingControls(view: FinanceView, holding: HoldingView): HoldingControl[] {
+  if (!view.features.includes("investments")) return [];
+  if (holding.account !== null && !rights(view.accounts.find((a) => a.id === holding.account)?.role ?? null).spend) return [];
+  return holding.option && view.features.includes("options") ? ["buy", "sell", "exercise"] : ["buy", "sell"];
+}
+
+export type PropertyControl = "let" | "sell" | "buy";
+
+/** The player's controls on a property, where property runs for the party: letting and selling one they own a share of, buying one for sale. */
+export function propertyControls(view: FinanceView, property: PropertyView): PropertyControl[] {
+  if (!view.features.includes("property")) return [];
+  if (property.share > 0) return ["let", "sell"];
+  return property.forSale !== null && property.forSale !== undefined ? ["buy"] : [];
+}
+
+/** The leases on a property the player may end: those still let that their books carry (outside tenants of a managed property come and go on their own). */
+export function endableLeases(view: FinanceView, property: PropertyView): string[] {
+  if (!propertyControls(view, property).includes("let")) return [];
+  return property.leases.filter((l) => l.state === "let" && view.flows.some((f) => f.id === l.flow)).map((l) => l.flow);
 }
 
 /** Where a new standing payment can come from: a non-cash account the party may pay from (flows never draw on wallet cash). */

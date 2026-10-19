@@ -1,8 +1,9 @@
 // Money → Jobs and Businesses (DESIGN §26): the party's jobs with their pay, schedule and last
 // paycheck; the businesses it owns or runs with their books, sales, invoices, payroll and taxes.
 // The player quits a job, and for a business they manage hires, gives raises, lets people go,
-// issues and voids invoices, draws money, pays out profit and sells a stake, each an in-world
-// action; the GM edits every job's, business's and invoice's declared fields.
+// issues, pays and voids invoices, draws money, pays out profit, sells a stake and says where
+// their profit goes, each an in-world action; the GM edits every job's, business's and invoice's
+// declared fields and routes an owner's profit.
 
 import { useState } from "preact/hooks";
 import { INVOICE_STATES, PAY_BASES, PAY_EVERY, ROLE_RIGHTS, type BusinessView, type FinanceView, type JobView } from "../../../shared/finance";
@@ -10,11 +11,12 @@ import { formatMoney } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { Card, Empty, Row } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
+import { RouteControl } from "./assets";
 import { AmountField, NumberField, Reveal, SelectField, TextField, type Choice } from "./forms";
 import type { GmControls, HubControls, PlayerControls, SectionProps } from "./hub";
-import { knownPeople, workBlocks } from "./layout";
+import { businessControls, invoiceControls, jobControls, knownPeople, workBlocks } from "./layout";
 import { AmountAction, EntityFields, TxnRows } from "./lines";
-import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, routeAction, stakeSellAction, type HireForm } from "./requests";
+import { amountOf, distributeAction, drawAction, hireAction, invoiceAction, invoiceIssueAction, jobEndAction, jobSpawnOps, newIdFor, raiseAction, stakeSellAction, type HireForm } from "./requests";
 
 /** People a control may name: those the POV knows for the player, anyone for the GM. */
 function people(controls: HubControls): Choice[] {
@@ -27,7 +29,7 @@ function JobCard(props: { view: FinanceView; job: JobView; controls: HubControls
   const { view, job: j, controls, employer } = props;
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const blocks = workBlocks(view);
-  const manages = employer?.role !== null && employer?.role !== undefined && ROLE_RIGHTS[employer.role].manage;
+  const can = jobControls(view, j, employer ?? null);
   const end = async (words: string) => {
     if (controls.mode !== "player") return;
     if (await app.host.confirm(words, `${words}: ${j.title || "the job"} at ${j.employer}?`, "warning", words)) await controls.act(jobEndAction(j.id));
@@ -55,15 +57,15 @@ function JobCard(props: { view: FinanceView; job: JobView; controls: HubControls
           ))}
         </>
       ) : null}
-      {controls.mode === "player" && j.status !== "ended" ? (
+      {controls.mode === "player" && can.length > 0 ? (
         <div class="lre-inline">
-          {j.workerId === view.party ? (
+          {can.includes("quit") ? (
             <button type="button" class="lre-btn small danger" disabled={controls.busy} onClick={() => void end("Quit")}>
               Quit
             </button>
           ) : null}
-          {manages ? <Reveal label="Raise">{(close) => <AmountAction label={`New rate (now ${j.pay})`} go="Give the raise" currency={controls.currency} busy={controls.busy} submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(raiseAction(j.id, cents)))} onDone={close} />}</Reveal> : null}
-          {manages ? (
+          {can.includes("raise") ? <Reveal label="Raise">{(close) => <AmountAction label={`New rate (now ${j.pay})`} go="Give the raise" currency={controls.currency} busy={controls.busy} submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(raiseAction(j.id, cents)))} onDone={close} />}</Reveal> : null}
+          {can.includes("let_go") ? (
             <button type="button" class="lre-btn small danger" disabled={controls.busy} onClick={() => void end("Let go")}>
               Let go
             </button>
@@ -218,8 +220,8 @@ function BusinessCard(props: { view: FinanceView; business: BusinessView; contro
   const { view, business: b, controls } = props;
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const blocks = workBlocks(view);
-  const rights = b.role ? ROLE_RIGHTS[b.role] : null;
-  const manages = rights?.manage === true;
+  const worth = b.role !== null && ROLE_RIGHTS[b.role].worth;
+  const can = businessControls(view, b);
   const accountName = (id: string): string => view.accounts.find((a) => a.id === id)?.name ?? (controls.mode === "gm" ? (controls.gm.entities.find((e) => e.id === id)?.name ?? id) : id);
   return (
     <Card title={`🏪 ${b.name}`} aside={b.role ? <span class="lre-badge">{humanize(b.role)}</span> : null}>
@@ -274,12 +276,12 @@ function BusinessCard(props: { view: FinanceView; business: BusinessView; contro
               ) : (
                 <span class={i.state === "late" ? "lre-badge neg" : i.state === "paid" ? "lre-badge pos" : "lre-badge"}>{i.state}</span>
               )}
-              {controls.mode === "player" && manages && (i.state === "open" || i.state === "late") ? (
+              {controls.mode === "player" && invoiceControls(view, b, i).includes("void") ? (
                 <button type="button" class="lre-btn small" disabled={controls.busy} onClick={() => void (async () => (await app.host.confirm("Void", `Void the invoice to ${i.customerName}?`, "warning", "Void")) && controls.act(invoiceAction(i.id, "void")))()}>
                   Void
                 </button>
               ) : null}
-              {controls.mode === "player" && i.customer === view.party && (i.state === "open" || i.state === "late") ? (
+              {controls.mode === "player" && invoiceControls(view, b, i).includes("pay") ? (
                 <button type="button" class="lre-btn small primary" disabled={controls.busy} onClick={() => void controls.act(invoiceAction(i.id, "pay"))}>
                   Pay
                 </button>
@@ -301,26 +303,14 @@ function BusinessCard(props: { view: FinanceView; business: BusinessView; contro
           ))}
         </>
       ) : null}
+      {worth ? <RouteControl view={view} controls={controls} target={{ business: b.id }} now={null} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${view.name}'s share of its profit goes to`} /> : null}
       {controls.mode === "player" ? (
         <div class="lre-inline" data-lre-business-controls={b.id}>
-          {manages ? <Reveal label="Hire">{(close) => <HireFormView business={b} controls={controls} onDone={close} />}</Reveal> : null}
-          {manages ? <Reveal label="Issue an invoice">{(close) => <InvoiceForm business={b} controls={controls} onDone={close} />}</Reveal> : null}
-          {manages ? <Reveal label="Owner's draw">{(close) => <AmountAction label="Amount" go="Draw it" currency={controls.currency} busy={controls.busy} submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(drawAction(b.id, cents)))} onDone={close} />}</Reveal> : null}
-          {manages ? <Reveal label="Pay out profit">{(close) => <AmountAction label="Amount" go="Pay it out by share" optional="Its share of the profit since the last" currency={controls.currency} busy={controls.busy} submit={(cents) => controls.act(distributeAction(b.id, cents))} onDone={close} />}</Reveal> : null}
-          {rights?.worth ? <Reveal label="Sell a stake">{(close) => <StakeForm business={b} controls={controls} onDone={close} />}</Reveal> : null}
-          {rights?.worth ? (
-            <Reveal label="Where your profit goes">
-              {(close) => (
-                <SelectField
-                  label="Your share of its profit goes to"
-                  value=""
-                  empty="Choose"
-                  options={[{ value: " ", label: "Your usual deposit account" }, ...view.accounts.filter((a) => a.role !== null && ROLE_RIGHTS[a.role].sees).map((a) => ({ value: a.id, label: a.name }))]}
-                  onChange={(to) => to !== "" && void controls.act(routeAction({ business: b.id }, to.trim())).then((ok) => ok && close())}
-                />
-              )}
-            </Reveal>
-          ) : null}
+          {can.includes("hire") ? <Reveal label="Hire">{(close) => <HireFormView business={b} controls={controls} onDone={close} />}</Reveal> : null}
+          {can.includes("invoice") ? <Reveal label="Issue an invoice">{(close) => <InvoiceForm business={b} controls={controls} onDone={close} />}</Reveal> : null}
+          {can.includes("draw") ? <Reveal label="Owner's draw">{(close) => <AmountAction label="Amount" go="Draw it" currency={controls.currency} busy={controls.busy} submit={(cents) => (cents === null ? Promise.resolve(false) : controls.act(drawAction(b.id, cents)))} onDone={close} />}</Reveal> : null}
+          {can.includes("distribute") ? <Reveal label="Pay out profit">{(close) => <AmountAction label="Amount" go="Pay it out by share" optional="Its share of the profit since the last" currency={controls.currency} busy={controls.busy} submit={(cents) => controls.act(distributeAction(b.id, cents))} onDone={close} />}</Reveal> : null}
+          {can.includes("stake") ? <Reveal label="Sell a stake">{(close) => <StakeForm business={b} controls={controls} onDone={close} />}</Reveal> : null}
         </div>
       ) : (
         <Reveal label="Business fields">{() => <EntityFields controls={controls} entity={b.id} />}</Reveal>

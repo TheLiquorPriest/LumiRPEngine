@@ -372,6 +372,9 @@ export interface TradeForm {
   account: string;
   qty: number | null;
   amount: string;
+  /** A buy's source and a sale's proceeds: an account of the party's, or empty for the holding's own account (else their deposit account). */
+  from: string;
+  to: string;
   /** An option on `asset`. */
   option: { right: "call" | "put"; strike: string; expiry: string } | null;
 }
@@ -394,6 +397,8 @@ export function tradeAction(form: TradeForm, currency: WorldCurrency): ActionBod
     if (cents === null) return "Type an amount above zero.";
     params.amount = cents;
   } else if (form.side === "buy") return "Say how many, or how much to spend.";
+  if (form.side === "buy" && form.from !== "") params.from = form.from;
+  if (form.side === "sell" && form.to !== "") params.to = form.to;
   if (form.option && form.holding === "") {
     const strike = amountOf(form.option.strike, currency);
     if (strike === null || !/^\d{4}-\d{2}-\d{2}$/.test(form.option.expiry)) return "An option needs a strike and an expiry date.";
@@ -404,8 +409,9 @@ export function tradeAction(form: TradeForm, currency: WorldCurrency): ActionBod
   return { action: FINANCE_ACTIONS.trade, params };
 }
 
-export function exerciseAction(holding: EntityId, qty: number | null): ActionBody {
-  return { action: FINANCE_ACTIONS.exercise, params: qty === null ? { holding } : { holding, qty } };
+/** Exercising contracts: all of them unless `qty` says how many; a call's strike paid `from`, a put's paid `to` (else the holding's account, else the deposit account). */
+export function exerciseAction(holding: EntityId, qty: number | null, opts: { from?: EntityId; to?: EntityId } = {}): ActionBody {
+  return { action: FINANCE_ACTIONS.exercise, params: { holding, ...(qty !== null ? { qty } : {}), ...(opts.from ? { from: opts.from } : {}), ...(opts.to ? { to: opts.to } : {}) } };
 }
 
 /** What distributions are routed for: a holding's dividends, a property's rent, or a business's profit share. */
@@ -416,9 +422,9 @@ export function routeAction(target: RouteTarget, to: string): ActionBody {
   return { action: FINANCE_ACTIONS.route, params: { ...target, to } };
 }
 
-/** The GM's routing of a holding's distributions: its `route` field. */
-export function routeOps(holding: EntityId, to: string): EditOp[] {
-  return [{ op: "set", entity: holding, field: "route", value: to }];
+/** The GM's routing for one party (`economy.route`, a GM effect): its holding's dividends, its property's rent or its share of a business's profit. */
+export function routeOps(target: RouteTarget, party: EntityId, to: string): EditOp[] {
+  return [{ op: "effect", effect: "economy.route", args: { ...target, party, to } }];
 }
 
 export function propertyBuyAction(property: EntityId, price: number, opts: { from?: EntityId; down?: number; termMonths?: number; aprPct?: number } = {}): ActionBody {
