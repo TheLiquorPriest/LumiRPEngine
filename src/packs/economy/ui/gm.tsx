@@ -1,4 +1,4 @@
-// GM view → Money (DESIGN §7): everyone else's money at their own Money level, with Add and Take
+// GM view → Money (DESIGN §7): every party's money at their own Money level, with Add and Take
 // on each account shown. Each change is one GM edit with its own Corrected chip.
 
 import { useState } from "preact/hooks";
@@ -48,7 +48,7 @@ function PersonMoney(props: { money: FinanceView; section: GmSectionProps }) {
 }
 
 export function GmMoneySection(props: GmSectionProps) {
-  if (props.gm.money.length === 0) return <Empty>No one else's money is tracked.</Empty>;
+  if (props.gm.money.length === 0) return <Empty>No one's money is tracked.</Empty>;
   return (
     <>
       {props.gm.money.map((m) => (
