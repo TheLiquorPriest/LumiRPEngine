@@ -6,9 +6,9 @@
 import type { ComponentType } from "preact";
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ChatId, PackId, PanelId } from "../shared/ids";
-import type { FrontendToBackend, ResultMessage, ErrorMessage, LintIssue, WorldCollection } from "../shared/protocol";
-import type { ChipKind, Chip, StateView } from "../shared/state-view";
-import type { WorldDoc } from "../shared/world";
+import type { EditOp, FrontendToBackend, ResultMessage, ErrorMessage, LintIssue, WorldCollection } from "../shared/protocol";
+import type { ChipKind, Chip, GmView, StateView } from "../shared/state-view";
+import type { WorldCurrency, WorldDoc } from "../shared/world";
 
 /** Requests without the envelope fields; `send` adds `lre` and `reqId`. */
 export type RequestBody = FrontendToBackend extends infer R ? (R extends FrontendToBackend ? Omit<R, "lre" | "reqId"> : never) : never;
@@ -70,6 +70,28 @@ export interface ChipProps {
   send: Send;
 }
 
+/** What a pack's GM view tab gets: the GM view as loaded, and the one way it changes the chat. */
+export interface GmSectionProps {
+  chatId: ChatId;
+  gm: GmView;
+  currency: WorldCurrency;
+  busy: boolean;
+  /** Sends the operations as one `lre.edit` (all or none, one Corrected chip), then reloads the view; true when it was accepted. */
+  edit(ops: EditOp[]): Promise<boolean>;
+  /** Asks for the GM view again (after a request other than an edit changed the chat). */
+  reload(): Promise<void>;
+  send: Send;
+}
+
+/** A tab of the GM view (DESIGN §7) a pack adds, after the engine's own Entities, Places and Tracks. */
+export interface GmSectionDef {
+  id: string;
+  label: string;
+  /** Order among the packs' tabs. */
+  order: number;
+  component: ComponentType<GmSectionProps>;
+}
+
 export interface UiRegistry {
   panel(def: PanelDef): void;
   editor(def: EditorDef): void;
@@ -79,6 +101,8 @@ export interface UiRegistry {
   chip(kind: ChipKind, component: ComponentType<ChipProps>): void;
   /** Draws a proposed value of a collection in a job's review; one per collection. */
   preview(collection: WorldCollection, component: ComponentType<PreviewProps>): void;
+  /** Adds a tab to the GM view; ids are unique across packs. */
+  gm(def: GmSectionDef): void;
 }
 
 export interface UiPackDef {

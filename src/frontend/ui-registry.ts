@@ -1,12 +1,12 @@
 // The UiRegistry implementation (ARCHITECTURE §5). Each pack's ui registers its Play panels,
-// Build editors, config fields and chip renderers; a duplicate registration is a pack conflict and
-// throws, so two packs can never silently shadow each other.
+// Build editors, config fields, chip renderers and GM view tabs; a duplicate registration is a pack
+// conflict and throws, so two packs can never silently shadow each other.
 
 import type { ComponentType } from "preact";
 import type { PackId } from "../shared/ids";
 import type { WorldCollection } from "../shared/protocol";
 import type { ChipKind } from "../shared/state-view";
-import type { ChipProps, EditorDef, PackConfigProps, PanelDef, PreviewProps, UiPackDef, UiRegistry } from "./registry";
+import type { ChipProps, EditorDef, GmSectionDef, PackConfigProps, PanelDef, PreviewProps, UiPackDef, UiRegistry } from "./registry";
 
 export interface UiCatalog {
   /** Play panels in `order`, ties by id. */
@@ -17,6 +17,8 @@ export interface UiCatalog {
   chips: ReadonlyMap<ChipKind, ComponentType<ChipProps>>;
   /** How a job's review draws a proposed value, by collection. */
   previews: ReadonlyMap<WorldCollection, ComponentType<PreviewProps>>;
+  /** The packs' GM view tabs in `order`, ties by id. */
+  gmSections: readonly GmSectionDef[];
   packs: readonly string[];
 }
 
@@ -26,6 +28,7 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
   const configs = new Map<PackId, ComponentType<PackConfigProps>>();
   const chips = new Map<ChipKind, ComponentType<ChipProps>>();
   const previews = new Map<WorldCollection, ComponentType<PreviewProps>>();
+  const gmSections = new Map<string, GmSectionDef>();
   const ids = new Set<string>();
   for (const pack of packs) {
     if (ids.has(pack.id)) throw new Error(`UI pack ${pack.id} is registered twice`);
@@ -51,9 +54,14 @@ export function buildCatalog(packs: readonly UiPackDef[]): UiCatalog {
         if (previews.has(collection)) throw new Error(`A preview for ${collection} (pack ${pack.id}) is already registered`);
         previews.set(collection, component);
       },
+      gm(def) {
+        if (gmSections.has(def.id)) throw new Error(`A GM view tab ${def.id} (pack ${pack.id}) is already registered`);
+        gmSections.set(def.id, def);
+      },
     };
     pack.register(registry);
   }
   const ordered = [...panels.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { panels: ordered, editors, configs, chips, previews, packs: [...ids] };
+  const tabs = [...gmSections.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  return { panels: ordered, editors, configs, chips, previews, gmSections: tabs, packs: [...ids] };
 }

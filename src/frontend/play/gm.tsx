@@ -3,22 +3,24 @@
 // never travels with the player's state. Every change is one `lre.edit`: checked against what it
 // touches, all or none, one fix with its own Undo chip. An entity's classes (hidden facets too) and
 // tags are set here for this chat; kinds and places are the world's definitions, edited in Build.
+// Packs add their own tabs (`UiRegistry.gm`: everyone's money is the economy pack's).
 
 import { useEffect, useId, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import type { EditOp } from "../../shared/protocol";
-import type { GmEntity, GmField, GmMoney, GmRelation, GmView } from "../../shared/state-view";
+import type { GmEntity, GmField, GmRelation, GmView } from "../../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../shared/world";
 import { useApp } from "../app";
 import { Card, Empty, Row, Tabs, tabPanel, useBusy } from "../components";
 import { ClassesInput } from "../build/facet-editor";
 import { TagListInput } from "../build/selector-editor";
 import { parseFixValue } from "../fix-editor";
-import type { PanelProps } from "../registry";
+import type { GmSectionProps, PanelProps } from "../registry";
 import { adjustOp, classifyOp, editRequest, entityStateOp, lifeEditOp, relationFields } from "../requests";
 import { decodeEncounterView, EncounterCard } from "../../packs/combat/ui/panel";
 
-type Section = "entities" | "places" | "tracks" | "money" | "fight" | "edits";
+/** The engine's own tabs; a pack's tab goes by its registered id, which holds a dot. */
+type Section = "entities" | "places" | "tracks" | "fight" | "edits" | (string & {});
 
 /** What the editor's forms share: the loaded view, the currency, and one way to send an edit. */
 interface Editor {
@@ -509,51 +511,13 @@ function Entities(props: { editor: Editor }) {
   );
 }
 
-/** One person's money at their own Money level, with Add and Take on each account shown. */
-function PersonMoney(props: { money: GmMoney; editor: Editor }) {
-  const { money: m, editor } = props;
-  const [amount, setAmount] = useState("");
-  const valid = adjustOp(m.entity, amount, editor.currency, false) !== null;
-  return (
-    <Card title={`Money · ${m.name}`} aside={<span class="lre-badge">Money {m.level}</span>}>
-      {m.band ? <Row k="Band" v={m.band} /> : null}
-      {m.netWorthCents !== null ? <Row k="Net worth" v={formatMoney(m.netWorthCents, editor.currency)} /> : null}
-      {!m.opened ? <div class="lre-small lre-muted">Not opened yet: these are the opening balances it will start from.</div> : null}
-      {m.accounts.map((a) => (
-        <Row
-          key={a.id}
-          k={a.name}
-          sub={a.kind}
-          v={
-            <span class="lre-inline">
-              {formatMoney(a.cents, editor.currency)}
-              <button type="button" class="lre-btn small" aria-label={`Add to ${a.name}`} disabled={editor.busy || !valid} onClick={() => { const op = adjustOp(a.id, amount, editor.currency, false); if (op) void editor.edit([op]); }}>
-                +
-              </button>
-              <button type="button" class="lre-btn small" aria-label={`Take from ${a.name}`} disabled={editor.busy || !valid} onClick={() => { const op = adjustOp(a.id, amount, editor.currency, true); if (op) void editor.edit([op]); }}>
-                −
-              </button>
-            </span>
-          }
-        />
-      ))}
-      {m.accounts.length > 0 ? <input class="lre-input" aria-label={`Amount for ${m.name}`} placeholder="Amount to add or take" value={amount} onInput={(event) => setAmount(event.currentTarget.value)} /> : null}
-      {m.recent.map((r, i) => (
-        <Row key={`r${i}`} k={r.memo} sub={`${r.at} · ${r.account}`} v={formatMoney(r.cents, editor.currency)} />
-      ))}
-      {m.notes.map((n, i) => (
-        <Row key={`n${i}`} k={n.text} sub={n.at} />
-      ))}
-    </Card>
-  );
-}
-
-function Body(props: { editor: Editor }) {
+function Body(props: { editor: Editor; section: Omit<GmSectionProps, "gm" | "busy" | "edit"> }) {
   const { editor } = props;
   const app = useApp();
   const [section, setSection] = useState<Section>("entities");
   const panelId = useId();
   const { gm } = editor;
+  const packTab = app.catalog.gmSections.find((def) => def.id === section);
   // The fight under way, everyone named and HP exact (the combat pack's GM view).
   const fight = gm.encounter === null ? null : decodeEncounterView(gm.encounter);
   // A Fight tab left open when the fight ends falls back to Entities.
@@ -568,7 +532,7 @@ function Body(props: { editor: Editor }) {
           { id: "entities", label: "Entities" },
           { id: "places", label: "Places" },
           { id: "tracks", label: "Tracks" },
-          { id: "money", label: "Money" },
+          ...app.catalog.gmSections.map((def) => ({ id: def.id, label: def.label })),
           ...(fight ? [{ id: "fight" as const, label: "Fight" }] : []),
           { id: "edits", label: "Edits" },
         ]}
@@ -601,7 +565,7 @@ function Body(props: { editor: Editor }) {
               </Card>
             ))
           : null}
-        {section === "money" ? (gm.money.length === 0 ? <Empty>No one else's money is tracked.</Empty> : gm.money.map((m) => <PersonMoney key={m.entity} money={m} editor={editor} />)) : null}
+        {packTab ? <packTab.component {...props.section} gm={gm} busy={editor.busy} edit={editor.edit} /> : null}
         {section === "edits" ? (
           <Card title="Corrections in force">
             {gm.refused.map((r) => (
@@ -668,7 +632,7 @@ export function GmPanel(props: PanelProps) {
           Hide
         </button>
       </div>
-      {editor ? <Body editor={editor} /> : <Empty>Loading the GM view…</Empty>}
+      {editor ? <Body editor={editor} section={{ chatId: props.chatId, currency: editor.currency, reload: load, send: props.send }} /> : <Empty>Loading the GM view…</Empty>}
     </div>
   );
 }
