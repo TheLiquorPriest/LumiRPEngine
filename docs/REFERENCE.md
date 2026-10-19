@@ -246,7 +246,7 @@ Panels: `castlife.cast`. Slots it writes: `people`, `stance`.
 
 ### Lint codes
 
-`castlife.cues`, `castlife.double_booking`.
+`castlife.birthday`, `castlife.cues`, `castlife.double_booking`.
 
 ## Combat pack (`combat`)
 
@@ -688,6 +688,7 @@ Extends `thing`.
 | `activity_until` | Activity ends | number |  |  |  |  | live from castlife 1; locked |
 | `agility` | Agility | number | 3 … 18 |  |  |  | live from sheets 1 |
 | `appointments` | Appointments | list |  |  |  |  | live from castlife 2 |
+| `birthday` | Birthday (MM-DD or YYYY-MM-DD) | date |  |  |  |  | live from castlife 3 |
 | `charm` | Charm | number | 3 … 18 |  |  |  | live from sheets 1 |
 | `chores` | Chores | list |  |  |  |  | live from castlife 3 |
 | `conditions` | Conditions | list |  |  |  |  | live from sheets 4 |

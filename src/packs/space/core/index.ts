@@ -146,6 +146,7 @@ export const PERSON: KindDef = {
     appointments: { type: "list", label: "Appointments", domain: "castlife", level: 2 },
     trips: { type: "list", label: "Trips", domain: "castlife", level: 1 },
     chores: { type: "list", label: "Chores", domain: "castlife", level: 3 },
+    birthday: { type: "date", label: "Birthday (MM-DD or YYYY-MM-DD)", domain: "castlife", level: 3 },
   },
 };
 
