@@ -405,6 +405,45 @@ describe("holdings: property", () => {
   });
 });
 
+describe("holdings: rent on a property owned with someone", () => {
+  const shared = (world: WorldDoc, extra: JsonObject = {}): void => {
+    world.entities.duplex = { id: "duplex", kind: "property", name: "The duplex", tier: "background", fields: { place: "apartment", owners: [{ party: "you", role: "owner", share: 60 }, { party: "jordan", role: "owner", share: 40 }], value: 30_000_000, units: 2, ...extra }, relations: [] };
+    world.entities.jordan_checking = account("jordan_checking", "Jordan's checking", "jordan", "checking", 900_000);
+    world.entities.rosa_checking = account("rosa_checking", "Rosa's checking", "rosa", "checking", 500_000);
+  };
+  // Rosa's rent: what leaves her checking for the owners' accounts (her living costs go elsewhere).
+  const rentPosts = (w: Working, start: number): PostEvent["lines"][] =>
+    w.events
+      .slice(start)
+      .filter((e): e is PostEvent => e.type === "post" && e.lines.some((l) => l.account === "rosa_checking" && l.amount < 0) && e.lines.some((l) => ["checking", "savings", "jordan_checking"].includes(l.account)))
+      .map((p) => [...p.lines].sort((a, b) => a.account.localeCompare(b.account)));
+  const split = [
+    { account: "checking", amount: 60000 },
+    { account: "jordan_checking", amount: 40000 },
+    { account: "rosa_checking", amount: -100000 },
+  ];
+
+  test("a lease started on it pays each owner their share", () => {
+    const w = setup((world) => shared(world));
+    run(w, "economy.lease_start", { party: "you", property: "duplex", tenant: "rosa", rent: 100000, months: 12, day: 1 });
+    const start = w.events.length;
+    lapseTo(w, "2026-11-01T12:00");
+    expect(rentPosts(w, start)).toEqual([split]);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("routing its rent back to the owners keeps a lease paid as a person paying, now split by share", () => {
+    const w = setup((world) => {
+      shared(world, { rent_to: "savings" });
+      world.entities.lease_rosa = { id: "lease_rosa", kind: "flow", name: "Lease: Rosa, the duplex", tier: "background", fields: { flow_kind: "rent", from: "rosa", to: "savings", amount_cents: 100000, every: "month", days: [1], shortfall: "retry", retry_days: 5, retries: 2, category: "rent", link: "duplex", status: "active" }, relations: [] };
+    });
+    run(w, "economy.route", { party: "you", property: "duplex", to: "" });
+    const start = w.events.length;
+    lapseTo(w, "2026-11-01T12:00");
+    expect(rentPosts(w, start)).toEqual([split]);
+  });
+});
+
 describe("holdings: what an outside buyer pays", () => {
   test("no more than a property is worth, nor than a business is", () => {
     const w = setup((world) => {

@@ -99,6 +99,15 @@ function rentSide(api: FinanceApi, ctx: ReadContext, id: EntityId, rentTo: strin
   return rest.length === 0 ? { to: first.account } : { to: first.account, splits: rest.map((d) => ({ to: d.account, pct: shares[d.party] ?? 0 })) };
 }
 
+/**
+ * The account a tenant pays rent from: the one the lease names, else their deposit account. A rent
+ * split between owners is paid from an account (the flow engine splits only what an account pays),
+ * so a lease never leaves the tenant to pay as a person.
+ */
+function rentPayer(api: FinanceApi, ctx: ReadContext, payer: EntityId): EntityId {
+  return own(ctx.state.entities, payer)?.kind === "account" ? payer : (api.depositAccount(ctx, payer) ?? payer);
+}
+
 /** The region a property is taxed in: its own, else its first owner's, else the economy's. */
 function regionOf(ctx: ReadContext, id: EntityId): string {
   const region = strOf(fieldsOf(ctx.state, id).region);
@@ -465,6 +474,9 @@ export function routeRent(api: FinanceApi, ctx: ReadContext, property: EntityId,
     if (!owners.includes(to) && !api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party))) continue;
     if (to !== side.to) out.push({ type: "set", entity: l.id, field: "to", value: side.to });
     if (JSON.stringify(f.splits ?? null) !== JSON.stringify(splits)) out.push({ type: "set", entity: l.id, field: "splits", value: splits });
+    // A lease a tenant pays as a person (authored so) pays the owners' split from their account.
+    const payer = strOf(f.from);
+    if (side.splits && rentPayer(api, ctx, payer) !== payer) out.push({ type: "set", entity: l.id, field: "from", value: rentPayer(api, ctx, payer) });
   }
   return unit(out);
 }
@@ -575,7 +587,7 @@ export function startLease(api: FinanceApi, ctx: ReadContext, x: LeaseStart): Le
   for (let i = 2; own(ctx.state.entities, id); i++) id = `lease:${x.property}:${x.tenant}:${i}`;
   const fields: JsonObject = {
     flow_kind: "rent",
-    from: x.from ?? x.tenant,
+    from: x.from ?? rentPayer(api, ctx, x.tenant),
     to: side.to,
     ...(side.splits ? { splits: side.splits as unknown as JsonValue } : {}),
     amount_cents: rent,
