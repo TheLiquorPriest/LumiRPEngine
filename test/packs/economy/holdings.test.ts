@@ -19,6 +19,7 @@ import { ALL_PACKS } from "../../../src/packs/index";
 import { assetOf, priceOf, quoteOf } from "../../../src/packs/economy/core/assets";
 import { lotsOf, qtyOf } from "../../../src/packs/economy/core/holdings";
 import { gainsIn, incomeIn } from "../../../src/packs/economy/core/records";
+import { investmentTax } from "../../../src/packs/economy/core/gains";
 import { blackScholes } from "../../../src/packs/economy/core/pricing";
 import { modernUsWorld } from "../riverton";
 import { fold, startState, trialBalance } from "../support";
@@ -276,6 +277,40 @@ describe("holdings: options", () => {
     expect(gainsIn(w.state, "you", 2026).short).toBe(-cost);
     expect(w.events.some((e) => e.type === "engine.signal" && "data" in e && String(e.data.text).includes("expired worthless"))).toBe(true);
   });
+
+  test("a put delivers the units it's written on for the strike, and what it cost comes off the gain", () => {
+    const w = setup((world) => {
+      world.entities.h_still = holding("h_still", "brokerage", "still", [{ qty: 100, cost: 400_000, at: "2026-06-01" }]);
+    });
+    run(w, "economy.trade", { party: "you", side: "buy", asset: "still", account: "brokerage", right: "put", strike: 6000, expiry: "2026-11-20", qty: 1 });
+    const option = Object.keys(w.state.entities).find((id) => String(w.state.entities[id]?.fields.asset ?? "").startsWith("opt:still:put")) ?? "";
+    const premium = lotsOf(w.ctx, option)[0]?.cost ?? 0;
+    // Deep in the money, a European put is worth about the strike's present value less the price.
+    expect(premium).toBeGreaterThan(90_000);
+    const before = balance(w, "brokerage");
+    run(w, "economy.exercise", { party: "you", holding: option, qty: 1 });
+    // A hundred units at $50 delivered for the $60 strike.
+    expect(balance(w, "brokerage") - before).toBe(600_000);
+    expect([qtyOf(lotsOf(w.ctx, option)), qtyOf(lotsOf(w.ctx, "h_still"))]).toEqual([0, 0]);
+    expect(gainsIn(w.state, "you", 2026).short).toBe(600_000 - premium - 400_000);
+    expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("a cash-settled call pays what it is worth over the strike instead of units", () => {
+    const w = setup((world) => {
+      const assets = world.packs.economy?.config.assets;
+      if (assets && typeof assets === "object" && !Array.isArray(assets)) assets.still_call = { label: "STIL Nov $40 call (cash)", class: "option", underlying: "still", strike: 4000, expiry: "2026-11-20", right: "call", multiplier: 100, settlement: "cash" };
+      world.entities.h_call = holding("h_call", "brokerage", "still_call", [{ qty: 2, cost: 30_000, at: "2026-10-01" }]);
+    });
+    const before = balance(w, "brokerage");
+    run(w, "economy.exercise", { party: "you", holding: "h_call", qty: 2 });
+    // Two contracts of a hundred units, $10 each in the money.
+    expect(balance(w, "brokerage") - before).toBe(200_000);
+    expect(qtyOf(lotsOf(w.ctx, "h_call"))).toBe(0);
+    expect(Object.values(w.state.entities).some((e) => e.kind === "holding" && e.fields.asset === "still" && e.fields.account === "brokerage")).toBe(false);
+    expect(gainsIn(w.state, "you", 2026).short).toBe(200_000 - 30_000);
+    expect(trialBalance(w.state)).toBe(0);
+  });
 });
 
 describe("holdings: bonds", () => {
@@ -296,6 +331,26 @@ describe("holdings: bonds", () => {
     expect(incomeIn(w.state, "you", 2026).interest).toBe(60_000);
     expect(qtyOf(lotsOf(w.ctx, "h_sat")) + qtyOf(lotsOf(w.ctx, "h_fri"))).toBe(0);
     expect(trialBalance(w.state)).toBe(0);
+  });
+
+  test("before it matures, a bond pays its coupon on its schedule, from its issuer into its account", () => {
+    const w = setup((world) => {
+      const assets = world.packs.economy?.config.assets;
+      if (assets && typeof assets === "object" && !Array.isArray(assets)) assets.apr = { label: "Note due 30 Apr 2027", symbol: "APR", class: "bond", face: 100000, coupon_pct: 5, pays_per_year: 2, maturity: "2027-04-30", price: 100000 };
+      world.entities.h_apr = holding("h_apr", "brokerage", "apr", [{ qty: 4, cost: 400_000, at: "2026-05-01" }]);
+    });
+    const start = w.events.length;
+    lapseTo(w, "2026-11-03T12:00");
+    // Four notes of $1,000 at 5 %, twice a year (April and October, on the 30th): $100 on Friday 30 October.
+    const coupons = w.events.slice(start).filter((e): e is PostEvent => e.type === "post" && e.memo === "APR interest");
+    expect(coupons.map((p) => p.lines)).toEqual([
+      [
+        { account: "economy.external:issuer:apr", amount: -10_000 },
+        { account: "brokerage", amount: 10_000 },
+      ],
+    ]);
+    expect(incomeIn(w.state, "you", 2026).interest).toBe(10_000);
+    expect(qtyOf(lotsOf(w.ctx, "h_apr"))).toBe(4);
   });
 });
 
@@ -444,6 +499,23 @@ describe("holdings: property", () => {
     expect(w.ctx.query("economy.net_worth")(w.ctx, "maya")).toBe(maya);
     expect(trialBalance(w.state)).toBe(0);
   });
+
+  test("its property tax, insurance and upkeep post from its owner's checking on their days, worked out from its value", () => {
+    const w = setup((world) => {
+      duplex(world, { value: 12_000_000, appreciation_pct: 0, volatility_pct: 0, tax_pct: 1.2, insurance: 15_000, upkeep_pct: 1 });
+      world.entities.checking!.fields.opening = 1_000_000;
+    });
+    const start = w.events.length;
+    lapseTo(w, "2026-12-02T12:00");
+    const paid = (memo: string): number[] => w.events.slice(start).flatMap((e) => (e.type === "post" && e.memo === memo ? e.lines.filter((l) => l.account === "checking").map((l) => l.amount) : []));
+    // Insurance on the 1st (Sunday 1 November rolls to the Monday) and 1 December.
+    expect(paid("Insurance, The duplex")).toEqual([-15_000, -15_000]);
+    // Upkeep, 1 % of $120,000 a year, on the 15th (a Sunday, so Monday 16 November).
+    expect(paid("Upkeep, The duplex")).toEqual([-10_000]);
+    // Property tax, 1.2 % a year in two installments, the second on 1 December.
+    expect(paid("Property tax, The duplex")).toEqual([-72_000]);
+    expect(trialBalance(w.state)).toBe(0);
+  });
 });
 
 describe("holdings: rent on a property owned with someone", () => {
@@ -546,5 +618,31 @@ describe("holdings: what an outside buyer pays", () => {
     run(w, "economy.stake_sell", { party: "you", business: "stall", share: 100, price: 1_000_000, to: "checking" });
     expect(balance(w, "checking") - checking).toBe(21_000_000);
     expect(trialBalance(w.state)).toBe(0);
+  });
+});
+
+describe("holdings: the yearly investment tax", () => {
+  test("at the top level, a year's gains are taxed on 15 April from the owner's checking", () => {
+    const w = setup((world) => {
+      world.realism.levels.money = 4;
+      world.start = { ...world.start, at: "2026-12-30T07:30" };
+      world.entities.checking!.fields.opening = 2_000_000;
+      world.entities.h_gain = holding("h_gain", "brokerage", "still", [{ qty: 10, cost: 30_000, at: "2026-06-01" }]);
+    });
+    // Ten units bought for $300 and sold for $500: a $200 short-term gain in 2026.
+    run(w, "economy.trade", { party: "you", side: "sell", holding: "h_gain", qty: 10 });
+    expect(gainsIn(w.state, "you", 2026).short).toBe(20_000);
+    const taxed = (): PostEvent[] => w.events.filter((e): e is PostEvent => e.type === "post" && e.memo === "Tax on 2026 investment income");
+    lapseTo(w, "2027-04-14T23:00");
+    expect(taxed()).toEqual([]);
+    const owed = investmentTax(w.ctx, "you", 2026).cents;
+    expect(owed).toBeGreaterThan(0);
+    lapseTo(w, "2027-04-15T23:00");
+    expect(taxed().map((p) => [...p.lines].sort((a, b) => a.account.localeCompare(b.account)))).toEqual([
+      [
+        { account: "checking", amount: -owed },
+        { account: "economy.external:tax:federal", amount: owed },
+      ],
+    ]);
   });
 });

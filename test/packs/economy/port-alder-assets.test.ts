@@ -117,4 +117,32 @@ describe("Port Alder's holdings and property", () => {
     expect((after.overview?.netWorth ?? 0) - (view.overview?.netWorth ?? 0)).toBe(1_800_000 - 3_000_000);
     expect(after.overview?.breakdown.some((l) => l.label === "Dale's pontoon")).toBe(false);
   });
+
+  test("Alder Automotive is worth its books and a multiple of its last year's profit, never below nothing; Marcus's stake counts it, and a value the GM sets stands instead", () => {
+    const w = portAlder();
+    const to = clockOfLocal(calendarOf(w.world), "2026-09-17T12:00");
+    for (let guard = 0; w.state.clock < to && guard < 32; guard++) {
+      const out = runTimelapse(reg, w, { type: "at", at: to }, { runSeed: "run", overrides: ALL_NOTE });
+      if ("code" in out) throw new Error(out.reason);
+    }
+    const shop = "alder_automotive_co";
+    const books = w.ctx.query("economy.business_books")(w.ctx, shop, w.state.clock - 525_600, w.state.clock);
+    // Three days of walk-in takings and no payday yet: a profit so far.
+    expect(books.profit).toBeGreaterThan(0);
+    // Its lift loan outweighs its account: on its books alone it is worth less than nothing.
+    const book = worth(w, shop) + books.receivables - books.payables;
+    expect(book).toBeLessThan(0);
+    const stake = (): number => (w.ctx.query("economy.finance")(w.ctx, "marcus_delgado", false).overview?.breakdown ?? []).find((l) => l.label.startsWith("Alder Automotive"))?.cents ?? 0;
+    const at = (multiple: number): number => {
+      w.apply({ type: "set", entity: shop, field: "valuation_multiple", value: multiple });
+      return stake();
+    };
+    const valued = stake();
+    expect(valued).toBe(Math.max(0, Math.round(book + 3 * books.profit)));
+    expect(at(0)).toBe(0);
+    expect(at(10)).toBe(Math.round(book + 10 * books.profit));
+    expect(at(10)).toBeGreaterThan(0);
+    w.apply({ type: "set", entity: shop, field: "value", value: 25_000_000 });
+    expect(stake()).toBe(25_000_000);
+  });
 });
