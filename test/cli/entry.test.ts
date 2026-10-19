@@ -96,13 +96,14 @@ describe("the lumirpengine entry", () => {
   test("a piped template prints the whole export file, which check then reads; check exits 1 on a file that fails", async () => {
     const run = await cli(["template", "mystery_manor"]);
     expect(run.code).toBe(0);
-    const file = JSON.parse(run.out) as { format: string; world: { name: string } };
+    const file = JSON.parse(run.out) as { format: string; world: { name: string; entities: Record<string, unknown> } };
     expect(file.format).toBe("lre-world-export-v1");
     const path = join(home, "manor.json");
     writeFileSync(path, run.out);
     const check = await cli(["check", path]);
     expect(check.code).toBe(0);
-    expect(JSON.parse(check.out)).toMatchObject({ ok: true, loads: true, errors: 0, contents: { entities: 41 } });
+    // Check reads the whole file the template printed, every entity of it and no more.
+    expect(JSON.parse(check.out)).toMatchObject({ ok: true, loads: true, errors: 0, contents: { entities: Object.keys(file.world.entities).length } });
     // A script goes by the exit code: a file that doesn't load, or loads with lint errors, is a failure.
     const broken = join(home, "broken-world.json");
     writeFileSync(broken, "{ nope");
