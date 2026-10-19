@@ -3,7 +3,7 @@
 // item the JSON Pointers whose values differ, capped so a large change still fits one answer.
 
 import { hasOwn, isRecord } from "../shared/json";
-import { jsonEqual, parsePointer, pointerOf } from "../shared/json-patch";
+import { isPrototypeKey, jsonEqual, parsePointer, pointerOf } from "../shared/json-patch";
 import { clip, nameOf } from "./read";
 
 /** The collections of a world (`lre-world-v1`): objects keyed by id, compared item by item. */
@@ -41,16 +41,21 @@ export interface Change {
   kind: "added" | "changed" | "removed";
 }
 
-/** Every change from one world document to another, collections item by item, in document order. */
+/**
+ * Every change from one world document to another, collections item by item, in document order.
+ * A key that reaches a prototype (`__proto__`) is no part of a world, whatever a document holds, so it is no change either.
+ */
 export function changesBetween(from: unknown, to: unknown): Change[] {
   const a = isRecord(from) ? from : {};
   const b = isRecord(to) ? to : {};
   const out: Change[] = [];
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (isPrototypeKey(key)) continue;
     const before = hasOwn(a, key) ? a[key] : undefined;
     const after = hasOwn(b, key) ? b[key] : undefined;
     if (isCollection(key) && isRecord(before) && isRecord(after)) {
       for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (isPrototypeKey(id)) continue;
         const was = hasOwn(before, id) ? before[id] : undefined;
         const now = hasOwn(after, id) ? after[id] : undefined;
         if (jsonEqual(was, now)) continue;
@@ -67,12 +72,13 @@ export function changesBetween(from: unknown, to: unknown): Change[] {
 
 export type ChangeCounts = Record<string, Partial<Record<Change["kind"], number>>>;
 
-/** How many items each collection (or part) gained, changed and lost. */
+/** How many items each collection (or part) gained, changed and lost. Null-prototype records: no key, however named, reaches Object.prototype. */
 export function countsOf(changes: readonly Change[]): ChangeCounts {
-  const counts: ChangeCounts = {};
+  const counts: ChangeCounts = Object.create(null) as ChangeCounts;
   for (const change of changes) {
     const top = parsePointer(change.key)[0] ?? "";
-    const row = (counts[top] ??= {});
+    if (isPrototypeKey(top)) continue;
+    const row = (counts[top] ??= Object.create(null) as ChangeCounts[string]);
     row[change.kind] = (row[change.kind] ?? 0) + 1;
   }
   return counts;

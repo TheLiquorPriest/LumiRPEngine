@@ -16,9 +16,21 @@ export function count(n: number, one: string, many = `${one}s`): string {
   return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 }
 
+/**
+ * Where text may be cut at `end` without splitting a surrogate pair (an emoji, a rarer letter): one
+ * unit earlier when `end` falls between a pair's halves. A lone half becomes U+FFFD in UTF-8, so a
+ * split pair would make "the pages together are the file" untrue.
+ */
+export function cutAt(text: string, end: number): number {
+  const code = text.charCodeAt(end - 1);
+  return end > 0 && end < text.length && code >= 0xd800 && code <= 0xdbff ? end - 1 : end;
+}
+
 /** `text` cut to `max` characters, saying how much was left out. */
 export function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…[${count(text.length - max, "more character")}]` : text;
+  if (text.length <= max) return text;
+  const end = cutAt(text, max);
+  return `${text.slice(0, end)}…[${count(text.length - end, "more character")}]`;
 }
 
 /**
@@ -123,15 +135,17 @@ export function readAt(root: unknown, options: ReadOptions): ReadResult {
   }
   const text = jsonText(value, options.compact);
   if (options.offset !== undefined) {
-    const offset = Math.floor(options.offset);
+    let offset = Math.floor(options.offset);
     if (!(offset >= 0) || offset >= text.length) return { ok: false, text: `offset ${options.offset} is outside ${where}: its JSON text has ${count(text.length, "character")} (offsets 0–${text.length - 1}).` };
-    const end = Math.min(text.length, offset + BODY_LIMIT);
+    // An offset between a pair's halves starts at the pair: the page then holds the whole character.
+    if (offset > 0 && cutAt(text, offset) < offset) offset -= 1;
+    const end = cutAt(text, Math.min(text.length, offset + BODY_LIMIT));
     const next = end < text.length ? `\n\n(Continues: read on with offset ${end}.)` : "\n\n(That is the end.)";
     return { ok: true, text: `${where}, characters ${offset}–${end} of ${text.length}:\n\n${text.slice(offset, end)}${next}` };
   }
   if (text.length <= BODY_LIMIT) return { ok: true, text: `${where}, ${kindOf(value)}:\n\n${text}` };
   if (!isRecord(value) && !Array.isArray(value)) {
-    const end = BODY_LIMIT;
+    const end = cutAt(text, BODY_LIMIT);
     return { ok: true, text: `${where}, ${kindOf(value)}, characters 0–${end} of ${text.length}:\n\n${text.slice(0, end)}\n\n(Continues: read on with offset ${end}.)` };
   }
   const deeper = Array.isArray(value) ? `${pointer}/0` : `${pointer}/<key>`;

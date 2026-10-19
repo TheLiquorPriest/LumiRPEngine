@@ -3,9 +3,9 @@
 // Pointer inside the item) that matched best, with a snippet around the match.
 
 import { isRecord } from "../shared/json";
-import { isCollection } from "./diff";
 import { pointerOf } from "../shared/json-patch";
-import { nameOf } from "./read";
+import { isCollection } from "./diff";
+import { cutAt, nameOf } from "./read";
 
 export interface SearchHit {
   worldId: string;
@@ -40,9 +40,10 @@ function snippetOf(text: string, words: readonly string[]): string {
   const lower = text.toLowerCase();
   const found = words.map((w) => lower.indexOf(w)).filter((i) => i >= 0);
   const at = found.length > 0 ? Math.min(...found) : 0;
-  const start = Math.max(0, at - 60);
-  const flat = text.slice(start, start + 160).replace(/\s+/g, " ");
-  return `${start > 0 ? "…" : ""}${flat}${start + 160 < text.length ? "…" : ""}`;
+  // Neither end splits a surrogate pair (cutAt): a lone half would read as U+FFFD.
+  const start = cutAt(text, Math.max(0, at - 60));
+  const end = cutAt(text, start + 160);
+  return `${start > 0 ? "…" : ""}${text.slice(start, end).replace(/\s+/g, " ")}${end < text.length ? "…" : ""}`;
 }
 
 export interface SearchScope {

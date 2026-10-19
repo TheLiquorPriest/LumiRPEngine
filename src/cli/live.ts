@@ -89,7 +89,8 @@ export class Live {
     const world = `“${index.name}” (${worldId})`;
     if (source === "draft") {
       const draft = await this.draft(worldId);
-      const label = draft.stored ? `the draft of ${world}, version ${draft.version}, begun from revision ${draft.base ?? "none"}` : `the draft of ${world}: none is stored, so this is its head, revision ${draft.base ?? index.head}`;
+      // The version either way: it is what the next write's expectVersion names.
+      const label = draft.stored ? `the draft of ${world}, version ${draft.version}, begun from revision ${draft.base ?? "none"}` : `the draft of ${world}, version ${draft.version}: none is stored, so this is its head, revision ${draft.base ?? index.head}`;
       return { world: draft.draft, index, label };
     }
     const revision = source === "head" ? index.head : resolveRevision(index, source);
@@ -112,15 +113,21 @@ const worldIdOf = (args: Args): string => neededText(args, "worldId", "the world
 
 export async function worldsTool(live: Live): Promise<ToolResult> {
   const worlds = await live.list();
-  const drafts = await Promise.all(
-    worlds.map((w) =>
-      live.draft(w.id).then(
-        (d) => ({ stored: d.stored, version: d.version }),
-        (error: unknown) => ({ unknown: error instanceof Error ? error.message : String(error) }),
-      ),
-    ),
-  );
-  return { text: json({ worlds: worlds.map((w, i) => ({ id: w.id, name: w.name, head: w.head, revisions: w.revisions.length, history: w.history?.length ?? 0, draft: drafts[i] })) }) };
+  // A request per world: the list doesn't say which world has a draft. One that fails is reported, not fatal.
+  const drafts = await Promise.all(worlds.map((w) => live.draft(w.id).then((d): { stored: boolean; version: number } | string => ({ stored: d.stored, version: d.version }), (error: unknown) => (error instanceof Error ? error.message : String(error)))));
+  const skipped = worlds.flatMap((w, i) => {
+    const draft = drafts[i];
+    return typeof draft === "string" ? [{ worldId: w.id, name: w.name, reason: draft }] : [];
+  });
+  return {
+    text: json({
+      worlds: worlds.map((w, i) => {
+        const draft = drafts[i];
+        return { id: w.id, name: w.name, head: w.head, revisions: w.revisions.length, history: w.history?.length ?? 0, draft: typeof draft === "string" || draft === undefined ? null : draft };
+      }),
+      ...(skipped.length > 0 ? { skipped, about: "These worlds' drafts couldn't be read, so their draft is null." } : {}),
+    }),
+  };
 }
 
 export async function worldTool(live: Live, args: Args): Promise<ToolResult> {
@@ -144,20 +151,32 @@ export async function searchTool(live: Live, args: Args): Promise<ToolResult> {
   const collections = named === undefined ? null : new Set(named);
   const worldId = textArg(args, "worldId");
   const worlds = worldId === undefined ? await live.list() : [await live.index(worldId)];
+  // Every world is read whole, its draft and its head: one that can't be read (deleted meanwhile, a broken draft) is skipped, not fatal.
   const found = await Promise.all(
-    worlds.map(async (w): Promise<{ hits: ScoredHit[]; draft: boolean }> => {
-      const draft = await live.draft(w.id);
-      // An unstored draft is a copy of the head: one search covers both.
-      if (!draft.stored) return { hits: searchDoc(draft.draft, words, { worldId: w.id, source: "head", collections }), draft: false };
-      const head = await live.revision(w.id, w.head);
-      const inDraft = searchDoc(draft.draft, words, { worldId: w.id, source: "draft", collections });
-      // The head adds only what the draft changed or dropped; an item both hold alike is the draft's hit.
-      const inHead = searchDoc(head, words, { worldId: w.id, source: "head", collections, skip: (collection, id, item) => jsonEqual(item, itemOf(draft.draft, collection, id)) });
-      return { hits: [...inDraft, ...inHead], draft: true };
+    worlds.map(async (w): Promise<{ hits: ScoredHit[]; draft: boolean } | { skipped: string }> => {
+      try {
+        const draft = await live.draft(w.id);
+        // An unstored draft is a copy of the head: one search covers both.
+        if (!draft.stored) return { hits: searchDoc(draft.draft, words, { worldId: w.id, source: "head", collections }), draft: false };
+        const head = await live.revision(w.id, w.head);
+        const inDraft = searchDoc(draft.draft, words, { worldId: w.id, source: "draft", collections });
+        // The head adds only what the draft changed or dropped; an item both hold alike is the draft's hit.
+        const inHead = searchDoc(head, words, { worldId: w.id, source: "head", collections, skip: (collection, id, item) => jsonEqual(item, itemOf(draft.draft, collection, id)) });
+        return { hits: [...inDraft, ...inHead], draft: true };
+      } catch (error) {
+        return { skipped: error instanceof Error ? error.message : String(error) };
+      }
     }),
   );
-  const all = found.flatMap((f) => f.hits);
-  return { text: json({ query, hits: rank(all, limit), total: all.length, searched: { worlds: worlds.length, drafts: found.filter((f) => f.draft).length } }) };
+  const skipped = worlds.flatMap((w, i) => {
+    const result = found[i];
+    return result !== undefined && "skipped" in result ? [{ worldId: w.id, name: w.name, reason: result.skipped }] : [];
+  });
+  // Nothing could be read at all: that is the connection's failure, not a search with no hits.
+  if (worlds.length > 0 && skipped.length === worlds.length) throw new ToolError(`No world could be searched: ${skipped[0]?.reason ?? "unknown"}`);
+  const searched = found.flatMap((f) => ("hits" in f ? [f] : []));
+  const all = searched.flatMap((f) => f.hits);
+  return { text: json({ query, hits: rank(all, limit), total: all.length, searched: { worlds: searched.length, drafts: searched.filter((f) => f.draft).length }, ...(skipped.length > 0 ? { skipped } : {}) }) };
 }
 
 export async function createTool(live: Live, args: Args): Promise<ToolResult> {
@@ -217,8 +236,9 @@ function patchOps(raw: unknown): JsonPatchOp[] {
   });
 }
 
-function stale(worldId: string, now: number, expected: number): ToolError {
-  return new ToolError(`Nothing changed: the draft of ${worldId} is at version ${now}, not ${expected}. It was written since you read it (by the user in Build, or another agent). Read it again (lre_world or lre_draft) and redo the edit against version ${now}.`);
+/** A draft written since the caller read it: `refused` says what didn't happen, `then` how to go on. */
+function stale(worldId: string, now: number, expected: number, refused: string, then: string): ToolError {
+  return new ToolError(`${refused}: the draft of ${worldId} is at version ${now}, not ${expected}. It was written since you read it (by the user in Build, or another agent). Read it again (lre_world or lre_draft), then ${then}.`);
 }
 
 export type Serialize = <T>(key: string, run: () => Promise<T>) => Promise<T>;
@@ -230,7 +250,7 @@ export function editTool(live: Live, args: Args, serialize: Serialize): Promise<
   return serialize(`world:${worldId}`, async () => {
     for (let attempt = 1; ; attempt++) {
       const before = await live.draft(worldId);
-      if (expected !== undefined && before.version !== expected) throw stale(worldId, before.version, expected);
+      if (expected !== undefined && before.version !== expected) throw stale(worldId, before.version, expected, "Nothing changed", `redo the edit against version ${before.version}`);
       let after: EditorBody;
       try {
         // The base and version read just now: a write in between (or a commit and a new draft) is refused, not overwritten.
@@ -243,7 +263,7 @@ export function editTool(live: Live, args: Args, serialize: Serialize): Promise<
           if (now.version === before.version && now.base === before.base) throw new ToolError(`Nothing changed: ${error.message}`);
           // Without expectVersion the edit is meant for the draft as it is: read it again once and apply.
           if (expected === undefined && attempt === 1) continue;
-          throw stale(worldId, now.version, expected ?? before.version);
+          throw stale(worldId, now.version, expected ?? before.version, "Nothing changed", `redo the edit against version ${now.version}`);
         }
         if (error.code === "bad_request" || error.code === "validation") throw new ToolError(`Nothing changed: LumiRPEngine refused the patch. ${error.message}`);
         throw error;
@@ -294,8 +314,11 @@ export function commitTool(live: Live, args: Args, serialize: Serialize): Promis
   const worldId = worldIdOf(args);
   const note = textArg(args, "note")?.trim();
   if (note !== undefined && note.length > 200) throw new ToolError(`note is at most 200 characters; this one has ${note.length}.`);
+  const expected = intArg(args, "expectVersion", 0, MAX_OFFSET);
   return serialize(`world:${worldId}`, async () => {
     const [draft, index] = await Promise.all([live.draft(worldId), live.index(worldId)]);
+    // A commit takes the whole draft: one written since the caller's read would carry changes it never saw.
+    if (expected !== undefined && draft.version !== expected) throw stale(worldId, draft.version, expected, "Not committed", "commit against its version if what it holds now should go into the head");
     if (!draft.stored) throw new ToolError(`There is no draft of “${index.name}” to commit: nothing has changed since its head. lre_edit writes one.`);
     let body: ResultBodies["lre.world"];
     try {
@@ -318,8 +341,11 @@ export function commitTool(live: Live, args: Args, serialize: Serialize): Promis
 
 export function discardTool(live: Live, args: Args, serialize: Serialize): Promise<ToolResult> {
   const worldId = worldIdOf(args);
+  const expected = intArg(args, "expectVersion", 0, MAX_OFFSET);
   return serialize(`world:${worldId}`, async () => {
     const [draft, index] = await Promise.all([live.draft(worldId), live.index(worldId)]);
+    // What was written since the caller's read may be the user's own work.
+    if (expected !== undefined && draft.version !== expected) throw stale(worldId, draft.version, expected, "Nothing discarded", "discard against its version only if what it holds now can go");
     if (!draft.stored) return { text: json({ worldId, discarded: false, note: "No draft was stored; there was nothing to discard." }) };
     const dropped = changesBetween(await live.revision(worldId, index.head), draft.draft);
     try {
@@ -375,10 +401,13 @@ export async function diffTool(live: Live, args: Args): Promise<ToolResult> {
 export function restoreTool(live: Live, args: Args, serialize: Serialize): Promise<ToolResult> {
   const worldId = worldIdOf(args);
   const given = neededText(args, "revision", "the revision to restore (lre_history lists them)");
+  const expected = intArg(args, "expectVersion", 0, MAX_OFFSET);
   return serialize(`world:${worldId}`, async () => {
     const index = await live.index(worldId);
     const revision = resolveRevision(index, given);
     const draft = await live.draft(worldId);
+    // A restore replaces the stored draft, so it must be the one the caller read.
+    if (expected !== undefined && draft.version !== expected) throw stale(worldId, draft.version, expected, "Nothing restored", "restore against its version only if what it holds now can go");
     let after: EditorBody;
     try {
       after = await live.conn.request("lre.editor", { op: "restore", worldId, base: null, version: draft.version, revision });
@@ -406,13 +435,20 @@ export function deleteTool(live: Live, args: Args, serialize: Serialize): Promis
     const index = await live.index(worldId);
     if (confirm !== index.name) {
       const [chats, draft] = await Promise.all([live.conn.request("lre.world", { op: "chats", worldId }).then((b) => b.chats ?? []), live.draft(worldId)]);
-      const parts = [`its ${index.revisions.length} revision${index.revisions.length === 1 ? "" : "s"}`, ...(draft.stored ? [`its stored draft (version ${draft.version})`] : []), ...((index.history?.length ?? 0) > 0 ? ["its history"] : [])];
-      const playing = chats.length > 0 ? ` ${chats.length} chat${chats.length === 1 ? " plays" : "s play"} it (${clip(chats.map((c) => c.name).join(", "), 600)}) and would stop being world chats.` : " No chat plays it.";
-      const why = confirm === undefined ? "confirm is missing" : `confirm ${JSON.stringify(confirm)} isn't the world's name`;
-      throw new ToolError(`Not deleted: ${why}. Deleting “${index.name}” (${worldId}) removes ${parts.join(", ")}, for good.${playing} To delete it, call again with confirm set to its exact name: ${JSON.stringify(index.name)}.`);
+      const preview = {
+        worldId,
+        name: index.name,
+        wouldDelete: { revisions: index.revisions.length, draft: draft.stored ? { version: draft.version } : null, history: index.history?.length ?? 0 },
+        chats: chats.map((c) => ({ chatId: c.chatId, name: c.name })),
+        afterwards: `${chats.length === 0 ? "No chat plays it." : `${chats.length === 1 ? "Its chat loses its world" : `Its ${chats.length} chats lose their world`} and stop${chats.length === 1 ? "s" : ""} being a world chat.`} Its engine lore book ("LumiRPEngine · " and the world's name) stays in World Books${chats.length > 0 ? ", still attached to those chats," : ""} for the user to delete.`,
+        toDelete: `Call again with confirm set to its exact name: ${JSON.stringify(index.name)}.`,
+      };
+      // Without confirm, a preview; with the wrong name, a refusal that says the same.
+      if (confirm === undefined) return { text: json({ deleted: false, ...preview }) };
+      throw new ToolError(`Not deleted: confirm ${JSON.stringify(confirm)} isn't the world's exact name.\n${json(preview)}`);
     }
     const body = await live.conn.request("lre.world", { op: "delete", worldId });
-    return { text: json({ deleted: worldId, name: index.name, worldsLeft: (body.worlds ?? []).length }) };
+    return { text: json({ deleted: worldId, name: index.name, worldsLeft: (body.worlds ?? []).length, afterwards: `Its engine lore book ("LumiRPEngine · " and the world's name) is still in World Books; delete it there if it isn't wanted.` }) };
   });
 }
 

@@ -6,9 +6,9 @@ import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { Args } from "./args";
 import type { CredentialStore } from "./credentials";
-import { normalizeBase } from "./credentials";
-import type { Http, OpenSocket } from "./connection";
-import { HostConnection, LiveError, signIn, signOut } from "./connection";
+import { inClear, normalizeBase } from "./credentials";
+import type { Http, OpenSocket, SignOutResult } from "./connection";
+import { HostConnection, LiveError, sessionOf, signIn, signOut } from "./connection";
 import { Live, resolveRevision } from "./live";
 import { McpServer } from "./mcp";
 import { templateFile } from "./offline";
@@ -34,7 +34,9 @@ export interface CliIO {
 export const USAGE = `${CLI_NAME}: manage your LumiRPEngine worlds on Lumiverse from a shell or an agent
 
 Sign-in
-  login [--url <base>] [--username <name>]   Sign in; the password comes from a hidden prompt or LUMIVERSE_PASSWORD
+  login [--url <base>] [--username <name>] [--allow-http]
+                                              Sign in; the password comes from a hidden prompt or LUMIVERSE_PASSWORD.
+                                              --allow-http: plain http to another machine (the token crosses in clear)
   logout                                      Sign out, and delete the saved session
   status                                      The host and user, the session, LumiRPEngine there, this client
 
@@ -62,18 +64,20 @@ Your worlds on Lumiverse
   edit <worldId> --ops <file|json> [--expect-version <n>]
                                               JSON Patch on the draft
   draft <worldId>                             The draft: version, lint, changes against the head
-  commit <worldId> [--note <text>]            The draft becomes the head
-  discard <worldId>                           Drop the draft
+  commit <worldId> [--note <text>] [--expect-version <n>]
+                                              The draft becomes the head
+  discard <worldId> [--expect-version <n>]    Drop the draft
   history <worldId>                           How each revision became head
   diff <worldId> [--from <s>] [--to <s>]      What changed (head to draft by default)
-  restore <worldId> <revision>                The draft becomes a copy of a revision
-  delete <worldId> --confirm <exact name>     Delete a world for good
+  restore <worldId> <revision> [--expect-version <n>]
+                                              The draft becomes a copy of a revision
+  delete <worldId> [--confirm <exact name>]   Delete a world for good (without --confirm: what it would delete)
   export <worldId> [--revision <r>] [--out <file>] [--offset <n>]
   chats [<worldId>]                           The chats that play a world
   attach <worldId> <chatId>                   A chat plays the world
   upgrade <chatId> [--to <revision>] [--preview] [--spoilers]
 
-  mcp                                         All of it as an MCP server on stdio
+  mcp [--read-only]                           All of it as an MCP server on stdio
   version, --version                          ${CLI_NAME}, engine, world format and agent API versions
 
   <s> is draft, head or a revision. Everywhere: --url <base> (or LUMIVERSE_URL) picks the Lumiverse when you
@@ -88,7 +92,25 @@ interface Parsed {
   flags: Record<string, true>;
 }
 
-const BOOLEAN_FLAGS: Record<string, true> = { "--read-only": true, "--preview": true, "--spoilers": true, "--map": true, "--help": true, "--version": true };
+const BOOLEAN_FLAGS: Record<string, true> = { "--read-only": true, "--allow-http": true, "--preview": true, "--spoilers": true, "--map": true, "--help": true, "--version": true };
+
+/** What `LRE_READ_ONLY` may say. Anything else stops the run: a value meant as "on" must never serve the write tools. */
+const READ_ONLY_VALUES: Record<string, boolean> = { "": false, "0": false, false: false, no: false, off: false, "1": true, true: true, yes: true, on: true };
+
+/** Whether this run is read-only: `--read-only`, or `LRE_READ_ONLY` in any case. */
+function readOnlyOf(p: Parsed, env: CliIO["env"]): boolean {
+  const raw = env.LRE_READ_ONLY;
+  const value = (raw ?? "").trim().toLowerCase();
+  if (!hasOwn(READ_ONLY_VALUES, value)) throw new UsageError(`LRE_READ_ONLY is ${JSON.stringify(raw)}, which isn't a yes or a no: set it to 1 (read-only) or 0, or unset it.`);
+  return p.flags["--read-only"] === true || READ_ONLY_VALUES[value] === true;
+}
+
+/** Refuses options a command doesn't take, and positionals where it takes none: a misspelled `--read-only` must stop the run, not be ignored. */
+function onlyOptions(command: string, p: Parsed, options: readonly string[], usage: string, positionals = true): void {
+  const stray = [...Object.keys(p.values), ...Object.keys(p.flags)].filter((o) => !options.includes(o) && o !== "--help");
+  if (stray.length > 0) throw new UsageError(`${command} doesn't take ${stray.join(", ")}. Usage: ${CLI_NAME} ${usage}`);
+  if (!positionals && p.positionals.length > 0) throw new UsageError(`${command} takes no ${p.positionals.length === 1 ? "argument" : "arguments"} (${p.positionals.join(" ")}). Usage: ${CLI_NAME} ${usage}`);
+}
 
 function parse(argv: readonly string[]): Parsed {
   const out: Parsed = { command: undefined, positionals: [], values: {}, flags: {} };
@@ -102,6 +124,8 @@ function parse(argv: readonly string[]): Parsed {
       const eq = arg.indexOf("=");
       const name = eq > 0 ? arg.slice(0, eq) : arg;
       if (hasOwn(BOOLEAN_FLAGS, name)) {
+        // `--spoilers=false` would read as on: a switch takes no value.
+        if (eq > 0) throw new UsageError(`${name} is a switch and takes no value: leave out "=${arg.slice(eq + 1)}".`);
         out.flags[name] = true;
         continue;
       }
@@ -121,6 +145,12 @@ function number(p: Parsed, name: string): number | undefined {
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(value)) throw new UsageError(`${name} takes a whole number, not ${JSON.stringify(value)}.`);
   return Number(value);
+}
+
+/** `--expect-version` as the write tools take it: the draft version the change is meant for. */
+function expectVersion(p: Parsed): Args {
+  const version = number(p, "--expect-version");
+  return version === undefined ? {} : { expectVersion: version };
 }
 
 /** Each mirrored command: its tool, the options it takes, and how its arguments become the tool's. */
@@ -156,14 +186,14 @@ const MIRRORS: Readonly<Record<string, Mirror>> = {
   },
   create: { tool: "lre_world_create", options: ["--template"], needs: 1, usage: "create <name…> [--template <id>]", args: (p) => ({ name: p.positionals.join(" "), ...(one(p, "--template") !== undefined ? { template: one(p, "--template") } : {}) }) },
   import: { tool: "lre_world_import", options: [], needs: 1, usage: "import <file>", args: (p) => ({ path: pos(p, 0) }) },
-  edit: { tool: "lre_edit", options: ["--ops", "--expect-version"], needs: 1, usage: "edit <worldId> --ops <file|json> [--expect-version <n>]", args: (p, io) => ({ worldId: pos(p, 0), ops: opsFrom(p, io), ...(number(p, "--expect-version") !== undefined ? { expectVersion: number(p, "--expect-version") } : {}) }) },
+  edit: { tool: "lre_edit", options: ["--ops", "--expect-version"], needs: 1, usage: "edit <worldId> --ops <file|json> [--expect-version <n>]", args: (p, io) => ({ worldId: pos(p, 0), ops: opsFrom(p, io), ...expectVersion(p) }) },
   draft: { tool: "lre_draft", options: [], needs: 1, usage: "draft <worldId>", args: (p) => ({ worldId: pos(p, 0) }) },
-  commit: { tool: "lre_commit", options: ["--note"], needs: 1, usage: "commit <worldId> [--note <text>]", args: (p) => ({ worldId: pos(p, 0), ...(one(p, "--note") !== undefined ? { note: one(p, "--note") } : {}) }) },
-  discard: { tool: "lre_discard", options: [], needs: 1, usage: "discard <worldId>", args: (p) => ({ worldId: pos(p, 0) }) },
+  commit: { tool: "lre_commit", options: ["--note", "--expect-version"], needs: 1, usage: "commit <worldId> [--note <text>] [--expect-version <n>]", args: (p) => ({ worldId: pos(p, 0), ...(one(p, "--note") !== undefined ? { note: one(p, "--note") } : {}), ...expectVersion(p) }) },
+  discard: { tool: "lre_discard", options: ["--expect-version"], needs: 1, usage: "discard <worldId> [--expect-version <n>]", args: (p) => ({ worldId: pos(p, 0), ...expectVersion(p) }) },
   history: { tool: "lre_history", options: [], needs: 1, usage: "history <worldId>", args: (p) => ({ worldId: pos(p, 0) }) },
   diff: { tool: "lre_diff", options: ["--from", "--to"], needs: 1, usage: "diff <worldId> [--from <s>] [--to <s>]", args: (p) => ({ worldId: pos(p, 0), ...(one(p, "--from") !== undefined ? { from: one(p, "--from") } : {}), ...(one(p, "--to") !== undefined ? { to: one(p, "--to") } : {}) }) },
-  restore: { tool: "lre_restore", options: [], needs: 2, usage: "restore <worldId> <revision>", args: (p) => ({ worldId: pos(p, 0), revision: pos(p, 1) }) },
-  delete: { tool: "lre_world_delete", options: ["--confirm"], needs: 1, usage: "delete <worldId> --confirm <exact name>", args: (p) => ({ worldId: pos(p, 0), ...(one(p, "--confirm") !== undefined ? { confirm: one(p, "--confirm") } : {}) }) },
+  restore: { tool: "lre_restore", options: ["--expect-version"], needs: 2, usage: "restore <worldId> <revision> [--expect-version <n>]", args: (p) => ({ worldId: pos(p, 0), revision: pos(p, 1), ...expectVersion(p) }) },
+  delete: { tool: "lre_world_delete", options: ["--confirm"], needs: 1, usage: "delete <worldId> [--confirm <exact name>]", args: (p) => ({ worldId: pos(p, 0), ...(one(p, "--confirm") !== undefined ? { confirm: one(p, "--confirm") } : {}) }) },
   export: { tool: "lre_world_export", options: ["--revision", "--out", "--offset"], needs: 1, usage: "export <worldId> [--revision <r>] [--out <file>] [--offset <n>]", args: (p) => ({ worldId: pos(p, 0), ...(one(p, "--revision") !== undefined ? { revision: one(p, "--revision") } : {}), ...(number(p, "--offset") !== undefined ? { offset: number(p, "--offset") } : {}) }) },
   chats: { tool: "lre_chats", options: [], needs: 0, usage: "chats [<worldId>]", args: (p) => (pos(p, 0) !== undefined ? { worldId: pos(p, 0) } : {}) },
   attach: { tool: "lre_attach", options: [], needs: 2, usage: "attach <worldId> <chatId>", args: (p) => ({ worldId: pos(p, 0), chatId: pos(p, 1) }) },
@@ -207,9 +237,9 @@ function chooseBase(p: Parsed, io: CliIO): string {
 }
 
 function liveFor(base: string, io: CliIO): Live {
-  const login = io.credentials.get(base);
-  if (login === null) throw new LiveError("login", `Not signed in to ${base}. Run: ${CLI_NAME} login --url ${base}`);
-  return new Live(new HostConnection({ base, username: login.username, token: login.token, http: io.http, openSocket: io.openSocket, client: { name: CLI_NAME, version: CLI_VERSION } }));
+  if (io.credentials.get(base) === null) throw new LiveError("login", `Not signed in to ${base}. Run: ${CLI_NAME} login --url ${base}`);
+  // Read again whenever the connection opens: a `login` while an `mcp` server runs takes effect without a restart.
+  return new Live(new HostConnection({ base, credentials: () => io.credentials.get(base), http: io.http, openSocket: io.openSocket, client: { name: CLI_NAME, version: CLI_VERSION } }));
 }
 
 interface Session {
@@ -219,10 +249,9 @@ interface Session {
 }
 
 /** The tools' context for one run: the host is reached only when a live tool first needs it. */
-function sessionFor(p: Parsed, io: CliIO): Session {
+function sessionFor(p: Parsed, io: CliIO, readOnly: boolean): Session {
   let live: Live | null = null;
   const queue = new KeyedQueue();
-  const readOnly = p.flags["--read-only"] === true || io.env.LRE_READ_ONLY === "1" || io.env.LRE_READ_ONLY === "true";
   const ctx: ToolContext = {
     readFile: (path) => io.readFile(path),
     readOnly,
@@ -238,12 +267,20 @@ async function login(p: Parsed, io: CliIO): Promise<number> {
   const asked = given ?? (stored.length === 1 ? stored[0] : await io.ask("Lumiverse address (as you open it in a browser): ", false));
   if (asked === null || asked === undefined || asked.trim() === "") throw new UsageError("login needs Lumiverse's address: --url <base>, or LUMIVERSE_URL.");
   const base = normalizeBase(asked);
+  const clear = inClear(base);
+  if (clear && p.flags["--allow-http"] !== true) {
+    throw new UsageError(`${base} is plain http to another machine: your password now, and the session token on every call after, would cross the network in clear, readable by anyone on the way. Use Lumiverse's https address if it has one. If the network is yours and you accept that, sign in with --allow-http.`);
+  }
+  // Asked as nobody, before a password is typed or sent: a redirect to https, an untrusted host or a lockout stops here.
+  await sessionOf(io.http, base, null);
+  if (clear) io.err(`Warning: ${base} is plain http. Your password now, and the session token on every call after, cross the network in clear.`);
   const username = one(p, "--username") ?? io.env.LUMIVERSE_USERNAME ?? io.credentials.get(base)?.username ?? (await io.ask("Username: ", false));
   if (username === null || username.trim() === "") throw new UsageError("login needs your username: --username <name>, or LUMIVERSE_USERNAME.");
   const password = io.env.LUMIVERSE_PASSWORD ?? (await io.ask(`Password for ${username} at ${base}: `, true));
   if (password === null || password === "") throw new UsageError("No password: run login in a terminal and type it at the prompt, or set LUMIVERSE_PASSWORD.");
   const token = await signIn(io.http, base, username.trim(), password);
-  io.credentials.put(base, { username: username.trim(), token, savedAt: Date.now() });
+  // The consent goes with the sign-in, so `mcp` and the other commands use it without the flag.
+  io.credentials.put(base, { username: username.trim(), token, savedAt: Date.now(), ...(clear ? { allowHttp: true } : {}) });
   io.out(`Signed in to ${base} as ${username.trim()}. The session is saved in ${io.credentials.path}, readable only by you; the password is not kept.`);
   // Say now whether LumiRPEngine answers there, rather than at the first tool call.
   const live = liveFor(base, io);
@@ -264,17 +301,22 @@ async function logout(p: Parsed, io: CliIO): Promise<number> {
     io.out(`Not signed in to ${base}: nothing to do.`);
     return 0;
   }
-  let ended: boolean;
+  let result: SignOutResult | null = null;
+  let unreachable = "";
   try {
-    ended = await signOut(io.http, base, login.token);
+    result = await signOut(io.http, base, login.token);
   } catch (error) {
-    // The saved token goes either way: an unused session ends on its own within 7 days.
-    io.err(`Couldn't reach Lumiverse to end the session (${error instanceof Error ? error.message : String(error)}). The saved session is deleted anyway; unused, it ends on its own within 7 days.`);
-    ended = false;
+    unreachable = error instanceof Error ? error.message : String(error);
   }
+  // The saved copy goes either way: this machine stops using the session.
   io.credentials.remove(base);
-  io.out(ended ? `Signed out of ${base}, and the saved session is deleted.` : `The saved session for ${base} is deleted.`);
-  return 0;
+  if (result !== null && result.outcome !== "unconfirmed") {
+    io.out(result.outcome === "ended" ? `Signed out of ${base}: Lumiverse ended the session, and the saved copy is deleted.` : `The session had already ended on ${base}; the saved copy is deleted.`);
+    return 0;
+  }
+  const answer = result === null ? `couldn't be reached (${unreachable})` : `answered ${result.status}`;
+  io.err(`Lumiverse at ${base} ${answer} and didn't confirm the sign-out, so the session is still valid there: it stays usable by anyone who holds the token until it expires, after 7 days without use. The saved copy on this machine is deleted.`);
+  return 1;
 }
 
 /** `template` and `export` as a whole file: written to `out` in one go, or printed when stdout is piped (`out` null). */
@@ -328,25 +370,31 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
     io.out(USAGE);
     return { code: 0 };
   }
-  if (command === "mcp") {
-    const session = sessionFor(p, io);
-    return { mcp: new McpServer(session.ctx), close: session.close };
-  }
-  const session = sessionFor(p, io);
+  let session: Session | null = null;
   try {
+    const readOnly = readOnlyOf(p, io.env);
+    if (command === "mcp") {
+      // Checked like any command's: a misspelled --read-only must refuse to start, never serve the write tools.
+      onlyOptions("mcp", p, ["--url", "--read-only"], "mcp [--read-only] [--url <base>]", false);
+      const server = sessionFor(p, io, readOnly);
+      return { mcp: new McpServer(server.ctx), close: server.close };
+    }
+    session = sessionFor(p, io, readOnly);
     if (command === "login") {
       if (p.values["--password"] !== undefined) throw new UsageError(`${CLI_NAME} never takes a password as an argument: it would stay in your shell history and show in the process list. Type it at the prompt, or set LUMIVERSE_PASSWORD.`);
+      onlyOptions("login", p, ["--url", "--username", "--allow-http"], "login [--url <base>] [--username <name>] [--allow-http]", false);
       return { code: await login(p, io) };
     }
-    if (command === "logout") return { code: await logout(p, io) };
+    if (command === "logout") {
+      onlyOptions("logout", p, ["--url"], "logout [--url <base>]", false);
+      return { code: await logout(p, io) };
+    }
     const mirror = hasOwn(MIRRORS, command) ? MIRRORS[command] : undefined;
     if (mirror === undefined || findTool(mirror.tool) === undefined) {
       io.err(`There is no command ${command}.\n\n${USAGE}`);
       return { code: 2 };
     }
-    const known = new Set(["--url", "--read-only", "--help", ...mirror.options]);
-    const stray = [...Object.keys(p.values), ...Object.keys(p.flags)].filter((o) => !known.has(o));
-    if (stray.length > 0) throw new UsageError(`${command} doesn't take ${stray.join(", ")}. Usage: ${CLI_NAME} ${mirror.usage}`);
+    onlyOptions(command, p, ["--url", "--read-only", ...mirror.options], mirror.usage);
     if (p.positionals.length < mirror.needs) throw new UsageError(`Usage: ${CLI_NAME} ${mirror.usage}`);
     const out = one(p, "--out");
     // A redirect wants the file itself (`template <id> > world.json`); a terminal gets the outline and paging.
@@ -364,6 +412,6 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
     io.err(error instanceof Error ? error.message : String(error));
     return { code: 1 };
   } finally {
-    session.close();
+    session?.close();
   }
 }

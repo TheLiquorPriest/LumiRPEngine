@@ -6,7 +6,7 @@
 import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { ToolContext } from "./tools";
-import { callTool, toolsFor } from "./tools";
+import { annotationsOf, callTool, findTool, toolsFor } from "./tools";
 import { CLI_NAME, CLI_VERSION } from "./version";
 
 /** The protocol versions this server speaks, newest first; a client asking for another gets the newest. */
@@ -21,10 +21,10 @@ Work like this:
 4. Check it: lre_draft gives its lint and what it changes against the head; lre_playtest and lre_check_world run it.
 5. Commit it with lre_commit and a short note, or drop it with lre_discard.
 
-The draft is the user's Build draft: they see your changes as you make them, and you see theirs. Commit or discard every draft you start; never leave one lying around. Deleting a world (lre_world_delete) takes its exact name as confirm. The offline tools (lre_guide, lre_docs, lre_schema, lre_templates, lre_template, lre_check, lre_playtest and lre_check_world on a file) need no sign-in.`;
+The draft is the user's Build draft: they see your changes as you make them, and you see theirs, and a Commit in Build commits your unfinished work as yours commits theirs. If lre_worlds shows a draft already stored before you start, it is the user's: ask them before you touch it. Commit or discard every draft you start; never leave one lying around. Deleting a world (lre_world_delete) takes its exact name as confirm. The offline tools (lre_guide, lre_docs, lre_schema, lre_templates, lre_template, lre_check, lre_playtest and lre_check_world on a file) need no sign-in.`;
 
 export function instructions(readOnly: boolean): string {
-  return readOnly ? `${WORKFLOW}\n\nThis server is read-only: it reads, searches and checks worlds, and changes nothing.` : WORKFLOW;
+  return readOnly ? `${WORKFLOW}\n\nThis server is read-only: it offers no tool that changes worlds or chats.` : WORKFLOW;
 }
 
 type Id = string | number | null;
@@ -60,6 +60,8 @@ export class McpServer {
     if (message.jsonrpc !== "2.0") return hasId ? fail(id, -32600, 'Invalid Request: jsonrpc must be "2.0"') : null;
     // Notifications (notifications/initialized, notifications/cancelled…) get no answer, whatever they are.
     if (!hasId) return null;
+    // MCP, unlike plain JSON-RPC, never allows a null request id.
+    if (raw === null) return fail(null, -32600, "Invalid Request: an MCP request's id is a string or a number, never null");
     const params = isRecord(message.params) ? message.params : {};
     const reply = (result: JsonValue): RpcReply => ({ jsonrpc: "2.0", id, result });
     try {
@@ -71,9 +73,11 @@ export class McpServer {
         case "ping":
           return reply({});
         case "tools/list":
-          return reply({ tools: toolsFor(this.ctx.readOnly).map((t): JsonObject => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+          return reply({ tools: toolsFor(this.ctx.readOnly).map((t): JsonObject => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: annotationsOf(t) })) });
         case "tools/call": {
           if (typeof params.name !== "string") return fail(id, -32602, "Invalid params: tools/call needs the tool's name");
+          // An unknown tool is a protocol error (MCP's "Unknown tools"); a known one that refuses answers isError.
+          if (findTool(params.name) === undefined) return fail(id, -32602, `Unknown tool: ${params.name}`);
           const result = await callTool(params.name, params.arguments, this.ctx);
           return reply({ content: [{ type: "text", text: result.text }], ...(result.isError ? { isError: true } : {}) });
         }

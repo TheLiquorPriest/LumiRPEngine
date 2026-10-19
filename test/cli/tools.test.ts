@@ -2,9 +2,11 @@
 // requests, exactly), what it answers the agent, and the offline tools on the starter worlds.
 
 import { describe, expect, test } from "bun:test";
+import { BODY_LIMIT } from "../../src/cli/read";
 import { callTool } from "../../src/cli/tools";
 import type { ToolContext } from "../../src/cli/tools";
 import { templateFile } from "../../src/cli/offline";
+import type { WorldDoc } from "../../src/shared/world";
 import { client, FakeLumiverse } from "./fake-lumiverse";
 
 async function call(ctx: ToolContext, name: string, args: Record<string, unknown> = {}): Promise<{ text: string; data: Record<string, unknown>; isError: boolean }> {
@@ -150,21 +152,57 @@ describe("live tools", () => {
     expect(fake.lre.sent("lre.editor", "discard")).toEqual([{ type: "lre.editor", op: "discard", worldId: w.index.id, base: null, version: 2 }]);
   });
 
-  test("lre_world_delete refuses without the exact name, says what it would delete, and sends nothing", async () => {
+  test("with expectVersion, lre_commit, lre_discard and lre_restore leave alone a draft the user wrote since", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const { ctx } = client(fake);
+    const first = w.index.head;
+    const mine = await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "add", path: "/entities/mara", value: person("mara", "Mara") }] });
+    const read = Number(mine.data.version);
+    // The user goes on in Build after the agent's read.
+    fake.lre.handle({ lre: 1, type: "lre.editor", reqId: "build", op: "patch", worldId: w.index.id, base: null, ops: [{ op: "add", path: "/entities/from_build", value: person("from_build", "Build") }] });
+    const refusals: [string, Record<string, unknown>, string][] = [
+      ["lre_discard", { worldId: w.index.id, expectVersion: read }, "Nothing discarded"],
+      ["lre_commit", { worldId: w.index.id, note: "Add Mara", expectVersion: read }, "Not committed"],
+      ["lre_restore", { worldId: w.index.id, revision: first, expectVersion: read }, "Nothing restored"],
+    ];
+    for (const [name, args, refused] of refusals) {
+      const result = await call(ctx, name, args);
+      expect([name, result.isError, result.text]).toEqual([name, true, expect.stringContaining(`${refused}: the draft of ${w.index.id} is at version ${read + 1}, not ${read}.`)]);
+    }
+    expect(fake.lre.sent("lre.editor", "discard")).toEqual([]);
+    expect(fake.lre.sent("lre.editor", "restore")).toEqual([]);
+    expect(fake.lre.sent("lre.world", "commit")).toEqual([]);
+    expect(Object.keys(w.draft?.doc.entities ?? {})).toEqual(expect.arrayContaining(["mara", "from_build"]));
+    // Against the version that holds the user's change too, the commit goes through.
+    const committed = await call(ctx, "lre_commit", { worldId: w.index.id, note: "Add Mara", expectVersion: read + 1 });
+    expect(committed.isError).toBe(false);
+    expect(fake.lre.sent("lre.world", "commit")).toHaveLength(1);
+  });
+
+  test("lre_world_delete previews without confirm, refuses a name that isn't exact, and deletes only with it", async () => {
     const fake = new FakeLumiverse();
     const w = fake.lre.seed("The Hall");
     fake.lre.chats = [{ chatId: "c1", name: "Night at the hall", worldId: w.index.id, revision: w.index.head, behind: false }];
     const { ctx } = client(fake);
-    for (const confirm of [undefined, "the hall", "The Hall "]) {
-      const refused = await call(ctx, "lre_world_delete", { worldId: w.index.id, ...(confirm !== undefined ? { confirm } : {}) });
+    const preview = await call(ctx, "lre_world_delete", { worldId: w.index.id });
+    expect(preview.isError).toBe(false);
+    expect(preview.data).toMatchObject({ deleted: false, worldId: w.index.id, name: "The Hall", wouldDelete: { revisions: 1, draft: null }, chats: [{ chatId: "c1", name: "Night at the hall" }] });
+    // What stays behind is the user's to clean up: the book in World Books, and chats without their world.
+    expect(String(preview.data.afterwards)).toContain("Its chat loses its world");
+    expect(String(preview.data.afterwards)).toContain('engine lore book ("LumiRPEngine · " and the world\'s name) stays in World Books, still attached to those chats');
+    expect(String(preview.data.toDelete)).toContain('confirm set to its exact name: "The Hall"');
+    for (const confirm of ["the hall", "The Hall "]) {
+      const refused = await call(ctx, "lre_world_delete", { worldId: w.index.id, confirm });
       expect(refused.isError).toBe(true);
-      expect(refused.text).toContain("Not deleted");
-      expect(refused.text).toContain("1 chat plays it (Night at the hall)");
-      expect(refused.text).toContain('confirm set to its exact name: "The Hall"');
+      expect(refused.text).toContain(`Not deleted: confirm ${JSON.stringify(confirm)} isn't the world's exact name.`);
+      expect(refused.text).toContain("Night at the hall");
     }
     expect(fake.lre.sent("lre.world", "delete")).toEqual([]);
+    expect(fake.lre.worlds.has(w.index.id)).toBe(true);
     const deleted = await call(ctx, "lre_world_delete", { worldId: w.index.id, confirm: "The Hall" });
-    expect(deleted.data).toEqual({ deleted: w.index.id, name: "The Hall", worldsLeft: 0 });
+    expect(deleted.data).toMatchObject({ deleted: w.index.id, name: "The Hall", worldsLeft: 0 });
+    expect(String(deleted.data.afterwards)).toContain("still in World Books");
     expect(fake.lre.sent("lre.world", "delete")).toEqual([{ type: "lre.world", op: "delete", worldId: w.index.id }]);
   });
 
@@ -214,6 +252,80 @@ describe("live tools", () => {
     expect(new Set(hits.map((h) => `${h.worldId} ${h.source} ${h.collection} ${h.id}`)).size).toBe(hits.length);
     const scoped = await call(ctx, "lre_search", { query: "old lighthouse", worldId: b.index.id, collections: ["places"], limit: 1 });
     expect(scoped.data.hits).toEqual([expect.objectContaining({ worldId: b.index.id, source: "draft", id: "lighthouse", label: "The old lighthouse" })]);
+  });
+
+  test("lre_search and lre_worlds go on past a world they can't read, and name it", async () => {
+    const fake = new FakeLumiverse();
+    const good = fake.lre.seed("Alpha");
+    const bad = fake.lre.seed("Beta");
+    const { ctx } = client(fake);
+    await call(ctx, "lre_edit", { worldId: good.index.id, ops: [{ op: "add", path: "/entities/keeper", value: person("keeper", "Old Keeper", { fields: { notes: "Tends the lighthouse lamp." } }) }] });
+    // Beta's draft can't be read: a broken file on the host, say.
+    const handle = fake.lre.handle.bind(fake.lre);
+    fake.lre.handle = (r) => (r.type === "lre.editor" && r.worldId === bad.index.id ? { lre: 1, type: "lre.error", reqId: r.reqId, code: "internal", message: "the draft file is unreadable" } : handle(r));
+    const found = await call(ctx, "lre_search", { query: "lighthouse" });
+    expect(found.isError).toBe(false);
+    expect(found.data).toMatchObject({ hits: [{ worldId: good.index.id, id: "keeper" }], searched: { worlds: 1, drafts: 1 }, skipped: [{ worldId: bad.index.id, name: "Beta" }] });
+    expect(JSON.stringify(found.data.skipped)).toContain("the draft file is unreadable");
+    const listed = await call(ctx, "lre_worlds");
+    expect(listed.isError).toBe(false);
+    expect(listed.data).toMatchObject({ worlds: [{ id: good.index.id, draft: { stored: true, version: 1 } }, { id: bad.index.id, draft: null }], skipped: [{ worldId: bad.index.id, name: "Beta" }] });
+    // With nothing readable at all, the search fails rather than answer "no hits".
+    const alone = await call(ctx, "lre_search", { query: "lighthouse", worldId: bad.index.id });
+    expect(alone.isError).toBe(true);
+    expect(alone.text).toContain("No world could be searched");
+  });
+
+  test("a key that reaches a prototype is no change, and leaves the counts of later diffs alone", async () => {
+    const fake = new FakeLumiverse();
+    const odd = fake.lre.seed("Alpha");
+    const plain = fake.lre.seed("Beta");
+    // As JSON.parse makes it: "__proto__" an own key of the draft.
+    const doc: unknown = JSON.parse(JSON.stringify(odd.revisions.get(odd.index.head)).replace(/^\{/, '{"__proto__":{"x":1},'));
+    odd.draft = { base: odd.index.head, doc: doc as WorldDoc, version: 1 };
+    const { ctx } = client(fake);
+    try {
+      const strange = await call(ctx, "lre_draft", { worldId: odd.index.id });
+      expect(strange.data.changes).toEqual({ counts: {}, items: [], more: 0 });
+      await call(ctx, "lre_edit", { worldId: plain.index.id, ops: [{ op: "add", path: "/entities/keeper", value: person("keeper", "Old Keeper") }] });
+      const honest = await call(ctx, "lre_draft", { worldId: plain.index.id });
+      expect(honest.data.changes).toMatchObject({ counts: { entities: { added: 1 } } });
+      expect(Object.hasOwn(Object.prototype, "added")).toBe(false);
+    } finally {
+      // A failure here must not leak into the other tests.
+      Reflect.deleteProperty(Object.prototype, "added");
+    }
+  });
+
+  test("export pages never split a character in two: each page survives UTF-8, and the pages together are the file", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const { ctx } = client(fake);
+    const exported = (): string => JSON.stringify({ format: "lre-world-export-v1", world: fake.lre.world(w.index.id).revisions.get(fake.lre.world(w.index.id).index.head) });
+    await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "add", path: "/entities/keeper", value: person("keeper", "Old Keeper", { fields: { notes: "@@" } }) }] });
+    await call(ctx, "lre_commit", { worldId: w.index.id });
+    // Put "🗡" (two UTF-16 units) where the first page ends: its first half the page's last unit.
+    const notes = `${"x".repeat(BODY_LIMIT - 1 - exported().indexOf("@@"))}🗡 the blade${"y".repeat(BODY_LIMIT)}`;
+    await call(ctx, "lre_edit", { worldId: w.index.id, ops: [{ op: "replace", path: "/entities/keeper/fields/notes", value: notes }] });
+    await call(ctx, "lre_commit", { worldId: w.index.id });
+    const whole = exported();
+    expect(whole.charCodeAt(BODY_LIMIT - 1)).toBe("🗡".charCodeAt(0));
+    const pages: string[] = [];
+    let offset: number | null = 0;
+    while (offset !== null) {
+      const page = await call(ctx, "lre_world_export", { worldId: w.index.id, offset });
+      const body = /^[^\n]*:\n\n([\s\S]*?)\n\n\((?:Continues: read on with offset (\d+)|That is the end)\.\)/.exec(page.text);
+      if (body === null) throw new Error(`not a page: ${page.text.slice(0, 200)}`);
+      // What reaches the user: each page as UTF-8, on stdout or in an MCP line.
+      pages.push(Buffer.from(body[1] ?? "", "utf8").toString("utf8"));
+      offset = body[2] === undefined ? null : Number(body[2]);
+    }
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.join("")).toBe(whole);
+    // An offset between the halves starts at the character.
+    const between = await call(ctx, "lre_world_export", { worldId: w.index.id, offset: BODY_LIMIT });
+    expect(between.text).toContain(`characters ${BODY_LIMIT - 1}–`);
+    expect(between.text).toContain(":\n\n🗡 the blade");
   });
 
   test("create, import, export, chats, attach and upgrade send the agent API's requests", async () => {

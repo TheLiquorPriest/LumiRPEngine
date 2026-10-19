@@ -10,6 +10,7 @@ import { isRecord } from "../shared/json";
 import type { ErrorCode, FrontendToBackend, LintIssue, ResultBodies } from "../shared/protocol";
 import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
 import { ENGINE_EXTENSION } from "../shared/studio-bridge";
+import { inClear } from "./credentials";
 
 export interface HttpRequest {
   method: "GET" | "POST";
@@ -40,7 +41,7 @@ export interface Socket {
 /** Opens the event socket; main.ts supplies Node's WebSocket. Events arrive later, never during the call itself. */
 export type OpenSocket = (url: string, events: SocketEvents) => Socket;
 
-export type LiveProblem = "login" | "locked" | "unreachable" | "forbidden" | "not_installed" | "not_running" | "too_old" | "timeout" | "closed" | "too_large" | "protocol";
+export type LiveProblem = "login" | "locked" | "unreachable" | "forbidden" | "insecure" | "not_installed" | "not_running" | "too_old" | "timeout" | "closed" | "too_large" | "protocol";
 
 /** Why a call to the host failed, in words the user can act on. */
 export class LiveError extends Error {
@@ -79,7 +80,8 @@ export interface ExtensionInfo {
 }
 
 export interface SessionState {
-  valid: boolean;
+  /** Whether the session holds; null when the host couldn't be asked (a lockout, an outage, a refusal). */
+  valid: boolean | null;
   /** Until when the session holds unused (each use extends it); null when the host didn't say. */
   expiresAt: string | null;
 }
@@ -87,13 +89,22 @@ export interface SessionState {
 /** The host as `lre_status` reports it. */
 export interface HostDescription {
   base: string;
-  username: string;
+  /** Who the saved sign-in is for; null when there is none. */
+  username: string | null;
   session: SessionState;
   extension: ExtensionInfo | null;
   /** The agent API level LumiRPEngine answered `lre.hello` with; null when it named none or wasn't reached. */
   agentApi: number | null;
   /** What stopped the description short, if anything. */
   problem: string | null;
+}
+
+/** The saved sign-in a connection uses (`StoredLogin`). */
+export interface Credentials {
+  username: string;
+  token: string;
+  /** The user agreed to plain http to another machine (`login --allow-http`). */
+  allowHttp?: true;
 }
 
 /** What the live tools need of the host. */
@@ -130,6 +141,25 @@ const loginAgain = (base: string): string => `Your Lumiverse session for ${base}
 const forbidden = (base: string): string =>
   `Lumiverse at ${base} refused this client (403 Forbidden): the address isn't one of its trusted hosts. Use the URL you open Lumiverse at in your browser, or add the host to Lumiverse's trusted hosts (Operator panel) or TRUSTED_ORIGINS. See docs/MCP.md, "Troubleshooting".`;
 
+/** How long a 429 asks to wait, in words. */
+function waitOf(reply: HttpReply): string {
+  const minutes = Math.ceil(Number(reply.header("retry-after")) / 60);
+  return Number.isFinite(minutes) && minutes > 0 ? `for about ${minutes} minute${minutes === 1 ? "" : "s"}` : "for a while";
+}
+
+/** A 429 from any route but the sign-in: a lockout blocks every /api request from the address. */
+const lockedOut = (reply: HttpReply): string =>
+  `Lumiverse is refusing every request from this address ${waitOf(reply)}${said(reply.text)}: it locks an address out after repeated failed sign-ins, and that includes your browser on this machine. Wait it out; signing in again before then only makes the next lockout longer.`;
+
+/** What a refusal means, for the replies a caller doesn't read itself; `asked` says what was asked ("asked for its extensions"). */
+function refused(base: string, reply: HttpReply, asked: string): LiveError {
+  if (reply.status === 401) return new LiveError("login", loginAgain(base));
+  if (reply.status === 403) return new LiveError("forbidden", forbidden(base));
+  if (reply.status === 429) return new LiveError("locked", lockedOut(reply));
+  if (reply.status === 404) return new LiveError("unreachable", `There is no Lumiverse at ${base} (404 when it ${asked}). Check the URL: it's the address you open Lumiverse at.`);
+  return new LiveError("unreachable", `Lumiverse at ${base} answered ${reply.status} when it ${asked}${said(reply.text)}. Behind a proxy, that can mean Lumiverse itself is down.`);
+}
+
 async function exchange(http: Http, base: string, method: "GET" | "POST", path: string, token: string | null, body?: string): Promise<HttpReply> {
   // No Origin and no Cookie, ever: a bearer request without them passes Lumiverse's origin checks.
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -142,7 +172,18 @@ async function exchange(http: Http, base: string, method: "GET" | "POST", path: 
     throw new LiveError("unreachable", `Can't reach Lumiverse at ${base}: ${error instanceof Error ? error.message : String(error)}`);
   }
   // Redirects aren't followed: one would drop the bearer (or turn the sign-in into a GET).
-  if (reply.status >= 300 && reply.status < 400) throw new LiveError("unreachable", `Lumiverse at ${base} answered with a redirect to ${reply.header("location") ?? "another address"}. Use the address it redirects to (lumirpengine login --url <that address>).`);
+  if (reply.status >= 300 && reply.status < 400) {
+    let target: URL | null = null;
+    try {
+      target = new URL(reply.header("location") ?? "", `${base}${path}`);
+    } catch {
+      // A Location that isn't a URL: the message names no address.
+    }
+    // The address to sign in at instead: the target, without the route that was asked for.
+    const instead = target === null ? "<that address>" : target.pathname.endsWith(path) ? `${target.origin}${target.pathname.slice(0, -path.length)}` : target.href;
+    if (target !== null && target.protocol === "https:" && base.startsWith("http:")) throw new LiveError("insecure", `Lumiverse at ${base} answers on https: use lumirpengine login --url ${instead}, so the password and the session token never cross the network in clear.`);
+    throw new LiveError("unreachable", `Lumiverse at ${base} answered with a redirect to ${target?.href ?? "another address"}. Use the address it redirects to (lumirpengine login --url ${instead}).`);
+  }
   return reply;
 }
 
@@ -155,28 +196,34 @@ export async function signIn(http: Http, base: string, username: string, passwor
     if (token === null || token === "") throw new LiveError("protocol", `Lumiverse at ${base} signed you in but sent back no session token, so this client can't use the session. Is it Lumiverse's staging branch?`);
     return token;
   }
-  if (reply.status === 401) throw new LiveError("login", `Lumiverse refused that username or password${said(reply.text)}. Careful: after 5 failed sign-ins Lumiverse locks your address out for a while.`);
-  if (reply.status === 429) {
-    const minutes = Math.ceil(Number(reply.header("retry-after")) / 60);
-    const wait = Number.isFinite(minutes) && minutes > 0 ? ` for about ${minutes} minute${minutes === 1 ? "" : "s"}` : " for a while";
-    throw new LiveError("locked", `Lumiverse is refusing sign-ins from this address${wait}: too many attempts. Wait, then sign in once more.`);
-  }
+  if (reply.status === 401) throw new LiveError("login", `Lumiverse refused that username or password${said(reply.text)}. Careful: after 5 failed sign-ins Lumiverse locks your address out, your browser on this machine included, and each lockout lasts longer than the last.`);
+  // The sign-in's own limit (8 tries in 5 minutes) or a lockout (after 5 failures): either way, more tries only make it worse.
+  if (reply.status === 429) throw new LiveError("locked", `Lumiverse is refusing sign-ins from this address ${waitOf(reply)}${said(reply.text)}. It allows 8 sign-ins in 5 minutes, and after 5 failed ones it locks the whole address out (your browser on this machine included) for 15 minutes, then 30, an hour, 6 hours, and up to 7 days. Wait, then sign in once.`);
   if (reply.status === 403) throw new LiveError("forbidden", forbidden(base));
   if (reply.status === 404) throw new LiveError("unreachable", `There is no Lumiverse sign-in at ${base} (404). Check the URL: it's the address you open Lumiverse at.`);
   throw new LiveError("protocol", `Lumiverse answered the sign-in with ${reply.status}${said(reply.text)}.`);
 }
 
-/** Ends the session on the host; whether the host had it. */
-export async function signOut(http: Http, base: string, token: string): Promise<boolean> {
+/** How a sign-out went: `ended`; `gone`, the host no longer had the session (401); or `unconfirmed`, with the status the host answered instead. */
+export type SignOutResult = { outcome: "ended" | "gone" } | { outcome: "unconfirmed"; status: number };
+
+/** Ends the session on the host. */
+export async function signOut(http: Http, base: string, token: string): Promise<SignOutResult> {
   const reply = await exchange(http, base, "POST", "/api/auth/sign-out", token, "{}");
-  return reply.status >= 200 && reply.status < 300;
+  if (reply.status >= 200 && reply.status < 300) return { outcome: "ended" };
+  if (reply.status === 401) return { outcome: "gone" };
+  return { outcome: "unconfirmed", status: reply.status };
 }
 
-/** Whether the session is still good, and until when it holds unused. */
-export async function sessionOf(http: Http, base: string, token: string): Promise<SessionState> {
+/**
+ * Whether a session holds, and until when it holds unused: a 401, or an answer with no session,
+ * means it doesn't. Any other answer (a lockout, a refusal, an outage) says nothing about the
+ * session, so it throws. With no token, it asks as nobody: `login` does that first, before a password is sent.
+ */
+export async function sessionOf(http: Http, base: string, token: string | null): Promise<SessionState> {
   const reply = await exchange(http, base, "GET", "/api/auth/get-session", token);
-  if (reply.status === 403) throw new LiveError("forbidden", forbidden(base));
-  if (reply.status < 200 || reply.status >= 300) return { valid: false, expiresAt: null };
+  if (reply.status === 401) return { valid: false, expiresAt: null };
+  if (reply.status < 200 || reply.status >= 300) throw refused(base, reply, "was asked about the session");
   const body = parse(reply.text);
   const session = isRecord(body) && isRecord(body.session) ? body.session : null;
   if (session === null) return { valid: false, expiresAt: null };
@@ -196,8 +243,11 @@ interface Opened {
 
 export interface ConnectionOptions {
   base: string;
-  username: string;
-  token: string;
+  /**
+   * The sign-in saved for `base`, read again every time the connection opens and whenever the host
+   * is asked about the session: after a `lumirpengine login`, a running server uses the new token.
+   */
+  credentials(): Credentials | null;
   http: Http;
   openSocket: OpenSocket;
   /** Named in `lre.hello`: LumiRPEngine labels this client's commits `agent`. */
@@ -238,11 +288,11 @@ export class HostConnection implements Connection {
   }
 
   async describe(): Promise<HostDescription> {
-    const { base, username, token, http } = this.options;
-    const out: HostDescription = { base, username, session: { valid: false, expiresAt: null }, extension: null, agentApi: null, problem: null };
+    const { base, http } = this.options;
+    const out: HostDescription = { base, username: this.options.credentials()?.username ?? null, session: { valid: null, expiresAt: null }, extension: null, agentApi: null, problem: null };
     try {
-      out.session = await sessionOf(http, base, token);
-      if (!out.session.valid) {
+      out.session = await sessionOf(http, base, this.signedIn().token);
+      if (out.session.valid === false) {
         out.problem = loginAgain(base);
         return out;
       }
@@ -269,6 +319,15 @@ export class HostConnection implements Connection {
     return `LumiRPEngine on ${this.options.base} is too old for lumirpengine ${this.options.client.version}: it ${speaks}, and this client needs ${AGENT_API}. Update LumiRPEngine on your Lumiverse (Extensions → LumiRPEngine → Update), then try again.`;
   }
 
+  /** The sign-in to use now. Plain http to another machine needs the consent `login --allow-http` saved with it. */
+  private signedIn(): Credentials {
+    const { base } = this.options;
+    const saved = this.options.credentials();
+    if (saved === null) throw new LiveError("login", `Not signed in to ${base}. Run: lumirpengine login --url ${base}`);
+    if (inClear(base) && saved.allowHttp !== true) throw new LiveError("insecure", `${base} is plain http to another machine, and this sign-in wasn't made with --allow-http, so its session token won't be sent there in clear. Use https, or sign in again with: lumirpengine login --url ${base} --allow-http`);
+    return saved;
+  }
+
   private ensure(): Promise<Opened> {
     if (this.opened !== null && this.socket !== null) return Promise.resolve(this.opened);
     this.opening ??= this.open().finally(() => {
@@ -277,13 +336,11 @@ export class HostConnection implements Connection {
     return this.opening;
   }
 
-  private async findExtension(): Promise<ExtensionInfo> {
-    const { base, token, http } = this.options;
+  private async findExtension(token: string): Promise<ExtensionInfo> {
+    const { base, http } = this.options;
     this.lastExtension = null;
     const reply = await exchange(http, base, "GET", "/api/v1/spindle", token);
-    if (reply.status === 401) throw new LiveError("login", loginAgain(base));
-    if (reply.status === 403) throw new LiveError("forbidden", forbidden(base));
-    if (reply.status !== 200) throw new LiveError("protocol", `Lumiverse at ${base} answered ${reply.status} when asked for its extensions${said(reply.text)}.`);
+    if (reply.status !== 200) throw refused(base, reply, "was asked for its extensions");
     const body = parse(reply.text);
     const found = isRecord(body) && Array.isArray(body.extensions) ? body.extensions.find((e): e is Record<string, unknown> => isRecord(e) && e.identifier === ENGINE_EXTENSION) : undefined;
     if (!found || typeof found.id !== "string") throw new LiveError("not_installed", `LumiRPEngine isn't installed on ${base}, or your account can't use it. Install it in Lumiverse's Extensions tab from https://github.com/TheLiquorPriest/LumiRPEngine.`);
@@ -293,21 +350,23 @@ export class HostConnection implements Connection {
     return extension;
   }
 
-  private async ticket(): Promise<string> {
-    const { base, token, http } = this.options;
+  private async ticket(token: string): Promise<string> {
+    const { base, http } = this.options;
     const reply = await exchange(http, base, "POST", "/api/v1/ws-ticket", token, "{}");
-    if (reply.status === 401) throw new LiveError("login", loginAgain(base));
+    if (reply.status !== 200) throw refused(base, reply, "was asked for a socket ticket");
     const body = parse(reply.text);
-    if (reply.status !== 200 || !isRecord(body) || typeof body.ticket !== "string") throw new LiveError("protocol", `Lumiverse at ${base} gave no socket ticket (${reply.status}${said(reply.text)}).`);
+    if (!isRecord(body) || typeof body.ticket !== "string") throw new LiveError("protocol", `Lumiverse at ${base} gave no socket ticket${said(reply.text)}.`);
     return body.ticket;
   }
 
   private async open(): Promise<Opened> {
-    const extension = await this.findExtension();
+    // Read now, not when the connection was made: a reconnect after `lumirpengine login` uses the new token.
+    const { token } = this.signedIn();
+    const extension = await this.findExtension(token);
     // A ticket lives 30 s and works once; one refused on the way gets one more try with a new ticket.
     for (let attempt = 1; ; attempt++) {
       try {
-        await this.connect(await this.ticket());
+        await this.connect(await this.ticket(token));
         break;
       } catch (error) {
         if (!(error instanceof LiveError && error.problem === "protocol" && attempt === 1)) throw error;

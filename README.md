@@ -74,7 +74,7 @@ npx -y github:TheLiquorPriest/LumiRPEngine login --url http://localhost:7860 --u
 claude mcp add lumirpengine -- npx -y github:TheLiquorPriest/LumiRPEngine mcp
 ```
 
-An agent edits the same draft as your Build tab, so you see its changes as it makes them; `--read-only` keeps it to reading and checking. Setup for other harnesses, every tool, safety and troubleshooting are in [MCP.md](docs/MCP.md), and agents read [AGENT-GUIDE.md](docs/AGENT-GUIDE.md).
+The first `npx` run downloads about 14 MB from GitHub; add `#<tag or commit>` after the repo name to pin a version. An agent edits the same draft as your Build tab, so you see its changes as it makes them, and a Commit in Build commits its unfinished work too. `--read-only` keeps the MCP server to reading and checking, but an agent with a shell can still run `lumirpengine` without it. Plain `http` to another machine sends your password and session token in clear, so `login` asks for `--allow-http` first. Setup for other harnesses, every tool, safety and troubleshooting are in [MCP.md](docs/MCP.md), and agents read [AGENT-GUIDE.md](docs/AGENT-GUIDE.md).
 
 ## Things to know before you install
 

@@ -117,4 +117,34 @@ describe("the MCP server", () => {
     expect(w.draft?.version).toBe(5);
     expect(fake.lre.sent("lre.editor", "patch").map((r) => r.version)).toEqual([0, 1, 2, 3, 4]);
   });
+
+  test("an unknown tool and a null id are protocol errors, as MCP has them", async () => {
+    const s = serve(new FakeLumiverse());
+    s.feed(rpc(1, "tools/call", { name: "lre_no_such_tool", arguments: {} }));
+    s.feed(`${JSON.stringify({ jsonrpc: "2.0", id: null, method: "tools/list" })}\n`);
+    const replies = await s.replies();
+    expect(replies.find((r) => r.id === 1)).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "Unknown tool: lre_no_such_tool" } });
+    const nullId = replies.find((r) => r.id === null);
+    expect(nullId?.error?.code).toBe(-32600);
+    expect(nullId?.result).toBeUndefined();
+  });
+
+  test("every tool says how it acts: the read-only ones exactly those read-only mode keeps, and the ones that can lose work destructive", async () => {
+    const fake = new FakeLumiverse();
+    const s = serve(fake);
+    s.feed(rpc(1, "tools/list"));
+    const tools = resultOf(await s.replies(), 1).tools as { name: string; annotations?: Record<string, unknown> }[];
+    const ro = serve(fake, true);
+    ro.feed(rpc(1, "tools/list"));
+    const kept = (resultOf(await ro.replies(), 1).tools as { name: string }[]).map((t) => t.name);
+    for (const t of tools) {
+      expect([t.name, t.annotations?.openWorldHint]).toEqual([t.name, false]);
+      expect([t.name, t.annotations?.readOnlyHint]).toEqual([t.name, kept.includes(t.name)]);
+      // A client goes by these when it decides what to ask the user about first.
+      if (t.annotations?.readOnlyHint === false) expect([t.name, typeof t.annotations.destructiveHint, typeof t.annotations.idempotentHint]).toEqual([t.name, "boolean", "boolean"]);
+    }
+    const destructive = tools.filter((t) => t.annotations?.destructiveHint === true).map((t) => t.name);
+    expect(destructive).toEqual(expect.arrayContaining(["lre_edit", "lre_discard", "lre_restore", "lre_world_delete", "lre_upgrade"]));
+    expect(destructive).not.toContain("lre_world_create");
+  });
 });

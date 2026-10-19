@@ -17,12 +17,26 @@ import type { ToolResult } from "./report";
 import { json, lintSummary } from "./report";
 import { VERSIONS } from "./version";
 
+/** How a write tool changes things, for MCP's tool annotations (a client may ask the user before a destructive call). */
+export interface WriteHints {
+  /** It can delete or overwrite what is there: a draft, a world, a chat's state. */
+  destructive: boolean;
+  /** Calling it again with the same arguments changes nothing more. */
+  idempotent: boolean;
+}
+
 export interface ToolDef {
   name: string;
   description: string;
   inputSchema: JsonObject;
-  /** Changes worlds or chats on the host: hidden and refused in read-only mode. */
-  write: boolean;
+  /** Changes worlds or chats on the host (hidden and refused in read-only mode), and how; false for a tool that only reads. */
+  write: false | WriteHints;
+}
+
+/** A tool's MCP annotations. None reaches past the user's own Lumiverse and files, so none is open-world. */
+export function annotationsOf(def: ToolDef): JsonObject {
+  if (def.write === false) return { readOnlyHint: true, openWorldHint: false };
+  return { readOnlyHint: false, destructiveHint: def.write.destructive, idempotentHint: def.write.idempotent, openWorldHint: false };
 }
 
 export interface ToolContext {
@@ -61,11 +75,12 @@ const OFFSET: JsonObject = { type: "integer", minimum: 0, description: "Read the
 const PATH: JsonObject = { type: "string", description: "A path to the world's JSON file on this machine: an lre-world-v1 document or an lre-world-export-v1 file." };
 const WORLD: JsonObject = { type: "object", description: "Or the world inline: an lre-world-v1 document or an lre-world-export-v1 file. A whole world is large; prefer path." };
 const RUN_FROM = { path: PATH, world: WORLD, worldId: { type: "string", description: "Or a world on your Lumiverse, by id (needs lumirpengine login)." }, source: SOURCE };
+const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "The draft version you last read (lre_world, lre_draft and lre_worlds say it, stored or not): refused if the draft has moved on since, so a change you haven't seen is never overwritten, committed or thrown away." };
 
 export const TOOLS: readonly ToolDef[] = [
   {
     name: "lre_guide",
-    description: "The agent guide to LumiRPEngine worlds: the world model, the workflow, and the patterns that bite (reveals, lifeKnownBy, fields.owner, cues, ids, map-owned items, tables). Read it before you write a world. topic narrows it to one section (its heading, such as \"Tracks and secrets\") or to whatever matches the words.",
+    description: 'The agent guide to LumiRPEngine worlds: the world model, the workflow, and the patterns that bite (reveals, lifeKnownBy, fields.owner, cues, ids, map-owned items, tables). Read it before you write a world. topic narrows it to one section (its heading, such as "Tracks: quests and secrets") or to whatever matches the words.',
     inputSchema: object({ topic: { type: "string", description: "A section's heading, or a few words." } }),
     write: false,
   },
@@ -119,7 +134,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_worlds",
-    description: "Your LumiRPEngine worlds: id, name, head revision, how many revisions and history notes, and whether a draft is stored (with its version).",
+    description: "Your LumiRPEngine worlds: id, name, head revision, how many revisions, and whether a draft is stored (with its version). It reads every world's draft, so it costs a request per world.",
     inputSchema: object({}),
     write: false,
   },
@@ -131,7 +146,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_search",
-    description: "Search your worlds' heads and stored drafts for words: names, descriptions, lore, cues, formulas, anything written as text. Each hit names the world, whether it is in the head or the draft, the item, and the field that matched (a JSON Pointer inside the item), with a snippet.",
+    description: "Search your worlds' heads and stored drafts for words: names, descriptions, lore, cues, formulas, anything written as text. Each hit names the world, whether it is in the head or the draft, the item, and the field that matched (a JSON Pointer inside the item), with a snippet. It reads every world it searches whole, so give worldId when you know the world. A world it couldn't read is listed as skipped.",
     inputSchema: object({ query: { type: "string", description: "Words to look for; items holding all of them come first." }, worldId: { type: "string", description: "Only this world." }, collections: { type: "array", items: { type: "string" }, description: 'Only these collections or parts ("entities", "lore", "tracks", "calendar"…).' }, limit: { type: "integer", minimum: 1, maximum: 100, description: "At most this many hits (default 20)." } }, ["query"]),
     write: false,
   },
@@ -139,13 +154,13 @@ export const TOOLS: readonly ToolDef[] = [
     name: "lre_world_create",
     description: "Create a world on your Lumiverse, blank or from a starter (lre_templates). Its first revision is its head.",
     inputSchema: object({ name: { type: "string", description: "The world's name." }, template: { type: "string", description: "A starter's id; blank when left out." } }, ["name"]),
-    write: true,
+    write: { destructive: false, idempotent: false },
   },
   {
     name: "lre_world_import",
     description: "Import a world file (an lre-world-v1 document or an lre-world-export-v1 file) as a new world on your Lumiverse. Its shape is checked here first; the macros in its lore and templates come back for review.",
     inputSchema: object({ path: PATH, world: WORLD }),
-    write: true,
+    write: { destructive: false, idempotent: false },
   },
   {
     name: "lre_edit",
@@ -161,11 +176,11 @@ export const TOOLS: readonly ToolDef[] = [
           description: "The operations, applied in order.",
           items: { type: "object", properties: { op: { type: "string", enum: ["add", "remove", "replace", "move", "copy", "test"] }, path: { type: "string" }, from: { type: "string" }, value: {} }, required: ["op", "path"] },
         },
-        expectVersion: { type: "integer", minimum: 0, description: "The draft version this edit is meant for (lre_draft and lre_world say it); refused if the draft has moved on." },
+        expectVersion: EXPECT_VERSION,
       },
       ["worldId", "ops"],
     ),
-    write: true,
+    write: { destructive: true, idempotent: false },
   },
   {
     name: "lre_draft",
@@ -175,15 +190,15 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_commit",
-    description: "Commit the world's draft as its new head revision, with a short note for its history. Refused while the draft has lint errors (they are listed) or when the head moved since the draft began. The draft is shared with the user's Build: commit or discard what you start.",
-    inputSchema: object({ worldId: WORLD_ID, note: { type: "string", maxLength: 200, description: "What this revision changes, in a few words." } }, ["worldId"]),
-    write: true,
+    description: "Commit the world's draft as its new head revision, with a short note for its history. A commit takes the whole draft, the user's changes in Build with yours, so pass expectVersion. Refused while the draft has lint errors (they are listed) or when the head moved since the draft began. The draft is shared with the user's Build: commit or discard what you start.",
+    inputSchema: object({ worldId: WORLD_ID, note: { type: "string", maxLength: 200, description: "What this revision changes, in a few words." }, expectVersion: EXPECT_VERSION }, ["worldId"]),
+    write: { destructive: false, idempotent: false },
   },
   {
     name: "lre_discard",
-    description: "Throw away the world's stored draft; the head stays as it is.",
-    inputSchema: object({ worldId: WORLD_ID }, ["worldId"]),
-    write: true,
+    description: "Throw away the world's stored draft; the head stays as it is. The draft may hold the user's work from Build too, so pass expectVersion.",
+    inputSchema: object({ worldId: WORLD_ID, expectVersion: EXPECT_VERSION }, ["worldId"]),
+    write: { destructive: true, idempotent: true },
   },
   {
     name: "lre_history",
@@ -199,15 +214,16 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_restore",
-    description: "Make the world's draft a copy of one of its revisions; committing it then makes that revision's content the head again. It replaces a stored draft.",
-    inputSchema: object({ worldId: WORLD_ID, revision: { type: "string", description: "The revision (lre_history), or a unique prefix of 6+ characters of it." } }, ["worldId", "revision"]),
-    write: true,
+    description: "Make the world's draft a copy of one of its revisions; committing it then makes that revision's content the head again. It replaces a stored draft, so pass expectVersion.",
+    inputSchema: object({ worldId: WORLD_ID, revision: { type: "string", description: "The revision (lre_history), or a unique prefix of 6+ characters of it." }, expectVersion: EXPECT_VERSION }, ["worldId", "revision"]),
+    write: { destructive: true, idempotent: true },
   },
   {
     name: "lre_world_delete",
-    description: "Delete a world for good: every revision, its draft and its history; the chats that play it stop being world chats. confirm must be the world's exact current name; without it, the answer says what would be deleted.",
-    inputSchema: object({ worldId: WORLD_ID, confirm: { type: "string", description: "The world's exact current name." } }, ["worldId", "confirm"]),
-    write: true,
+    description:
+      "Delete a world for good: every revision, its draft and its history. Its chats lose their world (they stop being world chats), and its engine lore book (\"LumiRPEngine · <name>\") stays in World Books, still attached to them, for the user to delete. Without confirm, it only says what would be deleted; to delete, confirm must be the world's exact current name.",
+    inputSchema: object({ worldId: WORLD_ID, confirm: { type: "string", description: "The world's exact current name. Leave it out for a preview of what would be deleted." } }, ["worldId"]),
+    write: { destructive: true, idempotent: true },
   },
   {
     name: "lre_world_export",
@@ -225,14 +241,14 @@ export const TOOLS: readonly ToolDef[] = [
     name: "lre_attach",
     description: "Attach a world to a chat: the chat plays it from its head revision, and the world's lore book joins the chat. A chat that already plays another world is refused.",
     inputSchema: object({ worldId: WORLD_ID, chatId: { type: "string", description: "The chat's id." } }, ["worldId", "chatId"]),
-    write: true,
+    write: { destructive: false, idempotent: true },
   },
   {
     name: "lre_upgrade",
     description:
       "Move a chat to a later revision of its world (the head by default). With preview, list what would change, entity by entity, with the default pick of each; without it, apply the Upgrade with the default picks (take what play never touched, keep what it changed). Changes about what the player hasn't found yet stay hidden unless spoilers is true.",
     inputSchema: object({ chatId: { type: "string", description: "The chat's id (lre_chats)." }, to: { type: "string", description: "The revision to move to (default: the world's head)." }, preview: { type: "boolean", description: "Only list what would change." }, spoilers: { type: "boolean", description: "With preview, show hidden changes too." } }, ["chatId"]),
-    write: true,
+    write: { destructive: true, idempotent: true },
   },
 ];
 
@@ -257,6 +273,7 @@ async function statusTool(ctx: ToolContext): Promise<ToolResult> {
   }
   const host = await live.conn.describe();
   const report = {
+    // null when the host couldn't be asked: a lockout or an outage says nothing about the session.
     signedIn: host.session.valid,
     lumiverse: host.base,
     user: host.username,

@@ -218,7 +218,8 @@ export class FakeLumiverse {
   private tickets = new Set<string>();
   private seq = 0;
 
-  constructor(readonly base = "http://lumi.test:7860") {}
+  /** On this machine by default: plain http to another one needs the user's consent (`login --allow-http`). */
+  constructor(readonly base = "http://localhost:7860") {}
 
   /** A session as sign-in would make one. */
   session(): string {
@@ -330,7 +331,7 @@ export class FakeLumiverse {
 /** A signed-in client of the fake: its connection, its worlds and the tools' context over them. */
 export function client(fake: FakeLumiverse, options: { readOnly?: boolean; timeoutMs?: number; files?: Record<string, string> } = {}): { ctx: ToolContext; conn: HostConnection; token: string } {
   const token = fake.session();
-  const conn = new HostConnection({ base: fake.base, username: USER.username, token, http: fake.http, openSocket: fake.openSocket, client: { name: "lumirpengine", version: "0.0.1" }, timeoutMs: options.timeoutMs ?? 3000 });
+  const conn = new HostConnection({ base: fake.base, credentials: () => ({ username: USER.username, token }), http: fake.http, openSocket: fake.openSocket, client: { name: "lumirpengine", version: "0.0.1" }, timeoutMs: options.timeoutMs ?? 3000 });
   const live = new Live(conn);
   const queue = new KeyedQueue();
   const files = options.files ?? {};

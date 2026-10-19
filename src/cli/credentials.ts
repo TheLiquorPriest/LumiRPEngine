@@ -10,6 +10,8 @@ export interface StoredLogin {
   token: string;
   /** When it was saved, in ms since the epoch. */
   savedAt: number;
+  /** The user agreed, at `login --allow-http`, to send the token over plain http to another machine. */
+  allowHttp?: true;
 }
 
 /** The file system as the store needs it; the entry (main.ts) supplies Node's. */
@@ -46,6 +48,17 @@ export function normalizeBase(input: string): string {
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
+/**
+ * Whether a base URL is plain http to another machine, where the password and then the session
+ * token would cross the network in clear. The machine's own loopback addresses never leave it.
+ */
+export function inClear(base: string): boolean {
+  const url = new URL(base);
+  if (url.protocol !== "http:") return false;
+  const host = url.hostname;
+  return !(host === "localhost" || host.endsWith(".localhost") || /^127(\.\d{1,3}){3}$/.test(host) || host === "[::1]");
+}
+
 const FORMAT = 1;
 
 export class CredentialStore {
@@ -68,7 +81,7 @@ export class CredentialStore {
     for (const [base, entry] of Object.entries(hosts)) {
       // Only keys that are base URLs as `normalizeBase` writes them (never `__proto__` and the like).
       if (!/^https?:\/\/[^/]/.test(base)) continue;
-      if (isRecord(entry) && typeof entry.username === "string" && typeof entry.token === "string") out[base] = { username: entry.username, token: entry.token, savedAt: typeof entry.savedAt === "number" ? entry.savedAt : 0 };
+      if (isRecord(entry) && typeof entry.username === "string" && typeof entry.token === "string") out[base] = { username: entry.username, token: entry.token, savedAt: typeof entry.savedAt === "number" ? entry.savedAt : 0, ...(entry.allowHttp === true ? { allowHttp: true } : {}) };
     }
     return out;
   }
