@@ -6,7 +6,8 @@
 import { describe, expect, test } from "bun:test";
 import type { PayTier } from "../../src/shared/finance";
 import { adjustOp } from "../../src/frontend/requests";
-import { accountBlocks, accountControls, cardControls, creditBlocks, flowSources, hubTabs, overviewBlocks, paySources, transferTargets } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, cardControls, creditBlocks, flowSources, flowTargets, hubTabs, overviewBlocks, paySources, sharedAccounts, transferTargets } from "../../src/packs/economy/ui/layout";
+import { flowSideChoices } from "../../src/packs/economy/ui/flows";
 import {
   accountStatusOps,
   applyCreditAction,
@@ -269,6 +270,25 @@ describe("Play → Money: each control plays as the player's turn", () => {
     expect(account(paid, CHECKING).cents).toBe(account(due, CHECKING).cents - 12000);
     expect(paid.flows.find((f) => f.label === "Dentist")).toMatchObject({ done: 1, next: null, status: "ended" });
   });
+
+  test("a standing payment's edit form keeps its own sides by name: the card a bill is charged to, the person the rent goes to; an outside payee stays typed", async () => {
+    const chat = await MoneyChat.start();
+    const view = await chat.hub();
+    const palette = (await chat.state()).palette;
+    // The player's From and To lists, as the form builds them.
+    const ends = { from: flowSources(view).map((s) => ({ value: s.id, label: s.label })), to: flowTargets(view, palette).map((t) => ({ value: t.id, label: t.label })) };
+    const sides = (id: string) => {
+      const f = view.flows.find((x) => x.id === id);
+      if (!f?.spec) throw new Error(`no ${id} with its form`);
+      return flowSideChoices(ends, { ...f, spec: f.spec });
+    };
+    // The internet bill is charged to the credit card, which isn't somewhere a new payment can come from.
+    expect(ends.from.map((c) => c.value)).not.toContain(CARD);
+    expect(sides("bill_internet").from.find((c) => c.value === CARD)?.label).toBe("Your credit card");
+    // Helen is someone the POV may pay; Midlake Mutual is a payee typed by name.
+    expect(sides("bill_rent").to).toEqual(ends.to);
+    expect(sides("bill_auto_insurance").to).toEqual(ends.to);
+  });
 });
 
 describe("GM view → Money: each control is one edit", () => {
@@ -403,6 +423,27 @@ describe("GM view → Money: each control is one edit", () => {
     expect((await chat.party("unit_2b")).partyKind).toBe("household");
     accepted(await chat.edit([{ op: "unlink", rel: "member_of", from: DANNY, to: "unit_2b" }]));
     expect((await chat.hub()).household?.members.map((m) => m.id)).toEqual(["pov"]);
+  });
+
+  test("a household's own account shows on a member's Money as one the household holds, never by its id; the household's own view names it", async () => {
+    const chat = await MoneyChat.start();
+    const kitty = "acct_unit_kitty";
+    accepted(
+      await chat.edit([
+        { op: "spawn", kind: "household", name: "Unit 2B", id: "unit_2b" },
+        { op: "link", rel: "member_of", from: "pov", to: "unit_2b" },
+        { op: "spawn", kind: "account", name: "Unit 2B kitty", id: kitty },
+        { op: "set", entity: kitty, field: "product", value: "checking" },
+        { op: "set", entity: kitty, field: "owners", value: [{ party: "unit_2b", role: "owner" }] },
+      ]),
+    );
+    const mine = await chat.hub();
+    if (!mine.household) throw new Error("no household on the POV's Money");
+    expect(mine.household.accounts).toContain(kitty);
+    expect(sharedAccounts(mine, mine.household)).toEqual({ names: [], others: [kitty] });
+    const theirs = await chat.party("unit_2b");
+    if (!theirs.household) throw new Error("no household view of its own");
+    expect(sharedAccounts(theirs, theirs.household).names).toContain("Unit 2B kitty");
   });
 
   test("the GM sets anyone's payment preferences", async () => {

@@ -11,7 +11,7 @@ import { humanize } from "../../../frontend/format";
 import { FlowRow } from "./flows";
 import { SelectField } from "./forms";
 import type { SectionProps } from "./hub";
-import { creditBlocks, householdRows } from "./layout";
+import { creditBlocks, householdRows, sharedAccounts } from "./layout";
 import { AmountAction } from "./lines";
 import { applyCreditAction } from "./requests";
 
@@ -101,6 +101,9 @@ export function HouseholdSection(props: SectionProps) {
   }
   const fmt = (cents: number): string => formatMoney(cents, controls.currency);
   const candidates = controls.mode === "gm" ? controls.gm.entities.filter((e) => e.kind === "person" && !e.gone && !h.members.some((m) => m.id === e.id)) : [];
+  // The household's own accounts are the GM's to name; the player sees how many there are.
+  const shared = sharedAccounts(view, h);
+  const others = controls.mode === "gm" ? shared.others.map((id) => controls.gm.entities.find((e) => e.id === id)?.name ?? id) : shared.others.length > 0 ? [`${shared.others.length} the household holds`] : [];
   return (
     <>
       <Card title={`🏡 ${h.name}`} aside={<span class="lre-badge">{fmt(h.monthly.total)} a month shared</span>}>
@@ -129,7 +132,7 @@ export function HouseholdSection(props: SectionProps) {
             </button>
           </div>
         ) : null}
-        {h.accounts.length > 0 ? <Row k="Shared accounts" v={h.accounts.map((id) => view.accounts.find((a) => a.id === id)?.name ?? id).join(", ")} /> : null}
+        {h.accounts.length > 0 ? <Row k="Shared accounts" v={[...shared.names, ...others].join(", ")} /> : null}
       </Card>
       <Card title="Shared costs">
         {h.flows.length === 0 ? <Empty>No shared costs.</Empty> : h.flows.map((f) => <FlowRow key={f.id} view={view} flow={f} controls={controls} />)}

@@ -263,6 +263,18 @@ export function householdRows(h: HouseholdView): HouseholdRow[] {
   });
 }
 
+/** A household's shared accounts: the party's own among them by name, and the ids of the ones only the household holds, which the party's view doesn't name. */
+export function sharedAccounts(view: FinanceView, h: HouseholdView): { names: string[]; others: EntityId[] } {
+  const names: string[] = [];
+  const others: EntityId[] = [];
+  for (const id of h.accounts) {
+    const a = view.accounts.find((x) => x.id === id);
+    if (a) names.push(a.name);
+    else others.push(id);
+  }
+  return { names, others };
+}
+
 // ---------------------------------------------------------------- realism gating
 
 /**

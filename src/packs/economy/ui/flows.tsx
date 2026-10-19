@@ -36,10 +36,25 @@ function endpoints(view: FinanceView, controls: HubControls): { from: Choice[]; 
   return { from: [...accounts, { value: view.party, label: `${view.name} (as their preferences choose)` }], to: [...accounts, ...parties] };
 }
 
+/**
+ * The From and To choices for a flow's form, with the flow's own sides kept under the names its
+ * view gives them when the lists don't offer them (the party paying as its preferences choose, a
+ * business it pays), so no side ever shows as an id. A To the view names as it's stored is an
+ * outside payee typed by name, and stays typed.
+ */
+export function flowSideChoices(ends: { from: Choice[]; to: Choice[] }, flow: (FlowView & { spec: Flow }) | undefined): { from: Choice[]; to: Choice[] } {
+  if (!flow) return ends;
+  const { from, to } = flow.spec;
+  return {
+    from: ends.from.some((c) => c.value === from) ? ends.from : [...ends.from, { value: from, label: flow.from }],
+    to: flow.to === to || ends.to.some((c) => c.value === to) ? ends.to : [...ends.to, { value: to, label: flow.to }],
+  };
+}
+
 /** A new flow, or the change to one: the player's action, or the GM's edit. */
 export function FlowFormView(props: { view: FinanceView; controls: HubControls; flow?: FlowView & { spec: Flow }; onDone(): void }) {
   const { view, controls, flow } = props;
-  const ends = endpoints(view, controls);
+  const ends = flowSideChoices(endpoints(view, controls), flow);
   const [form, setForm] = useState<FlowForm>(() => (flow ? flowFormOf(flow.spec, controls.currency) : { ...blankFlowForm(ends.from[0]?.value ?? "") }));
   const [more, setMore] = useState(false);
   const typedTo = form.to !== "" && !ends.to.some((t) => t.value === form.to);
@@ -67,7 +82,7 @@ export function FlowFormView(props: { view: FinanceView; controls: HubControls; 
     >
       {controls.mode === "player" || !flow ? <TextField label="Name" value={form.label} onInput={(label) => set({ label })} placeholder="Rent, Savings, Allowance…" /> : null}
       <SelectField label="Kind" value={form.kind} options={FLOW_KINDS.map((k) => ({ value: k, label: humanize(k) }))} onChange={(v) => set({ kind: FLOW_KINDS.find((k) => k === v) ?? "transfer" })} />
-      <SelectField label="From" value={form.from} empty="Choose" options={ends.from.some((f) => f.value === form.from) || form.from === "" ? ends.from : [...ends.from, { value: form.from, label: form.from }]} onChange={(from) => set({ from })} />
+      <SelectField label="From" value={form.from} empty="Choose" options={ends.from} onChange={(from) => set({ from })} />
       <SelectField
         label="To"
         value={otherTo ? OTHER : form.to}
