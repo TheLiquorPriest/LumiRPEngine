@@ -7,6 +7,7 @@ import type { SpindleFloatWidgetHandle, SpindleFrontendContext } from "lumiverse
 import type { App, Draft, Toast, UiState } from "./app";
 import { AppContext, makeRequest } from "./app";
 import { trackJobs } from "./build/jobs";
+import { trackDraft } from "./build/draft";
 import { MessageChips, messageIdFromScope } from "./chips";
 import { Toasts } from "./components";
 import { Drawer } from "./drawer";
@@ -93,6 +94,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   overlays = createOverlays(app, host);
   const set = overlays;
   cleanups.push(() => set.destroy());
+  // A draft another window or an outside agent changes is reloaded in Build (DESIGN §23).
+  cleanups.push(trackDraft(app));
 
   // ------------------------------------------------------------ drawer tab
   const tab = host.ui.registerDrawerTab({

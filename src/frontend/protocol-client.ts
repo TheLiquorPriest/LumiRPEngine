@@ -7,7 +7,7 @@
 import { isRecord } from "../shared/json";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
-import type { DeltaOp, ErrorCode, ErrorMessage, FrontendToBackend, JobUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
+import type { DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, JobUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import { applyDelta, DeltaError } from "./delta";
 import type { RequestBody, Send } from "./registry";
@@ -91,6 +91,7 @@ export class ProtocolClient {
   private readonly listeners = new Set<(state: SyncState) => void>();
   private readonly errorListeners = new Set<(error: ErrorMessage) => void>();
   private readonly jobListeners = new Set<(update: JobUpdate) => void>();
+  private readonly draftListeners = new Set<(push: DraftChanged) => void>();
   private readonly unsubscribe: () => void;
   private readonly timeoutMs: number;
   private readonly newReqId: () => string;
@@ -129,6 +130,12 @@ export class ProtocolClient {
   onJob(listener: (update: JobUpdate) => void): () => void {
     this.jobListeners.add(listener);
     return () => this.jobListeners.delete(listener);
+  }
+
+  /** A world's draft changed on the backend (`lre.draft.changed`): written, discarded or committed by any session. */
+  onDraftChanged(listener: (push: DraftChanged) => void): () => void {
+    this.draftListeners.add(listener);
+    return () => this.draftListeners.delete(listener);
   }
 
   /** The active Loom preset the frontend's state reports (`loom.activePresetId`), sent with each hello; undefined when it can't say. */
@@ -214,6 +221,12 @@ export class ProtocolClient {
         if (typeof payload.jobId === "string" && typeof payload.status === "string") {
           const update = payload as unknown as JobUpdate;
           for (const listener of this.jobListeners) listener(update);
+        }
+        return;
+      case "lre.draft.changed":
+        if (typeof payload.worldId === "string" && typeof payload.version === "number" && typeof payload.stored === "boolean") {
+          const push: DraftChanged = { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId: payload.worldId, version: payload.version, stored: payload.stored };
+          for (const listener of this.draftListeners) listener(push);
         }
         return;
     }

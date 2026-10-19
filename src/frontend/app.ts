@@ -68,6 +68,8 @@ export interface HostBridge {
 export interface Draft {
   worldId: WorldId;
   base: RevisionId | null;
+  /** The stored draft's write count as Build last read it (0 when none is stored): a push with another means it changed elsewhere. */
+  version: number;
   doc: WorldDoc;
   lint: LintIssue[];
   dirty: boolean;

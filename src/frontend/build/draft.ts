@@ -1,18 +1,45 @@
 // The Build draft (ARCHITECTURE §4 `lre.editor`, `lre.world commit`). `get` resumes the stored
-// draft (or a fresh copy of the head), every write returns the whole draft, its lint and its
-// base, which replace the held draft; commit turns it into a new revision, `discard` drops it.
-// A stale base comes back `conflict` and reloads.
+// draft (or a fresh copy of the head), every write returns the whole draft, its lint, its base and
+// its version, which replace the held draft; commit turns it into a new revision, `discard` drops
+// it. A stale base comes back `conflict` and reloads, and so does a draft another window or an
+// outside agent changed (`lre.draft.changed`, DESIGN §23).
 
 import type { WorldId } from "../../shared/ids";
 import type { App, Draft } from "../app";
 import type { Send } from "../registry";
 
-export async function loadDraft(app: App, worldId: WorldId): Promise<Draft | null> {
-  const [got, world] = await Promise.all([app.request({ type: "lre.editor", worldId, base: null, op: "get" }), app.request({ type: "lre.world", op: "get", worldId })]);
-  if (!got) return null;
-  const draft: Draft = { worldId, base: got.base, doc: got.draft, lint: got.lint, dirty: got.stored, packKinds: world?.packKinds ?? {}, packRelations: world?.packRelations ?? {}, functions: world?.functions ?? [] };
-  app.drafts.set(draft);
-  return draft;
+/** Draft loads under way, by world. */
+const loading = new Map<WorldId, Promise<Draft | null>>();
+
+export function loadDraft(app: Pick<App, "request" | "drafts">, worldId: WorldId): Promise<Draft | null> {
+  const load = (async (): Promise<Draft | null> => {
+    const [got, world] = await Promise.all([app.request({ type: "lre.editor", worldId, base: null, op: "get" }), app.request({ type: "lre.world", op: "get", worldId })]);
+    if (!got) return null;
+    const draft: Draft = { worldId, base: got.base, version: got.version, doc: got.draft, lint: got.lint, dirty: got.stored, packKinds: world?.packKinds ?? {}, packRelations: world?.packRelations ?? {}, functions: world?.functions ?? [] };
+    app.drafts.set(draft);
+    return draft;
+  })().finally(() => {
+    if (loading.get(worldId) === load) loading.delete(worldId);
+  });
+  loading.set(worldId, load);
+  return load;
+}
+
+/**
+ * Reloads the held draft when its world's draft changed elsewhere (`lre.draft.changed`): in another
+ * window, or by an outside agent. Build's own writes answer with the new version before their push
+ * arrives, so they reload nothing, and a load already under way finishes first, since it may have
+ * read the change already. Installed once at setup.
+ */
+export function trackDraft(app: Pick<App, "client" | "drafts" | "request" | "toast">): () => void {
+  return app.client.onDraftChanged((push) => {
+    void (async () => {
+      await loading.get(push.worldId);
+      const held = app.drafts.get();
+      if (!held || held.worldId !== push.worldId || held.version === push.version) return;
+      if (await loadDraft(app, push.worldId)) app.toast("This world's draft changed in another window, or an outside agent changed it; Build reloaded it.", "info");
+    })();
+  });
 }
 
 /**
@@ -29,7 +56,7 @@ export function draftSend(app: App): Send {
       if (message.code === "conflict" && draft) await loadDraft(app, draft.worldId);
     } else if (message.request === "lre.editor") {
       const current = app.drafts.get();
-      if (current) app.drafts.set({ ...current, doc: message.body.draft, lint: message.body.lint, base: message.body.base, dirty: message.body.stored });
+      if (current) app.drafts.set({ ...current, doc: message.body.draft, lint: message.body.lint, base: message.body.base, version: message.body.version, dirty: message.body.stored });
     }
     return message;
   };
@@ -46,7 +73,8 @@ export async function commitDraft(app: App): Promise<boolean> {
     return false;
   }
   if (message.request !== "lre.world") return false;
-  app.drafts.set({ ...draft, base: message.body.revision ?? draft.base, lint: message.body.lint ?? draft.lint, dirty: false });
+  // A commit leaves no stored draft, so its push says version 0.
+  app.drafts.set({ ...draft, base: message.body.revision ?? draft.base, lint: message.body.lint ?? draft.lint, version: 0, dirty: false });
   app.toast("Committed a new revision.", "info");
   return true;
 }
@@ -57,5 +85,5 @@ export async function discardDraft(app: App): Promise<void> {
   if (!draft) return;
   if (!(await app.host.confirm("Discard draft", "Throw away every uncommitted change to this world?", "danger", "Discard"))) return;
   const result = await app.request({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "discard" });
-  if (result) app.drafts.set({ ...draft, base: result.base, doc: result.draft, lint: result.lint, dirty: result.stored });
+  if (result) app.drafts.set({ ...draft, base: result.base, doc: result.draft, lint: result.lint, version: result.version, dirty: result.stored });
 }
