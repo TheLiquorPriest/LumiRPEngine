@@ -191,7 +191,11 @@ export function fidelityOf(ctx: ReadContext, texts: FidelityTexts, config: World
     const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
     const author: Fidelity | null = never ? "background" : always ? "live" : null;
     const t = config.thresholds;
-    const scored: Fidelity = score >= t.live ? "live" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    // Live is for people at hand: someone elsewhere and unnamed this turn waits at Near however much
+    // story they carry, so a Live slot never goes to a sleeper across town while someone in the room has none.
+    const atHand = (here !== null && place === here) || closeBy(world, place, here) || namedIn(e.name, said);
+    const scored: Fidelity = score >= t.live ? (atHand ? "live" : "near") : score >= t.near ? "near" : score >= t.far ? "far" : "background";
+    if (score >= t.live && !atHand) reasons.push({ label: "Not at hand, so Near at most", points: 0 });
     const level = gm ?? author ?? scored;
     if (gm) reasons.push({ label: `Pinned at ${gm} by the GM`, points: 0 });
     else if (author) reasons.push({ label: never ? "The author: never a mind" : "The author: always Live", points: 0 });

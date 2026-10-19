@@ -105,6 +105,23 @@ describe("the fidelity ladder", () => {
     expect(f!.score).toBeGreaterThanOrEqual(50);
     expect(f!.level).toBe("live");
   });
+
+  test("however much story they carry, someone elsewhere and unnamed is Near at most; at hand or named, they are Live", () => {
+    // A threshold every character clears, so only being at hand decides.
+    const w = world((x) => {
+      x.minds = { thresholds: { live: 1, near: 0.5, far: 0 } } as WorldDoc["minds"];
+    });
+    const base = startState(w);
+    const away = score(w, base, "maya");
+    expect(away!.score).toBeGreaterThanOrEqual(1);
+    expect(away!.level).toBe("near");
+    expect(away!.reasons.map((r) => r.label)).toContain("Not at hand, so Near at most");
+    expect(score(w, at(w, base, "maya", "apartment"), "maya")?.level).toBe("live");
+    expect(score(w, base, "maya", { user: "I text Maya about lunch.", reply: "" })?.level).toBe("live");
+    // A pin still decides: the GM can keep someone far away Live.
+    const pinned = fold(reg, w, base, [{ type: "minds.pin", data: { entity: "maya", level: "live" } }]);
+    expect(score(w, pinned, "maya")?.level).toBe("live");
+  });
 });
 
 describe("which minds run", () => {
