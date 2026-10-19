@@ -1,12 +1,14 @@
-// Build's money editors (DESIGN §13, §25): the Custom toggles as the economy config stores them,
-// household shares that add up, schedule lists as typed, structured values kept free of empty
-// parts, and every money field and place field reaching its editor through the registry.
+// Build's money editors (DESIGN §13, §25): the Custom toggles, the region and living costs as the
+// economy config stores them, household shares that add up, schedule lists as typed, structured
+// values kept free of empty parts, and every money field and place field reaching its editor
+// through the registry.
 
 import { describe, expect, test } from "bun:test";
 import { fieldEditorFor } from "../../src/frontend/build/schema-form";
 import { buildCatalog } from "../../src/frontend/ui-registry";
 import economy from "../../src/packs/economy/ui/index";
-import { toggleOf, withToggle } from "../../src/packs/economy/ui/config";
+import { regionChoices, toggleOf, withLivingCost, withRegion, withToggle } from "../../src/packs/economy/ui/config";
+import { STARTER_WORLDS } from "../../src/packs/index";
 import { compact, equalShares, householdMembers, monthDays, numbersOf, recordsOf } from "../../src/packs/economy/ui/field-editors";
 import type { WorldDoc } from "../../src/shared/world";
 
@@ -20,6 +22,27 @@ describe("the Custom money toggles", () => {
     expect(toggleOf(off, "atm")).toBe("off");
     expect(withToggle(withToggle(off, "atm", "level"), "statements", "level")).toEqual({ unpricedCap: 500 });
     expect(toggleOf({}, "holds")).toBe("level");
+  });
+});
+
+describe("the region and living costs", () => {
+  test("the regions are the table's rows by name, the national baseline first; Not set removes the region", () => {
+    const world = STARTER_WORLDS.modern_slice_of_life?.("w", "Port Alder");
+    if (!world) throw new Error("no starter");
+    const choices = regionChoices(world);
+    expect(choices[0]?.value).toBe("us");
+    expect(choices.length).toBe(Object.keys(world.tables["economy.regions"]?.rows ?? {}).length);
+    expect(choices.find((c) => c.value === "mi")?.label).toBe("Michigan");
+    expect(withRegion({ unpricedCap: 500 }, "mi")).toEqual({ unpricedCap: 500, region: "mi" });
+    expect(withRegion({ unpricedCap: 500, region: "mi" }, "")).toEqual({ unpricedCap: 500 });
+  });
+
+  test("a band's weekly living costs are whole minor units; clearing the last band removes them all", () => {
+    const one = withLivingCost({}, "modest", 21000.4);
+    expect(one).toEqual({ livingCosts: { modest: 21000 } });
+    const two = withLivingCost(one, "rich", 90000);
+    expect(two.livingCosts).toEqual({ modest: 21000, rich: 90000 });
+    expect(withLivingCost(withLivingCost(two, "rich", undefined), "modest", undefined)).toEqual({});
   });
 });
 

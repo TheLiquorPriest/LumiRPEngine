@@ -1,19 +1,22 @@
 // Build → Packs → economy: the economy pack's own config fields, above its config as JSON. The
 // narrated-price cap (DESIGN §9.5) is the most a narrated price charges for something no catalog
 // row prices, in the world's minor units; left empty, the engine derives it from the tables. The
-// Custom toggles (DESIGN §25) switch a money feature on or off at the levels its floor allows;
-// products are the world's own account products; assets are what holdings hold (§27).
+// region prices living and taxes for whoever names none; living costs are a week's spending per
+// wealth band. The Custom toggles (DESIGN §25) switch a money feature on or off at the levels its
+// floor allows; products are the world's own account products; assets are what holdings hold (§27).
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import { ACCOUNT_CLASSES, ASSET_CLASSES, FEATURE_DEFS, FINANCE_FEATURES, OVERDRAFT_POLICIES, type FinanceFeature } from "../../../shared/finance";
 import { formatMoneyInput, minorUnitPlural } from "../../../shared/money";
-import { formatMoney, type WorldCurrency } from "../../../shared/world";
+import { formatMoney, type WorldCurrency, type WorldDoc } from "../../../shared/world";
 import { Card, Row } from "../../../frontend/components";
+import { humanize } from "../../../frontend/format";
 import type { FieldSpec } from "../../../frontend/build/schema";
 import { lintAt, MinorMoneyInput, SchemaFields } from "../../../frontend/build/schema-form";
 import type { PackConfigProps } from "../../../frontend/registry";
-import { derivedUnpricedCap } from "../core/model";
+import { derivedUnpricedCap, WEALTH_BANDS } from "../core/model";
+import { SelectField, type Choice } from "./forms";
 
 /** A Custom toggle's state: as the level decides, or forced on or off. */
 export type ToggleState = "level" | "on" | "off";
@@ -30,6 +33,29 @@ export function withToggle(config: Readonly<JsonObject>, feature: FinanceFeature
   else features[feature] = state === "on";
   const { features: _old, ...rest } = config;
   return Object.keys(features).length > 0 ? { ...rest, features } : { ...rest };
+}
+
+/** The regions a world can be in: the regions table's rows by name, the national baseline first. */
+export function regionChoices(world: WorldDoc): Choice[] {
+  const rows = world.tables["economy.regions"]?.rows ?? {};
+  const choices = Object.entries(rows).map(([id, row]) => ({ value: id, label: typeof row.name === "string" && row.name !== "" ? row.name : id, national: row.scope === "national" }));
+  choices.sort((a, b) => Number(b.national) - Number(a.national) || a.label.localeCompare(b.label));
+  return choices.map(({ value, label }) => ({ value, label }));
+}
+
+/** The config in `region`, or with none ("" removes it). */
+export function withRegion(config: Readonly<JsonObject>, region: string): JsonObject {
+  const { region: _old, ...rest } = config;
+  return region === "" ? { ...rest } : { ...rest, region };
+}
+
+/** The config with a band's weekly living costs set, or removed; with no band left, `livingCosts` goes too. */
+export function withLivingCost(config: Readonly<JsonObject>, band: string, cents: number | undefined): JsonObject {
+  const costs: JsonObject = isRecord(config.livingCosts) ? { ...config.livingCosts } : {};
+  if (cents === undefined) delete costs[band];
+  else costs[band] = Math.round(cents);
+  const { livingCosts: _old, ...rest } = config;
+  return Object.keys(costs).length > 0 ? { ...rest, livingCosts: costs } : { ...rest };
 }
 
 const money = (key: string, label: string, unit: string): FieldSpec => ({ kind: "number", key, label: `${label} (${unit})`, min: 0, step: 1, optional: true });
@@ -121,6 +147,38 @@ function FeatureToggles(props: PackConfigProps) {
   );
 }
 
+function Region(props: PackConfigProps) {
+  const region = typeof props.config.region === "string" ? props.config.region : "";
+  const choices = regionChoices(props.world);
+  // A region the table doesn't have stays shown as it is, so opening the form doesn't change it.
+  const options = region === "" || choices.some((c) => c.value === region) ? choices : [{ value: region, label: `${region} (not in the regions table)` }, ...choices];
+  return (
+    <Card title="Region">
+      <SelectField label="Region" value={region} empty="Not set: the national averages" options={options} onChange={(v) => props.onChange(withRegion(props.config, v))} />
+      <span class="lre-small lre-muted">Prices, rents and taxes follow its cost of living and rates for anyone who doesn't name a region of their own.</span>
+    </Card>
+  );
+}
+
+/**
+ * A week of living costs per wealth band. The engine takes the world's amounts for every band once
+ * any band has one (a band left empty then spends nothing), else prices each band's week from the
+ * catalog's grocery baskets.
+ */
+function LivingCosts(props: PackConfigProps) {
+  const currency = props.world.currency;
+  const costs = isRecord(props.config.livingCosts) ? props.config.livingCosts : {};
+  const own = Object.keys(costs).length > 0;
+  return (
+    <Card title="Living costs">
+      <span class="lre-small lre-muted">{own ? "What someone in each wealth band spends a week. A band left empty spends nothing." : "Each band's week is priced from the catalog's grocery baskets. Set any band and these amounts replace that for every band."}</span>
+      {WEALTH_BANDS.map((b) => (
+        <MinorMoneyInput key={b.label} label={`${humanize(b.label)}, a week`} value={costs[b.label]} currency={currency} min={0} optional issues={lintAt(props.lint, `packs.economy.config.livingCosts.${b.label}`)} onChange={(v) => props.onChange(withLivingCost(props.config, b.label, typeof v === "number" ? v : undefined))} />
+      ))}
+    </Card>
+  );
+}
+
 export function EconomyConfig(props: PackConfigProps) {
   const currency = props.world.currency;
   const derived = derivedUnpricedCap(props.world);
@@ -145,6 +203,8 @@ export function EconomyConfig(props: PackConfigProps) {
           onChange={(value) => props.onChange(value === undefined ? rest : { ...rest, unpricedCap: value })}
         />
       </Card>
+      <Region {...props} />
+      <LivingCosts {...props} />
       <FeatureToggles {...props} />
       <Card title="Products and assets">
         <SchemaFields specs={specs} value={props.config} ctx={ctx} onChange={(next: JsonObject) => props.onChange(next)} />
