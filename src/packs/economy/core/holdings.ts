@@ -174,7 +174,8 @@ export const LOT_KINDS = ["buy", "sell", "reinvest", "expire", "redeem", "settle
 /**
  * Applies a change of lots: units bought (a new lot at its cost) or taken first in, first out (the
  * proceeds against their cost, realised by the owners), and folds an older chat's account-level
- * units in on the way, so they're never counted twice.
+ * units in on the way, so they're never counted twice. Entities are replaced, not written in place:
+ * a money step applies its events to a copy of the state that shares entities it hasn't copied.
  */
 export function applyLots(api: Pick<FinanceApi, "ownersOf">, state: WorldState, world: ReadContext["world"], tables: ReadContext["tables"], holding: EntityId, qty: number, cents: number, label: string, realised = true): void {
   const e = own(state.entities, holding);
@@ -184,7 +185,7 @@ export function applyLots(api: Pick<FinanceApi, "ownersOf">, state: WorldState, 
   const account = accountOfHolding(state, holding);
   if (account && legacyHolding(state, account) === holding) {
     const a = own(state.entities, account);
-    if (a) a.fields.units = 0;
+    if (a) state.entities[account] = { ...a, fields: { ...a.fields, units: 0 } };
   }
   if (qty > 0) lots.push({ qty: roundQty(qty), cost: cents, at: state.clock });
   else {
@@ -193,7 +194,7 @@ export function applyLots(api: Pick<FinanceApi, "ownersOf">, state: WorldState, 
     lots = taken.left;
     if (realised) realise(api, state, world, holding, taken.taken, cents, label);
   }
-  e.fields.lots = lots.map((l) => ({ qty: l.qty, cost: l.cost, at: l.at }));
+  state.entities[holding] = { ...e, fields: { ...e.fields, lots: lots.map((l) => ({ qty: l.qty, cost: l.cost, at: l.at })) } };
 }
 
 function lotsEvent(api: FinanceApi): EventTypeDef<PackEvent> {
