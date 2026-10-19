@@ -25,6 +25,8 @@ export interface PreparedRead {
   post: boolean;
   /** Off-screen `npc.choose` decisions, applied before the proposals. */
   events?: LedgerEvent[];
+  /** The minds' post phase (DESIGN §24.4): presence, memory and consolidation, applied after the post steps. */
+  minds?: LedgerEvent[];
 }
 
 /** The plan-phase prose steps' output for one plan (DESIGN §5.2): the brief and the prose outline. */
@@ -130,6 +132,8 @@ export class TurnBridge implements TurnModel {
   private readonly readChips = new Map<string, ReadChip[]>();
   /** Present-agent `npc.choose` decisions keyed like `intents`, applied before the plan. */
   private readonly decisions = new Map<string, LedgerEvent[]>();
+  /** The turn's minds round and its minds (DESIGN §24), keyed like `intents`, applied after the decisions. */
+  private readonly minds = new Map<string, LedgerEvent[]>();
   /** Plan-phase prose (brief, outline) keyed by plan seed. */
   private readonly prose = new Map<string, PlanProse>();
   /** A typed timelapse longer than a turn may run (`interpret`), offered as a chip instead, keyed like `intents`. */
@@ -211,6 +215,18 @@ export class TurnBridge implements TurnModel {
     trim(this.decisions);
   }
 
+  /** The minds round and minds for the turn whose last user text is `userText` (empty clears them). */
+  setMinds(userText: string, events: LedgerEvent[]): void {
+    if (events.length === 0) this.minds.delete(userText);
+    else this.minds.set(userText, events);
+    trim(this.minds);
+  }
+
+  /** What the plan applies before the pipeline, in order: the decisions, then the minds. */
+  prePlan(userText: string): LedgerEvent[] {
+    return [...(this.decisions.get(userText) ?? []), ...(this.minds.get(userText) ?? [])];
+  }
+
   setOffer(userText: string, target: TimelapseTarget | null): void {
     if (target) this.offers.set(userText, target);
     else this.offers.delete(userText);
@@ -257,9 +273,9 @@ export class TurnBridge implements TurnModel {
 
   plan(input: { state: WorldState; ctx: ReadContext; seed: string; kind: GenerationKind; userTexts: string[] }): LedgerEvent[] {
     const last = input.userTexts.at(-1) ?? "";
-    // Decisions first: the plan then follows the choices they record (DESIGN §5.2 npc.choose).
+    // Decisions and minds first: the plan then follows the choices they record (DESIGN §5.2 npc.choose, §24).
     const w = new Working(this.registry, input.ctx.world, input.state);
-    w.applyAll(this.decisions.get(last) ?? []);
+    w.applyAll(this.prePlan(last));
     const result = this.pipeline.plan({
       registry: this.registry,
       world: input.ctx.world,
@@ -298,6 +314,7 @@ export class TurnBridge implements TurnModel {
       const applied = (this.plans.get(base)?.elapsedMinutes ?? 0) + clockMinutes(w.events);
       w.applyAll(this.pipeline.post({ registry: this.registry, world: input.ctx.world, state: w.state, runSeed: this.runSeed, seed: input.seed, appliedMinutes: applied, extracted: [...w.events] }));
     }
+    w.applyAll(prepared?.minds ?? []);
     this.readChips.set(key, chips);
     trim(this.readChips);
     return w.events;

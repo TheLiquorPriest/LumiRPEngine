@@ -347,9 +347,21 @@ export interface HostRegexScriptInput {
   metadata: JsonObject;
 }
 
+/** The parts of a Lumiverse character card a character's mind reads (DESIGN §24.5). */
+export interface HostCharacterCard {
+  name: string;
+  description: string;
+  personality: string;
+  scenario: string;
+}
+
 // ---------------------------------------------------------------- the port
 
 export interface HostPort {
+  /** Character cards (`characters.get`): a world entity linked to one by `characterId` thinks with it. */
+  characters: {
+    card(characterId: string, userId: UserId): Promise<HostCharacterCard | null>;
+  };
   chats: {
     messages(chatId: ChatId, userId: UserId): Promise<HostMessage[]>;
     /** Replaces the message's whole `spindle_metadata` bag (host semantics; G2). Callers read-merge-write. */

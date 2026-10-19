@@ -16,8 +16,9 @@ import castlifePack from "./castlife/core/index";
 import sheetsPack from "./sheets/core/index";
 import storyPack from "./story/core/index";
 import combatPack from "./combat/core/index";
+import mindsPack from "./minds/core/index";
 
-export const ALL_PACKS: readonly PackDef[] = [enginePack, calendarPack, spacePack, economyPack, gearPack, vehiclesPack, weatherPack, relationshipsPack, castlifePack, sheetsPack, storyPack, combatPack];
+export const ALL_PACKS: readonly PackDef[] = [enginePack, calendarPack, spacePack, economyPack, gearPack, vehiclesPack, weatherPack, relationshipsPack, castlifePack, sheetsPack, storyPack, combatPack, mindsPack];
 
 /** Every pack's default tables, keyed by id (world creation copies and pins them). */
 export function defaultTables(packs: readonly PackDef[] = ALL_PACKS): Record<string, DataTable> {

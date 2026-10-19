@@ -146,7 +146,7 @@
             "here": { "type": "number", "minimum": -100, "maximum": 200, "description": "In the POV's scene. Default 45." },
             "nearby": { "type": "number", "minimum": -100, "maximum": 200, "description": "Under the same parent place as the POV. Default 20." },
             "mentioned": { "type": "number", "minimum": -100, "maximum": 200, "description": "Named or addressed in the latest message or reply. Default 40." },
-            "regard": { "type": "number", "minimum": -100, "maximum": 200, "description": "The strongest regard axis with the POV at its extreme, scaled by its size. Default 10." },
+            "regard": { "type": "number", "minimum": -100, "maximum": 200, "description": "Regard between them and the POV (the axes' mean, whichever way is stronger) at its extreme, scaled by its size. Default 10." },
             "knows": { "type": "number", "minimum": -100, "maximum": 200, "description": "A knows relation with the POV either way. Default 10." },
             "owner": { "type": "number", "minimum": -100, "maximum": 200, "description": "Owns a track under way. Default 15." },
             "track": { "type": "number", "minimum": -100, "maximum": 200, "description": "Each track under way whose stages name them, up to three. Default 8." },

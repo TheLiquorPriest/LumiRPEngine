@@ -238,7 +238,7 @@ export function lintWorld(world: WorldDoc, registry: Registry): LintIssue[] {
     for (const m of t.template.matchAll(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g)) if (!(STEP_PLACEHOLDERS as readonly string[]).includes((m[1] ?? "").toLowerCase())) warn(`steps.${id}.template`, "unknown_placeholder", `{{${m[1] ?? ""}}} isn't an engine placeholder; it renders empty`);
   }
   issues.push(...lintStructure(world, registry));
-  for (const rule of registry.lints) issues.push(...rule.check(world));
+  for (const rule of registry.lints) issues.push(...rule.check(world, registry));
   return issues;
 }
 

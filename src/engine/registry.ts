@@ -185,7 +185,8 @@ export interface ProposalChannelDef {
 
 export interface LintRule {
   code: string;
-  check(world: WorldDoc): LintIssue[];
+  /** `registry` is the frozen registry the world lints against (absent where a caller runs one rule on its own). */
+  check(world: WorldDoc, registry?: Registry): LintIssue[];
 }
 
 /** How the player chose to see a chat (kept beside it, never in its ledger): what a panel is drawn for. */

@@ -15,6 +15,7 @@ import { EXTRACTION_TYPES, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
+import { MINDS_SLOT, worldMindsOf } from "../shared/minds";
 import { fightOffers } from "../packs/combat/core/index";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
@@ -1638,7 +1639,10 @@ export class Runtime implements TurnHooks {
       if (missing || unrouted || input.entries.some((e) => e.bookId === bookId && loreOfEntry(e.extensions) !== null)) void this.book.ensure(world, index, input.userId).catch((error: unknown) => this.host.log("warn", `[LumiRPEngine] book repair failed: ${error instanceof Error ? error.message : String(error)}`, input.userId));
     }
     // Slots in rank order on the section budget; Outcome (rank 0) is never clipped (DESIGN §6.2).
+    // The Minds section has its own budget and never spends the shared one (DESIGN §24.3).
     let budget = settings.modelUse.tokens.sections;
+    const mindsBudget = settings.minds.tokens;
+    const fullMinds = worldMindsOf(world).secrecy === "full";
     const { delivery } = await this.inspector.load(input.chatId, input.userId);
     const uncounted: string[] = [];
     // Sections with hint lines (Stance's cues, §6.6), which ride once every section has its place.
@@ -1672,7 +1676,10 @@ export class Runtime implements TurnHooks {
       // The turn's resolution leads the Outcome slot; a timelapse's Montage fills its own.
       if (section.id === "outcome") lines.unshift(...planned.outcome);
       if (section.id === "montage") lines.push(...planned.montage);
-      const safe = lines.filter((l) => findLeaks(l, secrets).length === 0);
+      // Under `full` secrecy the narrator gets each mind whole, to depict and never state (DESIGN §24.3);
+      // everything else is leak-checked, the Minds section in `brief` once more after its own screens.
+      const minds = section.id === MINDS_SLOT;
+      const safe = minds && fullMinds ? lines : lines.filter((l) => findLeaks(l, secrets).length === 0);
       // Hints alone never make a section: its being there would tell of them.
       if (safe.length === 0) continue;
       const content = renderSection(section.label, section.template, safe);
@@ -1680,11 +1687,11 @@ export class Runtime implements TurnHooks {
       const counted = this.tokenCounts.get(key);
       if (counted === undefined) uncounted.push(content);
       const cost = counted ?? sectionTokens(content);
-      const clipped = section.rank > 0 && cost > budget;
+      const clipped = minds ? cost > mindsBudget : section.rank > 0 && cost > budget;
       // A clipped section wasn't in the prompt, so an earlier delivery check says nothing about it.
       record.sections.push({ slot: section.id, label: section.label, tokens: cost, clipped, delivery: clipped ? "unchecked" : (delivery[section.id] ?? "unchecked") });
       if (clipped) continue;
-      budget -= cost;
+      if (!minds) budget -= cost;
       if (routed) routedSlots.add(section.id);
       const placement = routed ? null : placementOf(section);
       result.enabled.push(entryId);

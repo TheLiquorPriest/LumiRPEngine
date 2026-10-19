@@ -32,7 +32,7 @@ export interface FidelityWeights {
   nearby: number;
   /** Named or addressed in the latest message or reply. */
   mentioned: number;
-  /** The strongest regard axis between them and the POV, either way, at its extreme (±100); scaled by its size. */
+  /** Regard between them and the POV (the axes' mean, whichever way is stronger) at its extreme (±100); scaled by its size. */
   regard: number;
   /** A `knows` relation between them and the POV, either way. */
   knows: number;
@@ -295,6 +295,8 @@ export interface MindsSettings {
   nearRefresh: NearRefresh;
   /** Game minutes between a Far character's minds. */
   farRefreshMinutes: Limit;
+  /** How many Near and Far refreshes run a turn besides the Live minds, the most pressing first; a GM's request always runs. */
+  refreshLimit: Limit;
   /** The levels whose present characters get the `memory` step after a reply. */
   memoryLevels: Fidelity[];
   /** The Minds section's own token budget, apart from the shared section budget (DESIGN §24.3). */
@@ -310,9 +312,9 @@ type PresetMinds = Omit<MindsSettings, "prompts" | "memory">;
 
 /** The minds part of each Model use preset (D25): Lean off; Standard 3 Live with notes for Live; Full no limit with notes for Live and Near. */
 export const MINDS_PRESETS: Readonly<Record<"lean" | "standard" | "full", Readonly<PresetMinds>>> = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } },
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } },
 });
 
 /** A new user's minds settings: Standard's. */
@@ -368,6 +370,7 @@ export function mindsSettingsOf(raw: unknown, base: Readonly<MindsSettings> = MI
       minutes: limitIn(near.minutes, 1, 525_600, base.nearRefresh.minutes),
     },
     farRefreshMinutes: limitIn(m.farRefreshMinutes, 1, 525_600, base.farRefreshMinutes),
+    refreshLimit: limitIn(m.refreshLimit, 0, 64, base.refreshLimit),
     memoryLevels: levels,
     tokens: typeof m.tokens === "number" && Number.isInteger(m.tokens) && m.tokens >= 0 && m.tokens <= 100_000 ? m.tokens : base.tokens,
     memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
@@ -747,15 +750,30 @@ export interface MindMoment {
 // ---------------------------------------------------------------- built-in prompts
 
 /**
- * The built-in instructions for each minds step (DESIGN §24.5). A world template for the purpose wins,
- * then the user's override; `{{character}}` is the character's name and `{{world}}` the world's. The
- * character's scoped context follows as the user message, and the preset's `RPEngine · <purpose>`
- * block is appended.
+ * The built-in instructions for each minds step (DESIGN §24.5): who the model is and how it thinks.
+ * A world template for the purpose wins, then the user's override; `{{character}}` is the character's
+ * name and `{{world}}` the world's. Whichever is used, the engine appends the purpose's answer format
+ * (`MIND_ANSWER_FORMATS`), which no template replaces, then the preset's `RPEngine · <purpose>`
+ * block; the character's scoped context follows as the user message.
  */
 export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Object.freeze({
   mind: [
     "You are the private mind of {{character}} in the roleplay world {{world}}. Think as {{character}}, from only what {{character}} knows: the context below is everything they perceive and remember. Other people's private thoughts are closed to you; ignore any narration of them in the recalled turns.",
     "Decide how {{character}} reads this moment and what they intend. Everyone else decides for themselves: never script their actions or replies, and never plan around what they will do. Intend broadly, so the intent holds whatever they do. Write no narration and no dialogue.",
+  ].join("\n"),
+  memory:
+    "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
+  skip: [
+    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
+    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places.",
+  ].join("\n"),
+  consolidate:
+    "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
+});
+
+/** Each minds step's answer: the JSON the engine reads, appended after the instructions whoever wrote them. */
+export const MIND_ANSWER_FORMATS: Readonly<Record<MindPurpose, string>> = Object.freeze({
+  mind: [
     'Answer with JSON only: {"monologue": "...", "depiction": "...", "intent": "...", "reactions": ["..."], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "mood": "...", "interrupt": {"reason": "..."}}',
     "- monologue: their private reasoning in the first person, at most six sentences.",
     "- depiction: how they come across right now, as behaviour anyone present could see (posture, tone, what they do). Never a secret, an unspoken reason or a thought.",
@@ -766,23 +784,15 @@ export const MIND_PROMPT_DEFAULTS: Readonly<Record<MindPurpose, string>> = Objec
     "- interrupt: only when the moment is a beat inside a time skip and what they'd do now would interrupt the player character's skipped time (seeking them out, calling them). Leave it out otherwise.",
   ].join("\n"),
   memory: [
-    "You keep the memory of {{character}} in the roleplay world {{world}}. Below is what {{character}} knows, then the turn that just happened, as it was written. Only what was written happened, and only what {{character}} could see or hear of it counts; ignore narration of other people's private thoughts.",
     'Answer with JSON only: {"notes": [{"text": "...", "salience": 3}], "commitments": [{"kind": "promise|debt|grudge|favour|plan|other", "with": ["a name"], "text": "...", "due": "YYYY-MM-DD HH:MM"}], "resolved": [{"id": "...", "status": "kept|broken|released"}], "plans": [{"what": "...", "kind": "errand|meet|visit|work|rest|leisure|other", "when": {"from": "YYYY-MM-DD HH:MM", "to": "YYYY-MM-DD HH:MM"}, "where": "a place", "with": ["a name"], "priority": 3}], "told": [{"to": ["a name"], "what": "..."}], "summary": "..."}',
-    "- notes: at most three things {{character}} will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
+    "- notes: at most three things they will remember, in their own perspective; salience 1 (passing) to 5 (unforgettable).",
     "- commitments: promises, debts, grudges, favours and plans with someone that this turn made; due only when a time was set.",
     "- resolved: their open commitments (listed with ids) that this turn kept, broke or released.",
     "- plans: intentions with times that this turn formed.",
-    "- told: what {{character}} told whom in this turn, in a few words each.",
+    "- told: what they told whom in this turn, in a few words each.",
     "- summary: their one-paragraph summary rewritten, only when this turn changed who they are or what they're about; leave it out otherwise.",
     "Use empty lists for anything the turn didn't give.",
   ].join("\n"),
-  skip: [
-    "The player character in the roleplay world {{world}} is skipping ahead in time. Below are the skip's span, the moments the engine already found in it, and what the people involved intend.",
-    "Propose further moments inside the span where something worth stopping for may happen: someone acting on a plan that involves the player character, a deadline, an occasion. Only moments the context supports; never invent people or places.",
-    'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
-  ].join("\n"),
-  consolidate: [
-    "You keep the long-term memory of {{character}} in the roleplay world {{world}}. Fold the older notes below into their summary: keep what still matters to them, let the rest go, and keep everything the summary already holds that is still true.",
-    'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
-  ].join("\n"),
+  skip: 'Answer with JSON only: {"beats": [{"at": "YYYY-MM-DD HH:MM", "reason": "..."}]}, at most five, in time order; an empty list when there are none.',
+  consolidate: 'Answer with JSON only: {"summary": "..."}: at most 900 characters of plain prose, in their own perspective.',
 });
