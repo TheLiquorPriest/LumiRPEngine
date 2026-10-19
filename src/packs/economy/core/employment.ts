@@ -524,7 +524,9 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   const periodic = job.basis === "salary" || job.basis === "stipend";
   const paydays = job.every === "per_job" ? [payDay - 1, payDay] : scheduledPaydays(ctx, api, job, paidThrough === null ? payDay : dateAt(cal, paidThrough).dayIndex, payDay);
   if (paydays.length < 2) return null;
-  const firstStart = clockAt(cal, (paydays[paydays.length - 2] ?? payDay) + 1, 0);
+  // Hours are cut at the start of each payday, so the first period runs from the start of the one
+  // before; a salary's periods are whole days after it.
+  const firstStart = clockAt(cal, (paydays[paydays.length - 2] ?? payDay) + (periodic ? 1 : 0), 0);
   const startClock = job.start === null ? -Infinity : clockAt(cal, job.start, 0);
   const since = paidThrough ?? Math.max(startClock, job.every === "per_job" ? clockAt(cal, payDay, 0) : firstStart);
   const through = periodic ? clockAt(cal, (paydays[paydays.length - 1] ?? payDay) + 1, 0) : Math.max(since, cutoff);

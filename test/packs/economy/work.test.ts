@@ -178,6 +178,24 @@ describe("work: jobs and payroll", () => {
     expect(trialBalance(w.state)).toBe(0);
     expect(hashJson(fold(reg, w.world, s0, w.events).accounts)).toBe(hashJson(w.state.accounts));
   });
+
+  test("hourly pay on a named weekday: four Thursday paychecks of $940 gross land in savings, net of withholding", () => {
+    const { w } = setup((world) => {
+      world.entities.job_shop = entity("job_shop", "job", "Stock clerk", { worker: "you", employer: "Riverton Hardware", title: "Stock clerk", basis: "hourly", rate: 2350, hours: "contract", hours_per_week: 40, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 4, splits: [{ to: "savings", pct: 100 }], start: "2025-01-01" });
+    });
+    const before = w.state.accounts.savings ?? 0;
+    lapse(w, 28 * 1440);
+    const pay = paychecks(w, "savings");
+    expect(pay).toHaveLength(4);
+    for (const p of pay) expect(line(p, ext("employer:riverton_hardware"))).toBe(-94_000);
+    const net = paid(w, "job_shop").map((d) => d.net as number);
+    expect(net.every((n) => n > 60_000 && n < 94_000)).toBe(true);
+    // The Money panel names the paycheck with its gross and what was withheld.
+    const ctx = reg.context(w.world, w.state);
+    expect(ctx.query("economy.finance")(ctx, "you", true).recent.find((r) => r.memo.startsWith("Payroll"))?.memo).toMatch(/gross, .* withheld/);
+    expect((w.state.accounts.savings ?? 0) - before).toBeGreaterThanOrEqual(net.reduce((a, n) => a + n, 0));
+    expect(trialBalance(w.state)).toBe(0);
+  });
 });
 
 describe("work: businesses", () => {
