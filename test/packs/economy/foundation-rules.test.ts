@@ -230,3 +230,29 @@ describe("a flow into credit pays at most what it owes", () => {
     expect(w.state.accounts.card ?? 0).toBe(0);
   });
 });
+
+describe("a shared flow's shares pay together or not at all", () => {
+  const rent = (opening: number) => (world: WorldDoc): void => {
+    world.entities.joint = entity("joint", "account", { owners: [{ party: "you", role: "joint" }, { party: "maya", role: "joint" }], product: "checking", opening });
+    world.entities.rent = entity("rent", "flow", { flow_kind: "rent", from: "joint", to: "Landlord", amount_cents: 200_000, shares: [{ party: "you", pct: 60, from: "joint" }, { party: "maya", pct: 40, from: "joint" }], every: "month", days: [1], shortfall: "skip", status: "active" });
+  };
+
+  // The rent itself, not the returned-item fee a bounced rent brings.
+  const rentLines = (w: Working): JsonObject[] => dataOf(w, "economy.txn").filter((t) => t.flow === "rent" && t.kind !== "fee");
+
+  test("two shares from one account that covers only the first are skipped whole, and nothing moves", () => {
+    const w = setup(rent(150_000));
+    lapse(w, 17);
+    expect(flowRuns(w, "rent").map((r) => [r.outcome, r.cents])).toEqual([["skipped", 0]]);
+    expect(w.state.accounts["economy.external:landlord"] ?? 0).toBe(0);
+    expect(rentLines(w)).toEqual([]);
+  });
+
+  test("an account that covers both pays the whole rent, each share on its own line", () => {
+    const w = setup(rent(250_000));
+    lapse(w, 17);
+    expect(flowRuns(w, "rent").map((r) => [r.outcome, r.cents])).toEqual([["paid", 200_000]]);
+    expect(w.state.accounts["economy.external:landlord"]).toBe(200_000);
+    expect(rentLines(w).map((t) => t.lines)).toEqual([[{ account: "joint", amount: -120_000 }], [{ account: "joint", amount: -80_000 }]]);
+  });
+});
