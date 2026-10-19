@@ -17,7 +17,7 @@ import { registerGains, taxEstimate } from "./gains";
 import { holdingsWorth, holdingView, lotsOf, qtyOf, registerHoldings, setRoute, visibleHoldings } from "./holdings";
 import { registerIncome } from "./income";
 import { registerOptions } from "./options";
-import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, registerProperty, visibleProperties } from "./property";
+import { monthlyRent, propertyIds, propertyValue, propertyView, propertyWorth, registerProperty, securedLoans, visibleProperties } from "./property";
 import { gainsIn, incomeIn } from "./records";
 import { businessIds, businessValue, registerStakes, setStakeRoute, stakeWorth } from "./stakes";
 
@@ -103,7 +103,7 @@ function summaryLines(api: FinanceApi, ctx: ReadContext, who: EntityId): string[
   for (const id of propertyIds(ctx.state)) {
     const share = api.shareOf(ctx.state, id, who);
     if (share <= 0) continue;
-    const owed = api.securedBy(ctx.state, id).reduce((a, loan) => a + Math.max(0, -api.balance(ctx.state, loan)), 0);
+    const owed = securedLoans(api, ctx.state, id).reduce((a, l) => a + l.owed, 0);
     const part = share < 100 ? `a ${Math.round(share)}% share of ` : "";
     out.push(`Owns ${part}${labelOf(ctx, id)} (worth ${about(ctx, propertyValue(ctx.state, id))}${owed > 0 ? `; ${about(ctx, owed)} left on the mortgage` : ""}).`);
   }

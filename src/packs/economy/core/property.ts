@@ -28,6 +28,8 @@ import { addMonths, clockOfDate, dateText, instantIn, investingRows, reject } fr
 import { acquisition, disposal } from "./gains";
 import { unit } from "./holdings";
 import { paymentMonths } from "./income";
+import { isOpened } from "./journal";
+import { openerOf } from "./model";
 import { byShare } from "./records";
 import { correlated, gbmStep, normal } from "./pricing";
 
@@ -337,12 +339,17 @@ function isRejection(v: LedgerEvent[] | Rejection): v is Rejection {
   return !Array.isArray(v);
 }
 
-/** What the loans a property secures still owe, each. */
-function securedLoans(api: FinanceApi, state: Readonly<WorldState>, id: EntityId): { loan: EntityId; owed: number }[] {
+/**
+ * What the loans a property secures still owe, each: a loan that hasn't opened yet owes the authored
+ * opening it will post, as the foundation's views show it, so equity and a sale's payoff are right
+ * before the borrower's accounts open.
+ */
+export function securedLoans(api: FinanceApi, state: Readonly<WorldState>, id: EntityId): { loan: EntityId; owed: number }[] {
   const ids = new Set(api.securedBy(state, id));
   const named = strOf(fieldsOf(state, id).mortgage);
   if (named !== "" && own(state.entities, named)?.kind === "account") ids.add(named);
-  return [...ids].sort().map((loan) => ({ loan, owed: Math.max(0, -api.balance(state, loan)) }));
+  const owed = (loan: EntityId): number => api.balance(state, loan) + (isOpened(state, loan, openerOf(state, loan)) ? 0 : Math.round(numOf(own(state.entities, loan)?.fields.opening)));
+  return [...ids].sort().map((loan) => ({ loan, owed: Math.max(0, -owed(loan)) }));
 }
 
 export interface PropertyBuy {
