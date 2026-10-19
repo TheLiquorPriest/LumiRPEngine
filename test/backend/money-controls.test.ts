@@ -625,10 +625,15 @@ describe("the hub shows what each Money level shows", () => {
     expect(helen?.credit).toBeNull();
     expect(danny?.level).toBe(4);
     expect(danny?.credit).not.toBeNull();
-    // A member's money shows their household: who's in it and the costs they share.
-    expect(money.find((m) => m.party === "household_kowalczyk")?.partyKind).toBe("household");
-    expect(helen?.household?.members.map((m) => m.id).sort()).toEqual(["helen_kowalczyk", "jess_kowalczyk", "maddie_kowalczyk"]);
-    expect(helen?.household?.monthly.total ?? 0).toBeGreaterThan(0);
+    // A household shows as its members do: who's in it and the costs they share, picked itself or seen from a member's money.
+    const household = money.find((m) => m.party === "household_kowalczyk");
+    expect(household?.partyKind).toBe("household");
+    expect(household ? hubTabs(household).map((t) => t.id) : []).toContain("household");
+    for (const view of [household, helen]) {
+      expect(view?.household?.members.map((m) => m.id).sort()).toEqual(["helen_kowalczyk", "jess_kowalczyk", "maddie_kowalczyk"]);
+      expect(view?.household?.monthly.total ?? 0).toBeGreaterThan(0);
+    }
+    expect(household?.household?.monthly).toEqual(helen?.household?.monthly);
     // An account's role decides what each owner may do with it.
     const maddie = money.find((m) => m.party === "maddie_kowalczyk");
     expect(maddie ? account(maddie, "acct_maddie_savings").role : null).toBe("beneficiary");

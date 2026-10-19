@@ -80,6 +80,12 @@ describe("realism gating", () => {
     expect(hubTabs(full).map((t) => t.id)).toEqual(["overview", "accounts", "flows", "investments", "credit"]);
   });
 
+  test("a household that holds no account itself shows its members, with no empty Accounts or Flows tab", () => {
+    const household = { id: "home", name: "The Kowalczyks", members: [{ id: "helen", name: "Helen", role: "head", share: 60 }], accounts: [], flows: [], monthly: { total: 52000, parts: [{ id: "helen", name: "Helen", cents: 31200 }] } };
+    expect(hubTabs(view({ partyKind: "household", household })).map((t) => t.id)).toEqual(["overview", "household"]);
+    expect(hubTabs(view({ partyKind: "household" })).map((t) => t.id)).toEqual(["overview"]);
+  });
+
   test("below the top level an account shows its balance and a few lines, never its terms, statements, pending lines or holds", () => {
     const simple = accountBlocks(view({ accounts: [visa] }), visa);
     expect(simple).toMatchObject({ terms: false, statements: false, pending: false, holds: false, owners: false, transactions: 5 });

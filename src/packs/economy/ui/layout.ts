@@ -21,19 +21,18 @@ export interface HubTab {
 }
 
 /**
- * The hub's sections for a party, in order. Money 1 is a band and nothing else; from 2 accounts
- * show; the rest show when their feature runs or the party has something there, so a player
- * with no job or business sees no empty tab for one.
+ * The hub's sections for a party, in order. Money 1 is a band and nothing else; from 2 a section
+ * shows when the party has something there (accounts; flows, or the feature that runs them from
+ * its accounts; a job, a household, …), so a household that holds no account of its own still
+ * shows its members, and a player with no job or business sees no empty tab for one.
  */
 export function hubTabs(view: FinanceView): HubTab[] {
   if (view.level <= 0) return [];
-  const overviewDot = view.overview?.alerts.some((a) => a.tone !== "info") ?? false;
-  if (view.level === 1 || (view.accounts.length === 0 && view.jobs.length === 0 && view.businesses.length === 0)) return [{ id: "overview", label: SECTION_LABELS.overview, dot: overviewDot }];
-  const tabs: HubTab[] = [
-    { id: "overview", label: SECTION_LABELS.overview, dot: overviewDot },
-    { id: "accounts", label: SECTION_LABELS.accounts, dot: view.accounts.some((a) => a.status !== "open" || a.statements.some((s) => s.state === "late") || a.cards.some((c) => c.state === "lost")) },
-  ];
-  if (view.features.includes("flows") || view.flows.length > 0) tabs.push({ id: "flows", label: SECTION_LABELS.flows, dot: view.flows.some((f) => f.missed > 0 && f.status === "active") });
+  const tabs: HubTab[] = [{ id: "overview", label: SECTION_LABELS.overview, dot: view.overview?.alerts.some((a) => a.tone !== "info") ?? false }];
+  if (view.level === 1) return tabs;
+  const hasAccounts = view.accounts.length > 0;
+  if (hasAccounts) tabs.push({ id: "accounts", label: SECTION_LABELS.accounts, dot: view.accounts.some((a) => a.status !== "open" || a.statements.some((s) => s.state === "late") || a.cards.some((c) => c.state === "lost")) });
+  if ((hasAccounts && view.features.includes("flows")) || view.flows.length > 0) tabs.push({ id: "flows", label: SECTION_LABELS.flows, dot: view.flows.some((f) => f.missed > 0 && f.status === "active") });
   if (view.jobs.length > 0) tabs.push({ id: "jobs", label: SECTION_LABELS.jobs, dot: false });
   if (view.businesses.length > 0) tabs.push({ id: "businesses", label: SECTION_LABELS.businesses, dot: view.businesses.some((b) => b.invoices.some((i) => i.state === "late")) });
   if (view.investments !== null) tabs.push({ id: "investments", label: SECTION_LABELS.investments, dot: false });
