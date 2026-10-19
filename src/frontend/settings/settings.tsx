@@ -18,10 +18,11 @@ import { humanize } from "../format";
 import { settingsTimePatch, TimeControlsEditor } from "../time-controls";
 import { AdjudicationSeed, AdjudicationThisChat } from "./adjudication";
 import { OverrideWorldSwitch, RealismSeed, RealismThisChat } from "./realism";
+import { MindsSection } from "./minds";
 import { ModelUseSection, StepsSection } from "./steps";
 import { UpgradePanel } from "./upgrade";
 
-type SectionId = "model" | "realism" | "checks" | "time" | "extraction" | "steps" | "pins" | "swipes" | "preset" | "caveats";
+type SectionId = "model" | "minds" | "realism" | "checks" | "time" | "extraction" | "steps" | "pins" | "swipes" | "preset" | "caveats";
 
 function Fold(props: { id: SectionId; title: string; summary?: string; open: SectionId | null; setOpen(id: SectionId | null): void; children: ComponentChildren }) {
   const expanded = props.open === props.id;
@@ -230,6 +231,9 @@ export function Settings() {
     <div class="lre-stack" data-lre-section="settings">
       <Fold id="model" title="Model use" summary={`${humanize(settings.modelUse.preset)} preset`} {...fold}>
         <ModelUseSection modelUse={settings.modelUse} meter={view?.meter ?? null} patch={patch} busy={busy} />
+      </Fold>
+      <Fold id="minds" title="Minds" summary={settings.minds.enabled ? `On · ${settings.minds.liveLimit === "none" ? "no Live limit" : `up to ${settings.minds.liveLimit} Live a turn`}` : "Off"} {...fold}>
+        <MindsSection minds={settings.minds} patch={patch} busy={busy} />
       </Fold>
       <Fold id="realism" title="Realism" summary={settings.overrideWorldDefaults ? `${humanize(settings.realism.preset)} for new chats` : `World defaults, then ${humanize(settings.realism.preset)}`} {...fold}>
         <div class="lre-stack">

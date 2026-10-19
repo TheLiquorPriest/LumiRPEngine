@@ -4,7 +4,7 @@ This guide is for two kinds of people: players, who want to chat in a world that
 
 - [How it works in one page](#how-it-works-in-one-page)
 - **Playing:** [Play](#play) · [Swipes, edits and branches](#swipes-edits-and-branches) · [Time controls](#time-controls) · [Realism](#realism)
-- **Tuning:** [Model use](#model-use) · [Extraction modes](#extraction-modes) · [The Context inspector](#the-context-inspector)
+- **Tuning:** [Model use](#model-use) · [Character minds](#character-minds) · [Extraction modes](#extraction-modes) · [The Context inspector](#the-context-inspector)
 - **Building:** [Authoring](#authoring)
 - [Troubleshooting](#troubleshooting)
 
@@ -161,11 +161,12 @@ When the world uses the **grid system**, you stand on a square of the grid you'r
 
 The **GM view** shows everything the engine knows, including secrets, truths you haven't discovered and people who were removed, and lets you change any of it. It sits behind a spoiler gate ("Spoilers ahead"): tap **Show the GM view** to open it, and **Hide** to put it away. Its data is fetched only while it is open, so none of it travels with what Play shows you. Looking never changes your chat; only the edits you save do. The [GM guide](GM-GUIDE.md) covers running a chat from here.
 
-It has five tabs, and a sixth, **Fight**, while a fight is under way:
+It has six tabs, and a seventh, **Fight**, while a fight is under way:
 
 - **Entities**: every person, item, vehicle, group and account in the world, including the ones spawned during this chat and the removed ones, with a search box and a kind filter. Badges mark **You**, **Removed**, **Spawned**, **Agent** (someone who lives off-screen) and anything that isn't public. Tap one to open its form.
 - **Places**: every place, with its visibility (public, discoverable, secret and so on).
 - **Tracks**: every quest, secret and agenda, with every stage and its truth. Pick a stage to move the track there.
+- **Minds**: every character's place on the fidelity ladder and why, their latest mind, plans, commitments, notes and summary, with pins and edits ([Minds in the GM view](#minds-in-the-gm-view)).
 - **Money**: everyone else's money (below).
 - **Fight**: everyone in the fight, seen or not, in initiative order, with HP exact and the round's acts.
 - **Edits**: the corrections in force on this version of the story, worded in full, and any change that didn't apply after a reply, with the exact reason.
@@ -413,6 +414,10 @@ The number is the most steps a turn can run: each step takes one call from its p
 | `extract` (Extract changes) | After the reply | Reads the reply for changes. See [Extraction modes](#extraction-modes). |
 | `contradiction` (Contradiction check) | After the reply | Checks the reply against the established facts. If it finds a clash, a **The reply contradicts the facts** chip appears, and the next turn is told the correction. |
 | `choices` (Suggested choices) | After the reply | Offers next-step options as **Suggested choices** chips. |
+| `mind` (Character minds) | Before the reply, and at time-skip beats | One call per character, as that character: their monologue, depiction, intent, reactions and plans. Runs on its own cadence; see [Character minds](#character-minds). |
+| `memory` (Character memory) | After the reply | Per character in the scene at the levels you pick: the notes, commitments and plans they take from what the reply said. |
+| `skip` (Time-skip beats) | Before a time skip | Proposes further moments in the skip worth stopping at, beside the ones the engine finds. |
+| `consolidate` (Memory consolidation) | After the reply | Folds a character's faded and surplus notes into their summary. |
 
 A step runs when one of its **signals** fires (in **Settings → Steps and connections**, each step lists its signals). `always` fires every turn; `never` turns the step off and wins over the rest. The others:
 
@@ -455,6 +460,52 @@ The call meter shows each turn's calls, seconds and tokens ("This turn: n calls 
 ### Engine tokens versus your context
 
 The engine's sections are a fixed overhead in every prompt, up to the engine budget. Nothing checks that budget against your connection's context size, so keep it well inside it: if the fixed part of the prompt is larger than the context, Lumiverse drops the chat history, including your latest message.
+
+## Character minds
+
+With **character minds** on, the people near the story think for themselves. Each one's mind is its own model call, made as that character and scoped to what they know: their own fields and character card, the lore they may know, the turns they were present for, what they saw or were told, their notes, commitments and summary, the scene as they see it, and their own life (money, work, today's plans, their own agendas and secrets, how they feel about the people present). Minds are blind to each other, so no mind decides what another character says or does. A mind answers with an inner monologue, a **depiction** (how they come across), what they intend, their reactions and their plans, and the narrator is told how to depict it. After the reply, the concrete changes (money, moves) are still read from what the reply actually says, and the characters' memory is written from it.
+
+Each mind is recorded on the turn, so swipes and branches keep it: **Re-narrate** reuses the turn's minds, **Re-run** asks again, and Playtest and Check world never call a model for them.
+
+### The fidelity ladder
+
+Every turn, and at each beat of a time skip, each character gets a focus score and a level from it:
+
+- **Live**: they think every turn, best score first, up to your Live limit.
+- **Near**: they think again when something calls for it: they come into the scene, they are named, or their mind is old enough (the Near refresh).
+- **Far**: they think now and then, on the Far refresh period, and their plans shape their day.
+- **Background**: no mind; they follow their routine.
+
+The score adds up proximity, being named, their feelings toward you, how they figure in the story (quests, secrets, agendas, story roles, rules that name them), what is pending between you (invitations, appointments, plans, commitments), their tier and how recently you saw them. The world sets the weights and thresholds, and who is always Live or never gets a mind ([Character minds in a world](#character-minds-in-a-world)); the GM view can pin anyone at a level.
+
+### Memory
+
+Each character remembers in four layers: a **witness log** of what they saw happen or were told; **recall** of the turns they were present for (and only those: what was narrated of other people's private thoughts is ignored); **notes** written after a reply, for the levels you pick, which fade with time unless they matter; and **commitments** (promises, debts, grudges, favours, plans with someone) that stay until they are kept, broken or released. Faded and surplus notes can be folded into the character's **summary**. The world sets the defaults; your Settings can override any of them.
+
+### Settings → Minds
+
+- **Character minds**: on or off. Off, no character gets a mind, and the engine's own rules decide invitations as before.
+- **Live minds a turn**: a number, or **no limit**.
+- **Near refresh**: when they come into the scene or it changes; when the latest message or reply names them; every so many turns; when their mind is so many game minutes old. Each number can be turned off.
+- **Far refresh**: every so many game minutes, or never.
+- **Memory notes after the reply**: which levels of the characters in the scene get the memory step.
+- **Minds section budget (tokens)**: the narrator's Minds section has its own budget, apart from the section budget, so minds never crowd out Scene or People.
+- **Time skips**: how many beats a skip may stop at, and how many minds think at each beat; either can be **no limit**.
+- **Memory**: your own value for any of the world's memory settings (see [Character minds in a world](#character-minds-in-a-world)); **Use the world's** goes back to the world's.
+- **Prompts**: the instructions for each minds step (Character minds, Character memory, Time-skip beats, Memory consolidation), each with its built-in default shown beneath it. **Save** keeps your own; **Reset to the default** goes back to the built-in. Saving the built-in text unchanged keeps no copy, so you get later improvements to it. A world's own step template for a step wins over yours.
+
+The **Model use** presets set minds too: **Lean** turns them off; **Standard** runs up to 3 Live minds a turn with memory notes for Live characters; **Full** has no Live limit, with notes for Live and Near. Picking a preset resets everything above but your prompts and memory; changing any of it makes the preset **Custom**. Where each minds step runs (its connection, model, max tokens and lore) is in **Settings → Steps and connections**, as for the other steps.
+
+### Minds in the GM view
+
+The GM view's **Minds** tab lists every character but you, closest on the ladder first, with their level, score, when they last thought, and badges for a pin or a refresh asked for; search by name or filter by level. It shows the chat's clock and the world's secrecy. Tap someone to see:
+
+- **Fidelity**: their level and score, each thing that added to it, and the author's pin. **Pin their fidelity** keeps them at a level in this chat whatever their score (**By score** unpins), and **Refresh their mind next turn** asks for a fresh mind on the next turn, whatever the refresh settings say.
+- **Latest mind**: when and why it ran, where they were, their mood, monologue, depiction, intent and reactions, and whether it interrupted a time skip. A **to the narrator** badge marks what the narrator got under the world's secrecy, and a warning says when a depiction was kept from the narrator because it gave something away.
+- **Plans**, **Commitments** and **Memory notes**: each with ✎ to edit and ✕ to delete, and an **Add** button. A plan has what it is, its kind, when it starts (hours from now) and how long it lasts, where, with whom, a priority from 1 (whenever it fits) to 5 (it must happen) and its status. A commitment has its kind, its text, who it is with, an optional due time (hours from now) and its status. A note has its text and a salience from 1 to 5, and shows how much it has faded.
+- **Summary** and **Witnessed**: what they have folded into their summary, and what they saw or were told.
+
+Each change is a GM edit like any other: one correction with its own **Undo**. Minds stay in the GM view: nothing a mind thinks reaches Play, the Journal, Cast or chips.
 
 ## Extraction modes
 
@@ -501,6 +552,8 @@ The **Context** panel in Play shows what the engine put into the prompt for each
 
 **Lore the helpers read** lists, for each model step of the generation, what it read of the world's lore ([Lore for the helpers](#lore-for-the-helpers)): its searches (the prefetch and each lookup) with how many entries each found, the entries it was given with their tokens (and *cut to fit* when shortened), its lookups and whether they went as tools or the ask form, and why a lookup didn't happen. It shows only what you may know. A secret entry isn't there at all: not listed, and not counted in what a search found. An NPC's choice shows only whose choice it is (*Dev's choice*), never what they might do: it reads *private*, its lookups show as —, and nothing it found is counted or listed. A choice made only by people you haven't met or can't see isn't listed. A step that may read a secret shows its lookups as — with how many entries they found, never what it asked. Any other search that would name a secret, a secret entry, someone you haven't met or a place you don't know is withheld, unless you or the reply said those words that turn; a name counts as it does in a judged approach's reason (see [Lore for the helpers](#lore-for-the-helpers)), so someone counts by any word of their name, however short.
 
+**Minds** lists the generation's minds calls ([Character minds](#character-minds)): whose mind it was, which step (a mind, a memory, a time skip's beats or consolidation), their level, when it ran (before the reply, after it, or in a time skip), whose prompt it used (the world's, yours or the built-in), and how it went: **recorded**, **reused** (a Re-narrate keeps the minds it had), **failed**, **over the limit** (it waited for a later turn) or **kept from the narrator** (its depiction gave something away, so the narrator got none of it), with its seconds and tokens. Never a word of what a mind thought or said: that is in the GM view. Someone you haven't met shows as *Someone*.
+
 ### The Stance section
 
 **Stance** tells the narrator how the people with you stand toward you and what they are about, in a line or two each. It lists only the people you can see where you are: someone hidden from you gets no line, and no line names them.
@@ -539,7 +592,7 @@ Anything the engine inserts into the prompt, a name, a price, a number, a model'
 
 ## Authoring
 
-You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults, tiers, time defaults, ruleset and the lore lookup table), its **Content** lists (Entities, Places, Maps, Routes, Grids, Kinds, Classifications, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Playtest**, **Check world** and, with a chat open, **Attach to this chat**. Edit an item and **Save to draft**, or **Revert**.
+You build worlds in the **Build** tab, which is designed to work at phone width as well as on a desktop. It opens on your worlds (each with **Export** and **Delete**), **New world** and **Import an lre-world-v1 file…**. Open a world to get its bar (**‹ Back**, the name, **Commit** and **Discard**), its World card (name, calendar, realism defaults, tiers, time defaults, ruleset, the lore lookup table and minds), its **Content** lists (Entities, Places, Maps, Routes, Grids, Kinds, Classifications, Relations, Actions, Checks, Rules, Schedules, Tracks, Lore, Data tables, Sections, Step templates and Packs, each with a count and an issue badge, a search box and **+ New**) and its **Tools**: **Problems**, **Import from lore**, **Index a World Info book**, **Index this text**, **Build / Refine with AI**, **Describe a map**, **Playtest**, **Check world** and, with a chat open, **Attach to this chat**. Edit an item and **Save to draft**, or **Revert**.
 
 For the formulas you write in requirements, checks, derived fields and rules, see [EXPRESSIONS.md](EXPRESSIONS.md); for every kind, field, effect, function and lint code the packs offer, the [reference](REFERENCE.md); and for small worlds to copy from, [RECIPES.md](RECIPES.md).
 
@@ -563,6 +616,7 @@ What you can define:
 - **Tiers**: the world's own ranks of importance. Each has a label, a band (Leads, Supporting or Background), a place in the order (↑ and ↓), an optional description, and whether its people live their own day (agendas and plans) by default; **+ Add tier** makes a new one, and a tier still in use can't be removed. **New people join** picks the tier for people the story introduces (by default the first Background tier). An entity's editor picks its tier from these, and its **Lives their own day** choice can follow the tier ("As its tier"); lint flags an entity whose tier the world doesn't have.
 - **Section templates**: how a section's lines are wrapped when they go into the prompt, and where they go. A template may use only the engine's `{{lines}}` marker; any other macro, control character or `<user>`-style shorthand in one is a lint error (`section_macro`), because it would run beside the engine's own values. Stance's template opens with its note to the narrator, which you can reword there. A world with no sections of its own gets the shipped ones; once it lists its own, it gets only those, so list `stance` to keep it. **Position** is `{"type":"chat_depth","role":"system","depth":1,"direction":"from_end"}` (that many messages from the end of the chat, or from its start), `{"type":"outlet","name":"…"}` (only where a `{{outlet::…}}` macro of that name stands, in your preset or a card, and nowhere else) or `{"type":"native"}` (where the section's entry sits in the world's book, which you can move in Lumiverse's World Info editor; a new one starts before the character). When you change a section's Position and commit, its entry in the world's book moves to match.
 - **Step templates**: your own wording for a model step, per purpose (interpret, NPC choices, contradiction, puzzle answers, judging your approach, brief, outline, extract, suggested choices), with an output (text, decision, or `effects` for the steps that read changes, which run after the reply only) and the signals it runs on (a template's own signals replace the step's). The brief, outline, extract and suggested-choices templates, and every `effects` template, can use engine placeholders: `{{world}}`, `{{pov}}`, `{{place}}`, `{{clock}}`, `{{scene}}`, `{{present}}`, `{{facts}}`, `{{outcome}}`, `{{beats}}`, `{{brief}}`, `{{user}}`, `{{reply}}` and `{{recent}}`. An interpret template fills in only `{{world}}` and `{{pov}}`, and none at all on a Decision connection; NPC-choice, puzzle-answer and judge templates, and a contradiction template with a decision output, are sent as you wrote them, with nothing filled in. `{{brief}}` is this turn's brief (an outline template that uses it waits for the brief; it's empty in the brief step itself), and `{{recent}}` is the Journal's last five lines before this turn, where each ✎ fix or GM edit you can see takes a line of its own. They are all player-visible: a line that would reveal an unrevealed truth is dropped before the call. A template whose output can't be used by its purpose, an unknown signal and an unknown placeholder are lint warnings. Changes a step template proposes with `effects` are checked and bounded exactly like extraction, and money in them is stated as a plain amount in the world's currency (8 for $8), which the engine converts. Which steps run at all is still your choice, in **Settings → Steps and connections**. A world made with an earlier version keeps its step templates, except those for lore selection, which no longer exists.
+- **Step templates for minds**: the four minds steps (Character minds, Character memory, Time-skip beats, Memory consolidation) take templates too, with output **text**; **Build → World → Minds** lists them and starts new ones from the built-in prompts (see [Character minds in a world](#character-minds-in-a-world)).
 
 Formulas use a small, safe expression language: numbers, comparisons and a fixed set of functions. They can't run code and they always produce a finite number. `table(id, key, column)` reads a cell of one of the world's data tables, and `table_step(id, value, column)` reads the row whose number key is the largest at or below `value` (a level table keyed by XP, say). `roll(notation)` works only in an effect's arguments (a value that starts with `=`): the effect's event records the result, so a replay or a swipe sees the same number. Anywhere else a roll would change the odds you were shown and what the engine reads, so it is a lint error and reads as nothing. For classifications and groups: `kind_is(e, 'person')` (a kind or one inheriting from it), `in_class(e, 'role', 'antagonist')` (a value or one nested under it), `has_tag(e, 'smuggler')`, `member_of(e, harlows)` (directly or through a member group), `tier_of(e)` and `band_of(e)` (the band its tier belongs to).
 
@@ -692,6 +746,21 @@ A classification is for you and the GM side unless you tick **Players can see th
 ### Selectors
 
 A **selector** picks entities by rule, with one editor wherever you need one (a schedule's owner, an action parameter's candidates): **Kind** (or one inheriting from it), **Tier**, a value of each classification (or one nested under it), **Tag**, **Member of** (directly or through a member group) and **Only these entities**. An entity must pass every constraint you set, and within one constraint any of its values will do; a selector with nothing set matches everyone.
+
+### Character minds in a world
+
+**Build → World → Minds** sets how the world's characters think (see [Character minds](#character-minds) for what they do in play). Nothing here is required: a world without it plays with the defaults, and **Use the defaults** takes the world's own settings out again. **Save to draft** saves the card whole; **Revert** drops your changes.
+
+- **What the narrator gets of a mind** (secrecy):
+  - **Brief**, the default: the narrator gets only a short description of how each character comes across (what they do, how they look and sound). It is checked first, and left out if it would give away a secret or name someone the player hasn't met. Their private thoughts and what they mean to do stay in the GM view. The safest choice against spoilers, with less for the narrator to work with.
+  - **Full**: the narrator also gets each character's inner monologue and what they mean to do, told to show them through behaviour and never say them outright. Richer, more consistent characters, but a careless narrator could let a thought or a secret slip.
+
+  Either way, the player never sees a mind.
+- **Focus weights**: the points each thing adds to a character's focus score: being in the player's scene, close by, named in the latest message or reply, strong feelings toward the player either way, knowing the player, owning a quest, secret or agenda under way, each track that names them, being named by a world rule, each pending invitation, appointment, plan or commitment with the player, their tier's band, and being seen with the player lately. **Role values** add points for a classification value (an antagonist, say), and a value nested under it counts as it. Weights run from −100 to 200; a negative one pushes a character away.
+- **Thresholds**: the lowest score for **Live**, **Near** and **Far**; under Far is Background. Live should be at least Near, and Near at least Far; out of order, the lower ones are raised to match.
+- **Always Live** and **Never a mind**: two [selectors](#selectors). Never wins over Always. A selector with nothing set picks no one here (not everyone), and the player's own character never gets a mind.
+- **Memory defaults**: how many witness-log lines, recalled turns (the latest, and the ones that best match the moment, with their token budget), notes and open commitments a mind sees; how many notes a character keeps before the oldest are folded into their summary; how fast a note's salience halves (in days of game time) and the salience under which it has faded; and whether faded and surplus notes are folded into the summary. A player's own **Settings → Minds → Memory** wins over these.
+- **Step templates**: the world's own prompts for the four minds steps. **New template** starts one from the built-in prompt and opens it in the step-template editor; each template already there opens the same way. A world's template wins over the player's own prompt and the built-in one.
 
 ### Lore books
 

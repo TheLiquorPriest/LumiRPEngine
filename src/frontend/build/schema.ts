@@ -359,7 +359,7 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
     { kind: "json", key: "position", label: "Position", hint: '{"type":"native"} · {"type":"outlet","name":"…"} · {"type":"chat_depth",…}' },
   ],
   steps: [
-    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge"] },
+    { kind: "enum", key: "purpose", label: "Purpose", values: ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"] },
     { kind: "text", key: "template", label: "Template", multiline: true },
     { kind: "enum", key: "output", label: "Output", values: ["text", "effects", "decision"] },
     { kind: "tags", key: "signals", label: "Signals" },
@@ -391,8 +391,8 @@ export const COLLECTION_SPECS: Record<WorldCollection, FieldSpec[]> = {
   ],
 };
 
-/** The schema-driven singletons; Tiers, Ruleset and the lore lookup table have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`). */
-export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset">, FieldSpec[]> = {
+/** The schema-driven singletons; Tiers, Ruleset, the lore lookup table and Minds have their own editors (`tiers-editor.tsx`, `ruleset-editor.tsx`, `lookup-editor.tsx`, `minds-editor.tsx`). */
+export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds">, FieldSpec[]> = {
   calendar: [
     { kind: "enum", key: "system", label: "System", values: ["gregorian", "custom"] },
     { kind: "text", key: "epoch", label: "Epoch (local ISO, e.g. 2026-10-16T06:00)" },
@@ -512,50 +512,6 @@ export const PART_SPECS: Record<Exclude<WorldPart, "tiers" | "loreIndex" | "rule
         },
       ],
     },
-  ],
-  minds: [
-    { kind: "enum", key: "secrecy", label: "What the narrator gets of a mind", values: ["brief", "full"] },
-    {
-      kind: "object",
-      key: "weights",
-      label: "Focus weights (points each input adds)",
-      fields: [
-        { kind: "number", key: "here", label: "In the POV's scene", min: -100, max: 200, step: 1 },
-        { kind: "number", key: "nearby", label: "Close by (same parent place)", min: -100, max: 200, step: 1 },
-        { kind: "number", key: "mentioned", label: "Named in the latest message or reply", min: -100, max: 200, step: 1 },
-        { kind: "number", key: "regard", label: "Regard with the POV, at its extreme", min: -100, max: 200, step: 1 },
-        { kind: "number", key: "knows", label: "Knows the POV", min: -100, max: 200, step: 1 },
-        { kind: "number", key: "owner", label: "Owns a track under way", min: -100, max: 200, step: 1 },
-        { kind: "number", key: "track", label: "Each track that names them (up to three)", min: -100, max: 200, step: 1 },
-        { kind: "record", key: "roles", label: "Role facet values", keyLabel: "Value id", item: { kind: "number", key: "", label: "Points", min: -100, max: 200, step: 1 } },
-        { kind: "number", key: "rule", label: "Named by a world rule", min: -100, max: 200, step: 1 },
-        { kind: "number", key: "pending", label: "Each pending interaction with the POV (up to three)", min: -100, max: 200, step: 1 },
-        {
-          kind: "object",
-          key: "band",
-          label: "Tier band",
-          fields: [
-            { kind: "number", key: "principal", label: "Leads", min: -100, max: 200, step: 1 },
-            { kind: "number", key: "supporting", label: "Supporting", min: -100, max: 200, step: 1 },
-            { kind: "number", key: "background", label: "Background", min: -100, max: 200, step: 1 },
-          ],
-        },
-        { kind: "number", key: "recent", label: "Seen with the POV lately", min: -100, max: 200, step: 1 },
-      ],
-    },
-    {
-      kind: "object",
-      key: "thresholds",
-      label: "Lowest score for each rung (below Far: Background)",
-      fields: [
-        { kind: "number", key: "live", label: "Live", min: 0, max: 1000, step: 1 },
-        { kind: "number", key: "near", label: "Near", min: 0, max: 1000, step: 1 },
-        { kind: "number", key: "far", label: "Far", min: 0, max: 1000, step: 1 },
-      ],
-    },
-    { kind: "selector", key: "always", label: "Always Live", optional: true },
-    { kind: "selector", key: "never", label: "Never a mind (wins over Always Live)", optional: true },
-    { kind: "json", key: "memory", label: "Memory defaults (witness, recall, notes, commitments, salience, consolidate)" },
   ],
 };
 

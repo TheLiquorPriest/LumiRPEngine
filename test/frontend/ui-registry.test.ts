@@ -39,6 +39,14 @@ describe("UI registry", () => {
     expect(() => buildCatalog([chip("a"), chip("b")])).toThrow("roll");
     const preview = (id: string): UiPackDef => ({ id, register: (r) => r.preview("maps", Empty) });
     expect(() => buildCatalog([preview("a"), preview("b")])).toThrow("maps");
+    const gm = (id: string): UiPackDef => ({ id, register: (r) => r.gm({ id: "x.tab", label: "T", order: 1, component: Empty }) });
+    expect(() => buildCatalog([gm("a"), gm("b")])).toThrow("GM view tab x.tab");
     expect(() => buildCatalog([{ id: "a", register: () => {} }, { id: "a", register: () => {} }])).toThrow("registered twice");
+  });
+
+  test("the packs' GM view tabs come out in order, ties broken by id", () => {
+    const tab = (pack: string, id: string, order: number): UiPackDef => ({ id: pack, register: (r) => r.gm({ id, label: id, order, component: Empty }) });
+    const catalog = buildCatalog([tab("minds", "minds.minds", 20), tab("economy", "economy.money", 30), tab("aaa", "aaa.tab", 20)]);
+    expect(catalog.gmSections.map((def) => def.id)).toEqual(["aaa.tab", "minds.minds", "economy.money"]);
   });
 });

@@ -1,0 +1,120 @@
+// The GM view's minds controls as `lre.edit` operations (DESIGN §24.9). Each form's text is read here
+// and refused (null) when it wouldn't make a valid item, so the Save button can say so before the
+// backend does. A `mind_memory` value carries only the fields the item has; an absent `id` adds one.
+
+import type { EntityId, PlaceId } from "../../../shared/ids";
+import type { JsonObject } from "../../../shared/json";
+import type { CommitmentKind, CommitmentStatus, Fidelity, MindCommitment, MindNote, MindPlan, PlanKind, PlanStatus } from "../../../shared/minds";
+import { MIND_TEXT_CAPS, PLAN_PRIORITY } from "../../../shared/minds";
+import type { EditOp } from "../../../shared/protocol";
+
+export const FIDELITY_LABEL: Record<Fidelity, string> = { live: "Live", near: "Near", far: "Far", background: "Background" };
+
+export const PLAN_KIND_LABEL: Record<PlanKind, string> = { errand: "Errand", meet: "Meet", visit: "Visit", work: "Work", rest: "Rest", leisure: "Leisure", other: "Other" };
+export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = { open: "Open", done: "Done", dropped: "Dropped" };
+export const COMMITMENT_KIND_LABEL: Record<CommitmentKind, string> = { promise: "Promise", debt: "Debt", grudge: "Grudge", favour: "Favour", plan: "Plan together", other: "Other" };
+export const COMMITMENT_STATUS_LABEL: Record<CommitmentStatus, string> = { open: "Open", kept: "Kept", broken: "Broken", released: "Released" };
+
+/** Pins a character at a rung, whatever their score, in this chat; null unpins. */
+export function pinOp(entity: EntityId, level: Fidelity | null): EditOp {
+  return { op: "mind_pin", entity, level };
+}
+
+/** Asks for a fresh mind for them next turn, whatever their refresh policy says. */
+export function refreshOp(entity: EntityId): EditOp {
+  return { op: "mind_refresh", entity };
+}
+
+/** Deletes a note, commitment or plan. */
+export function deleteOp(entity: EntityId, part: "note" | "commitment" | "plan", id: string): EditOp {
+  return { op: "mind_memory", entity, part, id, value: null };
+}
+
+function textIn(text: string, cap: number): string | null {
+  const t = text.trim().replace(/\s+/g, " ");
+  return t === "" || t.length > cap ? null : t;
+}
+
+/** A whole number in [lo, hi] typed as text, else null. */
+function wholeIn(text: string, lo: number, hi: number): number | null {
+  if (text.trim() === "") return null;
+  const n = Number(text);
+  return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
+}
+
+export interface NoteDraft {
+  text: string;
+  salience: string;
+}
+
+export function noteDraft(note?: Pick<MindNote, "text" | "salience">): NoteDraft {
+  return { text: note?.text ?? "", salience: String(note?.salience ?? 3) };
+}
+
+/** A note added (`id` null) or replaced: its text, within the note cap, and a salience of 1 to 5. */
+export function noteOp(entity: EntityId, id: string | null, draft: NoteDraft): EditOp | null {
+  const text = textIn(draft.text, MIND_TEXT_CAPS.note);
+  const salience = wholeIn(draft.salience, 1, 5);
+  if (text === null || salience === null) return null;
+  return { op: "mind_memory", entity, part: "note", id, value: { text, salience } };
+}
+
+export interface CommitmentDraft {
+  kind: CommitmentKind;
+  with: EntityId[];
+  text: string;
+  /** Absolute game minutes, or null for none. */
+  due: number | null;
+  status: CommitmentStatus;
+}
+
+export function commitmentDraft(c?: Pick<MindCommitment, "kind" | "with" | "text" | "due" | "status">): CommitmentDraft {
+  return { kind: c?.kind ?? "promise", with: [...(c?.with ?? [])], text: c?.text ?? "", due: c?.due ?? null, status: c?.status ?? "open" };
+}
+
+/** A commitment added or replaced: its text within the cap, and someone it is with. */
+export function commitmentOp(entity: EntityId, id: string | null, draft: CommitmentDraft): EditOp | null {
+  const text = textIn(draft.text, MIND_TEXT_CAPS.commitment);
+  const withIds = [...new Set(draft.with.filter((w) => w !== "" && w !== entity))];
+  if (text === null || withIds.length === 0 || (draft.due !== null && !Number.isFinite(draft.due))) return null;
+  const value: JsonObject = { kind: draft.kind, with: withIds, text, due: draft.due === null ? null : Math.round(draft.due), status: draft.status };
+  return { op: "mind_memory", entity, part: "commitment", id, value };
+}
+
+export interface PlanFormDraft {
+  what: string;
+  kind: PlanKind;
+  /** Absolute game minutes. */
+  from: number;
+  to: number;
+  where: PlaceId | null;
+  with: EntityId[];
+  priority: number;
+  status: PlanStatus;
+}
+
+/** A new plan starts an hour from now and lasts an hour; an existing one, as it is. */
+export function planDraft(now: number, plan?: MindPlan): PlanFormDraft {
+  if (plan) return { what: plan.what, kind: plan.kind, from: plan.when.from, to: plan.when.to, where: plan.where, with: [...plan.with], priority: plan.priority, status: plan.status };
+  return { what: "", kind: "errand", from: now + 60, to: now + 120, where: null, with: [], priority: PLAN_PRIORITY.normal, status: "open" };
+}
+
+/** Moves a plan to start `hours` from now, keeping how long it lasts. */
+export function startPlanIn(draft: PlanFormDraft, now: number, hours: number): PlanFormDraft {
+  const from = Math.round(now + hours * 60);
+  return { ...draft, from, to: from + (draft.to - draft.from) };
+}
+
+/** Sets how long a plan lasts, from its start. */
+export function planLasts(draft: PlanFormDraft, minutes: number): PlanFormDraft {
+  return { ...draft, to: draft.from + Math.round(minutes) };
+}
+
+/** A plan added or replaced: what it is within the cap, a start before its end, and a priority of 1 to 5. */
+export function planOp(entity: EntityId, id: string | null, draft: PlanFormDraft): EditOp | null {
+  const what = textIn(draft.what, MIND_TEXT_CAPS.planWhat);
+  const ok = Number.isInteger(draft.from) && Number.isInteger(draft.to) && draft.from < draft.to && Number.isInteger(draft.priority) && draft.priority >= PLAN_PRIORITY.min && draft.priority <= PLAN_PRIORITY.max;
+  if (what === null || !ok) return null;
+  const value: JsonObject = { what, kind: draft.kind, when: { from: draft.from, to: draft.to }, where: draft.where, with: [...new Set(draft.with.filter((w) => w !== "" && w !== entity))], priority: draft.priority, status: draft.status };
+  return { op: "mind_memory", entity, part: "plan", id, value };
+}

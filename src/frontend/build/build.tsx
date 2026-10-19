@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { isRecord } from "../../shared/json";
 import { mapSettingsOf } from "../../shared/maps";
-import { worldMindsOf } from "../../shared/minds";
 import type { LintIssue, WorldCollection, WorldPart } from "../../shared/protocol";
 import { spawnCapOf, type WorldDoc, type WorldIndex } from "../../shared/world";
 import type { App, BuildRoute } from "../app";
@@ -22,6 +21,7 @@ import { JobView } from "./jobs";
 import { COLLECTION_SPECS, newItem, PART_SPECS } from "./schema";
 import { lintAt, SchemaFields, worldIdentifiers } from "./schema-form";
 import { LookupTableEditor } from "./lookup-editor";
+import { MindsEditor } from "./minds-editor";
 import { LoreEditor, LoreList } from "./lore-editor";
 import { TableEditor } from "./table-editor";
 import { RulesetEditor } from "./ruleset-editor";
@@ -57,6 +57,7 @@ const PARTS: { id: WorldPart; label: string }[] = [
   { id: "time", label: "Time defaults" },
   { id: "ruleset", label: "Ruleset" },
   { id: "loreIndex", label: "Lore lookup table" },
+  { id: "minds", label: "Minds" },
 ];
 
 const TEMPLATES: { id: string | null; label: string }[] = [
@@ -610,7 +611,7 @@ function ItemView(props: { collection: WorldCollection; id: string | null }) {
   return <Editor world={draft.doc} collection={props.collection} id={props.id} send={send} />;
 }
 
-function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset">): JsonObject {
+function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds">): JsonObject {
   switch (part) {
     case "calendar":
       return doc.calendar as unknown as JsonObject;
@@ -619,10 +620,8 @@ function partValue(doc: WorldDoc, part: Exclude<WorldPart, "tiers" | "loreIndex"
     case "time":
       return doc.time as unknown as JsonObject;
     case "meta":
+      // Map settings and the spawn cap show as the world plays them: a world without them, with the defaults.
       return { name: doc.name, pov: doc.pov, start: { ...doc.start }, seedMode: doc.seedMode, lenientPricing: doc.lenientPricing, spawnCap: spawnCapOf(doc), lifeStates: structuredClone(doc.lifeStates ?? {}) as unknown as JsonObject, currency: { ...doc.currency }, mapSettings: structuredClone(mapSettingsOf(doc)) as unknown as JsonObject };
-    case "minds":
-      // As the world plays it: a world without its own, with the defaults.
-      return structuredClone(worldMindsOf(doc)) as unknown as JsonObject;
   }
 }
 
@@ -634,10 +633,11 @@ function PartView(props: { part: WorldPart }) {
   if (props.part === "tiers") return <TiersEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "tiers", value })} />;
   if (props.part === "loreIndex") return <LookupTableEditor doc={draft.doc} lint={draft.lint} save={(value) => send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "loreIndex", value })} />;
   if (props.part === "ruleset") return <RulesetEditor />;
+  if (props.part === "minds") return <MindsEditor />;
   return <SchemaPartView part={props.part} />;
 }
 
-function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset"> }) {
+function SchemaPartView(props: { part: Exclude<WorldPart, "tiers" | "loreIndex" | "ruleset" | "minds"> }) {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
   const send = useMemo(() => draftSend(app), [app]);
