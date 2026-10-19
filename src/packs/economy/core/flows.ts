@@ -279,7 +279,8 @@ function foundationFlows(ctx: ReadContext): Flow[] {
     const statements = featureOn(level, "statements", toggles(ctx.world));
     const amount: FlowAmount = mode === "fixed" ? { fixed: Math.round(numOf(e.fields.autopay_cents)) } : t.installment ? { due: "minimum" } : statements ? { due: mode === "minimum" ? "minimum" : mode === "statement" ? "statement" : "balance" } : { due: "balance" };
     let schedule: FlowSchedule;
-    if (t.installment) schedule = { every: "month", days: [dueDayOf(ctx, id) ?? numOf(e.fields.statement_day, 1)] };
+    // A loan's autopay falls on the day its bill does: its due day, else its product's statement day.
+    if (t.installment) schedule = { every: "month", days: [dueDayOf(ctx, id) ?? productOf(ctx, id)?.statement_day ?? 1] };
     else if (statements) {
       const cycle = cycleOf(s, id);
       if (!cycle) continue;
@@ -368,6 +369,8 @@ function tableAmount(ctx: ReadContext, table: string, row: string, column: strin
  */
 export function occurrenceAmount(hooks: FinanceHooks, ctx: ReadContext, flow: Flow, at: number, rng: Rng, deferred: number): { cents: number; posting?: FlowPosting } | Rejection | null {
   const a = flow.amount;
+  // Nothing is due on a loan before its first bill: a loan just taken owes no payment yet.
+  if (traitsOf(ctx, flow.to)?.installment && !cycleOf(ctx.state, flow.to)) return null;
   let cents: number | null = null;
   if ("fixed" in a) cents = a.fixed;
   else if ("formula" in a) {
@@ -387,7 +390,8 @@ export function occurrenceAmount(hooks: FinanceHooks, ctx: ReadContext, flow: Fl
     const owed = -balance(ctx.state, account);
     const cycle = cycleOf(ctx.state, account);
     if (owed <= 0) return null;
-    if (a.due === "balance" || !cycle) cents = owed;
+    if (a.due === "balance") cents = owed;
+    else if (!cycle) return null;
     else cents = Math.min(owed, Math.max(0, (a.due === "minimum" ? cycle.minimum : cycle.closing) - cycle.paid));
   } else {
     const provider = own(hooks.amounts, a.provider);
