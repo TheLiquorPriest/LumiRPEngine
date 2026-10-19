@@ -2,13 +2,14 @@
 // the published schema and the map lint, each problem marked on its line, with a preview drawn
 // the way Play's map draws it. Insert template starts a small grid map or node map.
 
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useMemo, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
 import { formatMap, mapProblems, mapTemplate, readMap } from "../../../shared/maps";
 import { pathText } from "../../../shared/schema-check";
 import type { MapDoc, WorldDoc } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
+import { useHeld } from "../../../frontend/build/held";
 import { newItem } from "../../../frontend/build/schema";
 import { Card, Empty, useBusy } from "../../../frontend/components";
 import { lineAt, parseJsonText } from "../../../frontend/json-text";
@@ -57,7 +58,7 @@ export function MapEditor(props: EditorProps) {
   const [busy, run] = useBusy();
   const area = useRef<HTMLTextAreaElement>(null);
   const gutter = useRef<HTMLPreElement>(null);
-  useEffect(() => setText(initial), [initial]);
+  useHeld(text, setText, initial, `${props.world.id}/maps/${props.id ?? ""}`, initial);
   const checked = useMemo(() => checkMapText(text, id, props.world), [text, id, props.world]);
   const marks = new Map<number, "error" | "warning">();
   for (const p of checked.problems) if (marks.get(p.line) !== "error") marks.set(p.line, p.severity);

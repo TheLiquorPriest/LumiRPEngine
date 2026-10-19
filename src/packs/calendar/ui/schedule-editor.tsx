@@ -7,6 +7,7 @@ import type { JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
 import type { Recurrence, ScheduleDef, ScheduleSlot } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
+import { useHeld } from "../../../frontend/build/held";
 import { kindIs, SelectorEditor, selectorOf } from "../../../frontend/build/selector-editor";
 import { Seg, useBusy } from "../../../frontend/components";
 import type { EditorProps } from "../../../frontend/registry";
@@ -94,7 +95,7 @@ export function ScheduleEditor(props: EditorProps) {
   const [schedule, setSchedule] = useState<ScheduleDef>(stored ? structuredClone(stored) : blank);
   const [selected, setSelected] = useState(0);
   const [busy, run] = useBusy();
-  useEffect(() => setSchedule(stored ? structuredClone(stored) : blank), [JSON.stringify(stored)]);
+  useHeld(schedule, setSchedule, stored ?? blank, `${props.world.id}/schedules/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const problems = useMemo(() => slotProblems(schedule.slots), [schedule.slots]);
   // Owners and selectors see the packs' kinds too (groups among them); the world's own win.
   const doc = useMemo(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);

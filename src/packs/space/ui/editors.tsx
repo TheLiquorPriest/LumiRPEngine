@@ -7,6 +7,7 @@ import type { JsonValue } from "../../../shared/json";
 import type { GridDef } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { MapOwned, SchemaEditor } from "../../../frontend/build/build";
+import { useHeld } from "../../../frontend/build/held";
 import { Seg, useBusy } from "../../../frontend/components";
 import { fit, GestureTracker, IDENTITY, toScreen, toWorld } from "../../../frontend/map-math";
 import type { Point, Transform } from "../../../frontend/map-math";
@@ -223,7 +224,7 @@ export function GridEditor(props: EditorProps) {
   const [newZone, setNewZone] = useState("");
   const adding = useRef(true);
   const [busy, run] = useBusy();
-  useEffect(() => setGrid(stored ? structuredClone(stored) : blank), [JSON.stringify(stored)]);
+  useHeld(grid, setGrid, stored ?? blank, `${props.world.id}/grids/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   if (!id) return <SchemaEditor {...props} />;
   if (stored?.map) return <MapOwned worldId={props.world.id} collection="grids" id={id} value={stored} map={stored.map} />;
   const changed = JSON.stringify(grid) !== JSON.stringify(stored ?? null);

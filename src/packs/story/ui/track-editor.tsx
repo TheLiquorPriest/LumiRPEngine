@@ -1,13 +1,14 @@
 // The track-graph special widget (DESIGN §13): a track's stages laid out in layers from the start
 // along `next` and `fail` edges (unreachable stages flagged), tap a stage to edit it.
 
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useMemo, useState } from "preact/hooks";
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { StageDef, TrackDef, TrackKind } from "../../../shared/world";
 import { useApp } from "../../../frontend/app";
 import { lintAt, SchemaFields, worldIdentifiers } from "../../../frontend/build/schema-form";
 import { SelectorEditor } from "../../../frontend/build/selector-editor";
 import { EFFECT, type FieldSpec } from "../../../frontend/build/schema";
+import { useHeld } from "../../../frontend/build/held";
 import { Seg, useBusy } from "../../../frontend/components";
 import type { EditorProps } from "../../../frontend/registry";
 
@@ -180,7 +181,7 @@ export function TrackEditor(props: EditorProps) {
   const [selected, setSelected] = useState<string | null>(track.start);
   const [newStage, setNewStage] = useState("");
   const [busy, run] = useBusy();
-  useEffect(() => setTrack(stored ? structuredClone(stored) : blank), [JSON.stringify(stored)]);
+  useHeld(track, setTrack, stored ?? blank, `${props.world.id}/tracks/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = useMemo(() => worldIdentifiers(props.world), [props.world]);
   if (!id) return <span class="lre-muted">Choose a track.</span>;
   const stageIds = Object.keys(track.stages);

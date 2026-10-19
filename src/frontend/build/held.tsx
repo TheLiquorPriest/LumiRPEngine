@@ -20,8 +20,11 @@ export interface HeldForm {
 /** The forms holding edits over a change made elsewhere (one, unless several editors are open). */
 export const heldForms = createStore<readonly HeldForm[]>([]);
 
-interface Base<T> {
+/** What a form's edits were made over. */
+export interface HeldBase<T> {
+  /** The item the form edits. */
   key: string;
+  /** Changes when the draft's value of that item does. */
   watch: string;
   /** The JSON of the draft's value the form's edits were made over. */
   from: string;
@@ -29,36 +32,62 @@ interface Base<T> {
   theirs: { value: T; json: string } | null;
 }
 
+/** A form's next base, and the draft's value it loads, when it loads one. */
+export interface HeldStep<T> {
+  base: HeldBase<T>;
+  load?: { value: T };
+}
+
+/** A form's base as it opens an item: its edits, none yet, are over the draft's value of it. */
+export function heldStart<T>(key: string, watch: string, initial: T): HeldBase<T> {
+  return { key, watch, from: JSON.stringify(initial), theirs: null };
+}
+
+/**
+ * A form's step when the item it edits (`key`), or the draft's value of it (`watch`), may have
+ * changed; null when neither did. Another item, Build's own write, an untouched form or one that
+ * already matches follows the draft, as forms always did. Edits over a reload are kept, with the
+ * draft's value as theirs, and stay made over what they were made over.
+ */
+export function holdOrFollow<T>(base: HeldBase<T>, now: { key: string; watch: string; value: T; initial: T; reloaded: boolean }): HeldStep<T> | null {
+  if (now.key === base.key && now.watch === base.watch) return null;
+  const mine = JSON.stringify(now.value);
+  const next = JSON.stringify(now.initial);
+  if (now.key !== base.key || !now.reloaded || mine === base.from || mine === next) {
+    const followed: HeldBase<T> = { key: now.key, watch: now.watch, from: next, theirs: null };
+    return mine === next ? { base: followed } : { base: followed, load: { value: now.initial } };
+  }
+  return { base: { ...base, watch: now.watch, theirs: { value: now.initial, json: next } } };
+}
+
+/** A held form's step on the user's choice: either way its edits are over theirs now, and Load theirs loads theirs. */
+export function heldChoice<T>(base: HeldBase<T>, choice: "theirs" | "mine"): HeldStep<T> {
+  if (!base.theirs) return { base };
+  const settled: HeldBase<T> = { key: base.key, watch: base.watch, from: base.theirs.json, theirs: null };
+  return choice === "theirs" ? { base: settled, load: { value: base.theirs.value } } : { base: settled };
+}
+
 /**
  * Keeps a form's `value` (with its setter) over `initial`, the draft's value of what it edits: `key`
  * names that item (another key is another item, which the form simply loads), and `watch` changes
- * when the draft's value does (its JSON by default).
+ * when the draft's value does (its JSON by default). Every Build editor keeps its form with it, the
+ * ones packs register included, so Build's bar and the save prompt cover them all.
  */
 export function useHeld<T>(value: T, set: (next: T) => void, initial: T, key: string, watch: string = JSON.stringify(initial)): void {
   const reloaded = useSelect(useApp().drafts, (d) => d?.reloaded === true);
-  const [base, setBase] = useState<Base<T>>(() => ({ key, watch, from: JSON.stringify(initial), theirs: null }));
-  useEffect(() => {
-    if (key === base.key && watch === base.watch) return;
-    const mine = JSON.stringify(value);
-    const next = JSON.stringify(initial);
-    // Another item, Build's own write, an untouched form, or one that already matches: the form follows the draft, as it always did.
-    if (key !== base.key || !reloaded || mine === base.from || mine === next) {
-      setBase({ key, watch, from: next, theirs: null });
-      if (mine !== next) set(structuredClone(initial));
-      return;
-    }
-    setBase({ ...base, watch, theirs: { value: initial, json: next } });
-  }, [key, watch]);
+  const [base, setBase] = useState<HeldBase<T>>(() => heldStart(key, watch, initial));
+  const apply = (step: HeldStep<T> | null): void => {
+    if (!step) return;
+    setBase(step.base);
+    // A copy, so the form's edits never write into the draft's own value.
+    if (step.load) set(structuredClone(step.load.value));
+  };
+  useEffect(() => apply(holdOrFollow(base, { key, watch, value, initial, reloaded })), [key, watch]);
   const theirs = base.theirs;
   useEffect(() => {
     if (!theirs) return undefined;
-    const form: HeldForm = {
-      loadTheirs: () => {
-        setBase({ key, watch: base.watch, from: theirs.json, theirs: null });
-        set(structuredClone(theirs.value));
-      },
-      keepMine: () => setBase({ key, watch: base.watch, from: theirs.json, theirs: null }),
-    };
+    // The base stays as it is while this form is registered: every step that changes it changes `theirs` too.
+    const form: HeldForm = { loadTheirs: () => apply(heldChoice(base, "theirs")), keepMine: () => apply(heldChoice(base, "mine")) };
     heldForms.update((all) => [...all, form]);
     return () => heldForms.update((all) => all.filter((f) => f !== form));
   }, [theirs]);
