@@ -26,7 +26,7 @@ export const SECRECY_EXPLAINED: Record<MindsSecrecy, { label: string; text: stri
   },
   full: {
     label: "Full",
-    text: "The narrator also gets each character's inner monologue and what they mean to do, told to show them through behaviour and never say them outright. Richer, more consistent characters; a careless narrator could let a thought or a secret slip.",
+    text: "The narrator also gets each character's inner monologue, what they mean to do, their reactions and their mood, told to show them through behaviour and never say them outright. Richer, more consistent characters; a careless narrator could let a thought or a secret slip.",
   },
 };
 

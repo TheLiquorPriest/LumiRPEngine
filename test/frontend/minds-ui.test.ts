@@ -2,7 +2,7 @@
 // Minds values, and the GM view's controls, each sent to a real backend and read back.
 
 import { describe, expect, test } from "bun:test";
-import { commitmentDraft, commitmentOp, deleteOp, noteOp, pinOp, planDraft, planLasts, planOp, refreshOp, startPlanIn } from "../../src/packs/minds/ui/ops";
+import { commitmentDraft, commitmentOp, deleteOp, narratorGets, noteOp, pinOp, planDraft, planLasts, planOp, refreshOp, startPlanIn, type MindPart } from "../../src/packs/minds/ui/ops";
 import { MEMORY_FIELDS, memoryOverride, memoryOverridePatch, mindsPolicyPatch, mindsPromptPatch, withMemoryLevel } from "../../src/frontend/settings/minds-patch";
 import { mindsPartValue } from "../../src/frontend/build/minds-editor";
 import { decodeContextView } from "../../src/frontend/play/context";
@@ -17,6 +17,12 @@ import { Rig } from "../support/rig";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
 import { mindsOn, mindsStepConfig } from "../../src/backend/minds";
 import { HELPER_MAX_TOKENS, stepConfigOf, type ModelUseSettings } from "../../src/shared/settings";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { ALL_PACKS } from "../../src/packs/index";
+import { mindLines } from "../../src/packs/minds/core/section";
+import { readCharacter } from "../../src/packs/minds/core/state";
+import { modernUsWorld } from "../packs/riverton";
+import { fold, startState } from "../packs/support";
 
 const field = (part: string, key: string) => {
   const f = MEMORY_FIELDS.find((x) => x.part === part && x.key === key);
@@ -186,6 +192,23 @@ describe("GM view → Minds controls", () => {
     expect(planOp("dev", null, planLasts(moved, 0))).toBeNull();
     expect(planOp("dev", null, { ...longer, what: " " })).toBeNull();
     expect(planOp("dev", null, { ...longer, priority: 6 })).toBeNull();
+  });
+
+  test("the to-the-narrator badges mark exactly what the Minds section gives the narrator, under each secrecy", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const text: Record<MindPart, string> = { mood: "wary", monologue: "I should keep my head down today", depiction: "keeps glancing at the door", intent: "Get through the shift", reactions: "changes the subject", interrupt: "needs a word before she leaves" };
+    for (const [secrecy, withheld] of [["full", false], ["brief", false], ["brief", true]] as const) {
+      const w = modernUsWorld("w", "R");
+      w.minds = { secrecy } as WorldDoc["minds"];
+      const s0 = fold(reg, w, startState(w), [{ type: "set", entity: "maya", field: "place", value: "apartment" }]);
+      const data = { entity: "maya", at: s0.clock, place: "apartment", level: "live", moment: "beat", reason: "live", monologue: `${text.monologue}.`, depiction: text.depiction, intent: `${text.intent}.`, reactions: [`if asked about money, ${text.reactions}`], plans: [], mood: text.mood, interrupt: { reason: text.interrupt }, withheld };
+      const s = fold(reg, w, s0, [{ type: "minds.round", data: { at: s0.clock, on: true } }, { type: "minds.mind", data }]);
+      const line = mindLines(reg.context(w, s)).map((l) => l.line).join("\n");
+      const record = readCharacter(s, "maya").mind;
+      if (!record) throw new Error("no mind recorded");
+      const sent = narratorGets(secrecy, record);
+      for (const part of Object.keys(text) as MindPart[]) expect([secrecy, withheld, part, sent[part]]).toEqual([secrecy, withheld, part, line.includes(text[part])]);
+    }
   });
 });
 
