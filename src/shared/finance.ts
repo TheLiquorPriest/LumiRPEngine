@@ -585,6 +585,12 @@ export interface CycleState {
   penalty: boolean;
   /** Installment loans: months left after this statement. */
   months_left?: number;
+  /** Consecutive cycles paid on time (six lift a penalty rate), and the history the credit report counts. */
+  streak?: number;
+  ontime?: number;
+  late30?: number;
+  late60?: number;
+  late90?: number;
 }
 
 /** One statement as a dashboard lists it. */
@@ -1269,7 +1275,10 @@ export interface BusinessView {
   owners: OwnerLine[];
   accounts: EntityId[];
   places: { id: string; name: string }[];
+  /** Year to date. */
   books: { period: string; revenue: number; expenses: number; payroll: number; taxes: number; profit: number; lines: { category: string; cents: number }[] };
+  /** The last 12 months, newest first. */
+  months: { period: string; revenue: number; expenses: number; profit: number }[];
   sales: JournalLine[];
   invoices: (Invoice & { customerName: string; issuedAt: string; dueAt: string })[];
   employees: JobView[];

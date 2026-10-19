@@ -16,6 +16,7 @@ import type { AccountClass, AlertLine, ClassTraits, FilingStatus, FinanceFeature
 import type { FieldDef } from "../../../shared/world";
 import type { CoreRegistry, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
+import type { Rng } from "../../../engine/rng";
 
 /** One occurrence's money, as a module's amount provider gives it. */
 export interface FlowPosting {
@@ -36,9 +37,10 @@ export interface FlowPosting {
 
 /**
  * Builds an occurrence of a flow whose amount is `{provider: id}`. Null skips the occurrence (no pay
- * this period); a rejection is a shortfall the flow's policy handles.
+ * this period); a rejection is a shortfall the flow's policy handles. `rng` is the occurrence's own
+ * draw, seeded from the run seed, the flow and the occurrence, as the engine's `range` amounts are.
  */
-export type AmountProvider = (ctx: ReadContext, flow: Flow, at: number) => FlowPosting | Rejection | null;
+export type AmountProvider = (ctx: ReadContext, flow: Flow, at: number, rng: Rng) => FlowPosting | Rejection | null;
 
 /** Flows a module derives from its records each time the engine reads them (paychecks from jobs, rent from leases, property tax). */
 export interface FlowSource {
