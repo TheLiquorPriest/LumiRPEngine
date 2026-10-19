@@ -381,6 +381,7 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
         accounts: strings(b.accounts),
         places: list(b.places, (p) => (typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id) } : null)),
         books: { period: str(books.period), revenue: num(books.revenue), expenses: num(books.expenses), payroll: num(books.payroll), taxes: num(books.taxes), profit: num(books.profit), lines: list(books.lines, (l) => ({ category: str(l.category), cents: num(l.cents) })) },
+        months: list(b.months, (m) => ({ period: str(m.period), revenue: num(m.revenue), expenses: num(m.expenses), profit: num(m.profit) })),
         sales: list(b.sales, journalLine),
         invoices: list(b.invoices, (i) =>
           typeof i.id === "string"

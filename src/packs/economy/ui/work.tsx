@@ -239,6 +239,14 @@ function BusinessCard(props: { view: FinanceView; business: BusinessView; contro
             <Row key={l.category} k={humanize(l.category)} v={fmt(l.cents)} tone={l.cents < 0 ? "neg" : "pos"} />
           ))
         : null}
+      {blocks.books && b.months.length > 0 ? (
+        <>
+          <div class="lre-h">Month by month</div>
+          {b.months.map((m) => (
+            <Row key={m.period} k={m.period} sub={`${fmt(m.revenue)} in · ${fmt(-Math.abs(m.expenses))} out`} v={fmt(m.profit)} tone={m.profit < 0 ? "neg" : "pos"} />
+          ))}
+        </>
+      ) : null}
       {blocks.sales && b.sales.length > 0 ? (
         <>
           <div class="lre-h">Sales</div>
