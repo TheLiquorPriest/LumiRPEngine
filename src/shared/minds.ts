@@ -600,10 +600,15 @@ export const MINDS_EVENTS = {
 
 export type RoundEventData = { at: number; on: boolean };
 
-/** `minds.mind`: one character's mind, as answered and screened. */
+/**
+ * `minds.mind`: one character's mind, as answered and screened. Its apply reads only its own data and
+ * the minds slice, never an entity's fields, so a coarsened skip record (L21) folds it the same.
+ */
 export type MindEventData = {
   entity: EntityId;
   at: number;
+  /** Where they were when they thought it. */
+  place: PlaceId | null;
   level: Fidelity;
   moment: "turn" | "beat";
   /** Why it ran (`RefreshReason`, or a beat's reason). */

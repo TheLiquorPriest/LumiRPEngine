@@ -108,17 +108,21 @@ Built in: `in`, `owns`, `uses`, `worn_by`, `equipped`, `knows`, `member_of`, `re
 |---|---|
 | `brief` | `text` |
 | `choices` | `text`, `effects` |
+| `consolidate` | `text` |
 | `contradiction` | `decision`, `text`, `effects` |
 | `extract` | `text`, `effects` |
 | `interpret` | `decision`, `text` |
 | `judge` | `decision`, `text` |
+| `memory` | `text` |
+| `mind` | `text` |
 | `npc.choose` | `decision`, `text` |
 | `outline` | `text` |
 | `puzzle.answer` | `decision`, `text` |
+| `skip` | `text` |
 
 Signals: `agents_present`, `always`, `beat`, `classifier`, `conflict`, `day_start`, `invitation`, `never`, `offscreen`, `present`, `reply`, `scene_change`, `slot_crossed`, `tie_zone`, `timelapse`, `typed_input`, and `every_n:<k>`.
 
-Template placeholders: `beats`, `brief`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.
+Template placeholders: `beats`, `brief`, `character`, `clock`, `facts`, `outcome`, `place`, `pov`, `present`, `recent`, `reply`, `scene`, `user`, `world`.
 
 ### Sections
 
