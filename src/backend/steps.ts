@@ -8,6 +8,7 @@ import type { ActionId, EntityId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { StepConfig } from "../shared/settings";
+import { HELPER_MAX_TOKENS } from "../shared/settings";
 import type { StepPurpose, WorldCurrency, WorldDoc } from "../shared/world";
 import { lifeStatesOf } from "../shared/world";
 import type { Answers, Questions } from "../engine/decide";
@@ -15,7 +16,6 @@ import { ACTION_QUEUE_LIMIT, type InterpretOutput, type QueuedAction } from "../
 import { cashGift } from "../packs/gear/core/index";
 import type { HostPort, QuietMessage, QuietRequest, QuietResult } from "./host";
 import type { LookupTransport, StepLore } from "./lore-steps";
-import { HELPER_MAX_TOKENS } from "./settings-store";
 import { readStoredJson } from "./stored-json";
 
 export interface CallRecord {

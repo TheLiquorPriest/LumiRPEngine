@@ -14,6 +14,9 @@ import type { MindCallTrace, MindsSettings, WorldMindsConfig } from "../../src/s
 import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_PRESETS, worldMindsOf } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
+import { stepUpdatePatch } from "../../src/frontend/settings/steps";
+import { mindsOn, mindsStepConfig } from "../../src/backend/minds";
+import { HELPER_MAX_TOKENS, stepConfigOf, type ModelUseSettings } from "../../src/shared/settings";
 
 const field = (part: string, key: string) => {
   const f = MEMORY_FIELDS.find((x) => x.part === part && x.key === key);
@@ -96,6 +99,25 @@ describe("Settings → Minds patches", () => {
     expect(memoryOverride(s.minds.memory, field("recall", "tokens"))).toBeUndefined();
     expect(memoryOverride(s.minds.memory, field("consolidate", "enabled"))).toBe(false);
     expect(s.preset).toBe("full");
+  });
+});
+
+describe("Settings → Steps with the minds steps", () => {
+  test("on Lean the unsaved minds cards show what runs, and picking a connection on Character minds leaves minds on when they're turned on", async () => {
+    const rig = new Rig();
+    type Read = { minds: MindsSettings; modelUse: ModelUseSettings };
+    const set = async (patch: JsonObject): Promise<Read> => rig.body(await rig.send({ type: "lre.settings.set", patch })).settings as Read;
+    const lean = await set({ modelUse: { preset: "lean" } });
+    for (const purpose of ["mind", "memory", "skip", "consolidate"] as const) {
+      expect(lean.modelUse.steps[purpose]).toBeUndefined();
+      expect(stepConfigOf(lean.modelUse.steps, purpose)).toEqual({ enabled: true, signals: [], maxTokens: HELPER_MAX_TOKENS });
+    }
+    // The card saves its whole config with the change, as the Connection select does.
+    const card = stepConfigOf(lean.modelUse.steps, "mind");
+    await set(stepUpdatePatch("mind", { ...card, route: { provider: "helper", connectionId: "conn-2", model: null } }));
+    const after = await set(mindsPolicyPatch({ enabled: true }));
+    expect(mindsOn(after)).toBe(true);
+    expect(mindsStepConfig(after.modelUse, "mind")).toMatchObject({ enabled: true, maxTokens: HELPER_MAX_TOKENS, route: { connectionId: "conn-2" } });
   });
 });
 
