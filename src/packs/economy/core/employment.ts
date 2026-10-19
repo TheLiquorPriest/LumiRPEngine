@@ -380,6 +380,24 @@ function scheduledPaydays(ctx: ReadContext, api: FinanceApi, job: Job, fromDay: 
   return days.filter((d) => (first === undefined || d >= first) && d <= target);
 }
 
+/** Where a weekly or biweekly payroll flow counts its weeks from: the job's anchor. */
+function flowStart(cal: Calendar, job: Job): string | undefined {
+  return job.anchor !== null && (job.every === "weekly" || job.every === "biweekly") ? dateText(cal, job.anchor) : undefined;
+}
+
+/**
+ * Where a job's pay starts before any paycheck is paid: the scheduled payday before the chat's
+ * first (a gig's: the day of its first payout). Null when no payday falls in the chat's first year.
+ */
+function firstPeriodDay(ctx: ReadContext, api: FinanceApi, job: Job): number | null {
+  const cal = calendarOf(ctx.world);
+  const begun = chatStart(ctx.world);
+  const at = api.occurrences(ctx, payFlowSchedule(ctx, job), begun, begun + 400 * MINUTES_PER_DAY, flowStart(cal, job))[0];
+  if (at === undefined) return null;
+  const day = dateAt(cal, at).dayIndex;
+  return job.every === "per_job" ? day : (scheduledPaydays(ctx, api, job, day, day)[0] ?? null);
+}
+
 // ---------------------------------------------------------------- the work a job counts
 
 type Block = { start: number; end: number };
@@ -522,13 +540,16 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   const record = payRecord(ctx.state, job.id);
   const paidThrough = typeof record.through === "number" ? record.through : null;
   const periodic = job.basis === "salary" || job.basis === "stipend";
-  const paydays = job.every === "per_job" ? [payDay - 1, payDay] : scheduledPaydays(ctx, api, job, paidThrough === null ? payDay : dateAt(cal, paidThrough).dayIndex, payDay);
+  // With nothing paid yet, pay runs from the period the chat's first payday closes, so a first
+  // paycheck that couldn't be paid is paid with the next.
+  const first = paidThrough === null ? firstPeriodDay(ctx, api, job) : null;
+  const paydays = job.every === "per_job" ? [payDay - 1, payDay] : scheduledPaydays(ctx, api, job, paidThrough !== null ? dateAt(cal, paidThrough).dayIndex : (first ?? payDay), payDay);
   if (paydays.length < 2) return null;
-  // Hours are cut at the start of each payday, so the first period runs from the start of the one
-  // before; a salary's periods are whole days after it.
-  const firstStart = clockAt(cal, (paydays[paydays.length - 2] ?? payDay) + (periodic ? 1 : 0), 0);
+  // Hours are cut at the start of each payday, so a period runs from the start of the one before;
+  // a salary's periods are whole days after it. A gig's day pays that evening.
+  const firstStart = clockAt(cal, job.every === "per_job" ? (first ?? payDay) : (paydays[0] ?? payDay) + (periodic ? 1 : 0), 0);
   const startClock = job.start === null ? -Infinity : clockAt(cal, job.start, 0);
-  const since = paidThrough ?? Math.max(startClock, job.every === "per_job" ? clockAt(cal, payDay, 0) : firstStart);
+  const since = paidThrough ?? Math.max(startClock, firstStart);
   const through = periodic ? clockAt(cal, (paydays[paydays.length - 1] ?? payDay) + 1, 0) : Math.max(since, cutoff);
   if (through <= since) return null;
   const work = workIn(ctx, job, since, Math.max(since, cutoff));
@@ -709,7 +730,7 @@ function payrollFlow(ctx: ReadContext, api: FinanceApi, job: Job): Flow | null {
   if (job.every === null) return null;
   const cal = calendarOf(ctx.world);
   const schedule = payFlowSchedule(ctx, job);
-  const start = job.anchor !== null && (job.every === "weekly" || job.every === "biweekly") ? dateText(cal, job.anchor) : undefined;
+  const start = flowStart(cal, job);
   // The last paycheck comes on the first payday after the last day worked. The flow ends on that
   // payday's scheduled day, since its occurrences are counted by it: rolled back off a weekend, the
   // payday is paid before the day the flow would otherwise end on.

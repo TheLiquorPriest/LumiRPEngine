@@ -18,4 +18,18 @@ describe("payroll: paydays", () => {
     expect(paid(w, "job_temp").map((d) => d.gross)).toEqual([Math.round(((4_800_000 / 24) * 5) / 16)]);
     expect(payslips(w, "job_temp")).toHaveLength(1);
   });
+
+  test("a first paycheck the employer can't cover is paid with the next", () => {
+    // Brightline opens with nothing; its first walk-in takings come at Friday's close, after the 09:00 payday.
+    const { w } = setup((wd) => {
+      Object.assign(wd.entities.brightline!.fields, { daily_sales: 300_000, margin_pct: 100, collects_sales_tax: false });
+      wd.entities.bl_operating!.fields.opening = 0;
+      wd.entities.job_driver = entity("job_driver", "job", "Driver", { worker: "rosa", employer: "brightline", title: "Driver", basis: "hourly", rate: 2000, hours: "contract", hours_per_week: 40, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06" });
+    });
+    lapse(w, 8 * DAY);
+    const runs = packEvents(w, "economy.flow_run").filter((e) => e.data.flow === "pay:job_driver");
+    expect(runs.map((e) => e.data.outcome)).toEqual(["skipped", "paid"]);
+    // Friday the 23rd pays both weeks: the one the 16th couldn't, and its own.
+    expect(paid(w, "job_driver").map((d) => [d.minutes, d.gross])).toEqual([[2 * 40 * 60, 2 * 40 * 2000]]);
+  });
 });
