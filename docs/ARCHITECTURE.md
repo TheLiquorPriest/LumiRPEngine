@@ -233,7 +233,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.chip` | `chatId, chip, choice, payload?` | `{applied, pending}` |
 | `lre.view.open` | `chatId, panel, entity` | `{materialized, pending}` |
 | `lre.fix` | `chatId, entity, field, value` | `{pending}`; checked as a `set` against the field's definition (locked fields refused), stored as one `fix` post entry |
-| `lre.edit` | `chatId, ops`: 1–64 `EditOp`s (`set`, `add`, `link`, `unlink`, `move`, `put`, `adjust`, `stage`, `entity`, `classify`, `life`, `spawn`, `despawn`, `restore`) | `{pending}`; all or none, one `fix` post entry; locked fields writable |
+| `lre.edit` | `chatId, ops`: 1–64 `EditOp`s (`set`, `add`, `link`, `unlink`, `move`, `put`, `adjust`, `stage`, `entity`, `classify`, `life`, `spawn`, `despawn`, `restore`, `effect`) | `{pending}`; all or none, one `fix` post entry; locked fields writable; `effect` runs only a pack effect registered with `gm` (literal arguments) |
 | `lre.gm` | `chatId` | `GmView`, built from the head's state when asked; never part of a snapshot or delta |
 | `lre.map` | `chatId`, then `display` (`knowledge` \| `fog`) \| `op: "walk", x, y` | `{display}`; stored in the chat's `prefs.json`, and the next snapshot's `space.map` panel is built for it. `walk`: `{walk: {minutes, disabled?}}`, Walk here to that cell of the grid the POV stands on, judged as the `step` action on the real ground |
 | `lre.marker` | `chatId`, then `resolve{domain, scope, to}` \| `time{control, scope, to}` \| `adjudicate{to}` \| `migrate{to, merge?}`; `preview` writes nothing | `{pending}`; with `preview`: `{preview}`, whose `upgrade` lists a migrate's definition changes with their default picks |
@@ -278,7 +278,7 @@ The engine calls a pack by name only through `optionalService`/`optionalQuery`, 
 |---|---|
 | `kind`, `relation` | Schema |
 | `event` | Event type: `validate` (null or a rejection; rebased views drop on rejection), `apply` (mutates the working state), `describe` |
-| `effect` | Effect proposal → concrete events, or a rejection; it declares the arguments it reads (`args`, `?` marking an optional one), which the reference lists |
+| `effect` | Effect proposal → concrete events, or a rejection; it declares the arguments it reads (`args`, `?` marking an optional one), which the reference lists; `gm` lets a GM edit run it (`lre.edit` `effect`) for what no entity field holds |
 | `service(name, impl)` | Cross-pack service with defined behavior at every level (`economy.charge`, `gear.transfer`, …) |
 | `query(name, impl)`, `formula(name, fn)` | Level-independent queries; formula functions for the expression language |
 | `renderer` | Slot lines (no `{{`/`}}`) |

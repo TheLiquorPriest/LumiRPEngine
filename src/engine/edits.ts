@@ -346,6 +346,19 @@ function restoreOp(reg: Registry, w: Working, entity: EntityId, rng: Rng): Rejec
   return e.agent ? caughtUp(w, entity) : null;
 }
 
+/**
+ * A pack effect the GM may run (`EffectDef.gm`): an asset's price, say, which no entity field holds.
+ * Its arguments are literals, and it resolves through the effect's own checks and the event guards.
+ */
+function effectOp(reg: Registry, w: Working, op: Extract<EditOp, { op: "effect" }>, opts: EditOptions, rng: Rng): Rejection | null {
+  const def = reg.effects.get(op.effect);
+  if (!opts.gm || def?.gm !== true) return reject("not_editable", `${op.effect.replace(/[._]/g, " ")} isn't something the GM view can run`);
+  const before = w.events.length;
+  const rejection = run(reg, w, [{ type: op.effect, args: op.args }], rng);
+  if (rejection) return rejection;
+  return w.events.length === before ? reject("no_change", "nothing to change") : null;
+}
+
 function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: Rng): Rejection | null {
   switch (op.op) {
     case "set":
@@ -376,6 +389,8 @@ function applyOp(reg: Registry, w: Working, op: EditOp, opts: EditOptions, rng: 
       return despawnOp(reg, w, op.entity, rng);
     case "restore":
       return restoreOp(reg, w, op.entity, rng);
+    case "effect":
+      return effectOp(reg, w, op, opts, rng);
   }
 }
 
@@ -449,6 +464,8 @@ export function parseEditOps(raw: unknown): EditOp[] | null {
         case "despawn":
         case "restore":
           return str(o.entity) ? { op: o.op, entity: o.entity } : null;
+        case "effect":
+          return str(o.effect) && isRecord(o.args) ? { op: "effect", effect: o.effect, args: o.args as JsonObject } : null;
         default:
           return null;
       }

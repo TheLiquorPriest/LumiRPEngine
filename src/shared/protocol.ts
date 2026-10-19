@@ -115,6 +115,8 @@ export interface FixRequest extends Request<"lre.fix"> {
  *    tags, both whole; the chat holds them from then on over the world's definition.
  *  - `spawn` adds an entity; `despawn` takes one out of the world (`gone`, its relations unlinked)
  *    and `restore` brings it back.
+ *  - `effect` runs a pack effect registered for GM edits (`EffectDef.gm`) with literal arguments:
+ *    what no entity field holds, such as an asset's price.
  */
 export type EditOp =
   | { op: "set"; entity: EntityId; field: FieldId; value: JsonValue }
@@ -131,7 +133,8 @@ export type EditOp =
   | { op: "life"; entity: EntityId; to?: LifeStateId; tell?: EntityId[] }
   | { op: "spawn"; kind: KindId; name: string; id?: EntityId; tier?: TierId; place?: PlaceId; agent?: boolean }
   | { op: "despawn"; entity: EntityId }
-  | { op: "restore"; entity: EntityId };
+  | { op: "restore"; entity: EntityId }
+  | { op: "effect"; effect: string; args: JsonObject };
 
 /** A GM edit on the head (DESIGN §7): the operations in order, all or none, as one `post` entry of kind `fix`; locked fields are writable. */
 export interface EditRequest extends Request<"lre.edit"> {

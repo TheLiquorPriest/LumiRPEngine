@@ -159,6 +159,11 @@ export class MockBackend {
         lines.push(`${track.label}: ${track.stages.find((s) => s.id === op.to)?.label ?? op.to}`);
         continue;
       }
+      // No engine here to run a pack's effect: the preview notes it and changes nothing.
+      if (op.op === "effect") {
+        lines.push(`Ran ${op.effect.replace(/[._]/g, " ")}`);
+        continue;
+      }
       const id = op.op === "link" || op.op === "unlink" ? op.from : op.op === "adjust" ? op.account : op.entity;
       const entity = find(id);
       if (!entity) return `${id} isn't in the world.`;
