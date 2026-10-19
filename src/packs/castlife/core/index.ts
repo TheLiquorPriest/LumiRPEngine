@@ -78,8 +78,21 @@ function satisfies(activity: string, need: string): boolean {
 
 // ---------------------------------------------------------------- commitments
 
+/** What a block of someone's commitments is: routine work or school, an appointment, a trip, one of their own plans, or other routine. */
+export type CommitmentKind = "work" | "school" | "appointment" | "trip" | "plan" | "other";
+
 interface Commitment extends FixedBlock {
-  kind: "work" | "school" | "appointment" | "trip" | "other";
+  kind: CommitmentKind;
+}
+
+/** One block a person is committed to, as `castlife.commitments` gives it (economy pay counts the work ones). */
+export interface CommitmentBlock {
+  start: number;
+  end: number;
+  activity: string;
+  place: PlaceId | null;
+  kind: CommitmentKind;
+  label: string;
 }
 
 /** Where a person's place schedules have them at `at`: the most specific schedule with a slot running wins (DESIGN §8 precedence). */
@@ -732,6 +745,8 @@ declare module "../../../engine/registry" {
     "castlife.tie_zones": (ctx: ReadContext) => { key: string; agent: EntityId; options: string[] }[];
     /** A person's activity as the player and the narrator read it: an agenda's step reads "busy" unless all their agendas are public (`shownActivity`). */
     "castlife.activity": (ctx: ReadContext, who: EntityId, activity: string) => string;
+    /** The blocks a person is committed to in [start, end), after every cut (a trip, a plan of their own, a more specific schedule): what they will actually be doing. */
+    "castlife.commitments": (ctx: ReadContext, who: EntityId, start: number, end: number) => CommitmentBlock[];
   }
 }
 
@@ -746,6 +761,7 @@ export const castlifePack: PackDef = {
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => (agent ? stepAgent(slot, ctx, rng, agent) : []) });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
     r.query("castlife.activity", shownActivity);
+    r.query("castlife.commitments", (ctx, who, start, end) => commitments(ctx, who, start, end).map((c) => ({ start: c.start, end: c.end, activity: c.activity, place: c.place ?? null, kind: c.kind, label: c.label })));
     r.query("castlife.tie_zones", (ctx) => {
       const out: { key: string; agent: EntityId; options: string[] }[] = [];
       const decided = decisions(ctx.state);
