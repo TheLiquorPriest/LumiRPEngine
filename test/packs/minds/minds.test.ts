@@ -117,6 +117,10 @@ describe("the fidelity ladder", () => {
     expect(away!.level).toBe("near");
     expect(away!.reasons.map((r) => r.label)).toContain("Not at hand, so Near at most");
     expect(score(w, at(w, base, "maya", "apartment"), "maya")?.level).toBe("live");
+    // Down the hall, under the same building: close by scores, but isn't at hand.
+    const hall = score(w, at(w, base, "maya", "apartment_hall"), "maya");
+    expect(hall!.reasons.map((r) => r.label)).toContain("Close by");
+    expect(hall!.level).toBe("near");
     expect(score(w, base, "maya", { user: "I text Maya about lunch.", reply: "" })?.level).toBe("live");
     // A pin still decides: the GM can keep someone far away Live.
     const pinned = fold(reg, w, base, [{ type: "minds.pin", data: { entity: "maya", level: "live" } }]);
