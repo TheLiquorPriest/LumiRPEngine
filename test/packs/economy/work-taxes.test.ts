@@ -6,6 +6,17 @@ import { entity, ext, lapse, line, paid, paychecks, posts, setup } from "./work-
 
 const DAY = 1440;
 
+/** Rosa (Money 3, no occupation of her own) delivering for Dashway nightly from 28 December 2026 to 16 January. */
+function courier() {
+  const { w } = setup((wd) => {
+    wd.start.at = "2026-12-28T07:30";
+    delete wd.entities.rosa!.fields.occupation;
+    wd.entities.job_gig = entity("job_gig", "job", "Courier", { worker: "rosa", employer: "Dashway", title: "Courier", occupation: "food_delivery_courier", basis: "per_shift", rate: 9000, hours: "contract", shifts_per_week: 7, weeks_per_year: 52, pay_every: "per_job", start: "2026-01-01" });
+  });
+  lapse(w, 19 * DAY);
+  return w;
+}
+
 describe("work taxes: withholding and estimated tax", () => {
   test("withholding and the estimated-tax set-aside read the job's occupation, not the worker's", () => {
     // Rosa (Money 3, Ohio's 1.4%) has no occupation of her own; each job names one.
@@ -20,15 +31,15 @@ describe("work taxes: withholding and estimated tax", () => {
     expect(line(check!, ext("tax:federal"))).toBe(Math.round(((slip?.gross as number) * 14) / 100));
 
     // A courier's contract pay in December is paid for on 15 January: the courier's 15.4% set-aside and the state's 1.4%.
-    const courier = setup((wd) => {
-      wd.start.at = "2026-12-28T07:30";
-      delete wd.entities.rosa!.fields.occupation;
-      wd.entities.job_gig = entity("job_gig", "job", "Courier", { worker: "rosa", employer: "Dashway", title: "Courier", occupation: "food_delivery_courier", basis: "per_shift", rate: 9000, hours: "contract", shifts_per_week: 7, weeks_per_year: 52, pay_every: "per_job", start: "2026-01-01" });
-    });
-    lapse(courier.w, 19 * DAY);
-    const december = paid(courier.w, "job_gig").filter((d) => d.year === 2026).reduce((a, d) => a + (d.gross as number), 0);
+    const w = courier();
+    const december = paid(w, "job_gig").filter((d) => d.year === 2026).reduce((a, d) => a + (d.gross as number), 0);
     expect(december).toBe(4 * 9000);
-    const [estimate] = posts(courier.w, /^Estimated tax/);
+    const [estimate] = posts(w, /^Estimated tax/);
     expect(-line(estimate!, "rosa_checking")).toBe(Math.round((december * (15.4 + 1.4)) / 100));
+  });
+
+  test("a person's estimated tax goes to the federal tax account their withholding goes to", () => {
+    const [estimate] = posts(courier(), /^Estimated tax/);
+    expect(line(estimate!, ext("tax:federal"))).toBe(-line(estimate!, "rosa_checking"));
   });
 });

@@ -474,8 +474,9 @@ export function registerTaxes(r: FinanceRegistry): void {
       for (const id of Object.keys(ctx.state.entities).sort()) {
         const e = own(ctx.state.entities, id);
         if (!e || isGone(ctx.state, id)) continue;
-        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(ctx, api, id)) out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, api.outside("tax:federal"), id, false));
-        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && structureOf(ctx.state, id) === "c_corp") out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? api.outside(id), api.outside("tax:federal"), id, true));
+        // The payee is named as a flow names someone outside (`tax:federal`), not as their outside account.
+        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(ctx, api, id)) out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, "tax:federal", id, false));
+        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && structureOf(ctx.state, id) === "c_corp") out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? id, "tax:federal", id, true));
       }
       return out;
     },
