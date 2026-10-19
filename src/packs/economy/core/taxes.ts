@@ -163,6 +163,8 @@ export function taxTotal(t: PayTaxes): number {
 
 export interface PayTaxInput {
   gross: number;
+  /** The job's occupation, whose flat rate applies below the top level. */
+  occupation: string;
   /** Pre-tax deductions this paycheck: `income` comes off income-tax wages, `fica` off FICA wages too. */
   pretax: { income: number; fica: number };
   /** Pay periods a year: how a paycheck annualizes. */
@@ -178,7 +180,7 @@ export interface PayTaxInput {
 }
 
 /**
- * Withholding on one paycheck. Flat: the occupation's federal-plus-FICA rate and the state rate on
+ * Withholding on one paycheck. Flat: the job's occupation's federal-plus-FICA rate and the state rate on
  * gross pay less pre-tax deductions. Brackets: the period's taxable pay annualized, less the
  * standard deduction, through the brackets and back to one period; FICA on this paycheck's FICA
  * wages within the year's wage base; state and local on taxable pay.
@@ -190,7 +192,7 @@ export function payTaxes(ctx: Ctx, person: EntityId, input: PayTaxInput): PayTax
   const stateTax = Math.round((taxable * state) / 100);
   const localTax = Math.round((taxable * local) / 100);
   if (!input.brackets) {
-    const occ = rowOf(ctx, "economy.occupations", strOf(own(ctx.state.entities, person)?.fields.occupation));
+    const occ = rowOf(ctx, "economy.occupations", input.occupation);
     return { federal: Math.round((taxable * numOf(occ?.withholding_rate_pct)) / 100), socialSecurity: 0, medicare: 0, state: stateTax, local: localTax };
   }
   const t = federalTables(ctx);
@@ -332,7 +334,7 @@ export function estimatedTax(api: FinanceApi, ctx: ReadContext, person: EntityId
   if (income <= 0) return { cents: 0, income: 0 };
   const state = (income * stateTaxPct(ctx, person).state) / 100;
   if (!api.feature(ctx, person, "tax_brackets")) {
-    const occ = rowOf(ctx, "economy.occupations", strOf(own(ctx.state.entities, person)?.fields.occupation));
+    const occ = rowOf(ctx, "economy.occupations", setAsideOccupation(ctx, person));
     return { cents: Math.round((income * numOf(occ?.estimated_tax_set_aside_pct, 15)) / 100 + state), income };
   }
   const t = federalTables(ctx);
@@ -438,10 +440,27 @@ function estimateFlow(id: string, label: string, from: string, to: string, party
   return { id, label, kind: "tax", from, to, amount: { provider: "estimated_tax", args: { party, business } }, schedule: { every: "year", months: ESTIMATE_DUE.map((d) => d.month), days: [15], roll: "after" }, shortfall: "skip", category: business ? "business_tax" : "tax", link: party, status: "active", source: "estimated_tax" };
 }
 
+/** The occupations of a person's contract jobs, ended ones too, since their pay still owes estimated tax (a job's own, else the person's), by job id. */
+function contractOccupations(ctx: ReadContext, person: EntityId): string[] {
+  const mine = strOf(own(ctx.state.entities, person)?.fields.occupation);
+  return Object.keys(ctx.state.entities)
+    .sort()
+    .flatMap((id) => {
+      const e = own(ctx.state.entities, id);
+      if (!e || e.kind !== "job" || e.fields.worker !== person) return [];
+      const occupation = strOf(e.fields.occupation, mine);
+      return e.fields.contractor === true || (e.fields.contractor === undefined && rowOf(ctx, "economy.occupations", occupation)?.self_employed === true) ? [occupation] : [];
+    });
+}
+
+/** The occupation a person's estimated tax sets aside by: their contract job's, else their own. */
+function setAsideOccupation(ctx: ReadContext, person: EntityId): string {
+  return contractOccupations(ctx, person)[0] ?? strOf(own(ctx.state.entities, person)?.fields.occupation);
+}
+
 /** Whether a person may have income nobody withholds from: a contract job, or a share of a pass-through business. */
 function owesEstimates(ctx: ReadContext, api: FinanceApi, person: EntityId): boolean {
-  if (passThroughShares(ctx, api, person).length > 0) return true;
-  return Object.values(ctx.state.entities).some((e) => e.kind === "job" && e.fields.worker === person && (e.fields.contractor === true || (e.fields.contractor === undefined && rowOf(ctx, "economy.occupations", strOf(e.fields.occupation))?.self_employed === true)));
+  return passThroughShares(ctx, api, person).length > 0 || contractOccupations(ctx, person).length > 0;
 }
 
 /** Estimated tax: a flow per person with contract pay or pass-through profit and per C corporation, its provider, and the tax queries the holdings module shares. */

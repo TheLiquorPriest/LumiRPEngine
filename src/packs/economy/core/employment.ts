@@ -593,7 +593,7 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   }
   const brackets = api.feature(ctx, job.worker, "tax_brackets");
   const year = dateAt(cal, at).year;
-  const taxes = api.feature(ctx, job.worker, "withholding") ? payTaxes(ctx, job.worker, { gross, pretax, periods: periodsPerYear(ctx, api, job), ytdFica: yearPay(ctx.state, job.worker, year).fica, brackets, selfEmployed: job.contractor, ficaExempt: job.ficaExempt }) : { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
+  const taxes = api.feature(ctx, job.worker, "withholding") ? payTaxes(ctx, job.worker, { gross, occupation: job.occupation, pretax, periods: periodsPerYear(ctx, api, job), ytdFica: yearPay(ctx.state, job.worker, year).fica, brackets, selfEmployed: job.contractor, ficaExempt: job.ficaExempt }) : { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
   // Withholding never takes more than the deductions leave: what it can't take comes off income tax
   // first, then Medicare, then Social Security. The employer's share of FICA is its own, and whole.
   const fica = taxes.socialSecurity + taxes.medicare;
