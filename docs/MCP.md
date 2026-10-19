@@ -54,7 +54,7 @@ Every answer is text, JSON for data, of at most about 24,000 characters; a large
 
 | Tool | What it does |
 |---|---|
-| `lre_guide {topic?}` | The agent guide, or one section of it ("Money", "Character minds"). |
+| `lre_guide {topic?}` | The agent guide, or one section of it ("Money", "Holdings and property", "Character minds"). |
 | `lre_docs {query, doc?}` | The best-matching sections of the reference, expressions, recipes, design, user guide, Studio contract and presets docs. |
 | `lre_schema {pointer?, schema?, offset?}` | The world (or map) JSON Schema at a pointer. |
 | `lre_templates` / `lre_template {id, pointer?, offset?}` | The starter worlds; one as an export file. |

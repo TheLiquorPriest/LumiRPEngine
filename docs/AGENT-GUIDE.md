@@ -165,12 +165,13 @@ A **business** is an entity of kind `business`, a party with `owners` (and their
 
 A business's own Money level is its tier's cap, as a person's is: it decides whether the business collects sales tax and pays business taxes (Money 4) and whether its invoices go late (Money 3). Its payroll, takings and other flows go through its accounts, and an account runs at the highest level of those who may spend from it (the business and its authorized users), whatever the account's own tier. So give a business the `principal` tier, as the modern starter does, for all of it to run.
 
-Dale's marina has run on his own account so far, its takings flowing into it and its bills out. Making it a business moves the account to the business, with Dale still spending from it as an authorized user, and a purchase at the marina then pays it:
+Dale's marina has run on his own account so far, its takings flowing into it and its bills out. Making it a business moves the account to the business, with Dale still able to spend from it as an authorized user, and a purchase at the marina then pays it. The account was all Dale had, so he gets a checking account of his own as well: without one, his own spending and bills would come out of the business's.
 
 ```json
 [
   { "op": "add", "path": "/entities/alder_harbor_marina_co", "value": { "id": "alder_harbor_marina_co", "kind": "business", "name": "Alder Harbor Marina", "tier": "principal", "fields": { "owners": [{ "party": "dale_whitcomb", "role": "owner" }], "structure": "sole_proprietorship", "places": ["alder_harbor_marina"], "operating_account": "acct_dale_marina", "industry": "marina", "margin_pct": 70, "late_fee_pct": 1.5 }, "relations": [] } },
-  { "op": "replace", "path": "/entities/acct_dale_marina/fields/owners", "value": [{ "party": "alder_harbor_marina_co", "role": "owner" }, { "party": "dale_whitcomb", "role": "authorized_user" }] }
+  { "op": "replace", "path": "/entities/acct_dale_marina/fields/owners", "value": [{ "party": "alder_harbor_marina_co", "role": "owner" }, { "party": "dale_whitcomb", "role": "authorized_user" }] },
+  { "op": "add", "path": "/entities/acct_dale_checking", "value": { "id": "acct_dale_checking", "kind": "account", "name": "Dale's checking account", "tier": "background", "fields": { "owners": [{ "party": "dale_whitcomb", "role": "owner" }], "product": "checking", "opening": 640000, "institution": "Great Lakes Bank" }, "relations": [] } }
 ]
 ```
 
@@ -224,24 +225,81 @@ The modern starter's economy is in Michigan, so a purchase in Chicago is taxed a
 ]
 ```
 
-### Holdings and property
-
-An **asset** is defined once, in `packs.economy.config.assets` by id: `label`, `class` (`security`, `fund`, `bond`, `option`, `property`, `business_stake`, `crypto` or `other`), its `price` per unit at the start, and how it moves (`model`, or `annual_return_pct` and `annual_volatility_pct`) and pays (`yield_pct`). An option names its `underlying`, `strike`, `expiry` and `right` (`call` or `put`). A **holding** is an entity of kind `holding`, a position in one asset: in an `account` (a brokerage or retirement account) or held directly by its `owners`, with `lots` (each `qty`, its total `cost` and when it was bought, `at`) and `route` for its dividends (an account id, or `reinvest`).
-
-```json
-[
-  { "op": "add", "path": "/packs/economy/config/assets/glix", "value": { "label": "Great Lakes Index Fund", "class": "fund", "symbol": "GLIX", "price": 11240, "yield_pct": 1.6 } },
-  { "op": "add", "path": "/entities/hold_pov_glix", "value": { "id": "hold_pov_glix", "kind": "holding", "name": "Great Lakes Index Fund", "tier": "background", "fields": { "account": "acct_pov_brokerage", "asset": "glix", "lots": [{ "qty": 20, "cost": 196000, "at": "2025-03-02" }], "route": "reinvest" }, "relations": [] } }
-]
-```
-
-A **property** is an entity of kind `property`, real estate tied to a `place`: `owners`, its `value` now, `appreciation_pct` a year, what it cost and when (`purchase_price`, `purchased`), and its upkeep (`tax_pct` of value a year, the region's when left out; `insurance` a month; `upkeep_pct` a year). A mortgage is an account of the `mortgage` class whose `secured_by` names the property, and the property's `mortgage` names the account back. A lease is a `rent` flow from the tenant to the owner, `link`ed to the property.
-
 ### Paying: preferences, cash machines and credit
 
 - **`pay_prefs`**, a person field, orders how they pay: tiers of `use` (`cash`, `debit`, `credit`, `charge`, `checking`, `savings`, or a card or account id), each for an amount from `min` to `max` and `categories`, but not those in `except`. A payment tries the tiers that fit it in order, then cash, debit, credit and charge; the first that covers it pays, and with none it is declined. Left out, the tiers follow their wealth band and their `traits`: a frugal or careful person keeps to cash and debit longer, an impulsive or flashy one reaches for credit first, a business pays by debit, then credit.
 - **Cash machines and branches** are place fields: `atm`, `{"bank", "fee", "limit", "deposits"}` (`fee` is the machine's own surcharge, `limit` the most one withdrawal takes), and `branch`, `{"bank"}`, a counter where that bank's customers withdraw and deposit. Where cash machines run (Money 4), cash comes out and goes in only at one of the two; at another bank's machine the product's `fees.atm` comes on top of the surcharge, a card's `daily_atm_limit` caps a day's withdrawals, and a deposit at a machine stays on hold for the account's `hold_days`. This applies only once the world places at least one `atm` or `branch`; place none and cash moves freely at every level.
 - **Credit** is played, not written: each person's report and monthly score (300 to 850) come from how their credit accounts are used and paid, and set the rates they are offered. An account's `opened` date counts toward its age.
+
+## Holdings and property
+
+Everything a party owns besides the money in its accounts: positions in assets, real estate and stakes in businesses, each counted in its net worth. Prices, payouts, trades and gains run where the `investments` feature does (Money 4), options where `options` does (Money 4), and property from Money 3 (`property`). The examples here build on the marina business of Money.
+
+### Assets
+
+An **asset** is defined once, in `packs.economy.config.assets` by id (the modern starter lists `broad_us_equity_index`, `glbd`, `lkfr`, `tnote_2030` and `btc`): a `label`, a `class` (`security`, `fund`, `bond`, `option`, `property`, `business_stake`, `crypto` or `other`), a `symbol` to show, and its `price` per unit at the start (100.00 when left out).
+
+- **How its price moves:** each class follows a recipe row of the finance table's `investing` section: securities and funds the stock index (`broad_us_equity_index`), bonds `bonds_aggregate`, crypto `crypto`. `model` names another row (`cash` holds its price), and an asset's own `annual_return_pct` (its total return), `annual_volatility_pct` and `correlation` (0 to 1, how closely it moves with its market) override the recipe. Prices are marked at 16:00 on each business day, every day for crypto.
+- **What it pays:** `yield_pct` of its value a year, paid `pays_per_year` times (4 for securities and funds, 12 for a bond fund, none for crypto). A payout comes out of the total return, so it is never counted twice. A single bond has a `face`, a `coupon_pct` and a `maturity`: it pays its coupon twice a year and is redeemed at its face on its maturity date.
+- **An option** names its `underlying` (an asset the world lists), `strike` (per unit), `expiry` (`YYYY-MM-DD`), `right` (`call` or `put`), `multiplier` (100 units a contract) and `settlement` (`physical`, the default, or `cash`). It is priced from its underlying, so it takes no `price`.
+
+Lint (`economy.assets`) requires a class, an option's terms, a bond's maturity with its face and a price above zero, and warns about a `model` the table doesn't list. A regional fund with its own return and twice-yearly payouts, and a December call on Lakefront Freight:
+
+```json
+[
+  { "op": "add", "path": "/packs/economy/config/assets/glix", "value": { "label": "Great Lakes Index Fund", "class": "fund", "symbol": "GLIX", "price": 11240, "annual_return_pct": 8, "annual_volatility_pct": 18, "yield_pct": 2.2, "pays_per_year": 2 } },
+  { "op": "add", "path": "/packs/economy/config/assets/lkfr_c4500_dec26", "value": { "label": "LKFR December 2026 45 call", "class": "option", "underlying": "lkfr", "strike": 4500, "expiry": "2026-12-18", "right": "call" } }
+]
+```
+
+### Holdings, trades and payouts
+
+A **holding** is an entity of kind `holding`, a position in one asset: in an `account` (a brokerage or retirement account, its owners the holding's by their shares) or held directly by its `owners`. Its `lots` are its purchases, oldest first, each `qty`, its whole `cost` and when it was bought (`at`); for an option, `qty` counts contracts. Lint (`economy.holdings`) requires an asset the world lists, an account that is one, owners for a holding in none, and lots as a list.
+
+- **Trades are played** (the `trade` action): buy or sell an asset or a holding, in units or for an amount (a sale with neither sells it all), held in an `account` (else directly), paid `from` an account (else the investment account's own cash, else the buyer's deposit account), with the proceeds `to` an account (else the holding's account, else the seller's deposit account). Units go first in, first out, and each sale realises its gain, short term on lots held under a year. A retirement account keeps a sale's proceeds.
+- **Options** trade whole contracts. Before expiry, a holder exercises in play (`exercise_option`): a call pays the strike for 100 units of the underlying, which land in the same account. At the close on its expiry date a contract in the money settles in cash at what it is worth, and one out of the money expires worthless.
+- **Payouts** are flows: dividends mid-month in evenly spaced months ending in December (quarterly: March, June, September and December), a bond fund's monthly, a bond's on its coupon dates, each the units held then times what a unit pays. One lands where the holding's `route` says: `reinvest` buys more units at that day's price, as a new lot; an account id pays it there; left out, it goes to the holding's account, else each owner's deposit account by share. A retirement account keeps what its holdings pay unless they reinvest. In play, `route_distributions` changes a holding's route.
+
+Twenty units of the fund, its payouts reinvested, and two of the calls, in the POV's brokerage account:
+
+```json
+[
+  { "op": "add", "path": "/entities/hold_pov_glix", "value": { "id": "hold_pov_glix", "kind": "holding", "name": "Great Lakes Index Fund", "tier": "background", "fields": { "account": "acct_pov_brokerage", "asset": "glix", "lots": [{ "qty": 20, "cost": 196000, "at": "2025-03-02" }], "route": "reinvest" }, "relations": [] } },
+  { "op": "add", "path": "/entities/hold_pov_lkfr_calls", "value": { "id": "hold_pov_lkfr_calls", "kind": "holding", "name": "LKFR December calls", "tier": "background", "fields": { "account": "acct_pov_brokerage", "asset": "lkfr_c4500_dec26", "lots": [{ "qty": 2, "cost": 37000, "at": "2026-08-20" }] }, "relations": [] } }
+]
+```
+
+### Property
+
+A **property** is an entity of kind `property`, real estate tied to a `place`, with `owners` (and their `share`s):
+
+- **Its value** is `value` now. It moves on the 1st of each month at its `appreciation_pct` a year with its `volatility_pct` swings (else the finance table's home prices); `purchase_price` and `purchased` are what it cost and when, for the gain on a sale.
+- **Its costs** are flows its owners pay by share: property tax at `tax_pct` of its value a year (else the regions table's rate for its `region`, else its first owner's, else the economy's), in `tax_installments` bills (2 a year); `insurance` a month (else the table's typical, scaled to its value); and upkeep, `upkeep_pct` of its value a year (1 when left out), each month.
+- **A mortgage** is an account of the `mortgage` product, with its own `apr_pct`, `payment`, `months_left` and the rest as any loan has, whose `secured_by` names the property; the property's `mortgage` names it back, and lint warns when the two don't. Equity is the value less what it secures.
+- **A lease** is a `rent` flow from the tenant to an owner (or into an account of theirs), `link`ed to the property, with `start` and `end` for its term. Each lease covers one of its `units` (1 when left out). With `managed: true`, each unit no lease covers is let to outside tenants at `market_rent`, lease after lease of `lease_months` (12) with about `vacancy_months` (1) empty between, from `let_from` (else the world's start), their rent into `rent_to` (else the owners' deposit accounts by share).
+- In play, `property_buy` buys one with an `asking_price` or nobody's, `property_sell` sells a share, and `lease_start` and `lease_end` let a unit and end a lease.
+
+The marina's grounds, owned by the marina business, with a mortgage it pays from its operating account and its bait shop let to an outside tenant:
+
+```json
+[
+  { "op": "add", "path": "/entities/prop_alder_harbor_marina", "value": { "id": "prop_alder_harbor_marina", "kind": "property", "name": "Alder Harbor Marina grounds", "tier": "background", "fields": { "place": "alder_harbor_marina", "owners": [{ "party": "alder_harbor_marina_co", "role": "owner" }], "value": 65000000, "appreciation_pct": 2.5, "purchase_price": 41000000, "purchased": "2001-03-15", "mortgage": "acct_marina_mortgage", "insurance": 42000, "upkeep_pct": 1.2 }, "relations": [] } },
+  { "op": "add", "path": "/entities/acct_marina_mortgage", "value": { "id": "acct_marina_mortgage", "kind": "account", "name": "Marina mortgage", "tier": "background", "fields": { "owners": [{ "party": "alder_harbor_marina_co", "role": "owner" }], "product": "mortgage", "institution": "Great Lakes Bank", "opening": -18000000, "apr_pct": 5.1, "payment": 191800, "months_left": 120, "due_day": 1, "autopay": "minimum", "autopay_from": "acct_dale_marina", "secured_by": "prop_alder_harbor_marina" }, "relations": [] } },
+  { "op": "add", "path": "/entities/lease_marina_bait_shop", "value": { "id": "lease_marina_bait_shop", "kind": "flow", "name": "Rent, bait shop", "tier": "background", "fields": { "flow_kind": "rent", "from": "Gull Point Bait & Tackle", "to": "alder_harbor_marina_co", "amount_cents": 65000, "every": "month", "days": [1], "start": "2026-05-01", "end": "2027-04-30", "shortfall": "skip", "link": "prop_alder_harbor_marina" }, "relations": [] } }
+]
+```
+
+### Business stakes and net worth
+
+**A stake** is an owner's share of a business: of its `value` when one is set, else of its book value (its own net worth from its accounts, holdings, property and stakes, plus what its customers owe it less what it owes) plus its last twelve months' profit times its `valuation_multiple` (3 when left out). Each owner's share of a profit distribution lands where they route it in play (`route_distributions`; `reinvest` keeps it in the business, adding to the stake), and `stake_sell` sells part of a stake.
+
+**Net worth** is a party's share of the accounts it holds with a role that counts worth, plus its share of every holding at market, of every property's value and of every stake. A mortgage is one of its accounts, so a property's debt counts once. A party with accounts has the wealth band of its net worth; one without keeps its `wealth` field.
+
+The marina, with a waiting list for its slips, is worth four years' profit over its books:
+
+```json
+[{ "op": "add", "path": "/entities/alder_harbor_marina_co/fields/valuation_multiple", "value": 4 }]
+```
 
 ## Places, routes and maps
 
@@ -311,6 +369,7 @@ Lumiverse runs macros (`{{…}}`) in the prompt it builds, and also acts on its 
 - Everything someone owns names them in `fields.owner`; every account, business, holding and property names its holders in `fields.owners`.
 - Every flow pays from and to something that exists, with an amount and a schedule (or `once`); every job names its worker and an employer that exists or is named in words.
 - A business is on a tier whose Money level runs what it does (4 for sales tax and business taxes), and its `operating_account` is one of its own accounts.
+- Every holding names an asset the world lists, and every mortgage and its property name each other.
 - A world that gives the narrator minds in full (`"secrecy": "full"`) has no secret a character would think about openly.
 - No secret track starts on a stage with a `truth`, no cue states its secret, and no public text gives one away.
 - Nothing a map draws was edited outside its map; no `revision` or pin was written by hand.
