@@ -86,7 +86,7 @@ function loreTracesOf(raw: unknown, legacy: boolean): LoreStepTrace[] | undefine
 }
 
 const MIND_PHASES: readonly MindCallTrace["phase"][] = ["pre", "post", "skip"];
-const MIND_OUTCOMES: readonly MindCallTrace["outcome"][] = ["recorded", "reused", "failed", "leak_blocked", "skipped_limit"];
+const MIND_OUTCOMES: readonly MindCallTrace["outcome"][] = ["recorded", "failed", "leak_blocked"];
 const MIND_PROMPTS: readonly MindCallTrace["prompt"][] = ["world", "override", "default"];
 
 /**

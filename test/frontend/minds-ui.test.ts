@@ -221,6 +221,10 @@ describe("Context inspector → Minds", () => {
     expect(mindTracesOf(undefined)).toBeUndefined();
   });
 
+  test("a trace reads only as an outcome the engine records: reused and over-the-limit calls never happen", () => {
+    expect(mindTracesOf([{ ...trace, outcome: "reused" }, { ...trace, outcome: "skipped_limit" }, { ...trace, outcome: "failed" }])?.map((t) => t.outcome)).toEqual(["failed"]);
+  });
+
   test("the panel reads the traces of a generation", () => {
     const view = decodeContextView({ warnings: [], generations: [{ id: "g1", at: 1, activation: "confirmed", sections: [], budget: { sections: 600, used: 0 }, minds: [trace, { ...trace, purpose: "memory", phase: "post", who: "Someone", outcome: "leak_blocked" }] }] });
     expect(view?.generations[0]?.minds?.map((m) => [m.who, m.purpose, m.outcome])).toEqual([
