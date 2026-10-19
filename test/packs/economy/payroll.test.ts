@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
-import { packEvents, paid, payslips, entity, lapse, setup } from "./work-world";
+import { act, entity, lapse, packEvents, paid, payslips, setup } from "./work-world";
 
 const DAY = 1440;
 
@@ -37,11 +37,27 @@ describe("payroll: paydays", () => {
 describe("payroll: paychecks", () => {
   test("taxes take no more than the deductions leave: a paycheck nearly all saved is paid, not refused", () => {
     // $100 a week at the top level with $99 of it to a 401(k): FICA alone is $7.65 of the $1 left.
-    const { w } = setup((wd) => void (wd.entities.job_saver = entity("job_saver", "job", "Saver", { worker: "maya", employer: "Riverton books", title: "Saver", basis: "hourly", rate: 250, hours: "contract", hours_per_week: 40, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06", deductions: [{ label: "401(k)", cents: 9900, pretax: true, kind: "retirement" }] })));
+    const { w } = setup((wd) => void (wd.entities.job_saver = entity("job_saver", "job", "Saver", { worker: "maya", employer: "Riverton books", title: "Saver", occupation: "office_clerk", basis: "hourly", rate: 250, hours: "contract", hours_per_week: 40, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06", deductions: [{ label: "401(k)", cents: 9900, pretax: true, kind: "retirement" }] })));
     lapse(w, 8 * DAY);
     expect(paid(w, "job_saver").map((d) => [d.gross, d.deductions, d.taxes, d.net])).toEqual([
       [10_000, 9900, 100, 0],
       [10_000, 9900, 100, 0],
     ]);
+  });
+
+  test("a tipped job keeps its tips after a raise, and a hire at a set rate is tipped too", () => {
+    // A bartender's default: the federal tipped cash wage of $2.13, and $14.87 an hour in tips (a $17 median).
+    const tipsOn = (minutes: number, rate: number): number => Math.round((rate * minutes) / 60) + Math.round((1487 * minutes) / 60);
+    const raised = setup((wd) => void (wd.entities.job_bar = entity("job_bar", "job", "Bartender", { worker: "maya", employer: "The Anchor", occupation: "bartender", hours: "contract", start: "2025-01-06" })));
+    expect(act(raised.w, "economy.job_raise", { job: "job_bar", pct: 10 }).rejected).toEqual([]);
+    lapse(raised.w, 8 * DAY);
+    const [after] = paid(raised.w, "job_bar");
+    expect(after?.gross).toBe(tipsOn(after?.minutes as number, Math.round(213 * 1.1)));
+    const hired = setup();
+    expect(act(hired.w, "economy.hire", { business: "brightline", worker: "rosa", occupation: "bartender", rate: 300, hours: "contract", by: "jordan" }).rejected).toEqual([]);
+    lapse(hired.w, 8 * DAY);
+    const job = Object.keys(hired.w.state.entities).find((id) => hired.w.state.entities[id]?.kind === "job" && hired.w.state.entities[id]?.fields.worker === "rosa") ?? "";
+    const [first] = paid(hired.w, job);
+    expect(first?.gross).toBe(tipsOn(first?.minutes as number, 300));
   });
 });

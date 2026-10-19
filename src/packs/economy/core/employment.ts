@@ -182,8 +182,9 @@ export function readJob(ctx: Pick<ReadContext, "registry" | "world" | "state" | 
   const business = employer !== "" && own(ctx.state.entities, employer) && !isGone(ctx.state, employer) ? employer : own(ctx.world.places, employer) ? businessAt(ctx, employer) : null;
   const freq = strOf(occ.pay_frequency);
   const basis: PayBasis = (PAY_BASES as readonly string[]).includes(strOf(f.basis)) ? (strOf(f.basis) as PayBasis) : freq === "semimonthly" || freq === "monthly" ? "salary" : "hourly";
-  // A tipped occupation's own pay is the tipped cash wage, and its tips the rest of the median.
-  const tipped = occ.tipped === true && typeof f.rate !== "number";
+  // A tipped occupation's own pay is the tipped cash wage, and its tips the rest of the median,
+  // whatever rate the job sets: a raise, or a hire at a stated wage, keeps the tips.
+  const tipped = occ.tipped === true;
   const median = numOf(occ.median_cents_per_h);
   const cashWage = numOf(occ.tipped_cash_wage_cents_per_h, median);
   const defaults: Record<PayBasis, number> = { salary: numOf(occ.typical_earnings_cents_per_year), hourly: tipped ? cashWage : median, per_shift: Math.round(median * 8), commission: 0, tips: Math.max(0, median - cashWage), stipend: 0 };
