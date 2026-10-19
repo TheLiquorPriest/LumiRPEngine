@@ -23,11 +23,14 @@ type Zone =
   | { kind: "pack-index" }
   /** `src/packs/starters/**`: converted starter worlds (data plus a typed index), imported only by the pack index. */
   | { kind: "pack-starters" }
+  /** `src/cli/**`: the `lumirpengine` command line and MCP server, bundled on its own; no other zone imports it. */
+  | { kind: "cli" }
   | { kind: "outside" };
 
 function zoneOf(file: string): Zone {
   const rel = relative(SRC, file).split("\\").join("/");
   if (rel.startsWith("..")) return { kind: "outside" };
+  if (rel.startsWith("cli/")) return { kind: "cli" };
   if (rel === "studio-api.ts") return { kind: "studio" };
   if (rel === "spindle-augment.ts") return { kind: "augment" };
   if (rel === "backend.ts") return { kind: "entry-backend" };
@@ -85,6 +88,7 @@ const PACKAGES: Record<Zone["kind"], Record<string, "value" | "type">> = {
   "entry-frontend": { "lumiverse-spindle-types": "type" },
   "pack-index": {},
   "pack-starters": {},
+  cli: {},
   outside: {},
 };
 
@@ -121,6 +125,9 @@ function allowedLocal(from: Zone, to: Zone, typeOnly: boolean, targetRel: string
       return to.kind === "backend" || to.kind === "shared" || (to.kind === "augment" && typeOnly);
     case "entry-frontend":
       return to.kind === "frontend" || to.kind === "shared" || to.kind === "pack-ui" || (to.kind === "augment" && typeOnly);
+    case "cli":
+      // The studio seam, the pack index for the starters, and pure code; never the backend, the frontend or a pack's UI.
+      return pure || to.kind === "studio" || to.kind === "pack-index" || to.kind === "cli";
     case "outside":
       return false;
   }
@@ -141,6 +148,9 @@ function resolveLocal(file: string, spec: string): string {
 /** Files allowed to reference the `spindle` global. */
 const SPINDLE_GLOBAL = new Set(["backend.ts", "backend/spindle-host.ts"]);
 
+/** What the CLI may import from outside src, by path from the repo root: the docs it serves, the schemas, its version. */
+const CLI_BUNDLED = /^(docs\/[A-Z-]+\.md|schemas\/[a-z0-9-]+\.schema\.json|package\.json)$/;
+
 describe("module boundaries", () => {
   const all = files(SRC);
 
@@ -154,10 +164,13 @@ describe("module boundaries", () => {
           const target = resolveLocal(file, edge.spec);
           const to = zoneOf(target);
           const targetRel = relative(SRC, target).split("\\").join("/");
-          if (to.kind === "outside") violations.push(`${rel}: imports outside src (${edge.spec})`);
-          else if (!allowedLocal(from, to, edge.typeOnly, targetRel)) violations.push(`${rel} (${from.kind}) → ${targetRel} (${to.kind})${edge.typeOnly ? " [type]" : ""}`);
+          if (to.kind === "outside") {
+            // The CLI bundles the docs, the schemas and its package version as text and data.
+            if (!(from.kind === "cli" && CLI_BUNDLED.test(relative(ROOT, target).split("\\").join("/")))) violations.push(`${rel}: imports outside src (${edge.spec})`);
+          } else if (!allowedLocal(from, to, edge.typeOnly, targetRel)) violations.push(`${rel} (${from.kind}) → ${targetRel} (${to.kind})${edge.typeOnly ? " [type]" : ""}`);
         } else if (edge.spec.startsWith("node:") || edge.spec.startsWith("bun:")) {
-          violations.push(`${rel}: runtime module ${edge.spec} (only backend I/O may use host storage through HostPort)`);
+          // The CLI's entry is the one file that touches the disk, the terminal and the process.
+          if (!(rel.split("\\").join("/") === "cli/main.ts" && edge.spec.startsWith("node:"))) violations.push(`${rel}: runtime module ${edge.spec} (only backend I/O may use host storage through HostPort, and only the CLI's entry may use node:)`);
         } else {
           const rule = PACKAGES[from.kind][edge.spec];
           if (!rule) violations.push(`${rel} (${from.kind}): package ${edge.spec} not allowed`);

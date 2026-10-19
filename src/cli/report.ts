@@ -1,0 +1,72 @@
+// How tool answers are made: every answer is text (JSON for data), and an error result says what
+// to do; and what they report of the engine's findings: lint in severity order, the host macro
+// hazards a change brought in, and what a world holds.
+
+import { macrosIn } from "../engine/authoring";
+import { isRecord } from "../shared/json";
+import type { LintIssue } from "../shared/protocol";
+import type { WorldDoc } from "../shared/world";
+import { isCollection } from "./diff";
+
+/**
+ * One tool's answer. `isError`: the call was refused or failed (MCP's tool error). `failed`: the
+ * call worked and found the world failing (a check with errors), which the command line exits 1 on.
+ */
+export interface ToolResult {
+  text: string;
+  isError?: true;
+  failed?: true;
+}
+
+const RANK: Record<LintIssue["severity"], number> = { error: 0, warning: 1, info: 2 };
+
+export interface LintSummary {
+  errors: number;
+  warnings: number;
+  infos: number;
+  /** The first issues, errors first. */
+  first: LintIssue[];
+  /** How many more there are beyond `first`. */
+  more: number;
+}
+
+export function lintSummary(issues: readonly LintIssue[], shown = 12): LintSummary {
+  const sorted = [...issues].sort((a, b) => RANK[a.severity] - RANK[b.severity]);
+  return {
+    errors: issues.filter((i) => i.severity === "error").length,
+    warnings: issues.filter((i) => i.severity === "warning").length,
+    infos: issues.filter((i) => i.severity === "info").length,
+    first: sorted.slice(0, shown),
+    more: Math.max(0, sorted.length - shown),
+  };
+}
+
+export interface Hazard {
+  path: string;
+  macro: string;
+}
+
+/**
+ * The host macro hazards in `after`'s lore, section templates and step templates that `before`
+ * didn't have at the same path: what this change brought in, which Lumiverse would act on when
+ * it builds a prompt (shared/macros.ts). All of them when there is no `before`.
+ */
+export function newHazards(before: WorldDoc | null, after: WorldDoc): Hazard[] {
+  const had = new Set((before === null ? [] : macrosIn(before)).map((h) => `${h.path}\u0000${h.macro}`));
+  return macrosIn(after).filter((h) => !had.has(`${h.path}\u0000${h.macro}`));
+}
+
+/** How many items each collection of a world holds (the empty ones left out). */
+export function contentsOf(world: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!isRecord(world)) return out;
+  for (const [key, value] of Object.entries(world)) {
+    if (isCollection(key) && isRecord(value) && Object.keys(value).length > 0) out[key] = Object.keys(value).length;
+  }
+  return out;
+}
+
+/** A tool's data, as the text of its answer. */
+export function json(value: unknown): string {
+  return JSON.stringify(value, null, 2) ?? "null";
+}

@@ -68,6 +68,21 @@ Design taken from Warp, with no Warp code retained (each is new code in LumiRPEn
     zoomAt is the standard one and is the same as Warp's; the model differs (a screen transform
     with pinch handling, not an SVG view box).
 
+Design taken from Warp Studio by japolino (https://github.com/japolino/warp-studio @
+53ab7a08e96f3a19c96b152ca6b873c617d4136b), with no Warp Studio code retained. Warp Studio carries
+no license, so only its design was used, and each file below is new code in LumiRPEngine:
+
+  - Warp Studio src/tools/{cli,commands,mcp,rulebook-tools}.ts, src/tools/tools.test.ts,
+    src/scanner.test.ts, skills/warp-rulebook/SKILL.md and .mcp.json
+      ->  LumiRPEngine src/cli/, test/cli/, test/cli-boundaries.test.ts, skills/lumirpengine/SKILL.md, .mcp.json
+    The pattern of the warp-rulebook tool: one pure core shared by a command line and an MCP
+    server, with only the entry touching the file system; JSON-RPC over stdio, one message per
+    line; tests that run the whole server in process; a boundary test that keeps the CLI out of the
+    extension's bundles; the bundle committed in dist/ for npx; and the skill file's layout.
+    Everything else is new: the live tools over Lumiverse's event socket, sign-in and saved
+    sessions, concurrent calls with per-world writes, protocol version negotiation, paging, search
+    and diffs.
+
 Written for the adaptation (no Warp code):
 
   - src/engine/rng.ts is the seeded generator that replaces xmur3 + mulberry32 in Warp's

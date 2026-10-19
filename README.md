@@ -65,6 +65,17 @@ LumiRPEngine deliberately does **not** request the `characters` permission. Char
 3. Attach the world to a chat with the world's **Attach to this chat** tool (or, in **Play**, **Attach a world to this chat…**). LumiRPEngine creates a lore book for the world's sections and adds it to that chat.
 4. Go to **Play** and write. Blank worlds start on the **Story** preset, which keeps things light, as does the fantasy town; the mystery manor starts on **Grounded** and the modern slice-of-life on **Simulation**. Change the realism whenever you like in **Settings → Realism**.
 
+## Your own agent: the CLI and MCP server
+
+`lumirpengine` lets your own agent (Claude Code, Codex, Cursor and the like) or your shell manage your worlds on your Lumiverse: read, search, create, import, edit, check, playtest, commit, restore, delete and export them, and attach and upgrade the chats that play them. It runs on Node 22 or newer with the engine bundled in, so checking and playtesting a world file needs no Lumiverse at all. Sign in once in a terminal (the password is asked at a hidden prompt and never stored), then add the MCP server to your harness:
+
+```bash
+npx -y github:TheLiquorPriest/LumiRPEngine login --url http://localhost:7860 --username you
+claude mcp add lumirpengine -- npx -y github:TheLiquorPriest/LumiRPEngine mcp
+```
+
+An agent edits the same draft as your Build tab, so you see its changes as it makes them; `--read-only` keeps it to reading and checking. Setup for other harnesses, every tool, safety and troubleshooting are in [MCP.md](docs/MCP.md), and agents read [AGENT-GUIDE.md](docs/AGENT-GUIDE.md).
+
 ## Things to know before you install
 
 These are the known limits of this release. Most of them need a change in Lumiverse itself, which I plan to propose after release.
