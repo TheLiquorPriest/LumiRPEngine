@@ -4,9 +4,12 @@
 
 import { describe, expect, test } from "bun:test";
 import type { AccountView, BusinessView, CardView, FinanceView, Flow, FlowView, HoldingView, PropertyView } from "../../src/shared/finance";
+import { isRecord } from "../../src/shared/json";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
+import { Row } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { OwnerRows } from "../../src/packs/economy/ui/lines";
 import {
   actionRequest,
   autopayAction,
@@ -83,6 +86,20 @@ describe("the view as it arrives", () => {
       [null, 25000],
     ]);
     expect(new Set(rows.map((r) => r.key)).size).toBe(3);
+  });
+
+  test("owners the player can't see, masked as null or as an empty id, still get rows of their own", () => {
+    // The keys of the rows a component draws, read off its tree (no DOM needed).
+    const rowKeys = (node: unknown): unknown[] => (Array.isArray(node) ? node.flatMap(rowKeys) : !isRecord(node) || !isRecord(node.props) ? [] : node.type === Row ? [node.key] : rowKeys(node.props.children));
+    const owners = [
+      { party: "marcus", name: "Marcus", role: "owner" as const, share: 60 },
+      { party: null, name: "someone", role: "owner" as const, share: 20 },
+      { party: "", name: "an owner", role: "owner" as const, share: 10 },
+      { party: "", name: "an owner", role: "owner" as const, share: 10 },
+    ];
+    const keys = rowKeys(OwnerRows({ owners }));
+    expect(keys).toHaveLength(4);
+    expect(new Set(keys).size).toBe(4);
   });
 });
 

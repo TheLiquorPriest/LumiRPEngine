@@ -1,8 +1,8 @@
-// Rows the money sections share: journal lines, a GM edit of an entity's declared fields, and the
-// amount a player types for an action.
+// Rows the money sections share: journal lines, an account's or a business's owners, a GM edit of
+// an entity's declared fields, and the amount a player types for an action.
 
 import { useState } from "preact/hooks";
-import type { JournalLine } from "../../../shared/finance";
+import type { JournalLine, OwnerLine } from "../../../shared/finance";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Empty, Row } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
@@ -10,6 +10,20 @@ import { FieldRow } from "../../../frontend/play/gm";
 import type { GmControls } from "./hub";
 import { AmountField } from "./forms";
 import { amountOf } from "./requests";
+
+/**
+ * Owners with their roles and shares. An owner the player can't see comes without an id (null, or
+ * "" from a module that masks it so), so rows are told apart by place where the id is missing.
+ */
+export function OwnerRows(props: { owners: readonly OwnerLine[] }) {
+  return (
+    <>
+      {props.owners.map((o, i) => (
+        <Row key={o.party || `someone:${i}`} k={o.name} sub={humanize(o.role)} v={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
+      ))}
+    </>
+  );
+}
 
 /** Journal lines, newest first: at most `max`, with a Show all when there are more. */
 export function TxnRows(props: { lines: readonly JournalLine[]; max: number; currency: WorldCurrency; account?: boolean }) {
