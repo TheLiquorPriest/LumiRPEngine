@@ -560,16 +560,20 @@ export class Runtime implements TurnHooks {
   }
 
   /**
-   * The world revision a chat plays at now, after any Upgrade: its fold's, as its view shows it.
-   * Null when its ledger can't open or fold (its world or a revision it needs is gone).
+   * The world revision a chat plays at now, after any Upgrade, as its view shows it; or why it
+   * can't be read (its ledger can't open or fold: its world or a revision it needs is gone).
    */
-  async revisionInPlay(chatId: ChatId, userId: UserId): Promise<RevisionId | null> {
+  async revisionInPlay(chatId: ChatId, userId: UserId, run: ChatRun): Promise<{ revision: RevisionId } | { revision: null; reason: string }> {
     try {
       const core = await this.ledger.core(chatId, userId);
-      return core ? core.fold(toChain(await this.host.chats.messages(chatId, userId))).state.revision : null;
+      if (!core) return { revision: null, reason: `its ledger can't be opened: revision ${run.revision} of its world can't be read` };
+      const observed = toChain(await this.host.chats.messages(chatId, userId));
+      // Only a migrate marker moves a chat off its run's revision: one whose ledger names no other plays the run's, so it needs no fold.
+      const named = core.revisionsIn(observed);
+      if (named.size === 1 && named.has(run.revision)) return { revision: run.revision };
+      return { revision: core.fold(observed).state.revision };
     } catch (error) {
-      this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its revision couldn't be read (${error instanceof Error ? error.message : String(error)})`, userId);
-      return null;
+      return { revision: null, reason: `its ledger can't be read: ${error instanceof Error ? error.message : String(error)}` };
     }
   }
 

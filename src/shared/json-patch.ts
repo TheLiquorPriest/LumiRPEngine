@@ -127,12 +127,59 @@ export function readOp(raw: unknown, index: number): JsonPatchOp {
   throw new PatchError(index, `unknown op ${JSON.stringify(op)} (add, remove, replace, move, copy or test)`);
 }
 
-/** Applies the operations to a copy of the document, all or none. */
-export function applyPatch(doc: JsonValue, ops: readonly JsonPatchOp[]): JsonValue {
+/** What a patch may bring in: `size`, characters of JSON across the values it adds or replaces and what it copies; `depth`, how deep the document may nest where it writes. */
+export interface PatchBudget {
+  size: number;
+  depth: number;
+}
+
+/**
+ * How deep a JSON value nests (a scalar is 0; `[]` and `{}` are 1) and about how many characters
+ * its JSON takes, walked without recursion and given up as soon as either passes its cap, so a huge
+ * or deeply nested value costs no more than the caps: then which cap it passed.
+ */
+export function measure(value: unknown, caps: PatchBudget): { size: number; depth: number } | "size" | "depth" {
+  let size = 0;
+  let depth = 0;
+  const stack: { value: unknown; level: number }[] = [{ value, level: 0 }];
+  for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
+    const v = top.value;
+    if (Array.isArray(v) || isRecord(v)) {
+      const level = top.level + 1;
+      if (level > caps.depth) return "depth";
+      depth = Math.max(depth, level);
+      size += 2;
+      for (const [key, item] of Array.isArray(v) ? v.map((x, i): [string, unknown] => [String(i), x]) : Object.entries(v)) {
+        size += Array.isArray(v) ? 1 : key.length + 4;
+        if (size > caps.size) return "size";
+        stack.push({ value: item, level });
+      }
+    } else size += typeof v === "string" ? v.length + 2 : String(v).length;
+    if (size > caps.size) return "size";
+  }
+  return { size, depth };
+}
+
+/**
+ * Applies the operations to a copy of the document, all or none. With a `budget`, each value an
+ * operation adds, replaces or copies is measured before it goes in: their sizes add up against
+ * the budget's size (a copy can double the document, so it counts like a value sent), and none may
+ * nest the document past its depth where it lands (moves included).
+ */
+export function applyPatch(doc: JsonValue, ops: readonly JsonPatchOp[], budget?: PatchBudget): JsonValue {
   let out = structuredClone(doc);
+  let spent = 0;
+  const afford = (value: JsonValue, tokens: readonly string[], counts: boolean): void => {
+    if (!budget) return;
+    const fits = measure(value, { size: counts ? budget.size - spent : Number.MAX_SAFE_INTEGER, depth: budget.depth - tokens.length });
+    if (fits === "size") throw new Error(`the patch brings in more than ${Math.round(budget.size / (1024 * 1024))} MiB of JSON (the values it adds and what it copies count)`);
+    if (fits === "depth") throw new Error(`the value would nest the world deeper than ${budget.depth} levels`);
+    if (counts) spent += fits.size;
+  };
   ops.forEach((op, index) => {
     try {
       const tokens = parsePointer(op.path);
+      if (op.op === "add" || op.op === "replace") afford(op.value, tokens, true);
       if (op.op === "add") out = insert(out, tokens, structuredClone(op.value), false);
       else if (op.op === "replace") out = insert(out, tokens, structuredClone(op.value), true);
       else if (op.op === "remove") out = removeAt(out, tokens);
@@ -142,6 +189,7 @@ export function applyPatch(doc: JsonValue, ops: readonly JsonPatchOp[]): JsonVal
         const fromTokens = parsePointer(op.from);
         const value = getAt(out, fromTokens);
         if (value === undefined) throw new Error(`nothing at ${op.from} to ${op.op}`);
+        afford(value, tokens, op.op === "copy");
         if (op.op === "move") {
           if (op.path.startsWith(`${op.from}/`)) throw new Error("can't move a value into itself");
           out = removeAt(out, fromTokens);

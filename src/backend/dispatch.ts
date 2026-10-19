@@ -41,7 +41,7 @@ import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
 import { recentLines, TIMELAPSE_ACTION } from "./view";
 import { buildGmView } from "./gm";
-import { macroReview, newChatRun, WORLD_COLLECTIONS, WorldError } from "./worlds";
+import { type DraftNotice, macroReview, newChatRun, WORLD_COLLECTIONS, WorldError } from "./worlds";
 
 export class RequestError extends Error {
   constructor(
@@ -63,8 +63,8 @@ function isRequest(raw: unknown): raw is FrontendToBackend {
   return isRecord(raw) && raw.lre === PROTOCOL_VERSION && typeof raw.type === "string" && typeof raw.reqId === "string";
 }
 
-/** Notes that a request changed a world's draft, to the version and storedness it has now. */
-type DraftNoted = (worldId: WorldId, draft: { version: number; stored: boolean }) => void;
+/** Notes that a request changed a world's working copy, to the state it has now. */
+type DraftNoted = DraftNotice;
 
 /** Outside clients remembered by session: a CLI makes a session per connection, so old ones go. */
 const CLIENTS_CAP = 256;
@@ -107,7 +107,7 @@ export class Dispatcher {
       announce();
     };
     const noted: DraftNoted = (worldId, draft) => {
-      drafts.set(worldId, { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: draft.version, stored: draft.stored });
+      drafts.set(worldId, { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: draft.version, stored: draft.stored, base: draft.base });
     };
     try {
       // The Studio bridge serves each user from their first request on (DESIGN §15).
@@ -301,9 +301,7 @@ export class Dispatcher {
         return;
       }
       case "lre.editor": {
-        const result = await this.rt.worlds.edit(r, userId);
-        if (r.op !== "get") noted(r.worldId, result);
-        reply("lre.editor", result);
+        reply("lre.editor", await this.rt.worlds.edit(r, userId, noted));
         return;
       }
       case "lre.world": {
@@ -356,9 +354,8 @@ export class Dispatcher {
         if (r.op === "save") {
           const run = await this.rt.runOf(r.chatId, userId);
           if (!run) throw new RequestError("not_world_chat", "this chat is not attached to a world");
-          const saved = await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, (await this.rt.settings.get(userId)).hideJsonBlocks, typeof r.text === "string" ? r.text : undefined);
-          noted(saved.worldId, saved);
-          reply("lre.lore", { worldId: saved.worldId, id: saved.id });
+          const saved = await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, (await this.rt.settings.get(userId)).hideJsonBlocks, typeof r.text === "string" ? r.text : undefined, noted);
+          reply("lre.lore", saved);
           return;
         }
         const world = await this.rt.worlds.working(r.worldId, userId);
@@ -367,14 +364,14 @@ export class Dispatcher {
         return;
       }
       case "lre.studio": {
-        reply("lre.studio", await this.studio(r, userId));
+        reply("lre.studio", await this.studio(r, userId, noted));
         return;
       }
     }
   }
 
   /** LumiRPEngine Studio's offer (DESIGN §15): reviewed on `offer`, installed only on the player's `install`. */
-  private async studio(r: Extract<FrontendToBackend, { type: "lre.studio" }>, userId: UserId): Promise<ResultBodies["lre.studio"]> {
+  private async studio(r: Extract<FrontendToBackend, { type: "lre.studio" }>, userId: UserId, noted: DraftNoted): Promise<ResultBodies["lre.studio"]> {
     if (r.op === "offer") {
       const read = await this.rt.studio.offer(userId);
       return read.offer ? { offer: (await this.reviewOffer(read.offer, read.hash, userId)).view } : { offer: null, message: read.reason };
@@ -391,7 +388,7 @@ export class Dispatcher {
       if (view.blocked !== null || world === null) throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
       if (view.headMoved && r.acceptMovedHead !== true) throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
       const store = this.rt.worlds;
-      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId, "studio").then((created) => ({ ...created, lint: macroReview(created.world) }));
+      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId, noted) : await store.create(world.name, world, userId, "studio").then((created) => ({ ...created, lint: macroReview(created.world) }));
       // Marked before anything else can fail: the world is written, so the offer is installed.
       await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
       await this.syncBook(done.world.id, userId);
@@ -452,7 +449,7 @@ export class Dispatcher {
       case "list":
         return { worlds: await store.list(userId) };
       case "get":
-        return { ...(await store.get(r.worldId, userId, r.revision)), packKinds: Object.fromEntries(this.rt.registry.kinds), packRelations: Object.fromEntries(this.rt.registry.relations), functions: formulaFunctions(this.rt.registry) };
+        return { ...(await store.get(r.worldId, userId, r.revision)), history: await store.history(r.worldId, userId), packKinds: Object.fromEntries(this.rt.registry.kinds), packRelations: Object.fromEntries(this.rt.registry.relations), functions: formulaFunctions(this.rt.registry) };
       case "create": {
         const template = r.template && hasOwn(this.rt.templates, r.template) ? this.rt.templates[r.template] : undefined;
         if (r.template && !template) throw new RequestError("not_found", `unknown template ${r.template}`);
@@ -467,8 +464,7 @@ export class Dispatcher {
         return { worlds: await store.list(userId) };
       case "commit": {
         // A session that said hello as an outside client commits as `agent` (DESIGN §23).
-        const committed = await store.commit(r.worldId, r.base, userId, { source: session !== undefined && this.clients.has(`${userId}\u0000${session}`) ? "agent" : "build", ...(r.note !== undefined ? { note: r.note } : {}) });
-        noted(r.worldId, { version: 0, stored: false });
+        const committed = await store.commit(r.worldId, r.base, userId, { source: session !== undefined && this.clients.has(`${userId}\u0000${session}`) ? "agent" : "build", ...(r.note !== undefined ? { note: r.note } : {}), ...(r.version !== undefined ? { version: r.version } : {}) }, noted);
         await this.syncBook(r.worldId, userId);
         return committed;
       }
@@ -509,9 +505,10 @@ export class Dispatcher {
         // With picks, the revision's definition changes come into the chat as the owner chose (DESIGN §4.3 `migrate`).
         const body = validMarkerBody({ kind: "migrate", to: r.to, merge: r.merge });
         if (!body) throw new RequestError("bad_request", "not a valid Upgrade");
-        await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
+        const result = await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
         await this.syncBook(before.worldId, userId);
-        return { revision: r.to };
+        // Mid-turn, the marker is held and lands when the turn ends (P2).
+        return { revision: r.to, pending: result.pending };
       }
       case "sheet": {
         // The Sheet Designer's live preview: the draft with the unsaved ruleset, as a chat would start.
@@ -526,16 +523,18 @@ export class Dispatcher {
       case "templates":
         return { templates: this.rt.templateInfo.filter((t) => hasOwn(this.rt.templates, t.id)) };
       case "chats": {
-        // The user's chats that play one of their worlds still there, each at the revision it plays now.
+        // The user's chats that play one of their worlds still there (one world's, or one chat), each at the revision it plays now.
+        // Each one's ledger is opened to read that: a filter keeps the cost to the chats asked about.
         const worlds = new Map((await store.list(userId)).map((index) => [index.id, index]));
         if (r.worldId !== undefined && !worlds.has(r.worldId)) throw new RequestError("not_found", `world ${r.worldId} not found`);
         const chats: WorldChatInfo[] = [];
         for (const chat of await this.rt.host.chats.list(userId)) {
+          if (r.chatId !== undefined && chat.id !== r.chatId) continue;
           const run = readRun(chat.metadata);
           const index = run && (r.worldId === undefined || run.worldId === r.worldId) ? worlds.get(run.worldId) : undefined;
           if (!run || !index) continue;
-          const revision = await this.rt.revisionInPlay(chat.id, userId);
-          if (revision !== null) chats.push({ chatId: chat.id, name: chat.name, worldId: run.worldId, revision, behind: revision !== index.head });
+          const played = await this.rt.revisionInPlay(chat.id, userId, run);
+          chats.push(played.revision === null ? { chatId: chat.id, name: chat.name, worldId: run.worldId, revision: null, behind: false, reason: played.reason } : { chatId: chat.id, name: chat.name, worldId: run.worldId, revision: played.revision, behind: played.revision !== index.head });
         }
         return { chats };
       }

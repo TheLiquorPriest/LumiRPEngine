@@ -292,15 +292,27 @@ export function createSpindleHost(): HostPort {
       async active(userId) {
         return (await spindle.chats.getActive(userId))?.id ?? null;
       },
-      // The host caps a page at 200 and lists the newest first; a chat updated while the pages are
-      // read moves to the front, so one may come back twice.
+      // The host lists the newest first by offset, so the list shifts while it is read: a chat
+      // updated or made meanwhile moves to the front, and one deleted moves the rest up. The pages
+      // overlap, so a few shifts between two reads skip nothing, and the front is read again until
+      // it shows nothing new, which takes in the chats that moved there.
       async list(userId) {
         const out = new Map<ChatId, HostChat>();
-        for (let offset = 0; offset < 100_000; offset += 200) {
+        const read = async (offset: number): Promise<{ size: number; total: number; fresh: number }> => {
           const page = await spindle.chats.list({ limit: 200, offset, userId });
-          for (const chat of page.data) if (!out.has(chat.id)) out.set(chat.id, { id: chat.id, name: chat.name, metadata: toJsonObject(chat.metadata) });
-          if (page.data.length < 200 || offset + 200 >= page.total) break;
+          let fresh = 0;
+          for (const chat of page.data) {
+            if (out.has(chat.id)) continue;
+            out.set(chat.id, { id: chat.id, name: chat.name, metadata: toJsonObject(chat.metadata) });
+            fresh++;
+          }
+          return { size: page.data.length, total: page.total, fresh };
+        };
+        for (let offset = 0; offset < 100_000; offset += 180) {
+          const page = await read(offset);
+          if (page.size < 200 || offset + 200 >= page.total) break;
         }
+        for (let pass = 0; pass < 5 && (await read(0)).fresh > 0; pass++);
         return [...out.values()];
       },
     },
