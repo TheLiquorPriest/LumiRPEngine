@@ -12,6 +12,7 @@ import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
+import { move } from "../../../src/packs/economy/core/pay";
 import { ALL_PACKS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
 import { startState, trialBalance } from "../support";
@@ -121,5 +122,28 @@ describe("the player's money view never names or sends someone they can't see", 
     expect(view.accounts.find((a) => a.id === "shared")?.owners.map((o) => o.party)).toEqual(["you", "viktor"]);
     expect(view.accounts.find((a) => a.id === "joint")?.transactions.find((t) => t.cents === -20_000)?.counterparty).toBe("Viktor Kane");
     expect(view.flows.find((f) => f.id === "hush")?.spec?.to).toBe("viktor");
+  });
+});
+
+describe("a late payment counts toward what was past due", () => {
+  test("the past-due minimum paid late isn't asked for again, and the next minimum paid on time keeps the card current", () => {
+    const w = setup((world) => {
+      world.entities.card!.fields.autopay = "none";
+    });
+    const statements = (): JsonObject[] => dataOf(w, "economy.statement").filter((s) => s.account === "card");
+    const pay = (cents: number): void => {
+      const out = move(w.ctx, "checking", "card", cents, "Card payment");
+      if ("code" in out) throw new Error(out.reason);
+      w.applyAll(out);
+    };
+    lapse(w, 44); // past the 28 Nov due date of the 3 Nov statement, unpaid
+    expect(dataOf(w, "economy.delinquency").map((d) => d.stage)).toEqual(["late"]);
+    pay(Number(statements()[0]?.minimum));
+    lapse(w, 6); // the 3 Dec statement
+    const dec = statements().at(-1);
+    expect(dec?.past_due).toBe(0);
+    pay(Number(dec?.minimum));
+    lapse(w, 24); // past 28 Dec
+    expect(dataOf(w, "economy.delinquency").map((d) => d.stage)).toEqual(["late", "current"]);
   });
 });
