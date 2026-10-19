@@ -10,6 +10,7 @@ import type { ToolContext } from "../../src/cli/tools";
 import { callTool, KeyedQueue } from "../../src/cli/tools";
 import type { FrontendToBackend, ResultBodies } from "../../src/shared/protocol";
 import { PROTOCOL_VERSION } from "../../src/shared/protocol";
+import { GUIDE_SECTIONS, guidePatches } from "../support/agent-guide";
 import { Rig } from "../support/rig";
 
 /** The tools' connection, straight into the Rig's dispatcher as one session that said hello as this client. */
@@ -155,4 +156,23 @@ test("an agent adds a flow, a holding and a minds config to a starter through lr
   expect(flows.every((h) => h.kind === "flow")).toBe(true);
   const assets = await call("lre_search", { worldId, query: "great lakes", collections: ["assets"] });
   expect(assets.hits).toContainEqual(expect.objectContaining({ id: "glix", collection: "assets", pointer: "/packs/economy/config/assets/glix" }));
+});
+
+test("every patch the agent guide shows for minds and money goes through lre_edit onto the modern starter, one by one, lint-clean, and commits", async () => {
+  const { call } = await tools();
+  const created = await call("lre_world_create", { name: "Port Alder", template: "modern_slice_of_life" });
+  const worldId = String(created.worldId);
+  let version = 0;
+  let applied = 0;
+  for (const title of GUIDE_SECTIONS) {
+    for (const ops of guidePatches(title)) {
+      // As an agent copies it: each block on its own, on the draft its last edit left.
+      const edit = await call("lre_edit", { worldId, ops, expectVersion: version });
+      expect({ title, ops, lintErrors: (edit.lint as { errors: number }).errors }).toEqual({ title, ops, lintErrors: 0 });
+      version = Number(edit.version);
+      applied++;
+    }
+  }
+  expect(applied).toBeGreaterThan(5);
+  expect(await call("lre_commit", { worldId, note: "The guide's examples", expectVersion: version })).toMatchObject({ worldId, warnings: { errors: 0 } });
 });

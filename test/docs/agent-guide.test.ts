@@ -4,32 +4,16 @@
 // these, so a wrong field name or a refused value here is a broken world there.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import schemaJson from "../../schemas/lre-world-v1.schema.json";
 import { STARTER_WORLDS } from "../../src/packs/index";
 import { isRecord, type JsonValue } from "../../src/shared/json";
 import { applyPatch, getAt, parsePointer, readOp } from "../../src/shared/json-patch";
 import type { WorldDoc } from "../../src/shared/world";
 import { checkSchema, lint, load, MAP_SCHEMA, pathText, type Schema } from "../../src/studio-api";
+import { GUIDE_SECTIONS as SECTIONS, guidePatches as patches } from "../support/agent-guide";
 
-const PAGE = readFileSync(join(import.meta.dir, "../../docs/AGENT-GUIDE.md"), "utf8");
 // A JSON module's inferred type spells out every node, which `Schema` describes in general.
 const WORLD_SCHEMA = schemaJson as unknown as Schema;
-const SECTIONS = ["Character minds", "Money"];
-
-/** The section under the `## ` heading `title`, up to the next one. */
-function section(title: string): string {
-  const found = PAGE.split("\n## ").find((s) => s.startsWith(`${title}\n`));
-  if (found === undefined) throw new Error(`docs/AGENT-GUIDE.md has no section "${title}"`);
-  return found;
-}
-
-/** Every JSON block of a section that is a JSON Patch (a list of operations), in page order. */
-function patches(title: string): unknown[][] {
-  const blocks = [...section(title).matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => JSON.parse(m[1] ?? "null") as unknown);
-  return blocks.filter((b): b is unknown[] => Array.isArray(b) && b.every((op) => isRecord(op) && typeof op.op === "string"));
-}
 
 const modern = (): WorldDoc => {
   const make = STARTER_WORLDS.modern_slice_of_life;
@@ -75,25 +59,33 @@ describe("the agent guide's examples", () => {
     expect(replaced).toEqual([]);
   });
 
-  test("every id their entities name is in the starter, so none reads as an outside payer by mistake", () => {
+  test("every id the entities they add or change name is in the world, so none reads as an outside party by mistake", () => {
     const world = modern();
     let doc = world as unknown as JsonValue;
     for (const title of SECTIONS) for (const ops of patches(title)) doc = applyPatch(doc, ops.map((op, n) => readOp(op, n)));
     const after = doc as unknown as WorldDoc;
-    const added = Object.values(after.entities).filter((e) => !(e.id in world.entities));
-    expect(added.length).toBeGreaterThan(0);
+    const touched = Object.values(after.entities).filter((e) => JSON.stringify(e) !== JSON.stringify(world.entities[e.id]));
+    expect(touched.length).toBeGreaterThan(0);
     const assets = after.packs.economy?.config.assets;
+    // An id is lower snake_case; an outside party, payee or customer is named in words, with spaces or capitals.
+    const idShaped = (v: unknown): v is string => typeof v === "string" && /^[a-z0-9_]+$/.test(v);
     const missing: string[] = [];
-    for (const e of added) {
+    const entity = (where: string, v: unknown): void => {
+      if (idShaped(v) && !(v in after.entities)) missing.push(`${where}: ${v}`);
+    };
+    const place = (where: string, v: unknown): void => {
+      if (typeof v === "string" && !(v in after.places)) missing.push(`${where}: ${v}`);
+    };
+    for (const e of touched) {
       const f = e.fields;
-      // Fields that only ever hold an id; `from`, `to` and `employer` also take an outside party's name, which has spaces or capitals, and an employer may be a place.
-      for (const key of ["account", "worker", "autopay_from", "from", "to", "employer"]) {
-        const v = f[key];
-        if (typeof v === "string" && /^[a-z0-9_]+$/.test(v) && !(v in after.entities) && !(key === "employer" && v in after.places)) missing.push(`${e.id}.${key}: ${v}`);
-      }
-      if (typeof f.workplace === "string" && !(f.workplace in after.places)) missing.push(`${e.id}.workplace: ${f.workplace}`);
+      for (const key of ["account", "worker", "autopay_from", "from", "to", "business", "customer", "operating_account", "holder", "link"]) entity(`${e.id}.${key}`, f[key]);
+      // An employer may also be a place: the business trading there.
+      if (!(idShaped(f.employer) && f.employer in after.places)) entity(`${e.id}.employer`, f.employer);
+      place(`${e.id}.workplace`, f.workplace);
+      for (const p of Array.isArray(f.places) ? f.places : []) place(`${e.id}.places`, p);
       if (typeof f.asset === "string" && !(isRecord(assets) && f.asset in assets)) missing.push(`${e.id}.asset: ${f.asset}`);
-      for (const o of Array.isArray(f.owners) ? f.owners : []) if (isRecord(o) && typeof o.party === "string" && !(o.party in after.entities)) missing.push(`${e.id}.owners: ${o.party}`);
+      for (const o of Array.isArray(f.owners) ? f.owners : []) if (isRecord(o)) entity(`${e.id}.owners`, o.party);
+      for (const key of ["splits", "deductions"]) for (const s of Array.isArray(f[key]) ? f[key] : []) if (isRecord(s)) entity(`${e.id}.${key}`, s.to);
     }
     expect(missing).toEqual([]);
   });
