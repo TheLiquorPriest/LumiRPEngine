@@ -5,7 +5,7 @@
 // and its expenses (flows its owners set up); and it pays its owners by draws, or distributions by
 // share. Every money movement here goes through the foundation's flows and postings.
 
-import type { JsonValue } from "../../../shared/json";
+import type { JsonObject, JsonValue } from "../../../shared/json";
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PackEvent, PostingLine } from "../../../shared/ledger";
 import type { EntityDef, FieldDef } from "../../../shared/world";
@@ -379,14 +379,25 @@ function voidInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, J
 
 // ---------------------------------------------------------------- owners: draws and distributions
 
-/** `economy.payout`: an owner's draw, or a distribution of profit by share, booked. */
+/**
+ * `economy.payout`: an owner's draw, or a distribution of profit by share, booked. A distribution
+ * books what it paid of each month's profit (`months`), so no month's profit is paid out twice; one
+ * without them books it all to the month it was paid.
+ */
 export const PAYOUT: EventTypeDef<PackEvent> = {
   type: "economy.payout",
   validate: (e, ctx) => (own(ctx.state.entities, str(e, "business")) && typeof e.data.cents === "number" ? null : reject("bad_event", "a payout needs its business and amount")),
   apply: (e, state, ctx) => {
     const business = str(e, "business");
-    addToBooks(state, business, monthOf(ctx.world, state.clock), e.data.what === "draw" ? { draws: numOf(e.data.cents) } : { distributions: numOf(e.data.cents) });
-    if (e.data.what === "distribution") sliceRecord(state, "economy", "distributed")[business] = state.clock;
+    const now = monthOf(ctx.world, state.clock);
+    if (e.data.what === "draw") {
+      addToBooks(state, business, now, { draws: numOf(e.data.cents) });
+      return;
+    }
+    const months = Object.entries(objOf(e.data.months)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    if (months.length === 0) addToBooks(state, business, now, { distributions: numOf(e.data.cents) });
+    for (const [month, cents] of months) addToBooks(state, business, month, { distributions: numOf(cents) });
+    sliceRecord(state, "economy", "distributed")[business] = state.clock;
   },
   describe: (e) => (e.data.what === "draw" ? "Owner's draw" : "Profit distributed"),
 };
@@ -411,12 +422,30 @@ function ownerDraw(ctx: EffectContext, api: FinanceApi, args: Record<string, Jso
 }
 
 /**
- * A distribution of `total` from a business's operating account to its owners by their share of its
- * worth. Each owner's part goes where the holdings module routes their stake (an account of theirs,
- * else their deposit account); a part they reinvest stays in the business and only its stake records
- * it. Null when there is nothing to pay or no account to pay from.
+ * What each month's profit from the one holding `from` to the one holding `to - 1` has left to pay
+ * out at `pct`: its share of the month's profit, less what distributions already paid of it.
  */
-function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, total: number): { lines: PostingLine[]; extra: LedgerEvent[]; paid: number } | null {
+function undistributed(api: FinanceApi, ctx: ReadContext, business: EntityId, from: number, to: number, pct: number): JsonObject {
+  const cal = calendarOf(ctx.world);
+  const out: JsonObject = {};
+  for (const month of monthsBetween(ctx.world, from, to)) {
+    const [y = 0, m = 1] = month.split("-").map(Number);
+    const start = clockAt(cal, dayIndexOf(cal, y, m, 1), 0);
+    const b = businessBooks(api, ctx, business, start, start + 1);
+    const left = Math.round((Math.max(0, b.profit) * pct) / 100) - b.distributions;
+    if (left > 0) out[month] = left;
+  }
+  return out;
+}
+
+/**
+ * A distribution from a business's operating account to its owners by their share of its worth,
+ * paying `months` of its profit. Each owner's part goes where the holdings module routes their
+ * stake (an account of theirs, else their deposit account); a part they reinvest stays in the
+ * business and only its stake records it. Null when there is nothing to pay or no account to pay from.
+ */
+function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, months: JsonObject): { lines: PostingLine[]; extra: LedgerEvent[]; paid: number } | null {
+  const total = Object.values(months).reduce((a: number, c) => a + numOf(c), 0);
   const from = operatingAccount(api, ctx, business);
   if (!from || total <= 0) return null;
   const owners = api.ownersOf(ctx.state, business).map((o) => ({ party: o.party, share: api.shareOf(ctx.state, business, o.party) })).filter((o) => o.share > 0);
@@ -444,7 +473,7 @@ function distribution(ctx: ReadContext, api: FinanceApi, business: EntityId, tot
     extra.push(...(stakePaid?.(ctx, o.party, business, cents, reinvest) ?? []));
   }
   if (paid > 0) lines.unshift({ account: from, amount: -paid });
-  extra.push({ type: "economy.payout", data: { business, what: "distribution", cents: total } });
+  extra.push({ type: "economy.payout", data: { business, what: "distribution", cents: total, months } });
   return { lines, extra, paid };
 }
 
@@ -455,9 +484,10 @@ function distribute(ctx: EffectContext, api: FinanceApi, args: Record<string, Js
   if (by !== "" && !manages(api, ctx.state, by, business)) return reject("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
   const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
   const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
-  const total = typeof args.cents === "number" && args.cents > 0 ? Math.round(args.cents) : Math.round((Math.max(0, businessBooks(api, ctx, business, since, ctx.state.clock + 1).profit) * pct) / 100);
-  if (!(total > 0)) return reject("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
-  const d = distribution(ctx, api, business, total);
+  // A stated amount pays out of this month; otherwise the profit of every month since the last payout that no payout has paid.
+  const months: JsonObject = typeof args.cents === "number" && args.cents > 0 ? { [monthOf(ctx.world, ctx.state.clock)]: Math.round(args.cents) } : undistributed(api, ctx, business, since, ctx.state.clock + 1, pct);
+  if (Object.keys(months).length === 0) return reject("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
+  const d = distribution(ctx, api, business, months);
   if (!d) return reject("no_owners", `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
   if (d.lines.length === 0) return d.extra;
   const posted = api.post(ctx, d.lines, { memo: "Profit distribution", kind: "income", category: "distribution" });
@@ -628,8 +658,7 @@ export function registerBusiness(r: FinanceRegistry): void {
     const f = own(ctx.state.entities, business)?.fields;
     if (!f) return null;
     const period = distributionPeriod(ctx, strOf(f.distribution_every, "quarter"), at);
-    const total = Math.round((Math.max(0, businessBooks(api, ctx, business, period.from, period.to).profit) * numOf(f.distribution_pct)) / 100);
-    const d = distribution(ctx, api, business, total);
+    const d = distribution(ctx, api, business, undistributed(api, ctx, business, period.from, period.to, numOf(f.distribution_pct)));
     return d ? { cents: d.paid, lines: d.lines, memo: "Profit distribution", kind: "income", category: "distribution", extra: d.extra } : null;
   });
   core.process({ id: "economy.invoices", domain: "money", minLevel: 3, step: (slot, ctx) => lateInvoices(slot, ctx, api) });
