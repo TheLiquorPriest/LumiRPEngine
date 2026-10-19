@@ -7,8 +7,8 @@ import { isRecord } from "../../src/shared/json";
 
 const PAGE = readFileSync(join(import.meta.dir, "../../docs/AGENT-GUIDE.md"), "utf8");
 
-/** The sections whose examples are written against the modern starter, applied in this order. */
-export const GUIDE_SECTIONS = ["Character minds", "Money"];
+/** The sections whose examples are written against the modern starter, applied in this order (Holdings and property builds on Money's marina). */
+export const GUIDE_SECTIONS = ["Character minds", "Money", "Holdings and property"];
 
 /** The section under the `## ` heading `title`, up to the next one. */
 export function guideSection(title: string): string {

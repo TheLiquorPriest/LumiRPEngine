@@ -80,7 +80,7 @@ const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "
 export const TOOLS: readonly ToolDef[] = [
   {
     name: "lre_guide",
-    description: 'The agent guide to LumiRPEngine worlds: the world model, the workflow, and the patterns that bite (reveals, lifeKnownBy, fields.owner, cues, ids, map-owned items, tables, a mind\'s secrecy, money\'s owners and flows). Read it before you write a world. topic narrows it to one section (its heading, such as "Tracks: quests and secrets", "Money" or "Character minds") or to whatever matches the words.',
+    description: 'The agent guide to LumiRPEngine worlds: the world model, the workflow, and the patterns that bite (reveals, lifeKnownBy, fields.owner, cues, ids, map-owned items, tables, a mind\'s secrecy, money\'s owners and flows). Read it before you write a world. topic narrows it to one section (its heading, such as "Tracks: quests and secrets", "Money", "Holdings and property" or "Character minds") or to whatever matches the words.',
     inputSchema: object({ topic: { type: "string", description: "A section's heading, or a few words." } }),
     write: false,
   },
