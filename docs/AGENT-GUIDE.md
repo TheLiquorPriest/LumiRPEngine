@@ -106,10 +106,10 @@ Money is entities, a few fields and the economy pack's config. Amounts are whole
 
 | From | What runs |
 |---|---|
-| Money 3 | flows, cards, payment preferences, household shares, living costs, property |
-| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding and tax brackets, sales and business tax, investments, options, capital gains |
+| Money 3 | flows (so bills, pay and a business's takings), cards, payment preferences, household shares, living costs, property, withholding at a flat rate |
+| Money 4 | statements and minimum payments, interest (on the average daily balance where an account asks for it), fees, late payments and collections, credit scores, cash only at a machine or a branch, holds, daily card limits, overdraft policies, withholding through the tax brackets, sales tax, business taxes, investments, options, capital gains |
 
-A world can switch one on or off for itself in `packs.economy.config.features` (`{"flows": true}`), as low as Money 2 for flows, cards, payment preferences, household shares, living costs, cash machines, daily limits and overdraft, and Money 3 for the rest.
+A world switches a feature on or off for itself in `packs.economy.config.features`, by id (`{"sales_tax": true}`): `flows`, `cards`, `payment_prefs`, `households`, `living_costs`, `atm` (cash machines), `daily_limits` and `overdraft` as low as Money 2; `statements`, `interest`, `fees`, `delinquency`, `credit`, `holds`, `average_daily`, `withholding`, `tax_brackets`, `sales_tax`, `business_tax`, `capital_gains`, `investments`, `options` and `property` as low as Money 3. Lint warns about an id it doesn't know.
 
 ### Who owns money
 
@@ -154,16 +154,74 @@ A **flow** is every scheduled or one-off movement of money: rent, bills, a trans
 [{ "op": "add", "path": "/entities/flow_pov_boat_fund", "value": { "id": "flow_pov_boat_fund", "kind": "flow", "name": "Boat fund", "tier": "background", "fields": { "flow_kind": "savings", "from": "acct_pov_checking", "to": "acct_pov_savings", "amount_cents": 4000, "every": "week", "interval": 2, "weekdays": [5], "start": "2026-09-18", "shortfall": "skip", "category": "savings" }, "relations": [] } }]
 ```
 
-### Work and business
+### Businesses and invoices
 
-A **job** is an entity of kind `job`, one worker's employment: `worker`; `employer`, a business entity (paying from its account), a place (the business there) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the employer business's `places`); `title` and `occupation` (a row of the occupations table); `basis` (`salary`, `hourly`, `per_shift`, `commission`, `tips` or `stipend`) and `rate` (the salary a year, the hourly rate or the pay per shift, with `commission_pct` and `tips_per_hour` where they apply); and `pay_every`: `weekly` or `biweekly` (on `pay_weekday`, or counted from the first payday, `pay_anchor`), `semimonthly` or `monthly` (on `pay_days`), `per_job` (at the end of each shift or gig), or `custom` (`pay_unit`, `pay_interval` and the rest, flattened like a flow's schedule). As needed: `hours`, `hours_per_week`, `shifts_per_week`, `weeks_per_year`, `season_from` and `season_to` (`MM-DD`), `start` and `end`, `deductions`, `splits` across the worker's accounts, `contractor` (nothing withheld), `shift_pattern` (the castlife pattern their shifts follow) and `status` (`active`, `leave` or `ended`). Pay follows the work: only inside the season and between `start` and `end`, and hourly or per-shift pay counts what `hours` names, the worker's scheduled commitments (`scheduled`), the shifts they turn up for (`attended`), or `hours_per_week` and `shifts_per_week` (`contract`). Left out, it is `attended` for the POV's own job and `scheduled` for anyone else's while they have a routine at the job, and `contract` without one.
+A **business** is an entity of kind `business`, a party with `owners` (and their `share`s) and a `structure`: `sole_proprietorship`, `partnership`, `llc` (the default), `s_corp` or `c_corp`.
 
-A **business** is an entity of kind `business`: `owners`, `places` it trades at (a purchase there pays it), `operating_account`, `collects_sales_tax`, `margin_pct`, and owner distributions (`distribution_pct`, `distribution_every`). Its accounts are the accounts it owns.
+- **Where it sells:** a purchase at one of its `places` (else where it stands) pays it. `daily_sales` is what walk-in customers from outside the world spend there on each of its `trading_days` (0 is Sunday; Monday to Friday when left out), give or take `sales_spread_pct` (30 when left out), paid at closing and never on a day-off holiday.
+- **Its money** is in the accounts it owns. `operating_account`, one of them, is where takings land and payroll comes from (else its best deposit account). It keeps `margin_pct` of a sale (all of it when left out) and owes the rest to its suppliers, paid on the 10th; the sales tax it collects is paid on the 20th. Its rent, bills and loan payments are flows from its accounts.
+- **Its owners** take draws in play, except from a `c_corp`. `distribution_pct` pays that share of each period's profit out to the owners by share, every `distribution_every` (`month`, `quarter` (the default) or `year`), on the 10th after the period closes.
+- **Its books**, month by month, are kept by the engine from all of that: there is nothing to write.
 
-A second job beside the POV's work at the garage: one shift a week through the marina's fall haul-out, paid each Saturday, and nothing outside the season:
+A business's own Money level is its tier's cap, as a person's is: it decides whether the business collects sales tax and pays business taxes (Money 4) and whether its invoices go late (Money 3). Its payroll, takings and other flows go through its accounts, and an account runs at the highest level of those who may spend from it (the business and its authorized users), whatever the account's own tier. So give a business the `principal` tier, as the modern starter does, for all of it to run.
+
+Dale's marina has run on his own account so far, its takings flowing into it and its bills out. Making it a business moves the account to the business, with Dale still spending from it as an authorized user, and a purchase at the marina then pays it:
 
 ```json
-[{ "op": "add", "path": "/entities/job_pov_haulout", "value": { "id": "job_pov_haulout", "kind": "job", "name": "Haul-out crew at Alder Harbor Marina", "tier": "background", "fields": { "worker": "pov", "employer": "Alder Harbor Marina", "workplace": "alder_harbor_marina", "basis": "per_shift", "rate": 11000, "hours": "contract", "shifts_per_week": 1, "season_from": "09-15", "season_to": "11-15", "pay_every": "weekly", "pay_anchor": "2026-09-19" }, "relations": [] } }]
+[
+  { "op": "add", "path": "/entities/alder_harbor_marina_co", "value": { "id": "alder_harbor_marina_co", "kind": "business", "name": "Alder Harbor Marina", "tier": "principal", "fields": { "owners": [{ "party": "dale_whitcomb", "role": "owner" }], "structure": "sole_proprietorship", "places": ["alder_harbor_marina"], "operating_account": "acct_dale_marina", "industry": "marina", "margin_pct": 70, "late_fee_pct": 1.5 }, "relations": [] } },
+  { "op": "replace", "path": "/entities/acct_dale_marina/fields/owners", "value": [{ "party": "alder_harbor_marina_co", "role": "owner" }, { "party": "dale_whitcomb", "role": "authorized_user" }] }
+]
+```
+
+An **invoice** is an entity of kind `invoice`: the `business` that issued it, the `customer` (a party's id, or an outside customer by name), `cents`, `memo`, `issued`, `due` (30 days after `issued` when left out), `state` (`open` when left out, `paid`, `late` or `void`) and `paid`, what is paid of it so far. Lint requires the business, the customer and an amount above zero. An open invoice is paid as a bill from the customer's accounts on its due date and every week after until it is paid; an outside customer pays on the due date. Unpaid when its due day ends, it goes `late` and takes the business's `late_fee_pct` of the amount, and the fee again every 30 days. A business's `invoice_days` (30 when left out) are the terms of the invoices it issues in play.
+
+```json
+[{ "op": "add", "path": "/entities/inv_pov_winter_storage", "value": { "id": "inv_pov_winter_storage", "kind": "invoice", "name": "Winter storage", "tier": "background", "fields": { "business": "alder_harbor_marina_co", "customer": "pov", "cents": 48000, "memo": "Winter storage for the fishing boat", "issued": "2026-09-14", "due": "2026-10-14", "state": "open" }, "relations": [] } }]
+```
+
+### Work and pay
+
+A **job** is an entity of kind `job`, one worker's employment:
+
+- **Who and where:** `worker`; `employer`, a business entity (paying from its operating account), a place (the business trading there, else an outside employer) or an outside employer named in words, an id-shaped one that names no one and no place drawing a lint warning; `workplace`, the place the work is (else the business's `places`); `title`; and `occupation`, a row of the occupations table (else the worker's own `occupation`).
+- **Pay:** `basis`, which is `salary` (a year), `hourly`, `per_shift`, `commission`, `tips` or `stipend` (a period), and `rate`, both from the occupation's row when left out; `commission_pct` of the sales credited to the worker; `tips_per_hour` on top of hourly pay.
+- **When it pays:** `pay_every`, the occupation's when left out: `weekly` or `biweekly` on the weekday of `pay_anchor` (the first payday), else of `pay_weekday` (Friday); `semimonthly` on `pay_days` (the 15th and the last); `monthly` on one day (the last); `per_job`, each evening at 21:00 for that day's work; or `custom`, a flow's schedule with `pay_` before each part (`pay_unit`, `pay_interval`, `pay_weekdays`, `pay_days`, `pay_months`, `pay_except`). A payday on a weekend or a day-off holiday moves to the business day before it (`pay_roll`: `before`, `after` or `none`).
+- **What it pays for:** the days from `start` to `end`, and inside the season (`season_from` to `season_to`, `MM-DD`, which may wrap the new year). Hourly and per-shift pay count what `hours` names: the worker's scheduled commitments at the workplace (`scheduled`, laid out by `shift_pattern`, a row of the `calendar.shifts` table), the shifts the POV turns up for (`attended`), or `hours_per_week` and `shifts_per_week` over `weeks_per_year` (`contract`). Left out, it is `attended` for the POV and `scheduled` for anyone else while they have a routine at the job, and `contract` without one. `status` is `active`, `leave` (paid nothing) or `ended`.
+- **The paycheck:** `deductions` come off the gross first, each `{label, cents or pct, pretax, kind, to, match_pct}`. A `pretax` one comes off income-tax wages (a `retirement` one still counts as wages for Social Security and Medicare; any other doesn't). `to` is an account of the worker's, else an outside payee by name, and a business employer adds `match_pct` of the gross, up to the deduction, to that account. Withholding follows (Taxes, below), and none for a `contractor` (the occupation's `self_employed` when left out). `splits` route the net among the worker's own accounts, each `{to, cents}` or `{to, pct}`: fixed amounts first, then percentages of the rest, and what's left to their deposit account.
+
+Each job pays through a flow from its employer to the worker. A paycheck covers the work since the last one paid, so a payday the employer can't cover is paid with the next. In play, a business's owner hires, ends jobs and raises pay; a GM edit of the job's fields does the same.
+
+A second job beside the POV's work at the garage: one shift a week on the marina's fall haul-out crew, paid on Fridays with half of each check into savings, and nothing outside the season:
+
+```json
+[{ "op": "add", "path": "/entities/job_pov_haulout", "value": { "id": "job_pov_haulout", "kind": "job", "name": "Haul-out crew at Alder Harbor Marina", "tier": "background", "fields": { "worker": "pov", "employer": "alder_harbor_marina_co", "workplace": "alder_harbor_marina", "title": "Haul-out crew", "basis": "per_shift", "rate": 11000, "hours": "contract", "shifts_per_week": 1, "season_from": "09-15", "season_to": "11-15", "pay_every": "weekly", "pay_anchor": "2026-09-18", "splits": [{ "to": "acct_pov_savings", "pct": 50 }] }, "relations": [] } }]
+```
+
+And a 401(k) at the garage: 5 % of the POV's pay before income tax into a retirement account of theirs, which the shop matches up to 3 % of pay:
+
+```json
+[
+  { "op": "add", "path": "/entities/acct_pov_401k", "value": { "id": "acct_pov_401k", "kind": "account", "name": "Your 401(k)", "tier": "background", "fields": { "owners": [{ "party": "pov", "role": "owner" }], "product": "retirement", "opening": 0, "institution": "Great Lakes Bank" }, "relations": [] } },
+  { "op": "add", "path": "/entities/job_pov_mechanic/fields/deductions", "value": [{ "label": "401(k)", "kind": "retirement", "pretax": true, "pct": 5, "match_pct": 3, "to": "acct_pov_401k" }] }
+]
+```
+
+### Taxes
+
+- **On pay**, withholding runs from Money 3 at a flat rate: the occupation's withholding rate (federal tax, Social Security and Medicare together) and the worker's state rate, plus their region's local rate when they have `local_tax: true`. At Money 4 it goes through the federal brackets and standard deduction for their `filing_status` (`single` when left out, `married_filing_jointly` or `head_of_household`), with Social Security and Medicare, then the state and local rates.
+- **A party's region**, a row of the regions table (`mi`, `il`…), gives the state and local rates of its income tax: its `region` field, else the economy config's `region`, else the national row.
+- **Income nobody withholds from** is paid as estimated tax on 15 April, June and September and 15 January: a contractor's pay, and an owner's share of the profit of any business but a `c_corp` where that business pays business taxes. A `c_corp` pays corporate tax on its own profit, at the config's `taxes.corporatePct` (21 when left out) plus the state rate.
+- **Sales tax** runs only at the top level, Money 4 (or from 3 where the world switches `sales_tax` on), and at the buyer's level: below it a price is as listed, and a business below it neither collects nor remits. The rate at a place is its `sales_tax_pct` (or an enclosing place's), else its tax region's: a `tax_region`, a regions row, on it or an enclosing place, else the config's `region`, else the national row. Nothing is charged on a category in the config's `taxes.exempt` (the modern starter's holds `groceries_staples`, `groceries_baskets` and `medical`) or in a place's `tax_exempt`, nor on what a business with `collects_sales_tax: false` sells.
+
+To charge Michigan's sales tax in the county and every place in it and Chicago's own combined rate there, and to tax the POV's pay at Michigan's typical local rate:
+
+```json
+[
+  { "op": "add", "path": "/places/lakeshore_county/fields/tax_region", "value": "mi" },
+  { "op": "add", "path": "/places/chicago_il/fields/sales_tax_pct", "value": 10.25 },
+  { "op": "add", "path": "/entities/pov/fields/local_tax", "value": true }
+]
 ```
 
 ### Holdings and property
@@ -184,7 +242,6 @@ A **property** is an entity of kind `property`, real estate tied to a `place`: `
 - **`pay_prefs`**, a person field, orders how they pay: tiers of `use` (`cash`, `debit`, `credit`, `charge`, `checking`, `savings`, or a card or account id), each for an amount from `min` to `max` and `categories`, but not those in `except`. A payment tries the tiers that fit it in order, then cash, debit, credit and charge; the first that covers it pays, and with none it is declined. Left out, the tiers follow their wealth band and their `traits`: a frugal or careful person keeps to cash and debit longer, an impulsive or flashy one reaches for credit first, a business pays by debit, then credit.
 - **Cash machines and branches** are place fields: `atm`, `{"bank", "fee", "limit", "deposits"}` (`fee` is the machine's own surcharge, `limit` the most one withdrawal takes), and `branch`, `{"bank"}`, a counter where that bank's customers withdraw and deposit. Where cash machines run (Money 4), cash comes out and goes in only at one of the two; at another bank's machine the product's `fees.atm` comes on top of the surcharge, a card's `daily_atm_limit` caps a day's withdrawals, and a deposit at a machine stays on hold for the account's `hold_days`.
 - **Credit** is played, not written: each person's report and monthly score (300 to 850) come from how their credit accounts are used and paid, and set the rates they are offered. An account's `opened` date counts toward its age.
-- **Tax** reads a person's `filing_status` (`single`, `married_filing_jointly` or `head_of_household`) and `local_tax`.
 
 ## Places, routes and maps
 
@@ -252,7 +309,8 @@ Lumiverse runs macros (`{{…}}`) in the prompt it builds, and also acts on its 
 - Everyone who has met the POV holds a `knows` or a `regard` toward them.
 - A death or dying the player hasn't learned of sets `lifeKnownBy`; the dead lie at a `fields.place`.
 - Everything someone owns names them in `fields.owner`; every account, business, holding and property names its holders in `fields.owners`.
-- Every flow and job pays from and to something that exists, with an amount and a schedule (or `once`).
+- Every flow pays from and to something that exists, with an amount and a schedule (or `once`); every job names its worker and an employer that exists or is named in words.
+- A business is on a tier whose Money level runs what it does (4 for sales tax and business taxes), and its `operating_account` is one of its own accounts.
 - A world that gives the narrator minds in full (`"secrecy": "full"`) has no secret a character would think about openly.
 - No secret track starts on a stage with a `truth`, no cue states its secret, and no public text gives one away.
 - Nothing a map draws was edited outside its map; no `revision` or pin was written by hand.
