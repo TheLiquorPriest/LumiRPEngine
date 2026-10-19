@@ -1133,3 +1133,42 @@ The ledger is accepted by an executable property suite (§14): a reference fold,
 12. Extraction quality is a floor measured on a weak model (§9.4); only time, location and condition changes start `auto`. Learning on the player's own connection and the per-type pin in Settings are the safeguard.
 13. Authored lore keeps its macros, as in native World Info; the import review lists them but does not block them.
 14. Keys aren't linked to the vehicles they open, so handing over keys with a lend shows its own confirm chip; a future `opens` relation would fold it in. (A narrated give of the thing lent, or of something inside it such as a lent truck's glovebox, is folded into the loan and offers no chip.)
+
+## 23. Outside agents
+
+A user's own agent harness (Claude Code, Codex, Cursor and the like) manages their worlds through the `lumirpengine` CLI and its MCP server (`docs/MCP.md`). Both live in this repository, and neither needs a change to Lumiverse.
+
+**The way in.** The client goes in by the same doors a browser does:
+1. It signs in once with the user's name and password and keeps only the session token.
+2. It finds the engine's extension id in the extension list.
+3. It takes a single-use WebSocket ticket and opens the socket as a widget runtime, so it never takes over the browser's frontend slot.
+4. Over that socket it sends `lre.*` requests as `SPINDLE_BACKEND_MSG` frames and reads the `lre.result` and `lre.error` replies by `reqId`.
+
+The host sends no acknowledgements, so the client sets its own timeouts. The token reaches the whole account, and sign-in is rate-limited, so the client reuses the token and doesn't sign in again for each command.
+
+**The contract** (`AGENT_API` 1, `shared/protocol.ts`). `lre.hello` answers with `agentApi`. A client names itself there with `client: {name, version}`, and the user's diagnostics log that an outside client connected. Beyond that, the contract is these requests and one push:
+- **The draft's version.** Every `lre.editor` result carries `version`: the stored draft's write count, or 0 when none is stored. A draft stored before versions existed reads as 1. A write that sends `version` is refused with `conflict` when the draft has moved on since. A write without one behaves as it always did, which is how Build writes.
+- **`patch`** applies RFC 6902 operations (`shared/json-patch.ts`) to the whole draft, or to a copy of the head when no draft is stored. It applies all of them or none, and a failed `test` is a `conflict`.
+- **`restore {revision}`** makes the draft a copy of one of the world's revisions. Its `base` stays the head, so a commit makes that content head again.
+- **`lre.world commit`** takes a `note`, which is trimmed and cut to 200 characters.
+- **`templates`** lists the starters `create` takes, with a name and a summary.
+- **`chats {worldId?}`** lists the user's chats that play a world that still exists. Each comes with the revision it plays now, after any Upgrade, and whether that revision is `behind` the head.
+- **`lre.draft.changed {worldId, version, stored}`** goes to every session of the user after a write, discard, commit or restore of a world's draft, and after a lore save.
+
+**Concurrency.** Requests are handled concurrently, and two writers that both read the same draft would each write it back without the other's change. So every write of one world waits for the one before it, through one queue per (user, world) in `WorldStore`. That covers editor writes, discards, commits and restores. It also covers the writes that reach a world from outside the editor: lore saves (which pick a free id from the draft inside the queue), job proposals (which the client applies as editor writes), Studio installs, the lore book id kept in the index, and deletion.
+
+A push goes out after the reply to the request that made the change, so the session that made it already holds the new version and has nothing to reload. Build, open on that world, reloads when a push names another version, and says so in a toast; it waits for a load already under way, which may have read the change already.
+
+**History.** `WorldIndex.history` keeps one note for each time a revision became head: `{revision, at, source, note?}`, oldest first, where the source is `create`, `build`, `agent`, `import` or `studio`. A commit from a session that said hello with `client` is `agent`'s, and the dispatcher keeps those sessions in memory. Committing the head as it is adds nothing. A world made before history was kept starts its history at its next head.
+
+**Guards.** A patch is refused, as `bad_request` naming the operation and its path, when it:
+- carries more than 500 operations;
+- names a prototype key (`__proto__`, `constructor`, `prototype`) in a path or anywhere in a value;
+- changes `/id`, `/format`, `/engineVersion`, `/pins` or `/suppressed`;
+- changes a place, grid or route a map draws, or marks anything but a map with `map`. This is the same rule as `put`, checked by comparing the draft before and after.
+
+What a patch leaves must pass the shape checks the Studio seam's `validate` makes, or it is refused as `validation`. After that the document is migrated and its maps compile, as after any collection write.
+
+Every editor write that changes a table (`put` or `remove` on `tables`, or a patch) gives that table its content's revision, `hashJson({schema, columns, rows})`, and pins the world to it in `pins.tables`. A removed table loses its pin. A revision the client sends is never used.
+
+A commit is refused as `conflict` when a stored draft began on a head other than the current one ("the world changed since this draft began; reload it"), since committing it would put back what was made head since. Discarding the draft, or restoring a revision onto the head, clears the way.

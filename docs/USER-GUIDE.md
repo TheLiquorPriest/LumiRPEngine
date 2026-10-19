@@ -774,6 +774,10 @@ If that world changed in Build since the Studio took it, the card says so and **
 
 You edit a world as a draft: the world bar in **Build** shows **unsaved draft** and a **Commit** button that carries its warning count, and **Discard** throws away every uncommitted change once you confirm. When you **commit**, the draft becomes a new revision; revisions that a chat depends on are never deleted automatically. A chat stays on the revision it was started on. Once you commit a newer revision of its world, **Settings → Pins and upgrade** shows the chat's revision and its pinned generators and tables, and offers **Upgrade to the latest revision**. (An imported world is a new world, and an extension update changes no stored revision, so neither brings an Upgrade.)
 
+A world has one draft, shared by every window and device you use. When something else changes the draft while Build has it open (another window, or an outside agent working through the `lumirpengine` CLI or its MCP server), Build reloads it and tells you: *This world's draft changed in another window, or an outside agent changed it; Build reloaded it.* Changes are made one at a time, so none is lost. A draft begun before the world got a newer revision can't be committed over it: discard it and start again from the latest revision.
+
+Each world keeps a **history** of how each of its revisions became the latest: created, committed in Build, committed by an outside agent (with the note it gave), imported, or installed from LumiRPEngine Studio. Worlds made before this was kept start their history at their next commit. The `lumirpengine` CLI and MCP server show the history, and they can put an earlier revision back into the draft for you to commit again.
+
 #### Upgrade
 
 Upgrade moves a chat to the newer revision from the next turn forward. It is recorded like any other change, so it works with swipes, branches and Re-narrate. Detail that has already been shown stays as it was; the new tables and generators apply to anything not yet shown. Nothing ever changes silently.
