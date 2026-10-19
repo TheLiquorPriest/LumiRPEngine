@@ -93,8 +93,8 @@ export interface MindsMemoryConfig {
   commitments: { show: number };
   /** A note's salience halves every `halfLifeDays` of game time; one that falls under `floor` has faded and is no longer shown. */
   salience: { halfLifeDays: number; floor: number };
-  /** Whether faded and surplus notes are folded into the summary by the `consolidate` step (otherwise they fade out). */
-  consolidate: { enabled: boolean };
+  /** Whether faded and surplus notes are folded into the summary by the `consolidate` step (otherwise they fade out), and at most how often per character, in game days. */
+  consolidate: { enabled: boolean; periodDays: number };
 }
 
 /** `world.minds` (DESIGN §24.2); a world without it plays with `DEFAULT_WORLD_MINDS`. */
@@ -135,7 +135,7 @@ export const DEFAULT_MINDS_MEMORY: Readonly<MindsMemoryConfig> = Object.freeze({
   notes: { show: 8, keep: 24 },
   commitments: { show: 8 },
   salience: { halfLifeDays: 7, floor: 0.5 },
-  consolidate: { enabled: true },
+  consolidate: { enabled: true, periodDays: 1 },
 });
 
 export const DEFAULT_WORLD_MINDS: Readonly<WorldMindsConfig> = Object.freeze({
@@ -156,6 +156,7 @@ export const MINDS_RANGES = {
   recallTokens: [0, 8000],
   halfLifeDays: [0.1, 3650],
   floor: [0, 5],
+  periodDays: [0.1, 365],
 } as const;
 
 const num = (v: unknown, [lo, hi]: readonly [number, number], fallback: number): number => (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback);
@@ -203,7 +204,7 @@ export function memoryConfigOf(raw: unknown, base: Readonly<MindsMemoryConfig> =
     notes: { show: whole(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
     commitments: { show: whole(commitments.show, MINDS_RANGES.show, base.commitments.show) },
     salience: { halfLifeDays: num(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
-    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) },
   };
 }
 
@@ -500,6 +501,8 @@ export type MindsCharacter = {
   refresh: boolean;
   /** The last turn they were in the POV's scene, as a clock reading. */
   lastPresent: number | null;
+  /** When their notes were last folded into their summary (`minds.consolidated`). */
+  consolidated: number | null;
 };
 
 /** The minds pack's state slice (`state.packs.minds`). */

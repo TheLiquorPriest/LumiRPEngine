@@ -41,6 +41,8 @@ async function turnCalls(preset: "lean" | "standard" | "full" | "custom", steps?
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", steps: steps ?? ALL_ON } } }));
   } else rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset } } }));
+  // Character minds have calls of their own, apart from the phase budgets (DESIGN §24.6): these count the steps.
+  rig.body(await rig.send({ type: "lre.settings.set", patch: { minds: { enabled: false } } }));
   const worldId = await rig.newWorld("Calls");
   const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId })) as { draft: { entities: Record<string, JsonObject & { fields: JsonObject }> } };
   const dev = draft.entities.dev;

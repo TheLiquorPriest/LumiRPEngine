@@ -202,7 +202,7 @@
                 "floor": { "type": "number", "minimum": 0, "maximum": 5, "description": "A note under this salience has faded. Default 0.5." }
               }
             },
-            "consolidate": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean", "description": "Fold faded and surplus notes into the summary. Default true." } } }
+            "consolidate": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean", "description": "Fold faded and surplus notes into the summary. Default true." }, "periodDays": { "type": "number", "minimum": 0.1, "maximum": 365, "description": "At most how often a character's notes are folded, in game days. Default 1." } } }
           }
         }
       }

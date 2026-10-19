@@ -14,7 +14,7 @@ export const PACK = "minds";
 const EMPTY_SLICE: MindsSlice = { round: 0, on: false, chars: {}, presence: [] };
 
 function emptyCharacter(): MindsCharacter {
-  return { mind: null, plans: [], notes: [], commitments: [], witness: [], summary: "", pin: null, refresh: false, lastPresent: null };
+  return { mind: null, plans: [], notes: [], commitments: [], witness: [], summary: "", pin: null, refresh: false, lastPresent: null, consolidated: null };
 }
 
 /** The slice as stored, every part present (read only). */

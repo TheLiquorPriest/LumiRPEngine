@@ -15,7 +15,8 @@ import { EXTRACTION_TYPES, stepLoreOf } from "../shared/settings";
 import type { ChipAction, ContextGeneration, ContextView, LoreStepTrace, StateView } from "../shared/state-view";
 import type { ActionDef, AdjudicationDef, StepPurpose, WorldDoc } from "../shared/world";
 import { formatMoney, offersAction } from "../shared/world";
-import { MINDS_SLOT, worldMindsOf } from "../shared/minds";
+import { MINDS_SLOT, worldMindsOf, type MindCallTrace } from "../shared/minds";
+import { postMinds, preMinds, type MindsDeps } from "./minds";
 import { fightOffers } from "../packs/combat/core/index";
 import { matchCatalog, transferCents } from "../packs/economy/core/index";
 import { itemName, stem } from "../packs/economy/core/items";
@@ -498,6 +499,10 @@ export class Runtime implements TurnHooks {
   private readonly prePhase = new Map<string, { facts: SignalFacts; text: string; start: PlanStart; connectionId: string | null; preset: PresetConfig }>();
   /** Each generation's lore traces, step by step (the inspector shows them, DESIGN §6.5). */
   private readonly loreTraces = new Map<string, LoreStepTrace[]>();
+  /** Each generation's minds calls, with no text (the inspector shows them, DESIGN §24.5). */
+  private readonly mindTraces = new Map<string, MindCallTrace[]>();
+  /** What the minds need of the backend: the runner, the pre and post phases and the time skip read it (`backend/minds.ts`). */
+  readonly minds: MindsDeps;
 
   constructor(options: RuntimeOptions) {
     this.host = options.host;
@@ -519,6 +524,7 @@ export class Runtime implements TurnHooks {
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
+    this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
     // Snapshots from another build never apply (the build defines LRE_BUILD_ID; tests fold as "dev").
     this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: process.env.LRE_BUILD_ID ?? "dev" }));
     this.studio = new StudioBridge(this.host, this.worlds);
@@ -704,11 +710,18 @@ export class Runtime implements TurnHooks {
     const [, early] = await Promise.all([intentTask, choose && budget.take(judging ? 1 : 0) ? choose() : null]);
     this.prePhase.set(p.generationId, { facts, text, start: { place: placeOfEntity(render.state, render.world.pov), clock: render.state.clock }, connectionId: input.connectionId, preset });
     trimMap(this.prePhase);
+    // Character minds (DESIGN §24) think beside the judge: separate calls, on the phase's wall clock,
+    // apart from its call count. A timelapse's minds think at its beats instead (`skip.ts`).
+    const lastReply = before.findLast((m) => !m.isUser);
+    const mindsTask = preMinds(this.minds, { chatId: input.chatId, userId: input.userId, world: render.world, state: render.state, user: text, reply: lastReply ? (lastReply.swipes[lastReply.swipeId] ?? "") : "", timelapse: bridge.intentOf(text)?.action === TIMELAPSE_ACTION, signal: budget.signal, guidance: preset.guidance.mind ?? "" });
     await this.judgeAnswer(bridge, text, render, settings, facts, budget, at);
     if (described) await this.judgeApproach(bridge, text, render, settings, facts, budget, at);
     const decisions = early ?? (choose && budget.take() ? await choose() : []);
     bridge.setDecisions(text, decisions);
-    if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${budget.spent} pre call(s)`, input.userId);
+    const minds = await mindsTask;
+    bridge.setMinds(text, minds.events);
+    this.addMindTraces(input.chatId, p.generationId, minds.traces, true);
+    if (text.trim() !== "") this.host.log("info", `[LumiRPEngine] plan ${String(input.generationId).slice(0, 8)}: intent ${bridge.intentOf(text)?.action ?? "none"} ${JSON.stringify(bridge.intentOf(text)?.params ?? {}).slice(0, 240)}, ${decisions.length} npc decision(s), ${minds.traces.length} mind(s), ${budget.spent} pre call(s)`, input.userId);
   }
 
   /**
@@ -752,6 +765,21 @@ export class Runtime implements TurnHooks {
     bridge.setProse(p.seed, prose);
     await this.keepPlanLines(input.chatId, input.userId, p.seed, plan, render.world, prose);
     this.host.log("info", `[LumiRPEngine] plan ${input.generationId.slice(0, 8)}: brief ${brief === "" ? "none" : "yes"}, ${outlines.flat().length} outline line(s), ${budget.spent} pre call(s)`, input.userId);
+  }
+
+  /**
+   * A generation's minds calls for the inspector (DESIGN §6.5, §24.5): the pre phase's replace any
+   * earlier ones (a Re-run asks again), and the post phase's and a skip's beats' join them. The record
+   * already made for the generation shows them at once.
+   */
+  addMindTraces(chatId: ChatId, generationId: string, traces: readonly MindCallTrace[], replace = false): void {
+    const list = [...(replace ? [] : (this.mindTraces.get(generationId) ?? [])), ...traces];
+    if (list.length === 0) this.mindTraces.delete(generationId);
+    else lruSet(this.mindTraces, generationId, list, 64);
+    const record = this.inspector.records(chatId)?.find((r) => r.id === generationId);
+    if (!record || list.length === 0) return;
+    record.minds = structuredClone(list);
+    this.inspector.save(chatId);
   }
 
   /** Stores the sections a plan feeds the narrator, so Re-narrate can rebuild them. */
@@ -1201,7 +1229,11 @@ export class Runtime implements TurnHooks {
     const contradictionTask = contradictionRun && post && budget.take() ? contradiction(this.steps, contradictionRun, told, text, userId, budget.signal, lore(contradictionRun)) : Promise.resolve(null);
     const choiceRuns = runsOf(modelUse, context.world, "choices", facts, { output: "text", guidance });
     const choiceTasks = choiceRuns.map((r) => (post && budget.take() ? promptedText(this.steps, r, "choices", vars, secrets, userId, budget.signal, lore(r)).then((lines) => lines ?? []) : Promise.resolve([])));
-    const [extracted, effects, decisions, contradicted, choices] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks)]);
+    // The minds' post phase (DESIGN §24.4): who was present, their memory of what was written, and
+    // consolidation, beside the reply's other steps, on the phase's wall clock.
+    const mindsTask = post ? postMinds(this.minds, { chatId, userId, world: context.world, state: context.state, pre: context.pre, messageId, user: pre?.text ?? "", reply: text, signal: budget.signal, guidance: { memory: guidance.memory ?? "", consolidate: guidance.consolidate ?? "" } }) : Promise.resolve({ events: [], traces: [] });
+    const [extracted, effects, decisions, contradicted, choices, minded] = await Promise.all([extractTask, Promise.all(effectsTasks), npcTask, contradictionTask, Promise.all(choiceTasks), mindsTask]);
+    this.addMindTraces(chatId, key, minded.traces);
     // The reply's lore traces join its generation's inspector record (the pre phase's are there already).
     const traces = this.loreTraces.get(key);
     const inspected = traces ? this.inspector.records(chatId)?.find((r) => r.id === key) : undefined;
@@ -1270,7 +1302,7 @@ export class Runtime implements TurnHooks {
       if (bounded.mode === "auto" && !unsure.has(p)) auto.push(fitted);
       else confirm.push(fitted);
     }
-    bridge.prepareRead(input.content, { auto, post, events: decisions });
+    bridge.prepareRead(input.content, { auto, post, events: decisions, minds: minded.events });
     // `choices` and `contradiction` become chips below, with the read's others.
     // Each automatic proposal gets an undo chip; each confirm proposal a confirm chip (DESIGN §11).
     // An automatic proposal the engine refuses gets a decline chip instead, never silence: a payment
@@ -1628,6 +1660,8 @@ export class Runtime implements TurnHooks {
     const record: InspectorRecord = { id: plan?.generationId ?? `dry:${Date.now().toString(36)}`, at: Date.now(), activation: "unconfirmed", sections: [], budget: { sections: settings.modelUse.tokens.sections, used: 0 }, forced: [] };
     const traces = plan ? this.loreTraces.get(plan.generationId) : undefined;
     if (traces) record.lore = structuredClone(traces);
+    const minded = plan ? this.mindTraces.get(plan.generationId) : undefined;
+    if (minded) record.minds = structuredClone(minded);
     if (bookId && present.size === 0) record.warnings = ["The world's book wasn't attached to this chat, so no engine sections reached the narrator. It is re-attached for the next turn."];
     else if (bookId && index) {
       // A slot entry deleted in the host's UI (or a stale cache) is recreated for the next turn, and

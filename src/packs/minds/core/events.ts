@@ -333,6 +333,7 @@ const consolidated: EventTypeDef<PackEvent> = {
     const gone = new Set(ids(d.notes) ? d.notes : []);
     c.notes = c.notes.filter((n) => !gone.has(n.id));
     if (str(d.summary)) c.summary = d.summary;
+    c.consolidated = finite(d.at) ? d.at : state.clock;
   },
   describe: (e, ctx, viewer) => (viewer !== undefined ? "" : `${nameOf(ctx, String(e.data.entity))}'s older notes folded into their summary`),
 };

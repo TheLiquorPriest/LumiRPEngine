@@ -17,7 +17,7 @@ const MEMORY_PARTS: Readonly<Record<string, Readonly<Record<string, { range: rea
   notes: { show: { range: MINDS_RANGES.show, whole: true }, keep: { range: MINDS_RANGES.keep, whole: true } },
   commitments: { show: { range: MINDS_RANGES.show, whole: true } },
   salience: { halfLifeDays: { range: MINDS_RANGES.halfLifeDays, whole: false }, floor: { range: MINDS_RANGES.floor, whole: false } },
-  consolidate: { enabled: "bool" },
+  consolidate: { enabled: "bool", periodDays: { range: MINDS_RANGES.periodDays, whole: false } },
 };
 
 /** Problems with `world.minds`: each one says what the engine plays instead. */
