@@ -7,9 +7,12 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../../src/shared/json";
 import type { PostEvent } from "../../../src/shared/ledger";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
+import { lintWorld } from "../../../src/engine/authoring";
 import { materializeAll } from "../../../src/engine/materialize";
 import { migrateMoney } from "../../../src/engine/money-migrate";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
+import { resolveAction } from "../../../src/engine/resolve";
+import { createRng } from "../../../src/engine/rng";
 import { placeOfEntity } from "../../../src/engine/scope";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
@@ -167,6 +170,34 @@ describe("money foundation: flows, owners and payment", () => {
     paid.applyAll(out);
     expect(paid.state.accounts.checking).toBe(214000 - 250000 - 2700);
     expect(trialBalance(paid.state)).toBe(0);
+  });
+});
+
+describe("money foundation: authoring and settings", () => {
+  test("a flow or a job naming an id that isn't in the world is a lint warning; an outside payee's name isn't", () => {
+    const world = modernUsWorld("w", "Riverton");
+    world.entities.power = entity("power", "flow", { flow_kind: "bill", from: "acct_pov_chequing", to: "Lakeshore Electric", amount_cents: 5000, every: "month", days: [1], shortfall: "skip", status: "active" });
+    world.entities.clerk = entity("clerk", "job", { worker: "you", employer: "brightline_co", occupation: "office_clerk", status: "active" });
+    const issues = lintWorld(world, reg).filter((i) => i.code === "economy.accounts");
+    expect(issues.filter((i) => i.path === "entities.power.fields.from")).toEqual([expect.objectContaining({ severity: "warning", message: expect.stringContaining('"acct_pov_chequing" names no entity') })]);
+    expect(issues.filter((i) => i.path === "entities.power.fields.to")).toEqual([]);
+    expect(issues.filter((i) => i.path === "entities.clerk.fields.employer")).toEqual([expect.objectContaining({ severity: "warning" })]);
+  });
+
+  test("payment preferences set by the action arrive as JSON text and are kept as tiers", () => {
+    const w = setup();
+    const r = resolveAction(reg, w, { action: "set_pay_prefs", params: { tiers: JSON.stringify([{ use: "cash", max: 2000 }, { use: "credit" }]) } }, createRng("prefs"));
+    expect([r.ok, r.rejected]).toEqual([true, []]);
+    expect(w.state.entities.you?.fields.pay_prefs).toEqual([{ use: "cash", max: 2000 }, { use: "credit" }]);
+  });
+
+  test("a one-off flow ends once it has run", () => {
+    const w = setup((world) => {
+      world.entities.gift = entity("gift", "flow", { flow_kind: "transfer", from: "checking", to: "savings", amount_cents: 1000, once: "2026-10-25T09:00", shortfall: "skip", status: "active" });
+    });
+    lapse(w, 15);
+    expect(dataOf(w, "economy.flow_run").filter((d) => d.flow === "gift")).toHaveLength(1);
+    expect(w.ctx.query("economy.finance")(w.ctx, "you", true).flows.find((f) => f.id === "gift")?.status).toBe("ended");
   });
 });
 

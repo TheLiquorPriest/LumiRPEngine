@@ -248,7 +248,8 @@ function flowView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, party: 
     schedule: scheduleWords(ctx, f),
     next: next === null ? null : when(ctx, next),
     shortfall: f.shortfall,
-    status: run.ended ? "ended" : f.status,
+    // A one-off flow entity that has run is over. Its run isn't marked ended: a derived flow (autopay) keeps its id while its one-off date moves on.
+    status: run.ended || (f.schedule.once !== undefined && run.done > 0 && own(ctx.state.entities, f.id)?.kind === "flow") ? "ended" : f.status,
     category: f.category ?? null,
     link: f.link && own(ctx.state.entities, f.link) ? { id: f.link, name: nameFor(ctx, viewer, f.link) } : null,
     editable: f.source === "entity" && payerHolds,

@@ -372,6 +372,9 @@ function purchaser(p: JsonObject, ctx: ReadContext): { payer: EntityId; from?: E
   return { payer: named, ...said };
 }
 
+/** An id as authors write one (lower snake_case, no spaces): what a misspelt reference looks like, unlike an outside party's name in words. */
+const ID_SHAPED = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
 function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   const chargeService: ChargeService = (ctx, payer, cents, memo, opts) => charge(hooks, ctx, payer, cents, memo, opts);
   r.service("economy.charge", chargeService);
@@ -548,11 +551,21 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
         }
         if (e.kind === "flow") {
           for (const side of ["from", "to"]) if (strOf(e.fields[side]) === "") issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no "${side}".`, path: `entities.${e.id}.fields.${side}` });
+          // A payer or payee that names no entity is an outside party by that name: money from or to nowhere when it was meant as an id.
+          for (const side of ["from", "to"]) {
+            const v = strOf(e.fields[side]);
+            if (ID_SHAPED.test(v) && !own(world.entities, v)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `Flow ${e.name}'s ${side} "${v}" names no entity; it's read as an outside party by that name.`, path: `entities.${e.id}.fields.${side}` });
+          }
           const amount = ["amount_cents", "amount_formula", "amount_table", "amount_min", "amount_pct", "amount_due"].some((k) => e.fields[k] !== undefined && e.fields[k] !== "");
           if (!amount) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no amount.`, path: `entities.${e.id}.fields.amount_cents` });
           if ((e.fields.every === undefined || e.fields.every === "") && (e.fields.once === undefined || e.fields.once === "")) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no schedule: give it "every" or "once".`, path: `entities.${e.id}.fields.every` });
           const link = strOf(e.fields.link);
           if (link !== "" && !own(world.entities, link)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} belongs to "${link}", which isn't in the world.`, path: `entities.${e.id}.fields.link` });
+        }
+        if (e.kind === "job") {
+          // An employer is a business, a place (the business there), or an outside employer named in words.
+          const employer = strOf(e.fields.employer);
+          if (ID_SHAPED.test(employer) && !own(world.entities, employer) && !own(world.places, employer)) issues.push({ severity: "warning" as const, code: "economy.accounts", message: `Job ${e.name}'s employer "${employer}" names no one and no place; it's read as an outside employer by that name.`, path: `entities.${e.id}.fields.employer` });
         }
       }
       return issues;
@@ -694,7 +707,7 @@ function registerActions(r: CoreRegistry): void {
   r.action({ id: "flow_resume", label: "Resume a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
   r.action({ id: "flow_delete", label: "Cancel a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
   r.action({ id: "apply_credit", label: "Apply for credit", pack: "economy", params: { product: { type: "text", label: "Product (credit_card, line_of_credit, loan, or one of the world's)" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
-  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "list", label: "Ways to pay, in order" } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
+  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
 }
 
 export const economyPack: PackDef = {

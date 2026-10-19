@@ -352,10 +352,18 @@ export function applyForCredit(ctx: ReadContext, who: EntityId, product: string,
   return [inquiry, ...opened, signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${limit ? ` with a ${money(ctx, limit)} limit` : ""}.`, who, ctx.state.clock)];
 }
 
-/** A party's payment preferences, set by them. */
+/** A party's payment preferences, set by them: a list of tiers, or that list as JSON text (an action's parameters are scalars). */
 export function setPayPrefs(ctx: ReadContext, who: EntityId, tiers: JsonValue | undefined): LedgerEvent[] | Rejection {
   if (!isParty(ctx, who)) return reject("missing_entity", `no ${labelOf(ctx, who)}`);
-  const list = Array.isArray(tiers) ? tiers.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
+  let raw = tiers;
+  if (typeof tiers === "string") {
+    try {
+      raw = JSON.parse(tiers) as JsonValue;
+    } catch {
+      return reject("bad_tiers", "payment preferences are a list of ways to pay");
+    }
+  }
+  const list = Array.isArray(raw) ? raw.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
   if (!list) return reject("bad_tiers", "payment preferences are a list of ways to pay");
   return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
 }

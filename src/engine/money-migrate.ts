@@ -110,7 +110,8 @@ function jobOf(doc: WorldDoc, person: EntityDef, taken: Set<string>): EntityDef 
   const f = person.fields;
   const occupation = typeof f.occupation === "string" ? f.occupation : "";
   if (occupation === "" || occupation === "retired") return null;
-  const employer = typeof f.employer === "string" && f.employer !== "" ? f.employer : occupation;
+  // Without an employer, the occupation in words: an outside employer by name (an id-shaped name lints as a misspelt reference).
+  const employer = typeof f.employer === "string" && f.employer !== "" ? f.employer : occupation.replace(/_/g, " ");
   const job: JsonObject = { worker: person.id, employer, occupation, status: "active" };
   if (typeof f.hourly_cents === "number") {
     job.basis = "hourly";
