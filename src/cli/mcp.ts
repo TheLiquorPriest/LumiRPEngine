@@ -21,7 +21,9 @@ Work like this:
 4. Check it: lre_draft gives its lint and what it changes against the head; lre_playtest and lre_check_world run it.
 5. Commit it with lre_commit and a short note, or drop it with lre_discard.
 
-The draft is the user's Build draft: they see your changes as you make them, and you see theirs, and a Commit in Build commits your unfinished work as yours commits theirs. If lre_worlds shows a draft already stored before you start, it is the user's: ask them before you touch it. Commit or discard every draft you start; never leave one lying around. Deleting a world (lre_world_delete) takes its exact name as confirm. The offline tools (lre_guide, lre_docs, lre_schema, lre_templates, lre_template, lre_check, lre_playtest and lre_check_world on a file) need no sign-in.`;
+The draft is the user's Build draft: they see your changes as you make them, and you see theirs, and a Commit in Build commits your unfinished work as yours commits theirs. If lre_worlds shows a draft already stored before you start, it is the user's: ask them before you touch it. Commit or discard every draft you start; never leave one lying around. Deleting a world (lre_world_delete) takes its exact name as confirm. The offline tools (lre_guide, lre_docs, lre_schema, lre_templates, lre_template, lre_check, lre_playtest and lre_check_world on a file) need no sign-in.
+
+Money and minds: accounts, cards, flows (standing payments and income), jobs, holdings, properties, businesses, trusts and households are entities, told apart by kind (lre_search takes kinds); an account names its holders in fields.owners with their roles, not fields.owner. A world's own account products and assets sit in packs.economy.config, and its character-minds settings (secrecy, the focus ladder, pins, memory) in its minds part. lre_guide's sections "Money" and "Character minds" show each with a patch to copy. Playtest and Check world call no model, so no mind runs there.`;
 
 export function instructions(readOnly: boolean): string {
   return readOnly ? `${WORKFLOW}\n\nThis server is read-only: it offers no tool that changes worlds or chats.` : WORKFLOW;

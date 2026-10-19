@@ -58,7 +58,7 @@ Your worlds on Lumiverse
   worlds                                      Your worlds, with their drafts
   world <worldId> [--source <s>] [--pointer <p>] [--offset <n>]
                                               Read a world (its draft by default)
-  search <words…> [--world <id>] [--collections <a,b>] [--limit <n>]
+  search <words…> [--world <id>] [--collections <a,b>] [--kinds <a,b>] [--limit <n>]
   create <name…> [--template <id>]            A new world, blank or from a starter
   import <file>                               A world file as a new world
   edit <worldId> --ops <file|json> [--expect-version <n>]
@@ -179,10 +179,16 @@ const MIRRORS: Readonly<Record<string, Mirror>> = {
   world: { tool: "lre_world", options: ["--source", "--pointer", "--offset"], needs: 1, usage: "world <worldId> [--source <s>] [--pointer <p>] [--offset <n>]", args: (p) => ({ worldId: pos(p, 0), ...(one(p, "--source") !== undefined ? { source: one(p, "--source") } : {}), ...pointerAndOffset(p) }) },
   search: {
     tool: "lre_search",
-    options: ["--world", "--collections", "--limit"],
+    options: ["--world", "--collections", "--kinds", "--limit"],
     needs: 1,
-    usage: "search <words…> [--world <id>] [--collections <a,b>] [--limit <n>]",
-    args: (p) => ({ query: p.positionals.join(" "), ...(one(p, "--world") !== undefined ? { worldId: one(p, "--world") } : {}), ...(one(p, "--collections") !== undefined ? { collections: (one(p, "--collections") ?? "").split(",").map((c) => c.trim()).filter((c) => c !== "") } : {}), ...(number(p, "--limit") !== undefined ? { limit: number(p, "--limit") } : {}) }),
+    usage: "search <words…> [--world <id>] [--collections <a,b>] [--kinds <a,b>] [--limit <n>]",
+    args: (p) => ({
+      query: p.positionals.join(" "),
+      ...(one(p, "--world") !== undefined ? { worldId: one(p, "--world") } : {}),
+      ...(one(p, "--collections") !== undefined ? { collections: (one(p, "--collections") ?? "").split(",").map((c) => c.trim()).filter((c) => c !== "") } : {}),
+      ...(one(p, "--kinds") !== undefined ? { kinds: (one(p, "--kinds") ?? "").split(",").map((k) => k.trim()).filter((k) => k !== "") } : {}),
+      ...(number(p, "--limit") !== undefined ? { limit: number(p, "--limit") } : {}),
+    }),
   },
   create: { tool: "lre_world_create", options: ["--template"], needs: 1, usage: "create <name…> [--template <id>]", args: (p) => ({ name: p.positionals.join(" "), ...(one(p, "--template") !== undefined ? { template: one(p, "--template") } : {}) }) },
   import: { tool: "lre_world_import", options: [], needs: 1, usage: "import <file>", args: (p) => ({ path: pos(p, 0) }) },

@@ -43,7 +43,15 @@ class RigConnection implements Connection {
   close(): void {}
 }
 
-test("edit, draft, commit, history, restore and diff against the real backend, with chats and templates", async () => {
+interface Tools {
+  conn: RigConnection;
+  ctx: ToolContext;
+  /** A tool's answer as data; a tool error fails the test with its text. */
+  call(name: string, args?: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+
+/** The live tools over a fresh Rig with every shipped pack and the starters, as one signed-in client. */
+async function tools(): Promise<Tools> {
   const rig = new Rig({ shipped: true });
   const conn = new RigConnection(rig);
   expect(await conn.hello()).toMatchObject({ accepted: true, agentApi: 1 });
@@ -55,6 +63,11 @@ test("edit, draft, commit, history, restore and diff against the real backend, w
     if (result.isError) throw new Error(`${name}: ${result.text}`);
     return JSON.parse(result.text) as Record<string, unknown>;
   };
+  return { conn, ctx, call };
+}
+
+test("edit, draft, commit, history, restore and diff against the real backend, with chats and templates", async () => {
+  const { conn, ctx, call } = await tools();
 
   const templates = await conn.request("lre.world", { op: "templates" });
   expect((templates.templates ?? []).map((t) => t.id)).toEqual(["fantasy_town", "mystery_manor", "modern_slice_of_life"]);
@@ -104,4 +117,42 @@ test("edit, draft, commit, history, restore and diff against the real backend, w
   expect(await call("lre_chats", { worldId })).toEqual({ chats: [] });
   await call("lre_discard", { worldId });
   expect((await call("lre_draft", { worldId })).stored).toBe(false);
+});
+
+test("an agent adds a flow, a holding and a minds config to a starter through lre_edit; it checks clean, commits, runs and is found by kind", async () => {
+  const { ctx, call } = await tools();
+  const created = await call("lre_world_create", { name: "Port Alder", template: "modern_slice_of_life" });
+  const worldId = String(created.worldId);
+  const ops = [
+    // A world's own asset, added by its id beside the starter's, and a position in it in the POV's brokerage account.
+    { op: "add", path: "/packs/economy/config/assets/glix", value: { label: "Great Lakes Index Fund", class: "fund", symbol: "GLIX", price: 11240, yield_pct: 1.6 } },
+    { op: "add", path: "/entities/hold_pov_glix", value: { id: "hold_pov_glix", kind: "holding", name: "Great Lakes Index Fund", tier: "background", fields: { account: "acct_pov_brokerage", asset: "glix", lots: [{ qty: 20, cost: 196000, at: "2025-03-02" }], route: "reinvest" }, relations: [] } },
+    // A boat fund: every other Friday from the first payday, skipped when checking can't cover it.
+    { op: "add", path: "/entities/flow_pov_boat_fund", value: { id: "flow_pov_boat_fund", kind: "flow", name: "Boat fund", tier: "background", fields: { flow_kind: "savings", from: "acct_pov_checking", to: "acct_pov_savings", amount_cents: 4000, every: "week", interval: 2, weekdays: [5], start: "2026-09-18", shortfall: "skip" }, relations: [] } },
+    { op: "add", path: "/minds", value: { secrecy: "brief", weights: { mentioned: 50 }, thresholds: { live: 60, near: 35, far: 15 }, always: { ids: ["marcus_delgado"] }, memory: { notes: { show: 10, keep: 30 } } } },
+  ];
+  const edit = await call("lre_edit", { worldId, ops, expectVersion: 0 });
+  // Each change is its own item, the asset under its config map, and nothing of the starter's moves with them.
+  expect(edit).toMatchObject({ version: 1 });
+  expect(edit.changed).toEqual({ entities: { added: 2 }, minds: { added: 1 }, assets: { added: 1 } });
+  // Clean: no lint error, nothing the schema doesn't know.
+  expect((edit.lint as { errors: number }).errors).toBe(0);
+  expect(edit.schema).toMatchObject({ warnings: 0 });
+  const draft = await call("lre_draft", { worldId });
+  expect(draft).toMatchObject({ stored: true, version: 1, lint: { errors: 0 } });
+  const commit = await call("lre_commit", { worldId, note: "A boat fund, an index fund and minds", expectVersion: 1 });
+  expect(commit).toMatchObject({ worldId, note: "A boat fund, an index fund and minds", warnings: { errors: 0 } });
+  // Committed as written: the head holds the minds config.
+  const head = await callTool("lre_world", { worldId, source: "head", pointer: "/minds/always" }, ctx);
+  expect(head.text).toContain('"marcus_delgado"');
+  // The committed world runs in the bundled engine, flow, holding and minds config and all.
+  const run = await call("lre_check_world", { worldId, source: "head", days: 5 });
+  expect(run.days).toHaveLength(5);
+  expect(run.lint).toMatchObject({ errors: 0 });
+  // Found by kind, with its pointer, among the starter's other entities; the asset in its config map.
+  const flows = (await call("lre_search", { worldId, query: "boat fund", kinds: ["flow"] })).hits as { kind?: string }[];
+  expect(flows).toContainEqual(expect.objectContaining({ id: "flow_pov_boat_fund", kind: "flow", pointer: "/entities/flow_pov_boat_fund", label: "Boat fund" }));
+  expect(flows.every((h) => h.kind === "flow")).toBe(true);
+  const assets = await call("lre_search", { worldId, query: "great lakes", collections: ["assets"] });
+  expect(assets.hits).toContainEqual(expect.objectContaining({ id: "glix", collection: "assets", pointer: "/packs/economy/config/assets/glix" }));
 });

@@ -80,7 +80,7 @@ const EXPECT_VERSION: JsonObject = { type: "integer", minimum: 0, description: "
 export const TOOLS: readonly ToolDef[] = [
   {
     name: "lre_guide",
-    description: 'The agent guide to LumiRPEngine worlds: the world model, the workflow, and the patterns that bite (reveals, lifeKnownBy, fields.owner, cues, ids, map-owned items, tables). Read it before you write a world. topic narrows it to one section (its heading, such as "Tracks: quests and secrets") or to whatever matches the words.',
+    description: 'The agent guide to LumiRPEngine worlds: the world model, the workflow, and the patterns that bite (reveals, lifeKnownBy, fields.owner, cues, ids, map-owned items, tables, a mind\'s secrecy, money\'s owners and flows). Read it before you write a world. topic narrows it to one section (its heading, such as "Tracks: quests and secrets", "Money" or "Character minds") or to whatever matches the words.',
     inputSchema: object({ topic: { type: "string", description: "A section's heading, or a few words." } }),
     write: false,
   },
@@ -110,19 +110,19 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_check",
-    description: "Check a world the way LumiRPEngine loads it, on this machine: the shape, migration to this engine, every lint rule of the engine and its packs, and the host macro hazards in authored text (lore, section and step templates). Errors block a commit and an import.",
+    description: "Check a world the way LumiRPEngine loads it, on this machine: the shape, migration to this engine, every lint rule of the engine and its packs, and the host macro hazards in authored text (lore, section and step templates). It counts the world's items and its entities by kind, which is where its accounts, flows, jobs and holdings show. Errors block a commit and an import.",
     inputSchema: object({ path: PATH, world: WORLD }),
     write: false,
   },
   {
     name: "lre_playtest",
-    description: "Play typed turns through the bundled engine from the world's start, with no narrator and no model: what each turn does to the world, and the engine's notes on it. The world comes from a file, inline, or from your Lumiverse (worldId with source).",
+    description: "Play typed turns through the bundled engine from the world's start, with no narrator and no model (so no character mind runs): what each turn does to the world, and the engine's notes on it. The world comes from a file, inline, or from your Lumiverse (worldId with source).",
     inputSchema: object({ ...RUN_FROM, turns: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50, description: 'What the player types, one entry per turn ("look around", "walk to the market").' } }, ["turns"]),
     write: false,
   },
   {
     name: "lre_check_world",
-    description: "Simulate whole days from the world's start with the bundled engine (no narrator, no model): NPC schedules and plans, rules, tracks and money, with dropped events, failures and secret leaks as notes. The world comes from a file, inline, or from your Lumiverse (worldId with source).",
+    description: "Simulate whole days from the world's start with the bundled engine (no narrator, no model, so no character mind runs): NPC schedules and plans, rules, tracks and money, flows and pay included, with dropped events, failures and secret leaks as notes. The world comes from a file, inline, or from your Lumiverse (worldId with source).",
     inputSchema: object({ ...RUN_FROM, days: { type: "integer", minimum: 1, maximum: 14, description: "Days to simulate (default 3)." } }),
     write: false,
   },
@@ -146,8 +146,18 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_search",
-    description: "Search your worlds' heads and stored drafts for words: names, descriptions, lore, cues, formulas, anything written as text. Each hit names the world, whether it is in the head or the draft, the item, and the field that matched (a JSON Pointer inside the item), with a snippet. It reads every world it searches whole, so give worldId when you know the world. A world it couldn't read is listed as skipped.",
-    inputSchema: object({ query: { type: "string", description: "Words to look for; items holding all of them come first." }, worldId: { type: "string", description: "Only this world." }, collections: { type: "array", items: { type: "string" }, description: 'Only these collections or parts ("entities", "lore", "tracks", "calendar"…).' }, limit: { type: "integer", minimum: 1, maximum: 100, description: "At most this many hits (default 20)." } }, ["query"]),
+    description:
+      "Search your worlds' heads and stored drafts for words: names, descriptions, lore, cues, formulas, anything written as text. Each hit names the world, whether it is in the head or the draft, the item, its kind when it is an entity, and the field that matched (a JSON Pointer inside the item), with a snippet. Accounts, cards, flows, jobs, holdings, properties, businesses, trusts and households are entities: kinds narrows the search to them. It reads every world it searches whole, so give worldId when you know the world. A world it couldn't read is listed as skipped.",
+    inputSchema: object(
+      {
+        query: { type: "string", description: "Words to look for; items holding all of them come first." },
+        worldId: { type: "string", description: "Only this world." },
+        collections: { type: "array", items: { type: "string" }, description: 'Only these collections or parts ("entities", "lore", "tracks", "calendar", "packs"…).' },
+        kinds: { type: "array", items: { type: "string" }, description: 'Only entities of these kinds, or of kinds that extend them: "flow", "account", "job", "household", "group" (every group)…' },
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "At most this many hits (default 20)." },
+      },
+      ["query"],
+    ),
     write: false,
   },
   {
@@ -208,7 +218,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "lre_diff",
-    description: 'What changed between two versions of a world, item by item (added, changed, removed), with the JSON Pointers that differ inside each changed item. from and to are "head", "draft" or a revision: by default, from the head to the draft.',
+    description: 'What changed between two versions of a world, item by item (added, changed, removed; a pack\'s products and assets are items of their own), with the JSON Pointers that differ inside each changed item. from and to are "head", "draft" or a revision: by default, from the head to the draft.',
     inputSchema: object({ worldId: WORLD_ID, from: SOURCE, to: SOURCE }, ["worldId"]),
     write: false,
   },

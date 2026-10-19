@@ -65,6 +65,10 @@ function outlineLine(label: string, value: unknown): string {
     const keys = Object.keys(value);
     // A collection (an object of objects keyed by id) lists its ids: they are what a pointer names.
     const collection = keys.length > 0 && keys.every((k) => isRecord(value[k]));
+    // An item says what it is: among a world's entities, an account or a flow is told from a person only so.
+    const kind = typeof value.kind === "string" && value.kind !== "" ? value.kind : null;
+    const name = nameOf(value);
+    if (!collection && (kind !== null || name !== null)) return `- ${label}: ${[kind, name === null ? null : clip(JSON.stringify(name), 80)].filter((x) => x !== null).join(" ")} (${count(keys.length, "key")})`;
     const shown = keys.slice(0, 60).join(", ");
     const more = keys.length > 60 ? `, … ${keys.length - 60} more` : "";
     return `- ${label}: ${collection ? count(keys.length, "item") : `an object of ${count(keys.length, "key")}`}${keys.length > 0 ? ` (${shown}${more})` : ""}`;

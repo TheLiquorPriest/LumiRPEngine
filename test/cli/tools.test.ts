@@ -53,6 +53,11 @@ describe("live tools", () => {
     const missing = await call(ctx, "lre_world", { worldId: w.index.id, pointer: "/entities/nobody_here" });
     expect(missing.isError).toBe(true);
     expect(missing.text).toContain("/entities holds");
+    // An outline of the entities says what each is, so an account or a flow isn't mistaken for a person.
+    const entities = await call(ctx, "lre_world", { worldId: w.index.id, source: "head", pointer: "/entities" });
+    const brindlemere = fake.lre.world(w.index.id).revisions.get(w.index.head);
+    const [someId, some] = Object.entries(brindlemere?.entities ?? {})[0] ?? [];
+    expect(entities.text).toContain(`- ${String(someId)}: ${String(some?.kind)} ${JSON.stringify(some?.name)} (`);
     expect(fake.lre.sent("lre.editor", "get")[0]).toEqual({ type: "lre.editor", op: "get", worldId: w.index.id, base: null });
     expect(fake.lre.sent("lre.world", "get")).toEqual([{ type: "lre.world", op: "get", worldId: w.index.id, revision: w.index.head }]);
   });
@@ -323,6 +328,111 @@ describe("live tools", () => {
     expect(scoped.data.hits).toEqual([expect.objectContaining({ worldId: b.index.id, source: "draft", id: "lighthouse", label: "The old lighthouse" })]);
   });
 
+  test("lre_search names each entity's kind, narrows to kinds and the kinds that extend them, and refuses names a world can't have", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const worldId = w.index.id;
+    const { ctx } = client(fake);
+    const thing = (id: string, kind: string, name: string, description: string) => ({ op: "add", path: `/entities/${id}`, value: { id, kind, name, tier: "background", fields: { description }, relations: [] } });
+    await call(ctx, "lre_edit", {
+      worldId,
+      ops: [
+        // A world's own group kind: it extends a pack's, so a search for groups includes it.
+        { op: "add", path: "/kinds/crew", value: { id: "crew", label: "Crew", extends: "group", fields: {} } },
+        thing("brandts", "household", "The Brandts", "They keep the harbor lamp lit."),
+        thing("guild", "faction", "Harbor Guild", "Dues from every boat in the harbor."),
+        thing("gulls", "crew", "The Gulls", "A harbor crew of three."),
+        thing("pilot", "person", "Old Pilot", "Knows every rock in the harbor."),
+      ],
+    });
+    const all = await call(ctx, "lre_search", { query: "harbor", worldId });
+    const kinds = Object.fromEntries((all.data.hits as { id: string; kind?: string }[]).map((h) => [h.id, h.kind ?? null]));
+    expect(kinds).toMatchObject({ brandts: "household", guild: "faction", gulls: "crew", pilot: "person" });
+    const groups = await call(ctx, "lre_search", { query: "harbor", worldId, kinds: ["group"] });
+    expect((groups.data.hits as { id: string }[]).map((h) => h.id).sort()).toEqual(["brandts", "guild", "gulls"]);
+    const households = await call(ctx, "lre_search", { query: "harbor", worldId, kinds: ["household"] });
+    expect((households.data.hits as { id: string }[]).map((h) => h.id)).toEqual(["brandts"]);
+    // A plural or a misspelling would only find nothing, which reads as "there is none".
+    const collection = await call(ctx, "lre_search", { query: "harbor", worldId, collections: ["households"] });
+    expect(collection.isError).toBe(true);
+    expect(collection.text).toContain("No world searched has a collection or part households");
+    expect(collection.text).toContain('kinds: ["flow"]');
+    const kind = await call(ctx, "lre_search", { query: "harbor", worldId, kinds: ["households"] });
+    expect(kind.isError).toBe(true);
+    expect(kind.text).toContain("There is no kind households");
+    expect(kind.text).toContain("household");
+  });
+
+  test("lre_search reads a pack's products and assets one by one, each with its own name and pointer, and the head only where the draft changed them", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const worldId = w.index.id;
+    const { ctx } = client(fake);
+    const economy = {
+      version: 1,
+      config: {
+        region: "harbor_county",
+        products: { harbor_checking: { label: "Harbor Credit Union checking", class: "checking", institution: "Harbor Credit Union" }, gull_card: { label: "Gull Rewards card", class: "credit_card", institution: "Harbor Credit Union", apr_pct: 24 } },
+        assets: { harbor_fund: { label: "Harbor Index Fund", class: "fund", symbol: "HRBR", price: 4200 } },
+      },
+    };
+    await call(ctx, "lre_edit", { worldId, ops: [{ op: "add", path: "/packs/economy", value: economy }] });
+    await call(ctx, "lre_commit", { worldId, note: "Banking" });
+    // The draft renames one product; the other is the same in head and draft.
+    await call(ctx, "lre_edit", { worldId, ops: [{ op: "replace", path: "/packs/economy/config/products/gull_card/label", value: "Harbor Gull card" }] });
+    const found = await call(ctx, "lre_search", { query: "harbor", worldId });
+    const hits = found.data.hits as { source: string; collection: string; id: string; pointer: string; label: string; field: string }[];
+    const where = hits.map((h) => `${h.source} ${h.collection} ${h.id}`).sort();
+    expect(where).toEqual(["draft assets harbor_fund", "draft packs economy", "draft products gull_card", "draft products harbor_checking", "head products gull_card"]);
+    expect(hits.find((h) => h.id === "harbor_checking")).toMatchObject({ pointer: "/packs/economy/config/products/harbor_checking", label: "Harbor Credit Union checking", field: "/label" });
+    expect(hits.find((h) => h.id === "gull_card" && h.source === "head")?.label).toBe("Gull Rewards card");
+    // The pack's own item keeps the rest of its config, not the products again.
+    expect(hits.find((h) => h.collection === "packs")).toMatchObject({ pointer: "/packs/economy", field: "/config/region" });
+    const products = await call(ctx, "lre_search", { query: "harbor", worldId, collections: ["products"] });
+    expect((products.data.hits as { id: string }[]).map((h) => h.id).sort()).toEqual(["gull_card", "gull_card", "harbor_checking"]);
+  });
+
+  test("lre_edit, lre_diff and the conflict check see a pack's products one by one, not the pack as one change", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const worldId = w.index.id;
+    const { ctx } = client(fake);
+    await call(ctx, "lre_edit", { worldId, ops: [{ op: "add", path: "/packs/economy", value: { version: 1, config: { region: "harbor_county", products: { gull_card: { label: "Gull Rewards card", class: "credit_card", apr_pct: 24 } } } } }] });
+    await call(ctx, "lre_commit", { worldId });
+    const edit = await call(ctx, "lre_edit", {
+      worldId,
+      ops: [
+        { op: "replace", path: "/packs/economy/config/products/gull_card/apr_pct", value: 19.9 },
+        { op: "add", path: "/packs/economy/config/products/harbor_checking", value: { label: "Harbor checking", class: "checking" } },
+      ],
+    });
+    expect(edit.data.changed).toEqual({ products: { changed: 1, added: 1 } });
+    expect(edit.data.items).toEqual([
+      { key: "/packs/economy/config/products/gull_card", label: "products › Gull Rewards card (gull_card)", kind: "changed" },
+      { key: "/packs/economy/config/products/harbor_checking", label: "products › Harbor checking (harbor_checking)", kind: "added" },
+    ]);
+    // The pack's own change lists only its own fields: the products are changes of their own.
+    await call(ctx, "lre_edit", { worldId, ops: [{ op: "replace", path: "/packs/economy/config/region", value: "gull_island" }] });
+    const diff = await call(ctx, "lre_diff", { worldId });
+    const changes = diff.data.changes as { key: string; fields?: { path: string }[] }[];
+    expect(changes.map((c) => c.key)).toEqual(["/packs/economy", "/packs/economy/config/products/gull_card", "/packs/economy/config/products/harbor_checking"]);
+    expect(changes[0]?.fields?.map((f) => f.path)).toEqual(["/packs/economy/config/region"]);
+    expect(changes[1]?.fields?.map((f) => f.path)).toEqual(["/packs/economy/config/products/gull_card/apr_pct"]);
+    // Build changes one product between the agent's read and its patch; the agent's patch to another goes on top.
+    const handle = fake.lre.handle.bind(fake.lre);
+    let raced = false;
+    fake.lre.handle = (r) => {
+      if (!raced && r.type === "lre.editor" && r.op === "patch") {
+        raced = true;
+        handle({ lre: 1, type: "lre.editor", reqId: "build", op: "patch", worldId, base: null, ops: [{ op: "replace", path: "/packs/economy/config/products/gull_card/label", value: "Gull card" }] });
+      }
+      return handle(r);
+    };
+    const other = await call(ctx, "lre_edit", { worldId, ops: [{ op: "replace", path: "/packs/economy/config/products/harbor_checking/label", value: "Harbor everyday checking" }] });
+    expect(other.isError).toBe(false);
+    expect(other.data.meanwhile).toMatchObject({ items: ["products › Gull card (gull_card)"] });
+  });
+
   test("lre_search and lre_worlds go on past a world they can't read, and name it", async () => {
     const fake = new FakeLumiverse();
     const good = fake.lre.seed("Alpha");
@@ -488,6 +598,13 @@ describe("offline tools", () => {
     const check = await call(ctx, "lre_check", { path: "manor.json" });
     expect(check.data).toMatchObject({ ok: true, loads: true, errors: 0, world: { id: "mystery_manor", name: "Mystery manor" } });
     expect((check.data.contents as Record<string, number>).entities).toBeGreaterThan(5);
+    // Every entity is counted under its own kind (the manor's people are its own `character` kind), most first.
+    const manor = templateFile("mystery_manor") as { world: { entities: Record<string, { kind: string }> } };
+    const expected: Record<string, number> = {};
+    for (const e of Object.values(manor.world.entities)) expected[e.kind] = (expected[e.kind] ?? 0) + 1;
+    expect(check.data.entityKinds).toEqual(expected);
+    const counts = Object.values(check.data.entityKinds as Record<string, number>);
+    expect(counts).toEqual([...counts].sort((a, b) => b - a));
     const play = await call(ctx, "lre_playtest", { path: "manor.json", turns: ["look around", "wait an hour"] });
     expect((play.data.turns as { user: string }[]).map((t) => t.user)).toEqual(["look around", "wait an hour"]);
     const days = await call(ctx, "lre_check_world", { path: "manor.json", days: 1 });
@@ -511,6 +628,14 @@ describe("offline tools", () => {
   test("guide, docs, schema, templates and template answer within one answer", async () => {
     const guide = await call(ctx, "lre_guide");
     expect(guide.text).toContain("# Writing LumiRPEngine worlds: a guide for agents");
+    // Larger than one answer: all of it but its largest section, which it names for a second call.
+    expect(guide.text.length).toBeLessThanOrEqual(24_000);
+    for (const heading of ["## How to work on a user's world", "## Character minds", "## Before you commit"]) expect(guide.text).toContain(heading);
+    expect(guide.text).not.toContain("\n## Money\n");
+    expect(guide.text).toMatch(/read each with topic when the work needs it: "Money" \([\d,]+ characters\)/);
+    const money = await call(ctx, "lre_guide", { topic: "Money" });
+    expect(money.text.startsWith("## Money\n")).toBe(true);
+    expect(money.text).toContain("### Flows: money that moves on its own");
     expect((await call(ctx, "lre_guide", { topic: "A revealed secret starts one stage earlier" })).text).toContain('"when": "true"');
     expect((await call(ctx, "lre_docs", { query: "account opening", doc: "reference" })).text).toContain("REFERENCE.md ›");
     expect((await call(ctx, "lre_docs", { query: "x", doc: "nope" })).isError).toBe(true);

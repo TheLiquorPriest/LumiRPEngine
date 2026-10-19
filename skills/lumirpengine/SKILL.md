@@ -27,7 +27,10 @@ Use whichever is available:
 
 - A secret track never starts on a stage with a `truth`: start one stage earlier, moving on with `"when": "true"`.
 - Someone who starts dead or dying lists who knows in `lifeKnownBy`; left out, everyone knows.
-- Whose a thing is lives in `fields.owner`; the `owns` relation only changes wording.
+- Whose a thing is lives in `fields.owner`; the `owns` relation only changes wording. Money is held differently: accounts, businesses, holdings and properties name their holders in `fields.owners`, each with a role (`owner`, `joint`, `custodian`, `beneficiary`, `trustee`, `authorized_user`).
+- Money that moves on its own (rent, bills, savings, allowances, pay) is a `flow` entity with a schedule and a `shortfall` policy, and a job is a `job` entity: never a note in someone's fields. Amounts are minor units, percentages percent units. `lre_guide` topic "Money" has a patch to copy for each kind.
+- A world's own products and assets are maps in `packs.economy.config`. Add each by its id where the map exists: a JSON Patch `add` of the whole map replaces it, dropping what was in it.
+- A world's minds settings are its `minds` part; keep `secrecy` at `brief` unless a private thought reaching the narrator gives nothing away (`lre_guide` topic "Character minds").
 - A cue says how someone acts, never the secret it stands for.
 - Edit a map, never the places, grids or routes it draws; never write a table's `revision` or `/pins`.
 - Keep ids stable in a world that chats play, ids equal to their keys, money in minor units.

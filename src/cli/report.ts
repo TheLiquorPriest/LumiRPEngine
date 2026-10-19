@@ -80,6 +80,18 @@ export function contentsOf(world: unknown): Record<string, number> {
   return out;
 }
 
+/** How many entities of each kind a world holds, most first: accounts, cards, flows, jobs and households are entities, so a count of entities alone hides them. */
+export function entityKindsOf(world: unknown): Record<string, number> {
+  const counts = new Map<string, number>();
+  const entities = isRecord(world) && isRecord(world.entities) ? Object.values(world.entities) : [];
+  for (const entity of entities) {
+    const kind = isRecord(entity) && typeof entity.kind === "string" ? entity.kind : "(no kind)";
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  // From entries, so a kind named like a prototype key (`__proto__`) stays a plain count.
+  return Object.fromEntries([...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])));
+}
+
 /** A tool's data, as the text of its answer. */
 export function json(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? "null";
