@@ -225,8 +225,8 @@ function BusinessCard(props: { view: FinanceView; business: BusinessView; contro
   const accountName = (id: string): string => view.accounts.find((a) => a.id === id)?.name ?? (controls.mode === "gm" ? (controls.gm.entities.find((e) => e.id === id)?.name ?? id) : id);
   return (
     <Card title={`🏪 ${b.name}`} aside={b.role ? <span class="lre-badge">{humanize(b.role)}</span> : null}>
-      {b.owners.map((o) => (
-        <Row key={o.party} k={o.name} sub={humanize(o.role)} v={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
+      {b.owners.map((o, i) => (
+        <Row key={o.party ?? `someone:${i}`} k={o.name} sub={humanize(o.role)} v={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
       ))}
       {b.places.length > 0 ? <Row k="Trades at" v={b.places.map((p) => p.name).join(", ")} /> : null}
       {b.accounts.length > 0 ? <Row k="Accounts" v={b.accounts.map(accountName).join(", ")} /> : null}

@@ -166,8 +166,8 @@ function AccountCard(props: { view: FinanceView; account: AccountView; controls:
       {blocks.owners ? (
         <>
           <div class="lre-h">Owners</div>
-          {a.owners.map((o) => (
-            <Row key={o.party} k={o.name} sub={humanize(o.role)} v={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
+          {a.owners.map((o, i) => (
+            <Row key={o.party ?? `someone:${i}`} k={o.name} sub={humanize(o.role)} v={o.share > 0 ? `${Math.round(o.share * 10) / 10}%` : undefined} />
           ))}
         </>
       ) : null}

@@ -4,7 +4,7 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights } from "../../../shared/finance";
+import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type HouseholdView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
@@ -238,6 +238,29 @@ export function flowTargets(view: FinanceView, palette: PaletteView | null): { i
 /** How much of a credit account's limit is in use, percent; null without a limit (a charge card). */
 export function utilisation(account: AccountView): number | null {
   return account.limit !== null && account.limit > 0 ? Math.round((Math.max(0, -account.cents) * 100) / account.limit) : null;
+}
+
+export interface HouseholdRow {
+  /** The row's key: the member's id, or its place for someone the player can't see. */
+  key: string;
+  id: EntityId | null;
+  name: string;
+  role: string;
+  share: number;
+  /** Their part of the shared costs a month. */
+  cents: number | null;
+}
+
+/**
+ * A household's members as its card lists them, each with its part of the shared costs. Someone
+ * the player can't see has no id, so they're paired by place: the view lists the members and
+ * their parts in the same order.
+ */
+export function householdRows(h: HouseholdView): HouseholdRow[] {
+  return h.members.map((m, i) => {
+    const part = h.monthly.parts.find((p, j) => (m.id === null ? j === i && p.id === null : p.id === m.id));
+    return { key: m.id ?? `someone:${i}`, id: m.id, name: m.name, role: m.role, share: m.share, cents: part?.cents ?? null };
+  });
 }
 
 // ---------------------------------------------------------------- realism gating

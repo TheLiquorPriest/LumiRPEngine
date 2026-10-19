@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { AccountView, BusinessView, CardView, FinanceView, Flow, FlowView, HoldingView, PropertyView } from "../../src/shared/finance";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
-import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, holdingControls, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
+import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
 import {
   actionRequest,
   autopayAction,
@@ -70,6 +70,19 @@ describe("the view as it arrives", () => {
     const decoded = decodeFinanceView(raw);
     expect(decoded?.accounts.map((a) => [a.id, a.class, a.status])).toEqual([["visa", "checking", "open"]]);
     expect(decoded?.features).toEqual(["flows"]);
+  });
+
+  test("household members the player can't see arrive without ids and still keep their own parts and rows", () => {
+    const home = view({ partyKind: "household", household: { id: "home", name: "Unit 2B", accounts: [], flows: [], members: [{ id: "pov", name: "You", role: "", share: 40 }, { id: null, name: "someone", role: "", share: 35 }, { id: null, name: "someone", role: "", share: 25 }], monthly: { total: 100000, parts: [{ id: "pov", name: "You", cents: 40000 }, { id: null, name: "someone", cents: 35000 }, { id: null, name: "someone", cents: 25000 }] } } });
+    const decoded = decodeFinanceView(JSON.parse(JSON.stringify(home)));
+    if (!decoded?.household) throw new Error("no household");
+    const rows = householdRows(decoded.household);
+    expect(rows.map((r) => [r.id, r.cents])).toEqual([
+      ["pov", 40000],
+      [null, 35000],
+      [null, 25000],
+    ]);
+    expect(new Set(rows.map((r) => r.key)).size).toBe(3);
   });
 });
 

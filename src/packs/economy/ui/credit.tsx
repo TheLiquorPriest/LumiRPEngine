@@ -11,7 +11,7 @@ import { humanize } from "../../../frontend/format";
 import { FlowRow } from "./flows";
 import { SelectField } from "./forms";
 import type { SectionProps } from "./hub";
-import { creditBlocks } from "./layout";
+import { creditBlocks, householdRows } from "./layout";
 import { AmountAction } from "./lines";
 import { applyCreditAction } from "./requests";
 
@@ -104,11 +104,11 @@ export function HouseholdSection(props: SectionProps) {
   return (
     <>
       <Card title={`🏡 ${h.name}`} aside={<span class="lre-badge">{fmt(h.monthly.total)} a month shared</span>}>
-        {h.members.map((m) => (
+        {householdRows(h).map((m) => (
           <Row
-            key={m.id}
+            key={m.key}
             k={m.name}
-            sub={[m.role ? humanize(m.role) : null, h.monthly.parts.find((p) => p.id === m.id) ? `${fmt(h.monthly.parts.find((p) => p.id === m.id)?.cents ?? 0)} a month` : null].filter((s) => s !== null).join(" · ") || undefined}
+            sub={[m.role ? humanize(m.role) : null, m.cents !== null ? `${fmt(m.cents)} a month` : null].filter((s) => s !== null).join(" · ") || undefined}
             v={
               <span class="lre-inline">
                 {m.share > 0 ? `${Math.round(m.share * 10) / 10}%` : null}
