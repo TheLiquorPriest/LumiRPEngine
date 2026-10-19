@@ -19,7 +19,7 @@ import type { EventTypeDef, ReadContext } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
 import type { AmountProvider, FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { assetOf, dateText, priceOf, reject, type Asset } from "./assets";
-import { accountOfHolding, holdingIds, holdingOwners, lotsChange, lotsOf, marketOf, qtyOf, routeOf } from "./holdings";
+import { accountOfHolding, holdingIds, holdingOwners, lotsChange, lotsOf, marketOf, qtyOf, routeOf, sheltered } from "./holdings";
 import { basisRecord, byShare, INCOME_KINDS, recordIncome, setBasisRecord, type IncomeKind } from "./records";
 import { QTY_EPSILON, roundQty } from "./pricing";
 
@@ -181,6 +181,8 @@ function incomeEvent(api: FinanceApi): EventTypeDef<PackEvent> {
         }
         return;
       }
+      // A retirement account's income isn't the year's to tax: it stays in the account untaxed.
+      if (sheltered(api, { world: ctx.world, state }, source)) return;
       const shares = worthShares(sourceOwners(api, state, source));
       for (const p of byShare(shares, cents)) recordIncome(state, ctx.world, p.party, kind, p.cents);
     },

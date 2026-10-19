@@ -146,8 +146,15 @@ export function shownRoute(api: FinanceApi, ctx: ReadContext, viewer: EntityId, 
 
 // ---------------------------------------------------------------- gains
 
-/** A sale's proceeds over the parts of lots it took, short and long term apart, as each owner's gains. */
-function realise(api: Pick<FinanceApi, "ownersOf">, state: WorldState, world: ReadContext["world"], holding: EntityId, taken: readonly TakenLot[], proceeds: number, label: string): void {
+/** Whether a holding sits in a retirement account, whose gains and income aren't the year's to tax (§27.8). */
+export function sheltered(api: Pick<FinanceApi, "classOf">, books: Pick<ReadContext, "world" | "state">, holding: EntityId): boolean {
+  const account = accountOfHolding(books.state, holding);
+  return account !== null && api.classOf(books, account) === "retirement";
+}
+
+/** A sale's proceeds over the parts of lots it took, short and long term apart, as each owner's gains (none inside a retirement account). */
+function realise(api: Pick<FinanceApi, "ownersOf" | "classOf">, state: WorldState, world: ReadContext["world"], holding: EntityId, taken: readonly TakenLot[], proceeds: number, label: string): void {
+  if (sheltered(api, { world, state }, holding)) return;
   const total = taken.reduce((a, t) => a + t.qty, 0);
   if (total <= 0) return;
   const parts: Record<"short" | "long", { qty: number; proceeds: number; basis: number }> = { short: { qty: 0, proceeds: 0, basis: 0 }, long: { qty: 0, proceeds: 0, basis: 0 } };
@@ -187,7 +194,7 @@ export const LOT_KINDS = ["buy", "sell", "reinvest", "expire", "redeem", "settle
  * units in on the way, so they're never counted twice. Entities are replaced, not written in place:
  * a money step applies its events to a copy of the state that shares entities it hasn't copied.
  */
-export function applyLots(api: Pick<FinanceApi, "ownersOf">, state: WorldState, world: ReadContext["world"], tables: ReadContext["tables"], holding: EntityId, qty: number, cents: number, label: string, realised = true): void {
+export function applyLots(api: Pick<FinanceApi, "ownersOf" | "classOf">, state: WorldState, world: ReadContext["world"], tables: ReadContext["tables"], holding: EntityId, qty: number, cents: number, label: string, realised = true): void {
   const e = own(state.entities, holding);
   if (!e) return;
   const books: AssetBooks = { world, state, tables };

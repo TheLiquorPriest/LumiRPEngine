@@ -1623,6 +1623,7 @@ Everything a party owns besides money in accounts: positions in securities, fund
 - **What it works out,** from the finance table's federal section and the work module's ordinary income and brackets (`economy.ordinary_income`, `economy.income_tax`): short gains and interest taxed at the ordinary brackets on top of the party's other income; long gains and dividends at the long-term rates (0, 15 and 20 %, by the thresholds for their filing status), stacked above it; the net investment income tax over its threshold; and the region's rate on the investment income.
 - **Losses** of one term come off gains of the other; a net loss comes off ordinary income up to the table's limit (short losses first), and the rest carries forward, its terms kept. Selling one's home after two years excludes the table's amount of the gain.
 - A loss that comes off ordinary income can make the year's figure a refund, which the flow pays into the party's deposit account.
+- **A retirement account** keeps its gains and income out of the year's: what its holdings realise or pay isn't recorded for the investment tax, since it is taxed (if ever) when the money leaves the account.
 - **The investment view** shows the year's gains so far, its income and the tax estimated on them, due the following 15 April.
 
 ### 27.9 Real estate

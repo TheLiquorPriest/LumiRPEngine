@@ -299,6 +299,26 @@ describe("holdings: bonds", () => {
   });
 });
 
+describe("holdings: a retirement account", () => {
+  test("its sales' gains and its dividends aren't the year's to tax; a brokerage's are", () => {
+    const w = setup((world) => {
+      world.entities.ira = account("ira", "IRA", "you", "retirement", 0);
+      world.entities.h_ira_pay = holding("h_ira_pay", "ira", "payer", [{ qty: 100, cost: 200_000, at: "2026-06-01" }]);
+      world.entities.h_ira_idx = holding("h_ira_idx", "ira", "index", [{ qty: 10, cost: 50_000, at: "2026-06-01" }]);
+      world.entities.h_brk_idx = holding("h_brk_idx", "brokerage", "index", [{ qty: 10, cost: 50_000, at: "2026-06-01" }]);
+    });
+    run(w, "economy.trade", { party: "you", side: "sell", holding: "h_ira_idx", qty: 10 });
+    run(w, "economy.trade", { party: "you", side: "sell", holding: "h_brk_idx", qty: 10 });
+    // Ten units bought for $500 and sold for $1,000: only the brokerage's $500 is a gain.
+    expect(gainsIn(w.state, "you", 2026).short).toBe(50_000);
+    const ira = balance(w, "ira");
+    lapseTo(w, "2026-11-17T12:00");
+    // The fund's monthly payout stays in the IRA, and isn't the year's income.
+    expect(balance(w, "ira") - ira).toBe(1_000);
+    expect(incomeIn(w.state, "you", 2026).dividend).toBe(0);
+  });
+});
+
 describe("holdings: property", () => {
   const duplex = (world: WorldDoc, extra: JsonObject = {}): void => {
     world.entities.duplex = { id: "duplex", kind: "property", name: "The duplex", tier: "background", fields: { place: "apartment", owners: [{ party: "you", role: "owner", share: 100 }], value: 30_000_000, units: 2, ...extra }, relations: [] };
