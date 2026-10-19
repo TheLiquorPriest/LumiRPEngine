@@ -8,7 +8,7 @@ import type { JsonObject, JsonValue } from "../shared/json";
 import { hasOwn, isRecord, safeKey } from "../shared/json";
 import type { ExtractionModeView, SettingsResult } from "../shared/protocol";
 import type { ExtractionBounds, ExtractionLearning, ExtractionType, ExtractionTypeStats, LookupLimits, LorePolicy, ModelUseSettings, PhaseBudget, RealismSettings, StepConfig, StepLore, StepRoute, TimeSettings, UserSettings } from "../shared/settings";
-import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
+import { EXTRACTION_DEFAULTS, EXTRACTION_LEARNING, EXTRACTION_TYPES, HELPER_MAX_TOKENS, LORE_POLICIES, LORE_TRANSPORTS, PRE_REPLY_MAX_MS, SPEED_ACTIVITIES, SPEED_DEFAULT, SPEED_THRESHOLD_MINUTES } from "../shared/settings";
 import type { BoundMode } from "../shared/ids";
 import type { StepPurpose } from "../shared/world";
 import { defaultMindsSettings, MINDS_PRESETS, mindsSettingsOf } from "../shared/minds";
@@ -17,9 +17,6 @@ import { readStoredJson } from "./stored-json";
 
 const SETTINGS_PATH = "settings.json";
 const LEARNING_PATH = "extraction-learning.json";
-
-/** Helper steps on reasoning models need room to think (DESIGN §5.3). */
-export const HELPER_MAX_TOKENS = 2000;
 
 export const REALISM_PRESETS: Record<Exclude<RealismPresetId, "custom">, Omit<RealismSettings, "preset">> = {
   story: {

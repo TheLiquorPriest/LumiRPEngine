@@ -6,6 +6,7 @@
 import type { Band, BoundMode, DomainId, InterruptClass, InterruptPolicy, Level, ModelUsePresetId, RealismPresetId, SceneTypeId } from "./ids";
 import type { AdjudicationDef, StepPurpose } from "./world";
 import type { MindsSettings } from "./minds";
+import { isMindPurpose } from "./minds";
 
 /** Where a model step runs. `decision` uses `decisions.evaluate`; `helper` a helper JSON call. */
 export interface StepRoute {
@@ -38,15 +39,20 @@ export function stepLoreOf(config: StepConfig | null | undefined): Readonly<Step
   return config?.lore ?? DEFAULT_STEP_LORE;
 }
 
+/** Helper steps on reasoning models need room to think (DESIGN §5.3). */
+export const HELPER_MAX_TOKENS = 2000;
+
 /**
  * A step's saved settings, else what it runs with while none are saved: `puzzle.answer` is the
- * author's opt-in, so it runs on every Answer unless the user turns it off; any other is off. The
- * turn and Settings → Steps both read this, so the card shows what runs and its switch flips it.
+ * author's opt-in, so it runs on every Answer unless the user turns it off; the minds steps run
+ * whenever Settings → Minds is on (DESIGN §24.6); any other is off. The turn, the minds and
+ * Settings → Steps all read this, so the card shows what runs and its switch flips it.
  * Puzzle answers with no signals saved reads its own: an older card saved Enabled with an empty
  * list, which showed On and never ran, and Enabled is what turns it off.
  */
 export function stepConfigOf(steps: Partial<Record<StepPurpose, StepConfig>>, purpose: StepPurpose): StepConfig {
   const saved = steps[purpose];
+  if (isMindPurpose(purpose)) return saved ?? { enabled: true, signals: [], maxTokens: HELPER_MAX_TOKENS };
   if (purpose !== "puzzle.answer") return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
   return saved ? (saved.signals.length > 0 ? saved : { ...saved, signals }) : { enabled: true, signals };

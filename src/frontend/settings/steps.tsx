@@ -129,14 +129,14 @@ function Meter(props: { meter: CallMeterView }) {
   );
 }
 
-/** A step's config as a JSON patch value, dropping absent optional fields. */
-function stepPatch(config: StepConfig): JsonObject {
+/** A step card's change as a settings patch: the card's whole config, dropping absent optional fields, under Custom. */
+export function stepUpdatePatch(purpose: StepPurpose, config: StepConfig): JsonObject {
   const out: JsonObject = { enabled: config.enabled, signals: [...config.signals] };
   if (config.route) out.route = { provider: config.route.provider, connectionId: config.route.connectionId, model: config.route.model };
   if (config.template !== undefined) out.template = config.template;
   if (config.maxTokens !== undefined) out.maxTokens = config.maxTokens;
   if (config.lore) out.lore = { policy: config.lore.policy, tokens: config.lore.tokens, ...(config.lore.transport ? { transport: config.lore.transport } : {}) };
-  return out;
+  return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
 
 export function StepsSection(props: { modelUse: ModelUseSettings; patch(patch: JsonObject): void; busy: boolean }) {
@@ -146,7 +146,7 @@ export function StepsSection(props: { modelUse: ModelUseSettings; patch(patch: J
   useEffect(() => {
     void app.host.connections().then(setConnections);
   }, []);
-  const update = (purpose: StepPurpose, next: StepConfig) => props.patch({ modelUse: { preset: "custom", steps: { [purpose]: stepPatch(next) } } });
+  const update = (purpose: StepPurpose, next: StepConfig) => props.patch(stepUpdatePatch(purpose, next));
   return (
     <div class="lre-list">
       {(Object.keys(STEP_LABEL) as StepPurpose[]).map((purpose) => {
