@@ -5,7 +5,8 @@ import type { WorldDoc } from "../../src/shared/world";
 import type { PackDef } from "../../src/engine/registry";
 import { advance, agentCursor, catchUp, coarsen, completedSlot } from "../../src/engine/simulate";
 import type { WorldState } from "../../src/engine/state";
-import { runTimelapse } from "../../src/engine/time";
+import { calendarOf, slotIndexAt, slotOf } from "../../src/engine/calendar";
+import { runTimelapse, TimelapseRun } from "../../src/engine/time";
 import { Working } from "../../src/engine/working";
 import { withoutAmbient } from "./support";
 import { baseWorld, fold, POV, registryOf, startState } from "../packs/support";
@@ -134,6 +135,40 @@ describe("simulation stepping", () => {
     const notedPrefix = noted.w.events.filter((e) => e.type !== "engine.caught").slice(0, prefix.length);
     expect(notedPrefix).toEqual(prefix);
     expect(noted.out.result.notes.some((n) => n.class === "invitation")).toBe(true);
+  });
+
+  test("a timelapse cut into pieces inside a slot stops where it stops whole, on a signal raised before the cut", () => {
+    const world = simWorld();
+    const s0 = startState(world);
+    // Ana calls the POV over part-way through a slot of the second day: an agent's own moment.
+    const cal = calendarOf(world);
+    const slot = slotOf(cal, slotIndexAt(cal, s0.clock + 1440));
+    const at = slot.start + Math.floor((slot.end - slot.start) / 3);
+    const calls: PackDef = {
+      id: "calltest",
+      label: "Call test",
+      version: 1,
+      domain: null,
+      requires: [],
+      register(r) {
+        r.process({ id: "calltest.call", domain: "castlife", minLevel: 1, scope: "agent", step: () => [], instants: (_ctx, agent, s) => (agent === "ana" && at > s.start && at < s.end ? [{ at, key: "call" }] : []), atInstant: (_ctx, agent) => [{ type: "engine.signal", data: { class: "invitation", text: "Ana calls: come over.", entity: agent } }] });
+      },
+    };
+    const reg = registryOf([calls]);
+    const run = (cuts: readonly number[]) => {
+      const w = new Working(reg, world, s0);
+      const r = TimelapseRun.start(reg, w, { type: "duration", minutes: 3 * 1440 }, { runSeed: "run-1", overrides: { ...allNote, invitation: "stop" } });
+      if ("code" in r) throw new Error(r.reason);
+      for (const c of cuts) r.advanceTo(c);
+      return { summary: r.finish(null).summary, state: w.state };
+    };
+    const whole = run([]);
+    expect(whole.summary).toMatchObject({ stoppedBy: "invitation", to: slot.end });
+    for (const cuts of [[at], [at + 1], [at - 30, at + 10], [s0.clock + 600, at, at + 5, slot.end - 1]]) {
+      const cut = run(cuts);
+      expect(cut.summary).toEqual(whole.summary);
+      expect(hashJson(cut.state)).toBe(hashJson(whole.state));
+    }
   });
 
   test("a signal the POV can't see never stops a timelapse or says what stopped it; one it can see does", () => {

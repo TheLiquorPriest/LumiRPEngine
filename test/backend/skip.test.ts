@@ -7,7 +7,11 @@ import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
 import { calendarOf, clockAt, dateAt, formatHHMM } from "../../src/engine/calendar";
 import { placeOfEntity } from "../../src/engine/scope";
+import { runTimelapse } from "../../src/engine/time";
+import { turnStart } from "../../src/engine/turn";
+import { Working } from "../../src/engine/working";
 import { toChain } from "../../src/backend/ledger-io";
+import { readRun } from "../../src/backend/runtime";
 import type { BeatMinds } from "../../src/backend/skip";
 import { Rig } from "../support/rig";
 
@@ -66,9 +70,9 @@ function fakeMinds(calls: { at: number; who: string[]; reason: string }[], inter
   };
 }
 
-/** A timelapse of `days`, where invitations only note (the plan's own invitation would end it first otherwise). */
-async function skipDays(rig: Rig, chatId: string, days: number): Promise<void> {
-  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides: { invitation: "note" } }, source: "palette" }));
+/** A timelapse of `days` under `overrides`: by default invitations only note (the plan's own invitation would end it first otherwise). */
+async function skipDays(rig: Rig, chatId: string, days: number, overrides: JsonObject = { invitation: "note" }): Promise<void> {
+  rig.body(await rig.send({ type: "lre.action", chatId, action: "timelapse", params: { target: { type: "duration", minutes: days * 1440 }, overrides }, source: "palette" }));
   const g = await rig.host.start(chatId, { type: "normal" });
   await rig.host.finish(g, "Days pass.");
 }
@@ -76,6 +80,40 @@ async function skipDays(rig: Rig, chatId: string, days: number): Promise<void> {
 const ofType = (events: readonly LedgerEvent[] | undefined, type: string): LedgerEvent[] => (events ?? []).filter((e) => e.type === type);
 
 describe("time skips", () => {
+  test("under the default policy an invitation stops the skip where the span run whole stops, and Continue's scan finds the beat after it", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    const meet = at(day + 1, "19:00");
+    await marcusPlans(rig, chatId, [meet]);
+    // The same span run whole, as a plain timelapse from the state the skip starts from: Marcus's
+    // invitation, asked six hours before the meeting, stops it at the end of that slot.
+    const start = await folded(rig, chatId);
+    const run = readRun(await rig.host.chats.chatMetadata(chatId, rig.host.userId));
+    if (!run) throw new Error("no run");
+    const whole = new Working(rig.rt.registry, start.world, start.state);
+    turnStart(rig.rt.registry, whole, run.runSeed);
+    const plain = runTimelapse(rig.rt.registry, whole, { type: "duration", minutes: 3 * 1440 }, { runSeed: run.runSeed });
+    if ("code" in plain) throw new Error(plain.reason);
+    expect(plain.summary.stoppedBy).toBe("invitation");
+    const calls: { at: number; who: string[]; reason: string }[] = [];
+    rig.rt.beatMinds = fakeMinds(calls, (who, when) => who === MARCUS && when === meet);
+    await skipDays(rig, chatId, 3, {});
+    const first = await folded(rig, chatId);
+    expect(first.record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: "invitation", to: plain.summary.to });
+    expect(first.state.clock).toBe(plain.summary.to);
+    // Continue runs the rest: its scan finds the meeting, where Marcus thinks and steps in.
+    const chip = (await rig.rt.view(chatId, rig.host.userId)).chips.find((c) => c.kind === "continue_timelapse");
+    expect(chip?.label).toBe("Timelapse stopped: an invitation");
+    if (!chip) throw new Error("no stop chip");
+    rig.body(await rig.send({ type: "lre.chip", chatId, chip: chip.id, choice: "timelapse" }));
+    const g = await rig.host.start(chatId, { type: "normal" });
+    await rig.host.finish(g, "Evening comes.");
+    const second = await folded(rig, chatId);
+    const skip = ofType(second.record?.events, "minds.skip")[0];
+    expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([expect.objectContaining({ at: meet, source: "scan" })]));
+    expect(calls.some((c) => c.at === meet && c.who.includes(MARCUS))).toBe(true);
+    expect(second.record?.events.find((e) => e.type === "timelapse")).toMatchObject({ stoppedBy: "mind", mind: MARCUS, to: meet });
+  });
+
   test("a 3-day skip finds the beats, runs the minds at them and stops on an interrupt at its time, with the chip; replay is identical", async () => {
     const { rig, chatId, day, at } = await portAlder();
     const meet = at(day + 1, "19:00");
