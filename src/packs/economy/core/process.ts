@@ -36,9 +36,10 @@ function parties(ctx: ReadContext): EntityId[] {
  * first); none when it holds none with an opening amount. It draws no randomness, so a view's
  * materialization and the money processes record the same events.
  */
-export function openingBalances(entity: EntityId, ctx: ReadContext): LedgerEvent[] {
+export function openingBalances(entity: EntityId, ctx: ReadContext, claimed?: Set<EntityId>): LedgerEvent[] {
   const s = ctx.state;
-  const closed = accountsOf(ctx, entity).filter((id) => !isOpened(s, id, openerOf(s, id) === entity ? null : openerOf(s, id)));
+  const closed = accountsOf(ctx, entity).filter((id) => !claimed?.has(id) && !isOpened(s, id, openerOf(s, id) === entity ? null : openerOf(s, id)));
+  for (const id of closed) claimed?.add(id);
   const lines: PostingLine[] = closed.filter((id) => typeof own(s.entities, id)?.fields.opening === "number" && numOf(own(s.entities, id)?.fields.opening) !== 0).map((id) => ({ account: id, amount: Math.round(numOf(own(s.entities, id)?.fields.opening)) }));
   const out: LedgerEvent[] = [];
   if (lines.length > 0) {
@@ -57,19 +58,21 @@ export function openingBalances(entity: EntityId, ctx: ReadContext): LedgerEvent
  */
 export function openAccounts(ctx: ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
+  // Every party here opens from the same state, so an account two of them hold goes with the first only.
+  const claimed = new Set<EntityId>();
   for (const who of parties(ctx)) {
     if (ctx.levelOf(who, "money") < 3 || isMaterialized(ctx.state, who, "money")) continue;
-    const opening = openingEvent(ctx, who);
+    const opening = openingEvent(ctx, who, claimed);
     if (opening) out.push(opening);
   }
   return out;
 }
 
 /** A party's opening balances as the `materialize` event a view records when it first shows them; null when nothing is left to open. */
-export function openingEvent(ctx: ReadContext, who: EntityId): LedgerEvent | null {
+export function openingEvent(ctx: ReadContext, who: EntityId, claimed?: Set<EntityId>): LedgerEvent | null {
   const version = pinnedVersion(ctx.world, ctx.registry, "money");
   if (typeof version !== "number") return null;
-  const events = openingBalances(who, ctx);
+  const events = openingBalances(who, ctx, claimed);
   return events.length > 0 ? { type: "materialize", entity: who, domain: "money", generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events } : null;
 }
 

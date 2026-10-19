@@ -3,6 +3,7 @@
 // act for, people pay bills and living costs, and their lines and notes are kept for the GM view
 // without ever reaching the player or stopping the player's timelapse.
 import { describe, expect, test } from "bun:test";
+import { ownersIn } from "../../../src/shared/finance";
 import type { LedgerEvent } from "../../../src/shared/ledger";
 import type { GmView } from "../../../src/shared/state-view";
 import type { WorldDoc } from "../../../src/shared/world";
@@ -67,7 +68,7 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     // Their authored opening balances were posted before their bills drew on them.
     for (const who of PEOPLE) expect(w.state.materialized[`${who}:money`]).toBeDefined();
     // Money moves both ways for everyone with income and outgoings.
-    const accounts = Object.entries(w.world.entities).filter(([, e]) => e.kind === "account" && PEOPLE.includes(String(e.fields.owner)));
+    const accounts = Object.entries(w.world.entities).filter(([, e]) => e.kind === "account" && e.fields.product === "checking" && ownersIn(e.fields).some((o) => o.role === "owner" && PEOPLE.includes(o.party)));
     expect(accounts.length).toBe(PEOPLE.length);
     for (const [id] of accounts) {
       const m = moved(events, id);
@@ -77,13 +78,15 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     // The GM view lists their money with the lines and notes the processes kept.
     const view = gm(w);
     const helen = view.money.find((m) => m.party === "helen_kowalczyk");
-    expect(helen?.accounts.map((a) => [a.id, a.cents])).toEqual([["acct_helen_checking", w.state.accounts.acct_helen_checking ?? 0]]);
+    expect(helen?.accounts.find((a) => a.id === "acct_helen_checking")?.cents).toBe(w.state.accounts.acct_helen_checking ?? 0);
     expect(helen?.recent.some((r) => r.memo === "Rent, Unit 2B" && r.cents === 99500)).toBe(true);
     expect(helen?.recent.some((r) => r.memo === "Household share, 1A" && r.cents === 30000)).toBe(true);
     const danny = view.money.find((m) => m.party === "danny_okafor");
     expect(danny?.notes.some((n) => n.text.startsWith("Payday:"))).toBe(true);
     expect(danny?.recent.some((r) => r.memo === "Living costs" && r.cents < 0)).toBe(true);
-    expect(view.money.some((m) => m.party === w.world.pov)).toBe(false);
+    // The GM view lists the player first, with none of anyone else's notes.
+    expect(view.money[0]?.party).toBe(w.world.pov);
+    expect(view.money[0]?.notes.some((n) => n.text.includes("Household share") || n.text.startsWith("Living costs") || n.text.startsWith("Pay: Bartender"))).toBe(false);
     // None of it reaches the player: their notes and postings are no player line.
     const lines = playerLines(reg, w.world, w.state, w.world.pov, events, 1000);
     expect(lines.some((l) => l.includes("Unit 2A") || l.includes("Household share") || l.includes("Living costs"))).toBe(false);
@@ -91,8 +94,7 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
 
   test("an NPC's declined bill is a private note: it never stops the player's timelapse", () => {
     const w = portAlder((world) => {
-      const fields = world.entities.danny_okafor?.fields;
-      if (fields) fields.bills = [{ label: "Boat loan", payee: "Lakeshore Credit Union", amountCents: 9_000_000, every: "month", day: 20, from: "acct_danny_checking" }];
+      world.entities.flow_boat_loan = { id: "flow_boat_loan", kind: "flow", name: "Boat loan", tier: "background", fields: { flow_kind: "bill", from: "acct_danny_checking", to: "Lakeshore Credit Union", amount_cents: 9_000_000, every: "month", days: [20] }, relations: [] };
     });
     const start = w.events.length;
     // Mon 14 to Thu 24 September: the bill falls due on the 20th, and declines stop this run.
@@ -107,12 +109,10 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
 
   test("two bills due the same morning that only one covers: the first pays, the second declines, nothing is dropped", () => {
     const w = portAlder((world) => {
-      const fields = world.entities.jess_kowalczyk?.fields;
-      if (fields) fields.bills = [{ label: "First", payee: "Somewhere", amountCents: 50000, every: "month", day: 1, from: "acct_jess_checking" }, { label: "Second", payee: "Somewhere", amountCents: 50000, every: "month", day: 1, from: "acct_jess_checking" }];
+      for (const [id, name] of [["flow_first", "First"], ["flow_second", "Second"]] as const) world.entities[id] = { id, kind: "flow", name, tier: "background", fields: { flow_kind: "bill", from: "acct_jess_checking", to: "Somewhere", amount_cents: 60000, every: "month", days: [15] }, relations: [] };
       const acct = world.entities.acct_jess_checking;
-      if (acct) acct.fields.opening = 0;
-      // Jess's pay alone, about 445 a week, covers one of the two bills by the 1st.
-      if (fields) fields.hourly_cents = 1650;
+      // $1,000 on Tuesday the 15th, before her Friday payday: one $600 bill fits, the second doesn't.
+      if (acct) acct.fields.opening = 100000;
     });
     lapse(w, 20);
     expect(w.dropped).toEqual([]);
