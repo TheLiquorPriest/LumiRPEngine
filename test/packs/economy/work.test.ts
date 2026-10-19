@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { hashJson } from "../../../src/shared/hash";
+import type { Level } from "../../../src/shared/ids";
 import type { JsonObject } from "../../../src/shared/json";
 import type { LedgerEvent, PackEvent, PostEvent } from "../../../src/shared/ledger";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
@@ -199,6 +200,31 @@ describe("work: jobs and payroll", () => {
 });
 
 describe("work: businesses", () => {
+  test("sales tax applies only at the top level: at Money 3 a purchase costs its listed price, and the business neither collects nor remits", () => {
+    const run = (level: Level) => {
+      const { w } = setup((world) => {
+        world.entities.you!.fields.place = "cafe";
+        world.realism.levels.money = level;
+      });
+      expect(act(w, "economy.buy", { payer: "you", item: "latte_16oz", method: "debit" }).rejected).toEqual([]);
+      const sale = packEvents(w, "economy.sale")[0]?.data ?? {};
+      const bought = posts(w, /^Bought/)[0];
+      lapse(w, 5 * 1440); // past the 20th, when collected tax is remitted
+      return { sale, lines: bought?.lines ?? [], remitted: posts(w, /^Sales tax/).length };
+    };
+    const top = run(4);
+    const cents = top.sale.cents as number;
+    const tax = top.sale.tax as number;
+    expect(tax).toBeGreaterThan(0);
+    expect(top.lines).toEqual([{ account: "checking", amount: -(cents + tax) }, { account: "db_operating", amount: cents + tax }]);
+    expect(top.remitted).toBe(1);
+    const below = run(3);
+    expect(below.sale).toMatchObject({ tax: 0 });
+    const listed = below.sale.cents as number;
+    expect(below.lines).toEqual([{ account: "checking", amount: -listed }, { account: "db_operating", amount: listed }]);
+    expect(below.remitted).toBe(0);
+  });
+
   test("a purchase at a business's place pays the business, with sales tax it remits on the 20th", () => {
     const { w } = setup((world) => void (world.entities.you!.fields.place = "cafe"));
     const ctx = reg.context(w.world, w.state);

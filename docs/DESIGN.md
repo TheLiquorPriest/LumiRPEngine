@@ -1523,7 +1523,7 @@ A party's own late invoices, owed or owed to it, are alerts. On the player's sur
 
 A contractor (`contractor`, by default the occupation's `self_employed`) has nothing withheld. A student working for their own school pays no FICA.
 
-**Sales tax** (feature `sales_tax`, Money 4) runs at the payer's level; walk-in takings use the business's.
+**Sales tax** (feature `sales_tax`) applies only at the top Money level (4), or under Custom with its toggle on. It runs at the payer's level: below it, a price is as listed, with no tax line. A business below it neither collects nor remits: a taxed customer's tax goes straight to the authority, and its walk-in takings, taxed at its own level, carry none.
 - **The rate** is a place's own `sales_tax_pct`, else the combined rate of its tax region: a `tax_region` on it or an enclosing place, else the economy config's `region`, else the national row.
 - **No tax** falls on a category exempt there (the economy config's `taxes.exempt`, or a place's `tax_exempt`), nor on what a business that doesn't collect (`collects_sales_tax: false`) sells.
 - **Where it goes.** A business holds what it collects until it remits it monthly. On a purchase nobody in the world sells, the tax goes straight to the authority.

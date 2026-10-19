@@ -127,7 +127,8 @@ function commissions(ctx: ReadContext, business: EntityId, cents: number, workin
 /**
  * The sale hook (DESIGN §26.2, §26.3): a purchase at a place a business trades at pays the business,
  * into its operating account, with the sales tax it collects on top; anywhere else the tax goes
- * straight to the region's tax authority. Sales tax runs at the payer's level.
+ * straight to the region's tax authority. Sales tax runs at the payer's level; a business below the
+ * level it runs at neither collects nor remits it, so its customer's tax goes to the region too.
  */
 function saleTerms(ctx: ReadContext, api: FinanceApi, sale: { payer: EntityId; place: string | null; category: string; cents: number; item: string }) {
   const seller = businessAt(ctx, sale.place);
@@ -138,10 +139,11 @@ function saleTerms(ctx: ReadContext, api: FinanceApi, sale: { payer: EntityId; p
   const authority = salesTaxAccount(api, taxRegionOf(ctx, sale.place));
   if (!business) return tax > 0 ? { tax, taxAccount: authority } : null;
   const deposit = operatingAccount(api, ctx, business);
+  const held = deposit !== null && api.feature(ctx, business, "sales_tax") ? tax : 0;
   const cogs = Math.round((sale.cents * (100 - marginOf(ctx.state, business))) / 100);
   const here = (j: Job): boolean => j.workplaces.some((w) => placeWithin(ctx.world, placeOfEntity(ctx.state, j.worker), w));
-  const extra: LedgerEvent[] = [{ type: "economy.sale", data: { business, cents: sale.cents, tax, cogs, takings: deposit ? sale.cents + tax : 0, payer: sale.payer, memo: sale.item, category: sale.category } }, ...commissions(ctx, business, sale.cents, here)];
-  return { seller: business, ...(deposit ? { deposit } : {}), tax, taxAccount: deposit ?? authority, extra };
+  const extra: LedgerEvent[] = [{ type: "economy.sale", data: { business, cents: sale.cents, tax: held, cogs, takings: deposit ? sale.cents + held : 0, payer: sale.payer, memo: sale.item, category: sale.category } }, ...commissions(ctx, business, sale.cents, here)];
+  return { seller: business, ...(deposit ? { deposit } : {}), tax, taxAccount: held > 0 && deposit ? deposit : authority, extra };
 }
 
 /**
