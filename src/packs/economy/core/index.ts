@@ -565,6 +565,9 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
           if ((e.fields.every === undefined || e.fields.every === "") && (e.fields.once === undefined || e.fields.once === "")) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} has no schedule: give it "every" or "once".`, path: `entities.${e.id}.fields.every` });
           const link = strOf(e.fields.link);
           if (link !== "" && !own(world.entities, link)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name} belongs to "${link}", which isn't in the world.`, path: `entities.${e.id}.fields.link` });
+          // A fallback is drawn on when the payer can't pay: it must be in the world, never an outside name.
+          const fallback = strOf(e.fields.fallback);
+          if (fallback !== "" && !own(world.entities, fallback)) issues.push({ severity: "error" as const, code: "economy.accounts", message: `Flow ${e.name}'s fallback "${fallback}" isn't in the world; a fallback is an account of the payer's.`, path: `entities.${e.id}.fields.fallback` });
         }
         if (e.kind === "job") {
           // An employer is a business, a place (the business there), or an outside employer named in words.
