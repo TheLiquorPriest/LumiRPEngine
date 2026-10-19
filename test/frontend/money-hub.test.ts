@@ -144,7 +144,7 @@ describe("what a party's roles allow", () => {
     expect(cardControls(view({ accounts: [theirs] }), card({ id: "c", account: "theirs", holderId: "mara" }))).toEqual([]);
   });
 
-  const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, owners: [], accounts: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [] });
+  const shop = (role: BusinessView["role"]): BusinessView => ({ id: "shop", name: "The shop", role, owners: [], accounts: [], places: [], books: { period: "Oct", revenue: 0, expenses: 0, payroll: 0, taxes: 0, profit: 0, lines: [] }, months: [], sales: [], invoices: [], employees: [], taxes: [], route: null });
   const flow = (over: Partial<FlowView> & Pick<FlowView, "id" | "spec">): FlowView => ({ label: over.id, kind: "bill", from: "", to: "", amount: "", cents: null, schedule: "", next: null, shortfall: "skip", status: "active", category: null, link: null, editable: false, source: "entity", done: 0, missed: 0, deferred: 0, ...over });
   const bill = (from: string): Flow => ({ id: "invoice:inv1", label: "Invoice", kind: "bill", from, to: "theirs", amount: { fixed: 5000 }, schedule: { once: "2026-10-01T09:00" }, shortfall: "skip", status: "active", source: "invoice" });
 
@@ -180,7 +180,7 @@ describe("what a party's roles allow", () => {
   });
 
   test("an owner ends a lease their books carry; outside tenants of a managed property come and go on their own", () => {
-    const duplex: PropertyView = { id: "duplex", name: "The duplex", place: null, owners: [], share: 100, value: 1, equity: 1, forSale: null, mortgage: null, costs: [], leases: [
+    const duplex: PropertyView = { id: "duplex", name: "The duplex", place: null, owners: [], share: 100, value: 1, equity: 1, forSale: null, mortgage: null, costs: [], route: null, leases: [
       { flow: "lease:duplex:mara", tenant: "Mara", rent: 120000, start: "2026-01-01", end: "2026-12-31", state: "let" },
       { flow: "lease:duplex:u2:1", tenant: "Outside tenant", rent: 110000, start: "2026-01-01", end: "2026-12-31", state: "let" },
       { flow: "", tenant: "", rent: 110000, start: null, end: null, state: "vacant" },

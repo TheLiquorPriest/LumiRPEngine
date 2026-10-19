@@ -44,7 +44,7 @@ function about(ctx: ReadContext, cents: number): string {
 /** A party's investments as their dashboard draws them: what they see, what they can buy, this year's gains, income and tax. */
 function investmentsView(api: FinanceApi, ctx: ReadContext, party: EntityId, detail: boolean): InvestmentsView | null {
   const holdings = visibleHoldings(api, ctx, party)
-    .map((id) => holdingView(api, ctx, id, detail))
+    .map((id) => holdingView(api, ctx, id, detail, party))
     .filter((h): h is HoldingView => h !== null);
   if (holdings.length === 0 && !api.feature(ctx, party, "investments")) return null;
   const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;

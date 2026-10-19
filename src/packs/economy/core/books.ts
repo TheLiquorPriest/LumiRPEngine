@@ -156,7 +156,8 @@ export function businessBooks(api: FinanceApi, books: Books, business: EntityId,
     for (const k of BOOK_KEYS) sum[k] += b[k];
     for (const account of accounts) {
       for (const [category, t] of Object.entries(totalsOf(books.state, account, month))) {
-        if (BOOKED_CATEGORIES.includes(category)) continue;
+        // An account's opening balance is what the business started with, not money it made or spent.
+        if (BOOKED_CATEGORIES.includes(category) || category === "opening") continue;
         otherIn += t.in;
         if (t.out > 0) otherOut[category] = (otherOut[category] ?? 0) + t.out;
       }

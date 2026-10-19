@@ -303,7 +303,7 @@ function BusinessCard(props: { view: FinanceView; business: BusinessView; contro
           ))}
         </>
       ) : null}
-      {worth ? <RouteControl view={view} controls={controls} target={{ business: b.id }} now={null} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${view.name}'s share of its profit goes to`} /> : null}
+      {worth ? <RouteControl view={view} controls={controls} target={{ business: b.id }} route={b.route} reinvest label={controls.mode === "player" ? "Your share of its profit goes to" : `${view.name}'s share of its profit goes to`} /> : null}
       {controls.mode === "player" ? (
         <div class="lre-inline" data-lre-business-controls={b.id}>
           {can.includes("hire") ? <Reveal label="Hire">{(close) => <HireFormView business={b} controls={controls} onDone={close} />}</Reveal> : null}

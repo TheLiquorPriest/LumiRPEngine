@@ -1296,6 +1296,17 @@ export interface JobView {
   spec: JobFields;
 }
 
+/**
+ * Where a holding's payouts, a property's rent or a business share's profit go now, as the viewer
+ * may see it: an account of theirs (`to`), reinvested, or the usual place (`to` null). An account
+ * the viewer doesn't see (another owner's) is `elsewhere`, and `to` never names it.
+ */
+export interface DistributionRoute {
+  to: EntityId | null;
+  reinvest: boolean;
+  elsewhere?: true;
+}
+
 export interface BusinessView {
   id: EntityId;
   name: string;
@@ -1312,6 +1323,8 @@ export interface BusinessView {
   invoices: (Invoice & { customerName: string; issuedAt: string; dueAt: string })[];
   employees: JobView[];
   taxes: { label: string; cents: number; due: string | null }[];
+  /** Where the viewer's share of its profit goes; null when they hold no share of its worth. */
+  route: DistributionRoute | null;
 }
 
 export interface HoldingView {
@@ -1325,7 +1338,8 @@ export interface HoldingView {
   gain: number;
   lots: { qty: number; cost: number; at: string; gain: number; term: "short" | "long" }[];
   option: { right: "call" | "put"; underlying: string; strike: number; expiry: string; inTheMoney: boolean } | null;
-  route: { to: EntityId | null; reinvest: boolean } | null;
+  /** Where its payouts go; null when it pays none. */
+  route: DistributionRoute | null;
 }
 
 export interface InvestmentsView {
@@ -1360,6 +1374,8 @@ export interface PropertyView {
   leases: LeaseView[];
   /** Property tax, insurance and upkeep flows. */
   costs: FlowView[];
+  /** Where its rent goes (`rent_to`), for an owner; null for anyone else. */
+  route: DistributionRoute | null;
 }
 
 export interface HouseholdView {

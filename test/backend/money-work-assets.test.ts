@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView, HoldingView } from "../../src/shared/finance";
-import { businessControls, endableLeases, flowControls, holdingControls, invoiceControls, jobControls, knownPeople, moveSources, propertyControls, transferTargets } from "../../src/packs/economy/ui/layout";
+import { businessControls, endableLeases, flowControls, holdingControls, invoiceControls, jobControls, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets } from "../../src/packs/economy/ui/layout";
 import {
   distributeAction,
   drawAction,
@@ -307,13 +307,13 @@ describe("Play → Money → Investments: each trade plays as the player's turn"
 
   test("Distributions go to: reinvested, an account, or back to the usual place", async () => {
     const chat = await MoneyChat.start();
-    expect(find(holdings(await chat.hub()), LKFR).route).toEqual({ to: BROKERAGE, reinvest: false });
+    expect(find(holdings(await chat.hub()), LKFR).route).toEqual({ to: null, reinvest: false });
     expect(await chat.play(routeAction({ holding: LKFR }, "reinvest"))).toContain("done");
     expect(find(holdings(await chat.hub()), LKFR).route?.reinvest).toBe(true);
     expect(await chat.play(routeAction({ holding: LKFR }, SAVINGS))).toContain("done");
     expect(find(holdings(await chat.hub()), LKFR).route).toEqual({ to: SAVINGS, reinvest: false });
     expect(await chat.play(routeAction({ holding: LKFR }, ""))).toContain("done");
-    expect(find(holdings(await chat.hub()), LKFR).route).toEqual({ to: BROKERAGE, reinvest: false });
+    expect(find(holdings(await chat.hub()), LKFR).route).toEqual({ to: null, reinvest: false });
   });
 });
 
@@ -431,5 +431,32 @@ describe("Levels: the work and asset controls follow the features running for th
     expect(view.flows).toEqual([]);
     expect(await chat.play(jobEndAction(JOB))).not.toContain("done");
     expect(find((await chat.hub()).jobs, JOB).status).toBe("active");
+  });
+});
+
+describe("Where each payout goes: the hub's pickers open on the route in force", () => {
+  test("a holding's dividends, a property's rent and the POV's profit share open on the usual place, then on where the POV routed each once the view reloads; another owner's account shows unnamed", async () => {
+    const chat = await MoneyChat.start();
+    await partner(chat);
+    await buyHouse(chat);
+    const before = await chat.hub();
+    expect([routePick(find(holdings(before), LKFR).route), routePick(find(before.properties, HOUSE).route), routePick(find(before.businesses, SHOP).route)]).toEqual([" ", " ", " "]);
+    expect(await chat.play(routeAction({ holding: LKFR }, SAVINGS))).toContain("done");
+    expect(await chat.play(routeAction({ property: HOUSE }, SAVINGS))).toContain("done");
+    expect(await chat.play(routeAction({ business: SHOP }, "reinvest"))).toContain("done");
+    const after = await chat.hub();
+    expect(find(holdings(after), LKFR).route).toEqual({ to: SAVINGS, reinvest: false });
+    expect(find(after.properties, HOUSE).route).toEqual({ to: SAVINGS, reinvest: false });
+    expect(find(after.businesses, SHOP).route).toEqual({ to: null, reinvest: true });
+    expect([routePick(find(holdings(after), LKFR).route), routePick(find(after.properties, HOUSE).route), routePick(find(after.businesses, SHOP).route)]).toEqual([SAVINGS, SAVINGS, "reinvest"]);
+    // The GM's view of the POV opens on the same routes.
+    const gm = await chat.party("pov");
+    expect([find(gm.properties, HOUSE).route, find(gm.businesses, SHOP).route]).toEqual([{ to: SAVINGS, reinvest: false }, { to: null, reinvest: true }]);
+    // Owned with Marcus and routed by the GM to his checking, the POV's picker says only that it goes to another owner's account; Marcus's names it.
+    accepted(await chat.edit([{ op: "set", entity: HOUSE, field: "owners", value: [{ party: "pov", role: "owner", share: 50 }, { party: MARCUS, role: "owner", share: 50 }] }, { op: "set", entity: HOUSE, field: "rent_to", value: MARCUS_CHECKING }]));
+    const shared = find((await chat.hub()).properties, HOUSE).route;
+    expect(shared).toEqual({ to: null, reinvest: false, elsewhere: true });
+    expect(routePick(shared)).toBe(ROUTE_ELSEWHERE);
+    expect(find((await chat.party(MARCUS)).properties, HOUSE).route).toEqual({ to: MARCUS_CHECKING, reinvest: false });
   });
 });

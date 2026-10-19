@@ -26,7 +26,7 @@ import type { WorldState } from "../../../engine/state";
 import type { AmountProvider, FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addMonths, clockOfDate, dateText, instantIn, investingRows, reject } from "./assets";
 import { acquisition, disposal } from "./gains";
-import { unit } from "./holdings";
+import { shownRoute, unit } from "./holdings";
 import { paymentMonths } from "./income";
 import { isOpened } from "./journal";
 import { openerOf } from "./model";
@@ -611,6 +611,7 @@ export function propertyView(api: FinanceApi, ctx: ReadContext, id: EntityId, pa
   const owed = loans.reduce((a, l) => a + l.owed, 0);
   const place = strOf(e?.fields.place);
   const asking = num(e?.fields.asking_price);
+  const rentTo = strOf(e?.fields.rent_to);
   return {
     id,
     name: e?.name ?? id,
@@ -623,6 +624,8 @@ export function propertyView(api: FinanceApi, ctx: ReadContext, id: EntityId, pa
     leases: leaseViews(ctx, id),
     costs: flows.filter((f) => f.link?.id === id && f.kind !== "rent"),
     forSale: asking ?? null,
+    // Where its rent goes, for an owner: `rent_to` when it names an account, else the usual place.
+    route: api.ownersOf(ctx.state, id).some((o) => o.party === party) ? shownRoute(api, ctx, party, own(ctx.state.entities, rentTo)?.kind === "account" ? rentTo : null, false) : null,
   };
 }
 

@@ -322,7 +322,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
   const mine = accountsOf(ctx, party);
   const empty: FinanceView = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
   if (level === 0) return empty;
-  const worth = netWorthParts(hooks, ctx, party, (id) => shown(ctx, id));
+  const worth = netWorthParts(hooks, ctx, party);
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
   if (kind === "household" && level >= 3 && mine.length === 0) return { ...empty, band, cash: { band }, opened, household: householdView(hooks, ctx, viewer, party, allFlows(hooks, ctx)) };

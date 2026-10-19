@@ -4,10 +4,25 @@
 // dashboards show at each level is tested directly; the core already left out what the level
 // doesn't simulate, and nothing here shows detail the view marks as below the top level.
 
-import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights } from "../../../shared/finance";
+import { CLASS_TRAITS, ROLE_RIGHTS, type AccountView, type BusinessView, type CardView, type DistributionRoute, type FinanceFeature, type FinanceView, type FlowView, type HoldingView, type Invoice, type JobView, type OwnerRole, type PropertyView, type RoleRights } from "../../../shared/finance";
 import type { EntityId } from "../../../shared/ids";
 import type { PaletteView } from "../../../shared/state-view";
 import { cardChanges, type CardChange } from "./requests";
+
+/** What a route picker opens on when the route in force is another owner's account, which the viewer can't pick. */
+export const ROUTE_ELSEWHERE = " elsewhere";
+
+/**
+ * What a route picker opens on for the route a view says is in force: an account of the viewer's,
+ * `reinvest`, " " for the usual place, ROUTE_ELSEWHERE for another owner's account, and "" (unset)
+ * when the view says none.
+ */
+export function routePick(route: DistributionRoute | null): string {
+  if (!route) return "";
+  if (route.reinvest) return "reinvest";
+  if (route.elsewhere) return ROUTE_ELSEWHERE;
+  return route.to ?? " ";
+}
 
 export type HubSection = "overview" | "accounts" | "flows" | "jobs" | "businesses" | "investments" | "properties" | "credit" | "household";
 
