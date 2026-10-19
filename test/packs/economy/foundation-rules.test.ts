@@ -207,3 +207,26 @@ describe("a flow into overdraft follows the account's overdraft policy", () => {
     expect(w.state.accounts.savings).toBe(savings - (250_000 - 214_000));
   });
 });
+
+describe("a flow into credit pays at most what it owes", () => {
+  test("a fixed autopay larger than the balance pays the balance, then nothing while the card owes nothing", () => {
+    const w = setup((world) => {
+      Object.assign(world.entities.card!.fields, { autopay: "fixed", autopay_cents: 100_000, autopay_from: "checking" });
+    });
+    lapse(w, 45);
+    const runs = flowRuns(w, "autopay:card");
+    expect(runs.map((r) => [r.outcome, r.cents])).toEqual([["paid", 38_000]]);
+    expect(w.state.accounts.card).toBe(0);
+  });
+
+  test("a standing payment to a paid-off card doesn't run", () => {
+    const w = setup((world) => {
+      world.entities.card!.fields.opening = 0;
+      world.entities.card!.fields.autopay = "none";
+      world.entities.extra = entity("extra", "flow", { flow_kind: "card_payment", from: "checking", to: "card", amount_cents: 5_000, every: "week", weekdays: [1], shortfall: "skip", status: "active" });
+    });
+    lapse(w, 10);
+    expect(flowRuns(w, "extra")).toEqual([]);
+    expect(w.state.accounts.card ?? 0).toBe(0);
+  });
+});
