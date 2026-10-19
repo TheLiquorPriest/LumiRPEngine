@@ -229,10 +229,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const base = { purpose: "mind" as const, phase, who: traceName(reg, world, state, who), level };
     const prompt = mindPrompt("mind", world, settings.minds, varsFor(world, state, who));
     if (!e) return { data: null, trace: { ...base, outcome: "failed", ms: 0, tokens: 0, prompt: prompt.source } };
-    // The card linked in the world (`characterId`): a character made in play has none.
-    const characterId = own(world.entities, who)?.characterId;
-    const card = characterId ? await deps.host.characters.card(characterId, userId).catch(() => null) : null;
-    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, card, moment: input.moment, loreTokens };
+    const scope: MindScope = { reg, world, state, who, memory, messages, hideJson: settings.hideJsonBlocks, moment: input.moment, loreTokens };
     const usage = { tokens: 0 };
     const t0 = performance.now();
     const raw = input.signal.aborted ? null : await deps.steps.helperJson("mind", prompt.text, mindContext(scope), config, userId, input.signal, { guidance, usage });
@@ -380,7 +377,7 @@ export async function postMinds(deps: MindsDeps, input: PostMindsInput): Promise
   const remembered = await Promise.all(
     remembering.map(async (id) => {
       const prompt = mindPrompt("memory", world, settings.minds, varsFor(world, w.state, id));
-      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, card: null, moment, loreTokens: 0 };
+      const scope: MindScope = { reg, world, state: w.state, who: id, memory, messages, hideJson: settings.hideJsonBlocks, moment, loreTokens: 0 };
       const usage = { tokens: 0 };
       const t0 = performance.now();
       const raw = input.signal.aborted ? null : await deps.steps.helperJson("memory", prompt.text, memoryContext(scope, { user: input.user, reply: input.reply }), memoryConfig, userId, input.signal, { guidance: input.guidance?.memory ?? deps.presets.last(userId).guidance.memory ?? "", usage });
