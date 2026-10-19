@@ -143,6 +143,23 @@ describe("time skips", () => {
     expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([{ at: festival, reason: "The harbour festival", source: "model" }]));
   });
 
+  test("the skip step makes no call until the user turns it on", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    await marcusPlans(rig, chatId, [at(day + 1, "19:00")]);
+    let asked = 0;
+    rig.host.quietReply = (req) => {
+      if (req.messages.some((m) => m.content.includes("skipping ahead in time"))) asked++;
+      return "{}";
+    };
+    rig.rt.beatMinds = fakeMinds([], () => false);
+    // The default settings (Standard) leave the step off.
+    await skipDays(rig, chatId, 1);
+    expect(asked).toBe(0);
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    await skipDays(rig, chatId, 1);
+    expect(asked).toBe(1);
+  });
+
   test("when the before-the-reply clock runs out the skip stops at a beat, keeps what it ran and offers Continue; the turn commits", async () => {
     const { rig, chatId, day, at } = await portAlder();
     rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { budgets: { pre: { calls: 4, ms: 250 } } } } }));

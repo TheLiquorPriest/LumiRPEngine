@@ -1258,7 +1258,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - **Lean:** minds off.
   - **Standard:** a Live limit of 3, two refreshes a turn, memory for Live.
   - **Full:** no limits, memory for Live and Near.
-- **When minds run:** whenever they are on and the purpose's step card isn't switched off. An unsaved card (Lean saves none) runs on the helper with 2,000 max tokens, and Settings → Steps shows it so (`stepConfigOf`), so a change made on it keeps it on; a saved one sets the connection, the tokens and the lore.
+- **When minds run:** whenever they are on and the purpose's step card isn't switched off. An unsaved card (Lean saves none) runs on the helper with 2,000 max tokens, and Settings → Steps shows it so (`stepConfigOf`), so a change made on it keeps it on; a saved one sets the connection, the tokens and the lore. The `skip` step is the exception: unsaved, it is off, and every preset saves it off (§24.7).
 - **Cost:** minds' calls aren't counted in §5.3's per-preset tables. A turn makes one call per mind that runs, and after the reply one `memory` call per present character at a chosen level and the occasional `consolidate`.
 
 ### 24.7 Time skips

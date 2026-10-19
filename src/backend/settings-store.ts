@@ -71,10 +71,10 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 400)),
       "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 400)),
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 400)),
-      // Minds run on their own cadence (`UserSettings.minds`): these cards set only where they run and their lore.
+      // Minds run on their own cadence (`UserSettings.minds`): these cards set only where they run and their lore. The skip step is off until the user turns it on (DESIGN §24.7).
       mind: step(true, ["always"], HELPER, lore("prefetch", 400)),
       memory: step(true, ["reply"], HELPER, lore("none", 0)),
-      skip: step(true, ["timelapse"], HELPER, lore("prefetch", 300)),
+      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 300)),
       consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
     },
     budgets: { pre: { calls: 2, ms: 30_000, lookup: { calls: 2, ms: 15_000 } }, post: { calls: 2, ms: 45_000, lookup: { calls: 1, ms: 20_000 } } },
@@ -91,7 +91,7 @@ export const MODEL_USE_PRESETS: Record<Exclude<ModelUsePresetId, "custom">, Omit
       judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
       mind: step(true, ["always"], HELPER, lore("prefetch", 600)),
       memory: step(true, ["reply"], HELPER, lore("none", 0)),
-      skip: step(true, ["timelapse"], HELPER, lore("prefetch", 400)),
+      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 400)),
       consolidate: step(true, ["reply"], HELPER, lore("none", 0)),
     },
     budgets: { pre: { calls: 8, ms: 60_000, lookup: { calls: 3, ms: 30_000 } }, post: { calls: 4, ms: 60_000, lookup: { calls: 2, ms: 30_000 } } },
