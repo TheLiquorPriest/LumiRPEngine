@@ -476,7 +476,7 @@ function overdraftFeesToday(ctx: ReadContext, account: EntityId): number {
  * What an account's overdraft policy adds to a payment that takes more than it has: a transfer from
  * the linked account first, or the overdraft fee after.
  */
-function overdraftEvents(ctx: ReadContext, account: EntityId, total: number, at: number): { before: LedgerEvent[]; after: LedgerEvent[] } {
+export function overdraftEvents(ctx: ReadContext, account: EntityId, total: number, at: number): { before: LedgerEvent[]; after: LedgerEvent[] } {
   const short = total - availableOf(ctx, account);
   if (short <= 0 || overdraftRoom(ctx, account) <= 0) return { before: [], after: [] };
   const p = productOf(ctx, account);
