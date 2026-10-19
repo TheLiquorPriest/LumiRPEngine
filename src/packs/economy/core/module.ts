@@ -33,6 +33,12 @@ export interface FlowPosting {
   category?: string;
   /** Bookkeeping that goes with the posting as one unit (a lot bought, a business's books). */
   extra?: LedgerEvent[];
+  /**
+   * Its posting is the only line it needs: no "paid" or "received" note follows it. A holding's
+   * payouts are routine and many (every holding, several times a year), so, like living costs, a
+   * note each would crowd paydays and statements out of a turn's lines.
+   */
+  quiet?: boolean;
 }
 
 /**

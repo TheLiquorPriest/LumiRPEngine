@@ -540,7 +540,7 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
     if (applied.length > 0 || attempt.events.length === 0) {
       const next: FlowRunState = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
       run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
-      if (who && flow.kind !== "living" && attempt.paid > 0) run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
+      if (who && flow.kind !== "living" && amount.posting?.quiet !== true && attempt.paid > 0) run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
       return;
     }
   }
