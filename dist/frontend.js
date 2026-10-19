@@ -1619,28 +1619,198 @@ function CheckView(props) {
   }, undefined, true, undefined, this);
 }
 
-// src/frontend/build/draft.ts
-async function loadDraft(app, worldId) {
-  const [got, world] = await Promise.all([app.request({ type: "lre.editor", worldId, base: null, op: "get" }), app.request({ type: "lre.world", op: "get", worldId })]);
-  if (!got)
+// src/shared/protocol.ts
+var PROTOCOL_VERSION = 1;
+
+// src/frontend/build/held.tsx
+var heldForms = createStore([]);
+function heldStart(key, watch, initial) {
+  return { key, watch, from: JSON.stringify(initial), theirs: null };
+}
+function holdOrFollow(base, now) {
+  if (now.key === base.key && now.watch === base.watch)
     return null;
-  const draft = { worldId, base: got.base, doc: got.draft, lint: got.lint, dirty: got.stored, packKinds: world?.packKinds ?? {}, packRelations: world?.packRelations ?? {}, functions: world?.functions ?? [] };
-  app.drafts.set(draft);
-  return draft;
+  const mine = JSON.stringify(now.value);
+  const next = JSON.stringify(now.initial);
+  if (now.key !== base.key || !now.reloaded || mine === base.from || mine === next) {
+    const followed = { key: now.key, watch: now.watch, from: next, theirs: null };
+    return mine === next ? { base: followed } : { base: followed, load: { value: now.initial } };
+  }
+  return { base: { ...base, watch: now.watch, theirs: { value: now.initial, json: next } } };
+}
+function heldChoice(base, choice) {
+  if (!base.theirs)
+    return { base };
+  const settled = { key: base.key, watch: base.watch, from: base.theirs.json, theirs: null };
+  return choice === "theirs" ? { base: settled, load: { value: base.theirs.value } } : { base: settled };
+}
+function useHeld(value, set, initial, key, watch = JSON.stringify(initial)) {
+  const reloaded = useSelect(useApp().drafts, (d) => d?.reloaded === true);
+  const [base, setBase] = d2(() => heldStart(key, watch, initial));
+  const apply = (step) => {
+    if (!step)
+      return;
+    setBase(step.base);
+    if (step.load)
+      set(structuredClone(step.load.value));
+  };
+  A(() => apply(holdOrFollow(base, { key, watch, value, initial, reloaded })), [key, watch]);
+  const theirs = base.theirs;
+  A(() => {
+    if (!theirs)
+      return;
+    const form = { loadTheirs: () => apply(heldChoice(base, "theirs")), keepMine: () => apply(heldChoice(base, "mine")) };
+    heldForms.update((all) => [...all, form]);
+    return () => heldForms.update((all) => all.filter((f) => f !== form));
+  }, [theirs]);
+}
+async function confirmOverwrite(app) {
+  const forms = heldForms.get();
+  if (forms.length === 0)
+    return true;
+  if (!await app.host.confirm("Save over the other change", "This item changed in another window, or an outside agent changed it, while you were editing it. Save yours over that change?", "warning", "Save mine"))
+    return false;
+  for (const form of forms)
+    form.keepMine();
+  return true;
+}
+var NOT_SAVED = { lre: PROTOCOL_VERSION, type: "lre.error", reqId: null, code: "conflict", message: "Not saved: the change made elsewhere is kept." };
+function ChangedElsewhere() {
+  const forms = useSelect(heldForms, (all) => all);
+  if (forms.length === 0)
+    return null;
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-banner warn",
+    "data-lre-changed-elsewhere": true,
+    children: [
+      "This item changed elsewhere while you were editing it.",
+      " ",
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small",
+        onClick: () => forms.forEach((f) => f.loadTheirs()),
+        children: "Load theirs"
+      }, undefined, false, undefined, this),
+      " ",
+      /* @__PURE__ */ u3("button", {
+        type: "button",
+        class: "lre-btn small ghost",
+        onClick: () => forms.forEach((f) => f.keepMine()),
+        children: "Keep mine"
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+
+// src/frontend/build/draft.ts
+var loading = new Map;
+var RELOADED = "This world's draft changed in another window, or an outside agent changed it; Build reloaded it.";
+var QUIET_MS = 300;
+var REAL_TIMERS = { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle) };
+function track(worldId, load) {
+  const settled = load.finally(() => {
+    if (loading.get(worldId) === settled)
+      loading.delete(worldId);
+  });
+  loading.set(worldId, settled);
+  return settled;
+}
+function loadDraft(app, worldId) {
+  return track(worldId, (async () => {
+    const [got, world] = await Promise.all([app.request({ type: "lre.editor", worldId, base: null, op: "get" }), app.request({ type: "lre.world", op: "get", worldId })]);
+    if (!got)
+      return null;
+    const draft = { worldId, base: got.base, version: got.version, doc: got.draft, lint: got.lint, dirty: got.stored, reloaded: true, packKinds: world?.packKinds ?? {}, packRelations: world?.packRelations ?? {}, functions: world?.functions ?? [] };
+    app.drafts.set(draft);
+    return draft;
+  })());
+}
+function refreshDraft(app, worldId) {
+  const held = app.drafts.get();
+  if (!held || held.worldId !== worldId)
+    return loadDraft(app, worldId);
+  return track(worldId, (async () => {
+    const got = await app.request({ type: "lre.editor", worldId, base: null, op: "get" });
+    const now = app.drafts.get();
+    if (!got || !now || now.worldId !== worldId)
+      return null;
+    const draft = { ...now, base: got.base, version: got.version, doc: got.draft, lint: got.lint, dirty: got.stored, reloaded: true };
+    app.drafts.set(draft);
+    return draft;
+  })());
+}
+function trackDraft(app, timers = REAL_TIMERS) {
+  const wanted = new Map;
+  const timer = new Map;
+  const running = new Set;
+  const behind = (worldId) => {
+    const held = app.drafts.get();
+    return held !== null && held.worldId === worldId && (wanted.get(worldId) ?? 0) > held.version;
+  };
+  const reload = async (worldId) => {
+    running.add(worldId);
+    try {
+      await loading.get(worldId);
+      if (behind(worldId) && await refreshDraft(app, worldId))
+        app.toast(RELOADED, "info");
+    } finally {
+      running.delete(worldId);
+      if (behind(worldId))
+        schedule(worldId);
+    }
+  };
+  const schedule = (worldId) => {
+    const prior = timer.get(worldId);
+    if (prior !== undefined)
+      timers.clear(prior);
+    timer.set(worldId, timers.set(() => {
+      timer.delete(worldId);
+      if (!running.has(worldId))
+        reload(worldId);
+    }, QUIET_MS));
+  };
+  const off = app.client.onDraftChanged((push) => {
+    const held = app.drafts.get();
+    if (!held || held.worldId !== push.worldId || push.version <= held.version)
+      return;
+    wanted.set(push.worldId, Math.max(wanted.get(push.worldId) ?? 0, push.version));
+    if (!running.has(push.worldId))
+      schedule(push.worldId);
+  });
+  return () => {
+    off();
+    for (const handle of timer.values())
+      timers.clear(handle);
+  };
+}
+async function recheckDraft(app) {
+  const held = app.drafts.get();
+  if (!held)
+    return;
+  await loading.get(held.worldId);
+  const before = app.drafts.get();
+  if (!before || before.worldId !== held.worldId)
+    return;
+  const now = await refreshDraft(app, held.worldId);
+  if (now && now.version !== before.version)
+    app.toast(RELOADED, "info");
 }
 function draftSend(app) {
   return async (body) => {
     const draft = app.drafts.get();
-    const request = body.type === "lre.editor" && draft ? { ...body, worldId: draft.worldId, base: draft.base } : body;
+    const write = body.type === "lre.editor" && body.op !== "get";
+    if (write && !await confirmOverwrite(app))
+      return NOT_SAVED;
+    const request = body.type === "lre.editor" && draft ? { ...body, worldId: draft.worldId, base: draft.base, version: draft.version } : body;
     const message = await app.send(request);
     if (message.type === "lre.error") {
-      app.toast(message.code === "conflict" ? "This world changed elsewhere. Reloaded the latest revision." : message.message, "error");
+      app.toast(message.code === "conflict" ? "This world changed elsewhere, so nothing was saved. Build reloaded it; save again to keep your change." : message.message, "error");
       if (message.code === "conflict" && draft)
-        await loadDraft(app, draft.worldId);
+        await refreshDraft(app, draft.worldId);
     } else if (message.request === "lre.editor") {
       const current = app.drafts.get();
       if (current)
-        app.drafts.set({ ...current, doc: message.body.draft, lint: message.body.lint, base: message.body.base, dirty: message.body.stored });
+        app.drafts.set({ ...current, doc: message.body.draft, lint: message.body.lint, base: message.body.base, version: message.body.version, dirty: message.body.stored, reloaded: false });
     }
     return message;
   };
@@ -1649,18 +1819,18 @@ async function commitDraft(app) {
   const draft = app.drafts.get();
   if (!draft)
     return false;
-  const message = await app.send({ type: "lre.world", op: "commit", worldId: draft.worldId, base: draft.base });
+  const message = await app.send({ type: "lre.world", op: "commit", worldId: draft.worldId, base: draft.base, version: draft.version });
   if (message.type === "lre.error") {
     app.toast(message.code === "validation" ? `Fix ${message.lint?.length ?? 0} error(s) before committing.` : message.message, "error");
     if (message.lint)
       app.drafts.set({ ...draft, lint: message.lint });
     if (message.code === "conflict")
-      await loadDraft(app, draft.worldId);
+      await refreshDraft(app, draft.worldId);
     return false;
   }
   if (message.request !== "lre.world")
     return false;
-  app.drafts.set({ ...draft, base: message.body.revision ?? draft.base, lint: message.body.lint ?? draft.lint, dirty: false });
+  await refreshDraft(app, draft.worldId);
   app.toast("Committed a new revision.", "info");
   return true;
 }
@@ -1670,9 +1840,15 @@ async function discardDraft(app) {
     return;
   if (!await app.host.confirm("Discard draft", "Throw away every uncommitted change to this world?", "danger", "Discard"))
     return;
-  const result = await app.request({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "discard" });
-  if (result)
-    app.drafts.set({ ...draft, base: result.base, doc: result.draft, lint: result.lint, dirty: result.stored });
+  const message = await app.send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, version: draft.version, op: "discard" });
+  if (message.type === "lre.error") {
+    app.toast(message.code === "conflict" ? "Nothing was discarded: the draft changed while you were asked. Build reloaded it." : message.message, "error");
+    if (message.code === "conflict")
+      await refreshDraft(app, draft.worldId);
+    return;
+  }
+  if (message.request === "lre.editor")
+    app.drafts.set({ ...draft, base: message.body.base, doc: message.body.draft, lint: message.body.lint, version: message.body.version, dirty: message.body.stored, reloaded: false });
 }
 
 // src/frontend/build/jobs.tsx
@@ -7059,7 +7235,7 @@ function LookupTableEditor(props) {
   const [value, setValue] = d2(initial);
   const [tab, setTab] = d2("terms");
   const [busy, run] = useBusy();
-  A(() => setValue(initial), [JSON.stringify(initial)]);
+  useHeld(value, setValue, initial, `${props.doc.id}/loreIndex`);
   const changed = JSON.stringify(value) !== JSON.stringify(initial);
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
@@ -7913,7 +8089,7 @@ function LoreEditor(props) {
   const initial = stored ? JSON.parse(JSON.stringify(stored)) : newItem("lore", id, props.world);
   const [value, setValue] = d2(initial);
   const [busy, run] = useBusy();
-  A(() => setValue(initial), [JSON.stringify(stored)]);
+  useHeld(value, setValue, initial, `${props.world.id}/lore/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
   const lint = draft?.lint ?? [];
   const path = `lore.${id}`;
@@ -8293,7 +8469,7 @@ function TableEditor(props) {
   const [page, setPage] = d2(0);
   const [newRow, setNewRow] = d2("");
   const [busy, run] = useBusy();
-  A(() => setTable(stored ? structuredClone(stored) : null), [stored?.revision, id]);
+  useHeld(table, setTable, stored ?? null, `${props.world.id}/tables/${id ?? ""}`, stored?.revision ?? "");
   if (!id)
     return /* @__PURE__ */ u3(TableList, {
       ...props
@@ -10705,7 +10881,7 @@ function RulesetEditor() {
   const [value, setValue] = d2(stored);
   const [busy, run] = useBusy();
   const [picking, setPicking] = d2(false);
-  A(() => setValue(stored), [storedKey]);
+  useHeld(value, setValue, stored, `${draft?.worldId ?? ""}/ruleset`, storedKey);
   const formDoc = b2(() => draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds }, relations: { ...draft.packRelations, ...draft.doc.relations } } : null, [draft?.doc, draft?.packKinds, draft?.packRelations]);
   const identifiers = b2(() => draft ? worldIdentifiers(draft.doc) : [], [draft?.doc]);
   if (!draft || !formDoc)
@@ -10898,7 +11074,7 @@ function TiersEditor(props) {
   const [value, setValue] = d2(initial);
   const [newId, setNewId] = d2("");
   const [busy, run] = useBusy();
-  A(() => setValue(initial), [JSON.stringify(initial)]);
+  useHeld(value, setValue, initial, `${props.doc.id}/tiers`);
   const ordered = tiersInOrder(value);
   const uses = (id) => Object.values(props.doc.entities).filter((e) => e.tier === id).length;
   const edit = (id, patch) => setValue({ ...value, tiers: { ...value.tiers, [id]: { ...value.tiers[id], ...patch } } });
@@ -11486,6 +11662,7 @@ function WithDraft(props) {
           }, undefined, true, undefined, this)
         ]
       }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(ChangedElsewhere, {}, undefined, false, undefined, this),
       props.children
     ]
   }, undefined, true, undefined, this);
@@ -12144,7 +12321,7 @@ function SchemaEditor(props) {
   const initial = isRecord(stored) ? stored : newItem(props.collection, id, props.world);
   const [value, setValue] = d2(initial);
   const [busy, run] = useBusy();
-  A(() => setValue(initial), [JSON.stringify(stored)]);
+  useHeld(value, setValue, initial, `${props.world.id}/${props.collection}/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
   const formDoc = b2(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds }, relations: { ...draft?.packRelations, ...props.world.relations } }), [props.world, draft?.packKinds, draft?.packRelations]);
   const path = `${props.collection}.${id}`;
@@ -12288,7 +12465,7 @@ function SchemaPartView(props) {
   const initial = draft ? partValue(draft.doc, props.part) : {};
   const [value, setValue] = d2(initial);
   const [busy, run] = useBusy();
-  A(() => setValue(initial), [JSON.stringify(initial)]);
+  useHeld(value, setValue, initial, `${draft?.worldId ?? ""}/${props.part}`);
   const identifiers = b2(() => draft ? worldIdentifiers(draft.doc) : [], [draft?.doc]);
   if (!draft)
     return null;
@@ -14788,7 +14965,7 @@ function ScheduleEditor(props) {
   const [schedule, setSchedule] = d2(stored ? structuredClone(stored) : blank);
   const [selected, setSelected] = d2(0);
   const [busy, run] = useBusy();
-  A(() => setSchedule(stored ? structuredClone(stored) : blank), [JSON.stringify(stored)]);
+  useHeld(schedule, setSchedule, stored ?? blank, `${props.world.id}/schedules/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const problems = b2(() => slotProblems(schedule.slots), [schedule.slots]);
   const doc = b2(() => ({ ...props.world, kinds: { ...draft?.packKinds, ...props.world.kinds } }), [props.world, draft?.packKinds]);
   if (!id)
@@ -17199,7 +17376,7 @@ function GridEditor(props) {
   const [newZone, setNewZone] = d2("");
   const adding = T2(true);
   const [busy, run] = useBusy();
-  A(() => setGrid(stored ? structuredClone(stored) : blank), [JSON.stringify(stored)]);
+  useHeld(grid, setGrid, stored ?? blank, `${props.world.id}/grids/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   if (!id)
     return /* @__PURE__ */ u3(SchemaEditor, {
       ...props
@@ -18848,7 +19025,7 @@ function MapEditor(props) {
   const [busy, run] = useBusy();
   const area = T2(null);
   const gutter = T2(null);
-  A(() => setText(initial), [initial]);
+  useHeld(text, setText, initial, `${props.world.id}/maps/${props.id ?? ""}`, initial);
   const checked = b2(() => checkMapText(text, id, props.world), [text, id, props.world]);
   const marks = new Map;
   for (const p of checked.problems)
@@ -19389,7 +19566,7 @@ function TrackEditor(props) {
   const [selected, setSelected] = d2(track.start);
   const [newStage, setNewStage] = d2("");
   const [busy, run] = useBusy();
-  A(() => setTrack(stored ? structuredClone(stored) : blank), [JSON.stringify(stored)]);
+  useHeld(track, setTrack, stored ?? blank, `${props.world.id}/tracks/${props.id ?? ""}`, JSON.stringify(stored ?? null));
   const identifiers = b2(() => worldIdentifiers(props.world), [props.world]);
   if (!id)
     return /* @__PURE__ */ u3("span", {
@@ -21332,9 +21509,6 @@ var core = {
 };
 var UI_PACKS = [core, ui_default6, ui_default4, ui_default9, ui_default5, ui_default3, ui_default, ui_default8, ui_default7, ui_default2];
 
-// src/shared/protocol.ts
-var PROTOCOL_VERSION = 1;
-
 // src/frontend/delta.ts
 class DeltaError extends Error {
   name = "DeltaError";
@@ -21447,6 +21621,7 @@ class ProtocolClient {
   listeners = new Set;
   errorListeners = new Set;
   jobListeners = new Set;
+  draftListeners = new Set;
   unsubscribe;
   timeoutMs;
   newReqId;
@@ -21479,6 +21654,10 @@ class ProtocolClient {
   onJob(listener) {
     this.jobListeners.add(listener);
     return () => this.jobListeners.delete(listener);
+  }
+  onDraftChanged(listener) {
+    this.draftListeners.add(listener);
+    return () => this.draftListeners.delete(listener);
   }
   presetId = undefined;
   open(chatId) {
@@ -21560,6 +21739,13 @@ class ProtocolClient {
           const update = payload;
           for (const listener of this.jobListeners)
             listener(update);
+        }
+        return;
+      case "lre.draft.changed":
+        if (typeof payload.worldId === "string" && typeof payload.version === "number" && typeof payload.stored === "boolean" && (typeof payload.base === "string" || payload.base === null)) {
+          const push = { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId: payload.worldId, version: payload.version, stored: payload.stored, base: payload.base };
+          for (const listener of this.draftListeners)
+            listener(push);
         }
         return;
     }
@@ -21930,6 +22116,15 @@ function setup(ctx) {
   overlays = createOverlays(app, host);
   const set = overlays;
   cleanups.push(() => set.destroy());
+  cleanups.push(trackDraft(app));
+  const recheck = () => void recheckDraft(app);
+  const visible = () => {
+    if (document.visibilityState === "visible")
+      recheck();
+  };
+  window.addEventListener("online", recheck);
+  document.addEventListener("visibilitychange", visible);
+  cleanups.push(ctx.events.on("CONNECTED", recheck), () => window.removeEventListener("online", recheck), () => document.removeEventListener("visibilitychange", visible));
   const tab = host.ui.registerDrawerTab({
     id: "lumirpengine",
     title: "LumiRPEngine",

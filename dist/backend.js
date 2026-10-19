@@ -41518,6 +41518,24 @@ var STARTER_WORLDS = {
   mystery_manor: starter(mystery_manor_default),
   modern_slice_of_life: starter(modern_slice_of_life_default)
 };
+// src/packs/starters/info.ts
+var STARTER_INFO = [
+  {
+    id: "fantasy_town",
+    name: "Fantasy town",
+    summary: "A river-ford market town on the eve of harvest: a stopped mill, a sick child across the water, and a chapel bell that has been silent for thirty years."
+  },
+  {
+    id: "mystery_manor",
+    name: "Mystery manor",
+    summary: "A storm cuts a fenland country house off from the world on Friday night. By Saturday morning the host is dead and everyone under the roof has something to hide."
+  },
+  {
+    id: "modern_slice_of_life",
+    name: "Modern slice-of-life",
+    summary: "A small Michigan lake town in the last good weeks of boating season: a garage that needs you, a loan and a landlord to keep paid, a friend with a pontoon, and a harbor festival on the way."
+  }
+];
 
 // src/packs/index.ts
 var ALL_PACKS = [enginePack, core_default, core_default2, core_default3, core_default4, core_default5, core_default6, core_default7, core_default8, core_default9, core_default10, core_default11];
@@ -42842,6 +42860,60 @@ function blankWorld(id, name) {
 function isWorldDoc(v) {
   return isRecord(v) && v.format === WORLD_FORMAT && typeof v.id === "string" && isRecord(v.entities) && isRecord(v.places) && typeof v.pov === "string";
 }
+var COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"];
+var LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"];
+var PARTS2 = ["pins", "calendar", "realism", "time", "start"];
+var OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings"];
+function shapeIssues(doc) {
+  const issues = [];
+  const err = (path, message) => {
+    issues.push({ severity: "error", path, code: "shape", message });
+  };
+  if (!isRecord(doc))
+    return [{ severity: "error", path: "", code: "shape", message: "not a JSON object" }];
+  const collection = (key) => {
+    const value = doc[key];
+    if (!isRecord(value))
+      return err(key, `${key} must be an object`);
+    for (const [id, item] of Object.entries(value))
+      if (!isRecord(item))
+        err(`${key}.${id}`, `each of ${key} must be an object`);
+  };
+  if (doc.format !== WORLD_FORMAT)
+    err("format", `format must be ${WORLD_FORMAT}`);
+  if (typeof doc.id !== "string" || doc.id === "")
+    err("id", "the world needs an id");
+  if (typeof doc.name !== "string")
+    err("name", "the world needs a name");
+  if (doc.engineVersion !== undefined && typeof doc.engineVersion !== "string")
+    err("engineVersion", "engineVersion must be text");
+  if (typeof doc.pov !== "string")
+    err("pov", "the world needs a POV entity id");
+  for (const key of COLLECTIONS)
+    collection(key);
+  for (const key of LATER_COLLECTIONS)
+    if (doc[key] !== undefined)
+      collection(key);
+  for (const key of PARTS2)
+    if (!isRecord(doc[key]))
+      err(key, `${key} must be an object`);
+  for (const key of OPTIONAL_PARTS)
+    if (doc[key] !== undefined && !isRecord(doc[key]))
+      err(key, `${key} must be an object`);
+  if (!Array.isArray(doc.suppressed))
+    err("suppressed", "suppressed must be a list");
+  if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll")
+    err("seedMode", "seedMode must be fresh or same_roll");
+  if (typeof doc.lenientPricing !== "boolean")
+    err("lenientPricing", "lenientPricing must be true or false");
+  if (doc.spawnTier !== undefined && typeof doc.spawnTier !== "string")
+    err("spawnTier", "spawnTier must be a tier id");
+  if (doc.spawnCap !== undefined && typeof doc.spawnCap !== "number")
+    err("spawnCap", "spawnCap must be a number");
+  if (doc.lifeStates !== undefined)
+    collection("lifeStates");
+  return issues;
+}
 function isCurrency(v) {
   return isRecord(v) && typeof v.code === "string" && typeof v.symbol === "string" && typeof v.minorUnit === "string" && typeof v.decimals === "number" && typeof v.format === "string";
 }
@@ -43393,6 +43465,7 @@ function parseEditOps(raw) {
 
 // src/shared/protocol.ts
 var PROTOCOL_VERSION = 1;
+var AGENT_API = 1;
 
 // src/engine/ledger/path.ts
 function contentId(text) {
@@ -45081,7 +45154,7 @@ var ENTRY_MAX_CHARS = 1500;
 var PROPOSALS_PER_CALL = 15;
 var PROPOSALS_MAX = 120;
 var PROPOSAL_MAX_TOKENS = 6000;
-var COLLECTIONS = { entities: "entities", places: "places", routes: "routes" };
+var COLLECTIONS2 = { entities: "entities", places: "places", routes: "routes" };
 var TRAVEL_MODES = ["walk", "road", "offroad", "water"];
 var PROPOSAL_STRICT_RULES = [
   "Propose only what the text states. Never invent numbers, prices, balances, distances or times; leave a field out instead.",
@@ -45199,7 +45272,7 @@ function readProposals(raw, source) {
   list.forEach((p, i) => {
     if (!isRecord(p))
       return;
-    const collection = typeof p.collection === "string" && hasOwn(COLLECTIONS, p.collection) ? COLLECTIONS[p.collection] : undefined;
+    const collection = typeof p.collection === "string" && hasOwn(COLLECTIONS2, p.collection) ? COLLECTIONS2[p.collection] : undefined;
     const key = typeof p.key === "string" ? p.key : isRecord(p.value) && typeof p.value.id === "string" ? p.value.id : null;
     if (typeof collection !== "string" || !key || !isRecord(p.value))
       return;
@@ -45681,6 +45754,199 @@ function mapProposal(request, answer) {
     ...answer.problems.length > 0 ? { note: `Check before you commit:
 ${problemLines(answer.problems)}` } : {}
   };
+}
+
+// src/shared/json-patch.ts
+class PatchError extends Error {
+  index;
+  constructor(index, message, op) {
+    super(`operation ${index + 1}${op ? ` (${op.op} ${op.path === "" ? '""' : op.path})` : ""}: ${message}`);
+    this.index = index;
+    this.name = "PatchError";
+  }
+}
+var PROTOTYPE_KEYS = Object.fromEntries(["__proto__", "constructor", "prototype"].map((key) => [key, true]));
+function isPrototypeKey(key) {
+  return hasOwn(PROTOTYPE_KEYS, key);
+}
+function parsePointer(pointer) {
+  if (pointer === "")
+    return [];
+  if (!pointer.startsWith("/"))
+    throw new Error(`"${pointer}" isn't a JSON Pointer (it starts with "/", or is "" for the whole draft)`);
+  return pointer.slice(1).split("/").map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+function pointerOf(tokens) {
+  return tokens.map((t) => `/${t.replace(/~/g, "~0").replace(/\//g, "~1")}`).join("");
+}
+function arrayIndex(token, length, forAdd) {
+  if (forAdd && token === "-")
+    return length;
+  if (!/^(0|[1-9][0-9]*)$/.test(token))
+    throw new Error(`"${token}" isn't an array index`);
+  const index = Number(token);
+  if (index > length || !forAdd && index === length)
+    throw new Error(`index ${index} is past the end (length ${length})`);
+  return index;
+}
+function getAt(doc, tokens) {
+  let at = doc;
+  for (const token of tokens) {
+    if (Array.isArray(at)) {
+      if (!/^(0|[1-9][0-9]*)$/.test(token))
+        return;
+      at = at[Number(token)];
+    } else if (isRecord(at)) {
+      at = hasOwn(at, token) ? at[token] : undefined;
+    } else
+      return;
+    if (at === undefined)
+      return;
+  }
+  return at;
+}
+function parentOf(doc, tokens, what) {
+  if (tokens.length === 0)
+    throw new Error(`${what} needs a path inside the draft, not the whole draft`);
+  const parent = getAt(doc, tokens.slice(0, -1));
+  if (parent === undefined || !Array.isArray(parent) && !isRecord(parent))
+    throw new Error(`there is no object or list at ${pointerOf(tokens.slice(0, -1)) || "the top"} to hold it`);
+  return { parent, key: tokens[tokens.length - 1] ?? "" };
+}
+function jsonEqual(a, b) {
+  if (a === b)
+    return true;
+  if (Array.isArray(a) && Array.isArray(b))
+    return a.length === b.length && a.every((v, i) => jsonEqual(v, b[i]));
+  if (isRecord(a) && isRecord(b)) {
+    const ka = Object.keys(a);
+    return ka.length === Object.keys(b).length && ka.every((k) => hasOwn(b, k) && jsonEqual(a[k], b[k]));
+  }
+  return false;
+}
+function insert(doc, tokens, value, replace) {
+  if (tokens.length === 0)
+    return value;
+  const { parent, key } = parentOf(doc, tokens, replace ? "replace" : "add");
+  if (Array.isArray(parent)) {
+    const index = arrayIndex(key, parent.length, !replace);
+    if (replace)
+      parent[index] = value;
+    else
+      parent.splice(index, 0, value);
+    return doc;
+  }
+  if (!isRecord(parent))
+    throw new Error("not an object");
+  if (isPrototypeKey(key))
+    throw new Error(`"${key}" can't be a key`);
+  if (replace && !hasOwn(parent, key))
+    throw new Error(`nothing at ${pointerOf(tokens)} to replace (use add)`);
+  parent[key] = value;
+  return doc;
+}
+function removeAt(doc, tokens) {
+  const { parent, key } = parentOf(doc, tokens, "remove");
+  if (Array.isArray(parent)) {
+    parent.splice(arrayIndex(key, parent.length, false), 1);
+    return doc;
+  }
+  if (!isRecord(parent) || !hasOwn(parent, key))
+    throw new Error(`nothing at ${pointerOf(tokens)} to remove`);
+  delete parent[key];
+  return doc;
+}
+function readOp(raw, index) {
+  if (!isRecord(raw))
+    throw new PatchError(index, "not an object");
+  const { op, path, from, value } = raw;
+  if (typeof path !== "string")
+    throw new PatchError(index, "needs a path (a JSON Pointer string)");
+  if (op === "remove")
+    return { op, path };
+  if (op === "add" || op === "replace" || op === "test") {
+    if (value === undefined)
+      throw new PatchError(index, `${op} needs a value`, { op, path });
+    return { op, path, value };
+  }
+  if (op === "move" || op === "copy") {
+    if (typeof from !== "string")
+      throw new PatchError(index, `${op} needs a from (a JSON Pointer string)`, { op, path });
+    return { op, from, path };
+  }
+  throw new PatchError(index, `unknown op ${JSON.stringify(op)} (add, remove, replace, move, copy or test)`);
+}
+function measure(value, caps) {
+  let size = 0;
+  let depth = 0;
+  const stack = [{ value, level: 0 }];
+  for (let top = stack.pop();top !== undefined; top = stack.pop()) {
+    const v = top.value;
+    if (Array.isArray(v) || isRecord(v)) {
+      const level = top.level + 1;
+      if (level > caps.depth)
+        return "depth";
+      depth = Math.max(depth, level);
+      size += 2;
+      for (const [key, item] of Array.isArray(v) ? v.map((x, i) => [String(i), x]) : Object.entries(v)) {
+        size += Array.isArray(v) ? 1 : key.length + 4;
+        if (size > caps.size)
+          return "size";
+        stack.push({ value: item, level });
+      }
+    } else
+      size += typeof v === "string" ? v.length + 2 : String(v).length;
+    if (size > caps.size)
+      return "size";
+  }
+  return { size, depth };
+}
+function applyPatch(doc, ops, budget) {
+  let out = structuredClone(doc);
+  let spent = 0;
+  const afford = (value, tokens, counts) => {
+    if (!budget)
+      return;
+    const fits = measure(value, { size: counts ? budget.size - spent : Number.MAX_SAFE_INTEGER, depth: budget.depth - tokens.length });
+    if (fits === "size")
+      throw new Error(`the patch brings in more than ${Math.round(budget.size / (1024 * 1024))} MiB of JSON (the values it adds and what it copies count)`);
+    if (fits === "depth")
+      throw new Error(`the value would nest the world deeper than ${budget.depth} levels`);
+    if (counts)
+      spent += fits.size;
+  };
+  ops.forEach((op, index) => {
+    try {
+      const tokens = parsePointer(op.path);
+      if (op.op === "add" || op.op === "replace")
+        afford(op.value, tokens, true);
+      if (op.op === "add")
+        out = insert(out, tokens, structuredClone(op.value), false);
+      else if (op.op === "replace")
+        out = insert(out, tokens, structuredClone(op.value), true);
+      else if (op.op === "remove")
+        out = removeAt(out, tokens);
+      else if (op.op === "test") {
+        if (!jsonEqual(getAt(out, tokens), op.value))
+          throw new Error(`the value at ${op.path || "the top"} isn't the one given`);
+      } else {
+        const fromTokens = parsePointer(op.from);
+        const value = getAt(out, fromTokens);
+        if (value === undefined)
+          throw new Error(`nothing at ${op.from} to ${op.op}`);
+        afford(value, tokens, op.op === "copy");
+        if (op.op === "move") {
+          if (op.path.startsWith(`${op.from}/`))
+            throw new Error("can't move a value into itself");
+          out = removeAt(out, fromTokens);
+        }
+        out = insert(out, tokens, structuredClone(value), false);
+      }
+    } catch (error) {
+      throw error instanceof PatchError ? error : new PatchError(index, error instanceof Error ? error.message : String(error), op);
+    }
+  });
+  return out;
 }
 
 // src/shared/profiles/parts.ts
@@ -46326,6 +46592,14 @@ function applyProfile(world, profile, packKinds, choices = {}) {
 }
 
 // src/backend/worlds.ts
+var HEAD_SOURCES = { create: true, build: true, agent: true, import: true, studio: true };
+var PATCH_OPS_CAP = 500;
+var PATCH_SIZE_CAP = 4 * 1024 * 1024;
+var DOC_DEPTH_CAP = 64;
+var NOTE_CAP = 200;
+var PATCH_PROTECTED = ["id", "format", "engineVersion", "pins", "suppressed"];
+var WORLD_PARTS = { calendar: true, realism: true, time: true, meta: true, tiers: true, ruleset: true, loreIndex: true };
+
 class WorldError extends Error {
   code;
   lint;
@@ -46373,6 +46647,7 @@ class WorldStore {
   registry;
   revisions = new Map;
   onChange = null;
+  writes = new Map;
   constructor(host, registry) {
     this.host = host;
     this.registry = registry;
@@ -46384,6 +46659,22 @@ class WorldStore {
   async writeJson(path, value, userId) {
     await this.host.storage.write(`${path}.tmp`, JSON.stringify(value), userId);
     await this.host.storage.move(`${path}.tmp`, path, userId);
+  }
+  async serial(userId, worldId, work) {
+    const key = `${userId}\x00${worldId}`;
+    const run = (this.writes.get(key) ?? Promise.resolve()).then(work);
+    const settled = run.then(() => {
+      return;
+    }, () => {
+      return;
+    });
+    this.writes.set(key, settled);
+    try {
+      return await run;
+    } finally {
+      if (this.writes.get(key) === settled)
+        this.writes.delete(key);
+    }
   }
   static key(userId, worldId, revision) {
     return `${userId}\x00${worldId}\x00${revision}`;
@@ -46412,12 +46703,14 @@ class WorldStore {
     const raw = await this.readJson(`${worldDir(worldId)}index.json`, userId);
     if (!isRecord(raw) || typeof raw.head !== "string")
       return null;
+    const draftVersion = typeof raw.draftVersion === "number" && Number.isSafeInteger(raw.draftVersion) && raw.draftVersion > 0 ? raw.draftVersion : 0;
     return {
       id: worldId,
       name: typeof raw.name === "string" ? raw.name : worldId,
       head: raw.head,
       loreBookId: typeof raw.loreBookId === "string" ? raw.loreBookId : null,
-      revisions: Array.isArray(raw.revisions) ? raw.revisions.filter((r) => typeof r === "string") : [raw.head]
+      revisions: Array.isArray(raw.revisions) ? raw.revisions.filter((r) => typeof r === "string") : [raw.head],
+      ...draftVersion > 0 ? { draftVersion } : {}
     };
   }
   async list(userId) {
@@ -46434,6 +46727,10 @@ class WorldStore {
         out.push(index);
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  async history(worldId, userId) {
+    const raw = await readStoredJson(this.host, `${worldDir(worldId)}history.json`, userId, `world ${worldId} history`, (v) => isRecord(v) && Array.isArray(v.notes));
+    return isRecord(raw) && Array.isArray(raw.notes) ? raw.notes.filter(isRevisionNote) : [];
   }
   async revision(worldId, revision, userId) {
     const known = this.cached(userId, worldId, revision);
@@ -46458,115 +46755,301 @@ class WorldStore {
   async hasRevision(worldId, revision, userId) {
     return (await this.index(worldId, userId))?.revisions.includes(revision) ?? false;
   }
-  async commitDoc(doc, userId, loreBookId) {
+  async commitDoc(doc, userId, loreBookId, made) {
     const issues = lintWorld(doc, this.registry);
     if (issues.some((i) => i.severity === "error"))
       throw new WorldError("validation", "the world has errors", issues);
     const written = stamped(doc);
-    const rev = hashJson(written);
+    let rev;
+    try {
+      rev = hashJson(written);
+    } catch (error) {
+      throw new WorldError("validation", `the world can't be committed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await this.writeJson(revisionFile(doc.id, rev), written, userId);
     this.remember(WorldStore.key(userId, doc.id, rev), written);
     const index = await this.index(doc.id, userId);
     const revisions = index ? [...index.revisions.filter((r) => r !== rev), rev] : [rev];
-    await this.writeJson(`${worldDir(doc.id)}index.json`, { id: doc.id, name: doc.name, head: rev, loreBookId: index?.loreBookId ?? loreBookId, revisions }, userId);
+    const moved = index?.head !== rev;
+    const prior = index?.draftVersion ?? 0;
+    const count = made.dropped !== undefined ? Math.max(prior, made.dropped) + 1 : index && moved ? prior + 1 : prior;
+    await this.writeJson(`${worldDir(doc.id)}index.json`, { id: doc.id, name: doc.name, head: rev, loreBookId: index?.loreBookId ?? loreBookId, revisions, ...count > 0 ? { draftVersion: count } : {} }, userId);
+    if (moved) {
+      const note = { revision: rev, at: Date.now(), source: made.source, ...made.note !== undefined ? { note: made.note } : {} };
+      await this.writeJson(`${worldDir(doc.id)}history.json`, { v: 1, notes: [...await this.history(doc.id, userId), note] }, userId);
+    }
     await this.onChange?.(doc.id, userId);
-    return rev;
+    return { revision: rev, lint: issues, count, moved };
   }
-  async create(name, template, userId) {
+  async create(name, template, userId, source = "create") {
     const id = `w_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const doc = template ? migrateWorld({ ...structuredClone(template), id, name }) : blankWorld(id, name);
-    const revision = await this.commitDoc(doc, userId, null);
-    return { world: doc, revision };
+    const made = await this.commitDoc(doc, userId, null, { source });
+    return { world: doc, revision: made.revision };
   }
   async setLoreBook(worldId, bookId, userId) {
+    await this.serial(userId, worldId, async () => {
+      const index = await this.index(worldId, userId);
+      if (!index)
+        throw new WorldError("not_found", `world ${worldId} not found`);
+      await this.writeJson(`${worldDir(worldId)}index.json`, { ...index, loreBookId: bookId }, userId);
+    });
+  }
+  async remove(worldId, userId) {
+    await this.serial(userId, worldId, async () => {
+      for (const path of await this.host.storage.list(worldDir(worldId), userId))
+        await this.host.storage.remove(path, userId);
+      await this.onChange?.(worldId, userId);
+    });
+  }
+  async storedDraft(index, userId) {
+    const raw = await this.readJson(`${worldDir(index.id)}draft.json`, userId);
+    if (!isRecord(raw) || !isWorldDoc(raw.doc))
+      return null;
+    const count = index.draftVersion ?? 0;
+    const version = typeof raw.version === "number" && Number.isSafeInteger(raw.version) && raw.version > 0 ? raw.version : count + 1;
+    return version > count ? { base: typeof raw.base === "string" ? raw.base : null, doc: raw.doc, version } : null;
+  }
+  async draft(worldId, userId) {
     const index = await this.index(worldId, userId);
     if (!index)
       throw new WorldError("not_found", `world ${worldId} not found`);
-    await this.writeJson(`${worldDir(worldId)}index.json`, { ...index, loreBookId: bookId }, userId);
-  }
-  async remove(worldId, userId) {
-    for (const path of await this.host.storage.list(worldDir(worldId), userId))
-      await this.host.storage.remove(path, userId);
-    await this.onChange?.(worldId, userId);
-  }
-  async draft(worldId, userId) {
-    const raw = await this.readJson(`${worldDir(worldId)}draft.json`, userId);
-    if (isRecord(raw) && isWorldDoc(raw.doc))
-      return { base: typeof raw.base === "string" ? raw.base : null, doc: migrateWorld(raw.doc), stored: true };
-    const head = await this.get(worldId, userId);
-    return { base: head.revision, doc: structuredClone(head.world), stored: false };
+    const stored = await this.storedDraft(index, userId);
+    if (stored)
+      return { ...stored, doc: migrateWorld(stored.doc), stored: true, head: index.head };
+    return { base: index.head, doc: structuredClone(await this.revision(worldId, index.head, userId)), version: index.draftVersion ?? 0, stored: false, head: index.head };
   }
   async working(worldId, userId) {
     return (await this.draft(worldId, userId)).doc;
   }
-  async edit(request, userId) {
-    if (request.op === "discard")
-      await this.host.storage.remove(`${worldDir(request.worldId)}draft.json`, userId).catch(() => {
-        return;
-      });
-    const draft = await this.draft(request.worldId, userId);
-    if (request.op === "get" || request.op === "discard")
-      return { draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: draft.stored };
+  async edit(request, userId, changed) {
+    return this.serial(userId, request.worldId, async () => this.apply(request, await this.draft(request.worldId, userId), userId, changed));
+  }
+  async editFrom(worldId, userId, write, changed) {
+    return this.serial(userId, worldId, async () => {
+      const draft = await this.draft(worldId, userId);
+      return this.apply({ ...write(draft.doc), worldId }, draft, userId, changed);
+    });
+  }
+  async apply(request, draft, userId, changed) {
+    const worldId = request.worldId;
+    if (request.op === "get")
+      return { draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: draft.stored, version: draft.version };
+    if (request.version !== undefined && request.version !== draft.version)
+      throw new WorldError("conflict", `the draft changed since you read it (it is at version ${draft.version} now); reload and retry`);
+    if (request.op === "discard") {
+      if (!draft.stored)
+        return { draft: draft.doc, lint: lintWorld(draft.doc, this.registry), base: draft.base, stored: false, version: draft.version };
+      const count = await this.dropDraft(worldId, userId, draft.version);
+      const head = structuredClone(await this.revision(worldId, draft.head, userId));
+      changed?.(worldId, { version: count, stored: false, base: draft.head });
+      await this.removeDraft(worldId, userId, "the draft is discarded");
+      return { draft: head, lint: lintWorld(head, this.registry), base: draft.head, stored: false, version: count };
+    }
     if (request.base !== null && request.base !== draft.base)
       throw new WorldError("conflict", "the world changed; reload and retry");
     let doc = draft.doc;
-    if (request.op === "set") {
-      setPart(doc, request.part, request.value);
-    } else if (request.op === "profile") {
-      const profile = profileOf(request.profile);
-      if (!profile)
-        throw new WorldError("bad_request", `unknown profile ${String(request.profile)}`);
-      doc = applyProfile(doc, profile, Object.fromEntries(this.registry.kinds), profileChoices(request.choices));
+    let base = draft.base;
+    let lint;
+    if (request.op === "patch") {
+      const patched = this.patched(draft.doc, request.ops);
+      if (jsonEqual(patched.doc, draft.doc))
+        return { draft: draft.doc, lint: patched.lint, base: draft.base, stored: draft.stored, version: draft.version };
+      doc = patched.doc;
+      lint = patched.lint;
     } else {
-      if (!hasOwn(WORLD_COLLECTIONS, request.collection))
-        throw new WorldError("bad_request", `unknown collection ${request.collection}`);
-      if (!safeKey(request.id))
-        throw new WorldError("bad_request", "not a valid id");
-      const collection = collectionOf(doc, request.collection);
-      const current = hasOwn(collection, request.id) ? collection[request.id] : undefined;
-      const owner = isRecord(current) && typeof current.map === "string" ? current.map : null;
-      if (owner !== null)
-        throw new WorldError("bad_request", `${request.collection} ${request.id} is drawn by the map ${owner}; edit it there`);
-      if (request.op === "put" && request.collection !== "maps" && isRecord(request.value) && request.value.map !== undefined)
-        throw new WorldError("bad_request", "only a map marks what it draws (map)");
-      if (request.op === "put")
-        collection[request.id] = request.value;
-      else
-        delete collection[request.id];
-      doc = compileMaps(doc);
+      let what;
+      if (request.op === "set") {
+        if (!hasOwn(WORLD_PARTS, request.part))
+          throw new WorldError("bad_request", `unknown part ${String(request.part)}`);
+        if (typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: DOC_DEPTH_CAP - 1 }) === "string")
+          throw new WorldError("bad_request", `the ${request.part} part nests deeper than ${DOC_DEPTH_CAP - 1} levels`);
+        what = `the ${request.part} part`;
+        setPart(doc, request.part, request.value);
+      } else if (request.op === "profile") {
+        const profile = profileOf(request.profile);
+        if (!profile)
+          throw new WorldError("bad_request", `unknown profile ${String(request.profile)}`);
+        what = `the ${request.profile} profile`;
+        const tables = { ...doc.tables };
+        doc = applyProfile(doc, profile, Object.fromEntries(this.registry.kinds), profileChoices(request.choices));
+        repinTables(tables, doc);
+      } else if (request.op === "restore") {
+        if (typeof request.revision !== "string")
+          throw new WorldError("bad_request", "restore names one of the world's revisions");
+        what = `revision ${request.revision}`;
+        doc = structuredClone((await this.get(worldId, userId, request.revision)).world);
+        base = draft.head;
+      } else if (request.op === "put" || request.op === "remove") {
+        if (!hasOwn(WORLD_COLLECTIONS, request.collection))
+          throw new WorldError("bad_request", `unknown collection ${request.collection}`);
+        if (!safeKey(request.id))
+          throw new WorldError("bad_request", "not a valid id");
+        const collection = collectionOf(doc, request.collection);
+        const current = hasOwn(collection, request.id) ? collection[request.id] : undefined;
+        const owner = isRecord(current) && typeof current.map === "string" ? current.map : null;
+        if (owner !== null)
+          throw new WorldError("bad_request", `${request.collection} ${request.id} is drawn by the map ${owner}; edit it there`);
+        if (request.op === "put" && request.collection !== "maps" && isRecord(request.value) && request.value.map !== undefined)
+          throw new WorldError("bad_request", "only a map marks what it draws (map)");
+        if (request.op === "put" && typeof measure(request.value, { size: Number.MAX_SAFE_INTEGER, depth: DOC_DEPTH_CAP - 2 }) === "string")
+          throw new WorldError("bad_request", `${request.collection} ${request.id} nests deeper than ${DOC_DEPTH_CAP - 2} levels`);
+        what = `${request.collection} ${request.id}`;
+        const tables = request.collection === "tables" ? { ...doc.tables } : null;
+        if (request.op === "put")
+          collection[request.id] = request.value;
+        else
+          delete collection[request.id];
+        try {
+          doc = compileMaps(doc);
+        } catch (error) {
+          throw unreadable(what, error);
+        }
+        if (tables)
+          repinTables(tables, doc);
+      } else
+        throw new WorldError("bad_request", "unknown editor operation");
+      try {
+        lint = lintWorld(doc, this.registry);
+      } catch (error) {
+        throw unreadable(what, error);
+      }
     }
-    await this.writeJson(`${worldDir(request.worldId)}draft.json`, { base: draft.base, doc }, userId);
-    return { draft: doc, lint: lintWorld(doc, this.registry), base: draft.base, stored: true };
+    const version = draft.version + 1;
+    await this.writeJson(`${worldDir(worldId)}draft.json`, { base, doc, version }, userId);
+    changed?.(worldId, { version, stored: true, base });
+    return { draft: doc, lint, base, stored: true, version };
   }
-  async commit(worldId, base, userId) {
-    const draft = await this.draft(worldId, userId);
-    if (base !== null && base !== draft.base)
-      throw new WorldError("conflict", "the world changed; reload and retry");
-    const revision = await this.commitDoc(draft.doc, userId, null);
-    await this.host.storage.remove(`${worldDir(worldId)}draft.json`, userId).catch(() => {
-      return;
+  async dropDraft(worldId, userId, version) {
+    const index = await this.index(worldId, userId);
+    if (!index)
+      throw new WorldError("not_found", `world ${worldId} not found`);
+    const count = Math.max(index.draftVersion ?? 0, version) + 1;
+    await this.writeJson(`${worldDir(worldId)}index.json`, { ...index, draftVersion: count }, userId);
+    return count;
+  }
+  async removeDraft(worldId, userId, done) {
+    try {
+      await this.host.storage.remove(`${worldDir(worldId)}draft.json`, userId);
+    } catch (error) {
+      throw new Error(`${done}, but its file couldn't be removed (${error instanceof Error ? error.message : String(error)}); it no longer reads as the draft`);
+    }
+  }
+  patched(before, raw) {
+    if (!Array.isArray(raw))
+      throw new WorldError("bad_request", "a patch is a list of operations");
+    if (raw.length > PATCH_OPS_CAP)
+      throw new WorldError("bad_request", `a patch has at most ${PATCH_OPS_CAP} operations; this one has ${raw.length}`);
+    const ops = [];
+    let after;
+    try {
+      raw.forEach((item, index) => {
+        const op = readOp(item, index);
+        try {
+          parsePointer(op.path);
+          if (op.op === "move" || op.op === "copy")
+            parsePointer(op.from);
+        } catch (error) {
+          throw new PatchError(index, error instanceof Error ? error.message : String(error), op);
+        }
+        const key = prototypeKeyOf(op);
+        if (key !== null)
+          throw new PatchError(index, `"${key}" can't be a key`, op);
+        ops.push(op);
+      });
+      after = applyPatch(before, ops, { size: PATCH_SIZE_CAP, depth: DOC_DEPTH_CAP });
+    } catch (error) {
+      if (!(error instanceof PatchError))
+        throw error;
+      throw new WorldError(ops[error.index]?.op === "test" ? "conflict" : "bad_request", error.message);
+    }
+    const refusal = (tokens, message) => {
+      const index = ops.findIndex((op) => writesAt(op, tokens));
+      const op = ops[index];
+      return new WorldError("bad_request", op ? new PatchError(index, message, op).message : message);
+    };
+    if (!isRecord(after))
+      throw refusal([], "the patch must leave a world document");
+    const was = before;
+    for (const part of PATCH_PROTECTED)
+      if (!jsonEqual(was[part], after[part]))
+        throw refusal([part], `a patch can't change /${part}`);
+    const items = [];
+    for (const name of Object.keys(WORLD_COLLECTIONS)) {
+      const old = was[name];
+      const now = after[name];
+      const prior = isRecord(old) ? old : {};
+      const next = isRecord(now) ? now : {};
+      for (const id of new Set([...Object.keys(prior), ...Object.keys(next)])) {
+        const from = hasOwn(prior, id) ? prior[id] : undefined;
+        const to = hasOwn(next, id) ? next[id] : undefined;
+        if (jsonEqual(from, to))
+          continue;
+        if (isRecord(from) && typeof from.map === "string")
+          throw refusal([name, id], `${name} ${id} is drawn by the map ${from.map}; edit it there`);
+        if (name !== "maps" && isRecord(to) && to.map !== undefined)
+          throw refusal([name, id], "only a map marks what it draws (map)");
+        const length = id.length;
+        if (to !== undefined && !safeKey(id))
+          throw refusal([name, id], `${name} ids are 1 to 200 characters long; this one is ${length}`);
+        items.push(`${name} ${id}`);
+      }
+    }
+    const shape = shapeIssues(after);
+    if (shape.length > 0 || !isWorldDoc(after))
+      throw new WorldError("validation", "the patch leaves the world malformed", shape);
+    try {
+      const doc = migrateWorld(after);
+      repinTables(before.tables, doc);
+      return { doc, lint: lintWorld(doc, this.registry) };
+    } catch (error) {
+      throw unreadable(items.length === 0 ? "the patched world" : items.length > 5 ? `${items.slice(0, 5).join(", ")} and ${items.length - 5} more` : items.join(", "), error);
+    }
+  }
+  async commit(worldId, base, userId, by, changed) {
+    if (by.note !== undefined && typeof by.note !== "string")
+      throw new WorldError("bad_request", "a commit note is text");
+    const note = by.note === undefined ? "" : Array.from(by.note.trim()).slice(0, NOTE_CAP).join("");
+    return this.serial(userId, worldId, async () => {
+      const draft = await this.draft(worldId, userId);
+      if (by.version !== undefined && by.version !== draft.version)
+        throw new WorldError("conflict", `the draft changed since you read it (it is at version ${draft.version} now); review it and commit again`);
+      if (base !== null && base !== draft.base)
+        throw new WorldError("conflict", "the world changed; reload and retry");
+      if (draft.stored && draft.base !== draft.head)
+        throw new WorldError("conflict", "the world changed since this draft began; reload it");
+      const made = await this.commitDoc(draft.doc, userId, null, { source: by.source, ...note !== "" ? { note } : {}, ...draft.stored ? { dropped: draft.version } : {} });
+      if (draft.stored || made.moved)
+        changed?.(worldId, { version: made.count, stored: false, base: made.revision });
+      if (draft.stored)
+        await this.removeDraft(worldId, userId, `revision ${made.revision} is the head now`);
+      return { revision: made.revision, lint: made.lint };
     });
-    return { revision, lint: lintWorld(draft.doc, this.registry) };
   }
   async importFile(file, userId) {
     const doc = isRecord(file) && isWorldDoc(file.world) ? file.world : file;
     if (!isWorldDoc(doc))
       throw new WorldError("bad_request", `not a ${WORLD_FORMAT} document`);
-    const created = await this.create(doc.name, migrateWorld(doc), userId);
+    const created = await this.create(doc.name, migrateWorld(doc), userId, "import");
     return { ...created, lint: macroReview(created.world) };
   }
-  async commitRevision(worldId, doc, userId) {
-    const index = await this.index(worldId, userId);
-    if (!index)
-      throw new WorldError("not_found", `world ${worldId} not found`);
-    if (await this.hasDraft(worldId, userId))
-      throw new WorldError("conflict", `Build has unsaved changes to \u201C${index.name}\u201D: commit or discard them first`);
-    const world = migrateWorld({ ...structuredClone(doc), id: worldId });
-    const revision = await this.commitDoc(world, userId, null);
-    return { world, revision, lint: macroReview(world) };
+  async commitRevision(worldId, doc, userId, changed) {
+    return this.serial(userId, worldId, async () => {
+      const index = await this.index(worldId, userId);
+      if (!index)
+        throw new WorldError("not_found", `world ${worldId} not found`);
+      if (await this.storedDraft(index, userId))
+        throw new WorldError("conflict", `Build has unsaved changes to \u201C${index.name}\u201D: commit or discard them first`);
+      const world = migrateWorld({ ...structuredClone(doc), id: worldId });
+      const made = await this.commitDoc(world, userId, null, { source: "studio" });
+      if (made.moved)
+        changed?.(worldId, { version: made.count, stored: false, base: made.revision });
+      return { world, revision: made.revision, lint: macroReview(world) };
+    });
   }
   async hasDraft(worldId, userId) {
-    return await this.host.storage.read(`${worldDir(worldId)}draft.json`, userId) !== null;
+    const index = await this.index(worldId, userId);
+    return index !== null && await this.storedDraft(index, userId) !== null;
   }
   async exportFile(worldId, userId, revision) {
     const { world } = await this.get(worldId, userId, revision);
@@ -46579,13 +47062,65 @@ class WorldStore {
 function macroReview(world) {
   return macrosIn(world).map((m) => ({ severity: "warning", path: m.path, code: "import_macro", message: `Review this macro before playing: ${m.macro}` }));
 }
+function unreadable(what, error) {
+  if (error instanceof WorldError)
+    return error;
+  return new WorldError("validation", `${what}: the engine can't read it (${error instanceof Error ? error.message : String(error)}); check it against the lre-world-v1 schema`);
+}
 function collectionOf(doc, name) {
   const value = doc[name];
   if (!isRecord(value))
     throw new WorldError("bad_request", `collection ${name} is not an object`);
   return value;
 }
+function isRevisionNote(v) {
+  return isRecord(v) && typeof v.revision === "string" && typeof v.at === "number" && typeof v.source === "string" && hasOwn(HEAD_SOURCES, v.source) && (v.note === undefined || typeof v.note === "string");
+}
+function prototypeKeyOf(op) {
+  for (const pointer of op.op === "move" || op.op === "copy" ? [op.path, op.from] : [op.path])
+    for (const token of pointer.split("/"))
+      if (isPrototypeKey(token))
+        return token;
+  const stack = "value" in op ? [op.value] : [];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (Array.isArray(value))
+      for (const item of value)
+        stack.push(item);
+    else if (isRecord(value)) {
+      for (const [key, item] of Object.entries(value)) {
+        if (isPrototypeKey(key))
+          return key;
+        stack.push(item);
+      }
+    }
+  }
+  return null;
+}
+function writesAt(op, tokens) {
+  if (op.op === "test")
+    return false;
+  const overlaps = (pointer) => parsePointer(pointer).every((token, i) => i >= tokens.length || token === tokens[i]);
+  return overlaps(op.path) || op.op === "move" && overlaps(op.from);
+}
+function repinTables(before, doc) {
+  const pins = isRecord(doc.pins) ? doc.pins.tables : undefined;
+  if (!isRecord(pins))
+    return;
+  for (const [id, table] of Object.entries(doc.tables)) {
+    if (!isRecord(table) || hasOwn(before, id) && jsonEqual(before[id], table))
+      continue;
+    const revision = hashJson({ schema: table.schema, columns: table.columns, rows: table.rows });
+    doc.tables[id] = { ...table, revision };
+    pins[id] = revision;
+  }
+  for (const id of Object.keys(before))
+    if (!hasOwn(doc.tables, id))
+      delete pins[id];
+}
 function setPart(doc, part, value) {
+  if (!hasOwn(WORLD_PARTS, part))
+    throw new WorldError("bad_request", `unknown part ${String(part)}`);
   if (!isRecord(value))
     throw new WorldError("bad_request", `part ${part} must be an object`);
   if (part === "meta") {
@@ -47315,7 +47850,7 @@ function savedTitle(text) {
   const words = (first ?? "").split(/\s+/).filter((w) => w !== "");
   return words.length === 0 ? "Saved from a chat" : words.length > 8 ? `${words.slice(0, 8).join(" ")}\u2026` : words.join(" ");
 }
-async function saveFromChat(host, worlds, chatId, worldId, userId, hiding, excerpt) {
+async function saveFromChat(host, worlds, chatId, worldId, userId, hiding, excerpt, changed) {
   const messages = await host.chats.messages(chatId, userId);
   const reply = messages.filter((m) => !m.isUser && m.content.trim() !== "").at(-1);
   const plain = (s) => s.replace(/\s+/g, " ").trim().toLowerCase();
@@ -47324,14 +47859,15 @@ async function saveFromChat(host, worlds, chatId, worldId, userId, hiding, excer
   if (!from)
     throw new WorldError("not_found", "the chat has no reply to save yet");
   const content = (wanted === "" ? readableReply(from.content, hiding) : excerpt ?? "").trim().slice(0, SAVED_MAX_CHARS);
-  const draft = await worlds.working(worldId, userId);
   const title = savedTitle(content);
   const base = `lore_${topicIdOf(title.split(/\s+/).slice(0, 5).join(" ")) || "saved"}`;
   let id = base;
-  for (let n = 2;hasOwn(draft.lore, id); n++)
-    id = `${base}_${n}`;
-  const value = { id, title, content, keys: [], links: [], source: { kind: "chat", chatId, messageId: from.id } };
-  await worlds.edit({ lre: PROTOCOL_VERSION, type: "lre.editor", reqId: "", worldId, base: null, op: "put", collection: "lore", id, value }, userId);
+  await worlds.editFrom(worldId, userId, (draft) => {
+    for (let n = 2;hasOwn(draft.lore, id); n++)
+      id = `${base}_${n}`;
+    const value = { id, title, content, keys: [], links: [], source: { kind: "chat", chatId, messageId: from.id } };
+    return { lre: PROTOCOL_VERSION, type: "lre.editor", reqId: "", worldId, base: null, op: "put", collection: "lore", id, value };
+  }, changed);
   return { worldId, id };
 }
 
@@ -51576,6 +52112,7 @@ class Runtime {
   push;
   studio;
   templates;
+  templateInfo;
   pipeline;
   runs = new Map;
   bridges = new Map;
@@ -51595,6 +52132,7 @@ class Runtime {
     this.registry = createRegistry(options.packs);
     this.pipeline = options.pipeline;
     this.templates = options.templates ?? {};
+    this.templateInfo = options.templateInfo ?? [];
     this.worlds = new WorldStore(this.host, this.registry);
     this.settings = new SettingsStore(this.host, (userId, settings) => this.ledger.preReplyBudget(userId, settings.modelUse.budgets.pre.ms));
     this.chips = new ChipStore(this.host);
@@ -51608,7 +52146,7 @@ class Runtime {
     this.meter = new CallMeter(this.host);
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792355873" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792376131" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -51642,6 +52180,20 @@ class Runtime {
     const run = readRun(await this.host.chats.chatMetadata(chatId, userId));
     lruSet(this.runs, key, run, 512);
     return run;
+  }
+  async revisionInPlay(chatId, userId, run) {
+    try {
+      const core = await this.ledger.core(chatId, userId);
+      if (!core)
+        return { revision: null, reason: `its ledger can't be opened: revision ${run.revision} of its world can't be read` };
+      const observed = toChain(await this.host.chats.messages(chatId, userId));
+      const named = core.revisionsIn(observed);
+      if (named.size === 1 && named.has(run.revision))
+        return { revision: run.revision };
+      return { revision: core.fold(observed).state.revision };
+    } catch (error) {
+      return { revision: null, reason: `its ledger can't be read: ${error instanceof Error ? error.message : String(error)}` };
+    }
   }
   forgetChat(chatId) {
     for (const key of [...this.runs.keys()])
@@ -53379,12 +53931,14 @@ var BAND_WHO = { principal: "leads", supporting: "supporting characters", backgr
 function isRequest(raw) {
   return isRecord(raw) && raw.lre === PROTOCOL_VERSION && typeof raw.type === "string" && typeof raw.reqId === "string";
 }
+var CLIENTS_CAP = 256;
 
 class Dispatcher {
   rt;
   jobs;
   writeSeq = 0;
   chipLocks = new Map;
+  clients = new Map;
   constructor(rt, jobs) {
     this.rt = rt;
     this.jobs = jobs;
@@ -53402,17 +53956,28 @@ class Dispatcher {
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: "bad_request", message: `invalid ${unsafe}` }, userId, session);
       return;
     }
+    const drafts = new Map;
+    const announce = () => {
+      for (const push of drafts.values())
+        this.rt.host.frontend.send(push, userId);
+      drafts.clear();
+    };
     const reply = (request, body) => {
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.result", reqId: raw.reqId, request, body }, userId, session);
+      announce();
+    };
+    const noted = (worldId, draft) => {
+      drafts.set(worldId, { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: draft.version, stored: draft.stored, base: draft.base });
     };
     try {
       await this.rt.studio.serve(userId);
-      await this.route(raw, userId, session, reply);
+      await this.route(raw, userId, session, reply, noted);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
       if (e.code === "internal")
         this.rt.host.log("error", `[LumiRPEngine] ${raw.type}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: e.code, message: e.message, ...e.lint ? { lint: e.lint } : {} }, userId, session);
+      announce();
     }
   }
   nextId() {
@@ -53447,11 +54012,15 @@ class Dispatcher {
       throw new RequestError("not_world_chat", "this chat is not attached to a world");
     return runSeed;
   }
-  async route(r, userId, session, reply) {
+  async route(r, userId, session, reply, noted) {
     switch (r.type) {
       case "lre.hello":
       case "lre.state.resync": {
-        reply(r.type, { accepted: true });
+        if (r.type === "lre.hello") {
+          reply("lre.hello", { accepted: true, agentApi: AGENT_API });
+          this.meet(userId, session, r.client);
+        } else
+          reply("lre.state.resync", { accepted: true });
         if (r.type === "lre.hello" && r.presetId !== undefined)
           this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null);
         if (r.chatId) {
@@ -53587,11 +54156,11 @@ class Dispatcher {
         return;
       }
       case "lre.editor": {
-        reply("lre.editor", await this.rt.worlds.edit(r, userId));
+        reply("lre.editor", await this.rt.worlds.edit(r, userId, noted));
         return;
       }
       case "lre.world": {
-        reply("lre.world", await this.world(r, userId));
+        reply("lre.world", await this.world(r, userId, session, noted));
         return;
       }
       case "lre.ui": {
@@ -53644,7 +54213,8 @@ class Dispatcher {
           const run = await this.rt.runOf(r.chatId, userId);
           if (!run)
             throw new RequestError("not_world_chat", "this chat is not attached to a world");
-          reply("lre.lore", await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, (await this.rt.settings.get(userId)).hideJsonBlocks, typeof r.text === "string" ? r.text : undefined));
+          const saved = await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, (await this.rt.settings.get(userId)).hideJsonBlocks, typeof r.text === "string" ? r.text : undefined, noted);
+          reply("lre.lore", saved);
           return;
         }
         const world = await this.rt.worlds.working(r.worldId, userId);
@@ -53654,12 +54224,12 @@ class Dispatcher {
         return;
       }
       case "lre.studio": {
-        reply("lre.studio", await this.studio(r, userId));
+        reply("lre.studio", await this.studio(r, userId, noted));
         return;
       }
     }
   }
-  async studio(r, userId) {
+  async studio(r, userId, noted) {
     if (r.op === "offer") {
       const read = await this.rt.studio.offer(userId);
       return read.offer ? { offer: (await this.reviewOffer(read.offer, read.hash, userId)).view } : { offer: null, message: read.reason };
@@ -53679,7 +54249,7 @@ class Dispatcher {
       if (view.headMoved && r.acceptMovedHead !== true)
         throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
       const store = this.rt.worlds;
-      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId).then((created) => ({ ...created, lint: macroReview(created.world) }));
+      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId, noted) : await store.create(world.name, world, userId, "studio").then((created) => ({ ...created, lint: macroReview(created.world) }));
       await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
       await this.syncBook(done.world.id, userId);
       return { installed: { offerId: offer.offerId, mode: offer.mode, worldId: done.world.id, name: done.world.name, revision: done.revision, attachChatId: offer.attachChatId ?? null }, lint: done.lint };
@@ -53736,13 +54306,13 @@ class Dispatcher {
     }
     return { view, world };
   }
-  async world(r, userId) {
+  async world(r, userId, session, noted) {
     const store = this.rt.worlds;
     switch (r.op) {
       case "list":
         return { worlds: await store.list(userId) };
       case "get":
-        return { ...await store.get(r.worldId, userId, r.revision), packKinds: Object.fromEntries(this.rt.registry.kinds), packRelations: Object.fromEntries(this.rt.registry.relations), functions: formulaFunctions(this.rt.registry) };
+        return { ...await store.get(r.worldId, userId, r.revision), history: await store.history(r.worldId, userId), packKinds: Object.fromEntries(this.rt.registry.kinds), packRelations: Object.fromEntries(this.rt.registry.relations), functions: formulaFunctions(this.rt.registry) };
       case "create": {
         const template = r.template && hasOwn(this.rt.templates, r.template) ? this.rt.templates[r.template] : undefined;
         if (r.template && !template)
@@ -53756,7 +54326,7 @@ class Dispatcher {
         await this.rt.jsonHiding.removeWorld(r.worldId, userId).catch((error) => this.rt.host.log("warn", `[LumiRPEngine] world ${r.worldId}: its chats' JSON-hiding regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
         return { worlds: await store.list(userId) };
       case "commit": {
-        const committed = await store.commit(r.worldId, r.base, userId);
+        const committed = await store.commit(r.worldId, r.base, userId, { source: session !== undefined && this.clients.has(`${userId}\x00${session}`) ? "agent" : "build", ...r.note !== undefined ? { note: r.note } : {}, ...r.version !== undefined ? { version: r.version } : {} }, noted);
         await this.syncBook(r.worldId, userId);
         return committed;
       }
@@ -53799,9 +54369,9 @@ class Dispatcher {
         const body = validMarkerBody({ kind: "migrate", to: r.to, merge: r.merge });
         if (!body)
           throw new RequestError("bad_request", "not a valid Upgrade");
-        await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
+        const result = await this.write(r.chatId, userId, { kind: "marker", id: this.nextId(), target: "head", body });
         await this.syncBook(before.worldId, userId);
-        return { revision: r.to };
+        return { revision: r.to, pending: result.pending };
       }
       case "sheet": {
         const problem = isRecord(r.ruleset) ? sheetRulesetProblem(r.ruleset) : null;
@@ -53812,7 +54382,43 @@ class Dispatcher {
         const entity = typeof r.entity === "string" && hasOwn(world.entities, r.entity) ? r.entity : world.pov;
         return { sheet: previewSheet(this.rt.registry, world, entity) };
       }
+      case "templates":
+        return { templates: this.rt.templateInfo.filter((t) => hasOwn(this.rt.templates, t.id)) };
+      case "chats": {
+        const worlds = new Map((await store.list(userId)).map((index) => [index.id, index]));
+        if (r.worldId !== undefined && !worlds.has(r.worldId))
+          throw new RequestError("not_found", `world ${r.worldId} not found`);
+        const chats = [];
+        for (const chat of await this.rt.host.chats.list(userId)) {
+          if (r.chatId !== undefined && chat.id !== r.chatId)
+            continue;
+          const run = readRun(chat.metadata);
+          const index = run && (r.worldId === undefined || run.worldId === r.worldId) ? worlds.get(run.worldId) : undefined;
+          if (!run || !index)
+            continue;
+          const played = await this.rt.revisionInPlay(chat.id, userId, run);
+          chats.push(played.revision === null ? { chatId: chat.id, name: chat.name, worldId: run.worldId, revision: null, behind: false, reason: played.reason } : { chatId: chat.id, name: chat.name, worldId: run.worldId, revision: played.revision, behind: played.revision !== index.head });
+        }
+        return { chats };
+      }
     }
+  }
+  meet(userId, session, client) {
+    const key = `${userId}\x00${session ?? ""}`;
+    this.clients.delete(key);
+    if (!isRecord(client) || typeof client.name !== "string" || typeof client.version !== "string")
+      return;
+    const shown = (text) => text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80);
+    const named = { name: shown(client.name), version: shown(client.version) };
+    if (session !== undefined) {
+      this.clients.set(key, named);
+      for (const oldest of this.clients.keys()) {
+        if (this.clients.size <= CLIENTS_CAP)
+          break;
+        this.clients.delete(oldest);
+      }
+    }
+    this.rt.host.log("info", `[LumiRPEngine] outside client connected: ${named.name} ${named.version}`, userId);
   }
   async syncBook(worldId, userId) {
     const index = await this.rt.worlds.index(worldId, userId);
@@ -54479,6 +55085,28 @@ function createSpindleHost() {
       },
       async active(userId) {
         return (await spindle.chats.getActive(userId))?.id ?? null;
+      },
+      async list(userId) {
+        const out = new Map;
+        const read = async (offset) => {
+          const page = await spindle.chats.list({ limit: 200, offset, userId });
+          let fresh = 0;
+          for (const chat of page.data) {
+            if (out.has(chat.id))
+              continue;
+            out.set(chat.id, { id: chat.id, name: chat.name, metadata: toJsonObject(chat.metadata) });
+            fresh++;
+          }
+          return { size: page.data.length, total: page.total, fresh };
+        };
+        for (let offset = 0;offset < 1e5; offset += 180) {
+          const page = await read(offset);
+          if (page.size < 200 || offset + 200 >= page.total)
+            break;
+        }
+        for (let pass = 0;pass < 5 && (await read(0)).fresh > 0; pass++)
+          ;
+        return [...out.values()];
       }
     },
     storage: {
@@ -54770,7 +55398,7 @@ function spliceBlocks(stored, at, blocks, newId) {
 // src/backend/main.ts
 function startBackend() {
   const host = createSpindleHost();
-  const runtime = new Runtime({ host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS });
+  const runtime = new Runtime({ host, packs: ALL_PACKS, pipeline: { plan: planTurn, post: postTurn }, templates: STARTER_WORLDS, templateInfo: STARTER_INFO });
   const jobs = new JobRunner(host, runtime.worlds, runtime.steps, runtime.settings, runtime.registry);
   runtime.start();
   new Dispatcher(runtime, jobs).start();
