@@ -97,7 +97,8 @@ describe("map scopes", () => {
     expect(view.scope).toBe("port_alder");
     const town = scopeOf(view, "port_alder");
     expect(town.grid).toBeUndefined();
-    expect(town.places.length).toBe(Object.values(world.places).filter((p) => p.parent === "port_alder").length);
+    // Every place in the town the POV can see; a secret one (Marcus's house) stays off the map until it's known.
+    expect(town.places.length).toBe(Object.values(world.places).filter((p) => p.parent === "port_alder" && (p.visibility ?? "public") === "public").length);
     expect(scopeOf(view, null).places.map((p) => p.id)).toEqual(["chicago_il", "lakeshore_county"]);
   });
 

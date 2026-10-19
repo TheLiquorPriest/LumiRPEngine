@@ -8,6 +8,7 @@
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId } from "../shared/ids";
+import { heldBy } from "../shared/finance";
 import type { LedgerEvent } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
 import { formatMoney } from "../shared/world";
@@ -47,7 +48,7 @@ const BOOKKEEPING = new Set<string>([
 
 /** A posting as the POV sees it: the memo with what moved between its own accounts. */
 function postLine(world: WorldDoc, state: Readonly<WorldState>, pov: EntityId, memo: string, lines: readonly { account: string; amount: number }[]): string | null {
-  const mine = lines.filter((l) => own(state.entities, l.account)?.fields.owner === pov);
+  const mine = lines.filter((l) => heldBy(state.entities, l.account, pov));
   const label = memo !== "" ? memo : "Money moved";
   if (mine.length === 0) return memo !== "" ? memo : null;
   const money = (cents: number): string => formatMoney(Math.abs(cents), world.currency);
@@ -85,7 +86,7 @@ export function metBy(state: Readonly<WorldState>, pov: EntityId, id: EntityId):
   const e = hasOwn(state.entities, id) ? own(state.entities, id) : undefined;
   const p = own(state.entities, pov);
   if (!e || !p) return false;
-  if (e.fields.owner === pov || knows(state, pov, id)) return true;
+  if (heldBy(state.entities, id, pov) || knows(state, pov, id)) return true;
   let holder: string | undefined = id;
   for (let i = 0; holder && i < HOLD_DEPTH; i++) {
     holder = own(state.entities, holder)?.relations.find((r) => r.type === "in")?.to;

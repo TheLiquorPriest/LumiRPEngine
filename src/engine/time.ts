@@ -5,6 +5,7 @@
 import type { JsonObject, JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { EntityId, InterruptClass, InterruptPolicy, SceneTypeId } from "../shared/ids";
+import { heldBy } from "../shared/finance";
 import { INTERRUPT_CLASSES } from "../shared/ids";
 import type { LedgerEvent, TimelapseEvent, TimelapseTarget } from "../shared/ledger";
 import type { WorldDoc } from "../shared/world";
@@ -486,7 +487,7 @@ export interface Montage {
 }
 
 function ownedBy(state: Readonly<WorldState>, id: EntityId, pov: EntityId): boolean {
-  return id === pov || own(state.entities, id)?.fields.owner === pov;
+  return id === pov || heldBy(state.entities, id, pov);
 }
 
 /**

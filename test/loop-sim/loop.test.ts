@@ -37,6 +37,8 @@ function mixedWorld(): WorldDoc {
   Object.assign(world.realism.levels, { money: 4, castlife: 4, relationships: 4, gear: 3, weather: 4, space: 3, sheets: 3, calendar: 4, vehicles: 2 });
   world.entities.maya!.levels = { money: 1 };
   world.entities.jordan!.levels = { castlife: 2 };
+  // A standing payment, so money moves every day whatever else the turns do.
+  world.entities.gym = { id: "gym", kind: "flow", name: "Gym membership", tier: "background", fields: { flow_kind: "bill", from: "checking", to: "Riverton Fitness", amount_cents: 1500, every: "day", at: "09:00", shortfall: "skip", status: "active" }, relations: [] };
   world.entities.maya!.relations.push({ type: "regard", to: "you", fields: { warmth: 40, trust: 30, respect: 30, t: 0 } });
   return world;
 }

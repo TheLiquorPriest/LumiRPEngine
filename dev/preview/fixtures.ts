@@ -1,6 +1,7 @@
 // Preview fixtures: a modern slice-of-life world in play. Shapes follow the contracts
 // (`StateView`, `WorldDoc`, `UserSettings`) and the panel view models of the UI packs.
 
+import type { FinanceView, JournalLine } from "../../src/shared/finance";
 import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
@@ -472,6 +473,36 @@ const SUPPORTING = [2, 2, 2, 2, 2, 2, 3, 2, 2];
 const BACKGROUND = [1, 1, 1, 1, 1, 1, 3, 2, 1];
 
 /** The GM view (`lre.gm`): everyone, the secret and the removed included, and every track's truths. */
+
+/** A party's money in the GM view: one checking account, its recent lines and notes. */
+function gmMoney(party: string, name: string, level: number, opened: boolean, account: string, accountName: string, cents: number, recent: { at: string; memo: string; cents: number }[], notes: { at: string; text: string }[]): FinanceView {
+  const lines: JournalLine[] = recent.map((r, i) => ({ id: `${account}:${i}`, ...r, account: accountName, accountId: account, kind: null, category: null, counterparty: null, card: null, status: "posted" }));
+  return {
+    party,
+    name,
+    partyKind: "person",
+    level,
+    detail: true,
+    features: [],
+    band: "modest",
+    opened,
+    cash: null,
+    overview: { netWorth: cents, assets: cents, liabilities: 0, breakdown: [], cashFlow: null, upcoming: [], alerts: [] },
+    accounts: [{ id: account, name: accountName, class: "checking", classLabel: "Checking", product: { id: "checking", label: "Checking" }, institution: null, status: "open", cents, available: cents, owners: [], role: "owner", limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: lines, securedBy: null, loan: null }],
+    cards: [],
+    flows: [],
+    jobs: [],
+    businesses: [],
+    investments: null,
+    properties: [],
+    credit: null,
+    household: null,
+    recent: lines,
+    notes,
+    payPrefs: [],
+  };
+}
+
 export function gmFixture(): GmView {
   const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
   return {
@@ -563,29 +594,15 @@ export function gmFixture(): GmView {
       { id: "regard", label: "Regard", from: "person", to: "person", fields: ["warmth", "trust", "respect"].map((id) => ({ id, label: id, type: "number" as const, min: -100, max: 100 })) },
     ],
     money: [
-      {
-        entity: "npc_dev",
-        name: "Dev Patel",
-        level: 4,
-        band: "modest",
-        netWorthCents: 412650,
-        opened: true,
-        accounts: [{ id: "dev_checking", name: "Dev's checking", kind: "checking", cents: 412650 }],
-        bills: [
-          { at: "day 1", label: "Rent, Unit 3", cents: -97500, payee: "Mara Lopez" },
-          { at: "day 14", label: "Mobile phone", cents: -4500, payee: "Northwind Mobile" },
-        ],
-        recent: [
-          { at: "Mon 12 Oct 2026, 11:30", memo: "Living costs", cents: -19000, account: "Dev's checking" },
-          { at: "Fri 9 Oct 2026, 11:30", memo: "Payroll: $1,060.00 gross, $204.58 withheld", cents: 85542, account: "Dev's checking" },
-          { at: "Thu 1 Oct 2026, 11:30", memo: "Rent, Unit 3", cents: -97500, account: "Dev's checking" },
-        ],
-        notes: [
-          { at: "Fri 9 Oct 2026, 11:30", text: "Payday: $855.42 net ($1,060.00 gross)." },
-          { at: "Thu 1 Oct 2026, 11:30", text: "Rent, Unit 3: $975.00 paid." },
-        ],
-      },
-      { entity: "npc_mara", name: "Mara Lopez", level: 2, band: "modest", netWorthCents: 1235000, opened: false, accounts: [{ id: "mara_checking", name: "Mara's checking", kind: "checking", cents: 1235000 }], bills: [], recent: [], notes: [] },
+      gmMoney("npc_dev", "Dev Patel", 4, true, "dev_checking", "Dev's checking", 412650, [
+        { at: "Mon 12 Oct 2026, 11:30", memo: "Living costs", cents: -19000 },
+        { at: "Fri 9 Oct 2026, 11:30", memo: "Payroll: $1,060.00 gross, $204.58 withheld", cents: 85542 },
+        { at: "Thu 1 Oct 2026, 11:30", memo: "Rent, Unit 3", cents: -97500 },
+      ], [
+        { at: "Fri 9 Oct 2026, 11:30", text: "Payday: $855.42 net ($1,060.00 gross)." },
+        { at: "Thu 1 Oct 2026, 11:30", text: "Rent, Unit 3: $975.00 paid." },
+      ]),
+      gmMoney("npc_mara", "Mara Lopez", 2, false, "mara_checking", "Mara's checking", 1235000, [], []),
     ],
     encounter: null,
     edits: [

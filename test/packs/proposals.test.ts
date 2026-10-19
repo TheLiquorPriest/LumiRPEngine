@@ -8,12 +8,15 @@ import { createRng } from "../../src/engine/rng";
 import { Working } from "../../src/engine/working";
 import { materializeAll } from "../../src/engine/materialize";
 import { ALL_PACKS } from "../../src/packs/index";
-import { buildMoneyView } from "../../src/packs/economy/core/view";
+import type { ReadContext } from "../../src/engine/registry";
 import { unpricedCap } from "../../src/packs/economy/core/model";
 import { isRecord } from "../../src/shared/json";
 import { buildGearView } from "../../src/packs/gear/core/view";
 import { modernUsWorld } from "./riverton";
 import { startState } from "./support";
+
+/** The POV's money as the Money panel shows it. */
+const moneyView = (ctx: ReadContext) => ctx.query("economy.finance")(ctx, ctx.world.pov, true);
 
 const reg = createRegistry(ALL_PACKS);
 
@@ -41,9 +44,9 @@ describe("narration proposals", () => {
     expect(propose(w, "purchase", { item: "gum", name: "a pack of gum" })).toBe("unpriced");
     const r = propose(w, "purchase", { item: "gum", name: "a pack of gum", price: 200 });
     expect(typeof r === "string" ? r : r.rejected).toEqual([]);
-    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought a pack of gum")?.cents).toBe(-200);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought a pack of gum")?.cents).toBe(-200);
     propose(w, "purchase", { item: "antique astrolabe", price: 9_000_000 });
-    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought antique astrolabe")?.cents).toBe(-50_000);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought antique astrolabe")?.cents).toBe(-50_000);
   });
 
   test("without an authored cap, the cap is the dearest catalog row's top price, else 500 of the currency", () => {
@@ -67,27 +70,27 @@ describe("narration proposals", () => {
     const w = setup();
     const r = propose(w, "purchase", { category: "electronics", name: "a speaker", method: "savings" });
     expect(typeof r === "string" ? r : r.rejected).toEqual([]);
-    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought a speaker")?.account).toBe("Savings");
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought a speaker")?.account).toBe("Savings");
     const s = propose(w, "purchase", { category: "electronics", name: "a cable", from: "card" });
     expect(typeof s === "string" ? s : s.rejected).toEqual([]);
-    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought a cable")?.account).toBe("Visa card");
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought a cable")?.account).toBe("Visa card");
   });
 
   test("the Buy action takes an optional stated price: an uncatalogued item at that price, a catalog item without one", () => {
     const w = setup();
     const gum = resolveAction(reg, w, { action: "buy", params: { item: "gum", price: 200 } }, createRng("g"));
     expect(gum.rejected).toEqual([]);
-    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought gum")?.cents).toBe(-200);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought gum")?.cents).toBe(-200);
     const milk = resolveAction(reg, w, { action: "buy", params: { item: "milk_whole" } }, createRng("m"));
     expect(milk.ok).toBe(true);
     expect(milk.rejected).toEqual([]);
     // The player's own stated price isn't capped like a narrated one: above what they can pay, it declines.
     const outboard = resolveAction(reg, w, { action: "buy", params: { item: "spare outboard engine", price: 900_000 } }, createRng("o"));
     expect(outboard.rejected[0]?.rejection.code).toBe("declined");
-    expect(buildMoneyView(w.ctx).recent.some((t) => t.memo === "Bought spare outboard engine")).toBe(false);
+    expect(moneyView(w.ctx).recent.some((t) => t.memo === "Bought spare outboard engine")).toBe(false);
     const kayak = resolveAction(reg, w, { action: "buy", params: { item: "used kayak", price: 90_000 } }, createRng("k"));
     expect(kayak.rejected).toEqual([]);
-    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Bought used kayak")?.cents).toBe(-90_000);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Bought used kayak")?.cents).toBe(-90_000);
   });
 
   test("free-text buys match a catalog row, preferring what the place sells: beers at a bar are pints", () => {
@@ -96,22 +99,22 @@ describe("narration proposals", () => {
     w.state.entities.you!.fields.place = "cafe";
     const beer = resolveAction(reg, w, { action: "buy", params: { item: "a round of beers" } }, createRng("b"));
     expect(beer.rejected).toEqual([]);
-    expect(buildMoneyView(w.ctx).recent.some((t) => t.memo.startsWith("Bought Beer at a bar"))).toBe(true);
+    expect(moneyView(w.ctx).recent.some((t) => t.memo.startsWith("Bought Beer at a bar"))).toBe(true);
     expect(propose(w, "purchase", { item: "beers" })).not.toBe("unpriced");
     expect(resolveAction(reg, w, { action: "buy", params: { item: "a unicorn" } }, createRng("u")).rejected[0]?.rejection.code).toBe("unpriced");
     const pizza = resolveAction(reg, w, { action: "buy", params: { item: "a large pepperoni pizza for delivery" } }, createRng("p"));
     expect(pizza.rejected).toEqual([]);
-    expect(buildMoneyView(w.ctx).recent.some((t) => t.memo.startsWith("Bought Pizza, large"))).toBe(true);
+    expect(moneyView(w.ctx).recent.some((t) => t.memo.startsWith("Bought Pizza, large"))).toBe(true);
   });
 
   test("losing the wallet loses the cash in it, posted out of the books; the wallet shows as lost", () => {
     const w = setup();
-    const cashBefore = buildMoneyView(w.ctx).accounts.find((a) => a.id === "cash")?.cents ?? 0;
+    const cashBefore = moneyView(w.ctx).accounts.find((a) => a.id === "cash")?.cents ?? 0;
     expect(cashBefore).toBeGreaterThan(0);
     const lost = resolveAction(reg, w, { action: "lose", params: { item: "wallet" } }, createRng("l"));
     expect(lost.rejected).toEqual([]);
-    expect(buildMoneyView(w.ctx).accounts.find((a) => a.id === "cash")?.cents).toBe(0);
-    expect(buildMoneyView(w.ctx).recent.find((t) => t.memo === "Lost with Wallet")?.cents).toBe(-cashBefore);
+    expect(moneyView(w.ctx).accounts.find((a) => a.id === "cash")?.cents).toBe(0);
+    expect(moneyView(w.ctx).recent.find((t) => t.memo === "Lost with Wallet")?.cents).toBe(-cashBefore);
     expect(w.state.entities.wallet?.relations.some((r) => r.type === "in")).toBe(false);
     expect(buildGearView(w.ctx).owned.some((i) => i.name === "Wallet (lost)")).toBe(true);
     // Already lost: the palette no longer offers it (the effect would refuse it too).

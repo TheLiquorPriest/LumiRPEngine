@@ -126,7 +126,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
   };
   const collections: [string, string][] = [
     ["places", "place"], ["routes", "route"], ["grids", "grid"], ["characters", "character"], ["items", "item"], ["containers", "container"], ["kits", "kit"],
-    ["vehicles", "vehicle"], ["accounts", "account"], ["tracks", "track"], ["rules", "rule"], ["actions", "action"], ["clues", "clue"], ["lore", "lore"], ["flags", "flag"], ["prices", "price"], ["bills", "bill"], ["gearItems", "gearItem"],
+    ["vehicles", "vehicle"], ["accounts", "account"], ["tracks", "track"], ["rules", "rule"], ["actions", "action"], ["clues", "clue"], ["lore", "lore"], ["flags", "flag"], ["prices", "price"], ["flows", "flow"], ["cards", "card"], ["households", "household"], ["records", "record"], ["gearItems", "gearItem"],
   ];
   for (const [key, kind] of collections) for (const [i, item] of recs(t[key]).entries()) claim(kind, item.id, `${key}[${i}]`);
   for (const group of Object.keys(rec(t.groups))) claim("group", group, `groups.${group}`);
@@ -389,6 +389,9 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     if (c.sheet !== undefined && Object.values(rec(c.sheet)).some((v) => (num(v) ?? 0) < 1 || (num(v) ?? 11) > 10)) err(`${where}: sheet values must be 1-10`);
   }
 
+  const accountsById = new Map(recs(t.accounts).map((a) => [text(a.id), a]));
+  const ownersOfAccount = (id: unknown): string[] => recs(accountsById.get(text(id))?.owners).map((o) => text(o.party));
+
   // ---------------------------------------------------------------- Modern US links (jobs, region)
   if (modern) {
     const region = data.rows("economy.regions")?.[text(t.region)];
@@ -406,52 +409,80 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
         continue;
       }
       const median = num(row.median_cents_per_h) ?? 1;
-      const hourly = num(job.hourlyCents) ?? 0;
-      if (hourly < median * 0.6 || hourly > median * 1.8) err(`${where}: ${hourly}c/h is outside 0.6-1.8x the ${occ} median ${median}c/h`);
-      if (row.pay_frequency !== job.payFrequency) err(`${where}: pay frequency "${text(job.payFrequency)}" differs from ${occ} (${text(row.pay_frequency)})`);
+      if (text(job.basis) !== "salary") {
+        const hourly = num(job.rateCents) ?? 0;
+        if (hourly < median * 0.6 || hourly > median * 1.8) err(`${where}: ${hourly}c/h is outside 0.6-1.8x the ${occ} median ${median}c/h`);
+      }
+      if (row.pay_frequency !== job.payEvery) err(`${where}: payEvery "${text(job.payEvery)}" differs from ${occ} (${text(row.pay_frequency)})`);
       if (row.schedule_pattern !== job.shiftPattern || !(text(job.shiftPattern) in shifts)) err(`${where}: shiftPattern differs from ${occ} (${text(row.schedule_pattern)})`);
       const hours = num(job.hoursPerWeek) ?? 0;
       if (hours < 8 || hours > 60) err(`${where}: hoursPerWeek ${hours} is implausible`);
       let weekly = 0;
+      const workplace = job.workplace ?? job.employer;
       for (const block of recs(c.schedule)) {
-        if (block.place === job.employer) weekly += ((minutes(block.end) ?? 0) - (minutes(block.start) ?? 0)) * list(block.days).length;
+        if (block.place === workplace) weekly += ((minutes(block.end) ?? 0) - (minutes(block.start) ?? 0)) * list(block.days).length;
       }
       if (Math.abs(weekly / 60 - hours) > 8) f.warn(`${where}: scheduled ${(weekly / 60).toFixed(1)} h at work, job says ${hours} h/week`);
-      const account = recs(t.accounts).find((a) => a.id === job.depositTo);
-      if (!account || account.owner !== c.id) err(`${where}: depositTo must be an account they own`);
+      for (const split of recs(job.splits)) if (!ownersOfAccount(split.to).includes(text(c.id))) err(`${where}: pay split to "${text(split.to)}" must go to an account they hold`);
     }
     const rent = num(rec(region).median_rent_1br_cents_per_month) ?? 1;
-    for (const bill of recs(t.bills)) {
-      const where = `bill ${text(bill.id)}`;
-      const amount = num(bill.amountCents) ?? 0;
-      if (bill.catalogItem !== undefined) {
-        const band = rec(rec(data.rows("economy.catalog")?.[text(bill.catalogItem)]).price_cents);
-        if (!band.min || amount < (num(band.min) ?? 0) || amount > (num(band.max) ?? 0)) err(`${where}: ${amount}c is outside the catalog band for ${text(bill.catalogItem)}`);
+    for (const flow of recs(t.flows)) {
+      const where = `flow ${text(flow.id)}`;
+      const amount = num(flow.amountCents) ?? 0;
+      if (flow.catalogItem !== undefined) {
+        const band = rec(rec(data.rows("economy.catalog")?.[text(flow.catalogItem)]).price_cents);
+        if (!band.min || amount < (num(band.min) ?? 0) || amount > (num(band.max) ?? 0)) err(`${where}: ${amount}c is outside the catalog band for ${text(flow.catalogItem)}`);
       }
-      if (bill.vehicleClass !== undefined && amount !== num(rec(data.rows("vehicles.classes")?.[text(bill.vehicleClass)]).insurance_full_cents_per_month)) err(`${where}: differs from the class's full-coverage insurance`);
-      if (bill.loan !== undefined && amount !== num(recs(t.accounts).find((a) => a.id === bill.loan)?.paymentCents)) err(`${where}: differs from the loan's payment`);
-      if (bill.usageKwh !== undefined && Math.abs((num(bill.usageKwh) ?? 0) * (num(bill.rateCentsPerKwh) ?? 0) - amount) > 1) err(`${where}: usage times rate does not equal the amount`);
-      if (bill.kind === "rent" && (amount < rent * 0.5 || amount > rent * 1.5)) err(`${where}: rent ${amount}c is outside 0.5-1.5x the regional 1BR median ${rent}c`);
+      if (flow.vehicleClass !== undefined && amount !== num(rec(data.rows("vehicles.classes")?.[text(flow.vehicleClass)]).insurance_full_cents_per_month)) err(`${where}: differs from the class's full-coverage insurance`);
+      if (flow.usageKwh !== undefined && Math.abs((num(flow.usageKwh) ?? 0) * (num(flow.rateCentsPerKwh) ?? 0) - amount) > 1) err(`${where}: usage times rate does not equal the amount`);
+      if (flow.kind === "rent" && (amount < rent * 0.5 || amount > rent * 1.5)) err(`${where}: rent ${amount}c is outside 0.5-1.5x the regional 1BR median ${rent}c`);
     }
   }
 
-  // ---------------------------------------------------------------- bills
-  for (const bill of recs(t.bills)) {
-    const where = `bill ${text(bill.id)}`;
-    const amount = num(bill.amountCents) ?? 0;
-    need(`${where}.payer`, bill.payer, "character");
-    // A payer that holds accounts pays from one of them; one without accounts names none and pays out of its means.
-    if (bill.from !== undefined) {
-      const account = recs(t.accounts).find((a) => a.id === bill.from);
-      if (!account || account.owner !== bill.payer) err(`${where}: "from" must be an account the payer owns`);
-    } else if (recs(t.accounts).some((a) => a.owner === bill.payer)) err(`${where}: the payer holds accounts, so "from" must name the one it pays from`);
-    // Paid to a character (it lands in their account) or to an outside counterparty named in words.
-    if (has(bill.payee) && !has(bill.payee, "character")) err(`${where}: payee "${text(bill.payee)}" is a ${kindOf(bill.payee)}; a bill is paid to a character or an outside counterparty`);
-    if (bill.payee === bill.payer) err(`${where}: the payer can't pay itself`);
-    if (!Number.isInteger(amount) || amount <= 0) err(`${where}: amount must be a positive integer of base units`);
-    const day = num(bill.day) ?? -1;
-    if (bill.every === "week" ? day < 0 || day > 6 : bill.every !== "month" || day < 1 || day > 28) err(`${where}: a bill is every "week" (day 0-6, the calendar's weekday) or every "month" (day 1-28)`);
+  // ---------------------------------------------------------------- money: flows, cards, households, records
+  for (const flow of recs(t.flows)) {
+    const where = `flow ${text(flow.id)}`;
+    const amount = num(flow.amountCents) ?? 0;
+    // From an account (its holders pay), or a party without accounts, who pays out of their means; an outside payer named in words pays in.
+    if (!accountsById.has(text(flow.from)) && has(flow.from)) {
+      if (!has(flow.from, "character", "household", "record")) err(`${where}: "from" is a ${kindOf(flow.from)}; a flow is paid from an account or a party`);
+      else if (recs(t.accounts).some((a) => ownersOfAccount(a.id).includes(text(flow.from)))) err(`${where}: the payer holds accounts, so "from" must name the one it pays from`);
+    }
+    // To an account, a party (it lands in their deposit account), or an outside counterparty named in words.
+    if (has(flow.to) && !has(flow.to, "account", "character", "household", "record")) err(`${where}: "to" is a ${kindOf(flow.to)}; a flow pays an account, a party or an outside counterparty`);
+    if (flow.to === flow.from) err(`${where}: a flow can't pay itself`);
+    if (!Number.isInteger(amount) || amount <= 0) err(`${where}: amountCents must be a positive integer of base units`);
+    if (flow.once === undefined) {
+      const every = text(flow.every);
+      if (!["day", "week", "month", "year"].includes(every)) err(`${where}: a flow falls every "day", "week", "month" or "year", or "once"`);
+      if (list(flow.weekdays).some((d) => !Number.isInteger(d) || (num(d) ?? -1) < 0 || (num(d) ?? 7) > 6)) err(`${where}: weekdays are 0-6, the calendar's`);
+      if (list(flow.days).some((d) => !Number.isInteger(d) || d === 0 || (num(d) ?? 0) < -1 || (num(d) ?? 32) > 31)) err(`${where}: days are 1-31, or -1 for the last`);
+      if (every === "week" && list(flow.weekdays).length === 0) err(`${where}: a weekly flow names its weekdays`);
+      if (every === "month" && list(flow.days).length === 0) err(`${where}: a monthly flow names its days`);
+    }
+    if (flow.link !== undefined) need(`${where}.link`, flow.link, "vehicle", "record", "account");
+    for (const [i, share] of recs(flow.shares).entries()) need(`${where}.shares[${i}]`, share.party, "character", "household", "record");
   }
+  for (const k of recs(t.cards)) {
+    const where = `card ${text(k.id)}`;
+    need(`${where}.account`, k.account, "account");
+    if (!ownersOfAccount(k.account).includes(text(k.holder))) err(`${where}: the holder must hold its account`);
+    if (k.item !== undefined) need(`${where}.item`, k.item, "item");
+    if (!["debit", "credit", "charge"].includes(text(k.network))) err(`${where}: network is debit, credit or charge`);
+  }
+  for (const h of recs(t.households)) for (const [i, m] of recs(h.members).entries()) need(`household ${text(h.id)}.members[${i}]`, m.id, "character");
+  const assets = rec(rec(t.economy).assets);
+  for (const r of recs(t.records)) {
+    const where = `record ${text(r.id)}`;
+    if (!["business", "invoice", "property", "holding", "trust"].includes(text(r.kind))) err(`${where}: kind "${text(r.kind)}" isn't a money record (business, invoice, property, holding or trust)`);
+    const fields = rec(r.fields);
+    if (r.kind === "holding") {
+      need(`${where}.fields.account`, fields.account, "account");
+      if (!(text(fields.asset) in assets)) err(`${where}: asset "${text(fields.asset)}" isn't in economy.assets`);
+    }
+    if (r.kind === "property") need(`${where}.fields.place`, fields.place, "place");
+  }
+  for (const p of recs(t.places)) for (const key of ["atm", "branch"]) if (p[key] !== undefined && text(rec(p[key]).bank) === "") err(`place ${text(p.id)}: its ${key} names no bank`);
 
   // ---------------------------------------------------------------- gear
   const gearItems = data.rows("gear.items") ?? {};
@@ -528,9 +559,11 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
   const denominations = new Map(recs(rec(t.currency).denominations).map((d) => [text(d.id), num(d.value) ?? 0]));
   for (const a of recs(t.accounts)) {
     const where = `account ${text(a.id)}`;
-    need(`${where}.owner`, a.owner, "character", "place");
+    const owners = recs(a.owners);
+    if (owners.length === 0) err(`${where}: an account needs its owners`);
+    for (const [i, o] of owners.entries()) need(`${where}.owners[${i}]`, o.party, "character", "place", "household", "record");
     if (a.container !== undefined) need(`${where}.container`, a.container, "container");
-    for (const field of ["balance", "owedCents", "limitCents", "principalCents", "paymentCents"]) {
+    for (const field of ["opening", "limitCents", "paymentCents", "autopayCents", "overdraftLimitCents"]) {
       if (a[field] !== undefined && !Number.isInteger(a[field])) err(`${where}: ${field} must be an integer`);
     }
     if (a.coins !== undefined) {
@@ -539,21 +572,19 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
         if (!denominations.has(d)) err(`${where}: unknown denomination "${d}"`);
         sum += (denominations.get(d) ?? 0) * (num(count) ?? 0);
       }
-      if (sum !== a.balance) err(`${where}: coins sum to ${sum}, balance says ${text(String(a.balance))}`);
+      if (sum !== (num(a.opening) ?? 0)) err(`${where}: coins sum to ${sum}, opening says ${text(String(a.opening))}`);
     }
-    if (a.kind === "card" && (num(a.owedCents) ?? 0) > (num(a.limitCents) ?? 0)) err(`${where}: balance exceeds the limit`);
-    if (a.kind === "loan") {
+    const product = text(a.product);
+    if (product === "") err(`${where}: an account needs its product`);
+    if (["credit_card", "charge_card", "line_of_credit"].includes(product) && -(num(a.opening) ?? 0) > (num(a.limitCents) ?? 0)) err(`${where}: what it owes exceeds the limit`);
+    if (product === "loan" || product === "mortgage") {
       const r = (num(a.aprPct) ?? 0) / 1200;
-      const n = num(a.remainingMonths) ?? 1;
-      const expected = ((num(a.principalCents) ?? 0) * r) / (1 - (1 + r) ** -n);
+      const n = num(a.monthsLeft) ?? num(a.termMonths) ?? 1;
+      const expected = (-(num(a.opening) ?? 0) * r) / (1 - (1 + r) ** -n);
       if (Math.abs(expected - (num(a.paymentCents) ?? 0)) > expected * 0.015) err(`${where}: payment ${text(String(a.paymentCents))} is not near the amortized ${expected.toFixed(0)}`);
     }
-    if (a.kind === "brokerage") {
-      const holdings = num(a.holdingsCents);
-      if (holdings === null || !Number.isInteger(holdings) || holdings <= 0) err(`${where}: a brokerage needs holdingsCents, its market value at the start in whole cents`);
-      const symbol = text(a.symbol) || "broad_us_equity_index";
-      if (!(symbol in rec(rec(rec(data.rows("economy.finance")).investing).values))) err(`${where}: symbol "${symbol}" is not in the finance table's investing recipes`);
-    } else if (a.holdingsCents !== undefined || a.symbol !== undefined) err(`${where}: only a brokerage holds a symbol`);
+    if (a.autopayFrom !== undefined) need(`${where}.autopayFrom`, a.autopayFrom, "account");
+    if (a.securedBy !== undefined) need(`${where}.securedBy`, a.securedBy, "record", "vehicle");
   }
   for (const p of recs(t.prices)) {
     const band = rec(p.band);
@@ -768,7 +799,8 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
   for (const r of rules) {
     const where = `rule ${text(r.id)}`;
     if (r.handledBy !== undefined) {
-      if (!["economy.bills", "economy.payroll"].includes(text(r.handledBy))) err(`${where}: unknown handledBy "${text(r.handledBy)}"`);
+      // Rents, bills and pay are flows the money process runs (DESIGN §25.5).
+      if (text(r.handledBy) !== "economy.money") err(`${where}: unknown handledBy "${text(r.handledBy)}"`);
     } else if (text(r.when) !== "always") formula(r.whenExpr, `${where}.when`);
     for (const e of recs(r.do)) argFormulas(e, where, new Set());
   }
@@ -898,7 +930,7 @@ function validate(t: Rec, file: string): { findings: Findings; counts: Record<st
     grids: gridById.size, "grid cells": gridCells, "blocked cells": blockedCells, zones: zoneCount,
     characters: `${npcs.length} NPCs + POV (${agents.length} agents)`, "schedule blocks": scheduleBlocks, "regard entries": regardPairs,
     items: recs(t.items).length, containers: recs(t.containers).length, kits: recs(t.kits).length, vehicles: recs(t.vehicles).length, accounts: recs(t.accounts).length,
-    bills: recs(t.bills).length, prices: recs(t.prices).length,
+    flows: recs(t.flows).length, cards: recs(t.cards).length, prices: recs(t.prices).length,
     tracks: `${count("quest")} quests, ${count("secret")} secret, ${count("puzzle")} puzzle, ${count("agenda")} agenda (${stageCount} stages)`,
     clues: recs(t.clues).length, rules: rules.length, climates: climates.length, lore: lore.length, flags: flagIds.size, "unique ids": registry.size,
   };

@@ -76,14 +76,14 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     }
     // The GM view lists their money with the lines and notes the processes kept.
     const view = gm(w);
-    const helen = view.money.find((m) => m.entity === "helen_kowalczyk");
+    const helen = view.money.find((m) => m.party === "helen_kowalczyk");
     expect(helen?.accounts.map((a) => [a.id, a.cents])).toEqual([["acct_helen_checking", w.state.accounts.acct_helen_checking ?? 0]]);
     expect(helen?.recent.some((r) => r.memo === "Rent, Unit 2B" && r.cents === 99500)).toBe(true);
     expect(helen?.recent.some((r) => r.memo === "Household share, 1A" && r.cents === 30000)).toBe(true);
-    const danny = view.money.find((m) => m.entity === "danny_okafor");
+    const danny = view.money.find((m) => m.party === "danny_okafor");
     expect(danny?.notes.some((n) => n.text.startsWith("Payday:"))).toBe(true);
     expect(danny?.recent.some((r) => r.memo === "Living costs" && r.cents < 0)).toBe(true);
-    expect(view.money.some((m) => m.entity === w.world.pov)).toBe(false);
+    expect(view.money.some((m) => m.party === w.world.pov)).toBe(false);
     // None of it reaches the player: their notes and postings are no player line.
     const lines = playerLines(reg, w.world, w.state, w.world.pov, events, 1000);
     expect(lines.some((l) => l.includes("Unit 2A") || l.includes("Household share") || l.includes("Living costs"))).toBe(false);
@@ -100,8 +100,8 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     expect(out.result.stop).toBe("target");
     const events = w.events.slice(start);
     expect(events.some((e) => e.type === "economy.decline")).toBe(false);
-    expect(events.some((e) => e.type === "engine.signal" && "data" in e && e.data.entity === "danny_okafor" && (e.data.class === "decline" || e.data.class === "bill"))).toBe(false);
-    const danny = gm(w).money.find((m) => m.entity === "danny_okafor");
+    expect(events.some((e) => e.type === "engine.signal" && "data" in e && e.data.party === "danny_okafor" && (e.data.class === "decline" || e.data.class === "bill"))).toBe(false);
+    const danny = gm(w).money.find((m) => m.party === "danny_okafor");
     expect(danny?.notes.some((n) => n.text.includes("Boat loan") && n.text.includes("declined"))).toBe(true);
   });
 
@@ -117,7 +117,7 @@ describe("people's money (Port Alder at Simulation over a month)", () => {
     lapse(w, 20);
     expect(w.dropped).toEqual([]);
     expect(trialBalance(w.state)).toBe(0);
-    const jess = gm(w).money.find((m) => m.entity === "jess_kowalczyk");
+    const jess = gm(w).money.find((m) => m.party === "jess_kowalczyk");
     expect(jess?.notes.some((n) => n.text.startsWith("First:") && n.text.endsWith("paid."))).toBe(true);
     expect(jess?.notes.some((n) => n.text.startsWith("Second") && n.text.includes("declined"))).toBe(true);
   });

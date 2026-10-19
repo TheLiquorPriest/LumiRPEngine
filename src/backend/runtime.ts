@@ -5,6 +5,7 @@
 import { hashParts } from "../shared/hash";
 import type { ChatId, ChipId, InterruptClass, MessageId, RevisionId, UserId } from "../shared/ids";
 import type { JsonObject, JsonValue } from "../shared/json";
+import { heldBy } from "../shared/finance";
 import { hasOwn, isRecord } from "../shared/json";
 import { tableChoices } from "../shared/tables";
 import type { ChatRun, EventRef, GenerationKind, LedgerEvent, PostEvent, TimelapseTarget } from "../shared/ledger";
@@ -128,7 +129,7 @@ function povMayKnow(reg: Registry, world: WorldDoc, state: Readonly<WorldState>,
   if (id === pov || playerKnows(reg, world, state, pov, id)) return true;
   if (!canSeeEntity(reg, world, state, pov, id)) return false;
   const e = state.entities[id];
-  if (e?.fields.owner === pov) return true;
+  if (heldBy(state.entities, id, pov)) return true;
   const here = placeOfEntity(state, pov);
   return here === undefined || placeOfEntity(state, id) === here;
 }
@@ -234,7 +235,7 @@ const CONTRAST: Readonly<Record<string, number>> = Object.fromEntries(
 /** Whether a narrated purchase is the player character's own (or paid by something they own): only those can tell their Buy again. */
 function povPays(p: JsonObject, world: WorldDoc, state: Readonly<WorldState>): boolean {
   const payer = typeof p.payer === "string" ? p.payer.trim() : "";
-  return payer === "" || payer === world.pov || !hasOwn(state.entities, payer) || state.entities[payer]?.fields.owner === world.pov;
+  return payer === "" || payer === world.pov || !hasOwn(state.entities, payer) || heldBy(state.entities, payer, world.pov);
 }
 
 /** The turn's own Buys, from its pre-reply events: each "Bought …" posting or history line, with its name, quantity and what it charged. */

@@ -7,7 +7,53 @@
     "engine": {"version": 1, "config": {}},
     "calendar": {"version": 1, "config": {}},
     "space": {"version": 1, "config": {"closedRoutes": []}},
-    "economy": {"version": 1, "config": {}},
+    "economy": {
+      "version": 1,
+      "config": {
+        "assets": {
+          "broad_us_equity_index": {
+            "label": "Broad US equity index fund",
+            "symbol": "BUSX",
+            "class": "fund",
+            "price": 10000,
+            "model": "broad_us_equity_index",
+            "yield_pct": 1.4,
+            "pays_per_year": 4
+          },
+          "glbd": {
+            "label": "Global aggregate bond fund",
+            "symbol": "GLBD",
+            "class": "fund",
+            "price": 5000,
+            "annual_return_pct": 4,
+            "annual_volatility_pct": 6,
+            "yield_pct": 3.6,
+            "pays_per_year": 12
+          },
+          "lkfr": {
+            "label": "Lakefront Freight",
+            "symbol": "LKFR",
+            "class": "stock",
+            "price": 4200,
+            "annual_return_pct": 8,
+            "annual_volatility_pct": 32,
+            "yield_pct": 2.1,
+            "pays_per_year": 4
+          },
+          "tnote_2030": {
+            "label": "US Treasury note, 4.25%, August 2030",
+            "symbol": "T 4.25 08/30",
+            "class": "bond",
+            "face": 100000,
+            "coupon_pct": 4.25,
+            "maturity": "2030-08-15",
+            "price": 100400
+          },
+          "btc": {"label": "Bitcoin", "symbol": "BTC", "class": "crypto", "price": 6500000}
+        },
+        "taxes": {"exempt": ["groceries_staples", "groceries_baskets", "medical"]}
+      }
+    },
     "gear": {"version": 1, "config": {}},
     "vehicles": {"version": 1, "config": {}},
     "weather": {
@@ -135,7 +181,7 @@
     "minds": {"version": 1, "config": {}}
   },
   "pins": {
-    "generators": {"money": 1, "gear": 1, "vehicles": 1},
+    "generators": {"money": 2, "gear": 1, "vehicles": 1},
     "tables": {
       "calendar.dst": "2a5e1e3d531f68983caa2e2f2d02411b",
       "calendar.holidays": "35b4d12795742dc4d5b4b37e388ce776",
@@ -200,44 +246,7 @@
         "region": "mi",
         "occupation": "auto_mechanic",
         "employer": "alder_automotive",
-        "hourly_cents": 2350,
-        "hours_per_week": 40,
-        "pay_frequency": "weekly",
-        "payday": "Friday",
-        "deposit_to": "acct_pov_checking",
-        "shift_pattern": "trades_day_7_330",
-        "bills": [
-          {"label": "Rent, Unit 2B", "payee": "helen_kowalczyk", "amountCents": 99500, "every": "month", "day": 1, "from": "acct_pov_checking"},
-          {"label": "Renters insurance", "payee": "Harbor Mutual", "amountCents": 1700, "every": "month", "day": 1, "from": "acct_pov_card"},
-          {"label": "Streaming video", "payee": "StreamBox", "amountCents": 1799, "every": "month", "day": 3, "from": "acct_pov_card"},
-          {"label": "Music streaming", "payee": "TuneBox", "amountCents": 1199, "every": "month", "day": 3, "from": "acct_pov_card"},
-          {
-            "label": "Auto insurance, full coverage",
-            "payee": "Midlake Mutual",
-            "amountCents": 22500,
-            "every": "month",
-            "day": 5,
-            "from": "acct_pov_checking"
-          },
-          {"label": "Home internet", "payee": "Alder Broadband", "amountCents": 6500, "every": "month", "day": 8, "from": "acct_pov_card"},
-          {
-            "label": "Auto loan payment",
-            "payee": "Lakeshore Credit Union",
-            "amountCents": 43631,
-            "every": "month",
-            "day": 10,
-            "from": "acct_pov_checking"
-          },
-          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 5000, "every": "month", "day": 14, "from": "acct_pov_card"},
-          {
-            "label": "Electricity, 370 kWh",
-            "payee": "Alder Light & Power",
-            "amountCents": 7215,
-            "every": "month",
-            "day": 20,
-            "from": "acct_pov_checking"
-          }
-        ]
+        "shift_pattern": "trades_day_7_330"
       },
       "relations": []
     },
@@ -251,8 +260,8 @@
         "role": "Owner of Alder Automotive",
         "age": 52,
         "traits": ["patient", "proud", "secretive about money"],
-        "place": "port_alder",
-        "home": "port_alder",
+        "place": "birch_lane_12",
+        "home": "birch_lane_12",
         "activity": "idle",
         "wealth": "comfortable",
         "mechanics": 16,
@@ -262,21 +271,7 @@
         "charm": 13,
         "fitness": 8,
         "region": "mi",
-        "employer": "alder_automotive",
-        "pay_frequency": "monthly",
-        "deposit_to": "acct_marcus_shop",
-        "annual_income_cents": 8500000,
-        "bills": [
-          {"label": "Mortgage", "payee": "Lakeshore Credit Union", "amountCents": 162000, "every": "month", "day": 1, "from": "acct_marcus_shop"},
-          {
-            "label": "Shop electricity, 1,400 kWh",
-            "payee": "Alder Light & Power",
-            "amountCents": 27300,
-            "every": "month",
-            "day": 20,
-            "from": "acct_marcus_shop"
-          }
-        ]
+        "employer": "alder_automotive"
       },
       "relations": [
         {"type": "regard", "to": "danny_okafor", "fields": {"warmth": 45, "trust": 55, "respect": 60, "t": 0}},
@@ -310,16 +305,7 @@
         "region": "mi",
         "occupation": "auto_mechanic",
         "employer": "alder_automotive",
-        "hourly_cents": 2650,
-        "hours_per_week": 40,
-        "pay_frequency": "weekly",
-        "payday": "Friday",
-        "deposit_to": "acct_danny_checking",
-        "shift_pattern": "trades_day_7_330",
-        "bills": [
-          {"label": "Rent, Unit 2A", "payee": "helen_kowalczyk", "amountCents": 97500, "every": "month", "day": 1, "from": "acct_danny_checking"},
-          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 4500, "every": "month", "day": 14, "from": "acct_danny_checking"}
-        ]
+        "shift_pattern": "trades_day_7_330"
       },
       "relations": [
         {"type": "regard", "to": "marcus_delgado", "fields": {"warmth": 45, "trust": 55, "respect": 60, "t": 0}},
@@ -353,17 +339,7 @@
         "region": "mi",
         "occupation": "accountant",
         "employer": "township_hall",
-        "hourly_cents": 3800,
-        "hours_per_week": 40,
-        "pay_frequency": "semimonthly",
-        "payday": "15th and the last day of the month",
-        "deposit_to": "acct_priya_checking",
-        "shift_pattern": "std_weekday_9_5",
-        "bills": [
-          {"label": "Rent", "payee": "Lakeview Apartments", "amountCents": 112500, "every": "month", "day": 1, "from": "acct_priya_checking"},
-          {"label": "Home internet", "payee": "Alder Broadband", "amountCents": 6500, "every": "month", "day": 8, "from": "acct_priya_checking"},
-          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 5500, "every": "month", "day": 14, "from": "acct_priya_checking"}
-        ]
+        "shift_pattern": "std_weekday_9_5"
       },
       "relations": [
         {"type": "regard", "to": "marcus_delgado", "fields": {"warmth": 25, "trust": 30, "respect": 35, "t": 0}},
@@ -397,16 +373,7 @@
         "region": "mi",
         "occupation": "bartender",
         "employer": "rusty_anchor",
-        "hourly_cents": 1650,
-        "hours_per_week": 32,
-        "pay_frequency": "weekly",
-        "payday": "Friday",
-        "deposit_to": "acct_jess_checking",
-        "shift_pattern": "bar_night",
-        "bills": [
-          {"label": "Household share, 1A", "payee": "helen_kowalczyk", "amountCents": 30000, "every": "month", "day": 1, "from": "acct_jess_checking"},
-          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 3500, "every": "month", "day": 14, "from": "acct_jess_checking"}
-        ]
+        "shift_pattern": "bar_night"
       },
       "relations": [
         {"type": "regard", "to": "helen_kowalczyk", "fields": {"warmth": 80, "trust": 70, "respect": 70, "t": 0}},
@@ -414,7 +381,8 @@
         {"type": "regard", "to": "priya_nair", "fields": {"warmth": 40, "trust": 40, "respect": 30, "t": 0}},
         {"type": "regard", "to": "dale_whitcomb", "fields": {"warmth": 40, "trust": 50, "respect": 55, "t": 0}},
         {"type": "regard", "to": "maddie_kowalczyk", "fields": {"warmth": 85, "trust": 75, "respect": 55, "t": 0}},
-        {"type": "regard", "to": "pov", "fields": {"warmth": 15, "trust": 10, "respect": 10, "t": 0}}
+        {"type": "regard", "to": "pov", "fields": {"warmth": 15, "trust": 10, "respect": 10, "t": 0}},
+        {"type": "member_of", "to": "household_kowalczyk", "fields": {"role": "member"}}
       ]
     },
     "maddie_kowalczyk": {
@@ -443,7 +411,8 @@
         {"type": "regard", "to": "jess_kowalczyk", "fields": {"warmth": 85, "trust": 80, "respect": 60, "t": 0}},
         {"type": "regard", "to": "helen_kowalczyk", "fields": {"warmth": 80, "trust": 75, "respect": 70, "t": 0}},
         {"type": "regard", "to": "dale_whitcomb", "fields": {"warmth": 50, "trust": 55, "respect": 65, "t": 0}},
-        {"type": "regard", "to": "pov", "fields": {"warmth": 25, "trust": 20, "respect": 30, "t": 0}}
+        {"type": "regard", "to": "pov", "fields": {"warmth": 25, "trust": 20, "respect": 30, "t": 0}},
+        {"type": "member_of", "to": "household_kowalczyk", "fields": {"role": "member"}}
       ],
       "agent": true
     },
@@ -468,36 +437,7 @@
         "charm": 10,
         "fitness": 10,
         "region": "mi",
-        "employer": "alder_harbor_marina",
-        "pay_frequency": "monthly",
-        "deposit_to": "acct_dale_marina",
-        "annual_income_cents": 6200000,
-        "bills": [
-          {
-            "label": "Township harbor fee",
-            "payee": "Port Alder Township",
-            "amountCents": 30000,
-            "every": "month",
-            "day": 1,
-            "from": "acct_dale_marina"
-          },
-          {
-            "label": "Marina liability insurance",
-            "payee": "Midlake Mutual",
-            "amountCents": 41000,
-            "every": "month",
-            "day": 5,
-            "from": "acct_dale_marina"
-          },
-          {
-            "label": "Marina electricity, 2,000 kWh",
-            "payee": "Alder Light & Power",
-            "amountCents": 39000,
-            "every": "month",
-            "day": 20,
-            "from": "acct_dale_marina"
-          }
-        ]
+        "employer": "alder_harbor_marina"
       },
       "relations": [
         {"type": "regard", "to": "marcus_delgado", "fields": {"warmth": 35, "trust": 40, "respect": 40, "t": 0}},
@@ -527,58 +467,14 @@
         "cooking": 15,
         "charm": 13,
         "fitness": 6,
-        "region": "mi",
-        "pay_frequency": "monthly",
-        "deposit_to": "acct_helen_checking",
-        "annual_income_cents": 2340000,
-        "bills": [
-          {
-            "label": "Property tax, 114 Harbor Street",
-            "payee": "Port Alder Township",
-            "amountCents": 38000,
-            "every": "month",
-            "day": 1,
-            "from": "acct_helen_checking"
-          },
-          {
-            "label": "Building insurance, 114 Harbor Street",
-            "payee": "Harbor Mutual",
-            "amountCents": 18500,
-            "every": "month",
-            "day": 5,
-            "from": "acct_helen_checking"
-          },
-          {
-            "label": "Electricity, 1A and the stairs, 520 kWh",
-            "payee": "Alder Light & Power",
-            "amountCents": 10140,
-            "every": "month",
-            "day": 20,
-            "from": "acct_helen_checking"
-          },
-          {
-            "label": "Natural gas, building heat",
-            "payee": "Lakeshore Gas",
-            "amountCents": 11000,
-            "every": "month",
-            "day": 22,
-            "from": "acct_helen_checking"
-          },
-          {
-            "label": "Water and sewer, building",
-            "payee": "Port Alder Township",
-            "amountCents": 9500,
-            "every": "month",
-            "day": 25,
-            "from": "acct_helen_checking"
-          }
-        ]
+        "region": "mi"
       },
       "relations": [
         {"type": "regard", "to": "jess_kowalczyk", "fields": {"warmth": 85, "trust": 75, "respect": 70, "t": 0}},
         {"type": "regard", "to": "maddie_kowalczyk", "fields": {"warmth": 85, "trust": 75, "respect": 65, "t": 0}},
         {"type": "regard", "to": "danny_okafor", "fields": {"warmth": 35, "trust": 40, "respect": 40, "t": 0}},
-        {"type": "regard", "to": "pov", "fields": {"warmth": 20, "trust": 20, "respect": 25, "t": 0}}
+        {"type": "regard", "to": "pov", "fields": {"warmth": 20, "trust": 20, "respect": 25, "t": 0}},
+        {"type": "member_of", "to": "household_kowalczyk", "fields": {"role": "head"}}
       ]
     },
     "nora_whitfield": {
@@ -604,24 +500,7 @@
         "region": "mi",
         "occupation": "registered_nurse",
         "employer": "community_clinic",
-        "hourly_cents": 4300,
-        "hours_per_week": 36,
-        "pay_frequency": "biweekly",
-        "payday": "every other Friday",
-        "deposit_to": "acct_nora_checking",
-        "shift_pattern": "three_12h",
-        "bills": [
-          {"label": "Rent", "payee": "Lakeview Apartments", "amountCents": 98000, "every": "month", "day": 1, "from": "acct_nora_checking"},
-          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 4000, "every": "month", "day": 14, "from": "acct_nora_checking"},
-          {
-            "label": "Electricity, 340 kWh",
-            "payee": "Alder Light & Power",
-            "amountCents": 6630,
-            "every": "month",
-            "day": 20,
-            "from": "acct_nora_checking"
-          }
-        ]
+        "shift_pattern": "three_12h"
       },
       "relations": [
         {"type": "regard", "to": "priya_nair", "fields": {"warmth": 45, "trust": 45, "respect": 40, "t": 0}},
@@ -646,16 +525,7 @@
         "region": "mi",
         "occupation": "police_officer",
         "employer": "port_alder",
-        "hourly_cents": 3650,
-        "hours_per_week": 40,
-        "pay_frequency": "biweekly",
-        "payday": "every other Friday",
-        "deposit_to": "acct_sam_checking",
-        "shift_pattern": "shift_8h_rotating",
-        "bills": [
-          {"label": "Rent", "payee": "Lakeview Apartments", "amountCents": 104000, "every": "month", "day": 1, "from": "acct_sam_checking"},
-          {"label": "Mobile phone", "payee": "Northwind Mobile", "amountCents": 5000, "every": "month", "day": 14, "from": "acct_sam_checking"}
-        ]
+        "shift_pattern": "shift_8h_rotating"
       },
       "relations": [
         {"type": "regard", "to": "marcus_delgado", "fields": {"warmth": 20, "trust": 30, "respect": 30, "t": 0}},
@@ -1107,7 +977,13 @@
       "kind": "account",
       "name": "Your checking account",
       "tier": "background",
-      "fields": {"owner": "pov", "type": "checking", "institution": "Lakeshore Credit Union", "opening": 184217, "apr_pct": 0.1},
+      "fields": {
+        "owners": [{"party": "pov", "role": "owner"}],
+        "product": "checking",
+        "opening": 184217,
+        "institution": "Lakeshore Credit Union",
+        "apy_pct": 0.1
+      },
       "relations": []
     },
     "acct_pov_savings": {
@@ -1115,7 +991,13 @@
       "kind": "account",
       "name": "Your savings account",
       "tier": "background",
-      "fields": {"owner": "pov", "type": "savings", "institution": "Lakeshore Credit Union", "opening": 326000, "apr_pct": 3.8},
+      "fields": {
+        "owners": [{"party": "pov", "role": "owner"}],
+        "product": "savings",
+        "opening": 326000,
+        "institution": "Lakeshore Credit Union",
+        "apy_pct": 3.8
+      },
       "relations": []
     },
     "acct_pov_brokerage": {
@@ -1123,7 +1005,7 @@
       "kind": "account",
       "name": "Your index-fund account",
       "tier": "background",
-      "fields": {"owner": "pov", "type": "brokerage", "symbol": "broad_us_equity_index", "units": 31.25, "institution": "Great Lakes Bank", "opening": 0},
+      "fields": {"owners": [{"party": "pov", "role": "owner"}], "product": "brokerage", "opening": 0, "institution": "Great Lakes Bank"},
       "relations": []
     },
     "acct_pov_card": {
@@ -1132,15 +1014,16 @@
       "name": "Your credit card",
       "tier": "background",
       "fields": {
-        "owner": "pov",
-        "type": "card",
-        "institution": "Great Lakes Bank",
+        "owners": [{"party": "pov", "role": "owner"}],
+        "product": "credit_card",
         "opening": -63840,
+        "institution": "Great Lakes Bank",
         "limit": 450000,
         "apr_pct": 22,
         "statement_day": 18,
         "due_day": 13,
-        "autopay": "minimum from acct_pov_checking"
+        "autopay": "minimum",
+        "autopay_from": "acct_pov_checking"
       },
       "relations": []
     },
@@ -1150,15 +1033,16 @@
       "name": "Your auto loan",
       "tier": "background",
       "fields": {
-        "owner": "pov",
-        "type": "loan",
-        "institution": "Lakeshore Credit Union",
+        "owners": [{"party": "pov", "role": "owner"}],
+        "product": "loan",
         "opening": -1740000,
+        "institution": "Lakeshore Credit Union",
         "apr_pct": 9.4,
         "due_day": 10,
-        "autopay": "from acct_pov_checking",
-        "remaining_months": 48,
-        "payment": 43631
+        "autopay": "minimum",
+        "autopay_from": "acct_pov_checking",
+        "payment": 43631,
+        "months_left": 48
       },
       "relations": []
     },
@@ -1167,7 +1051,7 @@
       "kind": "account",
       "name": "Your wallet cash",
       "tier": "background",
-      "fields": {"owner": "pov", "type": "cash", "opening": 8500},
+      "fields": {"owners": [{"party": "pov", "role": "owner"}], "product": "cash", "opening": 8500},
       "relations": [{"type": "in", "to": "pov_wallet"}]
     },
     "acct_marcus_shop": {
@@ -1175,7 +1059,12 @@
       "kind": "account",
       "name": "Alder Automotive operating account",
       "tier": "background",
-      "fields": {"owner": "marcus_delgado", "type": "checking", "institution": "Great Lakes Bank", "opening": 2340000},
+      "fields": {
+        "owners": [{"party": "alder_automotive_co", "role": "owner"}, {"party": "marcus_delgado", "role": "authorized_user"}],
+        "product": "business_checking",
+        "opening": 2340000,
+        "institution": "Great Lakes Bank"
+      },
       "relations": []
     },
     "acct_danny_checking": {
@@ -1183,7 +1072,7 @@
       "kind": "account",
       "name": "Danny's checking",
       "tier": "background",
-      "fields": {"owner": "danny_okafor", "type": "checking", "institution": "Lakeshore Credit Union", "opening": 195000},
+      "fields": {"owners": [{"party": "danny_okafor", "role": "owner"}], "product": "checking", "opening": 195000, "institution": "Lakeshore Credit Union"},
       "relations": []
     },
     "acct_priya_checking": {
@@ -1191,7 +1080,7 @@
       "kind": "account",
       "name": "Priya's checking",
       "tier": "background",
-      "fields": {"owner": "priya_nair", "type": "checking", "institution": "Lakeshore Credit Union", "opening": 412000},
+      "fields": {"owners": [{"party": "priya_nair", "role": "owner"}], "product": "checking", "opening": 412000, "institution": "Lakeshore Credit Union"},
       "relations": []
     },
     "acct_jess_checking": {
@@ -1199,7 +1088,7 @@
       "kind": "account",
       "name": "Jess's checking",
       "tier": "background",
-      "fields": {"owner": "jess_kowalczyk", "type": "checking", "institution": "Lakeshore Credit Union", "opening": 61000},
+      "fields": {"owners": [{"party": "jess_kowalczyk", "role": "owner"}], "product": "checking", "opening": 61000, "institution": "Lakeshore Credit Union"},
       "relations": []
     },
     "acct_dale_marina": {
@@ -1207,7 +1096,7 @@
       "kind": "account",
       "name": "Alder Harbor Marina account",
       "tier": "background",
-      "fields": {"owner": "dale_whitcomb", "type": "checking", "institution": "Great Lakes Bank", "opening": 1890000},
+      "fields": {"owners": [{"party": "dale_whitcomb", "role": "owner"}], "product": "checking", "opening": 1890000, "institution": "Great Lakes Bank"},
       "relations": []
     },
     "acct_helen_checking": {
@@ -1215,7 +1104,7 @@
       "kind": "account",
       "name": "Helen's checking",
       "tier": "background",
-      "fields": {"owner": "helen_kowalczyk", "type": "checking", "institution": "Lakeshore Credit Union", "opening": 1235000},
+      "fields": {"owners": [{"party": "helen_kowalczyk", "role": "owner"}], "product": "checking", "opening": 1235000, "institution": "Lakeshore Credit Union"},
       "relations": []
     },
     "acct_nora_checking": {
@@ -1223,7 +1112,7 @@
       "kind": "account",
       "name": "Nora's checking",
       "tier": "background",
-      "fields": {"owner": "nora_whitfield", "type": "checking", "institution": "Lakeshore Credit Union", "opening": 278000},
+      "fields": {"owners": [{"party": "nora_whitfield", "role": "owner"}], "product": "checking", "opening": 278000, "institution": "Lakeshore Credit Union"},
       "relations": []
     },
     "acct_sam_checking": {
@@ -1231,7 +1120,969 @@
       "kind": "account",
       "name": "Sam's checking",
       "tier": "background",
-      "fields": {"owner": "sam_reyes", "type": "checking", "institution": "Lakeshore Credit Union", "opening": 330000},
+      "fields": {"owners": [{"party": "sam_reyes", "role": "owner"}], "product": "checking", "opening": 330000, "institution": "Lakeshore Credit Union"},
+      "relations": []
+    },
+    "acct_marcus_checking": {
+      "id": "acct_marcus_checking",
+      "kind": "account",
+      "name": "Marcus's checking",
+      "tier": "background",
+      "fields": {"owners": [{"party": "marcus_delgado", "role": "owner"}], "product": "checking", "opening": 680000, "institution": "Lakeshore Credit Union"},
+      "relations": []
+    },
+    "acct_alder_lift_loan": {
+      "id": "acct_alder_lift_loan",
+      "kind": "account",
+      "name": "Lift loan",
+      "tier": "background",
+      "fields": {
+        "owners": [{"party": "alder_automotive_co", "role": "owner"}],
+        "product": "loan",
+        "opening": -3800000,
+        "institution": "Great Lakes Bank",
+        "apr_pct": 8.5,
+        "due_day": 15,
+        "autopay": "fixed",
+        "autopay_from": "acct_marcus_shop",
+        "autopay_cents": 119956,
+        "payment": 119956,
+        "term_months": 36,
+        "months_left": 36
+      },
+      "relations": []
+    },
+    "acct_marcus_mortgage": {
+      "id": "acct_marcus_mortgage",
+      "kind": "account",
+      "name": "Marcus's mortgage",
+      "tier": "background",
+      "fields": {
+        "owners": [{"party": "marcus_delgado", "role": "owner"}],
+        "product": "mortgage",
+        "opening": -18778000,
+        "institution": "Lakeshore Credit Union",
+        "apr_pct": 4.6,
+        "due_day": 1,
+        "autopay": "minimum",
+        "autopay_from": "acct_marcus_checking",
+        "payment": 114200,
+        "months_left": 260,
+        "secured_by": "prop_birch_lane_12"
+      },
+      "relations": []
+    },
+    "acct_priya_retirement": {
+      "id": "acct_priya_retirement",
+      "kind": "account",
+      "name": "Priya's IRA",
+      "tier": "background",
+      "fields": {"owners": [{"party": "priya_nair", "role": "owner"}], "product": "brokerage", "opening": 120000, "institution": "Harborview Investments"},
+      "relations": []
+    },
+    "acct_danny_coins": {
+      "id": "acct_danny_coins",
+      "kind": "account",
+      "name": "Danny's coin exchange",
+      "tier": "background",
+      "fields": {"owners": [{"party": "danny_okafor", "role": "owner"}], "product": "brokerage", "opening": 4500, "institution": "CoinHarbor"},
+      "relations": []
+    },
+    "acct_kowalczyk_household": {
+      "id": "acct_kowalczyk_household",
+      "kind": "account",
+      "name": "Kowalczyk household account",
+      "tier": "background",
+      "fields": {
+        "owners": [{"party": "helen_kowalczyk", "role": "joint", "share": 60}, {"party": "jess_kowalczyk", "role": "joint", "share": 40}],
+        "product": "checking",
+        "opening": 185000,
+        "institution": "Lakeshore Credit Union"
+      },
+      "relations": []
+    },
+    "acct_maddie_savings": {
+      "id": "acct_maddie_savings",
+      "kind": "account",
+      "name": "Maddie's savings",
+      "tier": "background",
+      "fields": {
+        "owners": [{"party": "helen_kowalczyk", "role": "custodian"}, {"party": "maddie_kowalczyk", "role": "beneficiary"}],
+        "product": "savings",
+        "opening": 42000,
+        "institution": "Lakeshore Credit Union"
+      },
+      "relations": []
+    },
+    "card_pov_debit": {
+      "id": "card_pov_debit",
+      "kind": "card",
+      "name": "Debit card",
+      "tier": "background",
+      "fields": {"account": "acct_pov_checking", "holder": "pov", "network": "debit", "state": "active", "item": "pov_debit_card", "last4": "4417"},
+      "relations": []
+    },
+    "card_pov_credit": {
+      "id": "card_pov_credit",
+      "kind": "card",
+      "name": "Credit card",
+      "tier": "background",
+      "fields": {"account": "acct_pov_card", "holder": "pov", "network": "credit", "state": "active", "item": "pov_credit_card", "last4": "9032"},
+      "relations": []
+    },
+    "bill_rent": {
+      "id": "bill_rent",
+      "kind": "flow",
+      "name": "Rent, Unit 2B",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "rent",
+        "from": "acct_pov_checking",
+        "to": "helen_kowalczyk",
+        "amount_cents": 99500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1],
+        "link": "prop_harbor_114"
+      },
+      "relations": []
+    },
+    "bill_renters": {
+      "id": "bill_renters",
+      "kind": "flow",
+      "name": "Renters insurance",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_pov_card",
+        "to": "Harbor Mutual",
+        "amount_cents": 1700,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "bill_streaming": {
+      "id": "bill_streaming",
+      "kind": "flow",
+      "name": "Streaming video",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_pov_card",
+        "to": "StreamBox",
+        "amount_cents": 1799,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [3]
+      },
+      "relations": []
+    },
+    "bill_music": {
+      "id": "bill_music",
+      "kind": "flow",
+      "name": "Music streaming",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_pov_card",
+        "to": "TuneBox",
+        "amount_cents": 1199,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [3]
+      },
+      "relations": []
+    },
+    "bill_auto_insurance": {
+      "id": "bill_auto_insurance",
+      "kind": "flow",
+      "name": "Auto insurance, full coverage",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_pov_checking",
+        "to": "Midlake Mutual",
+        "amount_cents": 22500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [5],
+        "link": "pov_truck"
+      },
+      "relations": []
+    },
+    "bill_internet": {
+      "id": "bill_internet",
+      "kind": "flow",
+      "name": "Home internet",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_pov_card",
+        "to": "Alder Broadband",
+        "amount_cents": 6500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [8]
+      },
+      "relations": []
+    },
+    "bill_phone": {
+      "id": "bill_phone",
+      "kind": "flow",
+      "name": "Mobile phone",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_pov_card",
+        "to": "Northwind Mobile",
+        "amount_cents": 5000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [14]
+      },
+      "relations": []
+    },
+    "bill_electric": {
+      "id": "bill_electric",
+      "kind": "flow",
+      "name": "Electricity, 370 kWh",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_pov_checking",
+        "to": "Alder Light & Power",
+        "amount_cents": 7215,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [20]
+      },
+      "relations": []
+    },
+    "bill_danny_rent": {
+      "id": "bill_danny_rent",
+      "kind": "flow",
+      "name": "Rent, Unit 2A",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "rent",
+        "from": "acct_danny_checking",
+        "to": "helen_kowalczyk",
+        "amount_cents": 97500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1],
+        "link": "prop_harbor_114"
+      },
+      "relations": []
+    },
+    "bill_danny_phone": {
+      "id": "bill_danny_phone",
+      "kind": "flow",
+      "name": "Mobile phone",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_danny_checking",
+        "to": "Northwind Mobile",
+        "amount_cents": 4500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [14]
+      },
+      "relations": []
+    },
+    "bill_helen_electric": {
+      "id": "bill_helen_electric",
+      "kind": "flow",
+      "name": "Electricity, 1A and the stairs, 520 kWh",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_helen_checking",
+        "to": "Alder Light & Power",
+        "amount_cents": 10140,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [20]
+      },
+      "relations": []
+    },
+    "bill_helen_gas": {
+      "id": "bill_helen_gas",
+      "kind": "flow",
+      "name": "Natural gas, building heat",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_helen_checking",
+        "to": "Lakeshore Gas",
+        "amount_cents": 11000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [22]
+      },
+      "relations": []
+    },
+    "bill_helen_water": {
+      "id": "bill_helen_water",
+      "kind": "flow",
+      "name": "Water and sewer, building",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_helen_checking",
+        "to": "Port Alder Township",
+        "amount_cents": 9500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [25]
+      },
+      "relations": []
+    },
+    "bill_jess_household": {
+      "id": "bill_jess_household",
+      "kind": "flow",
+      "name": "Household share, 1A",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "transfer",
+        "from": "acct_jess_checking",
+        "to": "acct_kowalczyk_household",
+        "amount_cents": 30000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "bill_jess_phone": {
+      "id": "bill_jess_phone",
+      "kind": "flow",
+      "name": "Mobile phone",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_jess_checking",
+        "to": "Northwind Mobile",
+        "amount_cents": 3500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [14]
+      },
+      "relations": []
+    },
+    "bill_marcus_shop_electric": {
+      "id": "bill_marcus_shop_electric",
+      "kind": "flow",
+      "name": "Shop electricity, 1,400 kWh",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_marcus_shop",
+        "to": "Alder Light & Power",
+        "amount_cents": 27300,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [20]
+      },
+      "relations": []
+    },
+    "bill_priya_rent": {
+      "id": "bill_priya_rent",
+      "kind": "flow",
+      "name": "Rent",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "rent",
+        "from": "acct_priya_checking",
+        "to": "Lakeview Apartments",
+        "amount_cents": 112500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "bill_priya_internet": {
+      "id": "bill_priya_internet",
+      "kind": "flow",
+      "name": "Home internet",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_priya_checking",
+        "to": "Alder Broadband",
+        "amount_cents": 6500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [8]
+      },
+      "relations": []
+    },
+    "bill_priya_phone": {
+      "id": "bill_priya_phone",
+      "kind": "flow",
+      "name": "Mobile phone",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_priya_checking",
+        "to": "Northwind Mobile",
+        "amount_cents": 5500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [14]
+      },
+      "relations": []
+    },
+    "bill_dale_harbor_fee": {
+      "id": "bill_dale_harbor_fee",
+      "kind": "flow",
+      "name": "Township harbor fee",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_dale_marina",
+        "to": "Port Alder Township",
+        "amount_cents": 30000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "bill_dale_insurance": {
+      "id": "bill_dale_insurance",
+      "kind": "flow",
+      "name": "Marina liability insurance",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_dale_marina",
+        "to": "Midlake Mutual",
+        "amount_cents": 41000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [5]
+      },
+      "relations": []
+    },
+    "bill_dale_electric": {
+      "id": "bill_dale_electric",
+      "kind": "flow",
+      "name": "Marina electricity, 2,000 kWh",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_dale_marina",
+        "to": "Alder Light & Power",
+        "amount_cents": 39000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [20]
+      },
+      "relations": []
+    },
+    "bill_nora_rent": {
+      "id": "bill_nora_rent",
+      "kind": "flow",
+      "name": "Rent",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "rent",
+        "from": "acct_nora_checking",
+        "to": "Lakeview Apartments",
+        "amount_cents": 98000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "bill_nora_phone": {
+      "id": "bill_nora_phone",
+      "kind": "flow",
+      "name": "Mobile phone",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_nora_checking",
+        "to": "Northwind Mobile",
+        "amount_cents": 4000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [14]
+      },
+      "relations": []
+    },
+    "bill_nora_electric": {
+      "id": "bill_nora_electric",
+      "kind": "flow",
+      "name": "Electricity, 340 kWh",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_nora_checking",
+        "to": "Alder Light & Power",
+        "amount_cents": 6630,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [20]
+      },
+      "relations": []
+    },
+    "bill_sam_rent": {
+      "id": "bill_sam_rent",
+      "kind": "flow",
+      "name": "Rent",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "rent",
+        "from": "acct_sam_checking",
+        "to": "Lakeview Apartments",
+        "amount_cents": 104000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "bill_sam_phone": {
+      "id": "bill_sam_phone",
+      "kind": "flow",
+      "name": "Mobile phone",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_sam_checking",
+        "to": "Northwind Mobile",
+        "amount_cents": 5000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [14]
+      },
+      "relations": []
+    },
+    "flow_shop_lease": {
+      "id": "flow_shop_lease",
+      "kind": "flow",
+      "name": "Shop lease",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_marcus_shop",
+        "to": "Harbor Realty",
+        "amount_cents": 320000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1],
+        "category": "rent"
+      },
+      "relations": []
+    },
+    "flow_owners_draw": {
+      "id": "flow_owners_draw",
+      "kind": "flow",
+      "name": "Owner's draw",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "draw",
+        "from": "acct_marcus_shop",
+        "to": "acct_marcus_checking",
+        "amount_cents": 600000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1],
+        "category": "draw"
+      },
+      "relations": []
+    },
+    "flow_helen_pension": {
+      "id": "flow_helen_pension",
+      "kind": "flow",
+      "name": "Pension",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "income",
+        "from": "Michigan Public Pension",
+        "to": "acct_helen_checking",
+        "amount_cents": 195000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1],
+        "category": "pension"
+      },
+      "relations": []
+    },
+    "flow_dale_takings": {
+      "id": "flow_dale_takings",
+      "kind": "flow",
+      "name": "Marina takings",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "income",
+        "from": "Marina customers",
+        "to": "acct_dale_marina",
+        "amount_cents": 516667,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [-1],
+        "category": "sales"
+      },
+      "relations": []
+    },
+    "flow_pov_savings": {
+      "id": "flow_pov_savings",
+      "kind": "flow",
+      "name": "Savings transfer",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "savings",
+        "from": "acct_pov_checking",
+        "to": "acct_pov_savings",
+        "amount_cents": 15000,
+        "shortfall": "retry",
+        "status": "active",
+        "every": "month",
+        "days": [2],
+        "retry_days": 3,
+        "retries": 2,
+        "category": "savings"
+      },
+      "relations": []
+    },
+    "flow_helen_household": {
+      "id": "flow_helen_household",
+      "kind": "flow",
+      "name": "Household share",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "transfer",
+        "from": "acct_helen_checking",
+        "to": "acct_kowalczyk_household",
+        "amount_cents": 45000,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "month",
+        "days": [1]
+      },
+      "relations": []
+    },
+    "flow_kowalczyk_groceries": {
+      "id": "flow_kowalczyk_groceries",
+      "kind": "flow",
+      "name": "Groceries",
+      "tier": "background",
+      "fields": {
+        "flow_kind": "bill",
+        "from": "acct_kowalczyk_household",
+        "to": "Alder Market",
+        "amount_cents": 15500,
+        "shortfall": "skip",
+        "status": "active",
+        "every": "week",
+        "weekdays": [6],
+        "category": "groceries",
+        "shares": [{"party": "helen_kowalczyk", "pct": 60}, {"party": "jess_kowalczyk", "pct": 40}]
+      },
+      "relations": []
+    },
+    "job_pov_mechanic": {
+      "id": "job_pov_mechanic",
+      "kind": "job",
+      "name": "Mechanic at Alder Automotive",
+      "tier": "background",
+      "fields": {
+        "worker": "pov",
+        "employer": "alder_automotive_co",
+        "occupation": "auto_mechanic",
+        "basis": "hourly",
+        "rate": 2350,
+        "status": "active",
+        "workplace": "alder_automotive",
+        "title": "Mechanic",
+        "hours_per_week": 40,
+        "pay_every": "weekly",
+        "pay_weekday": 5,
+        "splits": [{"to": "acct_pov_savings", "pct": 10}],
+        "shift_pattern": "trades_day_7_330",
+        "start": "2026-01-12"
+      },
+      "relations": []
+    },
+    "job_danny_mechanic": {
+      "id": "job_danny_mechanic",
+      "kind": "job",
+      "name": "Danny's job at Alder Automotive",
+      "tier": "background",
+      "fields": {
+        "worker": "danny_okafor",
+        "employer": "alder_automotive_co",
+        "occupation": "auto_mechanic",
+        "basis": "hourly",
+        "rate": 2650,
+        "status": "active",
+        "workplace": "alder_automotive",
+        "title": "Mechanic",
+        "hours_per_week": 40,
+        "pay_every": "weekly",
+        "pay_weekday": 5,
+        "deductions": [{"label": "Dental", "cents": 1800, "pretax": true, "kind": "health"}],
+        "shift_pattern": "trades_day_7_330",
+        "start": "2024-03-04"
+      },
+      "relations": []
+    },
+    "job_priya_nair": {
+      "id": "job_priya_nair",
+      "kind": "job",
+      "name": "Priya Nair's work",
+      "tier": "background",
+      "fields": {
+        "worker": "priya_nair",
+        "employer": "township_hall",
+        "occupation": "accountant",
+        "basis": "hourly",
+        "rate": 3800,
+        "status": "active",
+        "hours_per_week": 40,
+        "pay_every": "semimonthly",
+        "pay_days": [15, -1],
+        "shift_pattern": "std_weekday_9_5"
+      },
+      "relations": []
+    },
+    "job_jess_kowalczyk": {
+      "id": "job_jess_kowalczyk",
+      "kind": "job",
+      "name": "Jess Kowalczyk's work",
+      "tier": "background",
+      "fields": {
+        "worker": "jess_kowalczyk",
+        "employer": "rusty_anchor",
+        "occupation": "bartender",
+        "basis": "hourly",
+        "rate": 1650,
+        "status": "active",
+        "hours_per_week": 32,
+        "pay_every": "weekly",
+        "pay_weekday": 5,
+        "shift_pattern": "bar_night",
+        "tipped": true
+      },
+      "relations": []
+    },
+    "job_nora_whitfield": {
+      "id": "job_nora_whitfield",
+      "kind": "job",
+      "name": "Nora Whitfield's work",
+      "tier": "background",
+      "fields": {
+        "worker": "nora_whitfield",
+        "employer": "community_clinic",
+        "occupation": "registered_nurse",
+        "basis": "hourly",
+        "rate": 4300,
+        "status": "active",
+        "hours_per_week": 36,
+        "pay_every": "biweekly",
+        "pay_weekday": 5,
+        "shift_pattern": "three_12h"
+      },
+      "relations": []
+    },
+    "job_sam_reyes": {
+      "id": "job_sam_reyes",
+      "kind": "job",
+      "name": "Sam Reyes's work",
+      "tier": "background",
+      "fields": {
+        "worker": "sam_reyes",
+        "employer": "port_alder",
+        "occupation": "police_officer",
+        "basis": "hourly",
+        "rate": 3650,
+        "status": "active",
+        "hours_per_week": 40,
+        "pay_every": "biweekly",
+        "pay_weekday": 5,
+        "shift_pattern": "shift_8h_rotating"
+      },
+      "relations": []
+    },
+    "household_kowalczyk": {"id": "household_kowalczyk", "kind": "household", "name": "The Kowalczyks", "tier": "background", "fields": {}, "relations": []},
+    "hold_pov_index": {
+      "id": "hold_pov_index",
+      "kind": "holding",
+      "name": "Broad US equity index fund",
+      "tier": "background",
+      "fields": {"account": "acct_pov_brokerage", "asset": "broad_us_equity_index", "lots": [{"qty": 31.25, "cost": 312500, "at": "2026-09-14"}]},
+      "relations": []
+    },
+    "alder_automotive_co": {
+      "id": "alder_automotive_co",
+      "kind": "business",
+      "name": "Alder Automotive",
+      "tier": "principal",
+      "fields": {
+        "place": "alder_automotive",
+        "places": ["alder_automotive"],
+        "owners": [{"party": "marcus_delgado", "role": "owner", "share": 100}],
+        "structure": "llc",
+        "operating_account": "acct_marcus_shop",
+        "industry": "auto repair",
+        "margin_pct": 55,
+        "collects_sales_tax": true,
+        "daily_sales": 150000,
+        "sales_spread_pct": 35,
+        "trading_days": [1, 2, 3, 4, 5, 6],
+        "invoice_days": 30,
+        "late_fee_pct": 1.5
+      },
+      "relations": []
+    },
+    "inv_road_commission": {
+      "id": "inv_road_commission",
+      "kind": "invoice",
+      "name": "Road Commission fleet service",
+      "tier": "background",
+      "fields": {
+        "business": "alder_automotive_co",
+        "customer": "Port Alder Road Commission",
+        "cents": 245000,
+        "memo": "Fleet service",
+        "issued": "2026-09-01",
+        "due": "2026-10-01",
+        "state": "open"
+      },
+      "relations": []
+    },
+    "inv_dale_trailer": {
+      "id": "inv_dale_trailer",
+      "kind": "invoice",
+      "name": "Dale's trailer brakes",
+      "tier": "background",
+      "fields": {
+        "business": "alder_automotive_co",
+        "customer": "dale_whitcomb",
+        "cents": 85000,
+        "memo": "Trailer brakes",
+        "issued": "2026-08-03",
+        "due": "2026-09-02",
+        "state": "open"
+      },
+      "relations": []
+    },
+    "prop_birch_lane_12": {
+      "id": "prop_birch_lane_12",
+      "kind": "property",
+      "name": "Marcus's house",
+      "tier": "background",
+      "fields": {
+        "place": "birch_lane_12",
+        "owners": [{"party": "marcus_delgado", "role": "owner", "share": 100}],
+        "value": 34000000,
+        "appreciation_pct": 3.5,
+        "purchase_price": 27850000,
+        "purchased": "2018-06-15",
+        "mortgage": "acct_marcus_mortgage",
+        "tax_pct": 1.1,
+        "upkeep_pct": 0.8
+      },
+      "relations": []
+    },
+    "prop_harbor_114": {
+      "id": "prop_harbor_114",
+      "kind": "property",
+      "name": "114 Harbor Street",
+      "tier": "background",
+      "fields": {
+        "place": "harbor_street_114",
+        "owners": [{"party": "helen_kowalczyk", "role": "owner", "share": 100}],
+        "value": 52000000,
+        "appreciation_pct": 3,
+        "purchase_price": 9500000,
+        "purchased": "1986-04-01",
+        "tax_pct": 0.88,
+        "insurance": 18500,
+        "upkeep_pct": 0.6,
+        "units": 3,
+        "managed": true,
+        "market_rent": 98000,
+        "lease_months": 12,
+        "vacancy_months": 1,
+        "rent_to": "acct_helen_checking"
+      },
+      "relations": []
+    },
+    "hold_pov_lkfr": {
+      "id": "hold_pov_lkfr",
+      "kind": "holding",
+      "name": "Lakefront Freight",
+      "tier": "background",
+      "fields": {"account": "acct_pov_brokerage", "asset": "lkfr", "lots": [{"qty": 12, "cost": 46800, "at": "2025-03-10"}]},
+      "relations": []
+    },
+    "hold_priya_tnote": {
+      "id": "hold_priya_tnote",
+      "kind": "holding",
+      "name": "Treasury note",
+      "tier": "background",
+      "fields": {
+        "account": "acct_priya_retirement",
+        "asset": "tnote_2030",
+        "lots": [{"qty": 5, "cost": 497500, "at": "2025-08-20"}],
+        "route": "acct_priya_checking"
+      },
+      "relations": []
+    },
+    "hold_priya_glbd": {
+      "id": "hold_priya_glbd",
+      "kind": "holding",
+      "name": "Global bond fund",
+      "tier": "background",
+      "fields": {"account": "acct_priya_retirement", "asset": "glbd", "lots": [{"qty": 80, "cost": 392000, "at": "2024-01-15"}], "route": "reinvest"},
+      "relations": []
+    },
+    "hold_danny_btc": {
+      "id": "hold_danny_btc",
+      "kind": "holding",
+      "name": "Bitcoin",
+      "tier": "background",
+      "fields": {"account": "acct_danny_coins", "asset": "btc", "lots": [{"qty": 0.035, "cost": 210000, "at": "2024-11-02"}]},
       "relations": []
     },
     "region_lakeshore_county": {
@@ -1367,8 +2218,10 @@
       "id": "alder_market",
       "name": "Alder Market",
       "fields": {
-        "description": "The town's only full grocery store, with a deli counter, a rack of local apples and a bulletin board covered in lost-cat flyers.",
-        "tags": ["grocery"]
+        "description": "The town's only full grocery store, with a deli counter, a rack of local apples and a bulletin board covered in lost-cat flyers. By the entrance, a Lakeshore Credit Union counter and an ATM that takes deposits.",
+        "tags": ["grocery"],
+        "atm": {"bank": "Lakeshore Credit Union", "fee": 0, "limit": 80000, "deposits": true},
+        "branch": {"bank": "Lakeshore Credit Union"}
       },
       "parent": "port_alder",
       "timeZone": "America/New_York",
@@ -1379,7 +2232,8 @@
       "name": "Shoreline Fuel",
       "fields": {
         "description": "A gas station and convenience store on the road out of town, with four pumps, a car wash and surprisingly good hot dogs.",
-        "tags": ["fuel"]
+        "tags": ["fuel"],
+        "atm": {"bank": "Great Lakes Bank", "fee": 350, "limit": 40000, "deposits": false}
       },
       "parent": "port_alder",
       "timeZone": "America/New_York",
@@ -1427,6 +2281,18 @@
       },
       "parent": "port_alder",
       "sceneType": "work"
+    },
+    "birch_lane_12": {
+      "id": "birch_lane_12",
+      "name": "12 Birch Lane",
+      "fields": {
+        "description": "Marcus Delgado's two-storey clapboard house on a quiet lane above the harbor, with a detached garage he never parks in.",
+        "tags": ["home"]
+      },
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "downtime",
+      "visibility": "secret"
     }
   },
   "routes": {
@@ -1519,6 +2385,13 @@
       "from": "harbor_street_114",
       "to": "lakeshore_school",
       "modes": {"walk": {"minutes": 16, "distanceKm": 1.2}, "road": {"minutes": 5, "distanceKm": 1.4}},
+      "bidirectional": true
+    },
+    "rt_birch_lane_shop": {
+      "id": "rt_birch_lane_shop",
+      "from": "birch_lane_12",
+      "to": "alder_automotive",
+      "modes": {"walk": {"minutes": 12, "distanceKm": 0.9}, "road": {"minutes": 3, "distanceKm": 1.1}},
       "bidirectional": true
     }
   },

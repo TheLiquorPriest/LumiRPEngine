@@ -4,7 +4,13 @@
   "name": "Harrowmere Hall",
   "version": 1,
   "genre": "mystery",
-  "tags": ["whodunit", "country house", "1930s", "closed circle", "investigation"],
+  "tags": [
+    "whodunit",
+    "country house",
+    "1930s",
+    "closed circle",
+    "investigation"
+  ],
   "blurb": "A storm cuts a fenland country house off from the world on Friday night. By Saturday morning the host is dead and everyone under the roof has something to hide.",
   "contentNotes": "Golden-age mystery tone. One off-screen death; no gore, no explicit content. Fictional people, places and events only.",
   "realism": {
@@ -18,10 +24,26 @@
     "label": "Pounds, shillings and pence",
     "baseUnit": "penny",
     "denominations": [
-      {"id": "penny", "label": "penny", "value": 1},
-      {"id": "shilling", "label": "shilling", "value": 12},
-      {"id": "half_crown", "label": "half-crown", "value": 30},
-      {"id": "pound", "label": "pound", "value": 240}
+      {
+        "id": "penny",
+        "label": "penny",
+        "value": 1
+      },
+      {
+        "id": "shilling",
+        "label": "shilling",
+        "value": 12
+      },
+      {
+        "id": "half_crown",
+        "label": "half-crown",
+        "value": 30
+      },
+      {
+        "id": "pound",
+        "label": "pound",
+        "value": 240
+      }
     ],
     "note": "Pre-decimal money. A pint of bitter is 4d, a village-inn room 7s 6d, a gardener's wage about 35s a week.",
     "code": "GBP",
@@ -30,36 +52,89 @@
     "decimals": 0,
     "format": "{sign}{amount}d"
   },
-  "travelSpeedKmh": {"walk": [1.5, 6], "road": [20, 80], "offroad": [2, 10], "water": [2, 8]},
+  "travelSpeedKmh": {
+    "walk": [
+      1.5,
+      6
+    ],
+    "road": [
+      20,
+      80
+    ],
+    "offroad": [
+      2,
+      10
+    ],
+    "water": [
+      2,
+      8
+    ]
+  },
   "calendar": {
     "system": "gregorian",
     "epoch": "1934-10-26T00:00",
     "timeZone": "Europe/London",
     "dayParts": [
-      {"id": "early", "label": "Early morning", "start": "05:30"},
-      {"id": "morning", "label": "Morning", "start": "08:00"},
-      {"id": "midday", "label": "Midday", "start": "12:00"},
-      {"id": "afternoon", "label": "Afternoon", "start": "14:00"},
-      {"id": "evening", "label": "Evening", "start": "18:00"},
-      {"id": "night", "label": "Night", "start": "22:00"}
+      {
+        "id": "early",
+        "label": "Early morning",
+        "start": "05:30"
+      },
+      {
+        "id": "morning",
+        "label": "Morning",
+        "start": "08:00"
+      },
+      {
+        "id": "midday",
+        "label": "Midday",
+        "start": "12:00"
+      },
+      {
+        "id": "afternoon",
+        "label": "Afternoon",
+        "start": "14:00"
+      },
+      {
+        "id": "evening",
+        "label": "Evening",
+        "start": "18:00"
+      },
+      {
+        "id": "night",
+        "label": "Night",
+        "start": "22:00"
+      }
     ],
     "holidays": [
       {
         "id": "all_hallows_eve",
         "label": "All Hallows' Eve",
-        "rule": {"type": "fixed", "month": 10, "day": 31},
+        "rule": {
+          "type": "fixed",
+          "month": 10,
+          "day": 31
+        },
         "dayOff": false
       },
       {
         "id": "bonfire_night",
         "label": "Bonfire Night",
-        "rule": {"type": "fixed", "month": 11, "day": 5},
+        "rule": {
+          "type": "fixed",
+          "month": 11,
+          "day": 5
+        },
         "dayOff": false
       },
       {
         "id": "armistice_day",
         "label": "Armistice Day",
-        "rule": {"type": "fixed", "month": 11, "day": 11},
+        "rule": {
+          "type": "fixed",
+          "month": 11,
+          "day": 11
+        },
         "dayOff": true
       }
     ]
@@ -74,30 +149,95 @@
   },
   "time": {
     "sceneTypes": [
-      {"id": "conversation", "label": "Conversation", "tickMinutes": 2},
-      {"id": "action", "label": "Action", "tickMinutes": 0.5},
-      {"id": "exploration", "label": "Exploration", "tickMinutes": 10},
-      {"id": "downtime", "label": "Downtime", "tickMinutes": 30},
-      {"id": "investigation", "label": "Investigation", "tickMinutes": 15}
+      {
+        "id": "conversation",
+        "label": "Conversation",
+        "tickMinutes": 2
+      },
+      {
+        "id": "action",
+        "label": "Action",
+        "tickMinutes": 0.5
+      },
+      {
+        "id": "exploration",
+        "label": "Exploration",
+        "tickMinutes": 10
+      },
+      {
+        "id": "downtime",
+        "label": "Downtime",
+        "tickMinutes": 30
+      },
+      {
+        "id": "investigation",
+        "label": "Investigation",
+        "tickMinutes": 15
+      }
     ],
     "montage": "key",
-    "speedThrough": {"sleep": {"mode": "offer", "thresholdMinutes": 30}, "waiting": {"mode": "offer", "thresholdMinutes": 30}},
-    "interrupts": {"incident": "stop", "arrival": "stop", "bill": "ignore"}
+    "speedThrough": {
+      "sleep": {
+        "mode": "offer",
+        "thresholdMinutes": 30
+      },
+      "waiting": {
+        "mode": "offer",
+        "thresholdMinutes": 30
+      }
+    },
+    "interrupts": {
+      "incident": "stop",
+      "arrival": "stop",
+      "bill": "ignore"
+    }
   },
   "flags": [
-    {"id": "storm_active", "description": "The storm is over the fens.", "default": false},
-    {"id": "causeway_open", "description": "The Mere Causeway is passable.", "default": true},
-    {"id": "phone_working", "description": "The hall telephone line is working.", "default": true},
-    {"id": "alaric_alive", "description": "Sir Alaric is alive.", "default": true},
-    {"id": "body_found", "description": "Sir Alaric's body has been found.", "default": false},
+    {
+      "id": "storm_active",
+      "description": "The storm is over the fens.",
+      "default": false
+    },
+    {
+      "id": "causeway_open",
+      "description": "The Mere Causeway is passable.",
+      "default": true
+    },
+    {
+      "id": "phone_working",
+      "description": "The hall telephone line is working.",
+      "default": true
+    },
+    {
+      "id": "alaric_alive",
+      "description": "Sir Alaric is alive.",
+      "default": true
+    },
+    {
+      "id": "body_found",
+      "description": "Sir Alaric's body has been found.",
+      "default": false
+    },
     {
       "id": "ledger_page_intact",
       "description": "A scrap of the burnt ledger page remains in the library grate.",
       "default": true
     },
-    {"id": "safe_open", "description": "The study safe is open.", "default": false},
-    {"id": "constable_called", "description": "Someone has reached the constable.", "default": false},
-    {"id": "constable_arrived", "description": "Constable Hobbs is at the hall.", "default": false},
+    {
+      "id": "safe_open",
+      "description": "The study safe is open.",
+      "default": false
+    },
+    {
+      "id": "constable_called",
+      "description": "Someone has reached the constable.",
+      "default": false
+    },
+    {
+      "id": "constable_arrived",
+      "description": "Constable Hobbs is at the hall.",
+      "default": false
+    },
     {
       "id": "asked_whereabouts",
       "description": "The player has asked Rupert where he was on Friday night.",
@@ -113,8 +253,16 @@
       "description": "Dr. Farrant has admitted the symptoms do not fit a failing heart.",
       "default": false
     },
-    {"id": "rupert_confronted", "description": "The player has shown Rupert the creditor's note.", "default": false},
-    {"id": "tea_brought", "description": "The player has sat with Mrs. Marsh over a cup of tea.", "default": false},
+    {
+      "id": "rupert_confronted",
+      "description": "The player has shown Rupert the creditor's note.",
+      "default": false
+    },
+    {
+      "id": "tea_brought",
+      "description": "The player has sat with Mrs. Marsh over a cup of tea.",
+      "default": false
+    },
     {
       "id": "accused",
       "description": "Who the player has named as the culprit (empty until someone is named).",
@@ -124,17 +272,55 @@
   ],
   "regard": {
     "axes": [
-      {"id": "warmth", "label": "Warmth", "min": -100, "max": 100},
-      {"id": "trust", "label": "Trust", "min": -100, "max": 100},
-      {"id": "respect", "label": "Respect", "min": -100, "max": 100},
-      {"id": "fear", "label": "Fear", "min": 0, "max": 100}
+      {
+        "id": "warmth",
+        "label": "Warmth",
+        "min": -100,
+        "max": 100
+      },
+      {
+        "id": "trust",
+        "label": "Trust",
+        "min": -100,
+        "max": 100
+      },
+      {
+        "id": "respect",
+        "label": "Respect",
+        "min": -100,
+        "max": 100
+      },
+      {
+        "id": "fear",
+        "label": "Fear",
+        "min": 0,
+        "max": 100
+      }
     ],
     "bands": [
-      {"label": "hostile", "max": -60},
-      {"label": "cold", "min": -60, "max": -20},
-      {"label": "neutral", "min": -20, "max": 20},
-      {"label": "warm", "min": 20, "max": 60},
-      {"label": "devoted", "min": 60}
+      {
+        "label": "hostile",
+        "max": -60
+      },
+      {
+        "label": "cold",
+        "min": -60,
+        "max": -20
+      },
+      {
+        "label": "neutral",
+        "min": -20,
+        "max": 20
+      },
+      {
+        "label": "warm",
+        "min": 20,
+        "max": 60
+      },
+      {
+        "label": "devoted",
+        "min": 60
+      }
     ]
   },
   "places": [
@@ -144,7 +330,9 @@
       "timeZone": "Europe/London",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["region"],
+      "tags": [
+        "region"
+      ],
       "description": "A low, wet estate of reed beds, drove roads and willows, set on a rise of firmer ground in the fens. The nearest village is Saltreach, two and a half miles away by the causeway."
     },
     {
@@ -153,7 +341,9 @@
       "parent": "harrowmere_estate",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["road"],
+      "tags": [
+        "road"
+      ],
       "description": "A raised gravel road across the marsh, covered by the mere at the highest tides. In a hard south-westerly it can be impassable for hours."
     },
     {
@@ -162,7 +352,10 @@
       "timeZone": "Europe/London",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["village", "off-map"],
+      "tags": [
+        "village",
+        "off-map"
+      ],
       "description": "A small fenland village of brick cottages, a church, a public house and a police constable. The only telephone exchange for miles is in the post office."
     },
     {
@@ -171,7 +364,9 @@
       "parent": "harrowmere_estate",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["lodge"],
+      "tags": [
+        "lodge"
+      ],
       "description": "A brick lodge at the end of the drive, empty since the old gardener retired. The estate's telephone line comes in here before running to the hall on a line of poles."
     },
     {
@@ -181,7 +376,9 @@
       "sceneType": "conversation",
       "grid": "ground_floor",
       "visibility": "public",
-      "tags": ["manor"],
+      "tags": [
+        "manor"
+      ],
       "description": "A rambling red-brick house with a Jacobean core, Victorian additions and a conservatory that never quite matched either. Wind finds its way into every passage."
     },
     {
@@ -189,9 +386,14 @@
       "name": "Entrance Hall",
       "parent": "harrowmere_hall",
       "sceneType": "conversation",
-      "cell": {"x": 9, "y": 10},
+      "cell": {
+        "x": 9,
+        "y": 10
+      },
       "visibility": "public",
-      "tags": ["hall"],
+      "tags": [
+        "hall"
+      ],
       "description": "A flagged hall with a grandfather clock, a long oak settle and a staircase that creaks on the fourth step. The butler's pantry opens off it."
     },
     {
@@ -199,9 +401,14 @@
       "name": "The Library",
       "parent": "harrowmere_hall",
       "sceneType": "investigation",
-      "cell": {"x": 3, "y": 3},
+      "cell": {
+        "x": 3,
+        "y": 3
+      },
       "visibility": "public",
-      "tags": ["room"],
+      "tags": [
+        "room"
+      ],
       "description": "Walls of leather spines, a worn Turkey carpet, a tray of decanters and a deep fireplace. The mantel is carved with a date in Roman numerals. A door in the east wall leads to the study."
     },
     {
@@ -209,9 +416,14 @@
       "name": "Sir Alaric's Study",
       "parent": "harrowmere_hall",
       "sceneType": "investigation",
-      "cell": {"x": 9, "y": 3},
+      "cell": {
+        "x": 9,
+        "y": 3
+      },
       "visibility": "public",
-      "tags": ["room"],
+      "tags": [
+        "room"
+      ],
       "description": "A small, orderly room with a roll-top desk, a portrait of Sir Alaric's father and a framed estate map. A typewriter sits under a cover on a side table."
     },
     {
@@ -219,9 +431,14 @@
       "name": "The Drawing Room",
       "parent": "harrowmere_hall",
       "sceneType": "conversation",
-      "cell": {"x": 15, "y": 3},
+      "cell": {
+        "x": 15,
+        "y": 3
+      },
       "visibility": "public",
-      "tags": ["room"],
+      "tags": [
+        "room"
+      ],
       "description": "Chintz sofas, a baby grand nobody plays and a tall window onto the drive. After dinner the household gathers here for coffee."
     },
     {
@@ -229,9 +446,14 @@
       "name": "The Dining Room",
       "parent": "harrowmere_hall",
       "sceneType": "conversation",
-      "cell": {"x": 3, "y": 10},
+      "cell": {
+        "x": 3,
+        "y": 10
+      },
       "visibility": "public",
-      "tags": ["room"],
+      "tags": [
+        "room"
+      ],
       "description": "A long mahogany table under a dim chandelier, with twelve chairs and a sideboard that is polished every morning whether or not anyone eats."
     },
     {
@@ -239,9 +461,14 @@
       "name": "The Kitchen",
       "parent": "harrowmere_hall",
       "sceneType": "downtime",
-      "cell": {"x": 15, "y": 10},
+      "cell": {
+        "x": 15,
+        "y": 10
+      },
       "visibility": "public",
-      "tags": ["service"],
+      "tags": [
+        "service"
+      ],
       "description": "A flagged kitchen with a vast range, copper pans and a scrubbed table where the staff take their meals. A door leads to the yard and another to the cellar steps."
     },
     {
@@ -249,9 +476,14 @@
       "name": "The Conservatory",
       "parent": "harrowmere_hall",
       "sceneType": "downtime",
-      "cell": {"x": 20, "y": 3},
+      "cell": {
+        "x": 20,
+        "y": 3
+      },
       "visibility": "public",
-      "tags": ["room"],
+      "tags": [
+        "room"
+      ],
       "description": "A glass-and-iron room of potted palms and wicker chairs. A garden door opens onto a gravel path to the boathouse."
     },
     {
@@ -260,7 +492,9 @@
       "parent": "harrowmere_hall",
       "sceneType": "downtime",
       "visibility": "public",
-      "tags": ["bedrooms"],
+      "tags": [
+        "bedrooms"
+      ],
       "description": "A long first-floor corridor with doors to the family and guest bedrooms. Floorboards creak, and a light under a door can be seen from the stairs."
     },
     {
@@ -269,7 +503,9 @@
       "parent": "harrowmere_hall",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["cellar"],
+      "tags": [
+        "cellar"
+      ],
       "description": "A cool vaulted cellar of wine racks, coal and trunks. The house's main fuse board is bolted to the wall by the steps."
     },
     {
@@ -278,7 +514,9 @@
       "parent": "harrowmere_estate",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["water"],
+      "tags": [
+        "water"
+      ],
       "description": "A tarred wooden shed on the edge of the mere with a slipway, a stack of nets and a flat-bottomed punt. A damp path through the reeds leads up to the conservatory."
     }
   ],
@@ -288,77 +526,133 @@
       "from": "harrowmere_hall",
       "to": "entrance_hall",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.03}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.03
+        }
+      }
     },
     {
       "id": "rt_entrance_library",
       "from": "entrance_hall",
       "to": "library",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.03}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.03
+        }
+      }
     },
     {
       "id": "rt_entrance_study",
       "from": "entrance_hall",
       "to": "study",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.03}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.03
+        }
+      }
     },
     {
       "id": "rt_entrance_drawing",
       "from": "entrance_hall",
       "to": "drawing_room",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.04}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.04
+        }
+      }
     },
     {
       "id": "rt_entrance_dining",
       "from": "entrance_hall",
       "to": "dining_room",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.03}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.03
+        }
+      }
     },
     {
       "id": "rt_entrance_kitchen",
       "from": "entrance_hall",
       "to": "kitchen",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.04}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.04
+        }
+      }
     },
     {
       "id": "rt_library_study",
       "from": "library",
       "to": "study",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.03}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.03
+        }
+      }
     },
     {
       "id": "rt_drawing_conservatory",
       "from": "drawing_room",
       "to": "conservatory",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.03}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.03
+        }
+      }
     },
     {
       "id": "rt_entrance_upper",
       "from": "entrance_hall",
       "to": "upper_floor",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.03}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.03
+        }
+      }
     },
     {
       "id": "rt_kitchen_cellar",
       "from": "kitchen",
       "to": "cellar",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.03}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.03
+        }
+      }
     },
     {
       "id": "rt_conservatory_boathouse",
       "from": "conservatory",
       "to": "boathouse",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 9, "distanceKm": 0.45, "terrain": "reed path"}}
+      "modes": {
+        "walk": {
+          "minutes": 9,
+          "distanceKm": 0.45,
+          "terrain": "reed path"
+        }
+      }
     },
     {
       "id": "rt_hall_gatehouse",
@@ -366,8 +660,16 @@
       "to": "gatehouse",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 14, "distanceKm": 1.1, "terrain": "gravel drive"},
-        "road": {"minutes": 3, "distanceKm": 1.1, "terrain": "gravel drive"}
+        "walk": {
+          "minutes": 14,
+          "distanceKm": 1.1,
+          "terrain": "gravel drive"
+        },
+        "road": {
+          "minutes": 3,
+          "distanceKm": 1.1,
+          "terrain": "gravel drive"
+        }
       }
     },
     {
@@ -376,8 +678,16 @@
       "to": "mere_causeway",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 5, "distanceKm": 0.4, "terrain": "gravel"},
-        "road": {"minutes": 1, "distanceKm": 0.4, "terrain": "gravel"}
+        "walk": {
+          "minutes": 5,
+          "distanceKm": 0.4,
+          "terrain": "gravel"
+        },
+        "road": {
+          "minutes": 1,
+          "distanceKm": 0.4,
+          "terrain": "gravel"
+        }
       }
     },
     {
@@ -386,8 +696,16 @@
       "to": "saltreach",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 33, "distanceKm": 3.0, "terrain": "causeway"},
-        "road": {"minutes": 7, "distanceKm": 3.0, "terrain": "causeway"}
+        "walk": {
+          "minutes": 33,
+          "distanceKm": 3.0,
+          "terrain": "causeway"
+        },
+        "road": {
+          "minutes": 7,
+          "distanceKm": 3.0,
+          "terrain": "causeway"
+        }
       }
     },
     {
@@ -395,7 +713,13 @@
       "from": "boathouse",
       "to": "saltreach",
       "bidirectional": true,
-      "modes": {"water": {"minutes": 55, "distanceKm": 3.5, "terrain": "flooded marsh by punt"}}
+      "modes": {
+        "water": {
+          "minutes": 55,
+          "distanceKm": 3.5,
+          "terrain": "flooded marsh by punt"
+        }
+      }
     }
   ],
   "grids": [
@@ -406,16 +730,37 @@
       "height": 13,
       "cellMeters": 2,
       "legend": {
-        "#": {"terrain": "wall", "blocked": true},
-        "f": {"terrain": "wood floor"},
-        "h": {"terrain": "stone flags"},
-        "k": {"terrain": "flagstones"},
-        "t": {"terrain": "tile"},
-        "g": {"terrain": "gravel"},
-        "D": {"terrain": "doorway"},
-        "F": {"terrain": "front door"},
-        "G": {"terrain": "garden door"},
-        "s": {"terrain": "cellar steps"}
+        "#": {
+          "terrain": "wall",
+          "blocked": true
+        },
+        "f": {
+          "terrain": "wood floor"
+        },
+        "h": {
+          "terrain": "stone flags"
+        },
+        "k": {
+          "terrain": "flagstones"
+        },
+        "t": {
+          "terrain": "tile"
+        },
+        "g": {
+          "terrain": "gravel"
+        },
+        "D": {
+          "terrain": "doorway"
+        },
+        "F": {
+          "terrain": "front door"
+        },
+        "G": {
+          "terrain": "garden door"
+        },
+        "s": {
+          "terrain": "cellar steps"
+        }
       },
       "rows": [
         "#######################",
@@ -433,23 +778,137 @@
         "#########FF############"
       ],
       "zones": {
-        "library": [[1, 1, 6, 4]],
-        "study": [[8, 1, 4, 4]],
-        "drawing_room": [[13, 1, 5, 4]],
-        "conservatory": [[19, 1, 3, 6]],
-        "passage": [[1, 6, 17, 2]],
-        "dining_room": [[1, 9, 6, 3]],
-        "entrance_hall": [[8, 9, 4, 3]],
-        "kitchen": [[13, 9, 5, 3]],
-        "service_yard": [[19, 8, 3, 4]],
-        "cellar_stairs": [[17, 11, 1, 1]],
-        "garden_door": [[22, 3, 1, 1]],
-        "front_door": [[9, 12, 2, 1]],
-        "library_hearth": [[1, 1, 2, 2]],
-        "study_safe": [[11, 1, 1, 1]],
-        "drawing_room_window": [[14, 1, 3, 1]]
+        "library": [
+          [
+            1,
+            1,
+            6,
+            4
+          ]
+        ],
+        "study": [
+          [
+            8,
+            1,
+            4,
+            4
+          ]
+        ],
+        "drawing_room": [
+          [
+            13,
+            1,
+            5,
+            4
+          ]
+        ],
+        "conservatory": [
+          [
+            19,
+            1,
+            3,
+            6
+          ]
+        ],
+        "passage": [
+          [
+            1,
+            6,
+            17,
+            2
+          ]
+        ],
+        "dining_room": [
+          [
+            1,
+            9,
+            6,
+            3
+          ]
+        ],
+        "entrance_hall": [
+          [
+            8,
+            9,
+            4,
+            3
+          ]
+        ],
+        "kitchen": [
+          [
+            13,
+            9,
+            5,
+            3
+          ]
+        ],
+        "service_yard": [
+          [
+            19,
+            8,
+            3,
+            4
+          ]
+        ],
+        "cellar_stairs": [
+          [
+            17,
+            11,
+            1,
+            1
+          ]
+        ],
+        "garden_door": [
+          [
+            22,
+            3,
+            1,
+            1
+          ]
+        ],
+        "front_door": [
+          [
+            9,
+            12,
+            2,
+            1
+          ]
+        ],
+        "library_hearth": [
+          [
+            1,
+            1,
+            2,
+            2
+          ]
+        ],
+        "study_safe": [
+          [
+            11,
+            1,
+            1,
+            1
+          ]
+        ],
+        "drawing_room_window": [
+          [
+            14,
+            1,
+            3,
+            1
+          ]
+        ]
       },
-      "exits": {"gatehouse": [9, 12], "boathouse": [22, 3]}
+      "exits": {
+        "gatehouse": [
+          9,
+          12
+        ],
+        "boathouse": [
+          22,
+          3
+        ]
+      }
     }
   ],
   "characters": [
@@ -462,10 +921,19 @@
       "age": 35,
       "role": "Antiquarian valuer invited to appraise part of the Thorne collection",
       "summary": "You were asked to value a handful of pieces before the autumn sale, and you accepted because Sir Alaric's collection is one of the best private ones in the Fens. You notice things for a living.",
-      "traits": ["observant", "polite", "inquisitive"],
+      "traits": [
+        "observant",
+        "polite",
+        "inquisitive"
+      ],
       "home": "upper_floor",
       "location": "entrance_hall",
-      "sheet": {"observation": 7, "manner": 6, "nerve": 5, "knowledge": 7},
+      "sheet": {
+        "observation": 7,
+        "manner": 6,
+        "nerve": 5,
+        "knowledge": 7
+      },
       "schedule": [],
       "regard": [],
       "wealth": "comfortable"
@@ -479,31 +947,145 @@
       "age": 62,
       "role": "Master of Harrowmere; collector",
       "summary": "A big, courteous man with a heart condition he refuses to discuss. He collects clocks, maps and quarrels in about equal measure, and has the gift of making every guest feel they are his favourite.",
-      "traits": ["genial", "stubborn", "proud"],
+      "traits": [
+        "genial",
+        "stubborn",
+        "proud"
+      ],
       "home": "upper_floor",
-      "sheet": {"observation": 6, "manner": 8, "nerve": 6, "knowledge": 8},
+      "sheet": {
+        "observation": 6,
+        "manner": 8,
+        "nerve": 6,
+        "knowledge": 8
+      },
       "schedule": [
-        {"days": ["Friday"], "start": "16:30", "end": "18:30", "place": "library", "activity": "among his collection", "term": {"from": "1934-10-26", "until": "1934-10-26"}},
-        {"days": ["Friday"], "start": "18:30", "end": "19:30", "place": "upper_floor", "activity": "dressing for dinner", "term": {"from": "1934-10-26", "until": "1934-10-26"}},
-        {"days": ["Friday"], "start": "19:30", "end": "21:30", "place": "dining_room", "activity": "presiding at dinner", "term": {"from": "1934-10-26", "until": "1934-10-26"}},
-        {"days": ["Friday"], "start": "21:30", "end": "23:40", "place": "library", "activity": "brandy and papers", "term": {"from": "1934-10-26", "until": "1934-10-26"}}
+        {
+          "days": [
+            "Friday"
+          ],
+          "start": "16:30",
+          "end": "18:30",
+          "place": "library",
+          "activity": "among his collection",
+          "term": {
+            "from": "1934-10-26",
+            "until": "1934-10-26"
+          }
+        },
+        {
+          "days": [
+            "Friday"
+          ],
+          "start": "18:30",
+          "end": "19:30",
+          "place": "upper_floor",
+          "activity": "dressing for dinner",
+          "term": {
+            "from": "1934-10-26",
+            "until": "1934-10-26"
+          }
+        },
+        {
+          "days": [
+            "Friday"
+          ],
+          "start": "19:30",
+          "end": "21:30",
+          "place": "dining_room",
+          "activity": "presiding at dinner",
+          "term": {
+            "from": "1934-10-26",
+            "until": "1934-10-26"
+          }
+        },
+        {
+          "days": [
+            "Friday"
+          ],
+          "start": "21:30",
+          "end": "23:40",
+          "place": "library",
+          "activity": "brandy and papers",
+          "term": {
+            "from": "1934-10-26",
+            "until": "1934-10-26"
+          }
+        }
       ],
       "regard": [
-        {"toward": "lady_honoria", "axes": {"warmth": 55, "trust": 60, "respect": 50, "fear": 0}},
+        {
+          "toward": "lady_honoria",
+          "axes": {
+            "warmth": 55,
+            "trust": 60,
+            "respect": 50,
+            "fear": 0
+          }
+        },
         {
           "toward": "rupert_thorne",
-          "axes": {"warmth": 10, "trust": -15, "respect": 20, "fear": 0},
+          "axes": {
+            "warmth": 10,
+            "trust": -15,
+            "respect": 20,
+            "fear": 0
+          },
           "note": "Furious about the debts."
         },
-        {"toward": "verity_lorne", "axes": {"warmth": 45, "trust": 65, "respect": 60, "fear": 0}},
-        {"toward": "julian_ashcombe", "axes": {"warmth": 40, "trust": 40, "respect": 45, "fear": 0}},
-        {"toward": "dr_lionel_farrant", "axes": {"warmth": 45, "trust": 50, "respect": 55, "fear": 0}},
-        {"toward": "gideon_pell", "axes": {"warmth": 50, "trust": 70, "respect": 60, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 20, "trust": 20, "respect": 30, "fear": 0}}
+        {
+          "toward": "verity_lorne",
+          "axes": {
+            "warmth": 45,
+            "trust": 65,
+            "respect": 60,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "julian_ashcombe",
+          "axes": {
+            "warmth": 40,
+            "trust": 40,
+            "respect": 45,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "dr_lionel_farrant",
+          "axes": {
+            "warmth": 45,
+            "trust": 50,
+            "respect": 55,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "gideon_pell",
+          "axes": {
+            "warmth": 50,
+            "trust": 70,
+            "respect": 60,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 20,
+            "trust": 20,
+            "respect": 30,
+            "fear": 0
+          }
+        }
       ],
       "goals": {
         "label": "Show off the collection and settle family business at breakfast",
-        "steps": ["Receive the valuer and show the clocks", "Host dinner", "Speak privately with someone after breakfast"]
+        "steps": [
+          "Receive the valuer and show the clocks",
+          "Host dinner",
+          "Speak privately with someone after breakfast"
+        ]
       },
       "wealth": "wealthy"
     },
@@ -516,55 +1098,90 @@
       "age": 58,
       "role": "Sir Alaric's wife",
       "summary": "Composed, quick and fond of crossword puzzles and cold tea. She runs the household in all but name and has long since learned which of her husband's disputes to ignore.",
-      "traits": ["composed", "dry", "protective"],
+      "traits": [
+        "composed",
+        "dry",
+        "protective"
+      ],
       "home": "upper_floor",
-      "sheet": {"observation": 7, "manner": 8, "nerve": 7, "knowledge": 6},
+      "sheet": {
+        "observation": 7,
+        "manner": 8,
+        "nerve": 7,
+        "knowledge": 6
+      },
       "schedule": [
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
           "start": "16:00",
           "end": "18:00",
           "place": "drawing_room",
           "activity": "receiving guests"
         },
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
           "start": "18:00",
           "end": "19:15",
           "place": "upper_floor",
           "activity": "dressing for dinner"
         },
-        {"days": ["Friday"], "start": "19:30", "end": "21:30", "place": "dining_room", "activity": "dinner"},
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
+          "start": "19:30",
+          "end": "21:30",
+          "place": "dining_room",
+          "activity": "dinner"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
           "start": "21:30",
           "end": "23:00",
           "place": "drawing_room",
           "activity": "coffee with the guests"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "08:30",
           "end": "09:30",
           "place": "dining_room",
           "activity": "breakfast"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "10:00",
           "end": "12:00",
           "place": "drawing_room",
           "activity": "writing letters"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "12:30",
           "end": "14:00",
           "place": "dining_room",
           "activity": "luncheon"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "15:00",
           "end": "18:00",
           "place": "drawing_room",
@@ -572,20 +1189,69 @@
         }
       ],
       "regard": [
-        {"toward": "sir_alaric", "axes": {"warmth": 55, "trust": 60, "respect": 50, "fear": 0}},
+        {
+          "toward": "sir_alaric",
+          "axes": {
+            "warmth": 55,
+            "trust": 60,
+            "respect": 50,
+            "fear": 0
+          }
+        },
         {
           "toward": "rupert_thorne",
-          "axes": {"warmth": 40, "trust": 25, "respect": 20, "fear": 0},
+          "axes": {
+            "warmth": 40,
+            "trust": 25,
+            "respect": 20,
+            "fear": 0
+          },
           "note": "Cannot quite give up on him."
         },
-        {"toward": "verity_lorne", "axes": {"warmth": 35, "trust": 50, "respect": 45, "fear": 0}},
-        {"toward": "julian_ashcombe", "axes": {"warmth": 30, "trust": 55, "respect": 55, "fear": 0}},
-        {"toward": "gideon_pell", "axes": {"warmth": 45, "trust": 70, "respect": 60, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 15, "trust": 10, "respect": 15, "fear": 0}}
+        {
+          "toward": "verity_lorne",
+          "axes": {
+            "warmth": 35,
+            "trust": 50,
+            "respect": 45,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "julian_ashcombe",
+          "axes": {
+            "warmth": 30,
+            "trust": 55,
+            "respect": 55,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "gideon_pell",
+          "axes": {
+            "warmth": 45,
+            "trust": 70,
+            "respect": 60,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 15,
+            "trust": 10,
+            "respect": 15,
+            "fear": 0
+          }
+        }
       ],
       "goals": {
         "label": "Hold the household together through the weekend",
-        "steps": ["Welcome the guests", "Keep Rupert and Alaric apart at dinner", "Persuade Alaric to rest"]
+        "steps": [
+          "Welcome the guests",
+          "Keep Rupert and Alaric apart at dinner",
+          "Persuade Alaric to rest"
+        ]
       },
       "wealth": "wealthy"
     },
@@ -598,49 +1264,81 @@
       "age": 34,
       "role": "Sir Alaric's nephew and heir",
       "summary": "Charming, restless and always somewhere else in his head. He served with distinction, drinks a little too much, and owes money in more than one town.",
-      "traits": ["charming", "restless", "evasive"],
+      "traits": [
+        "charming",
+        "restless",
+        "evasive"
+      ],
       "home": "upper_floor",
       "agenda": "a_rupert_thorne",
-      "sheet": {"observation": 5, "manner": 7, "nerve": 6, "knowledge": 4},
+      "sheet": {
+        "observation": 5,
+        "manner": 7,
+        "nerve": 6,
+        "knowledge": 4
+      },
       "schedule": [
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
           "start": "17:00",
           "end": "19:00",
           "place": "library",
           "activity": "lounging with a magazine and a drink"
         },
-        {"days": ["Friday"], "start": "19:30", "end": "21:30", "place": "dining_room", "activity": "dinner"},
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
+          "start": "19:30",
+          "end": "21:30",
+          "place": "dining_room",
+          "activity": "dinner"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
           "start": "21:30",
           "end": "22:45",
           "place": "drawing_room",
           "activity": "coffee and restless pacing"
         },
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
           "start": "22:45",
           "end": "23:45",
           "place": "boathouse",
           "activity": "a conversation he does not mention"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "09:00",
           "end": "10:00",
           "place": "dining_room",
           "activity": "a late breakfast"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "10:00",
           "end": "13:00",
           "place": "conservatory",
           "activity": "smoking and brooding"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "14:00",
           "end": "17:00",
           "place": "library",
@@ -648,12 +1346,60 @@
         }
       ],
       "regard": [
-        {"toward": "sir_alaric", "axes": {"warmth": 20, "trust": 5, "respect": 25, "fear": 15}},
-        {"toward": "lady_honoria", "axes": {"warmth": 45, "trust": 35, "respect": 30, "fear": 0}},
-        {"toward": "verity_lorne", "axes": {"warmth": 25, "trust": 20, "respect": 20, "fear": 0}},
-        {"toward": "julian_ashcombe", "axes": {"warmth": 30, "trust": 25, "respect": 25, "fear": 0}},
-        {"toward": "dr_lionel_farrant", "axes": {"warmth": 20, "trust": 20, "respect": 25, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 5, "trust": 0, "respect": 5, "fear": 0}}
+        {
+          "toward": "sir_alaric",
+          "axes": {
+            "warmth": 20,
+            "trust": 5,
+            "respect": 25,
+            "fear": 15
+          }
+        },
+        {
+          "toward": "lady_honoria",
+          "axes": {
+            "warmth": 45,
+            "trust": 35,
+            "respect": 30,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "verity_lorne",
+          "axes": {
+            "warmth": 25,
+            "trust": 20,
+            "respect": 20,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "julian_ashcombe",
+          "axes": {
+            "warmth": 30,
+            "trust": 25,
+            "respect": 25,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "dr_lionel_farrant",
+          "axes": {
+            "warmth": 20,
+            "trust": 20,
+            "respect": 25,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 5,
+            "trust": 0,
+            "respect": 5,
+            "fear": 0
+          }
+        }
       ],
       "wealth": "poor"
     },
@@ -666,36 +1412,72 @@
       "age": 29,
       "role": "Sir Alaric's private secretary",
       "summary": "Quiet, exact and easy to overlook, which she uses. She types faster than she speaks and knows where every paper in the house is kept.",
-      "traits": ["exact", "reserved", "brave when pushed"],
+      "traits": [
+        "exact",
+        "reserved",
+        "brave when pushed"
+      ],
       "home": "upper_floor",
       "agenda": "a_verity_lorne",
-      "sheet": {"observation": 8, "manner": 5, "nerve": 6, "knowledge": 7},
+      "sheet": {
+        "observation": 8,
+        "manner": 5,
+        "nerve": 6,
+        "knowledge": 7
+      },
       "schedule": [
-        {"days": ["Friday"], "start": "16:30", "end": "18:00", "place": "study", "activity": "indexing papers"},
-        {"days": ["Friday"], "start": "19:30", "end": "21:30", "place": "dining_room", "activity": "dinner"},
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
+          "start": "16:30",
+          "end": "18:00",
+          "place": "study",
+          "activity": "indexing papers"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
+          "start": "19:30",
+          "end": "21:30",
+          "place": "dining_room",
+          "activity": "dinner"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
           "start": "21:30",
           "end": "22:40",
           "place": "study",
           "activity": "gathering papers into a folder"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "08:00",
           "end": "09:00",
           "place": "dining_room",
           "activity": "breakfast"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "09:30",
           "end": "12:00",
           "place": "study",
           "activity": "correspondence and indexing"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "14:00",
           "end": "17:00",
           "place": "drawing_room",
@@ -703,16 +1485,61 @@
         }
       ],
       "regard": [
-        {"toward": "sir_alaric", "axes": {"warmth": 45, "trust": 65, "respect": 60, "fear": 0}},
-        {"toward": "lady_honoria", "axes": {"warmth": 35, "trust": 50, "respect": 45, "fear": 0}},
-        {"toward": "rupert_thorne", "axes": {"warmth": 20, "trust": 10, "respect": 15, "fear": 0}},
+        {
+          "toward": "sir_alaric",
+          "axes": {
+            "warmth": 45,
+            "trust": 65,
+            "respect": 60,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "lady_honoria",
+          "axes": {
+            "warmth": 35,
+            "trust": 50,
+            "respect": 45,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "rupert_thorne",
+          "axes": {
+            "warmth": 20,
+            "trust": 10,
+            "respect": 15,
+            "fear": 0
+          }
+        },
         {
           "toward": "julian_ashcombe",
-          "axes": {"warmth": 5, "trust": -25, "respect": 25, "fear": 30},
+          "axes": {
+            "warmth": 5,
+            "trust": -25,
+            "respect": 25,
+            "fear": 30
+          },
           "note": "Afraid of him and not sure why she should be."
         },
-        {"toward": "gideon_pell", "axes": {"warmth": 30, "trust": 45, "respect": 40, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 10, "trust": 10, "respect": 15, "fear": 0}}
+        {
+          "toward": "gideon_pell",
+          "axes": {
+            "warmth": 30,
+            "trust": 45,
+            "respect": 40,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 10,
+            "trust": 10,
+            "respect": 15,
+            "fear": 0
+          }
+        }
       ],
       "wealth": "modest"
     },
@@ -725,49 +1552,81 @@
       "age": 51,
       "role": "Family solicitor and trustee",
       "summary": "Urbane, silver-haired and fond of telling stories at his own expense. He has handled the Thornes' affairs for twenty years and is everyone's idea of a safe pair of hands.",
-      "traits": ["urbane", "obliging", "controlled"],
+      "traits": [
+        "urbane",
+        "obliging",
+        "controlled"
+      ],
       "home": "upper_floor",
       "agenda": "a_julian_ashcombe",
-      "sheet": {"observation": 6, "manner": 9, "nerve": 8, "knowledge": 8},
+      "sheet": {
+        "observation": 6,
+        "manner": 9,
+        "nerve": 8,
+        "knowledge": 8
+      },
       "schedule": [
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
           "start": "16:30",
           "end": "18:30",
           "place": "drawing_room",
           "activity": "tea and legal gossip"
         },
-        {"days": ["Friday"], "start": "19:30", "end": "21:30", "place": "dining_room", "activity": "dinner"},
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
+          "start": "19:30",
+          "end": "21:30",
+          "place": "dining_room",
+          "activity": "dinner"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
           "start": "21:30",
           "end": "22:50",
           "place": "drawing_room",
           "activity": "coffee and conversation"
         },
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
           "start": "22:50",
           "end": "23:00",
           "place": "kitchen",
           "activity": "stepping out for a few minutes"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "08:30",
           "end": "09:30",
           "place": "dining_room",
           "activity": "breakfast"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "10:00",
           "end": "12:00",
           "place": "drawing_room",
           "activity": "reading the papers"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "14:00",
           "end": "17:00",
           "place": "library",
@@ -775,12 +1634,60 @@
         }
       ],
       "regard": [
-        {"toward": "sir_alaric", "axes": {"warmth": 35, "trust": 30, "respect": 40, "fear": 0}},
-        {"toward": "lady_honoria", "axes": {"warmth": 50, "trust": 60, "respect": 55, "fear": 0}},
-        {"toward": "rupert_thorne", "axes": {"warmth": 25, "trust": 20, "respect": 20, "fear": 0}},
-        {"toward": "verity_lorne", "axes": {"warmth": 25, "trust": 15, "respect": 20, "fear": 0}},
-        {"toward": "dr_lionel_farrant", "axes": {"warmth": 30, "trust": 30, "respect": 40, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 20, "trust": 15, "respect": 25, "fear": 0}}
+        {
+          "toward": "sir_alaric",
+          "axes": {
+            "warmth": 35,
+            "trust": 30,
+            "respect": 40,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "lady_honoria",
+          "axes": {
+            "warmth": 50,
+            "trust": 60,
+            "respect": 55,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "rupert_thorne",
+          "axes": {
+            "warmth": 25,
+            "trust": 20,
+            "respect": 20,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "verity_lorne",
+          "axes": {
+            "warmth": 25,
+            "trust": 15,
+            "respect": 20,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "dr_lionel_farrant",
+          "axes": {
+            "warmth": 30,
+            "trust": 30,
+            "respect": 40,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 20,
+            "trust": 15,
+            "respect": 25,
+            "fear": 0
+          }
+        }
       ],
       "wealth": "comfortable"
     },
@@ -793,34 +1700,61 @@
       "age": 48,
       "role": "Family physician",
       "summary": "A brisk, kind man with large hands and a habit of patting his pockets. He has treated Sir Alaric's heart for eight years and is more worried about it than he lets on.",
-      "traits": ["brisk", "kind", "fretful"],
+      "traits": [
+        "brisk",
+        "kind",
+        "fretful"
+      ],
       "home": "upper_floor",
-      "sheet": {"observation": 7, "manner": 6, "nerve": 5, "knowledge": 8},
+      "sheet": {
+        "observation": 7,
+        "manner": 6,
+        "nerve": 5,
+        "knowledge": 8
+      },
       "schedule": [
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
           "start": "17:00",
           "end": "19:00",
           "place": "drawing_room",
           "activity": "tea and talk, bag set down by the sofa"
         },
-        {"days": ["Friday"], "start": "19:30", "end": "21:30", "place": "dining_room", "activity": "dinner"},
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
+          "start": "19:30",
+          "end": "21:30",
+          "place": "dining_room",
+          "activity": "dinner"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
           "start": "21:30",
           "end": "23:00",
           "place": "drawing_room",
           "activity": "coffee and a quiet word with Lady Honoria"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "08:30",
           "end": "09:30",
           "place": "dining_room",
           "activity": "breakfast"
         },
         {
-          "days": ["Saturday", "Sunday"],
+          "days": [
+            "Saturday",
+            "Sunday"
+          ],
           "start": "10:00",
           "end": "12:00",
           "place": "drawing_room",
@@ -828,11 +1762,51 @@
         }
       ],
       "regard": [
-        {"toward": "sir_alaric", "axes": {"warmth": 45, "trust": 50, "respect": 55, "fear": 0}},
-        {"toward": "lady_honoria", "axes": {"warmth": 40, "trust": 50, "respect": 45, "fear": 0}},
-        {"toward": "julian_ashcombe", "axes": {"warmth": 30, "trust": 30, "respect": 35, "fear": 0}},
-        {"toward": "rupert_thorne", "axes": {"warmth": 25, "trust": 20, "respect": 25, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 15, "trust": 10, "respect": 15, "fear": 0}}
+        {
+          "toward": "sir_alaric",
+          "axes": {
+            "warmth": 45,
+            "trust": 50,
+            "respect": 55,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "lady_honoria",
+          "axes": {
+            "warmth": 40,
+            "trust": 50,
+            "respect": 45,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "julian_ashcombe",
+          "axes": {
+            "warmth": 30,
+            "trust": 30,
+            "respect": 35,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "rupert_thorne",
+          "axes": {
+            "warmth": 25,
+            "trust": 20,
+            "respect": 25,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 15,
+            "trust": 10,
+            "respect": 15,
+            "fear": 0
+          }
+        }
       ],
       "goals": {
         "label": "Get Sir Alaric to rest and take his drops on time",
@@ -853,62 +1827,135 @@
       "age": 55,
       "role": "Butler",
       "summary": "Tall, grave and perfectly silent on the stairs. He has served the Thornes for thirty years and measures his own worth by how little anyone ever notices him.",
-      "traits": ["grave", "loyal", "discreet"],
+      "traits": [
+        "grave",
+        "loyal",
+        "discreet"
+      ],
       "home": "entrance_hall",
       "agenda": "a_gideon_pell",
-      "sheet": {"observation": 8, "manner": 8, "nerve": 6, "knowledge": 6},
+      "sheet": {
+        "observation": 8,
+        "manner": 8,
+        "nerve": 6,
+        "knowledge": 6
+      },
       "schedule": [
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "06:00",
           "end": "07:30",
           "place": "entrance_hall",
           "activity": "opening the house and lighting fires"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "07:30",
           "end": "09:30",
           "place": "dining_room",
           "activity": "serving breakfast"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "09:30",
           "end": "12:00",
           "place": "entrance_hall",
           "activity": "household accounts and the post"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "12:30",
           "end": "14:00",
           "place": "dining_room",
           "activity": "serving luncheon"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "14:00",
           "end": "17:00",
           "place": "kitchen",
           "activity": "polishing the silver"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "17:30",
           "end": "19:30",
           "place": "dining_room",
           "activity": "laying dinner"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "19:30",
           "end": "22:30",
           "place": "dining_room",
           "activity": "serving dinner and coffee"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "22:30",
           "end": "23:30",
           "place": "entrance_hall",
@@ -916,12 +1963,60 @@
         }
       ],
       "regard": [
-        {"toward": "sir_alaric", "axes": {"warmth": 50, "trust": 70, "respect": 60, "fear": 0}},
-        {"toward": "lady_honoria", "axes": {"warmth": 45, "trust": 70, "respect": 60, "fear": 0}},
-        {"toward": "rupert_thorne", "axes": {"warmth": 20, "trust": 10, "respect": 20, "fear": 0}},
-        {"toward": "mrs_marsh", "axes": {"warmth": 40, "trust": 55, "respect": 45, "fear": 0}},
-        {"toward": "nell_sparrow", "axes": {"warmth": 30, "trust": 40, "respect": 25, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 10, "trust": 10, "respect": 15, "fear": 0}}
+        {
+          "toward": "sir_alaric",
+          "axes": {
+            "warmth": 50,
+            "trust": 70,
+            "respect": 60,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "lady_honoria",
+          "axes": {
+            "warmth": 45,
+            "trust": 70,
+            "respect": 60,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "rupert_thorne",
+          "axes": {
+            "warmth": 20,
+            "trust": 10,
+            "respect": 20,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "mrs_marsh",
+          "axes": {
+            "warmth": 40,
+            "trust": 55,
+            "respect": 45,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "nell_sparrow",
+          "axes": {
+            "warmth": 30,
+            "trust": 40,
+            "respect": 25,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 10,
+            "trust": 10,
+            "respect": 15,
+            "fear": 0
+          }
+        }
       ],
       "wealth": "modest"
     },
@@ -934,26 +2029,59 @@
       "age": 50,
       "role": "Cook and housekeeper",
       "summary": "Square, rosy and entirely unflappable. She feeds the household, manages the maids and notices everything that passes through her kitchen. She dislikes gossip and will tell you anything if you are kind to her.",
-      "traits": ["unflappable", "observant", "loyal"],
+      "traits": [
+        "unflappable",
+        "observant",
+        "loyal"
+      ],
       "home": "kitchen",
-      "sheet": {"observation": 7, "manner": 6, "nerve": 8, "knowledge": 5},
+      "sheet": {
+        "observation": 7,
+        "manner": 6,
+        "nerve": 8,
+        "knowledge": 5
+      },
       "schedule": [
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "05:30",
           "end": "14:00",
           "place": "kitchen",
           "activity": "cooking and managing the house"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "14:00",
           "end": "15:00",
           "place": "kitchen",
           "activity": "tea at the kitchen table"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "15:00",
           "end": "21:30",
           "place": "kitchen",
@@ -961,15 +2089,59 @@
         }
       ],
       "regard": [
-        {"toward": "gideon_pell", "axes": {"warmth": 40, "trust": 55, "respect": 45, "fear": 0}},
-        {"toward": "nell_sparrow", "axes": {"warmth": 50, "trust": 50, "respect": 30, "fear": 0}},
-        {"toward": "sir_alaric", "axes": {"warmth": 40, "trust": 55, "respect": 50, "fear": 0}},
-        {"toward": "lady_honoria", "axes": {"warmth": 40, "trust": 60, "respect": 55, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 10, "trust": 10, "respect": 10, "fear": 0}}
+        {
+          "toward": "gideon_pell",
+          "axes": {
+            "warmth": 40,
+            "trust": 55,
+            "respect": 45,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "nell_sparrow",
+          "axes": {
+            "warmth": 50,
+            "trust": 50,
+            "respect": 30,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "sir_alaric",
+          "axes": {
+            "warmth": 40,
+            "trust": 55,
+            "respect": 50,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "lady_honoria",
+          "axes": {
+            "warmth": 40,
+            "trust": 60,
+            "respect": 55,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 10,
+            "trust": 10,
+            "respect": 10,
+            "fear": 0
+          }
+        }
       ],
       "goals": {
         "label": "Feed everyone through the storm",
-        "steps": ["Plan the Sunday joint", "Check the larder and the coal", "Keep the maids calm"]
+        "steps": [
+          "Plan the Sunday joint",
+          "Check the larder and the coal",
+          "Keep the maids calm"
+        ]
       },
       "wealth": "modest"
     },
@@ -982,47 +2154,104 @@
       "age": 19,
       "role": "Housemaid",
       "summary": "Quick, nervous and kind. She has worked at the Hall for two years, sees the whole house before anyone else is up, and is terrified of Mr. Pell.",
-      "traits": ["nervous", "kind", "quick"],
+      "traits": [
+        "nervous",
+        "kind",
+        "quick"
+      ],
       "home": "kitchen",
-      "sheet": {"observation": 7, "manner": 5, "nerve": 3, "knowledge": 3},
+      "sheet": {
+        "observation": 7,
+        "manner": 5,
+        "nerve": 3,
+        "knowledge": 3
+      },
       "schedule": [
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "06:00",
           "end": "07:00",
           "place": "upper_floor",
           "activity": "lighting bedroom fires"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "07:00",
           "end": "09:00",
           "place": "library",
           "activity": "laying the fire and dusting"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "09:00",
           "end": "12:00",
           "place": "upper_floor",
           "activity": "making beds"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "13:00",
           "end": "16:00",
           "place": "drawing_room",
           "activity": "dusting and polishing"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "16:00",
           "end": "19:00",
           "place": "kitchen",
           "activity": "helping Mrs. Marsh"
         },
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "19:30",
           "end": "22:00",
           "place": "dining_room",
@@ -1030,11 +2259,51 @@
         }
       ],
       "regard": [
-        {"toward": "mrs_marsh", "axes": {"warmth": 50, "trust": 50, "respect": 30, "fear": 0}},
-        {"toward": "gideon_pell", "axes": {"warmth": 15, "trust": 25, "respect": 35, "fear": 20}},
-        {"toward": "lady_honoria", "axes": {"warmth": 30, "trust": 40, "respect": 40, "fear": 0}},
-        {"toward": "verity_lorne", "axes": {"warmth": 30, "trust": 30, "respect": 20, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 10, "trust": 5, "respect": 10, "fear": 0}}
+        {
+          "toward": "mrs_marsh",
+          "axes": {
+            "warmth": 50,
+            "trust": 50,
+            "respect": 30,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "gideon_pell",
+          "axes": {
+            "warmth": 15,
+            "trust": 25,
+            "respect": 35,
+            "fear": 20
+          }
+        },
+        {
+          "toward": "lady_honoria",
+          "axes": {
+            "warmth": 30,
+            "trust": 40,
+            "respect": 40,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "verity_lorne",
+          "axes": {
+            "warmth": 30,
+            "trust": 30,
+            "respect": 20,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 10,
+            "trust": 5,
+            "respect": 10,
+            "fear": 0
+          }
+        }
       ],
       "goals": {
         "label": "Get through the weekend without Mr. Pell noticing her",
@@ -1055,11 +2324,22 @@
       "age": 42,
       "role": "Village constable of Saltreach",
       "summary": "A solid, patient man on a bicycle, with a notebook and a strong sense of what is and is not his business. He has never had a case bigger than a stolen pig.",
-      "traits": ["patient", "dogged"],
+      "traits": [
+        "patient",
+        "dogged"
+      ],
       "home": "saltreach",
       "schedule": [
         {
-          "days": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "06:00",
           "end": "22:00",
           "place": "saltreach",
@@ -1067,12 +2347,32 @@
         }
       ],
       "regard": [
-        {"toward": "sir_alaric", "axes": {"warmth": 20, "trust": 30, "respect": 40, "fear": 0}},
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 5, "fear": 0}}
+        {
+          "toward": "sir_alaric",
+          "axes": {
+            "warmth": 20,
+            "trust": 30,
+            "respect": 40,
+            "fear": 0
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 5,
+            "fear": 0
+          }
+        }
       ],
       "goals": {
         "label": "Keep Saltreach quiet",
-        "steps": ["Patrol the village", "Check the tide tables each morning", "Answer any call from the Hall"]
+        "steps": [
+          "Patrol the village",
+          "Check the tide tables each morning",
+          "Answer any call from the Hall"
+        ]
       },
       "wealth": "modest"
     }
@@ -1095,7 +2395,9 @@
       "owner": "pov",
       "in": "valuers_case",
       "weightG": 60,
-      "tags": ["inspection"]
+      "tags": [
+        "inspection"
+      ]
     },
     {
       "id": "notebook",
@@ -1112,7 +2414,9 @@
       "owner": "pov",
       "in": "valuers_case",
       "weightG": 280,
-      "tags": ["light"]
+      "tags": [
+        "light"
+      ]
     },
     {
       "id": "evidence_envelopes",
@@ -1339,16 +2643,126 @@
     }
   ],
   "gearItems": [
-    {"id": "matches_box", "name": "Box of safety matches", "category": "household", "weightG": 40, "volumeL": 0.06, "priceBand": {"min": 1, "typical": 1, "max": 2}},
-    {"id": "string_ball", "name": "Ball of kitchen string", "category": "household", "weightG": 120, "volumeL": 0.2, "priceBand": {"min": 2, "typical": 3, "max": 6}},
-    {"id": "scissors_kitchen", "name": "Kitchen scissors", "category": "household", "weightG": 150, "volumeL": 0.12, "priceBand": {"min": 12, "typical": 18, "max": 30}},
-    {"id": "mug_enamel", "name": "Enamel mug", "category": "household", "weightG": 180, "volumeL": 0.35, "priceBand": {"min": 4, "typical": 6, "max": 10}},
-    {"id": "plate_earthenware", "name": "Earthenware plate", "category": "household", "weightG": 400, "volumeL": 0.5, "priceBand": {"min": 3, "typical": 5, "max": 9}},
-    {"id": "skillet_iron", "name": "Iron frying pan", "category": "household", "weightG": 1400, "volumeL": 3.0, "priceBand": {"min": 18, "typical": 24, "max": 40}},
-    {"id": "bucket_galvanised", "name": "Galvanised bucket", "category": "household", "weightG": 900, "volumeL": 12.0, "priceBand": {"min": 12, "typical": 18, "max": 30}},
-    {"id": "broom_yard", "name": "Yard broom", "category": "household", "weightG": 800, "volumeL": 4.0, "priceBand": {"min": 9, "typical": 12, "max": 24}},
-    {"id": "tea_towel", "name": "Linen tea towel", "category": "household", "weightG": 90, "volumeL": 0.3, "priceBand": {"min": 4, "typical": 6, "max": 12}},
-    {"id": "boot_polish_tin", "name": "Tin of boot polish", "category": "household", "weightG": 110, "volumeL": 0.1, "priceBand": {"min": 3, "typical": 4, "max": 7}}
+    {
+      "id": "matches_box",
+      "name": "Box of safety matches",
+      "category": "household",
+      "weightG": 40,
+      "volumeL": 0.06,
+      "priceBand": {
+        "min": 1,
+        "typical": 1,
+        "max": 2
+      }
+    },
+    {
+      "id": "string_ball",
+      "name": "Ball of kitchen string",
+      "category": "household",
+      "weightG": 120,
+      "volumeL": 0.2,
+      "priceBand": {
+        "min": 2,
+        "typical": 3,
+        "max": 6
+      }
+    },
+    {
+      "id": "scissors_kitchen",
+      "name": "Kitchen scissors",
+      "category": "household",
+      "weightG": 150,
+      "volumeL": 0.12,
+      "priceBand": {
+        "min": 12,
+        "typical": 18,
+        "max": 30
+      }
+    },
+    {
+      "id": "mug_enamel",
+      "name": "Enamel mug",
+      "category": "household",
+      "weightG": 180,
+      "volumeL": 0.35,
+      "priceBand": {
+        "min": 4,
+        "typical": 6,
+        "max": 10
+      }
+    },
+    {
+      "id": "plate_earthenware",
+      "name": "Earthenware plate",
+      "category": "household",
+      "weightG": 400,
+      "volumeL": 0.5,
+      "priceBand": {
+        "min": 3,
+        "typical": 5,
+        "max": 9
+      }
+    },
+    {
+      "id": "skillet_iron",
+      "name": "Iron frying pan",
+      "category": "household",
+      "weightG": 1400,
+      "volumeL": 3.0,
+      "priceBand": {
+        "min": 18,
+        "typical": 24,
+        "max": 40
+      }
+    },
+    {
+      "id": "bucket_galvanised",
+      "name": "Galvanised bucket",
+      "category": "household",
+      "weightG": 900,
+      "volumeL": 12.0,
+      "priceBand": {
+        "min": 12,
+        "typical": 18,
+        "max": 30
+      }
+    },
+    {
+      "id": "broom_yard",
+      "name": "Yard broom",
+      "category": "household",
+      "weightG": 800,
+      "volumeL": 4.0,
+      "priceBand": {
+        "min": 9,
+        "typical": 12,
+        "max": 24
+      }
+    },
+    {
+      "id": "tea_towel",
+      "name": "Linen tea towel",
+      "category": "household",
+      "weightG": 90,
+      "volumeL": 0.3,
+      "priceBand": {
+        "min": 4,
+        "typical": 6,
+        "max": 12
+      }
+    },
+    {
+      "id": "boot_polish_tin",
+      "name": "Tin of boot polish",
+      "category": "household",
+      "weightG": 110,
+      "volumeL": 0.1,
+      "priceBand": {
+        "min": 3,
+        "typical": 4,
+        "max": 7
+      }
+    }
   ],
   "kits": [
     {
@@ -1358,17 +2772,50 @@
       "owner": "sir_alaric",
       "pieceCount": 18,
       "pieces": [
-        {"name": "pliers", "qty": 1},
-        {"name": "wire cutters", "qty": 1},
-        {"name": "insulating tape roll", "qty": 2},
-        {"name": "screwdriver", "qty": 2},
-        {"name": "clasp knife", "qty": 1},
-        {"name": "card of fuse wire", "qty": 1},
-        {"name": "spanner", "qty": 1},
-        {"name": "hammer", "qty": 1},
-        {"name": "terminal screw", "qty": 6},
-        {"name": "coil of copper wire", "qty": 1},
-        {"name": "oil can", "qty": 1}
+        {
+          "name": "pliers",
+          "qty": 1
+        },
+        {
+          "name": "wire cutters",
+          "qty": 1
+        },
+        {
+          "name": "insulating tape roll",
+          "qty": 2
+        },
+        {
+          "name": "screwdriver",
+          "qty": 2
+        },
+        {
+          "name": "clasp knife",
+          "qty": 1
+        },
+        {
+          "name": "card of fuse wire",
+          "qty": 1
+        },
+        {
+          "name": "spanner",
+          "qty": 1
+        },
+        {
+          "name": "hammer",
+          "qty": 1
+        },
+        {
+          "name": "terminal screw",
+          "qty": 6
+        },
+        {
+          "name": "coil of copper wire",
+          "qty": 1
+        },
+        {
+          "name": "oil can",
+          "qty": 1
+        }
       ],
       "overrides": []
     },
@@ -1379,15 +2826,41 @@
       "owner": "dr_lionel_farrant",
       "pieceCount": 17,
       "pieces": [
-        {"name": "stethoscope", "qty": 1},
-        {"name": "clinical thermometer", "qty": 1},
-        {"name": "bandage roll", "qty": 4},
-        {"name": "medicine bottle", "qty": 8},
-        {"name": "forceps", "qty": 1},
-        {"name": "syringe", "qty": 1},
-        {"name": "case notebook", "qty": 1}
+        {
+          "name": "stethoscope",
+          "qty": 1
+        },
+        {
+          "name": "clinical thermometer",
+          "qty": 1
+        },
+        {
+          "name": "bandage roll",
+          "qty": 4
+        },
+        {
+          "name": "medicine bottle",
+          "qty": 8
+        },
+        {
+          "name": "forceps",
+          "qty": 1
+        },
+        {
+          "name": "syringe",
+          "qty": 1
+        },
+        {
+          "name": "case notebook",
+          "qty": 1
+        }
       ],
-      "overrides": [{"piece": "medicine bottle", "note": "One bottle is the heart tincture (see tincture_bottle)."}]
+      "overrides": [
+        {
+          "piece": "medicine bottle",
+          "note": "One bottle is the heart tincture (see tincture_bottle)."
+        }
+      ]
     }
   ],
   "vehicles": [
@@ -1399,7 +2872,12 @@
       "location": "harrowmere_hall",
       "fuelFraction": 0.6,
       "odometerMiles": 41200,
-      "spec": {"type": "four-door saloon", "tankGallons": 10, "milesPerGallon": 24, "passengers": 4},
+      "spec": {
+        "type": "four-door saloon",
+        "tankGallons": 10,
+        "milesPerGallon": 24,
+        "passengers": 4
+      },
       "description": "A dark green saloon, parked on the gravel forecourt with its bonnet to the house."
     },
     {
@@ -1422,77 +2900,109 @@
     {
       "id": "acct_pov_cash",
       "name": "Your wallet",
-      "kind": "cash",
-      "owner": "pov",
+      "product": "cash",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
       "container": "pov_wallet",
-      "balance": 1050,
-      "coins": {"pound": 4, "shilling": 7, "penny": 6}
+      "opening": 1050,
+      "coins": {
+        "pound": 4,
+        "shilling": 7,
+        "penny": 6
+      }
     },
     {
       "id": "acct_pov_bank",
       "name": "Your account at the Fenland & District Bank",
-      "kind": "checking",
-      "owner": "pov",
-      "balance": 9000
+      "product": "checking",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
+      "opening": 9000
     },
     {
       "id": "acct_household_petty",
       "name": "Household petty cash",
-      "kind": "cash",
-      "owner": "gideon_pell",
-      "balance": 2916,
-      "coins": {"pound": 12, "shilling": 3, "penny": 0}
+      "product": "cash",
+      "owners": [
+        {
+          "party": "gideon_pell"
+        }
+      ],
+      "opening": 2916,
+      "coins": {
+        "pound": 12,
+        "shilling": 3,
+        "penny": 0
+      }
     },
     {
       "id": "acct_rupert_bank",
       "name": "Captain Thorne's account",
-      "kind": "checking",
-      "owner": "rupert_thorne",
-      "balance": 0
+      "product": "checking",
+      "owners": [
+        {
+          "party": "rupert_thorne"
+        }
+      ],
+      "opening": 0
     },
     {
       "id": "acct_rupert_debts",
       "name": "Captain Thorne's debts",
-      "kind": "loan",
-      "owner": "rupert_thorne",
+      "product": "loan",
+      "owners": [
+        {
+          "party": "rupert_thorne"
+        }
+      ],
       "institution": "Fenland & District Bank",
-      "principalCents": 74880,
+      "opening": -74880,
       "aprPct": 5,
-      "remainingMonths": 24,
-      "paymentCents": 3285,
       "dueDay": 1,
+      "paymentCents": 3285,
+      "monthsLeft": 24,
       "autopay": "none"
     }
   ],
-  "bills": [
+  "flows": [
     {
       "id": "bill_housekeeping_allowance",
-      "payer": "lady_honoria",
-      "payee": "gideon_pell",
       "label": "Housekeeping allowance",
+      "from": "lady_honoria",
+      "to": "gideon_pell",
       "amountCents": 1440,
       "every": "week",
-      "day": 1
+      "weekdays": [
+        1
+      ]
     },
     {
       "id": "bill_household_tradesmen",
-      "payer": "gideon_pell",
-      "payee": "Saltreach tradesmen",
       "label": "Butcher, baker and grocer",
+      "from": "acct_household_petty",
+      "to": "Saltreach tradesmen",
       "amountCents": 840,
       "every": "week",
-      "day": 6,
-      "from": "acct_household_petty"
+      "weekdays": [
+        6
+      ]
     },
     {
       "id": "bill_household_coal",
-      "payer": "gideon_pell",
-      "payee": "Saltreach coal merchant",
       "label": "Coal",
+      "from": "acct_household_petty",
+      "to": "Saltreach coal merchant",
       "amountCents": 480,
       "every": "month",
-      "day": 1,
-      "from": "acct_household_petty"
+      "days": [
+        1
+      ]
     }
   ],
   "prices": [
@@ -1500,98 +3010,154 @@
       "id": "pr_pint_bitter",
       "name": "Pint of bitter",
       "unit": "pint",
-      "band": {"min": 3, "typical": 4, "max": 6},
+      "band": {
+        "min": 3,
+        "typical": 4,
+        "max": 6
+      },
       "category": "alcohol"
     },
     {
       "id": "pr_newspaper",
       "name": "Daily newspaper",
       "unit": "copy",
-      "band": {"min": 1, "typical": 2, "max": 2},
+      "band": {
+        "min": 1,
+        "typical": 2,
+        "max": 2
+      },
       "category": "entertainment"
     },
     {
       "id": "pr_cigarettes_20",
       "name": "Twenty cigarettes",
       "unit": "packet",
-      "band": {"min": 14, "typical": 16, "max": 22},
+      "band": {
+        "min": 14,
+        "typical": 16,
+        "max": 22
+      },
       "category": "personal_care"
     },
     {
       "id": "pr_telegram",
       "name": "Telegram, twelve words",
       "unit": "telegram",
-      "band": {"min": 12, "typical": 12, "max": 18},
+      "band": {
+        "min": 12,
+        "typical": 12,
+        "max": 18
+      },
       "category": "utilities"
     },
     {
       "id": "pr_trunk_call",
       "name": "Trunk telephone call, three minutes",
       "unit": "call",
-      "band": {"min": 12, "typical": 18, "max": 36},
+      "band": {
+        "min": 12,
+        "typical": 18,
+        "max": 36
+      },
       "category": "utilities"
     },
     {
       "id": "pr_inn_room",
       "name": "Room at the Saltreach inn",
       "unit": "night",
-      "band": {"min": 72, "typical": 90, "max": 126},
+      "band": {
+        "min": 72,
+        "typical": 90,
+        "max": 126
+      },
       "category": "lodging"
     },
     {
       "id": "pr_tea_for_two",
       "name": "Tea for two",
       "unit": "pot",
-      "band": {"min": 14, "typical": 18, "max": 30},
+      "band": {
+        "min": 14,
+        "typical": 18,
+        "max": 30
+      },
       "category": "meals_out"
     },
     {
       "id": "pr_train_single",
       "name": "Third-class single, London to Peterborough",
       "unit": "ticket",
-      "band": {"min": 90, "typical": 102, "max": 120},
+      "band": {
+        "min": 90,
+        "typical": 102,
+        "max": 120
+      },
       "category": "transport"
     },
     {
       "id": "pr_motor_taxi_mile",
       "name": "Motor taxi",
       "unit": "mile",
-      "band": {"min": 8, "typical": 9, "max": 12},
+      "band": {
+        "min": 8,
+        "typical": 9,
+        "max": 12
+      },
       "category": "transport"
     },
     {
       "id": "pr_punt_hire",
       "name": "Punt hire",
       "unit": "hour",
-      "band": {"min": 6, "typical": 12, "max": 18},
+      "band": {
+        "min": 6,
+        "typical": 12,
+        "max": 18
+      },
       "category": "entertainment"
     },
     {
       "id": "pr_petrol_gallon",
       "name": "Petrol",
       "unit": "gallon",
-      "band": {"min": 15, "typical": 18, "max": 22},
+      "band": {
+        "min": 15,
+        "typical": 18,
+        "max": 22
+      },
       "category": "fuel"
     },
     {
       "id": "pr_gardener_week",
       "name": "Gardener's wage",
       "unit": "week",
-      "band": {"min": 360, "typical": 420, "max": 540},
+      "band": {
+        "min": 360,
+        "typical": 420,
+        "max": 540
+      },
       "category": "vehicle_services"
     },
     {
       "id": "pr_typewriter_ribbon",
       "name": "Typewriter ribbon",
       "unit": "ribbon",
-      "band": {"min": 20, "typical": 28, "max": 40},
+      "band": {
+        "min": 20,
+        "typical": 28,
+        "max": 40
+      },
       "category": "household_goods"
     },
     {
       "id": "pr_valuation_fee",
       "name": "Valuer's fee for a day",
       "unit": "day",
-      "band": {"min": 480, "typical": 600, "max": 960},
+      "band": {
+        "min": 480,
+        "typical": 600,
+        "max": 960
+      },
       "category": "vehicle_services"
     }
   ],
@@ -1607,8 +3173,18 @@
         "arrival": {
           "label": "A weekend at Harrowmere",
           "cue": "Sir Alaric has invited you to value a few pieces from his collection before the autumn sale. Dinner is at half past seven.",
-          "objectives": ["Settle in", "Meet the household", "Be at dinner by 19:30"],
-          "next": [{"to": "inquiry", "when": "[[flag:body_found]] is true", "expr": "story.body_found"}],
+          "objectives": [
+            "Settle in",
+            "Meet the household",
+            "Be at dinner by 19:30"
+          ],
+          "next": [
+            {
+              "to": "inquiry",
+              "when": "[[flag:body_found]] is true",
+              "expr": "story.body_found"
+            }
+          ],
           "objectiveExprs": [
             "clock >= @1934-10-26T17:30",
             "at(pov, 'drawing_room') or at(pov, 'dining_room') or clock >= @1934-10-26T21:30",
@@ -1647,7 +3223,10 @@
         },
         "accuse": {
           "label": "Put the case",
-          "objectives": ["Present the evidence to the household or to Constable Hobbs", "Name the culprit"],
+          "objectives": [
+            "Present the evidence to the household or to Constable Hobbs",
+            "Name the culprit"
+          ],
           "gate": "[[s_thorne_death.s3_opportunity]] has been reached",
           "next": [
             {
@@ -1667,7 +3246,10 @@
             "expr": "story.constable_arrived and not story.accused"
           },
           "gateExpr": "stage('s_thorne_death') == 's3_opportunity' or stage('s_thorne_death') == 's4_culprit' or stage('s_thorne_death') == 'truth'",
-          "objectiveExprs": ["story.accused", "story.accused"]
+          "objectiveExprs": [
+            "story.accused",
+            "story.accused"
+          ]
         },
         "solved": {
           "label": "The truth comes out",
@@ -1677,22 +3259,42 @@
             {
               "type": "pay",
               "text": "Lady Honoria pays your fee and more.",
-              "args": {"from": "lady_honoria", "to": "pov", "amount": 1200, "currency": "pence"}
+              "args": {
+                "from": "lady_honoria",
+                "to": "pov",
+                "amount": 1200,
+                "currency": "pence"
+              }
             },
             {
               "type": "regard",
               "text": "Lady Honoria is grateful.",
-              "args": {"who": "lady_honoria", "toward": "pov", "axis": "warmth", "delta": 30}
+              "args": {
+                "who": "lady_honoria",
+                "toward": "pov",
+                "axis": "warmth",
+                "delta": 30
+              }
             },
             {
               "type": "regard",
               "text": "Lady Honoria trusts you.",
-              "args": {"who": "lady_honoria", "toward": "pov", "axis": "trust", "delta": 30}
+              "args": {
+                "who": "lady_honoria",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": 30
+              }
             },
             {
               "type": "regard",
               "text": "Verity Lorne is relieved.",
-              "args": {"who": "verity_lorne", "toward": "pov", "axis": "trust", "delta": 20}
+              "args": {
+                "who": "verity_lorne",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": 20
+              }
             }
           ]
         },
@@ -1704,12 +3306,22 @@
             {
               "type": "regard",
               "text": "Lady Honoria's trust in the player falls.",
-              "args": {"who": "lady_honoria", "toward": "pov", "axis": "trust", "delta": -25}
+              "args": {
+                "who": "lady_honoria",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": -25
+              }
             },
             {
               "type": "regard",
               "text": "The household turns on the accused.",
-              "args": {"who": "household", "toward": "pov", "axis": "warmth", "delta": -5}
+              "args": {
+                "who": "household",
+                "toward": "pov",
+                "axis": "warmth",
+                "delta": -5
+              }
             }
           ]
         },
@@ -1741,7 +3353,9 @@
         "cut_off": {
           "label": "The line is dead",
           "cue": "The hall telephone is silent and the gale has the whole fen in its grip; there is no knowing whether the causeway road will be passable by morning.",
-          "objectives": ["Find out why the line is dead"],
+          "objectives": [
+            "Find out why the line is dead"
+          ],
           "next": [
             {
               "to": "find_fault",
@@ -1749,11 +3363,15 @@
               "expr": "story.phone_tried"
             }
           ],
-          "objectiveExprs": ["story.phone_tried"]
+          "objectiveExprs": [
+            "story.phone_tried"
+          ]
         },
         "find_fault": {
           "label": "Follow the line",
-          "objectives": ["Walk to the gatehouse and examine [[junction_box]]"],
+          "objectives": [
+            "Walk to the gatehouse and examine [[junction_box]]"
+          ],
           "next": [
             {
               "to": "repair",
@@ -1766,12 +3384,18 @@
               "expr": "story.constable_called"
             }
           ],
-          "hints": ["The line runs on poles from the gatehouse; a fallen bough is the usual culprit."],
-          "objectiveExprs": ["story.clue_phone_fault"]
+          "hints": [
+            "The line runs on poles from the gatehouse; a fallen bough is the usual culprit."
+          ],
+          "objectiveExprs": [
+            "story.clue_phone_fault"
+          ]
         },
         "repair": {
           "label": "Mend the line",
-          "objectives": ["Splice the broken wire with tape and a screwdriver from [[tool_roll]]"],
+          "objectives": [
+            "Splice the broken wire with tape and a screwdriver from [[tool_roll]]"
+          ],
           "next": [
             {
               "to": "call",
@@ -1788,15 +3412,27 @@
             "A steady hand and a Knowledge or Nerve check; the tool roll makes it much easier.",
             "The punt is the other way out, if the marsh is deep enough."
           ],
-          "objectiveExprs": ["story.phone_working"]
+          "objectiveExprs": [
+            "story.phone_working"
+          ]
         },
         "call": {
           "label": "Telephone the constable",
-          "objectives": ["Use [[hall_telephone]] to reach Saltreach"],
+          "objectives": [
+            "Use [[hall_telephone]] to reach Saltreach"
+          ],
           "gate": "[[flag:phone_working]] is true",
-          "next": [{"to": "done", "when": "[[flag:constable_called]] is true", "expr": "story.constable_called"}],
+          "next": [
+            {
+              "to": "done",
+              "when": "[[flag:constable_called]] is true",
+              "expr": "story.constable_called"
+            }
+          ],
           "gateExpr": "story.phone_working",
-          "objectiveExprs": ["story.constable_called"]
+          "objectiveExprs": [
+            "story.constable_called"
+          ]
         },
         "done": {
           "label": "Help is coming",
@@ -1806,19 +3442,32 @@
             {
               "type": "set_flag",
               "text": "Someone has reached the constable.",
-              "args": {"flag": "constable_called", "value": true}
+              "args": {
+                "flag": "constable_called",
+                "value": true
+              }
             }
           ],
           "rewards": [
             {
               "type": "regard",
               "text": "Pell is quietly grateful.",
-              "args": {"who": "gideon_pell", "toward": "pov", "axis": "trust", "delta": 15}
+              "args": {
+                "who": "gideon_pell",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": 15
+              }
             },
             {
               "type": "regard",
               "text": "Lady Honoria is grateful.",
-              "args": {"who": "lady_honoria", "toward": "pov", "axis": "warmth", "delta": 10}
+              "args": {
+                "who": "lady_honoria",
+                "toward": "pov",
+                "axis": "warmth",
+                "delta": 10
+              }
             }
           ]
         }
@@ -1834,7 +3483,13 @@
       "stages": {
         "before": {
           "label": "Before",
-          "next": [{"to": "cue", "when": "[[flag:body_found]] is true", "expr": "story.body_found"}]
+          "next": [
+            {
+              "to": "cue",
+              "when": "[[flag:body_found]] is true",
+              "expr": "story.body_found"
+            }
+          ]
         },
         "cue": {
           "label": "Heart failure?",
@@ -1900,13 +3555,22 @@
           "label": "What happened in the library",
           "cue": "It all fits.",
           "truth": "Julian Ashcombe, the family's solicitor and a trustee of the Thorne Trust, had taken about eleven thousand four hundred pounds over six years by paying it to a fictitious 'M. Rutherford'. Verity Lorne noticed the pattern while indexing the papers and told Sir Alaric on Thursday. Sir Alaric invited Ashcombe to confront him on Saturday after breakfast and asked the valuer to attend as an independent witness. At about five to eleven on Friday night Ashcombe fetched a clean glass from the kitchen; at five past he joined Sir Alaric in the library for a brandy to 'talk through the papers', and put a lethal dose of digitalis tincture, taken from Dr. Farrant's bag in the drawing room, into his host's glass. Sir Alaric's known heart condition and prescription meant that his death would pass as natural. Ashcombe rinsed his own glass, burned a page of the ledger, left by the conservatory door and went back to bed.",
-          "leakTerms": ["Rutherford", "digitalis", "fictitious", "lethal dose"],
+          "leakTerms": [
+            "Rutherford",
+            "digitalis",
+            "fictitious",
+            "lethal dose"
+          ],
           "next": [],
           "rewards": [
             {
               "type": "reveal",
               "text": "The player learns the whole truth.",
-              "args": {"track": "s_thorne_death", "stage": "truth", "to": "pov"}
+              "args": {
+                "track": "s_thorne_death",
+                "stage": "truth",
+                "to": "pov"
+              }
             }
           ]
         }
@@ -1924,30 +3588,55 @@
         "locked": {
           "label": "Four digits",
           "cue": "A small brass plate on the safe's frame reads: 'Rebuilt, and kept.' The dial takes four digits.",
-          "objectives": ["Open [[study_safe]]"],
+          "objectives": [
+            "Open [[study_safe]]"
+          ],
           "answer": {
-            "expect": ["1887", "eighteen eighty-seven", "mdcccLXXXvii"],
+            "expect": [
+              "1887",
+              "eighteen eighty-seven",
+              "mdcccLXXXvii"
+            ],
             "normalize": true,
-            "decision": {"threshold": 0.8}
+            "decision": {
+              "threshold": 0.8
+            }
           },
           "hints": [
             "Sir Alaric was proud of one date. Look at the library mantel.",
             "The carved date is in Roman numerals.",
             "MDCCCLXXXVII is 1887: the year the west wing was rebuilt after the fire."
           ],
-          "next": [{"to": "open", "when": "the player sets the dial to 1887 in [[study]]", "expr": "false"}],
-          "objectiveExprs": ["story.safe_open"]
+          "next": [
+            {
+              "to": "open",
+              "when": "the player sets the dial to 1887 in [[study]]",
+              "expr": "false"
+            }
+          ],
+          "objectiveExprs": [
+            "story.safe_open"
+          ]
         },
         "open": {
           "label": "The safe swings open",
           "cue": "Inside: a thin bundle of letters and a long green account book.",
           "next": [],
           "effects": [
-            {"type": "set_flag", "text": "The safe is open.", "args": {"flag": "safe_open", "value": true}},
+            {
+              "type": "set_flag",
+              "text": "The safe is open.",
+              "args": {
+                "flag": "safe_open",
+                "value": true
+              }
+            },
             {
               "type": "reveal_item",
               "text": "The trust ledger can now be taken from the safe.",
-              "args": {"item": "trust_ledger"}
+              "args": {
+                "item": "trust_ledger"
+              }
             }
           ]
         }
@@ -1965,13 +3654,25 @@
         "avoid_creditor": {
           "label": "Dodge the creditor",
           "priority": 5,
-          "objectives": ["Meet the creditor's man at the boathouse", "Avoid Sir Alaric"],
-          "next": [{"to": "seek_cash", "when": "[[flag:body_found]] is true", "expr": "story.body_found"}]
+          "objectives": [
+            "Meet the creditor's man at the boathouse",
+            "Avoid Sir Alaric"
+          ],
+          "next": [
+            {
+              "to": "seek_cash",
+              "when": "[[flag:body_found]] is true",
+              "expr": "story.body_found"
+            }
+          ]
         },
         "seek_cash": {
           "label": "Find money fast",
           "priority": 7,
-          "objectives": ["Learn the terms of the will", "Borrow from anyone gullible"],
+          "objectives": [
+            "Learn the terms of the will",
+            "Borrow from anyone gullible"
+          ],
           "next": [
             {
               "to": "panic",
@@ -1983,7 +3684,10 @@
         "panic": {
           "label": "Cover his tracks",
           "priority": 9,
-          "objectives": ["Retrieve the cigarette case from the boathouse", "Deny the meeting"],
+          "objectives": [
+            "Retrieve the cigarette case from the boathouse",
+            "Deny the meeting"
+          ],
           "next": []
         }
       }
@@ -2000,13 +3704,25 @@
         "protect_copies": {
           "label": "Guard the copies",
           "priority": 7,
-          "objectives": ["Keep the folder out of sight", "Say nothing"],
-          "next": [{"to": "seek_ally", "when": "[[flag:body_found]] is true", "expr": "story.body_found"}]
+          "objectives": [
+            "Keep the folder out of sight",
+            "Say nothing"
+          ],
+          "next": [
+            {
+              "to": "seek_ally",
+              "when": "[[flag:body_found]] is true",
+              "expr": "story.body_found"
+            }
+          ]
         },
         "seek_ally": {
           "label": "Find someone to trust",
           "priority": 8,
-          "objectives": ["Watch the household", "Decide whom to tell"],
+          "objectives": [
+            "Watch the household",
+            "Decide whom to tell"
+          ],
           "next": [
             {
               "to": "testify",
@@ -2018,7 +3734,10 @@
         "testify": {
           "label": "Tell what she knows",
           "priority": 9,
-          "objectives": ["Hand over her carbon copy", "Explain Thursday"],
+          "objectives": [
+            "Hand over her carbon copy",
+            "Explain Thursday"
+          ],
           "next": []
         }
       }
@@ -2035,13 +3754,25 @@
         "play_the_friend": {
           "label": "Be the family's friend",
           "priority": 4,
-          "objectives": ["Comfort Lady Honoria", "Offer to handle the arrangements"],
-          "next": [{"to": "destroy_evidence", "when": "[[flag:body_found]] is true", "expr": "story.body_found"}]
+          "objectives": [
+            "Comfort Lady Honoria",
+            "Offer to handle the arrangements"
+          ],
+          "next": [
+            {
+              "to": "destroy_evidence",
+              "when": "[[flag:body_found]] is true",
+              "expr": "story.body_found"
+            }
+          ]
         },
         "destroy_evidence": {
           "label": "Finish what he started",
           "priority": 8,
-          "objectives": ["Burn the rest of the ledger page", "Wipe the conservatory door"],
+          "objectives": [
+            "Burn the rest of the ledger page",
+            "Wipe the conservatory door"
+          ],
           "next": [
             {
               "to": "shift_suspicion",
@@ -2053,7 +3784,10 @@
         "shift_suspicion": {
           "label": "Point elsewhere",
           "priority": 9,
-          "objectives": ["Mention Rupert's debts", "Suggest the doctor's tincture"],
+          "objectives": [
+            "Mention Rupert's debts",
+            "Suggest the doctor's tincture"
+          ],
           "next": [
             {
               "to": "slip_away",
@@ -2065,7 +3799,10 @@
         "slip_away": {
           "label": "Leave before the constable comes",
           "priority": 10,
-          "objectives": ["Reach the car", "Get across the causeway the moment it opens"],
+          "objectives": [
+            "Reach the car",
+            "Get across the causeway the moment it opens"
+          ],
           "next": []
         }
       }
@@ -2082,19 +3819,40 @@
         "keep_order": {
           "label": "Keep the house in order",
           "priority": 3,
-          "objectives": ["Run dinner", "Lock up at half past ten"],
-          "next": [{"to": "shield_family", "when": "[[flag:body_found]] is true", "expr": "story.body_found"}]
+          "objectives": [
+            "Run dinner",
+            "Lock up at half past ten"
+          ],
+          "next": [
+            {
+              "to": "shield_family",
+              "when": "[[flag:body_found]] is true",
+              "expr": "story.body_found"
+            }
+          ]
         },
         "shield_family": {
           "label": "Protect Lady Honoria",
           "priority": 8,
-          "objectives": ["Keep servants from gossip", "Keep the library door shut"],
-          "next": [{"to": "assist_police", "when": "[[flag:constable_called]] is true", "expr": "story.constable_called"}]
+          "objectives": [
+            "Keep servants from gossip",
+            "Keep the library door shut"
+          ],
+          "next": [
+            {
+              "to": "assist_police",
+              "when": "[[flag:constable_called]] is true",
+              "expr": "story.constable_called"
+            }
+          ]
         },
         "assist_police": {
           "label": "Help the constable",
           "priority": 7,
-          "objectives": ["Answer plainly", "Show the constable the library"],
+          "objectives": [
+            "Answer plainly",
+            "Show the constable the library"
+          ],
           "next": []
         }
       }
@@ -2111,9 +3869,14 @@
       "requires": "the player searches [[library]] after [[flag:body_found]] and looks at the drinks tray",
       "item": "brandy_glass_right",
       "finds": "Two balloon glasses on the tray: the left holds a finger of brandy, the right is perfectly clean and faintly damp at the rim, though Pell swears no one has touched the tray.",
-      "action": {"label": "Look at the drinks tray in the library"},
+      "action": {
+        "label": "Look at the drinks tray in the library"
+      },
       "requiresExpr": "at(pov, 'library') and story.body_found",
-      "reveals": ["brandy_glass_left", "brandy_glass_right"]
+      "reveals": [
+        "brandy_glass_left",
+        "brandy_glass_right"
+      ]
     },
     {
       "id": "clue_burnt_page",
@@ -2125,9 +3888,13 @@
       "requires": "the player inspects the fireplace in [[library]] while [[flag:ledger_page_intact]] is true",
       "item": "burnt_ledger_scrap",
       "finds": "A curl of paper at the back of the grate has survived: columns of figures under a heading 'Trust A/c' and the initials 'M. R.'.",
-      "action": {"label": "Inspect the library fireplace"},
+      "action": {
+        "label": "Inspect the library fireplace"
+      },
       "requiresExpr": "at(pov, 'library') and story.ledger_page_intact",
-      "reveals": ["burnt_ledger_scrap"]
+      "reveals": [
+        "burnt_ledger_scrap"
+      ]
     },
     {
       "id": "clue_muddy_prints",
@@ -2138,7 +3905,9 @@
       "where": "conservatory",
       "requires": "the player examines the floor by the garden door in [[conservatory]] before it is cleaned at Saturday 11:00",
       "finds": "A line of dried mud from the garden door across the tiles: a narrow, welted shoe, size nine or ten, and a streak on the door frame where a hand steadied itself.",
-      "action": {"label": "Examine the floor by the garden door"},
+      "action": {
+        "label": "Examine the floor by the garden door"
+      },
       "requiresExpr": "at(pov, 'conservatory') and clock < @1934-10-27T11:00",
       "reveals": []
     },
@@ -2152,9 +3921,13 @@
       "requires": "the player is in [[upper_floor]] while [[julian_ashcombe]] is elsewhere, and examines [[ashcombe_brogues]]",
       "item": "ashcombe_brogues",
       "finds": "A pair of black brogues, size nine, with a crust of fresh grey fen clay on the welts. They match the prints by the garden door.",
-      "action": {"label": "Examine the brogues in Ashcombe's room"},
+      "action": {
+        "label": "Examine the brogues in Ashcombe's room"
+      },
       "requiresExpr": "at(pov, 'upper_floor') and not at('julian_ashcombe', here)",
-      "reveals": ["ashcombe_brogues"]
+      "reveals": [
+        "ashcombe_brogues"
+      ]
     },
     {
       "id": "clue_marsh_testimony",
@@ -2165,7 +3938,9 @@
       "where": "kitchen",
       "requires": "[[mrs_marsh]]'s trust toward the player is at least 20, or the player brings her tea and sits with her",
       "finds": "Mrs. Marsh admits that Mr. Ashcombe came to the kitchen about five to eleven for a clean glass 'for a nightcap', and says she kept quiet because he is a gentleman of the law.",
-      "action": {"label": "Ask Mrs. Marsh what she saw on Friday night"},
+      "action": {
+        "label": "Ask Mrs. Marsh what she saw on Friday night"
+      },
       "requiresExpr": "at(pov, 'kitchen') and at('mrs_marsh', here) and (story.tea_brought or regard('mrs_marsh', 'pov', 'trust') >= 20)",
       "reveals": []
     },
@@ -2179,9 +3954,13 @@
       "requires": "the player opens [[doctors_bag]] in [[drawing_room]] while it is unattended (Friday 21:30 to Saturday 08:00)",
       "item": "tincture_bottle",
       "finds": "A one-ounce bottle labelled 'Sir A. T. - drops as directed', well under two-thirds full. Dr. Farrant's notes in the bag say it was filled to the neck on Thursday.",
-      "action": {"label": "Look inside Dr. Farrant's bag"},
+      "action": {
+        "label": "Look inside Dr. Farrant's bag"
+      },
       "requiresExpr": "at(pov, 'drawing_room') and clock >= @1934-10-26T21:30 and clock < @1934-10-27T08:00",
-      "reveals": ["tincture_bottle"]
+      "reveals": [
+        "tincture_bottle"
+      ]
     },
     {
       "id": "clue_trust_ledger",
@@ -2193,7 +3972,9 @@
       "requires": "[[p_study_safe]] is solved and the player reads [[trust_ledger]]",
       "item": "trust_ledger",
       "finds": "Six years of entries in the Thorne Trust book: regular payments of between sixty and four hundred pounds to 'M. Rutherford', initialled in a hand you recognise from the estate letters: Mr. Ashcombe's.",
-      "action": {"label": "Read the Thorne Trust account book"},
+      "action": {
+        "label": "Read the Thorne Trust account book"
+      },
       "requiresExpr": "at(pov, 'study') and story.safe_open",
       "reveals": []
     },
@@ -2207,9 +3988,13 @@
       "requires": "Verity's trust toward the player is at least 30, or the player opens [[verity_typewriter_case]] unobserved",
       "item": "verity_memo_carbon",
       "finds": "A typed carbon dated Thursday: 'Sir Alaric, the following payments from the trust do not match any bill or invoice.' It lists a dozen 'M. Rutherford' entries.",
-      "action": {"label": "Open Verity's typewriter case"},
+      "action": {
+        "label": "Open Verity's typewriter case"
+      },
       "requiresExpr": "at(pov, 'upper_floor') and (not at('verity_lorne', here) or regard('verity_lorne', 'pov', 'trust') >= 30)",
-      "reveals": ["verity_memo_carbon"]
+      "reveals": [
+        "verity_memo_carbon"
+      ]
     },
     {
       "id": "clue_boathouse_case",
@@ -2222,9 +4007,14 @@
       "requires": "the player searches [[boathouse]]",
       "item": "rupert_cigarette_case",
       "finds": "A gold-plated cigarette case engraved R.T., with a pencilled note in the lid: 'Thursday last, or I go to your uncle.' (A red herring: it concerns the captain's debts, not the death.)",
-      "action": {"label": "Search the boathouse"},
+      "action": {
+        "label": "Search the boathouse"
+      },
       "requiresExpr": "at(pov, 'boathouse')",
-      "reveals": ["rupert_cigarette_case", "creditor_note"]
+      "reveals": [
+        "rupert_cigarette_case",
+        "creditor_note"
+      ]
     },
     {
       "id": "clue_dinner_quarrel",
@@ -2236,7 +4026,9 @@
       "where": "drawing_room",
       "requires": "the player asks [[lady_honoria]] or [[dr_lionel_farrant]] about dinner",
       "finds": "Sir Alaric and Captain Thorne had words over the soup: the allowance would stop if the debts were not cleared by Christmas. Rupert left the table white-faced. (A red herring that will make him the obvious suspect.)",
-      "action": {"label": "Ask about the dinner quarrel"},
+      "action": {
+        "label": "Ask about the dinner quarrel"
+      },
       "requiresExpr": "at('lady_honoria', here) or at('dr_lionel_farrant', here)",
       "reveals": []
     },
@@ -2250,7 +4042,9 @@
       "requires": "the player examines [[junction_box]]",
       "item": "junction_box",
       "finds": "A bough from the lime by the gate has come down across the wires and torn one lead off its terminal. It is storm damage, plain and old-fashioned.",
-      "action": {"label": "Examine the junction box"},
+      "action": {
+        "label": "Examine the junction box"
+      },
       "requiresExpr": "at(pov, 'gatehouse')",
       "reveals": []
     }
@@ -2259,7 +4053,9 @@
     {
       "id": "r_storm_breaks",
       "label": "The storm breaks",
-      "on": {"at": "1934-10-26T21:30"},
+      "on": {
+        "at": "1934-10-26T21:30"
+      },
       "trigger": "At 21:30 on Friday a south-westerly gale hits the fens.",
       "when": "always",
       "once": true,
@@ -2268,35 +4064,71 @@
         {
           "type": "set_weather",
           "text": "A gale and heavy rain sweep across the fens.",
-          "args": {"region": "harrowmere_estate", "state": "storm", "minutes": 1800}
+          "args": {
+            "region": "harrowmere_estate",
+            "state": "storm",
+            "minutes": 1800
+          }
         },
-        {"type": "set_flag", "text": "A storm is active.", "args": {"flag": "storm_active", "value": true}},
-        {"type": "set_flag", "text": "The telephone line fails.", "args": {"flag": "phone_working", "value": false}}
+        {
+          "type": "set_flag",
+          "text": "A storm is active.",
+          "args": {
+            "flag": "storm_active",
+            "value": true
+          }
+        },
+        {
+          "type": "set_flag",
+          "text": "The telephone line fails.",
+          "args": {
+            "flag": "phone_working",
+            "value": false
+          }
+        }
       ],
-      "beat": {"hint": "The lights flicker, the windows rattle, and someone says it will blow over by morning."}
+      "beat": {
+        "hint": "The lights flicker, the windows rattle, and someone says it will blow over by morning."
+      }
     },
     {
       "id": "r_causeway_floods",
       "label": "The causeway floods",
-      "on": {"tick": "slot"},
+      "on": {
+        "tick": "slot"
+      },
       "trigger": "While the storm blows and the causeway is still open.",
       "when": "[[flag:storm_active]] is true",
       "do": [
         {
           "type": "set_route",
           "text": "The causeway is under water.",
-          "args": {"route": "rt_causeway_saltreach", "open": false}
+          "args": {
+            "route": "rt_causeway_saltreach",
+            "open": false
+          }
         },
-        {"type": "set_flag", "text": "The causeway is closed.", "args": {"flag": "causeway_open", "value": false}}
+        {
+          "type": "set_flag",
+          "text": "The causeway is closed.",
+          "args": {
+            "flag": "causeway_open",
+            "value": false
+          }
+        }
       ],
-      "beat": {"hint": "From the drawing room window the causeway has vanished into a silver sheet."},
+      "beat": {
+        "hint": "From the drawing room window the causeway has vanished into a silver sheet."
+      },
       "whenExpr": "story.storm_active and story.causeway_open",
       "once": true
     },
     {
       "id": "r_night_events",
       "label": "Friday night in the library",
-      "on": {"at": "1934-10-26T23:05"},
+      "on": {
+        "at": "1934-10-26T23:05"
+      },
       "trigger": "At 23:05 Julian Ashcombe goes to the library and, by 23:40, Sir Alaric is dead.",
       "when": "always",
       "once": true,
@@ -2304,17 +4136,46 @@
         {
           "type": "schedule_override",
           "text": "Ashcombe is in the library from 23:05 to 23:40.",
-          "args": {"who": "julian_ashcombe", "place": "library", "activity": "a late brandy with the host", "minutes": 35}
+          "args": {
+            "who": "julian_ashcombe",
+            "place": "library",
+            "activity": "a late brandy with the host",
+            "minutes": 35
+          }
         },
-        {"type": "set_flag", "text": "Sir Alaric is dead.", "args": {"flag": "alaric_alive", "value": false}},
-        {"type": "set", "text": "Sir Alaric lies in the library.", "args": {"entity": "sir_alaric", "field": "place", "value": "library"}},
-        {"type": "life", "text": "Sir Alaric dies; only the one with him knows it.", "args": {"entity": "sir_alaric", "to": "dead"}}
+        {
+          "type": "set_flag",
+          "text": "Sir Alaric is dead.",
+          "args": {
+            "flag": "alaric_alive",
+            "value": false
+          }
+        },
+        {
+          "type": "set",
+          "text": "Sir Alaric lies in the library.",
+          "args": {
+            "entity": "sir_alaric",
+            "field": "place",
+            "value": "library"
+          }
+        },
+        {
+          "type": "life",
+          "text": "Sir Alaric dies; only the one with him knows it.",
+          "args": {
+            "entity": "sir_alaric",
+            "to": "dead"
+          }
+        }
       ]
     },
     {
       "id": "r_night_events_2",
       "label": "Ashcombe goes to bed",
-      "on": {"at": "1934-10-26T23:40"},
+      "on": {
+        "at": "1934-10-26T23:40"
+      },
       "trigger": "At 23:40 on Friday.",
       "when": "always",
       "once": true,
@@ -2322,47 +4183,99 @@
         {
           "type": "schedule_override",
           "text": "Ashcombe slips out through the conservatory at 23:40 and is in his room by 23:55.",
-          "args": {"who": "julian_ashcombe", "place": "upper_floor", "activity": "going to bed", "minutes": 490}
+          "args": {
+            "who": "julian_ashcombe",
+            "place": "upper_floor",
+            "activity": "going to bed",
+            "minutes": 490
+          }
         }
       ]
     },
     {
       "id": "r_study_safe_noticed",
       "label": "The safe behind the portrait",
-      "on": {"enter": "study"},
+      "on": {
+        "enter": "study"
+      },
       "trigger": "The player steps into Sir Alaric's study and sees the safe behind the portrait.",
       "when": "the player is the one who came in",
       "whenExpr": "self == pov",
       "once": true,
       "do": [
-        {"type": "link", "text": "You notice the safe behind the portrait.", "args": {"rel": "knows", "from": "pov", "to": "study_safe"}}
+        {
+          "type": "link",
+          "text": "You notice the safe behind the portrait.",
+          "args": {
+            "rel": "knows",
+            "from": "pov",
+            "to": "study_safe"
+          }
+        }
       ]
     },
     {
       "id": "r_body_found",
       "label": "Nell finds the body",
-      "on": {"at": "1934-10-27T07:20"},
+      "on": {
+        "at": "1934-10-27T07:20"
+      },
       "trigger": "At 07:20 on Saturday Nell Sparrow opens the library to lay the fire.",
       "when": "[[flag:alaric_alive]] is false",
       "once": true,
       "interrupt": true,
       "do": [
-        {"type": "move", "text": "Nell is in the library.", "args": {"who": "nell_sparrow", "place": "library"}},
-        {"type": "set_flag", "text": "The body has been found.", "args": {"flag": "body_found", "value": true}},
-        {"type": "life", "text": "The scream tells the household and the player that Sir Alaric is dead.", "args": {"entity": "sir_alaric", "tell": ["pov", "lady_honoria", "rupert_thorne", "verity_lorne", "julian_ashcombe", "dr_lionel_farrant", "gideon_pell", "mrs_marsh", "nell_sparrow"]}},
+        {
+          "type": "move",
+          "text": "Nell is in the library.",
+          "args": {
+            "who": "nell_sparrow",
+            "place": "library"
+          }
+        },
+        {
+          "type": "set_flag",
+          "text": "The body has been found.",
+          "args": {
+            "flag": "body_found",
+            "value": true
+          }
+        },
+        {
+          "type": "life",
+          "text": "The scream tells the household and the player that Sir Alaric is dead.",
+          "args": {
+            "entity": "sir_alaric",
+            "tell": [
+              "pov",
+              "lady_honoria",
+              "rupert_thorne",
+              "verity_lorne",
+              "julian_ashcombe",
+              "dr_lionel_farrant",
+              "gideon_pell",
+              "mrs_marsh",
+              "nell_sparrow"
+            ]
+          }
+        },
         {
           "type": "note",
           "text": "Nell screams; Pell is first on the scene, then Lady Honoria and the household.",
           "args": {}
         }
       ],
-      "beat": {"hint": "A scream from the library cuts through the sound of the gale."},
+      "beat": {
+        "hint": "A scream from the library cuts through the sound of the gale."
+      },
       "whenExpr": "not story.alaric_alive"
     },
     {
       "id": "r_evidence_burned",
       "label": "Ashcombe burns the page",
-      "on": {"at": "1934-10-27T12:00"},
+      "on": {
+        "at": "1934-10-27T12:00"
+      },
       "trigger": "At noon on Saturday, if the player has not taken the scrap from the grate.",
       "when": "[[flag:ledger_page_intact]] is true and [[burnt_ledger_scrap]] is still in [[library]]",
       "once": true,
@@ -2370,16 +4283,25 @@
         {
           "type": "set_flag",
           "text": "The remaining scrap is burned.",
-          "args": {"flag": "ledger_page_intact", "value": false}
+          "args": {
+            "flag": "ledger_page_intact",
+            "value": false
+          }
         },
-        {"type": "note", "text": "The grate is empty and the library smells of fresh smoke.", "args": {}}
+        {
+          "type": "note",
+          "text": "The grate is empty and the library smells of fresh smoke.",
+          "args": {}
+        }
       ],
       "whenExpr": "story.ledger_page_intact"
     },
     {
       "id": "r_constable_arrives",
       "label": "The constable arrives",
-      "on": {"tick": "slot"},
+      "on": {
+        "tick": "slot"
+      },
       "trigger": "Once the constable has been told, or by Sunday noon.",
       "when": "[[flag:constable_called]] is true or the clock reaches Sunday 12:00",
       "once": true,
@@ -2388,39 +4310,75 @@
         {
           "type": "move",
           "text": "Constable Hobbs arrives by punt or bicycle.",
-          "args": {"who": "constable_hobbs", "place": "harrowmere_hall"}
+          "args": {
+            "who": "constable_hobbs",
+            "place": "harrowmere_hall"
+          }
         },
         {
           "type": "set_flag",
           "text": "The constable is at the hall.",
-          "args": {"flag": "constable_arrived", "value": true}
+          "args": {
+            "flag": "constable_arrived",
+            "value": true
+          }
         }
       ],
-      "beat": {"hint": "A knock at the front door: a patient man in a cape, rain running off his helmet."},
+      "beat": {
+        "hint": "A knock at the front door: a patient man in a cape, rain running off his helmet."
+      },
       "whenExpr": "story.constable_called or clock >= @1934-10-28T12:00"
     },
     {
       "id": "r_causeway_reopens",
       "label": "The causeway reopens",
-      "on": {"at": "1934-10-28T11:00"},
+      "on": {
+        "at": "1934-10-28T11:00"
+      },
       "trigger": "At Sunday 11:00 the tide ebbs and the storm has passed.",
       "when": "always",
       "once": true,
       "do": [
-        {"type": "set_weather", "text": "The sky clears.", "args": {"region": "harrowmere_estate", "state": "clear"}},
+        {
+          "type": "set_weather",
+          "text": "The sky clears.",
+          "args": {
+            "region": "harrowmere_estate",
+            "state": "clear"
+          }
+        },
         {
           "type": "set_route",
           "text": "The causeway is passable.",
-          "args": {"route": "rt_causeway_saltreach", "open": true}
+          "args": {
+            "route": "rt_causeway_saltreach",
+            "open": true
+          }
         },
-        {"type": "set_flag", "text": "The causeway is open.", "args": {"flag": "causeway_open", "value": true}},
-        {"type": "set_flag", "text": "The storm is over.", "args": {"flag": "storm_active", "value": false}}
+        {
+          "type": "set_flag",
+          "text": "The causeway is open.",
+          "args": {
+            "flag": "causeway_open",
+            "value": true
+          }
+        },
+        {
+          "type": "set_flag",
+          "text": "The storm is over.",
+          "args": {
+            "flag": "storm_active",
+            "value": false
+          }
+        }
       ]
     },
     {
       "id": "r_rupert_defensive",
       "label": "Rupert bristles",
-      "on": {"tick": "slot"},
+      "on": {
+        "tick": "slot"
+      },
       "trigger": "When the player questions anyone about Rupert's movements on Friday night within Rupert's hearing.",
       "when": "the player has asked about Rupert's whereabouts on Friday night and [[rupert_thorne]] is in the same place",
       "cooldownMinutes": 720,
@@ -2428,20 +4386,35 @@
         {
           "type": "regard",
           "text": "Rupert grows hostile.",
-          "args": {"who": "rupert_thorne", "toward": "pov", "axis": "warmth", "delta": -10}
+          "args": {
+            "who": "rupert_thorne",
+            "toward": "pov",
+            "axis": "warmth",
+            "delta": -10
+          }
         },
         {
           "type": "regard",
           "text": "Rupert is afraid of being found out.",
-          "args": {"who": "rupert_thorne", "toward": "pov", "axis": "fear", "delta": 5}
+          "args": {
+            "who": "rupert_thorne",
+            "toward": "pov",
+            "axis": "fear",
+            "delta": 5
+          }
         },
         {
           "type": "set_flag",
           "text": "The question is answered.",
-          "args": {"flag": "asked_whereabouts", "value": false}
+          "args": {
+            "flag": "asked_whereabouts",
+            "value": false
+          }
         }
       ],
-      "beat": {"hint": "Rupert's smile stays exactly where it is while his eyes go somewhere else."},
+      "beat": {
+        "hint": "Rupert's smile stays exactly where it is while his eyes go somewhere else."
+      },
       "whenExpr": "story.asked_whereabouts and at('rupert_thorne', here)"
     }
   ],
@@ -2463,52 +4436,147 @@
         "region": "harrowmere_estate",
         "label": "Cool, damp fenland",
         "states": [
-          {"id": "clear", "label": "Clear and cold", "effects": {}},
-          {"id": "overcast", "label": "Overcast", "effects": {}},
-          {"id": "drizzle", "label": "Drizzle", "effects": {"travelTimeMultiplier": {"walk": 1.1, "road": 1.1}}},
+          {
+            "id": "clear",
+            "label": "Clear and cold",
+            "effects": {}
+          },
+          {
+            "id": "overcast",
+            "label": "Overcast",
+            "effects": {}
+          },
+          {
+            "id": "drizzle",
+            "label": "Drizzle",
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.1,
+                "road": 1.1
+              }
+            }
+          },
           {
             "id": "fog",
             "label": "Fen fog",
-            "effects": {"travelTimeMultiplier": {"walk": 1.3, "road": 1.6, "water": 1.4}}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.3,
+                "road": 1.6,
+                "water": 1.4
+              }
+            }
           },
-          {"id": "frost", "label": "Frost", "effects": {"travelTimeMultiplier": {"walk": 1.1, "road": 1.2}}},
+          {
+            "id": "frost",
+            "label": "Frost",
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.1,
+                "road": 1.2
+              }
+            }
+          },
           {
             "id": "storm",
             "label": "Gale and rain",
             "effects": {
-              "travelTimeMultiplier": {"walk": 1.6, "road": 2.0, "water": 1.5},
-              "closes": ["road:rt_causeway_saltreach"]
+              "travelTimeMultiplier": {
+                "walk": 1.6,
+                "road": 2.0,
+                "water": 1.5
+              },
+              "closes": [
+                "road:rt_causeway_saltreach"
+              ]
             }
           }
         ],
         "seasons": [
           {
             "label": "Late autumn",
-            "months": [10, 11],
-            "weights": {"clear": 15, "overcast": 30, "drizzle": 25, "fog": 20, "frost": 7, "storm": 3},
-            "tempC": [3, 11]
+            "months": [
+              10,
+              11
+            ],
+            "weights": {
+              "clear": 15,
+              "overcast": 30,
+              "drizzle": 25,
+              "fog": 20,
+              "frost": 7,
+              "storm": 3
+            },
+            "tempC": [
+              3,
+              11
+            ]
           },
           {
             "label": "Winter",
-            "months": [12, 1, 2],
-            "weights": {"clear": 15, "overcast": 30, "drizzle": 15, "fog": 15, "frost": 20, "storm": 5},
-            "tempC": [-2, 6]
+            "months": [
+              12,
+              1,
+              2
+            ],
+            "weights": {
+              "clear": 15,
+              "overcast": 30,
+              "drizzle": 15,
+              "fog": 15,
+              "frost": 20,
+              "storm": 5
+            },
+            "tempC": [
+              -2,
+              6
+            ]
           },
           {
             "label": "Spring",
-            "months": [3, 4, 5],
-            "weights": {"clear": 25, "overcast": 30, "drizzle": 25, "fog": 10, "frost": 5, "storm": 5},
-            "tempC": [4, 15]
+            "months": [
+              3,
+              4,
+              5
+            ],
+            "weights": {
+              "clear": 25,
+              "overcast": 30,
+              "drizzle": 25,
+              "fog": 10,
+              "frost": 5,
+              "storm": 5
+            },
+            "tempC": [
+              4,
+              15
+            ]
           },
           {
             "label": "Summer",
-            "months": [6, 7, 8, 9],
-            "weights": {"clear": 40, "overcast": 25, "drizzle": 15, "fog": 10, "storm": 10},
-            "tempC": [12, 23]
+            "months": [
+              6,
+              7,
+              8,
+              9
+            ],
+            "weights": {
+              "clear": 40,
+              "overcast": 25,
+              "drizzle": 15,
+              "fog": 10,
+              "storm": 10
+            },
+            "tempC": [
+              12,
+              23
+            ]
           }
         ],
         "note": "The storm that cuts the house off is scripted by a rule; the climate describes everything else.",
-        "appliesTo": ["saltreach"]
+        "appliesTo": [
+          "saltreach"
+        ]
       }
     ]
   },
@@ -2518,14 +4586,22 @@
       "title": "Harrowmere Hall",
       "category": "place",
       "about": "harrowmere_hall",
-      "keys": ["Harrowmere", "the Hall", "Harrowmere Hall"],
+      "keys": [
+        "Harrowmere",
+        "the Hall",
+        "Harrowmere Hall"
+      ],
       "text": "Harrowmere Hall stands on a rise of firm ground in the fens, built round a Jacobean core and added to by every generation of Thornes. The west wing burned in 1887 and was rebuilt in a brisker brick. The house is damp, draughty and beloved; it is also famous for its collection of clocks and maps."
     },
     {
       "id": "lore_thornes",
       "title": "The Thorne family",
       "category": "history",
-      "keys": ["Thorne", "Thornes", "the family"],
+      "keys": [
+        "Thorne",
+        "Thornes",
+        "the family"
+      ],
       "text": "The Thornes have held Harrowmere for three hundred years, and the baronetcy for two. They farmed the fen, drained it, lost money and made it back. The present family is Sir Alaric, Lady Honoria and, as heir, Sir Alaric's nephew Captain Rupert Thorne; the Thornes have no children of their own."
     },
     {
@@ -2533,7 +4609,11 @@
       "title": "The Mere Causeway",
       "category": "place",
       "about": "mere_causeway",
-      "keys": ["causeway", "Mere", "tide"],
+      "keys": [
+        "causeway",
+        "Mere",
+        "tide"
+      ],
       "text": "The causeway is a raised gravel road of about two miles that connects the estate to Saltreach. At the highest tides, or when a gale pushes the mere up, it can be impassable for a day. Estate people know the tide tables by heart; visitors are told to check before they set out."
     },
     {
@@ -2541,14 +4621,22 @@
       "title": "Saltreach",
       "category": "place",
       "about": "saltreach",
-      "keys": ["Saltreach", "the village"],
+      "keys": [
+        "Saltreach",
+        "the village"
+      ],
       "text": "Saltreach is a village of about two hundred, with a church, a public house called the Heron, a post office with the district's telephone exchange and one police constable. The Thornes have been its principal family for as long as anyone remembers."
     },
     {
       "id": "lore_collection",
       "title": "The Thorne collection",
       "category": "history",
-      "keys": ["collection", "clocks", "maps", "valuation"],
+      "keys": [
+        "collection",
+        "clocks",
+        "maps",
+        "valuation"
+      ],
       "text": "Sir Alaric's collection of English clocks and fen maps is one of the finest private ones in eastern England. This autumn he has decided to sell a selection at auction to fund repairs to the Hall, and he has invited a London valuer to appraise the pieces before the sale."
     },
     {
@@ -2556,7 +4644,11 @@
       "title": "Sir Alaric Thorne",
       "category": "person",
       "about": "sir_alaric",
-      "keys": ["Sir Alaric", "Alaric", "Sir A."],
+      "keys": [
+        "Sir Alaric",
+        "Alaric",
+        "Sir A."
+      ],
       "text": "Sir Alaric Thorne is sixty-two, big, courteous and given to long stories about clocks. He has had a weak heart for eight years and takes drops from Dr. Farrant as directed, though he has been known to forget. He likes to host house parties and to settle disputes before breakfast."
     },
     {
@@ -2564,7 +4656,11 @@
       "title": "Lady Honoria Thorne",
       "category": "person",
       "about": "lady_honoria",
-      "keys": ["Lady Honoria", "Honoria", "Lady Thorne"],
+      "keys": [
+        "Lady Honoria",
+        "Honoria",
+        "Lady Thorne"
+      ],
       "text": "Lady Honoria is Sir Alaric's wife of thirty-three years. She runs the house calmly and dryly, solves the newspaper's crossword every day and has never been known to raise her voice."
     },
     {
@@ -2572,7 +4668,11 @@
       "title": "Captain Rupert Thorne",
       "category": "person",
       "about": "rupert_thorne",
-      "keys": ["Rupert", "Captain Thorne", "the Captain"],
+      "keys": [
+        "Rupert",
+        "Captain Thorne",
+        "the Captain"
+      ],
       "text": "Captain Rupert Thorne is Sir Alaric's nephew and heir. Charming, restless and a little vague about money, he is said in Saltreach to owe more than he earns. His uncle has bailed him out twice and has said that he will not do so a third time."
     },
     {
@@ -2580,7 +4680,11 @@
       "title": "Verity Lorne",
       "category": "person",
       "about": "verity_lorne",
-      "keys": ["Verity", "Miss Lorne", "the secretary"],
+      "keys": [
+        "Verity",
+        "Miss Lorne",
+        "the secretary"
+      ],
       "text": "Miss Verity Lorne has been Sir Alaric's secretary for four years. She is quiet, exact and loyal, and has never been late with a letter. The household calls her 'the filing cabinet' and relies on her to find anything."
     },
     {
@@ -2588,7 +4692,12 @@
       "title": "Julian Ashcombe",
       "category": "person",
       "about": "julian_ashcombe",
-      "keys": ["Ashcombe", "Julian", "Mr. Ashcombe", "the solicitor"],
+      "keys": [
+        "Ashcombe",
+        "Julian",
+        "Mr. Ashcombe",
+        "the solicitor"
+      ],
       "text": "Julian Ashcombe is the Thorne family's solicitor and a trustee of the family trust. He has handled their affairs for twenty years and is respected across the county. A frequent weekend guest, he is as much a part of the furniture as the grandfather clock."
     },
     {
@@ -2596,7 +4705,11 @@
       "title": "Dr. Lionel Farrant",
       "category": "person",
       "about": "dr_lionel_farrant",
-      "keys": ["Dr. Farrant", "Farrant", "the doctor"],
+      "keys": [
+        "Dr. Farrant",
+        "Farrant",
+        "the doctor"
+      ],
       "text": "Dr. Farrant has been the family's physician for fifteen years, Sir Alaric's heart specialist for eight, and a friend for longer. He carries his black bag everywhere and puts it down wherever he stops."
     },
     {
@@ -2604,7 +4717,11 @@
       "title": "Gideon Pell",
       "category": "person",
       "about": "gideon_pell",
-      "keys": ["Pell", "the butler", "Mr. Pell"],
+      "keys": [
+        "Pell",
+        "the butler",
+        "Mr. Pell"
+      ],
       "text": "Pell has been the Hall's butler for thirty years. He is tall, grave and impeccably discreet, and he holds the keys to the cellar, the plate cupboard and most of the household's secrets. He is also the one person who can say how the house is meant to run."
     },
     {
@@ -2612,7 +4729,11 @@
       "title": "Mrs. Dorothea Marsh",
       "category": "person",
       "about": "mrs_marsh",
-      "keys": ["Mrs. Marsh", "the cook", "Marsh"],
+      "keys": [
+        "Mrs. Marsh",
+        "the cook",
+        "Marsh"
+      ],
       "text": "Mrs. Marsh has cooked at the Hall for twenty years. She is solid, kind and unshockable, and her kitchen is the warmest room in the house. She dislikes gossip but will tell a friend a great deal."
     },
     {
@@ -2620,7 +4741,11 @@
       "title": "Nell Sparrow",
       "category": "person",
       "about": "nell_sparrow",
-      "keys": ["Nell", "the housemaid", "Sparrow"],
+      "keys": [
+        "Nell",
+        "the housemaid",
+        "Sparrow"
+      ],
       "text": "Nell Sparrow is nineteen, the Hall's youngest servant, and the first person up each morning. She lights the fires, dusts the library and is afraid of Mr. Pell. She sees the house before anyone else has made a mess of it."
     },
     {
@@ -2628,7 +4753,11 @@
       "title": "Constable Albert Hobbs",
       "category": "person",
       "about": "constable_hobbs",
-      "keys": ["Constable Hobbs", "Hobbs", "the constable"],
+      "keys": [
+        "Constable Hobbs",
+        "Hobbs",
+        "the constable"
+      ],
       "text": "Constable Hobbs has kept the peace in Saltreach for eleven years, mostly by bicycle. He is patient, thorough and slow to hurry, and has never had a case bigger than a stolen pig. He gets to the Hall as fast as the tide lets him."
     },
     {
@@ -2636,7 +4765,11 @@
       "title": "The Library",
       "category": "place",
       "about": "library",
-      "keys": ["library", "mantel", "books"],
+      "keys": [
+        "library",
+        "mantel",
+        "books"
+      ],
       "text": "The library is the heart of the house. It has leather-bound sets of the county histories, a worn Turkey carpet and a fireplace carved with the year the west wing was rebuilt. Guests are encouraged to take a book; Sir Alaric prefers that they put it back."
     },
     {
@@ -2644,7 +4777,11 @@
       "title": "Sir Alaric's study",
       "category": "place",
       "about": "study",
-      "keys": ["study", "safe", "desk"],
+      "keys": [
+        "study",
+        "safe",
+        "desk"
+      ],
       "text": "The study is Sir Alaric's private office. It holds a roll-top desk, the estate map and a wall safe behind the portrait of his father. It is generally known that he keeps important papers in the safe."
     },
     {
@@ -2652,7 +4789,10 @@
       "title": "The Conservatory",
       "category": "place",
       "about": "conservatory",
-      "keys": ["conservatory", "garden door"],
+      "keys": [
+        "conservatory",
+        "garden door"
+      ],
       "text": "The conservatory was added in 1902 and has never been warm. A garden door leads to a path through the reeds to the boathouse; the family use it in summer and the staff use it for shortcuts."
     },
     {
@@ -2660,21 +4800,35 @@
       "title": "The telephone",
       "category": "item",
       "about": "hall_telephone",
-      "keys": ["telephone", "phone", "line", "exchange"],
+      "keys": [
+        "telephone",
+        "phone",
+        "line",
+        "exchange"
+      ],
       "text": "The house has one telephone, in the entrance hall, connected to the Saltreach exchange by a line on wooden poles. The line has failed in gales before. The estate keeps a tool roll in the gatehouse for just such repairs."
     },
     {
       "id": "lore_mere_ghost",
       "title": "The lantern on the mere",
       "category": "rumor",
-      "keys": ["ghost", "lantern", "legend", "will-o'-the-wisp"],
+      "keys": [
+        "ghost",
+        "lantern",
+        "legend",
+        "will-o'-the-wisp"
+      ],
       "text": "Estate children claim that a lantern walks on the mere on stormy nights and that it belongs to the first Thorne, who drowned crossing the causeway. Mrs. Marsh says it is marsh gas. Nell has never been out to look."
     },
     {
       "id": "lore_dinner",
       "title": "Dinner at Harrowmere",
       "category": "history",
-      "keys": ["dinner", "dress", "half past seven"],
+      "keys": [
+        "dinner",
+        "dress",
+        "half past seven"
+      ],
       "text": "Dinner at Harrowmere is at half past seven, and everyone dresses. Sir Alaric presides, Lady Honoria sits at the other end, and conversation is expected to be general and sometimes loud. Coffee is taken in the drawing room."
     }
   ],
@@ -2682,24 +4836,55 @@
     {
       "id": "try_telephone",
       "label": "Try the telephone",
-      "requires": ["at('hall_telephone', here)", "not story.phone_working", "not story.phone_tried"],
+      "requires": [
+        "at('hall_telephone', here)",
+        "not story.phone_working",
+        "not story.phone_tried"
+      ],
       "duration": 3,
-      "lexicon": ["try the phone", "pick up the telephone"],
+      "lexicon": [
+        "try the phone",
+        "pick up the telephone"
+      ],
       "observable": "lifts the receiver",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "phone_tried", "value": true}},
-        {"type": "note", "args": {"text": "The earpiece hisses and clicks. The line is dead."}}
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "phone_tried",
+            "value": true
+          }
+        },
+        {
+          "type": "note",
+          "args": {
+            "text": "The earpiece hisses and clicks. The line is dead."
+          }
+        }
       ]
     },
     {
       "id": "telephone_constable",
       "label": "Telephone Constable Hobbs",
-      "requires": ["at('hall_telephone', here)", "story.phone_working", "not story.constable_called"],
+      "requires": [
+        "at('hall_telephone', here)",
+        "story.phone_working",
+        "not story.constable_called"
+      ],
       "duration": 10,
-      "lexicon": ["call the constable", "telephone the police"],
+      "lexicon": [
+        "call the constable",
+        "telephone the police"
+      ],
       "observable": "speaks on the telephone",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "constable_called", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "constable_called",
+            "value": true
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2711,12 +4896,26 @@
     {
       "id": "splice_line",
       "label": "Splice the telephone line",
-      "requires": ["at(pov, 'gatehouse')", "at('tool_roll', 'gatehouse')", "story.clue_phone_fault", "not story.phone_working"],
+      "requires": [
+        "at(pov, 'gatehouse')",
+        "at('tool_roll', 'gatehouse')",
+        "story.clue_phone_fault",
+        "not story.phone_working"
+      ],
       "duration": 45,
-      "lexicon": ["mend the line", "splice the wire"],
+      "lexicon": [
+        "mend the line",
+        "splice the wire"
+      ],
       "observable": "works on the junction box",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "phone_working", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "phone_working",
+            "value": true
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2728,21 +4927,49 @@
     {
       "id": "tell_constable",
       "label": "Tell Constable Hobbs what has happened",
-      "requires": ["at(pov, 'saltreach')", "at('constable_hobbs', here)", "not story.constable_called"],
+      "requires": [
+        "at(pov, 'saltreach')",
+        "at('constable_hobbs', here)",
+        "not story.constable_called"
+      ],
       "duration": 15,
-      "lexicon": ["tell the constable", "report the death"],
+      "lexicon": [
+        "tell the constable",
+        "report the death"
+      ],
       "observable": "talks with the constable",
-      "effects": [{"type": "set_flag", "args": {"flag": "constable_called", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "constable_called",
+            "value": true
+          }
+        }
+      ]
     },
     {
       "id": "press_farrant",
       "label": "Press Dr. Farrant about the symptoms",
-      "requires": ["at('dr_lionel_farrant', here)", "story.body_found", "not story.farrant_admitted"],
+      "requires": [
+        "at('dr_lionel_farrant', here)",
+        "story.body_found",
+        "not story.farrant_admitted"
+      ],
       "duration": 15,
-      "lexicon": ["question the doctor", "ask the doctor about the death"],
+      "lexicon": [
+        "question the doctor",
+        "ask the doctor about the death"
+      ],
       "observable": "questions the doctor",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "farrant_admitted", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "farrant_admitted",
+            "value": true
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2754,82 +4981,324 @@
     {
       "id": "accuse",
       "label": "Name the culprit",
-      "params": {"who": {"type": "ref", "ref": "person", "label": "Who"}},
-      "requires": ["story.body_found", "who != pov"],
+      "params": {
+        "who": {
+          "type": "ref",
+          "ref": "person",
+          "label": "Who"
+        }
+      },
+      "requires": [
+        "story.body_found",
+        "who != pov"
+      ],
       "duration": 10,
-      "lexicon": ["accuse", "name the culprit", "it was"],
+      "lexicon": [
+        "accuse",
+        "name the culprit",
+        "it was"
+      ],
       "observable": "makes an accusation",
-      "effects": [{"type": "set_flag", "args": {"flag": "accused", "value": "=who"}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "accused",
+            "value": "=who"
+          }
+        }
+      ]
     },
     {
       "id": "ask_rupert_whereabouts",
       "label": "Ask Rupert where he was on Friday night",
-      "requires": ["at('rupert_thorne', here)", "story.body_found"],
+      "requires": [
+        "at('rupert_thorne', here)",
+        "story.body_found"
+      ],
       "duration": 10,
-      "lexicon": ["ask rupert where he was"],
+      "lexicon": [
+        "ask rupert where he was"
+      ],
       "observable": "questions Rupert",
-      "effects": [{"type": "set_flag", "args": {"flag": "asked_whereabouts", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "asked_whereabouts",
+            "value": true
+          }
+        }
+      ]
     },
     {
       "id": "confront_rupert",
       "label": "Show Rupert the creditor's note",
-      "requires": ["at('rupert_thorne', here)", "story.clue_boathouse_case", "not story.rupert_confronted"],
+      "requires": [
+        "at('rupert_thorne', here)",
+        "story.clue_boathouse_case",
+        "not story.rupert_confronted"
+      ],
       "duration": 10,
-      "lexicon": ["confront rupert"],
+      "lexicon": [
+        "confront rupert"
+      ],
       "observable": "shows Rupert a letter",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "rupert_confronted", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "rupert_confronted",
+            "value": true
+          }
+        },
         {
           "type": "note",
-          "args": {"text": "Rupert goes pale and says the debt has nothing to do with his brother's death."}
+          "args": {
+            "text": "Rupert goes pale and says the debt has nothing to do with his brother's death."
+          }
         }
       ]
     },
     {
       "id": "sit_with_mrs_marsh",
       "label": "Bring Mrs. Marsh a cup of tea and sit with her",
-      "requires": ["at(pov, 'kitchen')", "at('mrs_marsh', here)", "not story.tea_brought"],
+      "requires": [
+        "at(pov, 'kitchen')",
+        "at('mrs_marsh', here)",
+        "not story.tea_brought"
+      ],
       "duration": 30,
-      "lexicon": ["make tea for mrs marsh", "sit with the cook"],
+      "lexicon": [
+        "make tea for mrs marsh",
+        "sit with the cook"
+      ],
       "observable": "shares a pot of tea",
       "effects": [
-        {"type": "regard", "args": {"who": "mrs_marsh", "toward": "pov", "axis": "trust", "delta": 15}},
-        {"type": "set_flag", "args": {"flag": "tea_brought", "value": true}}
+        {
+          "type": "regard",
+          "args": {
+            "who": "mrs_marsh",
+            "toward": "pov",
+            "axis": "trust",
+            "delta": 15
+          }
+        },
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "tea_brought",
+            "value": true
+          }
+        }
       ]
     }
   ],
   "sheets": {
-    "scale": [1, 10],
+    "scale": [
+      1,
+      10
+    ],
     "stats": [
-      {"id": "observation", "label": "Observation"},
-      {"id": "manner", "label": "Manner"},
-      {"id": "nerve", "label": "Nerve"},
-      {"id": "knowledge", "label": "Knowledge"}
+      {
+        "id": "observation",
+        "label": "Observation"
+      },
+      {
+        "id": "manner",
+        "label": "Manner"
+      },
+      {
+        "id": "nerve",
+        "label": "Nerve"
+      },
+      {
+        "id": "knowledge",
+        "label": "Knowledge"
+      }
     ],
     "derived": {
-      "acuity": {"label": "Acuity", "formula": "floor((observation + knowledge) / 2)"},
-      "composure": {"label": "Composure", "formula": "6 + floor((nerve + manner) / 3)"}
+      "acuity": {
+        "label": "Acuity",
+        "formula": "floor((observation + knowledge) / 2)"
+      },
+      "composure": {
+        "label": "Composure",
+        "formula": "6 + floor((nerve + manner) / 3)"
+      }
     }
   },
   "categories": {
-    "groceries_staples": {"name": "Groceries", "basis": "1934 shop prices: a loaf for about 4d, butter a shilling a pound, tea two shillings.", "band": {"min": 1, "typical": 6, "max": 36}},
-    "groceries_baskets": {"name": "A week's housekeeping", "basis": "Food for one for a week, about ten shillings.", "band": {"min": 72, "typical": 120, "max": 240}},
-    "meals_out": {"name": "Meals out", "basis": "Tea for two at a tea room to dinner at a good hotel.", "band": {"min": 6, "typical": 18, "max": 120}},
-    "coffee": {"name": "Tea and coffee", "basis": "A cup at a café or station buffet.", "band": {"min": 2, "typical": 3, "max": 8}},
-    "alcohol": {"name": "Beer, wine and spirits", "basis": "A pint of bitter to a bottle of champagne.", "band": {"min": 3, "typical": 6, "max": 240}},
-    "clothing": {"name": "Clothing", "basis": "Collars and gloves to a tailored suit or overcoat.", "band": {"min": 12, "typical": 120, "max": 2400}},
-    "electronics": {"name": "Wireless and electrical goods", "basis": "A light bulb to a wireless set.", "band": {"min": 6, "typical": 240, "max": 3600}},
-    "tools_hardware": {"name": "Tools and hardware", "basis": "Ironmongers' prices, a box of screws to a good spade or saw.", "band": {"min": 2, "typical": 24, "max": 600}},
-    "household_goods": {"name": "Household goods", "basis": "A typewriter ribbon or crockery to a piece of furniture.", "band": {"min": 2, "typical": 30, "max": 2400}},
-    "personal_care": {"name": "Personal care and tobacco", "basis": "A shave or a packet of cigarettes to a gentleman's haircut and tonic.", "band": {"min": 2, "typical": 12, "max": 120}},
-    "medical": {"name": "Medical", "basis": "A bottle of medicine or a doctor's visit to a specialist's fee in guineas.", "band": {"min": 6, "typical": 42, "max": 1260}},
-    "entertainment": {"name": "Entertainment", "basis": "A newspaper, a seat at the pictures or a punt for the afternoon.", "band": {"min": 1, "typical": 9, "max": 120}},
-    "transport": {"name": "Travel", "basis": "A motor taxi to a first-class return to London.", "band": {"min": 1, "typical": 12, "max": 480}},
-    "fuel": {"name": "Petrol and coal", "basis": "Petrol by the gallon, coal by the hundredweight.", "band": {"min": 6, "typical": 18, "max": 60}},
-    "vehicle_services": {"name": "Hire, wages and fees", "basis": "A garage repair or a day's wage to a valuer's fee.", "band": {"min": 6, "typical": 120, "max": 960}},
-    "lodging": {"name": "Lodging", "basis": "A room at a country inn to a London hotel.", "band": {"min": 24, "typical": 90, "max": 480}},
-    "utilities": {"name": "Post, telegrams and telephone", "basis": "A stamp or a telegram to a quarter's telephone account.", "band": {"min": 1, "typical": 12, "max": 240}},
-    "subscriptions": {"name": "Subscriptions", "basis": "A magazine to a year's club subscription of two guineas.", "band": {"min": 12, "typical": 60, "max": 504}},
-    "gifts": {"name": "Gifts", "basis": "Flowers or chocolates to a silver cigarette case.", "band": {"min": 6, "typical": 60, "max": 1200}}
+    "groceries_staples": {
+      "name": "Groceries",
+      "basis": "1934 shop prices: a loaf for about 4d, butter a shilling a pound, tea two shillings.",
+      "band": {
+        "min": 1,
+        "typical": 6,
+        "max": 36
+      }
+    },
+    "groceries_baskets": {
+      "name": "A week's housekeeping",
+      "basis": "Food for one for a week, about ten shillings.",
+      "band": {
+        "min": 72,
+        "typical": 120,
+        "max": 240
+      }
+    },
+    "meals_out": {
+      "name": "Meals out",
+      "basis": "Tea for two at a tea room to dinner at a good hotel.",
+      "band": {
+        "min": 6,
+        "typical": 18,
+        "max": 120
+      }
+    },
+    "coffee": {
+      "name": "Tea and coffee",
+      "basis": "A cup at a café or station buffet.",
+      "band": {
+        "min": 2,
+        "typical": 3,
+        "max": 8
+      }
+    },
+    "alcohol": {
+      "name": "Beer, wine and spirits",
+      "basis": "A pint of bitter to a bottle of champagne.",
+      "band": {
+        "min": 3,
+        "typical": 6,
+        "max": 240
+      }
+    },
+    "clothing": {
+      "name": "Clothing",
+      "basis": "Collars and gloves to a tailored suit or overcoat.",
+      "band": {
+        "min": 12,
+        "typical": 120,
+        "max": 2400
+      }
+    },
+    "electronics": {
+      "name": "Wireless and electrical goods",
+      "basis": "A light bulb to a wireless set.",
+      "band": {
+        "min": 6,
+        "typical": 240,
+        "max": 3600
+      }
+    },
+    "tools_hardware": {
+      "name": "Tools and hardware",
+      "basis": "Ironmongers' prices, a box of screws to a good spade or saw.",
+      "band": {
+        "min": 2,
+        "typical": 24,
+        "max": 600
+      }
+    },
+    "household_goods": {
+      "name": "Household goods",
+      "basis": "A typewriter ribbon or crockery to a piece of furniture.",
+      "band": {
+        "min": 2,
+        "typical": 30,
+        "max": 2400
+      }
+    },
+    "personal_care": {
+      "name": "Personal care and tobacco",
+      "basis": "A shave or a packet of cigarettes to a gentleman's haircut and tonic.",
+      "band": {
+        "min": 2,
+        "typical": 12,
+        "max": 120
+      }
+    },
+    "medical": {
+      "name": "Medical",
+      "basis": "A bottle of medicine or a doctor's visit to a specialist's fee in guineas.",
+      "band": {
+        "min": 6,
+        "typical": 42,
+        "max": 1260
+      }
+    },
+    "entertainment": {
+      "name": "Entertainment",
+      "basis": "A newspaper, a seat at the pictures or a punt for the afternoon.",
+      "band": {
+        "min": 1,
+        "typical": 9,
+        "max": 120
+      }
+    },
+    "transport": {
+      "name": "Travel",
+      "basis": "A motor taxi to a first-class return to London.",
+      "band": {
+        "min": 1,
+        "typical": 12,
+        "max": 480
+      }
+    },
+    "fuel": {
+      "name": "Petrol and coal",
+      "basis": "Petrol by the gallon, coal by the hundredweight.",
+      "band": {
+        "min": 6,
+        "typical": 18,
+        "max": 60
+      }
+    },
+    "vehicle_services": {
+      "name": "Hire, wages and fees",
+      "basis": "A garage repair or a day's wage to a valuer's fee.",
+      "band": {
+        "min": 6,
+        "typical": 120,
+        "max": 960
+      }
+    },
+    "lodging": {
+      "name": "Lodging",
+      "basis": "A room at a country inn to a London hotel.",
+      "band": {
+        "min": 24,
+        "typical": 90,
+        "max": 480
+      }
+    },
+    "utilities": {
+      "name": "Post, telegrams and telephone",
+      "basis": "A stamp or a telegram to a quarter's telephone account.",
+      "band": {
+        "min": 1,
+        "typical": 12,
+        "max": 240
+      }
+    },
+    "subscriptions": {
+      "name": "Subscriptions",
+      "basis": "A magazine to a year's club subscription of two guineas.",
+      "band": {
+        "min": 12,
+        "typical": 60,
+        "max": 504
+      }
+    },
+    "gifts": {
+      "name": "Gifts",
+      "basis": "Flowers or chocolates to a silver cigarette case.",
+      "band": {
+        "min": 6,
+        "typical": 60,
+        "max": 1200
+      }
+    }
   }
 }

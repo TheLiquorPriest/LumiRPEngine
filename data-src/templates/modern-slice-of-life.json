@@ -4,7 +4,14 @@
   "name": "Port Alder",
   "version": 1,
   "genre": "slice of life",
-  "tags": ["modern", "small town", "Great Lakes", "work and friends", "boats", "simulation"],
+  "tags": [
+    "modern",
+    "small town",
+    "Great Lakes",
+    "work and friends",
+    "boats",
+    "simulation"
+  ],
   "blurb": "A small Michigan lake town in the last good weeks of boating season: a garage that needs you, a loan and a landlord to keep paid, a friend with a pontoon, and a harbor festival on the way.",
   "contentNotes": "All-ages. Everyday money, work and friendship. No real people, businesses or events; Port Alder is fictional and the numbers are approximate 2025-26 US figures.",
   "realism": {
@@ -18,14 +25,46 @@
     "label": "US dollars",
     "baseUnit": "cent",
     "denominations": [
-      {"id": "cent", "label": "cent", "value": 1},
-      {"id": "nickel", "label": "nickel", "value": 5},
-      {"id": "dime", "label": "dime", "value": 10},
-      {"id": "quarter", "label": "quarter", "value": 25},
-      {"id": "one", "label": "$1 bill", "value": 100},
-      {"id": "five", "label": "$5 bill", "value": 500},
-      {"id": "ten", "label": "$10 bill", "value": 1000},
-      {"id": "twenty", "label": "$20 bill", "value": 2000}
+      {
+        "id": "cent",
+        "label": "cent",
+        "value": 1
+      },
+      {
+        "id": "nickel",
+        "label": "nickel",
+        "value": 5
+      },
+      {
+        "id": "dime",
+        "label": "dime",
+        "value": 10
+      },
+      {
+        "id": "quarter",
+        "label": "quarter",
+        "value": 25
+      },
+      {
+        "id": "one",
+        "label": "$1 bill",
+        "value": 100
+      },
+      {
+        "id": "five",
+        "label": "$5 bill",
+        "value": 500
+      },
+      {
+        "id": "ten",
+        "label": "$10 bill",
+        "value": 1000
+      },
+      {
+        "id": "twenty",
+        "label": "$20 bill",
+        "value": 2000
+      }
     ],
     "note": "Money is integer cents. National prices are scaled by the region's cost-of-living multiplier (Michigan 0.95) at pricing time.",
     "code": "USD",
@@ -34,25 +73,71 @@
     "decimals": 2,
     "format": "{sign}{symbol}{amount}"
   },
-  "travelSpeedKmh": {"walk": [1.5, 6], "road": [15, 110], "offroad": [4, 40], "water": [5, 35]},
+  "travelSpeedKmh": {
+    "walk": [
+      1.5,
+      6
+    ],
+    "road": [
+      15,
+      110
+    ],
+    "offroad": [
+      4,
+      40
+    ],
+    "water": [
+      5,
+      35
+    ]
+  },
   "calendar": {
     "system": "gregorian",
     "epoch": "2026-09-14T00:00",
     "timeZone": "America/New_York",
     "dayParts": [
-      {"id": "early", "label": "Early morning", "start": "05:00"},
-      {"id": "morning", "label": "Morning", "start": "08:00"},
-      {"id": "midday", "label": "Midday", "start": "11:30"},
-      {"id": "afternoon", "label": "Afternoon", "start": "14:00"},
-      {"id": "evening", "label": "Evening", "start": "17:30"},
-      {"id": "night", "label": "Night", "start": "21:30"}
+      {
+        "id": "early",
+        "label": "Early morning",
+        "start": "05:00"
+      },
+      {
+        "id": "morning",
+        "label": "Morning",
+        "start": "08:00"
+      },
+      {
+        "id": "midday",
+        "label": "Midday",
+        "start": "11:30"
+      },
+      {
+        "id": "afternoon",
+        "label": "Afternoon",
+        "start": "14:00"
+      },
+      {
+        "id": "evening",
+        "label": "Evening",
+        "start": "17:30"
+      },
+      {
+        "id": "night",
+        "label": "Night",
+        "start": "21:30"
+      }
     ],
     "inheritHolidays": "calendar.holidays",
     "holidays": [
       {
         "id": "harbor_fest",
         "label": "Harbor Fest",
-        "rule": {"type": "nth_weekday", "month": 9, "weekday": 6, "n": 4},
+        "rule": {
+          "type": "nth_weekday",
+          "month": 9,
+          "weekday": 6,
+          "n": 4
+        },
         "dayOff": false
       }
     ]
@@ -67,47 +152,143 @@
   },
   "time": {
     "sceneTypes": [
-      {"id": "conversation", "label": "Conversation", "tickMinutes": 2},
-      {"id": "action", "label": "Action", "tickMinutes": 0.5},
-      {"id": "exploration", "label": "Exploration", "tickMinutes": 10},
-      {"id": "downtime", "label": "Downtime", "tickMinutes": 30},
-      {"id": "work", "label": "Work", "tickMinutes": 15}
+      {
+        "id": "conversation",
+        "label": "Conversation",
+        "tickMinutes": 2
+      },
+      {
+        "id": "action",
+        "label": "Action",
+        "tickMinutes": 0.5
+      },
+      {
+        "id": "exploration",
+        "label": "Exploration",
+        "tickMinutes": 10
+      },
+      {
+        "id": "downtime",
+        "label": "Downtime",
+        "tickMinutes": 30
+      },
+      {
+        "id": "work",
+        "label": "Work",
+        "tickMinutes": 15
+      }
     ],
     "montage": "key",
     "speedThrough": {
-      "sleep": {"mode": "offer", "thresholdMinutes": 30},
-      "work_shift": {"mode": "offer", "thresholdMinutes": 30},
-      "travel": {"mode": "offer", "thresholdMinutes": 30},
-      "waiting": {"mode": "offer", "thresholdMinutes": 30}
+      "sleep": {
+        "mode": "offer",
+        "thresholdMinutes": 30
+      },
+      "work_shift": {
+        "mode": "offer",
+        "thresholdMinutes": 30
+      },
+      "travel": {
+        "mode": "offer",
+        "thresholdMinutes": 30
+      },
+      "waiting": {
+        "mode": "offer",
+        "thresholdMinutes": 30
+      }
     }
   },
   "flags": [
-    {"id": "shop_open", "description": "Alder Automotive is open for business.", "default": true},
+    {
+      "id": "shop_open",
+      "description": "Alder Automotive is open for business.",
+      "default": true
+    },
     {
       "id": "fleet_contract_signed",
       "description": "The township has signed the fleet service contract.",
       "default": false
     },
-    {"id": "township_truck_fixed", "description": "The township's pickup starts and runs.", "default": false},
-    {"id": "small_craft_advisory", "description": "A small-craft advisory is in force on the lake.", "default": false},
-    {"id": "ferry_running", "description": "The Gull Island ferry is running.", "default": true},
-    {"id": "pontoon_loaned", "description": "Dale has lent the pontoon to the player.", "default": false},
-    {"id": "fleet_deal_accepted", "description": "The player has taken the township truck job.", "default": false},
+    {
+      "id": "township_truck_fixed",
+      "description": "The township's pickup starts and runs.",
+      "default": false
+    },
+    {
+      "id": "small_craft_advisory",
+      "description": "A small-craft advisory is in force on the lake.",
+      "default": false
+    },
+    {
+      "id": "ferry_running",
+      "description": "The Gull Island ferry is running.",
+      "default": true
+    },
+    {
+      "id": "pontoon_loaned",
+      "description": "Dale has lent the pontoon to the player.",
+      "default": false
+    },
+    {
+      "id": "fleet_deal_accepted",
+      "description": "The player has taken the township truck job.",
+      "default": false
+    },
     {
       "id": "relay_replaced",
       "description": "The township pickup's fuel pump relay has been replaced.",
       "default": false
     },
-    {"id": "priya_walked", "description": "The player has walked Priya through the repair.", "default": false},
-    {"id": "fleet_serviced", "description": "The township fleet service run is finished.", "default": false},
-    {"id": "pontoon_looked_at", "description": "The player has agreed to look at Dale's pontoon.", "default": false},
-    {"id": "pontoon_diagnosed", "description": "The pontoon's fault is diagnosed.", "default": false},
-    {"id": "pontoon_repaired", "description": "The pontoon is repaired.", "default": false},
-    {"id": "pontoon_trial_done", "description": "The sea trial is complete.", "default": false},
-    {"id": "pontoon_out", "description": "The pontoon has left the marina on loan.", "default": false},
-    {"id": "asked_about_marcus", "description": "The player has asked about Marcus.", "default": false},
-    {"id": "read_notice", "description": "The player has read the past-due notice.", "default": false},
-    {"id": "read_statement", "description": "The player has read the shop's bank statement.", "default": false},
+    {
+      "id": "priya_walked",
+      "description": "The player has walked Priya through the repair.",
+      "default": false
+    },
+    {
+      "id": "fleet_serviced",
+      "description": "The township fleet service run is finished.",
+      "default": false
+    },
+    {
+      "id": "pontoon_looked_at",
+      "description": "The player has agreed to look at Dale's pontoon.",
+      "default": false
+    },
+    {
+      "id": "pontoon_diagnosed",
+      "description": "The pontoon's fault is diagnosed.",
+      "default": false
+    },
+    {
+      "id": "pontoon_repaired",
+      "description": "The pontoon is repaired.",
+      "default": false
+    },
+    {
+      "id": "pontoon_trial_done",
+      "description": "The sea trial is complete.",
+      "default": false
+    },
+    {
+      "id": "pontoon_out",
+      "description": "The pontoon has left the marina on loan.",
+      "default": false
+    },
+    {
+      "id": "asked_about_marcus",
+      "description": "The player has asked about Marcus.",
+      "default": false
+    },
+    {
+      "id": "read_notice",
+      "description": "The player has read the past-due notice.",
+      "default": false
+    },
+    {
+      "id": "read_statement",
+      "description": "The player has read the shop's bank statement.",
+      "default": false
+    },
     {
       "id": "talked_marcus",
       "description": "The player has talked to Marcus about the shop's money.",
@@ -116,16 +297,49 @@
   ],
   "regard": {
     "axes": [
-      {"id": "warmth", "label": "Warmth", "min": -100, "max": 100},
-      {"id": "trust", "label": "Trust", "min": -100, "max": 100},
-      {"id": "respect", "label": "Respect", "min": -100, "max": 100}
+      {
+        "id": "warmth",
+        "label": "Warmth",
+        "min": -100,
+        "max": 100
+      },
+      {
+        "id": "trust",
+        "label": "Trust",
+        "min": -100,
+        "max": 100
+      },
+      {
+        "id": "respect",
+        "label": "Respect",
+        "min": -100,
+        "max": 100
+      }
     ],
     "bands": [
-      {"label": "hostile", "max": -60},
-      {"label": "cold", "min": -60, "max": -20},
-      {"label": "neutral", "min": -20, "max": 20},
-      {"label": "warm", "min": 20, "max": 60},
-      {"label": "devoted", "min": 60}
+      {
+        "label": "hostile",
+        "max": -60
+      },
+      {
+        "label": "cold",
+        "min": -60,
+        "max": -20
+      },
+      {
+        "label": "neutral",
+        "min": -20,
+        "max": 20
+      },
+      {
+        "label": "warm",
+        "min": 20,
+        "max": 60
+      },
+      {
+        "label": "devoted",
+        "min": 60
+      }
     ]
   },
   "places": [
@@ -135,7 +349,9 @@
       "timeZone": "America/New_York",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["region"],
+      "tags": [
+        "region"
+      ],
       "description": "A long strip of dunes, orchards and small harbor towns on the east shore of Lake Michigan."
     },
     {
@@ -145,7 +361,9 @@
       "timeZone": "America/New_York",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["town"],
+      "tags": [
+        "town"
+      ],
       "description": "A harbor town of about 6,500 people with a brick Main Street, a working marina, two stoplights and an unreasonable number of coffee shops in summer."
     },
     {
@@ -155,7 +373,9 @@
       "timeZone": "America/New_York",
       "sceneType": "downtime",
       "visibility": "public",
-      "tags": ["home"],
+      "tags": [
+        "home"
+      ],
       "description": "A three-storey brick building with Harbor Hardware on the ground floor and four apartments above. Unit 2B has a lake view if you lean out of the bathroom window."
     },
     {
@@ -165,7 +385,9 @@
       "timeZone": "America/New_York",
       "sceneType": "work",
       "visibility": "public",
-      "tags": ["workplace"],
+      "tags": [
+        "workplace"
+      ],
       "description": "A three-bay repair shop on Lake Avenue with a customer counter, a parts shelf and a back lot full of cars waiting for one more part. The radio is always on."
     },
     {
@@ -175,7 +397,9 @@
       "timeZone": "America/New_York",
       "sceneType": "conversation",
       "visibility": "public",
-      "tags": ["bar"],
+      "tags": [
+        "bar"
+      ],
       "description": "A waterfront bar and grill with a deck over the harbor, a wall of old buoys and the best burger in the county. Trivia is on Thursdays."
     },
     {
@@ -185,7 +409,9 @@
       "timeZone": "America/New_York",
       "sceneType": "conversation",
       "visibility": "public",
-      "tags": ["cafe"],
+      "tags": [
+        "cafe"
+      ],
       "description": "A bright corner cafe on Main Street with mismatched chairs, a good espresso machine and a pastry case that empties by ten."
     },
     {
@@ -195,7 +421,9 @@
       "timeZone": "America/New_York",
       "sceneType": "conversation",
       "visibility": "public",
-      "tags": ["civic"],
+      "tags": [
+        "civic"
+      ],
       "description": "A low brick building with a flagpole and a bulletin board. Permits, tax bills and the township's vehicle yard are all handled here."
     },
     {
@@ -205,7 +433,9 @@
       "timeZone": "America/New_York",
       "sceneType": "conversation",
       "visibility": "public",
-      "tags": ["clinic"],
+      "tags": [
+        "clinic"
+      ],
       "description": "A one-storey clinic with urgent care, a pharmacy window and a waiting room that smells of hand sanitizer and old magazines."
     },
     {
@@ -216,7 +446,10 @@
       "sceneType": "exploration",
       "grid": "marina_grid",
       "visibility": "public",
-      "tags": ["marina", "water"],
+      "tags": [
+        "marina",
+        "water"
+      ],
       "description": "Eighty slips, a boat ramp, a fuel dock and a barn full of winter storage. The harbor office has a bell on the door and a coffee pot that is never quite empty."
     },
     {
@@ -226,7 +459,9 @@
       "timeZone": "America/New_York",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["park"],
+      "tags": [
+        "park"
+      ],
       "description": "A strip of beach, lawn and picnic tables beside the marina. The pavilion hosts the weekly farmers' market in summer and Harbor Fest in September."
     },
     {
@@ -236,8 +471,19 @@
       "timeZone": "America/New_York",
       "sceneType": "downtime",
       "visibility": "public",
-      "tags": ["grocery"],
-      "description": "The town's only full grocery store, with a deli counter, a rack of local apples and a bulletin board covered in lost-cat flyers."
+      "tags": [
+        "grocery"
+      ],
+      "description": "The town's only full grocery store, with a deli counter, a rack of local apples and a bulletin board covered in lost-cat flyers. By the entrance, a Lakeshore Credit Union counter and an ATM that takes deposits.",
+      "atm": {
+        "bank": "Lakeshore Credit Union",
+        "fee": 0,
+        "limit": 80000,
+        "deposits": true
+      },
+      "branch": {
+        "bank": "Lakeshore Credit Union"
+      }
     },
     {
       "id": "shoreline_fuel",
@@ -246,8 +492,15 @@
       "timeZone": "America/New_York",
       "sceneType": "action",
       "visibility": "public",
-      "tags": ["fuel"],
-      "description": "A gas station and convenience store on the road out of town, with four pumps, a car wash and surprisingly good hot dogs."
+      "tags": [
+        "fuel"
+      ],
+      "description": "A gas station and convenience store on the road out of town, with four pumps, a car wash and surprisingly good hot dogs.",
+      "atm": {
+        "bank": "Great Lakes Bank",
+        "fee": 350,
+        "limit": 40000
+      }
     },
     {
       "id": "dune_trails",
@@ -256,7 +509,9 @@
       "timeZone": "America/New_York",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["offroad"],
+      "tags": [
+        "offroad"
+      ],
       "description": "Twelve miles of marked sand trails through the dunes, open to ATVs and side-by-sides from a trailhead lot off County Road 12. The sand is deep, the views are huge and the rules are posted on a sign no one reads."
     },
     {
@@ -266,7 +521,10 @@
       "timeZone": "America/New_York",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["island", "water"],
+      "tags": [
+        "island",
+        "water"
+      ],
       "description": "A wooded island six kilometers offshore with a lighthouse, a small campground and a ferry that runs from the marina several times a day in season."
     },
     {
@@ -275,7 +533,10 @@
       "timeZone": "America/Chicago",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["city", "off-map"],
+      "tags": [
+        "city",
+        "off-map"
+      ],
       "description": "The nearest big city, about a three-and-a-half-hour drive around the bottom of the lake, in the Central time zone: an hour behind Port Alder."
     },
     {
@@ -284,8 +545,22 @@
       "parent": "port_alder",
       "sceneType": "work",
       "visibility": "public",
-      "tags": ["school"],
+      "tags": [
+        "school"
+      ],
       "description": "A low brick school on the edge of town that serves Port Alder and the farms behind the dunes: one long corridor, a gym that doubles as the auditorium, and a flagpole in front. Classes run from eight until ten past three."
+    },
+    {
+      "id": "birch_lane_12",
+      "name": "12 Birch Lane",
+      "parent": "port_alder",
+      "timeZone": "America/New_York",
+      "sceneType": "downtime",
+      "visibility": "secret",
+      "tags": [
+        "home"
+      ],
+      "description": "Marcus Delgado's two-storey clapboard house on a quiet lane above the harbor, with a detached garage he never parks in."
     }
   ],
   "routes": [
@@ -294,56 +569,120 @@
       "from": "harbor_street_114",
       "to": "bluebird_coffee",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 2, "distanceKm": 0.1}}
+      "modes": {
+        "walk": {
+          "minutes": 2,
+          "distanceKm": 0.1
+        }
+      }
     },
     {
       "id": "rt_home_anchor",
       "from": "harbor_street_114",
       "to": "rusty_anchor",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 4, "distanceKm": 0.3}}
+      "modes": {
+        "walk": {
+          "minutes": 4,
+          "distanceKm": 0.3
+        }
+      }
     },
     {
       "id": "rt_home_shop",
       "from": "harbor_street_114",
       "to": "alder_automotive",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 11, "distanceKm": 0.9}, "road": {"minutes": 3, "distanceKm": 0.9}}
+      "modes": {
+        "walk": {
+          "minutes": 11,
+          "distanceKm": 0.9
+        },
+        "road": {
+          "minutes": 3,
+          "distanceKm": 0.9
+        }
+      }
     },
     {
       "id": "rt_home_hall",
       "from": "harbor_street_114",
       "to": "township_hall",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 6, "distanceKm": 0.5}, "road": {"minutes": 2, "distanceKm": 0.6}}
+      "modes": {
+        "walk": {
+          "minutes": 6,
+          "distanceKm": 0.5
+        },
+        "road": {
+          "minutes": 2,
+          "distanceKm": 0.6
+        }
+      }
     },
     {
       "id": "rt_home_market",
       "from": "harbor_street_114",
       "to": "alder_market",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 9, "distanceKm": 0.7}, "road": {"minutes": 3, "distanceKm": 0.9}}
+      "modes": {
+        "walk": {
+          "minutes": 9,
+          "distanceKm": 0.7
+        },
+        "road": {
+          "minutes": 3,
+          "distanceKm": 0.9
+        }
+      }
     },
     {
       "id": "rt_home_marina",
       "from": "harbor_street_114",
       "to": "alder_harbor_marina",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 12, "distanceKm": 1.0}, "road": {"minutes": 4, "distanceKm": 1.2}}
+      "modes": {
+        "walk": {
+          "minutes": 12,
+          "distanceKm": 1.0
+        },
+        "road": {
+          "minutes": 4,
+          "distanceKm": 1.2
+        }
+      }
     },
     {
       "id": "rt_home_clinic",
       "from": "harbor_street_114",
       "to": "community_clinic",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 14, "distanceKm": 1.1}, "road": {"minutes": 4, "distanceKm": 1.3}}
+      "modes": {
+        "walk": {
+          "minutes": 14,
+          "distanceKm": 1.1
+        },
+        "road": {
+          "minutes": 4,
+          "distanceKm": 1.3
+        }
+      }
     },
     {
       "id": "rt_shop_fuel",
       "from": "alder_automotive",
       "to": "shoreline_fuel",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 5, "distanceKm": 0.4}, "road": {"minutes": 1, "distanceKm": 0.5}}
+      "modes": {
+        "walk": {
+          "minutes": 5,
+          "distanceKm": 0.4
+        },
+        "road": {
+          "minutes": 1,
+          "distanceKm": 0.5
+        }
+      }
     },
     {
       "id": "rt_marina_park",
@@ -351,9 +690,18 @@
       "to": "lakefront_park",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 8, "distanceKm": 0.6},
-        "road": {"minutes": 3, "distanceKm": 0.8},
-        "water": {"minutes": 9, "distanceKm": 2.0}
+        "walk": {
+          "minutes": 8,
+          "distanceKm": 0.6
+        },
+        "road": {
+          "minutes": 3,
+          "distanceKm": 0.8
+        },
+        "water": {
+          "minutes": 9,
+          "distanceKm": 2.0
+        }
       }
     },
     {
@@ -361,7 +709,13 @@
       "from": "alder_harbor_marina",
       "to": "gull_island",
       "bidirectional": true,
-      "modes": {"water": {"minutes": 25, "distanceKm": 6.0, "terrain": "open lake"}}
+      "modes": {
+        "water": {
+          "minutes": 25,
+          "distanceKm": 6.0,
+          "terrain": "open lake"
+        }
+      }
     },
     {
       "id": "rt_alder_dunes",
@@ -369,8 +723,16 @@
       "to": "dune_trails",
       "bidirectional": true,
       "modes": {
-        "road": {"minutes": 12, "distanceKm": 9.0, "terrain": "County Road 12"},
-        "offroad": {"minutes": 22, "distanceKm": 7.0, "terrain": "sand trail"}
+        "road": {
+          "minutes": 12,
+          "distanceKm": 9.0,
+          "terrain": "County Road 12"
+        },
+        "offroad": {
+          "minutes": 22,
+          "distanceKm": 7.0,
+          "terrain": "sand trail"
+        }
       }
     },
     {
@@ -378,14 +740,45 @@
       "from": "port_alder",
       "to": "chicago_il",
       "bidirectional": true,
-      "modes": {"road": {"minutes": 215, "distanceKm": 305, "terrain": "interstate"}}
+      "modes": {
+        "road": {
+          "minutes": 215,
+          "distanceKm": 305,
+          "terrain": "interstate"
+        }
+      }
     },
     {
       "id": "rt_home_school",
       "from": "harbor_street_114",
       "to": "lakeshore_school",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 16, "distanceKm": 1.2}, "road": {"minutes": 5, "distanceKm": 1.4}}
+      "modes": {
+        "walk": {
+          "minutes": 16,
+          "distanceKm": 1.2
+        },
+        "road": {
+          "minutes": 5,
+          "distanceKm": 1.4
+        }
+      }
+    },
+    {
+      "id": "rt_birch_lane_shop",
+      "from": "birch_lane_12",
+      "to": "alder_automotive",
+      "bidirectional": true,
+      "modes": {
+        "walk": {
+          "minutes": 12,
+          "distanceKm": 0.9
+        },
+        "road": {
+          "minutes": 3,
+          "distanceKm": 1.1
+        }
+      }
     }
   ],
   "grids": [
@@ -396,14 +789,35 @@
       "height": 11,
       "cellMeters": 5,
       "legend": {
-        "~": {"terrain": "water", "blockedFor": ["walk", "road"]},
-        "a": {"terrain": "asphalt"},
-        "s": {"terrain": "sand and grass"},
-        "b": {"terrain": "building", "blocked": true},
-        "r": {"terrain": "boat ramp"},
-        "d": {"terrain": "dock"},
-        "f": {"terrain": "fuel dock"},
-        "D": {"terrain": "doorway"}
+        "~": {
+          "terrain": "water",
+          "blockedFor": [
+            "walk",
+            "road"
+          ]
+        },
+        "a": {
+          "terrain": "asphalt"
+        },
+        "s": {
+          "terrain": "sand and grass"
+        },
+        "b": {
+          "terrain": "building",
+          "blocked": true
+        },
+        "r": {
+          "terrain": "boat ramp"
+        },
+        "d": {
+          "terrain": "dock"
+        },
+        "f": {
+          "terrain": "fuel dock"
+        },
+        "D": {
+          "terrain": "doorway"
+        }
       },
       "rows": [
         "abbbbaabbbbbbaabba",
@@ -419,18 +833,104 @@
         "~~~~~~~~~~~~~~~~~~"
       ],
       "zones": {
-        "parking": [[0, 2, 18, 2]],
-        "harbor_office_front": [[1, 2, 4, 1]],
-        "storage_barn_front": [[7, 2, 6, 1]],
-        "shoreline": [[0, 4, 18, 1]],
-        "boat_ramp": [[13, 4, 2, 5]],
-        "pier_a": [[2, 5, 1, 5]],
-        "pier_b": [[6, 5, 1, 5]],
-        "pier_c": [[10, 5, 1, 4]],
-        "fuel_dock": [[16, 5, 2, 2]],
-        "open_water": [[0, 9, 18, 2]]
+        "parking": [
+          [
+            0,
+            2,
+            18,
+            2
+          ]
+        ],
+        "harbor_office_front": [
+          [
+            1,
+            2,
+            4,
+            1
+          ]
+        ],
+        "storage_barn_front": [
+          [
+            7,
+            2,
+            6,
+            1
+          ]
+        ],
+        "shoreline": [
+          [
+            0,
+            4,
+            18,
+            1
+          ]
+        ],
+        "boat_ramp": [
+          [
+            13,
+            4,
+            2,
+            5
+          ]
+        ],
+        "pier_a": [
+          [
+            2,
+            5,
+            1,
+            5
+          ]
+        ],
+        "pier_b": [
+          [
+            6,
+            5,
+            1,
+            5
+          ]
+        ],
+        "pier_c": [
+          [
+            10,
+            5,
+            1,
+            4
+          ]
+        ],
+        "fuel_dock": [
+          [
+            16,
+            5,
+            2,
+            2
+          ]
+        ],
+        "open_water": [
+          [
+            0,
+            9,
+            18,
+            2
+          ]
+        ]
       },
-      "exits": {"harbor_street_114": [0, 3], "lakefront_park": [17, 3], "gull_island": {"cell": [8, 10], "mode": "water"}}
+      "exits": {
+        "harbor_street_114": [
+          0,
+          3
+        ],
+        "lakefront_park": [
+          17,
+          3
+        ],
+        "gull_island": {
+          "cell": [
+            8,
+            10
+          ],
+          "mode": "water"
+        }
+      }
     }
   ],
   "characters": [
@@ -444,37 +944,77 @@
       "role": "Auto mechanic at Alder Automotive",
       "occupation": "auto_mechanic",
       "summary": "Eight months into the job and a year into living in Port Alder, you are good with engines, careful with money and still learning the town's unwritten rules. You rent 2B above the hardware store, make payments on a pickup older than it looks, and keep an old fishing boat on a trailer at the marina for days off.",
-      "traits": ["capable", "practical", "a little guarded"],
+      "traits": [
+        "capable",
+        "practical",
+        "a little guarded"
+      ],
       "home": "harbor_street_114",
       "location": "harbor_street_114",
-      "sheet": {"mechanics": 7, "driving": 6, "boating": 3, "cooking": 4, "charm": 5, "fitness": 5},
+      "sheet": {
+        "mechanics": 7,
+        "driving": 6,
+        "boating": 3,
+        "cooking": 4,
+        "charm": 5,
+        "fitness": 5
+      },
       "job": {
-        "employer": "alder_automotive",
+        "id": "job_pov_mechanic",
+        "name": "Mechanic at Alder Automotive",
+        "title": "Mechanic",
+        "employer": "alder_automotive_co",
+        "workplace": "alder_automotive",
         "occupation": "auto_mechanic",
-        "hourlyCents": 2350,
+        "basis": "hourly",
+        "rateCents": 2350,
         "hoursPerWeek": 40,
-        "payFrequency": "weekly",
-        "payday": "Friday",
-        "depositTo": "acct_pov_checking",
-        "shiftPattern": "trades_day_7_330"
+        "payEvery": "weekly",
+        "payWeekday": 5,
+        "splits": [
+          {
+            "to": "acct_pov_savings",
+            "pct": 10
+          }
+        ],
+        "shiftPattern": "trades_day_7_330",
+        "start": "2026-01-12"
       },
       "schedule": [
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "07:00",
           "end": "12:00",
           "place": "alder_automotive",
           "activity": "working on cars"
         },
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "12:00",
           "end": "12:30",
           "place": "bluebird_coffee",
           "activity": "lunch"
         },
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "12:30",
           "end": "15:30",
           "place": "alder_automotive",
@@ -494,48 +1034,78 @@
       "role": "Owner of Alder Automotive",
       "occupation": null,
       "summary": "Heavy-set, patient and fond of old pickup trucks. He built the shop up over eleven years, remembers every customer's name and keeps a lot of his worries to himself.",
-      "traits": ["patient", "proud", "secretive about money"],
-      "home": "port_alder",
+      "traits": [
+        "patient",
+        "proud",
+        "secretive about money"
+      ],
+      "home": "birch_lane_12",
       "agenda": "a_marcus_delgado",
-      "sheet": {"mechanics": 9, "driving": 6, "boating": 4, "cooking": 5, "charm": 7, "fitness": 4},
+      "sheet": {
+        "mechanics": 9,
+        "driving": 6,
+        "boating": 4,
+        "cooking": 5,
+        "charm": 7,
+        "fitness": 4
+      },
       "job": {
         "employer": "alder_automotive",
-        "occupation": null,
-        "selfEmployed": true,
-        "estimatedAnnualIncomeCents": 8500000,
-        "depositTo": "acct_marcus_shop"
+        "occupation": null
       },
       "schedule": [
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "06:30",
           "end": "12:00",
           "place": "alder_automotive",
           "activity": "running the counter and the books"
         },
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "12:00",
           "end": "12:45",
           "place": "rusty_anchor",
           "activity": "lunch"
         },
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "12:45",
           "end": "17:30",
           "place": "alder_automotive",
           "activity": "running the counter and the books"
         },
         {
-          "days": ["Saturday"],
+          "days": [
+            "Saturday"
+          ],
           "start": "08:00",
           "end": "13:00",
           "place": "alder_automotive",
           "activity": "open Saturday hours"
         },
         {
-          "days": ["Sunday"],
+          "days": [
+            "Sunday"
+          ],
           "start": "09:30",
           "end": "11:00",
           "place": "bluebird_coffee",
@@ -543,10 +1113,38 @@
         }
       ],
       "regard": [
-        {"toward": "danny_okafor", "axes": {"warmth": 45, "trust": 55, "respect": 60}},
-        {"toward": "priya_nair", "axes": {"warmth": 25, "trust": 30, "respect": 35}},
-        {"toward": "dale_whitcomb", "axes": {"warmth": 35, "trust": 40, "respect": 40}},
-        {"toward": "pov", "axes": {"warmth": 20, "trust": 25, "respect": 30}}
+        {
+          "toward": "danny_okafor",
+          "axes": {
+            "warmth": 45,
+            "trust": 55,
+            "respect": 60
+          }
+        },
+        {
+          "toward": "priya_nair",
+          "axes": {
+            "warmth": 25,
+            "trust": 30,
+            "respect": 35
+          }
+        },
+        {
+          "toward": "dale_whitcomb",
+          "axes": {
+            "warmth": 35,
+            "trust": 40,
+            "respect": 40
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 20,
+            "trust": 25,
+            "respect": 30
+          }
+        }
       ],
       "wealth": "comfortable"
     },
@@ -560,65 +1158,161 @@
       "role": "Senior mechanic at Alder Automotive",
       "occupation": "auto_mechanic",
       "summary": "Funny, quick with a wrench and a little too keen on being the one who knows how to fix things. He has worked at the shop six years and lives in 2A, across the landing from you.",
-      "traits": ["funny", "competitive", "loyal"],
+      "traits": [
+        "funny",
+        "competitive",
+        "loyal"
+      ],
       "home": "harbor_street_114",
       "agenda": "a_danny_okafor",
-      "trips": [{"from": "2026-09-25T17:30", "until": "2026-09-27T19:00", "place": "chicago_il", "label": "Visiting family in Chicago"}],
-      "sheet": {"mechanics": 8, "driving": 7, "boating": 5, "cooking": 3, "charm": 6, "fitness": 6},
+      "trips": [
+        {
+          "from": "2026-09-25T17:30",
+          "until": "2026-09-27T19:00",
+          "place": "chicago_il",
+          "label": "Visiting family in Chicago"
+        }
+      ],
+      "sheet": {
+        "mechanics": 8,
+        "driving": 7,
+        "boating": 5,
+        "cooking": 3,
+        "charm": 6,
+        "fitness": 6
+      },
       "job": {
-        "employer": "alder_automotive",
+        "id": "job_danny_mechanic",
+        "name": "Danny's job at Alder Automotive",
+        "title": "Mechanic",
+        "employer": "alder_automotive_co",
+        "workplace": "alder_automotive",
         "occupation": "auto_mechanic",
-        "hourlyCents": 2650,
+        "basis": "hourly",
+        "rateCents": 2650,
         "hoursPerWeek": 40,
-        "payFrequency": "weekly",
-        "payday": "Friday",
-        "depositTo": "acct_danny_checking",
-        "shiftPattern": "trades_day_7_330"
+        "payEvery": "weekly",
+        "payWeekday": 5,
+        "deductions": [
+          {
+            "label": "Dental",
+            "cents": 1800,
+            "pretax": true,
+            "kind": "health"
+          }
+        ],
+        "shiftPattern": "trades_day_7_330",
+        "start": "2024-03-04"
       },
       "schedule": [
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "07:00",
           "end": "12:00",
           "place": "alder_automotive",
           "activity": "working on cars"
         },
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "12:00",
           "end": "12:30",
           "place": "shoreline_fuel",
           "activity": "gas-station lunch"
         },
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "12:30",
           "end": "15:30",
           "place": "alder_automotive",
           "activity": "working on cars"
         },
         {
-          "days": ["Friday"],
+          "days": [
+            "Friday"
+          ],
           "start": "17:30",
           "end": "21:30",
           "place": "rusty_anchor",
           "activity": "drinks with friends"
         },
         {
-          "days": ["Saturday"],
+          "days": [
+            "Saturday"
+          ],
           "start": "10:00",
           "end": "14:00",
           "place": "alder_harbor_marina",
           "activity": "helping Dale with boats"
         },
-        {"days": ["Sunday"], "start": "11:00", "end": "15:00", "place": "dune_trails", "activity": "riding"}
+        {
+          "days": [
+            "Sunday"
+          ],
+          "start": "11:00",
+          "end": "15:00",
+          "place": "dune_trails",
+          "activity": "riding"
+        }
       ],
       "regard": [
-        {"toward": "marcus_delgado", "axes": {"warmth": 45, "trust": 55, "respect": 60}},
-        {"toward": "jess_kowalczyk", "axes": {"warmth": 30, "trust": 35, "respect": 25}},
-        {"toward": "priya_nair", "axes": {"warmth": 20, "trust": 25, "respect": 25}},
-        {"toward": "dale_whitcomb", "axes": {"warmth": 40, "trust": 45, "respect": 40}},
-        {"toward": "pov", "axes": {"warmth": 30, "trust": 25, "respect": 30}}
+        {
+          "toward": "marcus_delgado",
+          "axes": {
+            "warmth": 45,
+            "trust": 55,
+            "respect": 60
+          }
+        },
+        {
+          "toward": "jess_kowalczyk",
+          "axes": {
+            "warmth": 30,
+            "trust": 35,
+            "respect": 25
+          }
+        },
+        {
+          "toward": "priya_nair",
+          "axes": {
+            "warmth": 20,
+            "trust": 25,
+            "respect": 25
+          }
+        },
+        {
+          "toward": "dale_whitcomb",
+          "axes": {
+            "warmth": 40,
+            "trust": 45,
+            "respect": 40
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 30,
+            "trust": 25,
+            "respect": 30
+          }
+        }
       ],
       "wealth": "modest"
     },
@@ -632,59 +1326,105 @@
       "role": "Township accountant and Harbor Fest organizer",
       "occupation": "accountant",
       "summary": "Organized, warm and permanently carrying a clipboard. She keeps the township's books, runs the festival committee and is quietly hoping someone will volunteer to help.",
-      "traits": ["organized", "warm", "overcommitted"],
+      "traits": [
+        "organized",
+        "warm",
+        "overcommitted"
+      ],
       "home": "port_alder",
       "agenda": "a_priya_nair",
-      "sheet": {"mechanics": 2, "driving": 5, "boating": 4, "cooking": 7, "charm": 7, "fitness": 6},
+      "sheet": {
+        "mechanics": 2,
+        "driving": 5,
+        "boating": 4,
+        "cooking": 7,
+        "charm": 7,
+        "fitness": 6
+      },
       "job": {
         "employer": "township_hall",
         "occupation": "accountant",
-        "hourlyCents": 3800,
+        "basis": "hourly",
+        "rateCents": 3800,
         "hoursPerWeek": 40,
-        "payFrequency": "semimonthly",
-        "payday": "15th and the last day of the month",
-        "depositTo": "acct_priya_checking",
+        "payEvery": "semimonthly",
+        "payDays": [
+          15,
+          -1
+        ],
         "shiftPattern": "std_weekday_9_5"
       },
       "schedule": [
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "09:00",
           "end": "12:30",
           "place": "township_hall",
           "activity": "keeping the township's books"
         },
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "12:30",
           "end": "13:15",
           "place": "bluebird_coffee",
           "activity": "lunch with the festival committee"
         },
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "13:15",
           "end": "17:00",
           "place": "township_hall",
           "activity": "keeping the township's books"
         },
-        {"days": ["Tuesday"], "start": "18:00", "end": "19:30", "place": "bluebird_coffee", "activity": "book club"},
         {
-          "days": ["Friday"],
+          "days": [
+            "Tuesday"
+          ],
+          "start": "18:00",
+          "end": "19:30",
+          "place": "bluebird_coffee",
+          "activity": "book club"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
           "start": "18:00",
           "end": "21:00",
           "place": "rusty_anchor",
           "activity": "after-work drinks"
         },
         {
-          "days": ["Saturday"],
+          "days": [
+            "Saturday"
+          ],
           "start": "09:00",
           "end": "11:00",
           "place": "lakefront_park",
           "activity": "running by the lake"
         },
         {
-          "days": ["Sunday"],
+          "days": [
+            "Sunday"
+          ],
           "start": "10:00",
           "end": "12:00",
           "place": "alder_market",
@@ -692,11 +1432,46 @@
         }
       ],
       "regard": [
-        {"toward": "marcus_delgado", "axes": {"warmth": 25, "trust": 30, "respect": 35}},
-        {"toward": "danny_okafor", "axes": {"warmth": 20, "trust": 25, "respect": 25}},
-        {"toward": "jess_kowalczyk", "axes": {"warmth": 40, "trust": 40, "respect": 30}},
-        {"toward": "dale_whitcomb", "axes": {"warmth": 30, "trust": 30, "respect": 35}},
-        {"toward": "pov", "axes": {"warmth": 15, "trust": 10, "respect": 15}}
+        {
+          "toward": "marcus_delgado",
+          "axes": {
+            "warmth": 25,
+            "trust": 30,
+            "respect": 35
+          }
+        },
+        {
+          "toward": "danny_okafor",
+          "axes": {
+            "warmth": 20,
+            "trust": 25,
+            "respect": 25
+          }
+        },
+        {
+          "toward": "jess_kowalczyk",
+          "axes": {
+            "warmth": 40,
+            "trust": 40,
+            "respect": 30
+          }
+        },
+        {
+          "toward": "dale_whitcomb",
+          "axes": {
+            "warmth": 30,
+            "trust": 30,
+            "respect": 35
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 15,
+            "trust": 10,
+            "respect": 15
+          }
+        }
       ],
       "wealth": "comfortable"
     },
@@ -710,37 +1485,58 @@
       "role": "Bartender at the Rusty Anchor",
       "occupation": "bartender",
       "summary": "Dry-witted, sharp with names and pouring a pint faster than anyone in town. She lives in 1A with her grandmother and her fifteen-year-old sister, Maddie, and is saving to start a boat-charter business of her own.",
-      "traits": ["dry", "sharp", "ambitious"],
+      "traits": [
+        "dry",
+        "sharp",
+        "ambitious"
+      ],
       "home": "harbor_street_114",
-      "sheet": {"mechanics": 3, "driving": 5, "boating": 7, "cooking": 5, "charm": 8, "fitness": 5},
+      "sheet": {
+        "mechanics": 3,
+        "driving": 5,
+        "boating": 7,
+        "cooking": 5,
+        "charm": 8,
+        "fitness": 5
+      },
       "job": {
         "employer": "rusty_anchor",
         "occupation": "bartender",
-        "hourlyCents": 1650,
+        "basis": "hourly",
+        "rateCents": 1650,
         "hoursPerWeek": 32,
-        "payFrequency": "weekly",
-        "payday": "Friday",
-        "depositTo": "acct_jess_checking",
+        "payEvery": "weekly",
+        "payWeekday": 5,
         "shiftPattern": "bar_night",
         "tipped": true
       },
       "schedule": [
         {
-          "days": ["Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+          "days": [
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday"
+          ],
           "start": "16:30",
           "end": "24:00",
           "place": "rusty_anchor",
           "activity": "tending bar"
         },
         {
-          "days": ["Monday"],
+          "days": [
+            "Monday"
+          ],
           "start": "09:00",
           "end": "11:00",
           "place": "bluebird_coffee",
           "activity": "coffee and charter-business spreadsheets"
         },
         {
-          "days": ["Tuesday"],
+          "days": [
+            "Tuesday"
+          ],
           "start": "10:00",
           "end": "13:00",
           "place": "alder_harbor_marina",
@@ -748,16 +1544,62 @@
         }
       ],
       "regard": [
-        {"toward": "helen_kowalczyk", "axes": {"warmth": 80, "trust": 70, "respect": 70}},
-        {"toward": "danny_okafor", "axes": {"warmth": 30, "trust": 30, "respect": 25}},
-        {"toward": "priya_nair", "axes": {"warmth": 40, "trust": 40, "respect": 30}},
-        {"toward": "dale_whitcomb", "axes": {"warmth": 40, "trust": 50, "respect": 55}},
-        {"toward": "maddie_kowalczyk", "axes": {"warmth": 85, "trust": 75, "respect": 55}},
-        {"toward": "pov", "axes": {"warmth": 15, "trust": 10, "respect": 10}}
+        {
+          "toward": "helen_kowalczyk",
+          "axes": {
+            "warmth": 80,
+            "trust": 70,
+            "respect": 70
+          }
+        },
+        {
+          "toward": "danny_okafor",
+          "axes": {
+            "warmth": 30,
+            "trust": 30,
+            "respect": 25
+          }
+        },
+        {
+          "toward": "priya_nair",
+          "axes": {
+            "warmth": 40,
+            "trust": 40,
+            "respect": 30
+          }
+        },
+        {
+          "toward": "dale_whitcomb",
+          "axes": {
+            "warmth": 40,
+            "trust": 50,
+            "respect": 55
+          }
+        },
+        {
+          "toward": "maddie_kowalczyk",
+          "axes": {
+            "warmth": 85,
+            "trust": 75,
+            "respect": 55
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 15,
+            "trust": 10,
+            "respect": 10
+          }
+        }
       ],
       "goals": {
         "label": "Save for a charter boat",
-        "steps": ["Put aside $200 a week", "Look at three boats for sale", "Draft a business plan and show it to Dale"]
+        "steps": [
+          "Put aside $200 a week",
+          "Look at three boats for sale",
+          "Draft a business plan and show it to Dale"
+        ]
       },
       "wealth": "poor"
     },
@@ -771,27 +1613,175 @@
       "role": "Student at Lakeshore Consolidated School",
       "occupation": null,
       "summary": "Fifteen, quick and a little too observant, Jess's kid sister is a sophomore at Lakeshore Consolidated. She lives in 1A with Jess and their grandmother, rides to school on the morning bus, and spends her free hours at the coffee shop or hanging around the marina dock.",
-      "traits": ["observant", "restless", "kind"],
+      "traits": [
+        "observant",
+        "restless",
+        "kind"
+      ],
       "home": "harbor_street_114",
       "agenda": "a_maddie_kowalczyk",
-      "sheet": {"mechanics": 2, "driving": 1, "boating": 5, "cooking": 4, "charm": 7, "fitness": 7},
+      "sheet": {
+        "mechanics": 2,
+        "driving": 1,
+        "boating": 5,
+        "cooking": 4,
+        "charm": 7,
+        "fitness": 7
+      },
       "schedule": [
-        {"days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "start": "06:00", "end": "08:00", "place": "harbor_street_114", "activity": "getting ready for the bus"},
-        {"days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "start": "08:00", "end": "15:10", "place": "lakeshore_school", "activity": "school", "term": {"from": "2026-08-31", "until": "2026-11-20", "except": ["labor_day"]}},
-        {"days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "start": "08:00", "end": "15:10", "place": "lakeshore_school", "activity": "school", "term": {"from": "2026-11-30", "until": "2026-12-18"}},
-        {"days": ["Monday", "Wednesday"], "start": "15:30", "end": "17:30", "place": "bluebird_coffee", "activity": "studying at the coffee shop"},
-        {"days": ["Tuesday", "Thursday"], "start": "15:30", "end": "17:30", "place": "lakefront_park", "activity": "walking the beach with friends"},
-        {"days": ["Friday"], "start": "15:30", "end": "18:00", "place": "alder_harbor_marina", "activity": "hanging around the dock"},
-        {"days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "start": "18:00", "end": "22:00", "place": "harbor_street_114", "activity": "dinner and studying"},
-        {"days": ["Saturday"], "start": "10:00", "end": "13:00", "place": "alder_market", "activity": "grocery run with Helen"},
-        {"days": ["Saturday"], "start": "13:00", "end": "17:00", "place": "lakefront_park", "activity": "out with friends"},
-        {"days": ["Sunday"], "start": "11:00", "end": "15:00", "place": "harbor_street_114", "activity": "studying and laundry"}
+        {
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
+          "start": "06:00",
+          "end": "08:00",
+          "place": "harbor_street_114",
+          "activity": "getting ready for the bus"
+        },
+        {
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
+          "start": "08:00",
+          "end": "15:10",
+          "place": "lakeshore_school",
+          "activity": "school",
+          "term": {
+            "from": "2026-08-31",
+            "until": "2026-11-20",
+            "except": [
+              "labor_day"
+            ]
+          }
+        },
+        {
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
+          "start": "08:00",
+          "end": "15:10",
+          "place": "lakeshore_school",
+          "activity": "school",
+          "term": {
+            "from": "2026-11-30",
+            "until": "2026-12-18"
+          }
+        },
+        {
+          "days": [
+            "Monday",
+            "Wednesday"
+          ],
+          "start": "15:30",
+          "end": "17:30",
+          "place": "bluebird_coffee",
+          "activity": "studying at the coffee shop"
+        },
+        {
+          "days": [
+            "Tuesday",
+            "Thursday"
+          ],
+          "start": "15:30",
+          "end": "17:30",
+          "place": "lakefront_park",
+          "activity": "walking the beach with friends"
+        },
+        {
+          "days": [
+            "Friday"
+          ],
+          "start": "15:30",
+          "end": "18:00",
+          "place": "alder_harbor_marina",
+          "activity": "hanging around the dock"
+        },
+        {
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
+          "start": "18:00",
+          "end": "22:00",
+          "place": "harbor_street_114",
+          "activity": "dinner and studying"
+        },
+        {
+          "days": [
+            "Saturday"
+          ],
+          "start": "10:00",
+          "end": "13:00",
+          "place": "alder_market",
+          "activity": "grocery run with Helen"
+        },
+        {
+          "days": [
+            "Saturday"
+          ],
+          "start": "13:00",
+          "end": "17:00",
+          "place": "lakefront_park",
+          "activity": "out with friends"
+        },
+        {
+          "days": [
+            "Sunday"
+          ],
+          "start": "11:00",
+          "end": "15:00",
+          "place": "harbor_street_114",
+          "activity": "studying and laundry"
+        }
       ],
       "regard": [
-        {"toward": "jess_kowalczyk", "axes": {"warmth": 85, "trust": 80, "respect": 60}},
-        {"toward": "helen_kowalczyk", "axes": {"warmth": 80, "trust": 75, "respect": 70}},
-        {"toward": "dale_whitcomb", "axes": {"warmth": 50, "trust": 55, "respect": 65}},
-        {"toward": "pov", "axes": {"warmth": 25, "trust": 20, "respect": 30}}
+        {
+          "toward": "jess_kowalczyk",
+          "axes": {
+            "warmth": 85,
+            "trust": 80,
+            "respect": 60
+          }
+        },
+        {
+          "toward": "helen_kowalczyk",
+          "axes": {
+            "warmth": 80,
+            "trust": 75,
+            "respect": 70
+          }
+        },
+        {
+          "toward": "dale_whitcomb",
+          "axes": {
+            "warmth": 50,
+            "trust": 55,
+            "respect": 65
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 25,
+            "trust": 20,
+            "respect": 30
+          }
+        }
       ],
       "wealth": "broke"
     },
@@ -805,28 +1795,53 @@
       "role": "Owner of Alder Harbor Marina",
       "occupation": null,
       "summary": "Weathered, deliberate and usually wearing a faded cap from a long-closed tackle shop. He has run the marina for twenty-five years and is happiest when someone asks him how to read the lake.",
-      "traits": ["deliberate", "generous", "stubborn about boats"],
+      "traits": [
+        "deliberate",
+        "generous",
+        "stubborn about boats"
+      ],
       "home": "alder_harbor_marina",
       "agenda": "a_dale_whitcomb",
-      "sheet": {"mechanics": 6, "driving": 4, "boating": 9, "cooking": 5, "charm": 5, "fitness": 5},
+      "sheet": {
+        "mechanics": 6,
+        "driving": 4,
+        "boating": 9,
+        "cooking": 5,
+        "charm": 5,
+        "fitness": 5
+      },
       "job": {
         "employer": "alder_harbor_marina",
-        "occupation": null,
-        "selfEmployed": true,
-        "estimatedAnnualIncomeCents": 6200000,
-        "depositTo": "acct_dale_marina"
+        "occupation": null
       },
       "schedule": [
         {
-          "days": ["Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+          "days": [
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday"
+          ],
           "start": "07:00",
           "end": "18:00",
           "place": "alder_harbor_marina",
           "activity": "running the marina"
         },
-        {"days": ["Monday"], "start": "09:00", "end": "11:00", "place": "alder_market", "activity": "stocking up"},
         {
-          "days": ["Monday"],
+          "days": [
+            "Monday"
+          ],
+          "start": "09:00",
+          "end": "11:00",
+          "place": "alder_market",
+          "activity": "stocking up"
+        },
+        {
+          "days": [
+            "Monday"
+          ],
           "start": "13:00",
           "end": "16:00",
           "place": "alder_harbor_marina",
@@ -834,10 +1849,38 @@
         }
       ],
       "regard": [
-        {"toward": "marcus_delgado", "axes": {"warmth": 35, "trust": 40, "respect": 40}},
-        {"toward": "danny_okafor", "axes": {"warmth": 40, "trust": 45, "respect": 40}},
-        {"toward": "jess_kowalczyk", "axes": {"warmth": 45, "trust": 55, "respect": 55}},
-        {"toward": "pov", "axes": {"warmth": 15, "trust": 15, "respect": 20}}
+        {
+          "toward": "marcus_delgado",
+          "axes": {
+            "warmth": 35,
+            "trust": 40,
+            "respect": 40
+          }
+        },
+        {
+          "toward": "danny_okafor",
+          "axes": {
+            "warmth": 40,
+            "trust": 45,
+            "respect": 40
+          }
+        },
+        {
+          "toward": "jess_kowalczyk",
+          "axes": {
+            "warmth": 45,
+            "trust": 55,
+            "respect": 55
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 15,
+            "trust": 15,
+            "respect": 20
+          }
+        }
       ],
       "wealth": "comfortable"
     },
@@ -851,26 +1894,39 @@
       "role": "Landlady and owner of 114 Harbor Street",
       "occupation": null,
       "summary": "Small, firm and fond of crossword puzzles and the ball game on the radio. She has owned the building for forty years, keeps the rents low and knows every tenant's footsteps on the stairs.",
-      "traits": ["firm", "kind", "nosy"],
+      "traits": [
+        "firm",
+        "kind",
+        "nosy"
+      ],
       "home": "harbor_street_114",
-      "sheet": {"mechanics": 2, "driving": 4, "boating": 3, "cooking": 8, "charm": 7, "fitness": 3},
-      "job": {
-        "employer": null,
-        "occupation": null,
-        "retired": true,
-        "incomeMonthlyCents": 195000,
-        "depositTo": "acct_helen_checking"
+      "sheet": {
+        "mechanics": 2,
+        "driving": 4,
+        "boating": 3,
+        "cooking": 8,
+        "charm": 7,
+        "fitness": 3
       },
       "schedule": [
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday"
+          ],
           "start": "09:00",
           "end": "10:30",
           "place": "bluebird_coffee",
           "activity": "coffee and the crossword"
         },
         {
-          "days": ["Sunday"],
+          "days": [
+            "Sunday"
+          ],
           "start": "09:00",
           "end": "11:00",
           "place": "bluebird_coffee",
@@ -878,14 +1934,46 @@
         }
       ],
       "regard": [
-        {"toward": "jess_kowalczyk", "axes": {"warmth": 85, "trust": 75, "respect": 70}},
-        {"toward": "maddie_kowalczyk", "axes": {"warmth": 85, "trust": 75, "respect": 65}},
-        {"toward": "danny_okafor", "axes": {"warmth": 35, "trust": 40, "respect": 40}},
-        {"toward": "pov", "axes": {"warmth": 20, "trust": 20, "respect": 25}}
+        {
+          "toward": "jess_kowalczyk",
+          "axes": {
+            "warmth": 85,
+            "trust": 75,
+            "respect": 70
+          }
+        },
+        {
+          "toward": "maddie_kowalczyk",
+          "axes": {
+            "warmth": 85,
+            "trust": 75,
+            "respect": 65
+          }
+        },
+        {
+          "toward": "danny_okafor",
+          "axes": {
+            "warmth": 35,
+            "trust": 40,
+            "respect": 40
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 20,
+            "trust": 20,
+            "respect": 25
+          }
+        }
       ],
       "goals": {
         "label": "Keep the building in good repair",
-        "steps": ["Fix the ninth stair", "Collect the rents on the 1st", "Plan the winter heating with the plumber"]
+        "steps": [
+          "Fix the ninth stair",
+          "Collect the rents on the 1st",
+          "Plan the winter heating with the plumber"
+        ]
       },
       "wealth": "modest"
     },
@@ -899,30 +1987,55 @@
       "role": "Registered nurse at the Community Clinic",
       "occupation": "registered_nurse",
       "summary": "Tired, funny and endlessly practical. She works three twelve-hour shifts a week, lives alone with a very old cat, and would like very much to sleep through one entire Saturday.",
-      "traits": ["tired", "funny", "practical"],
+      "traits": [
+        "tired",
+        "funny",
+        "practical"
+      ],
       "home": "port_alder",
-      "sheet": {"mechanics": 3, "driving": 5, "boating": 3, "cooking": 6, "charm": 6, "fitness": 5},
+      "sheet": {
+        "mechanics": 3,
+        "driving": 5,
+        "boating": 3,
+        "cooking": 6,
+        "charm": 6,
+        "fitness": 5
+      },
       "job": {
         "employer": "community_clinic",
         "occupation": "registered_nurse",
-        "hourlyCents": 4300,
+        "basis": "hourly",
+        "rateCents": 4300,
         "hoursPerWeek": 36,
-        "payFrequency": "biweekly",
-        "payday": "every other Friday",
-        "depositTo": "acct_nora_checking",
+        "payEvery": "biweekly",
+        "payWeekday": 5,
         "shiftPattern": "three_12h"
       },
       "schedule": [
         {
-          "days": ["Monday", "Tuesday", "Thursday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Thursday"
+          ],
           "start": "07:00",
           "end": "19:30",
           "place": "community_clinic",
           "activity": "twelve-hour shift"
         },
-        {"days": ["Saturday"], "start": "10:00", "end": "12:00", "place": "alder_market", "activity": "groceries"},
         {
-          "days": ["Sunday"],
+          "days": [
+            "Saturday"
+          ],
+          "start": "10:00",
+          "end": "12:00",
+          "place": "alder_market",
+          "activity": "groceries"
+        },
+        {
+          "days": [
+            "Sunday"
+          ],
           "start": "11:00",
           "end": "13:00",
           "place": "bluebird_coffee",
@@ -930,13 +2043,38 @@
         }
       ],
       "regard": [
-        {"toward": "priya_nair", "axes": {"warmth": 45, "trust": 45, "respect": 40}},
-        {"toward": "jess_kowalczyk", "axes": {"warmth": 35, "trust": 35, "respect": 30}},
-        {"toward": "pov", "axes": {"warmth": 10, "trust": 10, "respect": 10}}
+        {
+          "toward": "priya_nair",
+          "axes": {
+            "warmth": 45,
+            "trust": 45,
+            "respect": 40
+          }
+        },
+        {
+          "toward": "jess_kowalczyk",
+          "axes": {
+            "warmth": 35,
+            "trust": 35,
+            "respect": 30
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 10,
+            "trust": 10,
+            "respect": 10
+          }
+        }
       ],
       "goals": {
         "label": "Get one full night's sleep",
-        "steps": ["Swap a shift", "Skip the extra overtime", "Sleep in on Saturday"]
+        "steps": [
+          "Swap a shift",
+          "Skip the extra overtime",
+          "Sleep in on Saturday"
+        ]
       },
       "wealth": "modest"
     },
@@ -950,21 +2088,30 @@
       "role": "Port Alder police officer",
       "occupation": "police_officer",
       "summary": "Calm, dry and good at finding the lost dog in under an hour. Sam works the afternoon shift and knows who is parked where in this town.",
-      "traits": ["calm", "dry"],
+      "traits": [
+        "calm",
+        "dry"
+      ],
       "home": "port_alder",
       "job": {
         "employer": "port_alder",
         "occupation": "police_officer",
-        "hourlyCents": 3650,
+        "basis": "hourly",
+        "rateCents": 3650,
         "hoursPerWeek": 40,
-        "payFrequency": "biweekly",
-        "payday": "every other Friday",
-        "depositTo": "acct_sam_checking",
+        "payEvery": "biweekly",
+        "payWeekday": 5,
         "shiftPattern": "shift_8h_rotating"
       },
       "schedule": [
         {
-          "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
           "start": "15:00",
           "end": "23:00",
           "place": "port_alder",
@@ -972,13 +2119,38 @@
         }
       ],
       "regard": [
-        {"toward": "marcus_delgado", "axes": {"warmth": 20, "trust": 30, "respect": 30}},
-        {"toward": "jess_kowalczyk", "axes": {"warmth": 25, "trust": 30, "respect": 25}},
-        {"toward": "pov", "axes": {"warmth": 5, "trust": 5, "respect": 10}}
+        {
+          "toward": "marcus_delgado",
+          "axes": {
+            "warmth": 20,
+            "trust": 30,
+            "respect": 30
+          }
+        },
+        {
+          "toward": "jess_kowalczyk",
+          "axes": {
+            "warmth": 25,
+            "trust": 30,
+            "respect": 25
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 5,
+            "trust": 5,
+            "respect": 10
+          }
+        }
       ],
       "goals": {
         "label": "Keep Harbor Fest orderly",
-        "steps": ["Plan the traffic cones with Priya", "Walk the park at dusk", "Be at the parade route by 14:00 on Saturday"]
+        "steps": [
+          "Plan the traffic cones with Priya",
+          "Walk the park at dusk",
+          "Be at the parade route by 14:00 on Saturday"
+        ]
       },
       "wealth": "modest"
     }
@@ -1295,472 +2467,1032 @@
     {
       "id": "acct_pov_checking",
       "name": "Your checking account",
-      "kind": "checking",
-      "owner": "pov",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "balance": 184217,
-      "aprPct": 0.1
+      "opening": 184217,
+      "apyPct": 0.1
     },
     {
       "id": "acct_pov_savings",
       "name": "Your savings account",
-      "kind": "savings",
-      "owner": "pov",
+      "product": "savings",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "balance": 326000,
-      "aprPct": 3.8
+      "opening": 326000,
+      "apyPct": 3.8
     },
     {
       "id": "acct_pov_brokerage",
       "name": "Your index-fund account",
-      "kind": "brokerage",
-      "owner": "pov",
+      "product": "brokerage",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
       "institution": "Great Lakes Bank",
-      "balance": 0,
-      "holdingsCents": 312500,
-      "symbol": "broad_us_equity_index"
+      "opening": 0
     },
     {
       "id": "acct_pov_card",
       "name": "Your credit card",
-      "kind": "card",
-      "owner": "pov",
+      "product": "credit_card",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
       "institution": "Great Lakes Bank",
-      "owedCents": 63840,
+      "opening": -63840,
       "limitCents": 450000,
       "aprPct": 22.0,
       "statementDay": 18,
       "dueDay": 13,
-      "autopay": "minimum from acct_pov_checking"
+      "autopay": "minimum",
+      "autopayFrom": "acct_pov_checking"
     },
     {
       "id": "acct_pov_auto_loan",
       "name": "Your auto loan",
-      "kind": "loan",
-      "owner": "pov",
+      "product": "loan",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "principalCents": 1740000,
+      "opening": -1740000,
       "aprPct": 9.4,
-      "remainingMonths": 48,
-      "paymentCents": 43631,
       "dueDay": 10,
-      "autopay": "from acct_pov_checking"
+      "paymentCents": 43631,
+      "monthsLeft": 48,
+      "autopay": "minimum",
+      "autopayFrom": "acct_pov_checking"
     },
     {
       "id": "acct_pov_cash",
       "name": "Your wallet cash",
-      "kind": "cash",
-      "owner": "pov",
+      "product": "cash",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
       "container": "pov_wallet",
-      "balance": 8500,
-      "coins": {"twenty": 2, "ten": 2, "five": 4, "one": 5}
+      "opening": 8500,
+      "coins": {
+        "twenty": 2,
+        "ten": 2,
+        "five": 4,
+        "one": 5
+      }
     },
     {
       "id": "acct_marcus_shop",
       "name": "Alder Automotive operating account",
-      "kind": "checking",
-      "owner": "marcus_delgado",
+      "product": "business_checking",
+      "owners": [
+        {
+          "party": "alder_automotive_co",
+          "role": "owner"
+        },
+        {
+          "party": "marcus_delgado",
+          "role": "authorized_user"
+        }
+      ],
       "institution": "Great Lakes Bank",
-      "balance": 2340000
+      "opening": 2340000
     },
     {
       "id": "acct_danny_checking",
       "name": "Danny's checking",
-      "kind": "checking",
-      "owner": "danny_okafor",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "danny_okafor"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "balance": 195000
+      "opening": 195000
     },
     {
       "id": "acct_priya_checking",
       "name": "Priya's checking",
-      "kind": "checking",
-      "owner": "priya_nair",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "priya_nair"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "balance": 412000
+      "opening": 412000
     },
     {
       "id": "acct_jess_checking",
       "name": "Jess's checking",
-      "kind": "checking",
-      "owner": "jess_kowalczyk",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "jess_kowalczyk"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "balance": 61000
+      "opening": 61000
     },
     {
       "id": "acct_dale_marina",
       "name": "Alder Harbor Marina account",
-      "kind": "checking",
-      "owner": "dale_whitcomb",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "dale_whitcomb"
+        }
+      ],
       "institution": "Great Lakes Bank",
-      "balance": 1890000
+      "opening": 1890000
     },
     {
       "id": "acct_helen_checking",
       "name": "Helen's checking",
-      "kind": "checking",
-      "owner": "helen_kowalczyk",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "helen_kowalczyk"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "balance": 1235000
+      "opening": 1235000
     },
     {
       "id": "acct_nora_checking",
       "name": "Nora's checking",
-      "kind": "checking",
-      "owner": "nora_whitfield",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "nora_whitfield"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "balance": 278000
+      "opening": 278000
     },
     {
       "id": "acct_sam_checking",
       "name": "Sam's checking",
-      "kind": "checking",
-      "owner": "sam_reyes",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "sam_reyes"
+        }
+      ],
       "institution": "Lakeshore Credit Union",
-      "balance": 330000
+      "opening": 330000
+    },
+    {
+      "id": "acct_marcus_checking",
+      "name": "Marcus's checking",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "marcus_delgado"
+        }
+      ],
+      "institution": "Lakeshore Credit Union",
+      "opening": 680000
+    },
+    {
+      "id": "acct_alder_lift_loan",
+      "name": "Lift loan",
+      "product": "loan",
+      "owners": [
+        {
+          "party": "alder_automotive_co"
+        }
+      ],
+      "institution": "Great Lakes Bank",
+      "opening": -3800000,
+      "aprPct": 8.5,
+      "termMonths": 36,
+      "monthsLeft": 36,
+      "paymentCents": 119956,
+      "dueDay": 15,
+      "autopay": "fixed",
+      "autopayFrom": "acct_marcus_shop",
+      "autopayCents": 119956
+    },
+    {
+      "id": "acct_marcus_mortgage",
+      "name": "Marcus's mortgage",
+      "product": "mortgage",
+      "owners": [
+        {
+          "party": "marcus_delgado"
+        }
+      ],
+      "institution": "Lakeshore Credit Union",
+      "opening": -18778000,
+      "aprPct": 4.6,
+      "paymentCents": 114200,
+      "monthsLeft": 260,
+      "dueDay": 1,
+      "securedBy": "prop_birch_lane_12",
+      "autopay": "minimum",
+      "autopayFrom": "acct_marcus_checking"
+    },
+    {
+      "id": "acct_priya_retirement",
+      "name": "Priya's IRA",
+      "product": "brokerage",
+      "owners": [
+        {
+          "party": "priya_nair"
+        }
+      ],
+      "institution": "Harborview Investments",
+      "opening": 120000
+    },
+    {
+      "id": "acct_danny_coins",
+      "name": "Danny's coin exchange",
+      "product": "brokerage",
+      "owners": [
+        {
+          "party": "danny_okafor"
+        }
+      ],
+      "institution": "CoinHarbor",
+      "opening": 4500
+    },
+    {
+      "id": "acct_kowalczyk_household",
+      "name": "Kowalczyk household account",
+      "product": "checking",
+      "owners": [
+        {
+          "party": "helen_kowalczyk",
+          "role": "joint",
+          "share": 60
+        },
+        {
+          "party": "jess_kowalczyk",
+          "role": "joint",
+          "share": 40
+        }
+      ],
+      "institution": "Lakeshore Credit Union",
+      "opening": 185000
+    },
+    {
+      "id": "acct_maddie_savings",
+      "name": "Maddie's savings",
+      "product": "savings",
+      "owners": [
+        {
+          "party": "helen_kowalczyk",
+          "role": "custodian"
+        },
+        {
+          "party": "maddie_kowalczyk",
+          "role": "beneficiary"
+        }
+      ],
+      "institution": "Lakeshore Credit Union",
+      "opening": 42000
     }
   ],
-  "bills": [
+  "cards": [
+    {
+      "id": "card_pov_debit",
+      "name": "Debit card",
+      "account": "acct_pov_checking",
+      "holder": "pov",
+      "network": "debit",
+      "item": "pov_debit_card",
+      "last4": "4417"
+    },
+    {
+      "id": "card_pov_credit",
+      "name": "Credit card",
+      "account": "acct_pov_card",
+      "holder": "pov",
+      "network": "credit",
+      "item": "pov_credit_card",
+      "last4": "9032"
+    }
+  ],
+  "flows": [
     {
       "id": "bill_rent",
-      "kind": "rent",
-      "payer": "pov",
-      "payee": "helen_kowalczyk",
       "label": "Rent, Unit 2B",
+      "kind": "rent",
+      "from": "acct_pov_checking",
+      "to": "helen_kowalczyk",
       "amountCents": 99500,
       "every": "month",
-      "day": 1,
-      "from": "acct_pov_checking"
+      "days": [
+        1
+      ],
+      "link": "prop_harbor_114"
     },
     {
       "id": "bill_renters",
-      "payer": "pov",
-      "payee": "Harbor Mutual",
       "label": "Renters insurance",
-      "catalogItem": "renters_insurance",
+      "from": "acct_pov_card",
+      "to": "Harbor Mutual",
       "amountCents": 1700,
       "every": "month",
-      "day": 1,
-      "from": "acct_pov_card"
+      "days": [
+        1
+      ],
+      "catalogItem": "renters_insurance"
     },
     {
       "id": "bill_streaming",
-      "payer": "pov",
-      "payee": "StreamBox",
       "label": "Streaming video",
-      "catalogItem": "streaming_video_standard",
+      "from": "acct_pov_card",
+      "to": "StreamBox",
       "amountCents": 1799,
       "every": "month",
-      "day": 3,
-      "from": "acct_pov_card"
+      "days": [
+        3
+      ],
+      "catalogItem": "streaming_video_standard"
     },
     {
       "id": "bill_music",
-      "payer": "pov",
-      "payee": "TuneBox",
       "label": "Music streaming",
-      "catalogItem": "music_streaming",
+      "from": "acct_pov_card",
+      "to": "TuneBox",
       "amountCents": 1199,
       "every": "month",
-      "day": 3,
-      "from": "acct_pov_card"
+      "days": [
+        3
+      ],
+      "catalogItem": "music_streaming"
     },
     {
       "id": "bill_auto_insurance",
-      "payer": "pov",
-      "payee": "Midlake Mutual",
       "label": "Auto insurance, full coverage",
-      "vehicleClass": "pickup_midsize",
+      "from": "acct_pov_checking",
+      "to": "Midlake Mutual",
       "amountCents": 22500,
       "every": "month",
-      "day": 5,
-      "from": "acct_pov_checking"
+      "days": [
+        5
+      ],
+      "vehicleClass": "pickup_midsize",
+      "link": "pov_truck"
     },
     {
       "id": "bill_internet",
-      "payer": "pov",
-      "payee": "Alder Broadband",
       "label": "Home internet",
-      "catalogItem": "internet_home",
+      "from": "acct_pov_card",
+      "to": "Alder Broadband",
       "amountCents": 6500,
       "every": "month",
-      "day": 8,
-      "from": "acct_pov_card"
-    },
-    {
-      "id": "bill_auto_loan",
-      "payer": "pov",
-      "payee": "Lakeshore Credit Union",
-      "label": "Auto loan payment",
-      "loan": "acct_pov_auto_loan",
-      "amountCents": 43631,
-      "every": "month",
-      "day": 10,
-      "from": "acct_pov_checking"
+      "days": [
+        8
+      ],
+      "catalogItem": "internet_home"
     },
     {
       "id": "bill_phone",
-      "payer": "pov",
-      "payee": "Northwind Mobile",
       "label": "Mobile phone",
-      "catalogItem": "mobile_single_line",
+      "from": "acct_pov_card",
+      "to": "Northwind Mobile",
       "amountCents": 5000,
       "every": "month",
-      "day": 14,
-      "from": "acct_pov_card"
+      "days": [
+        14
+      ],
+      "catalogItem": "mobile_single_line"
     },
     {
       "id": "bill_electric",
-      "payer": "pov",
-      "payee": "Alder Light & Power",
       "label": "Electricity, 370 kWh",
-      "usageKwh": 370,
-      "rateCentsPerKwh": 19.5,
+      "from": "acct_pov_checking",
+      "to": "Alder Light & Power",
       "amountCents": 7215,
       "every": "month",
-      "day": 20,
-      "from": "acct_pov_checking"
+      "days": [
+        20
+      ],
+      "usageKwh": 370,
+      "rateCentsPerKwh": 19.5
     },
     {
       "id": "bill_danny_rent",
-      "kind": "rent",
-      "payer": "danny_okafor",
-      "payee": "helen_kowalczyk",
       "label": "Rent, Unit 2A",
+      "kind": "rent",
+      "from": "acct_danny_checking",
+      "to": "helen_kowalczyk",
       "amountCents": 97500,
       "every": "month",
-      "day": 1,
-      "from": "acct_danny_checking"
+      "days": [
+        1
+      ],
+      "link": "prop_harbor_114"
     },
     {
       "id": "bill_danny_phone",
-      "payer": "danny_okafor",
-      "payee": "Northwind Mobile",
       "label": "Mobile phone",
-      "catalogItem": "mobile_single_line",
+      "from": "acct_danny_checking",
+      "to": "Northwind Mobile",
       "amountCents": 4500,
       "every": "month",
-      "day": 14,
-      "from": "acct_danny_checking"
-    },
-    {
-      "id": "bill_helen_property_tax",
-      "payer": "helen_kowalczyk",
-      "payee": "Port Alder Township",
-      "label": "Property tax, 114 Harbor Street",
-      "amountCents": 38000,
-      "every": "month",
-      "day": 1,
-      "from": "acct_helen_checking"
-    },
-    {
-      "id": "bill_helen_insurance",
-      "payer": "helen_kowalczyk",
-      "payee": "Harbor Mutual",
-      "label": "Building insurance, 114 Harbor Street",
-      "catalogItem": "homeowners_insurance",
-      "amountCents": 18500,
-      "every": "month",
-      "day": 5,
-      "from": "acct_helen_checking"
+      "days": [
+        14
+      ],
+      "catalogItem": "mobile_single_line"
     },
     {
       "id": "bill_helen_electric",
-      "payer": "helen_kowalczyk",
-      "payee": "Alder Light & Power",
       "label": "Electricity, 1A and the stairs, 520 kWh",
-      "usageKwh": 520,
-      "rateCentsPerKwh": 19.5,
+      "from": "acct_helen_checking",
+      "to": "Alder Light & Power",
       "amountCents": 10140,
       "every": "month",
-      "day": 20,
-      "from": "acct_helen_checking"
+      "days": [
+        20
+      ],
+      "usageKwh": 520,
+      "rateCentsPerKwh": 19.5
     },
     {
       "id": "bill_helen_gas",
-      "payer": "helen_kowalczyk",
-      "payee": "Lakeshore Gas",
       "label": "Natural gas, building heat",
-      "catalogItem": "natural_gas",
+      "from": "acct_helen_checking",
+      "to": "Lakeshore Gas",
       "amountCents": 11000,
       "every": "month",
-      "day": 22,
-      "from": "acct_helen_checking"
+      "days": [
+        22
+      ],
+      "catalogItem": "natural_gas"
     },
     {
       "id": "bill_helen_water",
-      "payer": "helen_kowalczyk",
-      "payee": "Port Alder Township",
       "label": "Water and sewer, building",
-      "catalogItem": "water_sewer",
+      "from": "acct_helen_checking",
+      "to": "Port Alder Township",
       "amountCents": 9500,
       "every": "month",
-      "day": 25,
-      "from": "acct_helen_checking"
+      "days": [
+        25
+      ],
+      "catalogItem": "water_sewer"
     },
     {
       "id": "bill_jess_household",
-      "payer": "jess_kowalczyk",
-      "payee": "helen_kowalczyk",
       "label": "Household share, 1A",
+      "from": "acct_jess_checking",
+      "to": "acct_kowalczyk_household",
       "amountCents": 30000,
       "every": "month",
-      "day": 1,
-      "from": "acct_jess_checking"
+      "days": [
+        1
+      ],
+      "kind": "transfer"
     },
     {
       "id": "bill_jess_phone",
-      "payer": "jess_kowalczyk",
-      "payee": "Northwind Mobile",
       "label": "Mobile phone",
-      "catalogItem": "mobile_single_line",
+      "from": "acct_jess_checking",
+      "to": "Northwind Mobile",
       "amountCents": 3500,
       "every": "month",
-      "day": 14,
-      "from": "acct_jess_checking"
-    },
-    {
-      "id": "bill_marcus_mortgage",
-      "payer": "marcus_delgado",
-      "payee": "Lakeshore Credit Union",
-      "label": "Mortgage",
-      "amountCents": 162000,
-      "every": "month",
-      "day": 1,
-      "from": "acct_marcus_shop"
+      "days": [
+        14
+      ],
+      "catalogItem": "mobile_single_line"
     },
     {
       "id": "bill_marcus_shop_electric",
-      "payer": "marcus_delgado",
-      "payee": "Alder Light & Power",
       "label": "Shop electricity, 1,400 kWh",
-      "usageKwh": 1400,
-      "rateCentsPerKwh": 19.5,
+      "from": "acct_marcus_shop",
+      "to": "Alder Light & Power",
       "amountCents": 27300,
       "every": "month",
-      "day": 20,
-      "from": "acct_marcus_shop"
+      "days": [
+        20
+      ],
+      "usageKwh": 1400,
+      "rateCentsPerKwh": 19.5
     },
     {
       "id": "bill_priya_rent",
-      "kind": "rent",
-      "payer": "priya_nair",
-      "payee": "Lakeview Apartments",
       "label": "Rent",
+      "kind": "rent",
+      "from": "acct_priya_checking",
+      "to": "Lakeview Apartments",
       "amountCents": 112500,
       "every": "month",
-      "day": 1,
-      "from": "acct_priya_checking"
+      "days": [
+        1
+      ]
     },
     {
       "id": "bill_priya_internet",
-      "payer": "priya_nair",
-      "payee": "Alder Broadband",
       "label": "Home internet",
-      "catalogItem": "internet_home",
+      "from": "acct_priya_checking",
+      "to": "Alder Broadband",
       "amountCents": 6500,
       "every": "month",
-      "day": 8,
-      "from": "acct_priya_checking"
+      "days": [
+        8
+      ],
+      "catalogItem": "internet_home"
     },
     {
       "id": "bill_priya_phone",
-      "payer": "priya_nair",
-      "payee": "Northwind Mobile",
       "label": "Mobile phone",
-      "catalogItem": "mobile_single_line",
+      "from": "acct_priya_checking",
+      "to": "Northwind Mobile",
       "amountCents": 5500,
       "every": "month",
-      "day": 14,
-      "from": "acct_priya_checking"
+      "days": [
+        14
+      ],
+      "catalogItem": "mobile_single_line"
     },
     {
       "id": "bill_dale_harbor_fee",
-      "payer": "dale_whitcomb",
-      "payee": "Port Alder Township",
       "label": "Township harbor fee",
+      "from": "acct_dale_marina",
+      "to": "Port Alder Township",
       "amountCents": 30000,
       "every": "month",
-      "day": 1,
-      "from": "acct_dale_marina"
+      "days": [
+        1
+      ]
     },
     {
       "id": "bill_dale_insurance",
-      "payer": "dale_whitcomb",
-      "payee": "Midlake Mutual",
       "label": "Marina liability insurance",
+      "from": "acct_dale_marina",
+      "to": "Midlake Mutual",
       "amountCents": 41000,
       "every": "month",
-      "day": 5,
-      "from": "acct_dale_marina"
+      "days": [
+        5
+      ]
     },
     {
       "id": "bill_dale_electric",
-      "payer": "dale_whitcomb",
-      "payee": "Alder Light & Power",
       "label": "Marina electricity, 2,000 kWh",
-      "usageKwh": 2000,
-      "rateCentsPerKwh": 19.5,
+      "from": "acct_dale_marina",
+      "to": "Alder Light & Power",
       "amountCents": 39000,
       "every": "month",
-      "day": 20,
-      "from": "acct_dale_marina"
+      "days": [
+        20
+      ],
+      "usageKwh": 2000,
+      "rateCentsPerKwh": 19.5
     },
     {
       "id": "bill_nora_rent",
-      "kind": "rent",
-      "payer": "nora_whitfield",
-      "payee": "Lakeview Apartments",
       "label": "Rent",
+      "kind": "rent",
+      "from": "acct_nora_checking",
+      "to": "Lakeview Apartments",
       "amountCents": 98000,
       "every": "month",
-      "day": 1,
-      "from": "acct_nora_checking"
+      "days": [
+        1
+      ]
     },
     {
       "id": "bill_nora_phone",
-      "payer": "nora_whitfield",
-      "payee": "Northwind Mobile",
       "label": "Mobile phone",
-      "catalogItem": "mobile_single_line",
+      "from": "acct_nora_checking",
+      "to": "Northwind Mobile",
       "amountCents": 4000,
       "every": "month",
-      "day": 14,
-      "from": "acct_nora_checking"
+      "days": [
+        14
+      ],
+      "catalogItem": "mobile_single_line"
     },
     {
       "id": "bill_nora_electric",
-      "payer": "nora_whitfield",
-      "payee": "Alder Light & Power",
       "label": "Electricity, 340 kWh",
-      "usageKwh": 340,
-      "rateCentsPerKwh": 19.5,
+      "from": "acct_nora_checking",
+      "to": "Alder Light & Power",
       "amountCents": 6630,
       "every": "month",
-      "day": 20,
-      "from": "acct_nora_checking"
+      "days": [
+        20
+      ],
+      "usageKwh": 340,
+      "rateCentsPerKwh": 19.5
     },
     {
       "id": "bill_sam_rent",
-      "kind": "rent",
-      "payer": "sam_reyes",
-      "payee": "Lakeview Apartments",
       "label": "Rent",
+      "kind": "rent",
+      "from": "acct_sam_checking",
+      "to": "Lakeview Apartments",
       "amountCents": 104000,
       "every": "month",
-      "day": 1,
-      "from": "acct_sam_checking"
+      "days": [
+        1
+      ]
     },
     {
       "id": "bill_sam_phone",
-      "payer": "sam_reyes",
-      "payee": "Northwind Mobile",
       "label": "Mobile phone",
-      "catalogItem": "mobile_single_line",
+      "from": "acct_sam_checking",
+      "to": "Northwind Mobile",
       "amountCents": 5000,
       "every": "month",
-      "day": 14,
-      "from": "acct_sam_checking"
+      "days": [
+        14
+      ],
+      "catalogItem": "mobile_single_line"
+    },
+    {
+      "id": "flow_shop_lease",
+      "label": "Shop lease",
+      "kind": "bill",
+      "category": "rent",
+      "from": "acct_marcus_shop",
+      "to": "Harbor Realty",
+      "amountCents": 320000,
+      "every": "month",
+      "days": [
+        1
+      ]
+    },
+    {
+      "id": "flow_owners_draw",
+      "label": "Owner's draw",
+      "kind": "draw",
+      "category": "draw",
+      "from": "acct_marcus_shop",
+      "to": "acct_marcus_checking",
+      "amountCents": 600000,
+      "every": "month",
+      "days": [
+        1
+      ]
+    },
+    {
+      "id": "flow_helen_pension",
+      "label": "Pension",
+      "kind": "income",
+      "category": "pension",
+      "from": "Michigan Public Pension",
+      "to": "acct_helen_checking",
+      "amountCents": 195000,
+      "every": "month",
+      "days": [
+        1
+      ]
+    },
+    {
+      "id": "flow_dale_takings",
+      "label": "Marina takings",
+      "kind": "income",
+      "category": "sales",
+      "from": "Marina customers",
+      "to": "acct_dale_marina",
+      "amountCents": 516667,
+      "every": "month",
+      "days": [
+        -1
+      ]
+    },
+    {
+      "id": "flow_pov_savings",
+      "label": "Savings transfer",
+      "kind": "savings",
+      "category": "savings",
+      "from": "acct_pov_checking",
+      "to": "acct_pov_savings",
+      "amountCents": 15000,
+      "every": "month",
+      "days": [
+        2
+      ],
+      "shortfall": "retry",
+      "retryDays": 3,
+      "retries": 2
+    },
+    {
+      "id": "flow_helen_household",
+      "label": "Household share",
+      "kind": "transfer",
+      "from": "acct_helen_checking",
+      "to": "acct_kowalczyk_household",
+      "amountCents": 45000,
+      "every": "month",
+      "days": [
+        1
+      ]
+    },
+    {
+      "id": "flow_kowalczyk_groceries",
+      "label": "Groceries",
+      "kind": "bill",
+      "category": "groceries",
+      "from": "acct_kowalczyk_household",
+      "to": "Alder Market",
+      "amountCents": 15500,
+      "every": "week",
+      "weekdays": [
+        6
+      ],
+      "shares": [
+        {
+          "party": "helen_kowalczyk",
+          "pct": 60
+        },
+        {
+          "party": "jess_kowalczyk",
+          "pct": 40
+        }
+      ]
+    }
+  ],
+  "households": [
+    {
+      "id": "household_kowalczyk",
+      "name": "The Kowalczyks",
+      "members": [
+        {
+          "id": "helen_kowalczyk",
+          "role": "head"
+        },
+        {
+          "id": "jess_kowalczyk"
+        },
+        {
+          "id": "maddie_kowalczyk"
+        }
+      ]
+    }
+  ],
+  "economy": {
+    "assets": {
+      "broad_us_equity_index": {
+        "label": "Broad US equity index fund",
+        "symbol": "BUSX",
+        "class": "fund",
+        "price": 10000,
+        "model": "broad_us_equity_index",
+        "yield_pct": 1.4,
+        "pays_per_year": 4
+      },
+      "glbd": {
+        "label": "Global aggregate bond fund",
+        "symbol": "GLBD",
+        "class": "fund",
+        "price": 5000,
+        "annual_return_pct": 4,
+        "annual_volatility_pct": 6,
+        "yield_pct": 3.6,
+        "pays_per_year": 12
+      },
+      "lkfr": {
+        "label": "Lakefront Freight",
+        "symbol": "LKFR",
+        "class": "stock",
+        "price": 4200,
+        "annual_return_pct": 8,
+        "annual_volatility_pct": 32,
+        "yield_pct": 2.1,
+        "pays_per_year": 4
+      },
+      "tnote_2030": {
+        "label": "US Treasury note, 4.25%, August 2030",
+        "symbol": "T 4.25 08/30",
+        "class": "bond",
+        "face": 100000,
+        "coupon_pct": 4.25,
+        "maturity": "2030-08-15",
+        "price": 100400
+      },
+      "btc": {
+        "label": "Bitcoin",
+        "symbol": "BTC",
+        "class": "crypto",
+        "price": 6500000
+      }
+    },
+    "taxes": {
+      "exempt": [
+        "groceries_staples",
+        "groceries_baskets",
+        "medical"
+      ]
+    }
+  },
+  "records": [
+    {
+      "id": "hold_pov_index",
+      "kind": "holding",
+      "name": "Broad US equity index fund",
+      "fields": {
+        "account": "acct_pov_brokerage",
+        "asset": "broad_us_equity_index",
+        "lots": [
+          {
+            "qty": 31.25,
+            "cost": 312500,
+            "at": "2026-09-14"
+          }
+        ]
+      }
+    },
+    {
+      "id": "alder_automotive_co",
+      "kind": "business",
+      "name": "Alder Automotive",
+      "tier": "principal",
+      "fields": {
+        "place": "alder_automotive",
+        "places": [
+          "alder_automotive"
+        ],
+        "owners": [
+          {
+            "party": "marcus_delgado",
+            "role": "owner",
+            "share": 100
+          }
+        ],
+        "structure": "llc",
+        "operating_account": "acct_marcus_shop",
+        "industry": "auto repair",
+        "margin_pct": 55,
+        "collects_sales_tax": true,
+        "daily_sales": 150000,
+        "sales_spread_pct": 35,
+        "trading_days": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "invoice_days": 30,
+        "late_fee_pct": 1.5
+      }
+    },
+    {
+      "id": "inv_road_commission",
+      "kind": "invoice",
+      "name": "Road Commission fleet service",
+      "fields": {
+        "business": "alder_automotive_co",
+        "customer": "Port Alder Road Commission",
+        "cents": 245000,
+        "memo": "Fleet service",
+        "issued": "2026-09-01",
+        "due": "2026-10-01",
+        "state": "open"
+      }
+    },
+    {
+      "id": "inv_dale_trailer",
+      "kind": "invoice",
+      "name": "Dale's trailer brakes",
+      "fields": {
+        "business": "alder_automotive_co",
+        "customer": "dale_whitcomb",
+        "cents": 85000,
+        "memo": "Trailer brakes",
+        "issued": "2026-08-03",
+        "due": "2026-09-02",
+        "state": "open"
+      }
+    },
+    {
+      "id": "prop_birch_lane_12",
+      "kind": "property",
+      "name": "Marcus's house",
+      "fields": {
+        "place": "birch_lane_12",
+        "owners": [
+          {
+            "party": "marcus_delgado",
+            "role": "owner",
+            "share": 100
+          }
+        ],
+        "value": 34000000,
+        "appreciation_pct": 3.5,
+        "purchase_price": 27850000,
+        "purchased": "2018-06-15",
+        "mortgage": "acct_marcus_mortgage",
+        "tax_pct": 1.1,
+        "upkeep_pct": 0.8
+      }
+    },
+    {
+      "id": "prop_harbor_114",
+      "kind": "property",
+      "name": "114 Harbor Street",
+      "fields": {
+        "place": "harbor_street_114",
+        "owners": [
+          {
+            "party": "helen_kowalczyk",
+            "role": "owner",
+            "share": 100
+          }
+        ],
+        "value": 52000000,
+        "appreciation_pct": 3,
+        "purchase_price": 9500000,
+        "purchased": "1986-04-01",
+        "tax_pct": 0.88,
+        "insurance": 18500,
+        "upkeep_pct": 0.6,
+        "units": 3,
+        "managed": true,
+        "market_rent": 98000,
+        "lease_months": 12,
+        "vacancy_months": 1,
+        "rent_to": "acct_helen_checking"
+      }
+    },
+    {
+      "id": "hold_pov_lkfr",
+      "kind": "holding",
+      "name": "Lakefront Freight",
+      "fields": {
+        "account": "acct_pov_brokerage",
+        "asset": "lkfr",
+        "lots": [
+          {
+            "qty": 12,
+            "cost": 46800,
+            "at": "2025-03-10"
+          }
+        ]
+      }
+    },
+    {
+      "id": "hold_priya_tnote",
+      "kind": "holding",
+      "name": "Treasury note",
+      "fields": {
+        "account": "acct_priya_retirement",
+        "asset": "tnote_2030",
+        "lots": [
+          {
+            "qty": 5,
+            "cost": 497500,
+            "at": "2025-08-20"
+          }
+        ],
+        "route": "acct_priya_checking"
+      }
+    },
+    {
+      "id": "hold_priya_glbd",
+      "kind": "holding",
+      "name": "Global bond fund",
+      "fields": {
+        "account": "acct_priya_retirement",
+        "asset": "glbd",
+        "lots": [
+          {
+            "qty": 80,
+            "cost": 392000,
+            "at": "2024-01-15"
+          }
+        ],
+        "route": "reinvest"
+      }
+    },
+    {
+      "id": "hold_danny_btc",
+      "kind": "holding",
+      "name": "Bitcoin",
+      "fields": {
+        "account": "acct_danny_coins",
+        "asset": "btc",
+        "lots": [
+          {
+            "qty": 0.035,
+            "cost": 210000,
+            "at": "2024-11-02"
+          }
+        ]
+      }
     }
   ],
   "tracks": [
@@ -1775,7 +3507,10 @@
         "kickoff": {
           "label": "A deal on the table",
           "cue": "Marcus calls the shop together before opening: the township wants a single shop to service all its vehicles, and he wants it. Priya Nair will inspect the shop Tuesday morning, and the township's old pickup is sitting in Bay 2 as a test.",
-          "objectives": ["Hear Marcus out on Monday morning", "Clear Bay 2 for the township pickup"],
+          "objectives": [
+            "Hear Marcus out on Monday morning",
+            "Clear Bay 2 for the township pickup"
+          ],
           "next": [
             {
               "to": "trial",
@@ -1783,7 +3518,10 @@
               "expr": "story.fleet_deal_accepted"
             }
           ],
-          "objectiveExprs": ["story.fleet_deal_accepted", "story.fleet_deal_accepted"]
+          "objectiveExprs": [
+            "story.fleet_deal_accepted",
+            "story.fleet_deal_accepted"
+          ]
         },
         "trial": {
           "label": "Fix the township pickup",
@@ -1791,7 +3529,17 @@
             "Find out why [[township_pickup]] cranks but won't start",
             "Fix it before Wednesday 17:00 with [[pov_toolbox]] and parts on hand"
           ],
-          "effects": [{"type": "link", "text": "The township pickup is yours to diagnose.", "args": {"rel": "knows", "from": "pov", "to": "township_pickup"}}],
+          "effects": [
+            {
+              "type": "link",
+              "text": "The township pickup is yours to diagnose.",
+              "args": {
+                "rel": "knows",
+                "from": "pov",
+                "to": "township_pickup"
+              }
+            }
+          ],
           "next": [
             {
               "to": "inspection",
@@ -1808,7 +3556,10 @@
             "Start with the basics: fuel, spark, then what runs the pump.",
             "Danny might have a quick trick for this model."
           ],
-          "objectiveExprs": ["story.relay_replaced", "story.township_truck_fixed"]
+          "objectiveExprs": [
+            "story.relay_replaced",
+            "story.township_truck_fixed"
+          ]
         },
         "inspection": {
           "label": "Pass Priya's inspection",
@@ -1828,11 +3579,16 @@
             "to": "lost",
             "expr": "clock >= @2026-09-18T17:00 and not story.fleet_contract_signed"
           },
-          "objectiveExprs": ["story.priya_walked", "regard('priya_nair', 'pov', 'respect') >= 25"]
+          "objectiveExprs": [
+            "story.priya_walked",
+            "regard('priya_nair', 'pov', 'respect') >= 25"
+          ]
         },
         "service_run": {
           "label": "Service the township fleet",
-          "objectives": ["Complete oil-and-inspection service on the township's other six vehicles by Friday 25 September 17:00"],
+          "objectives": [
+            "Complete oil-and-inspection service on the township's other six vehicles by Friday 25 September 17:00"
+          ],
           "gate": "[[flag:fleet_contract_signed]] is true",
           "next": [
             {
@@ -1847,7 +3603,9 @@
             "expr": "clock >= @2026-09-25T17:00 and not story.fleet_serviced"
           },
           "gateExpr": "story.fleet_contract_signed",
-          "objectiveExprs": ["story.fleet_serviced"]
+          "objectiveExprs": [
+            "story.fleet_serviced"
+          ]
         },
         "done": {
           "label": "Contract delivered",
@@ -1857,17 +3615,32 @@
             {
               "type": "pay",
               "text": "Marcus gives the player a $300 bonus.",
-              "args": {"from": "marcus_delgado", "to": "pov", "amount": 30000, "currency": "usd"}
+              "args": {
+                "from": "marcus_delgado",
+                "to": "pov",
+                "amount": 30000,
+                "currency": "usd"
+              }
             },
             {
               "type": "regard",
               "text": "Marcus is grateful.",
-              "args": {"who": "marcus_delgado", "toward": "pov", "axis": "respect", "delta": 25}
+              "args": {
+                "who": "marcus_delgado",
+                "toward": "pov",
+                "axis": "respect",
+                "delta": 25
+              }
             },
             {
               "type": "regard",
               "text": "Priya trusts the player.",
-              "args": {"who": "priya_nair", "toward": "pov", "axis": "trust", "delta": 20}
+              "args": {
+                "who": "priya_nair",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": 20
+              }
             }
           ]
         },
@@ -1879,7 +3652,12 @@
             {
               "type": "regard",
               "text": "Marcus is disappointed.",
-              "args": {"who": "marcus_delgado", "toward": "pov", "axis": "respect", "delta": -10}
+              "args": {
+                "who": "marcus_delgado",
+                "toward": "pov",
+                "axis": "respect",
+                "delta": -10
+              }
             }
           ]
         }
@@ -1896,7 +3674,9 @@
         "offer": {
           "label": "Dale needs a hand",
           "cue": "Dale Whitcomb props himself on the pontoon's rail and shakes his head: the engine coughs and dies. He'd pay for a mechanic's afternoon, or lend the boat out for a weekend, whichever you want.",
-          "objectives": ["Talk to [[dale_whitcomb]] at [[alder_harbor_marina]]"],
+          "objectives": [
+            "Talk to [[dale_whitcomb]] at [[alder_harbor_marina]]"
+          ],
           "next": [
             {
               "to": "diagnose",
@@ -1904,11 +3684,15 @@
               "expr": "story.pontoon_looked_at"
             }
           ],
-          "objectiveExprs": ["story.pontoon_looked_at"]
+          "objectiveExprs": [
+            "story.pontoon_looked_at"
+          ]
         },
         "diagnose": {
           "label": "Find the fault",
-          "objectives": ["Run the engine and check fuel, spark and the lower unit"],
+          "objectives": [
+            "Run the engine and check fuel, spark and the lower unit"
+          ],
           "next": [
             {
               "to": "repair",
@@ -1916,8 +3700,13 @@
               "expr": "story.pontoon_diagnosed"
             }
           ],
-          "hints": ["It starts, then dies as it warms up.", "Fuel in the bowl looks darker than it should."],
-          "objectiveExprs": ["story.pontoon_diagnosed"]
+          "hints": [
+            "It starts, then dies as it warms up.",
+            "Fuel in the bowl looks darker than it should."
+          ],
+          "objectiveExprs": [
+            "story.pontoon_diagnosed"
+          ]
         },
         "repair": {
           "label": "Fix it",
@@ -1932,11 +3721,16 @@
               "expr": "story.pontoon_repaired"
             }
           ],
-          "objectiveExprs": ["story.pontoon_repaired", "story.pontoon_repaired"]
+          "objectiveExprs": [
+            "story.pontoon_repaired",
+            "story.pontoon_repaired"
+          ]
         },
         "sea_trial": {
           "label": "Sea trial",
-          "objectives": ["Take [[marina_pontoon]] out with Dale for twenty minutes"],
+          "objectives": [
+            "Take [[marina_pontoon]] out with Dale for twenty minutes"
+          ],
           "next": [
             {
               "to": "loan",
@@ -1951,12 +3745,16 @@
               "args": {}
             }
           ],
-          "objectiveExprs": ["story.pontoon_trial_done"]
+          "objectiveExprs": [
+            "story.pontoon_trial_done"
+          ]
         },
         "loan": {
           "label": "The boat is yours until Sunday evening",
           "cue": "Dale tosses you the keys. 'Back by six on Sunday, full tank, and you tell me how she ran.'",
-          "objectives": ["Return [[marina_pontoon]] to the marina by Sunday 20 September, 18:00, with a full tank"],
+          "objectives": [
+            "Return [[marina_pontoon]] to the marina by Sunday 20 September, 18:00, with a full tank"
+          ],
           "gate": "[[flag:small_craft_advisory]] is false, so the boat can safely leave the harbor",
           "next": [
             {
@@ -1969,9 +3767,20 @@
             {
               "type": "assign_vehicle",
               "text": "Dale lends the pontoon to the player.",
-              "args": {"vehicle": "marina_pontoon", "to": "pov", "until": "2026-09-20T18:00"}
+              "args": {
+                "vehicle": "marina_pontoon",
+                "to": "pov",
+                "until": "2026-09-20T18:00"
+              }
             },
-            {"type": "set_flag", "text": "The pontoon is on loan.", "args": {"flag": "pontoon_loaned", "value": true}}
+            {
+              "type": "set_flag",
+              "text": "The pontoon is on loan.",
+              "args": {
+                "flag": "pontoon_loaned",
+                "value": true
+              }
+            }
           ],
           "fail": {
             "when": "the clock is past Sunday 20 September, 18:00 and [[marina_pontoon]] is not at [[alder_harbor_marina]]",
@@ -1979,7 +3788,9 @@
             "expr": "clock > @2026-09-20T18:00 and not at('marina_pontoon', 'alder_harbor_marina')"
           },
           "gateExpr": "not story.small_craft_advisory",
-          "objectiveExprs": ["story.pontoon_out and at('marina_pontoon', 'alder_harbor_marina') and fuel_pct('marina_pontoon') >= 90"]
+          "objectiveExprs": [
+            "story.pontoon_out and at('marina_pontoon', 'alder_harbor_marina') and fuel_pct('marina_pontoon') >= 90"
+          ]
         },
         "done": {
           "label": "Returned, full tank",
@@ -1989,12 +3800,22 @@
             {
               "type": "regard",
               "text": "Dale respects the player.",
-              "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "respect", "delta": 25}
+              "args": {
+                "who": "dale_whitcomb",
+                "toward": "pov",
+                "axis": "respect",
+                "delta": 25
+              }
             },
             {
               "type": "regard",
               "text": "Dale trusts the player.",
-              "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "trust", "delta": 20}
+              "args": {
+                "who": "dale_whitcomb",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": 20
+              }
             }
           ]
         },
@@ -2006,7 +3827,12 @@
             {
               "type": "regard",
               "text": "Dale loses some trust.",
-              "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "trust", "delta": -15}
+              "args": {
+                "who": "dale_whitcomb",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": -15
+              }
             }
           ]
         }
@@ -2045,12 +3871,21 @@
         "notice": {
           "label": "A formal letter",
           "cue": "A formal letter on the desk, face-up and half under a stack of invoices. The bank's name is at the top and the stamp is red.",
-          "next": [{"to": "statement", "when": "the player has read [[past_due_notice]]", "expr": "story.read_notice"}],
+          "next": [
+            {
+              "to": "statement",
+              "when": "the player has read [[past_due_notice]]",
+              "expr": "story.read_notice"
+            }
+          ],
           "effects": [
             {
               "type": "reveal_item",
               "text": "A formal letter turns up on the shop desk.",
-              "args": {"item": "past_due_notice", "to": "pov"}
+              "args": {
+                "item": "past_due_notice",
+                "to": "pov"
+              }
             }
           ]
         },
@@ -2068,7 +3903,10 @@
             {
               "type": "reveal_item",
               "text": "A bank statement with a margin note lies under the notice.",
-              "args": {"item": "shop_bank_statement", "to": "pov"}
+              "args": {
+                "item": "shop_bank_statement",
+                "to": "pov"
+              }
             }
           ]
         },
@@ -2076,13 +3914,22 @@
           "label": "What was going on",
           "cue": "Marcus finally puts down the wrench and tells you.",
           "truth": "Alder Automotive is about $112,000 behind on its lease and its lift-equipment loan after a slow winter. Marcus has been covering payroll from a personal line of credit and has an offer from a regional chain that would keep the staff but cut everyone's pay and end the shop's name. He wants the township contract to prove the shop can pay its own way.",
-          "leakTerms": ["$112,000", "behind on", "line of credit", "regional chain"],
+          "leakTerms": [
+            "$112,000",
+            "behind on",
+            "line of credit",
+            "regional chain"
+          ],
           "next": [],
           "rewards": [
             {
               "type": "reveal",
               "text": "The player learns what Marcus has been hiding.",
-              "args": {"track": "s_shop_trouble", "stage": "truth", "to": "pov"}
+              "args": {
+                "track": "s_shop_trouble",
+                "stage": "truth",
+                "to": "pov"
+              }
             }
           ]
         }
@@ -2100,8 +3947,18 @@
         "stuck": {
           "label": "Cranks, doesn't catch",
           "cue": "The township pickup turns over fine but never fires. You hear nothing from the fuel tank when you turn the key to ON.",
-          "objectives": ["Work out why [[township_pickup]] won't start"],
-          "answer": {"expect": ["fuel pump relay", "the fuel pump relay", "bad fuel pump relay", "relay"], "normalize": true},
+          "objectives": [
+            "Work out why [[township_pickup]] won't start"
+          ],
+          "answer": {
+            "expect": [
+              "fuel pump relay",
+              "the fuel pump relay",
+              "bad fuel pump relay",
+              "relay"
+            ],
+            "normalize": true
+          },
           "hints": [
             "No priming hum from the tank: the pump isn't getting power.",
             "Check the fuse first, then swap the relay with a known good one.",
@@ -2114,7 +3971,9 @@
               "expr": "story.relay_replaced"
             }
           ],
-          "objectiveExprs": ["story.relay_replaced"]
+          "objectiveExprs": [
+            "story.relay_replaced"
+          ]
         },
         "fixed": {
           "label": "It fires",
@@ -2124,7 +3983,10 @@
             {
               "type": "set_flag",
               "text": "The township pickup runs.",
-              "args": {"flag": "township_truck_fixed", "value": true}
+              "args": {
+                "flag": "township_truck_fixed",
+                "value": true
+              }
             }
           ]
         }
@@ -2142,7 +4004,10 @@
         "win_contract": {
           "label": "Win the township contract",
           "priority": 8,
-          "objectives": ["Impress Priya", "Keep the bays full"],
+          "objectives": [
+            "Impress Priya",
+            "Keep the bays full"
+          ],
           "next": [
             {
               "to": "keep_afloat",
@@ -2159,10 +4024,20 @@
         "keep_afloat": {
           "label": "Find money another way",
           "priority": 9,
-          "objectives": ["Take extra jobs", "Listen to the chain's offer"],
+          "objectives": [
+            "Take extra jobs",
+            "Listen to the chain's offer"
+          ],
           "next": []
         },
-        "celebrate": {"label": "Take a breath", "priority": 3, "objectives": ["Buy the crew lunch"], "next": []}
+        "celebrate": {
+          "label": "Take a breath",
+          "priority": 3,
+          "objectives": [
+            "Buy the crew lunch"
+          ],
+          "next": []
+        }
       }
     },
     {
@@ -2177,7 +4052,10 @@
         "prove_himself": {
           "label": "Be the shop's go-to mechanic",
           "priority": 5,
-          "objectives": ["Take the hard jobs", "Keep his own pride intact"],
+          "objectives": [
+            "Take the hard jobs",
+            "Keep his own pride intact"
+          ],
           "next": [
             {
               "to": "sulk",
@@ -2189,7 +4067,10 @@
         "sulk": {
           "label": "Stew quietly",
           "priority": 6,
-          "objectives": ["Withhold shortcuts", "Stay late at the shop"],
+          "objectives": [
+            "Withhold shortcuts",
+            "Stay late at the shop"
+          ],
           "next": [
             {
               "to": "prove_himself",
@@ -2212,7 +4093,10 @@
         "plan_fest": {
           "label": "Finish the festival plan",
           "priority": 6,
-          "objectives": ["Confirm vendors", "Find volunteers"],
+          "objectives": [
+            "Confirm vendors",
+            "Find volunteers"
+          ],
           "next": [
             {
               "to": "run_fest",
@@ -2224,7 +4108,10 @@
         "run_fest": {
           "label": "Run Harbor Fest",
           "priority": 10,
-          "objectives": ["Open the pavilion", "Oversee the boat parade"],
+          "objectives": [
+            "Open the pavilion",
+            "Oversee the boat parade"
+          ],
           "next": [
             {
               "to": "recover",
@@ -2233,7 +4120,14 @@
             }
           ]
         },
-        "recover": {"label": "Sleep", "priority": 2, "objectives": ["Do absolutely nothing"], "next": []}
+        "recover": {
+          "label": "Sleep",
+          "priority": 2,
+          "objectives": [
+            "Do absolutely nothing"
+          ],
+          "next": []
+        }
       }
     },
     {
@@ -2248,13 +4142,25 @@
         "finish_season": {
           "label": "Finish the season",
           "priority": 5,
-          "objectives": ["Keep the rental pontoons running", "Take bookings through Harbor Fest"],
-          "next": [{"to": "haul_out", "when": "the clock reaches Monday 5 October", "expr": "clock >= @2026-10-05T00:00"}]
+          "objectives": [
+            "Keep the rental pontoons running",
+            "Take bookings through Harbor Fest"
+          ],
+          "next": [
+            {
+              "to": "haul_out",
+              "when": "the clock reaches Monday 5 October",
+              "expr": "clock >= @2026-10-05T00:00"
+            }
+          ]
         },
         "haul_out": {
           "label": "Haul out and winterize",
           "priority": 8,
-          "objectives": ["Schedule hauling", "Store the boats in the barn"],
+          "objectives": [
+            "Schedule hauling",
+            "Store the boats in the barn"
+          ],
           "next": []
         }
       }
@@ -2271,19 +4177,39 @@
         "first_quarter": {
           "label": "Finish the first quarter",
           "priority": 5,
-          "objectives": ["Hand in the history essay", "Keep her grades up"],
-          "next": [{"to": "ask_dale", "when": "the clock reaches Friday 23 October", "expr": "clock >= @2026-10-23T00:00"}]
+          "objectives": [
+            "Hand in the history essay",
+            "Keep her grades up"
+          ],
+          "next": [
+            {
+              "to": "ask_dale",
+              "when": "the clock reaches Friday 23 October",
+              "expr": "clock >= @2026-10-23T00:00"
+            }
+          ]
         },
         "ask_dale": {
           "label": "Ask Dale about weekend dock work",
           "priority": 6,
-          "objectives": ["Work up the nerve", "Ask Dale at the marina"],
-          "next": [{"to": "winter_break", "when": "the clock reaches the end of school on Friday 18 December", "expr": "clock >= @2026-12-18T15:10"}]
+          "objectives": [
+            "Work up the nerve",
+            "Ask Dale at the marina"
+          ],
+          "next": [
+            {
+              "to": "winter_break",
+              "when": "the clock reaches the end of school on Friday 18 December",
+              "expr": "clock >= @2026-12-18T15:10"
+            }
+          ]
         },
         "winter_break": {
           "label": "Winter break",
           "priority": 2,
-          "objectives": ["Sleep late"],
+          "objectives": [
+            "Sleep late"
+          ],
           "next": []
         }
       }
@@ -2293,7 +4219,9 @@
     {
       "id": "r_rent_due",
       "label": "Rent is due",
-      "on": {"tick": "day"},
+      "on": {
+        "tick": "day"
+      },
       "trigger": "On the 1st of each month.",
       "when": "the day of the month is 1",
       "do": [
@@ -2309,20 +4237,27 @@
           }
         }
       ],
-      "beat": {"hint": "Helen knocks twice on your door at nine with a plate of cookies and no mention of the rent."},
-      "handledBy": "economy.bills"
+      "beat": {
+        "hint": "Helen knocks twice on your door at nine with a plate of cookies and no mention of the rent."
+      },
+      "handledBy": "economy.money"
     },
     {
       "id": "r_payday_semimonthly",
       "label": "Township payday",
-      "on": {"tick": "day"},
+      "on": {
+        "tick": "day"
+      },
       "trigger": "On the 15th and the last day of the month of each month.",
       "when": "the day of the month is 1 or 15",
       "do": [
         {
           "type": "payroll",
           "text": "Township employees (Priya) are paid net of withholding.",
-          "args": {"employer": "township_hall", "payFrequency": "semimonthly"}
+          "args": {
+            "employer": "township_hall",
+            "payFrequency": "semimonthly"
+          }
         },
         {
           "type": "note",
@@ -2333,27 +4268,34 @@
       "beat": {
         "hint": "Priya hums on her way into the Rusty Anchor: payday and the first festival shipment, on the same day."
       },
-      "handledBy": "economy.payroll"
+      "handledBy": "economy.money"
     },
     {
       "id": "r_payday_weekly",
       "label": "Friday payday at the shop",
-      "on": {"tick": "day"},
+      "on": {
+        "tick": "day"
+      },
       "trigger": "Every Friday at 15:00.",
       "when": "the weekday is Friday and the time is 15:00 or later",
       "do": [
         {
           "type": "payroll",
           "text": "The shop pays its crew net of withholding.",
-          "args": {"employer": "alder_automotive", "payFrequency": "weekly"}
+          "args": {
+            "employer": "alder_automotive",
+            "payFrequency": "weekly"
+          }
         }
       ],
-      "handledBy": "economy.payroll"
+      "handledBy": "economy.money"
     },
     {
       "id": "r_small_craft_advisory",
       "label": "Small-craft advisory",
-      "on": {"at": "2026-09-23T14:00"},
+      "on": {
+        "at": "2026-09-23T14:00"
+      },
       "trigger": "At 14:00 on Wednesday 23 September a strong blow comes down the lake and lasts about twenty hours.",
       "when": "always",
       "once": true,
@@ -2362,26 +4304,47 @@
         {
           "type": "set_weather",
           "text": "A gale-force wind and high waves hit the lake.",
-          "args": {"region": "port_alder", "state": "gale", "minutes": 1200}
+          "args": {
+            "region": "port_alder",
+            "state": "gale",
+            "minutes": 1200
+          }
         },
         {
           "type": "set_flag",
           "text": "A small-craft advisory is in force.",
-          "args": {"flag": "small_craft_advisory", "value": true}
+          "args": {
+            "flag": "small_craft_advisory",
+            "value": true
+          }
         },
         {
           "type": "set_route",
           "text": "The Gull Island ferry stops running.",
-          "args": {"route": "rt_marina_gull", "open": false}
+          "args": {
+            "route": "rt_marina_gull",
+            "open": false
+          }
         },
-        {"type": "set_flag", "text": "The ferry is not running.", "args": {"flag": "ferry_running", "value": false}}
+        {
+          "type": "set_flag",
+          "text": "The ferry is not running.",
+          "args": {
+            "flag": "ferry_running",
+            "value": false
+          }
+        }
       ],
-      "beat": {"hint": "The flags at the marina snap straight out, and Dale starts doubling every dock line."}
+      "beat": {
+        "hint": "The flags at the marina snap straight out, and Dale starts doubling every dock line."
+      }
     },
     {
       "id": "r_small_craft_advisory_ends",
       "label": "The advisory is lifted",
-      "on": {"at": "2026-09-24T10:00"},
+      "on": {
+        "at": "2026-09-24T10:00"
+      },
       "trigger": "At 10:00 on Thursday 24 September, twenty hours after the gale began.",
       "when": "always",
       "once": true,
@@ -2389,20 +4352,35 @@
         {
           "type": "set_flag",
           "text": "The small-craft advisory is lifted.",
-          "args": {"flag": "small_craft_advisory", "value": false}
+          "args": {
+            "flag": "small_craft_advisory",
+            "value": false
+          }
         },
-        {"type": "set_flag", "text": "The ferry is running again.", "args": {"flag": "ferry_running", "value": true}},
+        {
+          "type": "set_flag",
+          "text": "The ferry is running again.",
+          "args": {
+            "flag": "ferry_running",
+            "value": true
+          }
+        },
         {
           "type": "set_route",
           "text": "The Gull Island ferry resumes.",
-          "args": {"route": "rt_marina_gull", "open": true}
+          "args": {
+            "route": "rt_marina_gull",
+            "open": true
+          }
         }
       ]
     },
     {
       "id": "r_harbor_fest",
       "label": "Harbor Fest",
-      "on": {"at": "2026-09-26T10:00"},
+      "on": {
+        "at": "2026-09-26T10:00"
+      },
       "trigger": "At 10:00 on Saturday 26 September the festival opens at Lakefront Park, with a boat parade at 14:00.",
       "when": "always",
       "once": true,
@@ -2411,20 +4389,30 @@
         {
           "type": "move",
           "text": "The town heads to Lakefront Park.",
-          "args": {"who": "town_cast", "place": "lakefront_park"}
+          "args": {
+            "who": "town_cast",
+            "place": "lakefront_park"
+          }
         },
         {
           "type": "set_scene",
           "text": "The park fills with food stalls and music.",
-          "args": {"place": "lakefront_park", "sceneType": "conversation"}
+          "args": {
+            "place": "lakefront_park",
+            "sceneType": "conversation"
+          }
         }
       ],
-      "beat": {"hint": "Smoke from the grill, a brass band warming up, and Priya running past with a walkie-talkie."}
+      "beat": {
+        "hint": "Smoke from the grill, a brass band warming up, and Priya running past with a walkie-talkie."
+      }
     },
     {
       "id": "r_danny_jealous",
       "label": "Danny gets prickly",
-      "on": {"tick": "day"},
+      "on": {
+        "tick": "day"
+      },
       "trigger": "Once Marcus's respect for the player is high, at most once a week.",
       "when": "[[marcus_delgado]] has praised the player in front of [[danny_okafor]] at least twice since Monday",
       "cooldownMinutes": 10080,
@@ -2432,7 +4420,12 @@
         {
           "type": "regard",
           "text": "Danny cools toward the player.",
-          "args": {"who": "danny_okafor", "toward": "pov", "axis": "warmth", "delta": -10}
+          "args": {
+            "who": "danny_okafor",
+            "toward": "pov",
+            "axis": "warmth",
+            "delta": -10
+          }
         },
         {
           "type": "note",
@@ -2440,32 +4433,51 @@
           "args": {}
         }
       ],
-      "beat": {"hint": "Danny slides the right-sized socket just out of reach and says it must have gone missing."},
+      "beat": {
+        "hint": "Danny slides the right-sized socket just out of reach and says it must have gone missing."
+      },
       "whenExpr": "regard('marcus_delgado', 'pov', 'respect') >= 40"
     },
     {
       "id": "r_pontoon_overdue",
       "label": "Pontoon overdue",
-      "on": {"tick": "slot"},
+      "on": {
+        "tick": "slot"
+      },
       "trigger": "When the pontoon is on loan and the return time has passed.",
       "when": "[[flag:pontoon_loaned]] is true and the clock is past Sunday 20 September, 18:00 and [[marina_pontoon]] is not at [[alder_harbor_marina]]",
       "interrupt": true,
       "once": true,
       "do": [
-        {"type": "flag_overdue", "text": "The loan is overdue.", "args": {"vehicle": "marina_pontoon"}},
+        {
+          "type": "flag_overdue",
+          "text": "The loan is overdue.",
+          "args": {
+            "vehicle": "marina_pontoon"
+          }
+        },
         {
           "type": "regard",
           "text": "Dale loses a little trust.",
-          "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "trust", "delta": -10}
+          "args": {
+            "who": "dale_whitcomb",
+            "toward": "pov",
+            "axis": "trust",
+            "delta": -10
+          }
         }
       ],
-      "beat": {"hint": "Your phone buzzes: three texts from Dale in a row, each shorter than the last."},
+      "beat": {
+        "hint": "Your phone buzzes: three texts from Dale in a row, each shorter than the last."
+      },
       "whenExpr": "story.pontoon_loaned and clock > @2026-09-20T18:00 and not at('marina_pontoon', 'alder_harbor_marina')"
     },
     {
       "id": "r_oil_change_due",
       "label": "Oil change due",
-      "on": {"tick": "day"},
+      "on": {
+        "tick": "day"
+      },
       "trigger": "When the pickup has gone 7,500 miles since its last oil change.",
       "when": "[[pov_truck]]'s odometer is at least 7,500 miles past its last oil change",
       "cooldownMinutes": 10080,
@@ -2481,7 +4493,9 @@
     {
       "id": "r_pontoon_out",
       "label": "The pontoon leaves the marina",
-      "on": {"tick": "slot"},
+      "on": {
+        "tick": "slot"
+      },
       "trigger": "While the pontoon is on loan and away from its slip.",
       "when": "the loan is running and the pontoon is not at the marina",
       "whenExpr": "stage('q_pontoon_weekend') == 'loan' and not at('marina_pontoon', 'alder_harbor_marina')",
@@ -2490,7 +4504,10 @@
         {
           "type": "set_flag",
           "text": "The pontoon is out on the lake.",
-          "args": {"flag": "pontoon_out", "value": true}
+          "args": {
+            "flag": "pontoon_out",
+            "value": true
+          }
         }
       ]
     }
@@ -2512,54 +4529,160 @@
         "region": "lakeshore_county",
         "label": "Lake-moderated Great Lakes shore",
         "states": [
-          {"id": "clear", "label": "Clear", "effects": {}},
-          {"id": "cloudy", "label": "Cloudy", "effects": {}},
+          {
+            "id": "clear",
+            "label": "Clear",
+            "effects": {}
+          },
+          {
+            "id": "cloudy",
+            "label": "Cloudy",
+            "effects": {}
+          },
           {
             "id": "rain",
             "label": "Rain",
-            "effects": {"travelTimeMultiplier": {"walk": 1.1, "road": 1.1, "offroad": 1.3}}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.1,
+                "road": 1.1,
+                "offroad": 1.3
+              }
+            }
           },
-          {"id": "fog", "label": "Lake fog", "effects": {"travelTimeMultiplier": {"road": 1.2, "water": 1.5}}},
+          {
+            "id": "fog",
+            "label": "Lake fog",
+            "effects": {
+              "travelTimeMultiplier": {
+                "road": 1.2,
+                "water": 1.5
+              }
+            }
+          },
           {
             "id": "thunderstorm",
             "label": "Thunderstorm",
-            "effects": {"travelTimeMultiplier": {"walk": 1.3, "road": 1.3, "offroad": 1.6}, "closes": ["water"]}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.3,
+                "road": 1.3,
+                "offroad": 1.6
+              },
+              "closes": [
+                "water"
+              ]
+            }
           },
           {
             "id": "gale",
             "label": "Gale (small-craft advisory)",
-            "effects": {"travelTimeMultiplier": {"walk": 1.3, "road": 1.2, "water": 2.0}, "closes": ["water"]}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.3,
+                "road": 1.2,
+                "water": 2.0
+              },
+              "closes": [
+                "water"
+              ]
+            }
           },
           {
             "id": "snow",
             "label": "Lake-effect snow",
-            "effects": {"travelTimeMultiplier": {"walk": 1.4, "road": 1.6, "offroad": 2.5}, "closes": ["water"]}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.4,
+                "road": 1.6,
+                "offroad": 2.5
+              },
+              "closes": [
+                "water"
+              ]
+            }
           }
         ],
         "seasons": [
           {
             "label": "Winter",
-            "months": [12, 1, 2],
-            "weights": {"clear": 10, "cloudy": 35, "rain": 5, "fog": 5, "snow": 40, "gale": 5},
-            "tempC": [-9, 0]
+            "months": [
+              12,
+              1,
+              2
+            ],
+            "weights": {
+              "clear": 10,
+              "cloudy": 35,
+              "rain": 5,
+              "fog": 5,
+              "snow": 40,
+              "gale": 5
+            },
+            "tempC": [
+              -9,
+              0
+            ]
           },
           {
             "label": "Spring",
-            "months": [3, 4, 5],
-            "weights": {"clear": 25, "cloudy": 30, "rain": 30, "fog": 7, "thunderstorm": 5, "gale": 3},
-            "tempC": [3, 15]
+            "months": [
+              3,
+              4,
+              5
+            ],
+            "weights": {
+              "clear": 25,
+              "cloudy": 30,
+              "rain": 30,
+              "fog": 7,
+              "thunderstorm": 5,
+              "gale": 3
+            },
+            "tempC": [
+              3,
+              15
+            ]
           },
           {
             "label": "Summer",
-            "months": [6, 7, 8],
-            "weights": {"clear": 45, "cloudy": 20, "rain": 15, "fog": 3, "thunderstorm": 15, "gale": 2},
-            "tempC": [16, 28]
+            "months": [
+              6,
+              7,
+              8
+            ],
+            "weights": {
+              "clear": 45,
+              "cloudy": 20,
+              "rain": 15,
+              "fog": 3,
+              "thunderstorm": 15,
+              "gale": 2
+            },
+            "tempC": [
+              16,
+              28
+            ]
           },
           {
             "label": "Autumn",
-            "months": [9, 10, 11],
-            "weights": {"clear": 30, "cloudy": 32, "rain": 20, "fog": 8, "thunderstorm": 4, "gale": 6},
-            "tempC": [4, 16]
+            "months": [
+              9,
+              10,
+              11
+            ],
+            "weights": {
+              "clear": 30,
+              "cloudy": 32,
+              "rain": 20,
+              "fog": 8,
+              "thunderstorm": 4,
+              "gale": 6
+            },
+            "tempC": [
+              4,
+              16
+            ]
           }
         ],
         "note": "The gale on Wednesday 23 September is scripted by a rule; ordinary weather is drawn from the season."
@@ -2568,41 +4691,131 @@
         "region": "chicago_il",
         "label": "Continental big-city lakefront",
         "states": [
-          {"id": "clear", "label": "Clear", "effects": {}},
-          {"id": "cloudy", "label": "Cloudy", "effects": {}},
-          {"id": "rain", "label": "Rain", "effects": {"travelTimeMultiplier": {"walk": 1.1, "road": 1.15}}},
-          {"id": "fog", "label": "Fog", "effects": {"travelTimeMultiplier": {"road": 1.2}}},
+          {
+            "id": "clear",
+            "label": "Clear",
+            "effects": {}
+          },
+          {
+            "id": "cloudy",
+            "label": "Cloudy",
+            "effects": {}
+          },
+          {
+            "id": "rain",
+            "label": "Rain",
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.1,
+                "road": 1.15
+              }
+            }
+          },
+          {
+            "id": "fog",
+            "label": "Fog",
+            "effects": {
+              "travelTimeMultiplier": {
+                "road": 1.2
+              }
+            }
+          },
           {
             "id": "thunderstorm",
             "label": "Thunderstorm",
-            "effects": {"travelTimeMultiplier": {"walk": 1.3, "road": 1.4}}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.3,
+                "road": 1.4
+              }
+            }
           },
-          {"id": "snow", "label": "Snow", "effects": {"travelTimeMultiplier": {"walk": 1.4, "road": 1.7}}}
+          {
+            "id": "snow",
+            "label": "Snow",
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.4,
+                "road": 1.7
+              }
+            }
+          }
         ],
         "seasons": [
           {
             "label": "Winter",
-            "months": [12, 1, 2],
-            "weights": {"clear": 20, "cloudy": 35, "rain": 5, "fog": 5, "snow": 35},
-            "tempC": [-9, 0]
+            "months": [
+              12,
+              1,
+              2
+            ],
+            "weights": {
+              "clear": 20,
+              "cloudy": 35,
+              "rain": 5,
+              "fog": 5,
+              "snow": 35
+            },
+            "tempC": [
+              -9,
+              0
+            ]
           },
           {
             "label": "Spring",
-            "months": [3, 4, 5],
-            "weights": {"clear": 28, "cloudy": 30, "rain": 28, "fog": 6, "thunderstorm": 8},
-            "tempC": [3, 16]
+            "months": [
+              3,
+              4,
+              5
+            ],
+            "weights": {
+              "clear": 28,
+              "cloudy": 30,
+              "rain": 28,
+              "fog": 6,
+              "thunderstorm": 8
+            },
+            "tempC": [
+              3,
+              16
+            ]
           },
           {
             "label": "Summer",
-            "months": [6, 7, 8],
-            "weights": {"clear": 45, "cloudy": 18, "rain": 12, "thunderstorm": 25},
-            "tempC": [18, 30]
+            "months": [
+              6,
+              7,
+              8
+            ],
+            "weights": {
+              "clear": 45,
+              "cloudy": 18,
+              "rain": 12,
+              "thunderstorm": 25
+            },
+            "tempC": [
+              18,
+              30
+            ]
           },
           {
             "label": "Autumn",
-            "months": [9, 10, 11],
-            "weights": {"clear": 35, "cloudy": 30, "rain": 22, "fog": 8, "thunderstorm": 5},
-            "tempC": [5, 17]
+            "months": [
+              9,
+              10,
+              11
+            ],
+            "weights": {
+              "clear": 35,
+              "cloudy": 30,
+              "rain": 22,
+              "fog": 8,
+              "thunderstorm": 5
+            },
+            "tempC": [
+              5,
+              17
+            ]
           }
         ],
         "note": "Chicago is in the Central time zone, an hour behind Port Alder."
@@ -2615,7 +4828,11 @@
       "title": "Port Alder",
       "category": "place",
       "about": "port_alder",
-      "keys": ["Port Alder", "Alder", "the town"],
+      "keys": [
+        "Port Alder",
+        "Alder",
+        "the town"
+      ],
       "text": "Port Alder sits on the east shore of Lake Michigan with about 6,500 residents. It began as a lumber port, became a fruit-shipping town and is now mostly a place where people fish, sail, ride dune buggies and commute to somewhere larger. It has two stoplights, one high school and no tolerance for being called quaint."
     },
     {
@@ -2623,7 +4840,12 @@
       "title": "114 Harbor Street",
       "category": "place",
       "about": "harbor_street_114",
-      "keys": ["Harbor Street", "114", "Unit 2B", "Harbor Hardware"],
+      "keys": [
+        "Harbor Street",
+        "114",
+        "Unit 2B",
+        "Harbor Hardware"
+      ],
       "text": "114 Harbor Street is a brick building with Harbor Hardware on the ground floor and four apartments above. Helen Kowalczyk has owned it for forty years and keeps the rents under what the neighbors charge. The stairs creak on the ninth step, and everyone on the second floor knows who is coming home."
     },
     {
@@ -2631,7 +4853,11 @@
       "title": "Alder Automotive",
       "category": "place",
       "about": "alder_automotive",
-      "keys": ["Alder Automotive", "the shop", "the garage"],
+      "keys": [
+        "Alder Automotive",
+        "the shop",
+        "the garage"
+      ],
       "text": "Alder Automotive has three bays, a counter, a parts shelf and a back lot of cars waiting for a part. Marcus Delgado opened it eleven years ago. It repairs everything from boat trailers to the township's tractors and is the first place locals call when a tow is needed."
     },
     {
@@ -2639,7 +4865,11 @@
       "title": "The Rusty Anchor",
       "category": "place",
       "about": "rusty_anchor",
-      "keys": ["Rusty Anchor", "the Anchor", "bar"],
+      "keys": [
+        "Rusty Anchor",
+        "the Anchor",
+        "bar"
+      ],
       "text": "The Rusty Anchor is the local bar and grill. It has a deck over the harbor, a wall of old buoys, a pool table with a wobbly leg and a Thursday trivia night that gets competitive. The burger is excellent. The jukebox only plays a handful of songs, and everyone knows them all."
     },
     {
@@ -2647,7 +4877,11 @@
       "title": "Bluebird Coffee",
       "category": "place",
       "about": "bluebird_coffee",
-      "keys": ["Bluebird", "coffee", "cafe"],
+      "keys": [
+        "Bluebird",
+        "coffee",
+        "cafe"
+      ],
       "text": "Bluebird Coffee is a bright corner cafe on Main Street with a good espresso machine, an overworked barista and a pastry case that empties by ten. A drip coffee costs three dollars; a latte costs about six. Half the town's business is conducted at its mismatched tables."
     },
     {
@@ -2655,7 +4889,11 @@
       "title": "Alder Township Hall",
       "category": "place",
       "about": "township_hall",
-      "keys": ["Township Hall", "township", "permit"],
+      "keys": [
+        "Township Hall",
+        "township",
+        "permit"
+      ],
       "text": "The township handles permits, property taxes, the vehicle yard and the festival fund. Its staff is small and overworked: an accountant, a clerk, a supervisor and a handful of part-timers. It owns a fleet of aging trucks that are serviced wherever the lowest bidder is this year."
     },
     {
@@ -2663,7 +4901,11 @@
       "title": "Alder Community Clinic",
       "category": "place",
       "about": "community_clinic",
-      "keys": ["clinic", "urgent care", "pharmacy"],
+      "keys": [
+        "clinic",
+        "urgent care",
+        "pharmacy"
+      ],
       "text": "A one-storey clinic with urgent care, primary care and a pharmacy window. It covers most of what a small town needs, and sends the rest to a hospital forty minutes away. Staff are friendly, the waiting room is cold, and the vending machine is always out of the good snack."
     },
     {
@@ -2671,7 +4913,12 @@
       "title": "Alder Harbor Marina",
       "category": "place",
       "about": "alder_harbor_marina",
-      "keys": ["marina", "harbor", "slip", "boat ramp"],
+      "keys": [
+        "marina",
+        "harbor",
+        "slip",
+        "boat ramp"
+      ],
       "text": "The marina has eighty slips, a boat ramp, a fuel dock and a barn for winter storage. Dale Whitcomb has run it for twenty-five years. In season, a slip rents by the month; for guests, a night at the dock is cheap and the coffee in the office is free. Dale lets a few regulars keep a trailered boat in the yard by the ramp, and launches it for them on request."
     },
     {
@@ -2679,7 +4926,12 @@
       "title": "Lakefront Park",
       "category": "place",
       "about": "lakefront_park",
-      "keys": ["Lakefront Park", "park", "beach", "pavilion"],
+      "keys": [
+        "Lakefront Park",
+        "park",
+        "beach",
+        "pavilion"
+      ],
       "text": "A strip of beach, lawn and picnic tables beside the marina, with a pavilion that hosts the farmers' market on summer Saturdays. It fills up on the Fourth of July and on the fourth weekend of September for Harbor Fest."
     },
     {
@@ -2687,7 +4939,11 @@
       "title": "Alder Market",
       "category": "place",
       "about": "alder_market",
-      "keys": ["market", "grocery", "groceries"],
+      "keys": [
+        "market",
+        "grocery",
+        "groceries"
+      ],
       "text": "The only full grocery store in town carries what you need, a few things you don't and a rack of local apples in fall. Its bulletin board advertises everything from lost cats to dune-buggy repairs. Prices run a little under national averages."
     },
     {
@@ -2695,7 +4951,11 @@
       "title": "Shoreline Fuel",
       "category": "place",
       "about": "shoreline_fuel",
-      "keys": ["Shoreline", "gas station", "fuel"],
+      "keys": [
+        "Shoreline",
+        "gas station",
+        "fuel"
+      ],
       "text": "Shoreline Fuel has four pumps, a car wash and a rotating selection of hot dogs. Regular gasoline runs about three dollars and fifteen cents a gallon. It is open from five in the morning until eleven at night and is the first place anyone stops after a flat tire."
     },
     {
@@ -2703,7 +4963,12 @@
       "title": "Shoreline Dunes Trail System",
       "category": "place",
       "about": "dune_trails",
-      "keys": ["dunes", "trail", "ATV", "riding"],
+      "keys": [
+        "dunes",
+        "trail",
+        "ATV",
+        "riding"
+      ],
       "text": "Twelve miles of marked sand trails run through the dunes, open to ATVs and side-by-sides from a trailhead off County Road 12. Riders must stay on the marked trail, wear helmets, and keep an eye on the weather: a front can roll off the lake in minutes."
     },
     {
@@ -2711,14 +4976,23 @@
       "title": "Gull Island State Park",
       "category": "place",
       "about": "gull_island",
-      "keys": ["Gull Island", "island", "ferry", "lighthouse"],
+      "keys": [
+        "Gull Island",
+        "island",
+        "ferry",
+        "lighthouse"
+      ],
       "text": "Gull Island has a lighthouse, a small campground and a long shingle beach. A ferry from the marina makes the crossing in about twenty-five minutes, several times a day in season, and costs around nine dollars. It does not run when the wind is up."
     },
     {
       "id": "lore_harbor_fest",
       "title": "Harbor Fest",
       "category": "history",
-      "keys": ["Harbor Fest", "festival", "boat parade"],
+      "keys": [
+        "Harbor Fest",
+        "festival",
+        "boat parade"
+      ],
       "text": "Harbor Fest is held on the fourth Saturday of September. It has food stalls, a brass band, a pie contest and a parade of decorated boats at two in the afternoon. The township's festival fund pays for most of it, and Priya Nair has organized it for the last four years."
     },
     {
@@ -2726,7 +5000,11 @@
       "title": "Marcus Delgado",
       "category": "person",
       "about": "marcus_delgado",
-      "keys": ["Marcus", "Delgado", "the boss"],
+      "keys": [
+        "Marcus",
+        "Delgado",
+        "the boss"
+      ],
       "text": "Marcus Delgado owns Alder Automotive. He is fifty-two, heavy-set and patient, and fixes everything slowly and well. Employees say he never raises his voice and never forgets a mistake. He works longer hours than any of them."
     },
     {
@@ -2734,7 +5012,10 @@
       "title": "Danny Okafor",
       "category": "person",
       "about": "danny_okafor",
-      "keys": ["Danny", "Okafor"],
+      "keys": [
+        "Danny",
+        "Okafor"
+      ],
       "text": "Danny Okafor is the shop's senior mechanic. Thirty-one, funny and fast, he knows every engine in town by its sound. He lives in 2A and tells everyone he has no plans to leave Port Alder, though he drives down to Chicago to see his family when the shop can spare him. He is competitive in a way he thinks is invisible."
     },
     {
@@ -2742,7 +5023,10 @@
       "title": "Priya Nair",
       "category": "person",
       "about": "priya_nair",
-      "keys": ["Priya", "Nair"],
+      "keys": [
+        "Priya",
+        "Nair"
+      ],
       "text": "Priya Nair is the township accountant and Harbor Fest's organizer. She is warm, brisk and permanently holding a clipboard. She can tell you the festival budget to the dollar and the name of every vendor's cousin."
     },
     {
@@ -2750,7 +5034,11 @@
       "title": "Jess Kowalczyk",
       "category": "person",
       "about": "jess_kowalczyk",
-      "keys": ["Jess", "Kowalczyk", "bartender"],
+      "keys": [
+        "Jess",
+        "Kowalczyk",
+        "bartender"
+      ],
       "text": "Jess Kowalczyk tends bar at the Rusty Anchor five nights a week. Twenty-four, dry-witted and exact with a pour, she lives in 1A with her grandmother and her kid sister Maddie, and spends her days off looking at boats she cannot yet afford."
     },
     {
@@ -2758,7 +5046,11 @@
       "title": "Maddie Kowalczyk",
       "category": "person",
       "about": "maddie_kowalczyk",
-      "keys": ["Maddie", "Jess's sister", "the Kowalczyk girl"],
+      "keys": [
+        "Maddie",
+        "Jess's sister",
+        "the Kowalczyk girl"
+      ],
       "text": "Maddie Kowalczyk is fifteen, Jess's kid sister, and a sophomore at Lakeshore Consolidated. She walks to the bus on school mornings, does her homework at the Bluebird Coffee shop twice a week and spends Friday afternoons on the marina dock, where Dale lets her coil lines in return for a lesson now and then."
     },
     {
@@ -2766,7 +5058,14 @@
       "title": "Lakeshore Consolidated School",
       "category": "place",
       "about": "lakeshore_school",
-      "keys": ["school", "Lakeshore Consolidated", "Consolidated", "term", "winter break", "Thanksgiving break"],
+      "keys": [
+        "school",
+        "Lakeshore Consolidated",
+        "Consolidated",
+        "term",
+        "winter break",
+        "Thanksgiving break"
+      ],
       "text": "Lakeshore Consolidated serves Port Alder and the farms behind the dunes. The fall term began on Monday 31 August and runs to Friday 20 November; the school closes for Thanksgiving week, reopens on Monday 30 November and lets out for winter break after Friday 18 December. Classes run from eight o'clock until ten past three."
     },
     {
@@ -2774,7 +5073,11 @@
       "title": "Dale Whitcomb",
       "category": "person",
       "about": "dale_whitcomb",
-      "keys": ["Dale", "Whitcomb", "harbormaster"],
+      "keys": [
+        "Dale",
+        "Whitcomb",
+        "harbormaster"
+      ],
       "text": "Dale Whitcomb owns the marina. Sixty-one, weathered and unhurried, he is happiest when someone asks him how to read the lake. He lends boats to people he trusts, and has strong opinions about the people he does not."
     },
     {
@@ -2782,7 +5085,11 @@
       "title": "Helen Kowalczyk",
       "category": "person",
       "about": "helen_kowalczyk",
-      "keys": ["Helen", "landlady", "Mrs. Kowalczyk"],
+      "keys": [
+        "Helen",
+        "landlady",
+        "Mrs. Kowalczyk"
+      ],
       "text": "Helen Kowalczyk, seventy-one, owns 114 Harbor Street and has lived on its ground floor for forty years. She is firm, kind, nosy in equal measure, and still does the crossword in pen."
     },
     {
@@ -2790,7 +5097,11 @@
       "title": "Nora Whitfield",
       "category": "person",
       "about": "nora_whitfield",
-      "keys": ["Nora", "Whitfield", "nurse"],
+      "keys": [
+        "Nora",
+        "Whitfield",
+        "nurse"
+      ],
       "text": "Nora Whitfield is a nurse at the clinic. She works three twelve-hour shifts a week, lives alone with an elderly cat, and is the person to ask about any medical question at three in the morning."
     },
     {
@@ -2798,21 +5109,35 @@
       "title": "Sam Reyes",
       "category": "person",
       "about": "sam_reyes",
-      "keys": ["Sam", "Reyes", "officer"],
+      "keys": [
+        "Sam",
+        "Reyes",
+        "officer"
+      ],
       "text": "Officer Sam Reyes works the afternoon patrol. Calm and dry, Sam is more likely to resolve a dispute with a conversation than a ticket, and has found the missing dog in less than an hour more times than anyone can count."
     },
     {
       "id": "lore_lake",
       "title": "The lake",
       "category": "history",
-      "keys": ["lake", "Lake Michigan", "storm", "gale"],
+      "keys": [
+        "lake",
+        "Lake Michigan",
+        "storm",
+        "gale"
+      ],
       "text": "Lake Michigan is calm for weeks and then, with almost no warning, isn't. Locals check the marine forecast before they put a boat in the water, and the marina flies a pennant when a small-craft advisory is in force."
     },
     {
       "id": "lore_cost_of_living",
       "title": "Living in Port Alder",
       "category": "history",
-      "keys": ["rent", "cost of living", "prices", "wages"],
+      "keys": [
+        "rent",
+        "cost of living",
+        "prices",
+        "wages"
+      ],
       "text": "Port Alder is cheaper than most of the country: a one-bedroom rents for about eleven hundred dollars a month, groceries cost a little under the national average and electricity runs close to twenty cents a kilowatt-hour. A mechanic makes about twenty-four dollars an hour and a nurse about forty-five."
     }
   ],
@@ -2820,12 +5145,25 @@
     {
       "id": "accept_fleet_job",
       "label": "Take the township truck job from Marcus",
-      "requires": ["at(pov, 'alder_automotive')", "at('marcus_delgado', here)", "not story.fleet_deal_accepted"],
+      "requires": [
+        "at(pov, 'alder_automotive')",
+        "at('marcus_delgado', here)",
+        "not story.fleet_deal_accepted"
+      ],
       "duration": 15,
-      "lexicon": ["take the township job", "accept the fleet contract job"],
+      "lexicon": [
+        "take the township job",
+        "accept the fleet contract job"
+      ],
       "observable": "talks with Marcus",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "fleet_deal_accepted", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "fleet_deal_accepted",
+            "value": true
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2844,10 +5182,19 @@
         "not story.relay_replaced"
       ],
       "duration": 60,
-      "lexicon": ["replace the relay", "swap the fuel pump relay"],
+      "lexicon": [
+        "replace the relay",
+        "swap the fuel pump relay"
+      ],
       "observable": "works under the township pickup's hood",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "relay_replaced", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "relay_replaced",
+            "value": true
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2859,13 +5206,34 @@
     {
       "id": "walk_priya_through_repair",
       "label": "Walk Priya through the repair",
-      "requires": ["stage('q_fleet_contract') == 'inspection'", "at('priya_nair', here)", "not story.priya_walked"],
+      "requires": [
+        "stage('q_fleet_contract') == 'inspection'",
+        "at('priya_nair', here)",
+        "not story.priya_walked"
+      ],
       "duration": 30,
-      "lexicon": ["show priya the repair", "walk priya through it"],
+      "lexicon": [
+        "show priya the repair",
+        "walk priya through it"
+      ],
       "observable": "explains a repair",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "priya_walked", "value": true}},
-        {"type": "regard", "args": {"who": "priya_nair", "toward": "pov", "axis": "respect", "delta": 15}}
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "priya_walked",
+            "value": true
+          }
+        },
+        {
+          "type": "regard",
+          "args": {
+            "who": "priya_nair",
+            "toward": "pov",
+            "axis": "respect",
+            "delta": 15
+          }
+        }
       ]
     },
     {
@@ -2878,85 +5246,194 @@
         "not story.fleet_contract_signed"
       ],
       "duration": 20,
-      "lexicon": ["sign the contract"],
+      "lexicon": [
+        "sign the contract"
+      ],
       "observable": "signs a contract",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "fleet_contract_signed", "value": true}},
-        {"type": "note", "args": {"text": "Priya countersigns, stamps the copy and hands you yours."}}
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "fleet_contract_signed",
+            "value": true
+          }
+        },
+        {
+          "type": "note",
+          "args": {
+            "text": "Priya countersigns, stamps the copy and hands you yours."
+          }
+        }
       ]
     },
     {
       "id": "service_township_fleet",
       "label": "Service the township fleet",
-      "requires": ["stage('q_fleet_contract') == 'service_run'", "at(pov, 'alder_automotive')", "not story.fleet_serviced"],
+      "requires": [
+        "stage('q_fleet_contract') == 'service_run'",
+        "at(pov, 'alder_automotive')",
+        "not story.fleet_serviced"
+      ],
       "duration": 480,
-      "lexicon": ["service the fleet", "do the oil changes"],
+      "lexicon": [
+        "service the fleet",
+        "do the oil changes"
+      ],
       "observable": "works through a row of township vehicles",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "fleet_serviced", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "fleet_serviced",
+            "value": true
+          }
+        },
         {
           "type": "note",
-          "args": {"text": "Six vehicles: oil, filters, belts, a tire rotation and a signed checklist for each."}
+          "args": {
+            "text": "Six vehicles: oil, filters, belts, a tire rotation and a signed checklist for each."
+          }
         }
       ]
     },
     {
       "id": "look_at_pontoon",
       "label": "Agree to look at Dale's pontoon",
-      "requires": ["at(pov, 'alder_harbor_marina')", "at('dale_whitcomb', here)", "not story.pontoon_looked_at"],
+      "requires": [
+        "at(pov, 'alder_harbor_marina')",
+        "at('dale_whitcomb', here)",
+        "not story.pontoon_looked_at"
+      ],
       "duration": 15,
-      "lexicon": ["look at the pontoon", "help dale with the boat"],
+      "lexicon": [
+        "look at the pontoon",
+        "help dale with the boat"
+      ],
       "observable": "talks with Dale",
-      "effects": [{"type": "set_flag", "args": {"flag": "pontoon_looked_at", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "pontoon_looked_at",
+            "value": true
+          }
+        }
+      ]
     },
     {
       "id": "diagnose_pontoon",
       "label": "Diagnose the pontoon's engine",
-      "requires": ["story.pontoon_looked_at", "at(pov, 'alder_harbor_marina')", "not story.pontoon_diagnosed"],
+      "requires": [
+        "story.pontoon_looked_at",
+        "at(pov, 'alder_harbor_marina')",
+        "not story.pontoon_diagnosed"
+      ],
       "duration": 90,
-      "lexicon": ["diagnose the engine", "figure out what's wrong with the boat"],
+      "lexicon": [
+        "diagnose the engine",
+        "figure out what's wrong with the boat"
+      ],
       "observable": "tinkers with an outboard",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "pontoon_diagnosed", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "pontoon_diagnosed",
+            "value": true
+          }
+        },
         {
           "type": "note",
-          "args": {"text": "A varnished carburetor and a fouled plug: the engine floods when it idles."}
+          "args": {
+            "text": "A varnished carburetor and a fouled plug: the engine floods when it idles."
+          }
         }
       ]
     },
     {
       "id": "repair_pontoon",
       "label": "Clean the carburetor and replace the plug",
-      "requires": ["story.pontoon_diagnosed", "at(pov, 'alder_harbor_marina')", "not story.pontoon_repaired"],
+      "requires": [
+        "story.pontoon_diagnosed",
+        "at(pov, 'alder_harbor_marina')",
+        "not story.pontoon_repaired"
+      ],
       "duration": 180,
-      "lexicon": ["fix the pontoon", "repair the outboard"],
+      "lexicon": [
+        "fix the pontoon",
+        "repair the outboard"
+      ],
       "observable": "tinkers with an outboard",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "pontoon_repaired", "value": true}},
-        {"type": "set", "args": {"entity": "marina_pontoon", "field": "status", "value": "ok"}}
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "pontoon_repaired",
+            "value": true
+          }
+        },
+        {
+          "type": "set",
+          "args": {
+            "entity": "marina_pontoon",
+            "field": "status",
+            "value": "ok"
+          }
+        }
       ]
     },
     {
       "id": "run_sea_trial",
       "label": "Run the pontoon on the lake for a sea trial",
-      "requires": ["story.pontoon_repaired", "at(pov, 'alder_harbor_marina')", "not story.pontoon_trial_done"],
+      "requires": [
+        "story.pontoon_repaired",
+        "at(pov, 'alder_harbor_marina')",
+        "not story.pontoon_trial_done"
+      ],
       "duration": 30,
-      "lexicon": ["take the boat out for a test"],
+      "lexicon": [
+        "take the boat out for a test"
+      ],
       "observable": "idles the pontoon off the dock",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "pontoon_trial_done", "value": true}},
-        {"type": "regard", "args": {"who": "dale_whitcomb", "toward": "pov", "axis": "trust", "delta": 10}}
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "pontoon_trial_done",
+            "value": true
+          }
+        },
+        {
+          "type": "regard",
+          "args": {
+            "who": "dale_whitcomb",
+            "toward": "pov",
+            "axis": "trust",
+            "delta": 10
+          }
+        }
       ]
     },
     {
       "id": "ask_about_marcus",
       "label": "Ask Danny or Jess how Marcus has been",
-      "requires": ["at('danny_okafor', here) or at('jess_kowalczyk', here)", "not story.asked_about_marcus"],
+      "requires": [
+        "at('danny_okafor', here) or at('jess_kowalczyk', here)",
+        "not story.asked_about_marcus"
+      ],
       "duration": 15,
-      "lexicon": ["ask about marcus"],
+      "lexicon": [
+        "ask about marcus"
+      ],
       "observable": "asks around",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "asked_about_marcus", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "asked_about_marcus",
+            "value": true
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2968,44 +5445,114 @@
     {
       "id": "read_past_due_notice",
       "label": "Read the past-due notice",
-      "requires": ["stage('s_shop_trouble') == 'notice'", "at(pov, 'alder_automotive')", "not story.read_notice"],
+      "requires": [
+        "stage('s_shop_trouble') == 'notice'",
+        "at(pov, 'alder_automotive')",
+        "not story.read_notice"
+      ],
       "duration": 10,
-      "lexicon": ["read the notice"],
+      "lexicon": [
+        "read the notice"
+      ],
       "observable": "reads a letter",
-      "effects": [{"type": "set_flag", "args": {"flag": "read_notice", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "read_notice",
+            "value": true
+          }
+        }
+      ]
     },
     {
       "id": "read_bank_statement",
       "label": "Read the shop's bank statement",
-      "requires": ["stage('s_shop_trouble') == 'statement'", "at(pov, 'alder_automotive')", "not story.read_statement"],
+      "requires": [
+        "stage('s_shop_trouble') == 'statement'",
+        "at(pov, 'alder_automotive')",
+        "not story.read_statement"
+      ],
       "duration": 15,
-      "lexicon": ["read the bank statement"],
+      "lexicon": [
+        "read the bank statement"
+      ],
       "observable": "reads a statement",
-      "effects": [{"type": "set_flag", "args": {"flag": "read_statement", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "read_statement",
+            "value": true
+          }
+        }
+      ]
     },
     {
       "id": "talk_to_marcus",
       "label": "Talk to Marcus about the shop's money",
-      "requires": ["story.read_statement", "at('marcus_delgado', here)", "not story.talked_marcus"],
+      "requires": [
+        "story.read_statement",
+        "at('marcus_delgado', here)",
+        "not story.talked_marcus"
+      ],
       "duration": 30,
-      "lexicon": ["confront marcus", "talk to marcus about the money"],
+      "lexicon": [
+        "confront marcus",
+        "talk to marcus about the money"
+      ],
       "observable": "talks quietly with Marcus",
-      "effects": [{"type": "set_flag", "args": {"flag": "talked_marcus", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "talked_marcus",
+            "value": true
+          }
+        }
+      ]
     }
   ],
   "sheets": {
-    "scale": [1, 10],
+    "scale": [
+      1,
+      10
+    ],
     "stats": [
-      {"id": "mechanics", "label": "Mechanics"},
-      {"id": "driving", "label": "Driving"},
-      {"id": "boating", "label": "Boating"},
-      {"id": "cooking", "label": "Cooking"},
-      {"id": "charm", "label": "Charm"},
-      {"id": "fitness", "label": "Fitness"}
+      {
+        "id": "mechanics",
+        "label": "Mechanics"
+      },
+      {
+        "id": "driving",
+        "label": "Driving"
+      },
+      {
+        "id": "boating",
+        "label": "Boating"
+      },
+      {
+        "id": "cooking",
+        "label": "Cooking"
+      },
+      {
+        "id": "charm",
+        "label": "Charm"
+      },
+      {
+        "id": "fitness",
+        "label": "Fitness"
+      }
     ],
     "derived": {
-      "health": {"label": "Health", "formula": "8 + fitness"},
-      "composure": {"label": "Composure", "formula": "6 + floor((charm + fitness) / 3)"}
+      "health": {
+        "label": "Health",
+        "formula": "8 + fitness"
+      },
+      "composure": {
+        "label": "Composure",
+        "formula": "6 + floor((charm + fitness) / 3)"
+      }
     }
   }
 }

@@ -12,10 +12,11 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import type { AccountClass, AlertLine, ClassTraits, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine } from "../../../shared/finance";
+import type { AccountClass, AlertLine, ClassTraits, FilingStatus, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine } from "../../../shared/finance";
 import type { FieldDef } from "../../../shared/world";
 import type { CoreRegistry, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
+import type { Rng } from "../../../engine/rng";
 
 /** One occurrence's money, as a module's amount provider gives it. */
 export interface FlowPosting {
@@ -36,9 +37,10 @@ export interface FlowPosting {
 
 /**
  * Builds an occurrence of a flow whose amount is `{provider: id}`. Null skips the occurrence (no pay
- * this period); a rejection is a shortfall the flow's policy handles.
+ * this period); a rejection is a shortfall the flow's policy handles. `rng` is the occurrence's own
+ * draw, seeded from the run seed, the flow and the occurrence, as the engine's `range` amounts are.
  */
-export type AmountProvider = (ctx: ReadContext, flow: Flow, at: number) => FlowPosting | Rejection | null;
+export type AmountProvider = (ctx: ReadContext, flow: Flow, at: number, rng: Rng) => FlowPosting | Rejection | null;
 
 /** Flows a module derives from its records each time the engine reads them (paychecks from jobs, rent from leases, property tax). */
 export interface FlowSource {
@@ -202,7 +204,7 @@ export interface FinanceHooks {
 }
 
 /** The kinds the foundation registers, whose fields modules may add to. */
-export type FinanceKind = "account" | "card" | "flow" | "trust" | "business" | "job" | "holding" | "property";
+export type FinanceKind = "account" | "card" | "flow" | "trust" | "business" | "job" | "holding" | "property" | "invoice";
 
 declare module "../../../engine/registry" {
   interface QueryMap {
@@ -210,5 +212,19 @@ declare module "../../../engine/registry" {
     "economy.summary": (ctx: ReadContext, who: EntityId) => MoneySummary;
     /** Every party an account (or any owned entity) names on its owners list. */
     "economy.holders": (ctx: ReadContext, entity: EntityId) => EntityId[];
+    /** Where an owner's share of a business's profit goes (the holdings module). */
+    "economy.stake_route": (ctx: ReadContext, owner: EntityId, business: EntityId) => { account: EntityId } | { reinvest: true } | null;
+    /** A business's books over `[from, to)` (the work module). */
+    "economy.business_books": (ctx: ReadContext, business: EntityId, from: number, to: number) => { revenue: number; expenses: number; profit: number; receivables: number; payables: number };
+    /** The account a business's takings land in and its payroll comes from (the work module). */
+    "economy.operating_account": (ctx: ReadContext, business: EntityId) => EntityId | null;
+    /** A person's ordinary income in a tax year (the work module). */
+    "economy.ordinary_income": (ctx: ReadContext, person: EntityId, year: number) => { gross: number; taxable: number; filing: FilingStatus };
+    /** Income tax on a taxable amount for a filing status (the work module). */
+    "economy.income_tax": (ctx: ReadContext, filing: FilingStatus, taxable: number) => number;
+  }
+  interface ServiceMap {
+    /** Books an owner's share of a business's profit paid out (the holdings module). */
+    "economy.stake_paid": (ctx: ReadContext, owner: EntityId, business: EntityId, cents: number, reinvested: boolean) => LedgerEvent[];
   }
 }

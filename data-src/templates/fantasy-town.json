@@ -4,7 +4,13 @@
   "name": "Brindlemere",
   "version": 1,
   "genre": "fantasy",
-  "tags": ["low magic", "market town", "river", "cozy", "light mystery"],
+  "tags": [
+    "low magic",
+    "market town",
+    "river",
+    "cozy",
+    "light mystery"
+  ],
   "blurb": "A river-ford market town on the eve of harvest: a stopped mill, a sick child across the water, and a chapel bell that has been silent for thirty years.",
   "contentNotes": "All-ages. No real people, places or events. Violence is off-screen and mild; nothing explicit.",
   "realism": {
@@ -18,9 +24,21 @@
     "label": "Brindlemere coin",
     "baseUnit": "bit",
     "denominations": [
-      {"id": "bit", "label": "copper bit", "value": 1},
-      {"id": "mark", "label": "silver mark", "value": 20},
-      {"id": "crown", "label": "gold crown", "value": 400}
+      {
+        "id": "bit",
+        "label": "copper bit",
+        "value": 1
+      },
+      {
+        "id": "mark",
+        "label": "silver mark",
+        "value": 20
+      },
+      {
+        "id": "crown",
+        "label": "gold crown",
+        "value": 400
+      }
     ],
     "note": "A labourer earns about 16 bits a day; a loaf is 1 bit, a night's bed 8, a riding horse about 8 crowns.",
     "code": "BIT",
@@ -29,38 +47,119 @@
     "decimals": 0,
     "format": "{sign}{amount} bits"
   },
-  "travelSpeedKmh": {"walk": [1.5, 6], "road": [5, 20], "offroad": [2, 12], "water": [2, 12]},
+  "travelSpeedKmh": {
+    "walk": [
+      1.5,
+      6
+    ],
+    "road": [
+      5,
+      20
+    ],
+    "offroad": [
+      2,
+      12
+    ],
+    "water": [
+      2,
+      12
+    ]
+  },
   "calendar": {
     "system": "custom",
     "epoch": "0412-08-25T00:00",
     "timeZone": "Etc/UTC",
     "dayParts": [
-      {"id": "dawn", "label": "Dawn", "start": "05:00"},
-      {"id": "morning", "label": "Morning", "start": "07:30"},
-      {"id": "midday", "label": "Midday", "start": "11:30"},
-      {"id": "afternoon", "label": "Afternoon", "start": "14:00"},
-      {"id": "evening", "label": "Evening", "start": "18:00"},
-      {"id": "night", "label": "Night", "start": "21:30"}
+      {
+        "id": "dawn",
+        "label": "Dawn",
+        "start": "05:00"
+      },
+      {
+        "id": "morning",
+        "label": "Morning",
+        "start": "07:30"
+      },
+      {
+        "id": "midday",
+        "label": "Midday",
+        "start": "11:30"
+      },
+      {
+        "id": "afternoon",
+        "label": "Afternoon",
+        "start": "14:00"
+      },
+      {
+        "id": "evening",
+        "label": "Evening",
+        "start": "18:00"
+      },
+      {
+        "id": "night",
+        "label": "Night",
+        "start": "21:30"
+      }
     ],
     "holidays": [
-      {"id": "greening", "label": "Greening", "rule": {"type": "fixed", "month": 4, "day": 1}, "dayOff": false},
+      {
+        "id": "greening",
+        "label": "Greening",
+        "rule": {
+          "type": "fixed",
+          "month": 4,
+          "day": 1
+        },
+        "dayOff": false
+      },
       {
         "id": "founders_day",
         "label": "Founders' Day",
-        "rule": {"type": "fixed", "month": 6, "day": 14},
+        "rule": {
+          "type": "fixed",
+          "month": 6,
+          "day": 14
+        },
         "dayOff": true
       },
       {
         "id": "reaping_feast",
         "label": "Reaping Feast",
-        "rule": {"type": "fixed", "month": 9, "day": 1},
+        "rule": {
+          "type": "fixed",
+          "month": 9,
+          "day": 1
+        },
         "dayOff": true
       },
-      {"id": "longnight", "label": "Longnight", "rule": {"type": "fixed", "month": 13, "day": 28}, "dayOff": true}
+      {
+        "id": "longnight",
+        "label": "Longnight",
+        "rule": {
+          "type": "fixed",
+          "month": 13,
+          "day": 28
+        },
+        "dayOff": true
+      }
     ],
     "custom": {
       "yearLabel": "Year {year} of the Charter",
-      "monthLengths": [28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28],
+      "monthLengths": [
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28
+      ],
       "monthNames": [
         "Frostmoon",
         "Thawmoon",
@@ -76,7 +175,15 @@
         "Darkmoon",
         "Longnight"
       ],
-      "weekdayNames": ["Hearthday", "Plowday", "Wellday", "Marketday", "Tollday", "Restday", "Feastday"],
+      "weekdayNames": [
+        "Hearthday",
+        "Plowday",
+        "Wellday",
+        "Marketday",
+        "Tollday",
+        "Restday",
+        "Feastday"
+      ],
       "note": "Every month has 28 days and starts on Hearthday, so a date's weekday never changes. Dates are written YYYY-MM-DD with the month's number (Goldmoon is month 8)."
     }
   },
@@ -90,24 +197,85 @@
   },
   "time": {
     "sceneTypes": [
-      {"id": "conversation", "label": "Conversation", "tickMinutes": 2},
-      {"id": "action", "label": "Action", "tickMinutes": 0.5},
-      {"id": "exploration", "label": "Exploration", "tickMinutes": 10},
-      {"id": "downtime", "label": "Downtime", "tickMinutes": 30},
-      {"id": "market", "label": "Market bustle", "tickMinutes": 6}
+      {
+        "id": "conversation",
+        "label": "Conversation",
+        "tickMinutes": 2
+      },
+      {
+        "id": "action",
+        "label": "Action",
+        "tickMinutes": 0.5
+      },
+      {
+        "id": "exploration",
+        "label": "Exploration",
+        "tickMinutes": 10
+      },
+      {
+        "id": "downtime",
+        "label": "Downtime",
+        "tickMinutes": 30
+      },
+      {
+        "id": "market",
+        "label": "Market bustle",
+        "tickMinutes": 6
+      }
     ],
     "montage": "key",
-    "speedThrough": {"sleep": {"mode": "offer", "thresholdMinutes": 30}, "travel": {"mode": "offer", "thresholdMinutes": 30}}
+    "speedThrough": {
+      "sleep": {
+        "mode": "offer",
+        "thresholdMinutes": 30
+      },
+      "travel": {
+        "mode": "offer",
+        "thresholdMinutes": 30
+      }
+    }
   },
   "flags": [
-    {"id": "ferry_running", "description": "The Wend ferry is carrying passengers.", "default": true},
-    {"id": "storm_active", "description": "A storm is over the vale.", "default": false},
-    {"id": "market_open", "description": "Market stalls are open in the square.", "default": true},
-    {"id": "mill_running", "description": "Wend Mill is grinding.", "default": false},
-    {"id": "cistern_known", "description": "The way under the chapel is open.", "default": false},
-    {"id": "charter_original_found", "description": "The original Charter has been found.", "default": false},
-    {"id": "joss_helping", "description": "The player has offered to find Joss a new millstone.", "default": false},
-    {"id": "cart_permission", "description": "Marta has lent the player her handcart.", "default": false},
+    {
+      "id": "ferry_running",
+      "description": "The Wend ferry is carrying passengers.",
+      "default": true
+    },
+    {
+      "id": "storm_active",
+      "description": "A storm is over the vale.",
+      "default": false
+    },
+    {
+      "id": "market_open",
+      "description": "Market stalls are open in the square.",
+      "default": true
+    },
+    {
+      "id": "mill_running",
+      "description": "Wend Mill is grinding.",
+      "default": false
+    },
+    {
+      "id": "cistern_known",
+      "description": "The way under the chapel is open.",
+      "default": false
+    },
+    {
+      "id": "charter_original_found",
+      "description": "The original Charter has been found.",
+      "default": false
+    },
+    {
+      "id": "joss_helping",
+      "description": "The player has offered to find Joss a new millstone.",
+      "default": false
+    },
+    {
+      "id": "cart_permission",
+      "description": "Marta has lent the player her handcart.",
+      "default": false
+    },
     {
       "id": "bell_asks",
       "description": "How many times the player has asked about the Quiet Bell.",
@@ -119,7 +287,11 @@
       "description": "The original Charter has been compared with the hall's copy, or shown to someone who can read it.",
       "default": false
     },
-    {"id": "hollis_questioned", "description": "The player has asked Hollis about the Charter.", "default": false},
+    {
+      "id": "hollis_questioned",
+      "description": "The player has asked Hollis about the Charter.",
+      "default": false
+    },
     {
       "id": "ferry_closed_at",
       "description": "The clock reading when the storm closed the ferry (0 when it is running).",
@@ -129,16 +301,49 @@
   ],
   "regard": {
     "axes": [
-      {"id": "warmth", "label": "Warmth", "min": -100, "max": 100},
-      {"id": "trust", "label": "Trust", "min": -100, "max": 100},
-      {"id": "respect", "label": "Respect", "min": -100, "max": 100}
+      {
+        "id": "warmth",
+        "label": "Warmth",
+        "min": -100,
+        "max": 100
+      },
+      {
+        "id": "trust",
+        "label": "Trust",
+        "min": -100,
+        "max": 100
+      },
+      {
+        "id": "respect",
+        "label": "Respect",
+        "min": -100,
+        "max": 100
+      }
     ],
     "bands": [
-      {"label": "hostile", "max": -60},
-      {"label": "cold", "min": -60, "max": -20},
-      {"label": "neutral", "min": -20, "max": 20},
-      {"label": "warm", "min": 20, "max": 60},
-      {"label": "devoted", "min": 60}
+      {
+        "label": "hostile",
+        "max": -60
+      },
+      {
+        "label": "cold",
+        "min": -60,
+        "max": -20
+      },
+      {
+        "label": "neutral",
+        "min": -20,
+        "max": 20
+      },
+      {
+        "label": "warm",
+        "min": 20,
+        "max": 60
+      },
+      {
+        "label": "devoted",
+        "min": 60
+      }
     ]
   },
   "places": [
@@ -147,7 +352,9 @@
       "name": "Wend Vale",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["region"],
+      "tags": [
+        "region"
+      ],
       "description": "A broad green valley where the River Wend slows and spreads. Orchards and mill-ponds crowd the near bank; woods and grazing climb the far one."
     },
     {
@@ -156,7 +363,9 @@
       "parent": "wend_vale",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["town"],
+      "tags": [
+        "town"
+      ],
       "description": "A market town of grey stone and red tile, about eight hundred souls, built where the high road meets the ferry. Everything in it is a short walk from the square."
     },
     {
@@ -166,7 +375,9 @@
       "sceneType": "market",
       "grid": "market_square_grid",
       "visibility": "public",
-      "tags": ["square"],
+      "tags": [
+        "square"
+      ],
       "description": "A cobbled square with a stone well at its heart. On Marketday the stalls go up before dawn and the whole vale comes to trade."
     },
     {
@@ -174,9 +385,14 @@
       "name": "The Crooked Kettle",
       "parent": "market_square",
       "sceneType": "conversation",
-      "cell": {"x": 2, "y": 1},
+      "cell": {
+        "x": 2,
+        "y": 1
+      },
       "visibility": "public",
-      "tags": ["inn"],
+      "tags": [
+        "inn"
+      ],
       "description": "A leaning, low-beamed inn with a copper kettle hung crooked over the door. Warm, noisy and always smelling of onions and woodsmoke; there are six beds upstairs and a stable yard behind."
     },
     {
@@ -184,9 +400,14 @@
       "name": "Reeve's Hall",
       "parent": "market_square",
       "sceneType": "conversation",
-      "cell": {"x": 6, "y": 1},
+      "cell": {
+        "x": 6,
+        "y": 1
+      },
       "visibility": "public",
-      "tags": ["civic"],
+      "tags": [
+        "civic"
+      ],
       "description": "The town's broad-windowed meeting hall. The reeve keeps his ledgers here, petitioners queue in the passage, and the framed Charter hangs behind the long table."
     },
     {
@@ -194,9 +415,14 @@
       "name": "Wren's Cottage",
       "parent": "market_square",
       "sceneType": "downtime",
-      "cell": {"x": 11, "y": 1},
+      "cell": {
+        "x": 11,
+        "y": 1
+      },
       "visibility": "public",
-      "tags": ["healer"],
+      "tags": [
+        "healer"
+      ],
       "description": "A narrow cottage hung with drying bundles of yarrow, mint and willow bark. A kettle is always warm, and the back garden is a tangle of useful weeds."
     },
     {
@@ -204,9 +430,14 @@
       "name": "Chapel of the Quiet Bell",
       "parent": "market_square",
       "sceneType": "conversation",
-      "cell": {"x": 2, "y": 8},
+      "cell": {
+        "x": 2,
+        "y": 8
+      },
       "visibility": "public",
-      "tags": ["chapel"],
+      "tags": [
+        "chapel"
+      ],
       "description": "A small, plain chapel with a square tower and a bell that no one has heard in thirty years. Candles, polished pews and a vestry off the nave smelling of beeswax and old dust."
     },
     {
@@ -214,9 +445,14 @@
       "name": "Dunmore's Forge",
       "parent": "market_square",
       "sceneType": "action",
-      "cell": {"x": 12, "y": 8},
+      "cell": {
+        "x": 12,
+        "y": 8
+      },
       "visibility": "public",
-      "tags": ["smith"],
+      "tags": [
+        "smith"
+      ],
       "description": "A smoky, open-fronted forge where hinges, nails, knives and ferry chain come off the anvil. A bench by the door has worn smooth under three generations of loiterers."
     },
     {
@@ -225,7 +461,9 @@
       "parent": "brindlemere",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["waterfront"],
+      "tags": [
+        "waterfront"
+      ],
       "description": "A gravel slip, a boathouse and a squat toll-hut at the foot of the town. A flat ferry hauled on a rope crosses the Wend to the far bank in about a quarter of an hour."
     },
     {
@@ -234,7 +472,9 @@
       "parent": "brindlemere",
       "sceneType": "action",
       "visibility": "public",
-      "tags": ["mill"],
+      "tags": [
+        "mill"
+      ],
       "description": "A three-storey mill on the river bend, its wheel as tall as a cottage. When it turns, the whole lower town hears the low thrum of the stones."
     },
     {
@@ -243,7 +483,9 @@
       "parent": "wend_vale",
       "sceneType": "exploration",
       "visibility": "public",
-      "tags": ["quarry"],
+      "tags": [
+        "quarry"
+      ],
       "description": "A grassed-over quarry above the old apple terraces, where the town's first millstones were cut. Rough-hewn blocks still lie in the nettles where the cutters left them."
     },
     {
@@ -252,7 +494,9 @@
       "parent": "wend_vale",
       "sceneType": "conversation",
       "visibility": "public",
-      "tags": ["waystation"],
+      "tags": [
+        "waystation"
+      ],
       "description": "A lonely stone house across the river where drovers and pilgrims wait for the ferry. A lamp burns in its window every night."
     },
     {
@@ -261,7 +505,9 @@
       "parent": "chapel_quiet_bell",
       "sceneType": "exploration",
       "visibility": "secret",
-      "tags": ["hidden"],
+      "tags": [
+        "hidden"
+      ],
       "description": "Damp stone steps lead down into a low, cold room that smells of old water and wet stone."
     }
   ],
@@ -271,35 +517,60 @@
       "from": "market_square",
       "to": "crooked_kettle",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.05}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.05
+        }
+      }
     },
     {
       "id": "rt_square_hall",
       "from": "market_square",
       "to": "reeves_hall",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 1, "distanceKm": 0.05}}
+      "modes": {
+        "walk": {
+          "minutes": 1,
+          "distanceKm": 0.05
+        }
+      }
     },
     {
       "id": "rt_square_cottage",
       "from": "market_square",
       "to": "wren_cottage",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 2, "distanceKm": 0.1}}
+      "modes": {
+        "walk": {
+          "minutes": 2,
+          "distanceKm": 0.1
+        }
+      }
     },
     {
       "id": "rt_square_chapel",
       "from": "market_square",
       "to": "chapel_quiet_bell",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 2, "distanceKm": 0.1}}
+      "modes": {
+        "walk": {
+          "minutes": 2,
+          "distanceKm": 0.1
+        }
+      }
     },
     {
       "id": "rt_square_forge",
       "from": "market_square",
       "to": "dunmore_forge",
       "bidirectional": true,
-      "modes": {"walk": {"minutes": 2, "distanceKm": 0.1}}
+      "modes": {
+        "walk": {
+          "minutes": 2,
+          "distanceKm": 0.1
+        }
+      }
     },
     {
       "id": "rt_square_landing",
@@ -307,8 +578,16 @@
       "to": "ferry_landing",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 9, "distanceKm": 0.5, "terrain": "cobbled street"},
-        "road": {"minutes": 4, "distanceKm": 0.5, "terrain": "cobbled street"}
+        "walk": {
+          "minutes": 9,
+          "distanceKm": 0.5,
+          "terrain": "cobbled street"
+        },
+        "road": {
+          "minutes": 4,
+          "distanceKm": 0.5,
+          "terrain": "cobbled street"
+        }
       }
     },
     {
@@ -317,8 +596,16 @@
       "to": "wend_mill",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 8, "distanceKm": 0.6, "terrain": "mill lane"},
-        "road": {"minutes": 4, "distanceKm": 0.6, "terrain": "mill lane"}
+        "walk": {
+          "minutes": 8,
+          "distanceKm": 0.6,
+          "terrain": "mill lane"
+        },
+        "road": {
+          "minutes": 4,
+          "distanceKm": 0.6,
+          "terrain": "mill lane"
+        }
       }
     },
     {
@@ -327,8 +614,16 @@
       "to": "wend_mill",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 6, "distanceKm": 0.35, "terrain": "riverside path"},
-        "offroad": {"minutes": 5, "distanceKm": 0.3, "terrain": "riverbank"}
+        "walk": {
+          "minutes": 6,
+          "distanceKm": 0.35,
+          "terrain": "riverside path"
+        },
+        "offroad": {
+          "minutes": 5,
+          "distanceKm": 0.3,
+          "terrain": "riverbank"
+        }
       }
     },
     {
@@ -336,7 +631,13 @@
       "from": "ferry_landing",
       "to": "far_bank_waystation",
       "bidirectional": true,
-      "modes": {"water": {"minutes": 12, "distanceKm": 0.6, "terrain": "rope ferry"}}
+      "modes": {
+        "water": {
+          "minutes": 12,
+          "distanceKm": 0.6,
+          "terrain": "rope ferry"
+        }
+      }
     },
     {
       "id": "rt_square_quarry",
@@ -344,9 +645,21 @@
       "to": "hollin_quarry",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 40, "distanceKm": 2.8, "terrain": "orchard road"},
-        "road": {"minutes": 17, "distanceKm": 3.0, "terrain": "orchard road"},
-        "offroad": {"minutes": 32, "distanceKm": 2.4, "terrain": "field paths"}
+        "walk": {
+          "minutes": 40,
+          "distanceKm": 2.8,
+          "terrain": "orchard road"
+        },
+        "road": {
+          "minutes": 17,
+          "distanceKm": 3.0,
+          "terrain": "orchard road"
+        },
+        "offroad": {
+          "minutes": 32,
+          "distanceKm": 2.4,
+          "terrain": "field paths"
+        }
       }
     },
     {
@@ -355,8 +668,16 @@
       "to": "hollin_quarry",
       "bidirectional": true,
       "modes": {
-        "walk": {"minutes": 30, "distanceKm": 2.2, "terrain": "field paths"},
-        "road": {"minutes": 14, "distanceKm": 2.6, "terrain": "cart track"}
+        "walk": {
+          "minutes": 30,
+          "distanceKm": 2.2,
+          "terrain": "field paths"
+        },
+        "road": {
+          "minutes": 14,
+          "distanceKm": 2.6,
+          "terrain": "cart track"
+        }
       }
     },
     {
@@ -365,7 +686,12 @@
       "to": "chapel_cistern",
       "bidirectional": true,
       "secret": true,
-      "modes": {"walk": {"minutes": 2, "distanceKm": 0.06}}
+      "modes": {
+        "walk": {
+          "minutes": 2,
+          "distanceKm": 0.06
+        }
+      }
     }
   ],
   "grids": [
@@ -376,12 +702,27 @@
       "height": 10,
       "cellMeters": 4,
       "legend": {
-        ".": {"terrain": "cobble"},
-        ",": {"terrain": "dirt"},
-        "#": {"terrain": "wall", "blocked": true},
-        "D": {"terrain": "doorway"},
-        "S": {"terrain": "stall", "blocked": true},
-        "W": {"terrain": "well", "blocked": true}
+        ".": {
+          "terrain": "cobble"
+        },
+        ",": {
+          "terrain": "dirt"
+        },
+        "#": {
+          "terrain": "wall",
+          "blocked": true
+        },
+        "D": {
+          "terrain": "doorway"
+        },
+        "S": {
+          "terrain": "stall",
+          "blocked": true
+        },
+        "W": {
+          "terrain": "well",
+          "blocked": true
+        }
       },
       "rows": [
         "##############",
@@ -396,17 +737,93 @@
         "#####,,,,#####"
       ],
       "zones": {
-        "kettle_front": [[0, 2, 5, 1]],
-        "hall_steps": [[5, 2, 5, 1]],
-        "cottage_front": [[10, 2, 4, 1]],
-        "market_floor": [[1, 3, 12, 5]],
-        "mill_road": [[0, 4, 1, 2]],
-        "quarry_road": [[13, 4, 1, 2]],
-        "ferry_road": [[5, 8, 4, 2]],
-        "chapel_door": [[2, 8, 1, 1]],
-        "forge_door": [[12, 8, 1, 1]]
+        "kettle_front": [
+          [
+            0,
+            2,
+            5,
+            1
+          ]
+        ],
+        "hall_steps": [
+          [
+            5,
+            2,
+            5,
+            1
+          ]
+        ],
+        "cottage_front": [
+          [
+            10,
+            2,
+            4,
+            1
+          ]
+        ],
+        "market_floor": [
+          [
+            1,
+            3,
+            12,
+            5
+          ]
+        ],
+        "mill_road": [
+          [
+            0,
+            4,
+            1,
+            2
+          ]
+        ],
+        "quarry_road": [
+          [
+            13,
+            4,
+            1,
+            2
+          ]
+        ],
+        "ferry_road": [
+          [
+            5,
+            8,
+            4,
+            2
+          ]
+        ],
+        "chapel_door": [
+          [
+            2,
+            8,
+            1,
+            1
+          ]
+        ],
+        "forge_door": [
+          [
+            12,
+            8,
+            1,
+            1
+          ]
+        ]
       },
-      "exits": {"wend_mill": [0, 4], "hollin_quarry": [13, 4], "ferry_landing": [6, 9]}
+      "exits": {
+        "wend_mill": [
+          0,
+          4
+        ],
+        "hollin_quarry": [
+          13,
+          4
+        ],
+        "ferry_landing": [
+          6,
+          9
+        ]
+      }
     }
   ],
   "characters": [
@@ -419,10 +836,18 @@
       "age": 28,
       "role": "Travelling hand-for-hire with a horse and no plan",
       "summary": "You came up the high road at dawn with a tired horse, a light purse and an open mind. Brindlemere is the first town in three days with a bed and a warm meal.",
-      "traits": ["adaptable", "curious"],
+      "traits": [
+        "adaptable",
+        "curious"
+      ],
       "home": "crooked_kettle",
       "location": "market_square",
-      "sheet": {"brawn": 5, "wits": 6, "grace": 5, "heart": 6},
+      "sheet": {
+        "brawn": 5,
+        "wits": 6,
+        "grace": 5,
+        "heart": 6
+      },
       "schedule": [],
       "regard": [],
       "wealth": "modest"
@@ -436,70 +861,111 @@
       "age": 52,
       "role": "Reeve of Brindlemere",
       "summary": "A careful man with ink on his cuffs who knows every debt in town and carries the worst of them himself. He is proud of the town's tidy accounts and dislikes being asked about them.",
-      "traits": ["careful", "proud", "tired"],
+      "traits": [
+        "careful",
+        "proud",
+        "tired"
+      ],
       "home": "reeves_hall",
       "agenda": "a_hollis_garrow",
-      "sheet": {"brawn": 3, "wits": 7, "grace": 4, "heart": 5},
+      "sheet": {
+        "brawn": 3,
+        "wits": 7,
+        "grace": 4,
+        "heart": 5
+      },
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday"
+          ],
           "start": "08:00",
           "end": "12:00",
           "place": "reeves_hall",
           "activity": "hearing petitions and signing tolls"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "08:00",
           "end": "09:30",
           "place": "reeves_hall",
           "activity": "signing the market licences"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "09:30",
           "end": "12:00",
           "place": "market_square",
           "activity": "walking the stalls and settling disputes"
         },
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Marketday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Marketday"
+          ],
           "start": "13:15",
           "end": "17:00",
           "place": "reeves_hall",
           "activity": "ledgers and correspondence"
         },
         {
-          "days": ["Tollday"],
+          "days": [
+            "Tollday"
+          ],
           "start": "13:15",
           "end": "14:00",
           "place": "reeves_hall",
           "activity": "ledgers and correspondence"
         },
         {
-          "days": ["Tollday"],
+          "days": [
+            "Tollday"
+          ],
           "start": "14:00",
           "end": "15:30",
           "place": "ferry_landing",
           "activity": "counting the week's ferry fares with Tamsin"
         },
         {
-          "days": ["Tollday"],
+          "days": [
+            "Tollday"
+          ],
           "start": "15:30",
           "end": "17:00",
           "place": "reeves_hall",
           "activity": "ledgers and correspondence"
         },
         {
-          "days": ["Restday"],
+          "days": [
+            "Restday"
+          ],
           "start": "09:00",
           "end": "10:30",
           "place": "chapel_quiet_bell",
           "activity": "attending the morning service"
         },
-        {"days": ["Restday"], "start": "14:00", "end": "17:00", "place": "reeves_hall", "activity": "reading alone"},
         {
-          "days": ["Feastday"],
+          "days": [
+            "Restday"
+          ],
+          "start": "14:00",
+          "end": "17:00",
+          "place": "reeves_hall",
+          "activity": "reading alone"
+        },
+        {
+          "days": [
+            "Feastday"
+          ],
           "start": "18:00",
           "end": "21:00",
           "place": "crooked_kettle",
@@ -507,15 +973,47 @@
         }
       ],
       "regard": [
-        {"toward": "tamsin_reed", "axes": {"warmth": 10, "trust": 20, "respect": 25}},
-        {"toward": "joss_tamber", "axes": {"warmth": 0, "trust": 5, "respect": 10}},
+        {
+          "toward": "tamsin_reed",
+          "axes": {
+            "warmth": 10,
+            "trust": 20,
+            "respect": 25
+          }
+        },
+        {
+          "toward": "joss_tamber",
+          "axes": {
+            "warmth": 0,
+            "trust": 5,
+            "respect": 10
+          }
+        },
         {
           "toward": "ilsabet_vane",
-          "axes": {"warmth": 15, "trust": -10, "respect": 20},
+          "axes": {
+            "warmth": 15,
+            "trust": -10,
+            "respect": 20
+          },
           "note": "Wary of her quiet questions about records."
         },
-        {"toward": "marta_dunmore", "axes": {"warmth": 10, "trust": 15, "respect": 20}},
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 0}}
+        {
+          "toward": "marta_dunmore",
+          "axes": {
+            "warmth": 10,
+            "trust": 15,
+            "respect": 20
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "wealth": "comfortable"
     },
@@ -528,41 +1026,63 @@
       "age": 38,
       "role": "Ferrywoman",
       "summary": "Broad-shouldered, sunburned and blunt. She has hauled the ferry rope since she was twelve and trusts weather more than people.",
-      "traits": ["blunt", "dependable", "stubborn"],
+      "traits": [
+        "blunt",
+        "dependable",
+        "stubborn"
+      ],
       "home": "ferry_landing",
       "agenda": "a_tamsin_reed",
-      "sheet": {"brawn": 8, "wits": 5, "grace": 5, "heart": 5},
+      "sheet": {
+        "brawn": 8,
+        "wits": 5,
+        "grace": 5,
+        "heart": 5
+      },
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday"
+          ],
           "start": "06:00",
           "end": "19:00",
           "place": "ferry_landing",
           "activity": "running the ferry"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "06:00",
           "end": "20:00",
           "place": "ferry_landing",
           "activity": "running the ferry through the market rush"
         },
         {
-          "days": ["Restday"],
+          "days": [
+            "Restday"
+          ],
           "start": "07:00",
           "end": "15:00",
           "place": "ferry_landing",
           "activity": "running a short ferry day"
         },
         {
-          "days": ["Feastday"],
+          "days": [
+            "Feastday"
+          ],
           "start": "07:00",
           "end": "13:00",
           "place": "ferry_landing",
           "activity": "running a short ferry day"
         },
         {
-          "days": ["Feastday"],
+          "days": [
+            "Feastday"
+          ],
           "start": "18:00",
           "end": "21:00",
           "place": "crooked_kettle",
@@ -570,15 +1090,47 @@
         }
       ],
       "regard": [
-        {"toward": "hollis_garrow", "axes": {"warmth": 5, "trust": 10, "respect": 15}},
+        {
+          "toward": "hollis_garrow",
+          "axes": {
+            "warmth": 5,
+            "trust": 10,
+            "respect": 15
+          }
+        },
         {
           "toward": "pip_marlow",
-          "axes": {"warmth": 60, "trust": 40, "respect": 20},
+          "axes": {
+            "warmth": 60,
+            "trust": 40,
+            "respect": 20
+          },
           "note": "Her sister's son; she is fiercely protective."
         },
-        {"toward": "joss_tamber", "axes": {"warmth": 20, "trust": 25, "respect": 15}},
-        {"toward": "marta_dunmore", "axes": {"warmth": 25, "trust": 30, "respect": 35}},
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 0}}
+        {
+          "toward": "joss_tamber",
+          "axes": {
+            "warmth": 20,
+            "trust": 25,
+            "respect": 15
+          }
+        },
+        {
+          "toward": "marta_dunmore",
+          "axes": {
+            "warmth": 25,
+            "trust": 30,
+            "respect": 35
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "wealth": "modest"
     },
@@ -591,48 +1143,73 @@
       "age": 47,
       "role": "Miller",
       "summary": "Floury to the elbows even on his day off, gloomy when the wheel is still and ridiculously generous when it turns. The Tambers have milled here for four generations.",
-      "traits": ["gloomy", "generous", "stubborn"],
+      "traits": [
+        "gloomy",
+        "generous",
+        "stubborn"
+      ],
       "home": "wend_mill",
       "agenda": "a_joss_tamber",
-      "sheet": {"brawn": 7, "wits": 5, "grace": 4, "heart": 6},
+      "sheet": {
+        "brawn": 7,
+        "wits": 5,
+        "grace": 4,
+        "heart": 6
+      },
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday"
+          ],
           "start": "05:30",
           "end": "17:30",
           "place": "wend_mill",
           "activity": "milling, or tending the idle mill"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "06:00",
           "end": "10:00",
           "place": "wend_mill",
           "activity": "dressing the stones"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "10:00",
           "end": "14:00",
           "place": "market_square",
           "activity": "selling flour at his stall"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "14:00",
           "end": "17:00",
           "place": "wend_mill",
           "activity": "mending and sweeping"
         },
         {
-          "days": ["Tollday", "Feastday"],
+          "days": [
+            "Tollday",
+            "Feastday"
+          ],
           "start": "19:00",
           "end": "21:30",
           "place": "crooked_kettle",
           "activity": "supper and gossip"
         },
         {
-          "days": ["Restday"],
+          "days": [
+            "Restday"
+          ],
           "start": "08:30",
           "end": "10:00",
           "place": "chapel_quiet_bell",
@@ -640,15 +1217,47 @@
         }
       ],
       "regard": [
-        {"toward": "marta_dunmore", "axes": {"warmth": 30, "trust": 30, "respect": 40}},
-        {"toward": "tamsin_reed", "axes": {"warmth": 20, "trust": 25, "respect": 20}},
-        {"toward": "odo_kettleby", "axes": {"warmth": 15, "trust": 5, "respect": 5}},
+        {
+          "toward": "marta_dunmore",
+          "axes": {
+            "warmth": 30,
+            "trust": 30,
+            "respect": 40
+          }
+        },
+        {
+          "toward": "tamsin_reed",
+          "axes": {
+            "warmth": 20,
+            "trust": 25,
+            "respect": 20
+          }
+        },
+        {
+          "toward": "odo_kettleby",
+          "axes": {
+            "warmth": 15,
+            "trust": 5,
+            "respect": 5
+          }
+        },
         {
           "toward": "hollis_garrow",
-          "axes": {"warmth": 0, "trust": -5, "respect": 5},
+          "axes": {
+            "warmth": 0,
+            "trust": -5,
+            "respect": 5
+          },
           "note": "Thinks the reeve fusses over the mill's rent."
         },
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 0}}
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "wealth": "modest"
     },
@@ -661,62 +1270,108 @@
       "age": 44,
       "role": "Blacksmith",
       "summary": "Quick-handed, dry-humoured and always smudged with soot. Her forge made the ferry chain, and she is not above reminding people of it.",
-      "traits": ["witty", "practical", "proud of her work"],
+      "traits": [
+        "witty",
+        "practical",
+        "proud of her work"
+      ],
       "home": "dunmore_forge",
-      "sheet": {"brawn": 8, "wits": 6, "grace": 5, "heart": 5},
+      "sheet": {
+        "brawn": 8,
+        "wits": 6,
+        "grace": 5,
+        "heart": 5
+      },
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday"
+          ],
           "start": "06:30",
           "end": "12:00",
           "place": "dunmore_forge",
           "activity": "forging and repairs"
         },
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday"
+          ],
           "start": "12:00",
           "end": "12:45",
           "place": "crooked_kettle",
           "activity": "midday meal"
         },
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday"
+          ],
           "start": "12:45",
           "end": "17:30",
           "place": "dunmore_forge",
           "activity": "forging and repairs"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "07:30",
           "end": "15:00",
           "place": "market_square",
           "activity": "selling hinges, nails and knives at her stall"
         },
-        {"days": ["Marketday"], "start": "15:00", "end": "17:30", "place": "dunmore_forge", "activity": "repairs"},
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday", "Marketday"],
+          "days": [
+            "Marketday"
+          ],
+          "start": "15:00",
+          "end": "17:30",
+          "place": "dunmore_forge",
+          "activity": "repairs"
+        },
+        {
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday",
+            "Marketday"
+          ],
           "start": "18:00",
           "end": "20:30",
           "place": "crooked_kettle",
           "activity": "supper and talk"
         },
         {
-          "days": ["Restday"],
+          "days": [
+            "Restday"
+          ],
           "start": "08:00",
           "end": "12:00",
           "place": "dunmore_forge",
           "activity": "mending her own tools"
         },
         {
-          "days": ["Feastday"],
+          "days": [
+            "Feastday"
+          ],
           "start": "09:00",
           "end": "11:00",
           "place": "chapel_quiet_bell",
           "activity": "morning quiet"
         },
         {
-          "days": ["Feastday"],
+          "days": [
+            "Feastday"
+          ],
           "start": "18:00",
           "end": "21:30",
           "place": "crooked_kettle",
@@ -724,11 +1379,46 @@
         }
       ],
       "regard": [
-        {"toward": "joss_tamber", "axes": {"warmth": 30, "trust": 30, "respect": 25}},
-        {"toward": "tamsin_reed", "axes": {"warmth": 25, "trust": 30, "respect": 35}},
-        {"toward": "odo_kettleby", "axes": {"warmth": 20, "trust": 10, "respect": 0}},
-        {"toward": "ilsabet_vane", "axes": {"warmth": 10, "trust": 15, "respect": 30}},
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 0}}
+        {
+          "toward": "joss_tamber",
+          "axes": {
+            "warmth": 30,
+            "trust": 30,
+            "respect": 25
+          }
+        },
+        {
+          "toward": "tamsin_reed",
+          "axes": {
+            "warmth": 25,
+            "trust": 30,
+            "respect": 35
+          }
+        },
+        {
+          "toward": "odo_kettleby",
+          "axes": {
+            "warmth": 20,
+            "trust": 10,
+            "respect": 0
+          }
+        },
+        {
+          "toward": "ilsabet_vane",
+          "axes": {
+            "warmth": 10,
+            "trust": 15,
+            "respect": 30
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "goals": {
         "label": "Finish the new ferry chain before the autumn floods",
@@ -749,40 +1439,69 @@
       "age": 61,
       "role": "Keeper of the Chapel of the Quiet Bell",
       "summary": "A small, upright woman with a calm voice and surprising stubbornness. She has polished the silent bell every dawn for twenty-two years and will not discuss why it stopped.",
-      "traits": ["serene", "stubborn", "observant"],
+      "traits": [
+        "serene",
+        "stubborn",
+        "observant"
+      ],
       "home": "chapel_quiet_bell",
-      "sheet": {"brawn": 3, "wits": 7, "grace": 5, "heart": 8},
+      "sheet": {
+        "brawn": 3,
+        "wits": 7,
+        "grace": 5,
+        "heart": 8
+      },
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Marketday", "Tollday", "Restday", "Feastday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Marketday",
+            "Tollday",
+            "Restday",
+            "Feastday"
+          ],
           "start": "05:30",
           "end": "06:15",
           "place": "chapel_quiet_bell",
           "activity": "dawn devotions and polishing the bell"
         },
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday", "Marketday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday",
+            "Marketday"
+          ],
           "start": "09:00",
           "end": "12:00",
           "place": "chapel_quiet_bell",
           "activity": "tending the candles and receiving visitors"
         },
         {
-          "days": ["Wellday"],
+          "days": [
+            "Wellday"
+          ],
           "start": "14:00",
           "end": "16:00",
           "place": "wren_cottage",
           "activity": "tea and herb-lore with Wren"
         },
         {
-          "days": ["Restday"],
+          "days": [
+            "Restday"
+          ],
           "start": "08:00",
           "end": "11:00",
           "place": "chapel_quiet_bell",
           "activity": "leading the morning service"
         },
         {
-          "days": ["Feastday"],
+          "days": [
+            "Feastday"
+          ],
           "start": "10:00",
           "end": "12:00",
           "place": "chapel_quiet_bell",
@@ -790,11 +1509,46 @@
         }
       ],
       "regard": [
-        {"toward": "wren_aldous", "axes": {"warmth": 40, "trust": 35, "respect": 40}},
-        {"toward": "hollis_garrow", "axes": {"warmth": 5, "trust": -10, "respect": 10}},
-        {"toward": "pip_marlow", "axes": {"warmth": 30, "trust": 20, "respect": 10}},
-        {"toward": "marta_dunmore", "axes": {"warmth": 15, "trust": 20, "respect": 25}},
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 0}}
+        {
+          "toward": "wren_aldous",
+          "axes": {
+            "warmth": 40,
+            "trust": 35,
+            "respect": 40
+          }
+        },
+        {
+          "toward": "hollis_garrow",
+          "axes": {
+            "warmth": 5,
+            "trust": -10,
+            "respect": 10
+          }
+        },
+        {
+          "toward": "pip_marlow",
+          "axes": {
+            "warmth": 30,
+            "trust": 20,
+            "respect": 10
+          }
+        },
+        {
+          "toward": "marta_dunmore",
+          "axes": {
+            "warmth": 15,
+            "trust": 20,
+            "respect": 25
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "goals": {
         "label": "Prepare the chapel for the Reaping Feast blessing",
@@ -816,47 +1570,74 @@
       "age": 33,
       "role": "Herbalist and healer",
       "summary": "Warm, curious and always mid-sentence. She learned her trade from her grandmother and charges what people can pay, which is often a basket of eggs.",
-      "traits": ["warm", "curious", "talkative"],
+      "traits": [
+        "warm",
+        "curious",
+        "talkative"
+      ],
       "home": "wren_cottage",
-      "sheet": {"brawn": 3, "wits": 7, "grace": 6, "heart": 8},
+      "sheet": {
+        "brawn": 3,
+        "wits": 7,
+        "grace": 6,
+        "heart": 8
+      },
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday"
+          ],
           "start": "07:30",
           "end": "12:00",
           "place": "wren_cottage",
           "activity": "drying and mixing herbs"
         },
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday"
+          ],
           "start": "13:00",
           "end": "17:00",
           "place": "wren_cottage",
           "activity": "seeing patients"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "07:30",
           "end": "14:00",
           "place": "market_square",
           "activity": "selling herbs at her stall"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "14:00",
           "end": "17:00",
           "place": "wren_cottage",
           "activity": "mixing remedies"
         },
         {
-          "days": ["Restday"],
+          "days": [
+            "Restday"
+          ],
           "start": "10:00",
           "end": "13:00",
           "place": "wren_cottage",
           "activity": "tending the garden"
         },
         {
-          "days": ["Feastday"],
+          "days": [
+            "Feastday"
+          ],
           "start": "19:00",
           "end": "22:00",
           "place": "crooked_kettle",
@@ -864,10 +1645,38 @@
         }
       ],
       "regard": [
-        {"toward": "odo_kettleby", "axes": {"warmth": 35, "trust": 20, "respect": 15}},
-        {"toward": "ilsabet_vane", "axes": {"warmth": 45, "trust": 40, "respect": 45}},
-        {"toward": "tamsin_reed", "axes": {"warmth": 20, "trust": 25, "respect": 20}},
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 0}}
+        {
+          "toward": "odo_kettleby",
+          "axes": {
+            "warmth": 35,
+            "trust": 20,
+            "respect": 15
+          }
+        },
+        {
+          "toward": "ilsabet_vane",
+          "axes": {
+            "warmth": 45,
+            "trust": 40,
+            "respect": 45
+          }
+        },
+        {
+          "toward": "tamsin_reed",
+          "axes": {
+            "warmth": 20,
+            "trust": 25,
+            "respect": 20
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "goals": {
         "label": "Keep her fever remedies stocked",
@@ -888,26 +1697,51 @@
       "age": 55,
       "role": "Innkeeper of the Crooked Kettle",
       "summary": "Round, jovial and always polishing the same mug. He knows everyone's business, shares most of it, and has a soft, easily bruised spot for Wren.",
-      "traits": ["jovial", "gossipy", "jealous"],
+      "traits": [
+        "jovial",
+        "gossipy",
+        "jealous"
+      ],
       "home": "crooked_kettle",
-      "sheet": {"brawn": 5, "wits": 5, "grace": 4, "heart": 6},
+      "sheet": {
+        "brawn": 5,
+        "wits": 5,
+        "grace": 4,
+        "heart": 6
+      },
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday", "Restday", "Feastday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday",
+            "Restday",
+            "Feastday"
+          ],
           "start": "06:30",
           "end": "09:30",
           "place": "crooked_kettle",
           "activity": "baking and cleaning"
         },
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday", "Restday", "Feastday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday",
+            "Restday",
+            "Feastday"
+          ],
           "start": "10:00",
           "end": "23:30",
           "place": "crooked_kettle",
           "activity": "keeping the inn"
         },
         {
-          "days": ["Marketday"],
+          "days": [
+            "Marketday"
+          ],
           "start": "08:00",
           "end": "23:30",
           "place": "crooked_kettle",
@@ -917,12 +1751,37 @@
       "regard": [
         {
           "toward": "wren_aldous",
-          "axes": {"warmth": 55, "trust": 25, "respect": 20},
+          "axes": {
+            "warmth": 55,
+            "trust": 25,
+            "respect": 20
+          },
           "note": "Would never say it aloud."
         },
-        {"toward": "marta_dunmore", "axes": {"warmth": 20, "trust": 10, "respect": 0}},
-        {"toward": "joss_tamber", "axes": {"warmth": 15, "trust": 5, "respect": 5}},
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 0}}
+        {
+          "toward": "marta_dunmore",
+          "axes": {
+            "warmth": 20,
+            "trust": 10,
+            "respect": 0
+          }
+        },
+        {
+          "toward": "joss_tamber",
+          "axes": {
+            "warmth": 15,
+            "trust": 5,
+            "respect": 5
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "goals": {
         "label": "Make the Reaping Feast the best the Kettle has hosted",
@@ -943,25 +1802,39 @@
       "age": 15,
       "role": "Ferry hand",
       "summary": "Tamsin's nephew: lanky, quick and forever coiling rope. He hears more than he repeats and has good instincts about who is lying.",
-      "traits": ["quick", "loyal", "shy"],
+      "traits": [
+        "quick",
+        "loyal",
+        "shy"
+      ],
       "home": "ferry_landing",
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Tollday", "Marketday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Tollday",
+            "Marketday"
+          ],
           "start": "06:00",
           "end": "19:00",
           "place": "ferry_landing",
           "activity": "hauling the ferry rope and tying off"
         },
         {
-          "days": ["Restday"],
+          "days": [
+            "Restday"
+          ],
           "start": "09:00",
           "end": "12:00",
           "place": "market_square",
           "activity": "running errands for the town"
         },
         {
-          "days": ["Feastday"],
+          "days": [
+            "Feastday"
+          ],
           "start": "15:00",
           "end": "18:00",
           "place": "market_square",
@@ -969,13 +1842,38 @@
         }
       ],
       "regard": [
-        {"toward": "tamsin_reed", "axes": {"warmth": 65, "trust": 50, "respect": 45}},
-        {"toward": "ilsabet_vane", "axes": {"warmth": 30, "trust": 25, "respect": 20}},
-        {"toward": "pov", "axes": {"warmth": 10, "trust": 0, "respect": 0}}
+        {
+          "toward": "tamsin_reed",
+          "axes": {
+            "warmth": 65,
+            "trust": 50,
+            "respect": 45
+          }
+        },
+        {
+          "toward": "ilsabet_vane",
+          "axes": {
+            "warmth": 30,
+            "trust": 25,
+            "respect": 20
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 10,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "goals": {
         "label": "Earn a place on the ferry as a true hand",
-        "steps": ["Learn the winch from Tamsin", "Work a full crossing alone", "Ask for a coil of rope of his own"]
+        "steps": [
+          "Learn the winch from Tamsin",
+          "Work a full crossing alone",
+          "Ask for a coil of rope of his own"
+        ]
       },
       "wealth": "poor"
     },
@@ -988,11 +1886,22 @@
       "age": 49,
       "role": "Keeper of the Far Bank Waystation",
       "summary": "A weathered widower who keeps the lamp lit and the kettle hot. His daughter Nessa is eight and has been ill for three days.",
-      "traits": ["patient", "worried"],
+      "traits": [
+        "patient",
+        "worried"
+      ],
       "home": "far_bank_waystation",
       "schedule": [
         {
-          "days": ["Hearthday", "Plowday", "Wellday", "Marketday", "Tollday", "Restday", "Feastday"],
+          "days": [
+            "Hearthday",
+            "Plowday",
+            "Wellday",
+            "Marketday",
+            "Tollday",
+            "Restday",
+            "Feastday"
+          ],
           "start": "06:00",
           "end": "22:00",
           "place": "far_bank_waystation",
@@ -1000,9 +1909,30 @@
         }
       ],
       "regard": [
-        {"toward": "wren_aldous", "axes": {"warmth": 25, "trust": 40, "respect": 30}},
-        {"toward": "tamsin_reed", "axes": {"warmth": 30, "trust": 35, "respect": 30}},
-        {"toward": "pov", "axes": {"warmth": 0, "trust": 0, "respect": 0}}
+        {
+          "toward": "wren_aldous",
+          "axes": {
+            "warmth": 25,
+            "trust": 40,
+            "respect": 30
+          }
+        },
+        {
+          "toward": "tamsin_reed",
+          "axes": {
+            "warmth": 30,
+            "trust": 35,
+            "respect": 30
+          }
+        },
+        {
+          "toward": "pov",
+          "axes": {
+            "warmth": 0,
+            "trust": 0,
+            "respect": 0
+          }
+        }
       ],
       "goals": {
         "label": "Get Nessa well",
@@ -1073,7 +2003,9 @@
       "owner": "pov",
       "in": "pov_pack",
       "weightG": 450,
-      "tags": ["light"]
+      "tags": [
+        "light"
+      ]
     },
     {
       "id": "waterskin",
@@ -1130,7 +2062,9 @@
       "in": "hollin_quarry",
       "weightG": 220000,
       "fixed": false,
-      "tags": ["heavy"]
+      "tags": [
+        "heavy"
+      ]
     },
     {
       "id": "millstone_cracked",
@@ -1260,14 +2194,102 @@
     }
   ],
   "gearItems": [
-    {"id": "candles_tallow", "name": "Tallow candles, bundle of six", "category": "household", "weightG": 300, "volumeL": 0.5, "priceBand": {"min": 2, "typical": 3, "max": 5}},
-    {"id": "mug_clay", "name": "Clay mug", "category": "household", "weightG": 300, "volumeL": 0.35, "priceBand": {"min": 1, "typical": 2, "max": 3}},
-    {"id": "bowl_wooden", "name": "Wooden bowl", "category": "household", "weightG": 250, "volumeL": 0.7, "priceBand": {"min": 1, "typical": 2, "max": 4}},
-    {"id": "pot_iron", "name": "Iron cooking pot", "category": "household", "weightG": 2800, "volumeL": 4.0, "priceBand": {"min": 18, "typical": 25, "max": 40}},
-    {"id": "flint_steel", "name": "Flint and steel", "category": "household", "weightG": 120, "volumeL": 0.1, "priceBand": {"min": 3, "typical": 4, "max": 6}},
-    {"id": "bucket_oak", "name": "Oak bucket", "category": "household", "weightG": 1500, "volumeL": 12.0, "priceBand": {"min": 4, "typical": 6, "max": 10}},
-    {"id": "broom_birch", "name": "Birch-twig broom", "category": "household", "weightG": 700, "volumeL": 4.0, "priceBand": {"min": 2, "typical": 3, "max": 5}},
-    {"id": "shears_iron", "name": "Iron shears", "category": "household", "weightG": 350, "volumeL": 0.25, "priceBand": {"min": 8, "typical": 12, "max": 20}}
+    {
+      "id": "candles_tallow",
+      "name": "Tallow candles, bundle of six",
+      "category": "household",
+      "weightG": 300,
+      "volumeL": 0.5,
+      "priceBand": {
+        "min": 2,
+        "typical": 3,
+        "max": 5
+      }
+    },
+    {
+      "id": "mug_clay",
+      "name": "Clay mug",
+      "category": "household",
+      "weightG": 300,
+      "volumeL": 0.35,
+      "priceBand": {
+        "min": 1,
+        "typical": 2,
+        "max": 3
+      }
+    },
+    {
+      "id": "bowl_wooden",
+      "name": "Wooden bowl",
+      "category": "household",
+      "weightG": 250,
+      "volumeL": 0.7,
+      "priceBand": {
+        "min": 1,
+        "typical": 2,
+        "max": 4
+      }
+    },
+    {
+      "id": "pot_iron",
+      "name": "Iron cooking pot",
+      "category": "household",
+      "weightG": 2800,
+      "volumeL": 4.0,
+      "priceBand": {
+        "min": 18,
+        "typical": 25,
+        "max": 40
+      }
+    },
+    {
+      "id": "flint_steel",
+      "name": "Flint and steel",
+      "category": "household",
+      "weightG": 120,
+      "volumeL": 0.1,
+      "priceBand": {
+        "min": 3,
+        "typical": 4,
+        "max": 6
+      }
+    },
+    {
+      "id": "bucket_oak",
+      "name": "Oak bucket",
+      "category": "household",
+      "weightG": 1500,
+      "volumeL": 12.0,
+      "priceBand": {
+        "min": 4,
+        "typical": 6,
+        "max": 10
+      }
+    },
+    {
+      "id": "broom_birch",
+      "name": "Birch-twig broom",
+      "category": "household",
+      "weightG": 700,
+      "volumeL": 4.0,
+      "priceBand": {
+        "min": 2,
+        "typical": 3,
+        "max": 5
+      }
+    },
+    {
+      "id": "shears_iron",
+      "name": "Iron shears",
+      "category": "household",
+      "weightG": 350,
+      "volumeL": 0.25,
+      "priceBand": {
+        "min": 8,
+        "typical": 12,
+        "max": 20
+      }
+    }
   ],
   "kits": [
     {
@@ -1277,14 +2299,38 @@
       "owner": "pov",
       "pieceCount": 11,
       "pieces": [
-        {"name": "bedroll", "qty": 1},
-        {"name": "tinderbox (flint, steel and tinder)", "qty": 1},
-        {"name": "tin cookpot", "qty": 1},
-        {"name": "tin cup", "qty": 1},
-        {"name": "whetstone", "qty": 1},
-        {"name": "sewing roll", "qty": 1},
-        {"name": "waxed cord", "qty": 1},
-        {"name": "candle stub", "qty": 4}
+        {
+          "name": "bedroll",
+          "qty": 1
+        },
+        {
+          "name": "tinderbox (flint, steel and tinder)",
+          "qty": 1
+        },
+        {
+          "name": "tin cookpot",
+          "qty": 1
+        },
+        {
+          "name": "tin cup",
+          "qty": 1
+        },
+        {
+          "name": "whetstone",
+          "qty": 1
+        },
+        {
+          "name": "sewing roll",
+          "qty": 1
+        },
+        {
+          "name": "waxed cord",
+          "qty": 1
+        },
+        {
+          "name": "candle stub",
+          "qty": 4
+        }
       ],
       "overrides": []
     },
@@ -1295,15 +2341,41 @@
       "owner": "wren_aldous",
       "pieceCount": 21,
       "pieces": [
-        {"name": "willow-bark bundle", "qty": 4},
-        {"name": "honey jar", "qty": 1},
-        {"name": "linen bandage roll", "qty": 6},
-        {"name": "poultice jar", "qty": 3},
-        {"name": "small knife", "qty": 1},
-        {"name": "pestle and mortar", "qty": 1},
-        {"name": "glass vial", "qty": 5}
+        {
+          "name": "willow-bark bundle",
+          "qty": 4
+        },
+        {
+          "name": "honey jar",
+          "qty": 1
+        },
+        {
+          "name": "linen bandage roll",
+          "qty": 6
+        },
+        {
+          "name": "poultice jar",
+          "qty": 3
+        },
+        {
+          "name": "small knife",
+          "qty": 1
+        },
+        {
+          "name": "pestle and mortar",
+          "qty": 1
+        },
+        {
+          "name": "glass vial",
+          "qty": 5
+        }
       ],
-      "overrides": [{"piece": "poultice jar", "note": "One jar holds the fever poultice (see fever_poultice)."}]
+      "overrides": [
+        {
+          "piece": "poultice jar",
+          "note": "One jar holds the fever poultice (see fever_poultice)."
+        }
+      ]
     }
   ],
   "vehicles": [
@@ -1313,7 +2385,12 @@
       "kind": "mount",
       "owner": "pov",
       "location": "crooked_kettle",
-      "spec": {"type": "riding horse", "carryKg": 110, "drawKg": 300, "restHours": 8},
+      "spec": {
+        "type": "riding horse",
+        "carryKg": 110,
+        "drawKg": 300,
+        "restHours": 8
+      },
       "description": "A dappled grey gelding, patient and a little lazy. Stabled behind the Kettle."
     },
     {
@@ -1323,7 +2400,11 @@
       "owner": "marta_dunmore",
       "location": "dunmore_forge",
       "assignedTo": null,
-      "spec": {"type": "two-wheel cart", "capacityKg": 350, "needsDraft": true},
+      "spec": {
+        "type": "two-wheel cart",
+        "capacityKg": 350,
+        "needsDraft": true
+      },
       "description": "A sturdy ash-wood cart with iron-shod wheels. Marta lends it to anyone she trusts and a few people she doesn't."
     },
     {
@@ -1332,7 +2413,12 @@
       "kind": "ferry",
       "owner": "tamsin_reed",
       "location": "ferry_landing",
-      "spec": {"type": "rope ferry", "capacityPeople": 12, "capacityKg": 800, "route": "rt_landing_farbank"},
+      "spec": {
+        "type": "rope ferry",
+        "capacityPeople": 12,
+        "capacityKg": 800,
+        "route": "rt_landing_farbank"
+      },
       "description": "A flat, broad-beamed ferry hauled along a rope by hand and winch. Fares are paid at the toll-hut."
     }
   ],
@@ -1340,102 +2426,162 @@
     {
       "id": "acct_pov_purse",
       "name": "Your coin purse",
-      "kind": "purse",
-      "owner": "pov",
+      "product": "cash",
+      "owners": [
+        {
+          "party": "pov"
+        }
+      ],
       "container": "pov_purse",
-      "balance": 67,
-      "coins": {"crown": 0, "mark": 3, "bit": 7}
+      "opening": 67,
+      "coins": {
+        "crown": 0,
+        "mark": 3,
+        "bit": 7
+      }
     },
     {
       "id": "acct_hollis_strongbox",
       "name": "Town strongbox",
-      "kind": "strongbox",
-      "owner": "hollis_garrow",
+      "product": "cash",
+      "owners": [
+        {
+          "party": "hollis_garrow"
+        }
+      ],
       "container": "reeves_strongbox",
-      "balance": 6170,
-      "coins": {"crown": 14, "mark": 22, "bit": 130}
+      "opening": 6170,
+      "coins": {
+        "crown": 14,
+        "mark": 22,
+        "bit": 130
+      }
     },
     {
       "id": "acct_kettle_till",
       "name": "The Kettle's till",
-      "kind": "till",
-      "owner": "odo_kettleby",
-      "balance": 151,
-      "coins": {"crown": 0, "mark": 6, "bit": 31}
+      "product": "cash",
+      "owners": [
+        {
+          "party": "odo_kettleby"
+        }
+      ],
+      "opening": 151,
+      "coins": {
+        "crown": 0,
+        "mark": 6,
+        "bit": 31
+      }
     },
     {
       "id": "acct_ferry_fares",
       "name": "Ferry fare box",
-      "kind": "till",
-      "owner": "tamsin_reed",
-      "balance": 100,
-      "coins": {"crown": 0, "mark": 3, "bit": 40}
+      "product": "cash",
+      "owners": [
+        {
+          "party": "tamsin_reed"
+        }
+      ],
+      "opening": 100,
+      "coins": {
+        "crown": 0,
+        "mark": 3,
+        "bit": 40
+      }
     },
     {
       "id": "acct_marta_purse",
       "name": "Marta's purse",
-      "kind": "purse",
-      "owner": "marta_dunmore",
-      "balance": 512,
-      "coins": {"crown": 1, "mark": 5, "bit": 12}
+      "product": "cash",
+      "owners": [
+        {
+          "party": "marta_dunmore"
+        }
+      ],
+      "opening": 512,
+      "coins": {
+        "crown": 1,
+        "mark": 5,
+        "bit": 12
+      }
     },
     {
       "id": "acct_joss_purse",
       "name": "Joss's purse",
-      "kind": "purse",
-      "owner": "joss_tamber",
-      "balance": 83,
-      "coins": {"crown": 0, "mark": 4, "bit": 3}
+      "product": "cash",
+      "owners": [
+        {
+          "party": "joss_tamber"
+        }
+      ],
+      "opening": 83,
+      "coins": {
+        "crown": 0,
+        "mark": 4,
+        "bit": 3
+      }
     },
     {
       "id": "acct_wren_purse",
       "name": "Wren's purse",
-      "kind": "purse",
-      "owner": "wren_aldous",
-      "balance": 149,
-      "coins": {"crown": 0, "mark": 7, "bit": 9}
+      "product": "cash",
+      "owners": [
+        {
+          "party": "wren_aldous"
+        }
+      ],
+      "opening": 149,
+      "coins": {
+        "crown": 0,
+        "mark": 7,
+        "bit": 9
+      }
     }
   ],
-  "bills": [
+  "flows": [
     {
       "id": "bill_kettle_market_dues",
-      "payer": "odo_kettleby",
-      "payee": "hollis_garrow",
       "label": "Market dues to the reeve",
+      "from": "acct_kettle_till",
+      "to": "hollis_garrow",
       "amountCents": 20,
       "every": "month",
-      "day": 1,
-      "from": "acct_kettle_till"
+      "days": [
+        1
+      ]
     },
     {
       "id": "bill_marta_hearth_tax",
-      "payer": "marta_dunmore",
-      "payee": "hollis_garrow",
       "label": "Hearth tax",
+      "from": "acct_marta_purse",
+      "to": "hollis_garrow",
       "amountCents": 6,
       "every": "month",
-      "day": 1,
-      "from": "acct_marta_purse"
+      "days": [
+        1
+      ]
     },
     {
       "id": "bill_joss_hearth_tax",
-      "payer": "joss_tamber",
-      "payee": "hollis_garrow",
       "label": "Hearth tax",
+      "from": "acct_joss_purse",
+      "to": "hollis_garrow",
       "amountCents": 6,
       "every": "month",
-      "day": 1,
-      "from": "acct_joss_purse"
+      "days": [
+        1
+      ]
     },
     {
       "id": "bill_wren_hearth_tax",
-      "payer": "wren_aldous",
-      "payee": "hollis_garrow",
       "label": "Hearth tax",
+      "from": "acct_wren_purse",
+      "to": "hollis_garrow",
       "amountCents": 4,
       "every": "month",
-      "day": 1,
-      "from": "acct_wren_purse"
+      "days": [
+        1
+      ]
     }
   ],
   "prices": [
@@ -1443,140 +2589,220 @@
       "id": "pr_bread_loaf",
       "name": "Loaf of bread",
       "unit": "loaf",
-      "band": {"min": 1, "typical": 1, "max": 2},
+      "band": {
+        "min": 1,
+        "typical": 1,
+        "max": 2
+      },
       "category": "groceries_staples"
     },
     {
       "id": "pr_ale_mug",
       "name": "Mug of ale",
       "unit": "mug",
-      "band": {"min": 1, "typical": 2, "max": 3},
+      "band": {
+        "min": 1,
+        "typical": 2,
+        "max": 3
+      },
       "category": "alcohol"
     },
     {
       "id": "pr_stew_bowl",
       "name": "Bowl of stew",
       "unit": "bowl",
-      "band": {"min": 3, "typical": 4, "max": 6},
+      "band": {
+        "min": 3,
+        "typical": 4,
+        "max": 6
+      },
       "category": "meals_out"
     },
     {
       "id": "pr_inn_bed",
       "name": "A bed at the Kettle",
       "unit": "night",
-      "band": {"min": 6, "typical": 8, "max": 12},
+      "band": {
+        "min": 6,
+        "typical": 8,
+        "max": 12
+      },
       "category": "lodging"
     },
     {
       "id": "pr_stable_night",
       "name": "Stabling a horse",
       "unit": "night",
-      "band": {"min": 3, "typical": 4, "max": 6},
+      "band": {
+        "min": 3,
+        "typical": 4,
+        "max": 6
+      },
       "category": "lodging"
     },
     {
       "id": "pr_ferry_fare",
       "name": "Ferry crossing, one person",
       "unit": "crossing",
-      "band": {"min": 1, "typical": 2, "max": 3},
+      "band": {
+        "min": 1,
+        "typical": 2,
+        "max": 3
+      },
       "category": "transport"
     },
     {
       "id": "pr_ferry_horse",
       "name": "Ferry crossing, horse or cart",
       "unit": "crossing",
-      "band": {"min": 4, "typical": 6, "max": 8},
+      "band": {
+        "min": 4,
+        "typical": 6,
+        "max": 8
+      },
       "category": "transport"
     },
     {
       "id": "pr_candle",
       "name": "Tallow candle",
       "unit": "candle",
-      "band": {"min": 1, "typical": 1, "max": 2},
+      "band": {
+        "min": 1,
+        "typical": 1,
+        "max": 2
+      },
       "category": "household_goods"
     },
     {
       "id": "pr_cheese_wheel",
       "name": "Hard cheese, small wheel",
       "unit": "wheel",
-      "band": {"min": 18, "typical": 24, "max": 36},
+      "band": {
+        "min": 18,
+        "typical": 24,
+        "max": 36
+      },
       "category": "groceries_staples"
     },
     {
       "id": "pr_flour_sack",
       "name": "Sack of fine flour",
       "unit": "50 lb sack",
-      "band": {"min": 30, "typical": 40, "max": 55},
+      "band": {
+        "min": 30,
+        "typical": 40,
+        "max": 55
+      },
       "category": "groceries_staples"
     },
     {
       "id": "pr_herb_poultice",
       "name": "Healing poultice",
       "unit": "jar",
-      "band": {"min": 6, "typical": 10, "max": 16},
+      "band": {
+        "min": 6,
+        "typical": 10,
+        "max": 16
+      },
       "category": "medical"
     },
     {
       "id": "pr_belt_knife",
       "name": "Belt knife",
       "unit": "knife",
-      "band": {"min": 20, "typical": 30, "max": 50},
+      "band": {
+        "min": 20,
+        "typical": 30,
+        "max": 50
+      },
       "category": "tools_hardware"
     },
     {
       "id": "pr_nails_pound",
       "name": "Nails",
       "unit": "pound",
-      "band": {"min": 3, "typical": 4, "max": 6},
+      "band": {
+        "min": 3,
+        "typical": 4,
+        "max": 6
+      },
       "category": "tools_hardware"
     },
     {
       "id": "pr_wool_cloak",
       "name": "Wool cloak",
       "unit": "cloak",
-      "band": {"min": 120, "typical": 200, "max": 360},
+      "band": {
+        "min": 120,
+        "typical": 200,
+        "max": 360
+      },
       "category": "clothing"
     },
     {
       "id": "pr_boots",
       "name": "Boots",
       "unit": "pair",
-      "band": {"min": 100, "typical": 160, "max": 260},
+      "band": {
+        "min": 100,
+        "typical": 160,
+        "max": 260
+      },
       "category": "clothing"
     },
     {
       "id": "pr_labourer_day",
       "name": "Labourer's day wage",
       "unit": "day",
-      "band": {"min": 12, "typical": 16, "max": 22},
+      "band": {
+        "min": 12,
+        "typical": 16,
+        "max": 22
+      },
       "category": "vehicle_services"
     },
     {
       "id": "pr_skilled_day",
       "name": "Skilled craftsperson's day wage",
       "unit": "day",
-      "band": {"min": 24, "typical": 30, "max": 44},
+      "band": {
+        "min": 24,
+        "typical": 30,
+        "max": 44
+      },
       "category": "vehicle_services"
     },
     {
       "id": "pr_cart",
       "name": "Two-wheel cart",
       "unit": "cart",
-      "band": {"min": 600, "typical": 800, "max": 1200},
+      "band": {
+        "min": 600,
+        "typical": 800,
+        "max": 1200
+      },
       "category": "transport"
     },
     {
       "id": "pr_riding_horse",
       "name": "Riding horse",
       "unit": "horse",
-      "band": {"min": 2400, "typical": 3200, "max": 4800},
+      "band": {
+        "min": 2400,
+        "typical": 3200,
+        "max": 4800
+      },
       "category": "transport"
     },
     {
       "id": "pr_rope_20",
       "name": "Hemp rope, twenty feet",
       "unit": "coil",
-      "band": {"min": 6, "typical": 10, "max": 14},
+      "band": {
+        "min": 6,
+        "typical": 10,
+        "max": 14
+      },
       "category": "tools_hardware"
     }
   ],
@@ -1592,7 +2818,9 @@
         "offer": {
           "label": "Wren needs a courier",
           "cue": "Wren Aldous is packing a satchel and glancing toward the ferry. The waystation keeper's daughter across the river has been feverish for three days.",
-          "objectives": ["Hear Wren out at [[wren_cottage]]"],
+          "objectives": [
+            "Hear Wren out at [[wren_cottage]]"
+          ],
           "next": [
             {
               "to": "carry",
@@ -1600,11 +2828,16 @@
               "expr": "carries(pov, 'wren_satchel')"
             }
           ],
-          "objectiveExprs": ["carries(pov, 'wren_satchel')"]
+          "objectiveExprs": [
+            "carries(pov, 'wren_satchel')"
+          ]
         },
         "carry": {
           "label": "Carry the poultice across",
-          "objectives": ["Carry [[wren_satchel]] to [[far_bank_waystation]]", "Arrive before the Reaping Feast, Reapmoon 1, 06:00"],
+          "objectives": [
+            "Carry [[wren_satchel]] to [[far_bank_waystation]]",
+            "Arrive before the Reaping Feast, Reapmoon 1, 06:00"
+          ],
           "next": [
             {
               "to": "cross",
@@ -1628,7 +2861,9 @@
         },
         "cross": {
           "label": "Get over the Wend",
-          "objectives": ["Cross the river by [[ferry_wend]]"],
+          "objectives": [
+            "Cross the river by [[ferry_wend]]"
+          ],
           "gate": "[[flag:ferry_running]] is true",
           "next": [
             {
@@ -1647,11 +2882,15 @@
             "A storm closes the ferry for most of a day; plan around it."
           ],
           "gateExpr": "story.ferry_running",
-          "objectiveExprs": ["at(pov, 'far_bank_waystation')"]
+          "objectiveExprs": [
+            "at(pov, 'far_bank_waystation')"
+          ]
         },
         "deliver": {
           "label": "Put the poultice in the keeper's hands",
-          "objectives": ["Give [[fever_poultice]] to [[bram_hesketh]]"],
+          "objectives": [
+            "Give [[fever_poultice]] to [[bram_hesketh]]"
+          ],
           "next": [
             {
               "to": "done",
@@ -1664,7 +2903,9 @@
             "to": "too_late",
             "expr": "clock >= @0412-09-01T06:00 and not carries('bram_hesketh', 'fever_poultice')"
           },
-          "objectiveExprs": ["carries('bram_hesketh', 'fever_poultice')"]
+          "objectiveExprs": [
+            "carries('bram_hesketh', 'fever_poultice')"
+          ]
         },
         "done": {
           "label": "Delivered",
@@ -1674,17 +2915,32 @@
             {
               "type": "pay",
               "text": "Bram pays the courier two silver marks.",
-              "args": {"from": "bram_hesketh", "to": "pov", "amount": 40, "currency": "bit"}
+              "args": {
+                "from": "bram_hesketh",
+                "to": "pov",
+                "amount": 40,
+                "currency": "bit"
+              }
             },
             {
               "type": "regard",
               "text": "Wren warms to the player.",
-              "args": {"who": "wren_aldous", "toward": "pov", "axis": "warmth", "delta": 20}
+              "args": {
+                "who": "wren_aldous",
+                "toward": "pov",
+                "axis": "warmth",
+                "delta": 20
+              }
             },
             {
               "type": "regard",
               "text": "Wren trusts the player.",
-              "args": {"who": "wren_aldous", "toward": "pov", "axis": "trust", "delta": 15}
+              "args": {
+                "who": "wren_aldous",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": 15
+              }
             }
           ]
         },
@@ -1696,7 +2952,12 @@
             {
               "type": "regard",
               "text": "Wren is disappointed.",
-              "args": {"who": "wren_aldous", "toward": "pov", "axis": "warmth", "delta": -10}
+              "args": {
+                "who": "wren_aldous",
+                "toward": "pov",
+                "axis": "warmth",
+                "delta": -10
+              }
             }
           ]
         }
@@ -1713,7 +2974,9 @@
         "offer": {
           "label": "The mill has stopped",
           "cue": "Joss Tamber stands in front of a millstone split edge to edge. The wheel has not turned since Hearthday, and the lower town is quiet without it.",
-          "objectives": ["Talk to [[joss_tamber]] at [[wend_mill]]"],
+          "objectives": [
+            "Talk to [[joss_tamber]] at [[wend_mill]]"
+          ],
           "next": [
             {
               "to": "search",
@@ -1721,11 +2984,16 @@
               "expr": "story.joss_helping"
             }
           ],
-          "objectiveExprs": ["story.joss_helping"]
+          "objectiveExprs": [
+            "story.joss_helping"
+          ]
         },
         "search": {
           "label": "Where do stones come from?",
-          "objectives": ["Find out where spare stones were cut", "Look over [[hollin_quarry]]"],
+          "objectives": [
+            "Find out where spare stones were cut",
+            "Look over [[hollin_quarry]]"
+          ],
           "next": [
             {
               "to": "haul",
@@ -1737,7 +3005,10 @@
             "Marta says the first stones were cut up past the orchard terraces.",
             "Joss mentions a quarry he has not visited since he was a boy."
           ],
-          "objectiveExprs": ["story.joss_helping", "at(pov, 'hollin_quarry')"]
+          "objectiveExprs": [
+            "story.joss_helping",
+            "at(pov, 'hollin_quarry')"
+          ]
         },
         "haul": {
           "label": "Bring the stone home",
@@ -1758,11 +3029,16 @@
             "Dapple can draw the cart over level road but not up the field paths with a full load."
           ],
           "gateExpr": "story.cart_permission",
-          "objectiveExprs": ["story.cart_permission", "at('millstone_spare', 'wend_mill')"]
+          "objectiveExprs": [
+            "story.cart_permission",
+            "at('millstone_spare', 'wend_mill')"
+          ]
         },
         "fit": {
           "label": "Set the stone",
-          "objectives": ["Help Joss set and dress the stone"],
+          "objectives": [
+            "Help Joss set and dress the stone"
+          ],
           "next": [
             {
               "to": "done",
@@ -1770,7 +3046,9 @@
               "expr": "at('millstone_spare', 'wend_mill') and at(pov, 'wend_mill') and since('q_idle_millstone') >= 60"
             }
           ],
-          "objectiveExprs": ["since('q_idle_millstone') >= 60 and at(pov, 'wend_mill')"]
+          "objectiveExprs": [
+            "since('q_idle_millstone') >= 60 and at(pov, 'wend_mill')"
+          ]
         },
         "done": {
           "label": "The wheel turns",
@@ -1780,29 +3058,50 @@
             {
               "type": "set_flag",
               "text": "The mill is running again.",
-              "args": {"flag": "mill_running", "value": true}
+              "args": {
+                "flag": "mill_running",
+                "value": true
+              }
             }
           ],
           "rewards": [
             {
               "type": "pay",
               "text": "Joss pays what he can.",
-              "args": {"from": "joss_tamber", "to": "pov", "amount": 60, "currency": "bit"}
+              "args": {
+                "from": "joss_tamber",
+                "to": "pov",
+                "amount": 60,
+                "currency": "bit"
+              }
             },
             {
               "type": "give_item",
               "text": "A sack of fine flour for the player.",
-              "args": {"item": "flour_sack", "to": "pov"}
+              "args": {
+                "item": "flour_sack",
+                "to": "pov"
+              }
             },
             {
               "type": "regard",
               "text": "Joss is grateful.",
-              "args": {"who": "joss_tamber", "toward": "pov", "axis": "warmth", "delta": 25}
+              "args": {
+                "who": "joss_tamber",
+                "toward": "pov",
+                "axis": "warmth",
+                "delta": 25
+              }
             },
             {
               "type": "regard",
               "text": "Joss trusts the player.",
-              "args": {"who": "joss_tamber", "toward": "pov", "axis": "trust", "delta": 20}
+              "args": {
+                "who": "joss_tamber",
+                "toward": "pov",
+                "axis": "trust",
+                "delta": 20
+              }
             }
           ]
         }
@@ -1841,8 +3140,24 @@
         "vestry": {
           "label": "The vestry floor",
           "cue": "Under the dust the vestry floor is carved: a ford, a ferry, a bridge, and a rhyme cut into the lintel above them.",
-          "next": [{"to": "door", "when": "[[p_vestry_tiles]] is solved", "expr": "stage('p_vestry_tiles') == 'solved'"}],
-          "effects": [{"type": "link", "text": "You make out the carved tiles in the vestry floor.", "args": {"rel": "knows", "from": "pov", "to": "tile_ford"}}]
+          "next": [
+            {
+              "to": "door",
+              "when": "[[p_vestry_tiles]] is solved",
+              "expr": "stage('p_vestry_tiles') == 'solved'"
+            }
+          ],
+          "effects": [
+            {
+              "type": "link",
+              "text": "You make out the carved tiles in the vestry floor.",
+              "args": {
+                "rel": "knows",
+                "from": "pov",
+                "to": "tile_ford"
+              }
+            }
+          ]
         },
         "door": {
           "label": "A stair under the stones",
@@ -1858,7 +3173,10 @@
             {
               "type": "set_flag",
               "text": "The way under the chapel is known.",
-              "args": {"flag": "cistern_known", "value": true}
+              "args": {
+                "flag": "cistern_known",
+                "value": true
+              }
             }
           ]
         },
@@ -1876,12 +3194,18 @@
             {
               "type": "set_flag",
               "text": "The original Charter has been found.",
-              "args": {"flag": "charter_original_found", "value": true}
+              "args": {
+                "flag": "charter_original_found",
+                "value": true
+              }
             },
             {
               "type": "reveal_item",
               "text": "The original Charter lies in the cistern, in its leather tube.",
-              "args": {"item": "charter_original", "to": "pov"}
+              "args": {
+                "item": "charter_original",
+                "to": "pov"
+              }
             }
           ]
         },
@@ -1889,13 +3213,22 @@
           "label": "What the bell was guarding",
           "cue": "The two charters do not say the same thing.",
           "truth": "The Charter framed in Reeve's Hall is a copy made from memory after the Great Flood, and it omits the clause that gives the ferry and the mill to the townsfolk in common. Brother Anselm hid the original in the chapel cistern during the flood and silenced the bell so that no one would linger in the vestry; he died before he could tell anyone. Reeve Hollis Garrow found the omission last winter while auditing old tolls. Believing the town had no claim, he has been leasing the ferry fares to a distant lord's steward to pay the town's debt, and he is ashamed of it.",
-          "leakTerms": ["in common", "omits", "steward", "leasing"],
+          "leakTerms": [
+            "in common",
+            "omits",
+            "steward",
+            "leasing"
+          ],
           "next": [],
           "rewards": [
             {
               "type": "reveal",
               "text": "The player learns the truth about the Charter.",
-              "args": {"track": "s_quiet_bell", "stage": "truth", "to": "pov"}
+              "args": {
+                "track": "s_quiet_bell",
+                "stage": "truth",
+                "to": "pov"
+              }
             }
           ]
         }
@@ -1913,7 +3246,9 @@
         "locked": {
           "label": "Three tiles and a rhyme",
           "cue": "The lintel reads: 'Foot first on the stones, then a float on the rope; the span came last and the span is gone. Press as the town grew and the floor will own.'",
-          "objectives": ["Press [[tile_ford]], [[tile_ferry]] and [[tile_bridge]] in the right order"],
+          "objectives": [
+            "Press [[tile_ford]], [[tile_ferry]] and [[tile_bridge]] in the right order"
+          ],
           "answer": {
             "expect": [
               "ford ferry bridge",
@@ -1935,7 +3270,9 @@
               "expr": "false"
             }
           ],
-          "objectiveExprs": ["false"]
+          "objectiveExprs": [
+            "false"
+          ]
         },
         "solved": {
           "label": "The floor gives way",
@@ -1945,12 +3282,18 @@
             {
               "type": "set_route",
               "text": "The way under the chapel opens.",
-              "args": {"route": "rt_chapel_cistern", "open": true}
+              "args": {
+                "route": "rt_chapel_cistern",
+                "open": true
+              }
             },
             {
               "type": "set_flag",
               "text": "The way under the chapel is known.",
-              "args": {"flag": "cistern_known", "value": true}
+              "args": {
+                "flag": "cistern_known",
+                "value": true
+              }
             }
           ]
         }
@@ -1968,7 +3311,10 @@
         "keep_books": {
           "label": "Keep the books tidy",
           "priority": 2,
-          "objectives": ["Finish the quarter's tolls", "Keep petitioners moving"],
+          "objectives": [
+            "Finish the quarter's tolls",
+            "Keep petitioners moving"
+          ],
           "next": [
             {
               "to": "deflect",
@@ -1980,7 +3326,10 @@
         "deflect": {
           "label": "Steer questions away from the old records",
           "priority": 6,
-          "objectives": ["Change the subject politely", "Find out what the questioner knows"],
+          "objectives": [
+            "Change the subject politely",
+            "Find out what the questioner knows"
+          ],
           "next": [
             {
               "to": "reckon",
@@ -1997,7 +3346,9 @@
         "reckon": {
           "label": "Face what the town is owed",
           "priority": 9,
-          "objectives": ["Decide whether to confess to the town"],
+          "objectives": [
+            "Decide whether to confess to the town"
+          ],
           "next": []
         }
       }
@@ -2014,20 +3365,47 @@
         "keep_running": {
           "label": "Keep the ferry running",
           "priority": 5,
-          "objectives": ["Run the crossings", "Check the rope and the chain"],
-          "next": [{"to": "secure", "when": "[[flag:storm_active]] is true", "expr": "story.storm_active"}]
+          "objectives": [
+            "Run the crossings",
+            "Check the rope and the chain"
+          ],
+          "next": [
+            {
+              "to": "secure",
+              "when": "[[flag:storm_active]] is true",
+              "expr": "story.storm_active"
+            }
+          ]
         },
         "secure": {
           "label": "Secure the ferry for the storm",
           "priority": 9,
-          "objectives": ["Haul the ferry up the slip", "Double-moor the boathouse doors"],
-          "next": [{"to": "resume", "when": "[[flag:storm_active]] is false", "expr": "not story.storm_active"}]
+          "objectives": [
+            "Haul the ferry up the slip",
+            "Double-moor the boathouse doors"
+          ],
+          "next": [
+            {
+              "to": "resume",
+              "when": "[[flag:storm_active]] is false",
+              "expr": "not story.storm_active"
+            }
+          ]
         },
         "resume": {
           "label": "Test the water and reopen",
           "priority": 7,
-          "objectives": ["Test the rope", "Reopen the crossing"],
-          "next": [{"to": "keep_running", "when": "[[flag:ferry_running]] is true", "expr": "story.ferry_running"}]
+          "objectives": [
+            "Test the rope",
+            "Reopen the crossing"
+          ],
+          "next": [
+            {
+              "to": "keep_running",
+              "when": "[[flag:ferry_running]] is true",
+              "expr": "story.ferry_running"
+            }
+          ]
         }
       }
     },
@@ -2043,26 +3421,45 @@
         "find_stone": {
           "label": "Find a new runner stone",
           "priority": 6,
-          "objectives": ["Ask around for a spare stone", "Keep the idle mill clean"],
+          "objectives": [
+            "Ask around for a spare stone",
+            "Keep the idle mill clean"
+          ],
           "next": [
             {
               "to": "wait_for_stone",
               "when": "the player has agreed to help [[joss_tamber]]",
               "expr": "story.joss_helping"
             },
-            {"to": "grind", "when": "[[flag:mill_running]] is true", "expr": "story.mill_running"}
+            {
+              "to": "grind",
+              "when": "[[flag:mill_running]] is true",
+              "expr": "story.mill_running"
+            }
           ]
         },
         "wait_for_stone": {
           "label": "Wait for the stone to come home",
           "priority": 4,
-          "objectives": ["Clear the stone bed", "Sharpen the picks"],
-          "next": [{"to": "grind", "when": "[[flag:mill_running]] is true", "expr": "story.mill_running"}]
+          "objectives": [
+            "Clear the stone bed",
+            "Sharpen the picks"
+          ],
+          "next": [
+            {
+              "to": "grind",
+              "when": "[[flag:mill_running]] is true",
+              "expr": "story.mill_running"
+            }
+          ]
         },
         "grind": {
           "label": "Grind the harvest",
           "priority": 5,
-          "objectives": ["Grind for the market", "Settle the town's flour orders"],
+          "objectives": [
+            "Grind for the market",
+            "Settle the town's flour orders"
+          ],
           "next": []
         }
       }
@@ -2072,7 +3469,9 @@
     {
       "id": "r_storm_arrives",
       "label": "The storm rolls in",
-      "on": {"at": "0412-08-27T18:00"},
+      "on": {
+        "at": "0412-08-27T18:00"
+      },
       "trigger": "At Goldmoon 27, 18:00 a storm breaks over the vale and lasts eighteen hours.",
       "when": "always",
       "once": true,
@@ -2081,16 +3480,31 @@
         {
           "type": "set_weather",
           "text": "A storm breaks over the vale.",
-          "args": {"region": "wend_vale", "state": "storm", "minutes": 1080}
+          "args": {
+            "region": "wend_vale",
+            "state": "storm",
+            "minutes": 1080
+          }
         },
-        {"type": "set_flag", "text": "A storm is active.", "args": {"flag": "storm_active", "value": true}}
+        {
+          "type": "set_flag",
+          "text": "A storm is active.",
+          "args": {
+            "flag": "storm_active",
+            "value": true
+          }
+        }
       ],
-      "beat": {"hint": "Black cloud, a cold gust off the river, and the ferry bell tolling the last crossing."}
+      "beat": {
+        "hint": "Black cloud, a cold gust off the river, and the ferry bell tolling the last crossing."
+      }
     },
     {
       "id": "r_storm_closes_ferry",
       "label": "The storm closes the ferry",
-      "on": {"tick": "slot"},
+      "on": {
+        "tick": "slot"
+      },
       "trigger": "When the storm is over the vale and the ferry is still running.",
       "when": "[[ferry_wend]] is at [[ferry_landing]]",
       "interrupt": true,
@@ -2098,60 +3512,132 @@
         {
           "type": "set_route",
           "text": "The crossing is closed.",
-          "args": {"route": "rt_landing_farbank", "open": false}
+          "args": {
+            "route": "rt_landing_farbank",
+            "open": false
+          }
         },
-        {"type": "set_flag", "text": "The ferry is not running.", "args": {"flag": "ferry_running", "value": false}},
+        {
+          "type": "set_flag",
+          "text": "The ferry is not running.",
+          "args": {
+            "flag": "ferry_running",
+            "value": false
+          }
+        },
         {
           "type": "move",
           "text": "Tamsin hauls the ferry up the slip.",
-          "args": {"who": "tamsin_reed", "place": "ferry_landing"}
+          "args": {
+            "who": "tamsin_reed",
+            "place": "ferry_landing"
+          }
         },
         {
           "type": "set_flag",
           "text": "The closing time is recorded.",
-          "args": {"flag": "ferry_closed_at", "value": "=clock"}
+          "args": {
+            "flag": "ferry_closed_at",
+            "value": "=clock"
+          }
         }
       ],
-      "beat": {"hint": "Tamsin, soaked, bellows at you to keep clear of the rope while she hauls the ferry out."},
+      "beat": {
+        "hint": "Tamsin, soaked, bellows at you to keep clear of the rope while she hauls the ferry out."
+      },
       "whenExpr": "story.storm_active and story.ferry_running",
       "once": true
     },
     {
       "id": "r_ferry_reopens",
       "label": "The ferry reopens",
-      "on": {"tick": "slot"},
+      "on": {
+        "tick": "slot"
+      },
       "trigger": "Twenty-one hours after the ferry closed: the storm has blown itself out and Tamsin has tested the rope.",
       "when": "at least three hours have passed since the storm ended",
       "do": [
-        {"type": "set_weather", "text": "The sky clears.", "args": {"region": "wend_vale", "state": "clear"}},
-        {"type": "set_route", "text": "The crossing reopens.", "args": {"route": "rt_landing_farbank", "open": true}},
-        {"type": "set_flag", "text": "The ferry is running.", "args": {"flag": "ferry_running", "value": true}},
-        {"type": "set_flag", "text": "The storm is over.", "args": {"flag": "storm_active", "value": false}},
-        {"type": "set_flag", "text": "The closing time is cleared.", "args": {"flag": "ferry_closed_at", "value": 0}}
+        {
+          "type": "set_weather",
+          "text": "The sky clears.",
+          "args": {
+            "region": "wend_vale",
+            "state": "clear"
+          }
+        },
+        {
+          "type": "set_route",
+          "text": "The crossing reopens.",
+          "args": {
+            "route": "rt_landing_farbank",
+            "open": true
+          }
+        },
+        {
+          "type": "set_flag",
+          "text": "The ferry is running.",
+          "args": {
+            "flag": "ferry_running",
+            "value": true
+          }
+        },
+        {
+          "type": "set_flag",
+          "text": "The storm is over.",
+          "args": {
+            "flag": "storm_active",
+            "value": false
+          }
+        },
+        {
+          "type": "set_flag",
+          "text": "The closing time is cleared.",
+          "args": {
+            "flag": "ferry_closed_at",
+            "value": 0
+          }
+        }
       ],
       "whenExpr": "story.ferry_closed_at > 0 and clock - story.ferry_closed_at >= 1260"
     },
     {
       "id": "r_market_day",
       "label": "Marketday",
-      "on": {"tick": "day"},
+      "on": {
+        "tick": "day"
+      },
       "trigger": "Every Marketday from 07:00 to 15:00.",
       "when": "the weekday is Marketday and the hour is between 07:00 and 15:00",
       "do": [
-        {"type": "set_flag", "text": "The stalls are open.", "args": {"flag": "market_open", "value": true}},
+        {
+          "type": "set_flag",
+          "text": "The stalls are open.",
+          "args": {
+            "flag": "market_open",
+            "value": true
+          }
+        },
         {
           "type": "price_modifier",
           "text": "Stall prices run ten percent under the Kettle's board.",
-          "args": {"scope": "market_square", "percent": -10, "minutes": 600}
+          "args": {
+            "scope": "market_square",
+            "percent": -10,
+            "minutes": 600
+          }
         }
       ],
-      "beat": {"hint": "Stallholders shout over each other; someone's goat has gotten loose near the well."},
+      "beat": {
+        "hint": "Stallholders shout over each other; someone's goat has gotten loose near the well."
+      },
       "whenExpr": "weekday == 3"
     },
     {
       "id": "r_reaping_feast",
       "label": "The Reaping Feast",
-      "on": {"at": "0412-09-01T18:00"},
+      "on": {
+        "at": "0412-09-01T18:00"
+      },
       "trigger": "At Reapmoon 1, 18:00 the town gathers at the Crooked Kettle for the harvest supper.",
       "when": "always",
       "once": true,
@@ -2160,21 +3646,37 @@
         {
           "type": "move",
           "text": "Everyone in the cast heads to the Kettle.",
-          "args": {"who": "town_cast", "place": "crooked_kettle"}
+          "args": {
+            "who": "town_cast",
+            "place": "crooked_kettle"
+          }
         },
         {
           "type": "regard",
           "text": "The town softens a little at the feast.",
-          "args": {"who": "town_cast", "toward": "town_cast", "axis": "warmth", "delta": 3}
+          "args": {
+            "who": "town_cast",
+            "toward": "town_cast",
+            "axis": "warmth",
+            "delta": 3
+          }
         },
-        {"type": "note", "text": "Odo stands the traveler a free supper.", "args": {}}
+        {
+          "type": "note",
+          "text": "Odo stands the traveler a free supper.",
+          "args": {}
+        }
       ],
-      "beat": {"hint": "The Kettle is packed to the rafters; Odo stands on a bench to announce the first barrel."}
+      "beat": {
+        "hint": "The Kettle is packed to the rafters; Odo stands on a bench to announce the first barrel."
+      }
     },
     {
       "id": "r_odo_jealous",
       "label": "Odo's jealous streak",
-      "on": {"tick": "slot"},
+      "on": {
+        "tick": "slot"
+      },
       "trigger": "When the traveler spends an evening hour alone with Wren while Odo is working.",
       "when": "the player has spent more than an hour alone with [[wren_aldous]] this evening and [[odo_kettleby]] is at [[crooked_kettle]]",
       "cooldownMinutes": 1440,
@@ -2182,17 +3684,30 @@
         {
           "type": "regard",
           "text": "Odo grows cool toward the traveler.",
-          "args": {"who": "odo_kettleby", "toward": "pov", "axis": "warmth", "delta": -8}
+          "args": {
+            "who": "odo_kettleby",
+            "toward": "pov",
+            "axis": "warmth",
+            "delta": -8
+          }
         },
-        {"type": "note", "text": "Odo says the best table is reserved and the stew is off.", "args": {}}
+        {
+          "type": "note",
+          "text": "Odo says the best table is reserved and the stew is off.",
+          "args": {}
+        }
       ],
-      "beat": {"hint": "Odo wipes the same mug three times and does not look at you."},
+      "beat": {
+        "hint": "Odo wipes the same mug three times and does not look at you."
+      },
       "whenExpr": "hour >= 18 and at(pov, 'crooked_kettle') and at('wren_aldous', 'crooked_kettle') and at('odo_kettleby', 'crooked_kettle')"
     },
     {
       "id": "r_joss_frets",
       "label": "Joss frets over the idle mill",
-      "on": {"tick": "day"},
+      "on": {
+        "tick": "day"
+      },
       "trigger": "Each morning the mill is stopped.",
       "when": "[[flag:mill_running]] is false",
       "cooldownMinutes": 1440,
@@ -2200,7 +3715,12 @@
         {
           "type": "regard",
           "text": "Joss grows shorter with everyone.",
-          "args": {"who": "joss_tamber", "toward": "town_cast", "axis": "warmth", "delta": -2}
+          "args": {
+            "who": "joss_tamber",
+            "toward": "town_cast",
+            "axis": "warmth",
+            "delta": -2
+          }
         }
       ],
       "whenExpr": "not story.mill_running"
@@ -2208,7 +3728,9 @@
     {
       "id": "r_reeve_wary",
       "label": "The reeve grows wary",
-      "on": {"enter": "reeves_hall"},
+      "on": {
+        "enter": "reeves_hall"
+      },
       "trigger": "When the traveler comes to Reeve's Hall after hearing the bell rumours.",
       "when": "the player has reached [[s_quiet_bell.rumor]]",
       "once": true,
@@ -2216,10 +3738,17 @@
         {
           "type": "regard",
           "text": "Hollis trusts the traveler a little less.",
-          "args": {"who": "hollis_garrow", "toward": "pov", "axis": "trust", "delta": -8}
+          "args": {
+            "who": "hollis_garrow",
+            "toward": "pov",
+            "axis": "trust",
+            "delta": -8
+          }
         }
       ],
-      "beat": {"hint": "The reeve's smile is exactly as warm as before and does not reach his eyes."},
+      "beat": {
+        "hint": "The reeve's smile is exactly as warm as before and does not reach his eyes."
+      },
       "whenExpr": "stage('s_quiet_bell') != 'cue'"
     }
   ],
@@ -2241,49 +3770,143 @@
         "region": "wend_vale",
         "label": "Temperate river vale",
         "states": [
-          {"id": "clear", "label": "Clear", "effects": {}},
-          {"id": "overcast", "label": "Overcast", "effects": {}},
+          {
+            "id": "clear",
+            "label": "Clear",
+            "effects": {}
+          },
+          {
+            "id": "overcast",
+            "label": "Overcast",
+            "effects": {}
+          },
           {
             "id": "rain",
             "label": "Rain",
-            "effects": {"travelTimeMultiplier": {"walk": 1.15, "road": 1.2, "offroad": 1.4}}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.15,
+                "road": 1.2,
+                "offroad": 1.4
+              }
+            }
           },
           {
             "id": "fog",
             "label": "Fog",
-            "effects": {"travelTimeMultiplier": {"walk": 1.2, "road": 1.3, "offroad": 1.4, "water": 1.5}}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.2,
+                "road": 1.3,
+                "offroad": 1.4,
+                "water": 1.5
+              }
+            }
           },
-          {"id": "frost", "label": "Frost", "effects": {"travelTimeMultiplier": {"walk": 1.1, "road": 1.1}}},
+          {
+            "id": "frost",
+            "label": "Frost",
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.1,
+                "road": 1.1
+              }
+            }
+          },
           {
             "id": "storm",
             "label": "Storm",
-            "effects": {"travelTimeMultiplier": {"walk": 1.5, "road": 1.8, "offroad": 2.0}, "closes": ["water"]}
+            "effects": {
+              "travelTimeMultiplier": {
+                "walk": 1.5,
+                "road": 1.8,
+                "offroad": 2.0
+              },
+              "closes": [
+                "water"
+              ]
+            }
           }
         ],
         "seasons": [
           {
             "label": "Late winter and spring",
-            "months": [1, 2, 3, 4],
-            "weights": {"clear": 22, "overcast": 30, "rain": 30, "fog": 8, "frost": 8, "storm": 2},
-            "tempC": [1, 14]
+            "months": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "weights": {
+              "clear": 22,
+              "overcast": 30,
+              "rain": 30,
+              "fog": 8,
+              "frost": 8,
+              "storm": 2
+            },
+            "tempC": [
+              1,
+              14
+            ]
           },
           {
             "label": "Summer",
-            "months": [5, 6, 7, 8],
-            "weights": {"clear": 45, "overcast": 25, "rain": 18, "fog": 4, "storm": 8},
-            "tempC": [13, 27]
+            "months": [
+              5,
+              6,
+              7,
+              8
+            ],
+            "weights": {
+              "clear": 45,
+              "overcast": 25,
+              "rain": 18,
+              "fog": 4,
+              "storm": 8
+            },
+            "tempC": [
+              13,
+              27
+            ]
           },
           {
             "label": "Autumn",
-            "months": [9, 10, 11],
-            "weights": {"clear": 20, "overcast": 30, "rain": 28, "fog": 17, "storm": 5},
-            "tempC": [4, 16]
+            "months": [
+              9,
+              10,
+              11
+            ],
+            "weights": {
+              "clear": 20,
+              "overcast": 30,
+              "rain": 28,
+              "fog": 17,
+              "storm": 5
+            },
+            "tempC": [
+              4,
+              16
+            ]
           },
           {
             "label": "Winter",
-            "months": [12, 13],
-            "weights": {"clear": 15, "overcast": 35, "rain": 5, "fog": 10, "frost": 30, "storm": 5},
-            "tempC": [-6, 5]
+            "months": [
+              12,
+              13
+            ],
+            "weights": {
+              "clear": 15,
+              "overcast": 35,
+              "rain": 5,
+              "fog": 10,
+              "frost": 30,
+              "storm": 5
+            },
+            "tempC": [
+              -6,
+              5
+            ]
           }
         ],
         "note": "The storm on Goldmoon 27 is scripted by a rule; ordinary storms are rare in late summer."
@@ -2296,7 +3919,10 @@
       "title": "Brindlemere",
       "category": "place",
       "about": "brindlemere",
-      "keys": ["Brindlemere", "the town"],
+      "keys": [
+        "Brindlemere",
+        "the town"
+      ],
       "text": "Brindlemere is a market town of about eight hundred people where the high road meets the Wend ferry. It was chartered four hundred and twelve years ago and has never been large or poor. Its farmers sell grain and apples, its smiths make hinges and chain, and its ferry connects the town to the far drovers' road."
     },
     {
@@ -2304,7 +3930,11 @@
       "title": "The River Wend",
       "category": "place",
       "about": "wend_vale",
-      "keys": ["Wend", "the river", "river Wend"],
+      "keys": [
+        "Wend",
+        "the river",
+        "river Wend"
+      ],
       "text": "The Wend is slow and brown in summer and fast and brown in spring. It has flooded the lower town twice in living memory, most badly thirty years ago, when it took the old bridge and half the mill lane. The ferry crosses where the river is widest and calmest, a little above the mill."
     },
     {
@@ -2312,7 +3942,12 @@
       "title": "Market Square",
       "category": "place",
       "about": "market_square",
-      "keys": ["square", "market", "Marketday", "the well"],
+      "keys": [
+        "square",
+        "market",
+        "Marketday",
+        "the well"
+      ],
       "text": "Market Square is paved with river cobbles and centered on a stone well that is older than the town's records. Marketday is the fourth day of the week; stalls go up before dawn and come down by evening. Disputes between stallholders are settled by the reeve, usually within the hour."
     },
     {
@@ -2320,7 +3955,12 @@
       "title": "The Crooked Kettle",
       "category": "place",
       "about": "crooked_kettle",
-      "keys": ["Kettle", "Crooked Kettle", "inn", "tavern"],
+      "keys": [
+        "Kettle",
+        "Crooked Kettle",
+        "inn",
+        "tavern"
+      ],
       "text": "The Crooked Kettle is the only inn in Brindlemere, and it has been the town's living room for longer than anyone alive can say. The ale is honest, the stew is better than it has any right to be, and the innkeeper's gossip is free. Six beds upstairs cost eight bits a night; the stable yard costs four."
     },
     {
@@ -2328,7 +3968,12 @@
       "title": "Reeve's Hall",
       "category": "place",
       "about": "reeves_hall",
-      "keys": ["Reeve's Hall", "the hall", "reeve", "Reeve"],
+      "keys": [
+        "Reeve's Hall",
+        "the hall",
+        "reeve",
+        "Reeve"
+      ],
       "text": "Reeve's Hall is where the town does its business: tolls are counted, disputes heard, and the year's accounts read aloud at Founders' Day. On the wall behind the long table hangs the framed Charter, the document that makes Brindlemere a town rather than a village and which every child is taken to see once."
     },
     {
@@ -2336,7 +3981,12 @@
       "title": "The Charter",
       "category": "history",
       "about": "charter_copy",
-      "keys": ["Charter", "charter", "founding", "the Charter"],
+      "keys": [
+        "Charter",
+        "charter",
+        "founding",
+        "the Charter"
+      ],
       "text": "The Charter of Brindlemere was granted four hundred and twelve years ago. It gave the settlement its market, freed it from the lord's tithes, and made the reeve answerable only to the townsfolk. Everyone knows the Charter hangs in Reeve's Hall; few have read it past the first paragraph."
     },
     {
@@ -2344,14 +3994,24 @@
       "title": "The Chapel of the Quiet Bell",
       "category": "place",
       "about": "chapel_quiet_bell",
-      "keys": ["chapel", "Chapel", "Quiet Bell", "bell", "vestry"],
+      "keys": [
+        "chapel",
+        "Chapel",
+        "Quiet Bell",
+        "bell",
+        "vestry"
+      ],
       "text": "The chapel's square tower holds a bronze bell that has not rung in thirty years. The town calls it the Quiet Bell. Some say the Great Flood cracked it; others say the bell was never cracked at all. Sister Ilsabet keeps the chapel spotless and the bell polished, and she answers questions about it with a small, patient smile."
     },
     {
       "id": "lore_great_flood",
       "title": "The Great Flood",
       "category": "history",
-      "keys": ["flood", "Great Flood", "the flood"],
+      "keys": [
+        "flood",
+        "Great Flood",
+        "the flood"
+      ],
       "text": "Thirty years ago the Wend rose in a night and took the old bridge, the mill lane and a dozen cottages. No one in Brindlemere drowned, which the town credits to Brother Anselm, the chapel's keeper at the time, who went door to door in the dark and then, people say, ordered the bell silenced. He died the following spring."
     },
     {
@@ -2359,7 +4019,12 @@
       "title": "Dunmore's Forge",
       "category": "place",
       "about": "dunmore_forge",
-      "keys": ["forge", "Dunmore", "smith", "smithy"],
+      "keys": [
+        "forge",
+        "Dunmore",
+        "smith",
+        "smithy"
+      ],
       "text": "Three generations of Dunmores have worked this forge. Marta is the current smith. She makes hinges, nails and knives for the market, and she forged the great chain that holds the ferry to its rope. A bench by the door is the unofficial parliament of the town."
     },
     {
@@ -2367,7 +4032,12 @@
       "title": "Wend Mill",
       "category": "place",
       "about": "wend_mill",
-      "keys": ["mill", "Wend Mill", "millstone", "wheel"],
+      "keys": [
+        "mill",
+        "Wend Mill",
+        "millstone",
+        "wheel"
+      ],
       "text": "Wend Mill has ground the vale's grain for longer than anyone remembers. The Tambers have run it for four generations. Its runner stone cracked at the start of this week; until a new one is found and set, the town's bread comes from last month's flour."
     },
     {
@@ -2375,7 +4045,12 @@
       "title": "The Wend Ferry",
       "category": "place",
       "about": "ferry_landing",
-      "keys": ["ferry", "Ferry Landing", "crossing", "toll-hut"],
+      "keys": [
+        "ferry",
+        "Ferry Landing",
+        "crossing",
+        "toll-hut"
+      ],
       "text": "The ferry is a flat boat hauled along a rope. It runs from dawn to evening, carries twelve people or a loaded cart, and closes in a storm. Tamsin Reed has run it for twenty-six years, with her nephew Pip. A crossing is two bits for a person and six for a horse or cart."
     },
     {
@@ -2383,7 +4058,11 @@
       "title": "The Far Bank Waystation",
       "category": "place",
       "about": "far_bank_waystation",
-      "keys": ["Far Bank", "waystation", "far bank"],
+      "keys": [
+        "Far Bank",
+        "waystation",
+        "far bank"
+      ],
       "text": "A lonely stone house on the far side of the Wend where drovers and pilgrims wait for the ferry. Bram Hesketh has kept it since his wife died, with his daughter Nessa. The lamp in the window is lit every night so the ferry knows someone is waiting."
     },
     {
@@ -2391,7 +4070,12 @@
       "title": "Hollin Quarry",
       "category": "place",
       "about": "hollin_quarry",
-      "keys": ["quarry", "Hollin", "Hollin Quarry", "orchard"],
+      "keys": [
+        "quarry",
+        "Hollin",
+        "Hollin Quarry",
+        "orchard"
+      ],
       "text": "Above the old apple terraces lies a grassed-over quarry where the town's first millstones were cut. Nobody has quarried there for generations, but rough blocks and half-finished stones lie in the nettles where the cutters left them."
     },
     {
@@ -2399,7 +4083,12 @@
       "title": "Reeve Hollis Garrow",
       "category": "person",
       "about": "hollis_garrow",
-      "keys": ["Hollis", "Garrow", "the reeve", "Reeve Hollis"],
+      "keys": [
+        "Hollis",
+        "Garrow",
+        "the reeve",
+        "Reeve Hollis"
+      ],
       "text": "Hollis Garrow has been reeve for eleven years. He is careful, fair in small matters and tidy in his accounts, and he takes the town's debts personally. People respect him; they seldom ask what he is thinking."
     },
     {
@@ -2407,7 +4096,11 @@
       "title": "Tamsin Reed",
       "category": "person",
       "about": "tamsin_reed",
-      "keys": ["Tamsin", "ferrywoman", "Reed"],
+      "keys": [
+        "Tamsin",
+        "ferrywoman",
+        "Reed"
+      ],
       "text": "Tamsin Reed is the ferrywoman. She is blunt, dependable and unimpressed by weather, wealth or titles. She says she can smell a storm an hour before it breaks and has been right so often that the town sets its clocks by her."
     },
     {
@@ -2415,7 +4108,11 @@
       "title": "Joss Tamber",
       "category": "person",
       "about": "joss_tamber",
-      "keys": ["Joss", "Tamber", "miller"],
+      "keys": [
+        "Joss",
+        "Tamber",
+        "miller"
+      ],
       "text": "Joss Tamber is floury, gloomy and generous in equal parts. He gives credit he cannot afford and complains about it cheerfully. When the wheel is still he is hard to be around; when it turns, he sings."
     },
     {
@@ -2423,7 +4120,11 @@
       "title": "Marta Dunmore",
       "category": "person",
       "about": "marta_dunmore",
-      "keys": ["Marta", "Dunmore", "blacksmith"],
+      "keys": [
+        "Marta",
+        "Dunmore",
+        "blacksmith"
+      ],
       "text": "Marta Dunmore is the town's blacksmith. She is quick, dry-witted and has forgotten more about metal than most people learn. She keeps a handcart in the forge yard that she lends to anyone she trusts, and she is a better judge of trust than the reeve."
     },
     {
@@ -2431,7 +4132,12 @@
       "title": "Sister Ilsabet Vane",
       "category": "person",
       "about": "ilsabet_vane",
-      "keys": ["Ilsabet", "Sister Ilsabet", "Vane", "chapel keeper"],
+      "keys": [
+        "Ilsabet",
+        "Sister Ilsabet",
+        "Vane",
+        "chapel keeper"
+      ],
       "text": "Sister Ilsabet has kept the chapel for twenty-two years. She is small, calm and impossible to rush. Children bring her their questions and adults bring her their secrets; she has been asked about the bell more often than anyone else in town and has never given the same answer twice."
     },
     {
@@ -2439,7 +4145,12 @@
       "title": "Wren Aldous",
       "category": "person",
       "about": "wren_aldous",
-      "keys": ["Wren", "Aldous", "herbalist", "healer"],
+      "keys": [
+        "Wren",
+        "Aldous",
+        "herbalist",
+        "healer"
+      ],
       "text": "Wren Aldous learned herb-lore from her grandmother and has been healing Brindlemere's coughs, cuts and fevers ever since. She charges what people can pay. She talks quickly, listens carefully and knows which of her neighbours are quietly struggling."
     },
     {
@@ -2447,14 +4158,22 @@
       "title": "Odo Kettleby",
       "category": "person",
       "about": "odo_kettleby",
-      "keys": ["Odo", "Kettleby", "innkeeper"],
+      "keys": [
+        "Odo",
+        "Kettleby",
+        "innkeeper"
+      ],
       "text": "Odo Kettleby is the innkeeper of the Crooked Kettle. Round, cheerful and always at work, he is the town's best source of news and its worst keeper of secrets. People who want something told quickly tell it to Odo."
     },
     {
       "id": "lore_reaping_feast",
       "title": "The Reaping Feast",
       "category": "history",
-      "keys": ["Reaping Feast", "feast", "Reapmoon"],
+      "keys": [
+        "Reaping Feast",
+        "feast",
+        "Reapmoon"
+      ],
       "text": "The Reaping Feast falls on the first day of Reapmoon. The whole town gathers at the Crooked Kettle for the harvest supper, the first barrel of the new ale and a great many toasts. No one works that day, and old quarrels are traditionally put aside until the morning after."
     },
     {
@@ -2462,7 +4181,11 @@
       "title": "Pip Marlow",
       "category": "person",
       "about": "pip_marlow",
-      "keys": ["Pip", "Marlow", "ferry hand"],
+      "keys": [
+        "Pip",
+        "Marlow",
+        "ferry hand"
+      ],
       "text": "Pip Marlow is Tamsin's nephew, fifteen years old, lanky and always coiling rope. He works the ferry every day it runs. Pip hears more than he repeats, and the town's children say he can tell when someone is lying by the way they hold their hands."
     },
     {
@@ -2470,14 +4193,23 @@
       "title": "Bram Hesketh",
       "category": "person",
       "about": "bram_hesketh",
-      "keys": ["Bram", "Hesketh", "waystation keeper"],
+      "keys": [
+        "Bram",
+        "Hesketh",
+        "waystation keeper"
+      ],
       "text": "Bram Hesketh keeps the Far Bank Waystation. A quiet widower with a weathered face and a patient manner, he lights the lamp every night so travellers know someone is waiting. His daughter Nessa, eight, is the reason he rarely leaves the house."
     },
     {
       "id": "lore_calendar",
       "title": "The Brindlemere calendar",
       "category": "history",
-      "keys": ["calendar", "moon", "Goldmoon", "week"],
+      "keys": [
+        "calendar",
+        "moon",
+        "Goldmoon",
+        "week"
+      ],
       "text": "The year has thirteen moons of twenty-eight days, and every moon starts on Hearthday. The weeks run Hearthday, Plowday, Wellday, Marketday, Tollday, Restday and Feastday. Goldmoon is the eighth moon, Reapmoon the ninth, and the last moon, Longnight, ends the year in a day-long festival."
     }
   ],
@@ -2485,12 +4217,25 @@
     {
       "id": "agree_carry",
       "label": "Take Wren's satchel across the river",
-      "requires": ["at(pov, 'wren_cottage')", "at('wren_satchel', 'wren_cottage')"],
+      "requires": [
+        "at(pov, 'wren_cottage')",
+        "at('wren_satchel', 'wren_cottage')"
+      ],
       "duration": 10,
-      "lexicon": ["carry the satchel", "take the poultice", "agree to carry"],
+      "lexicon": [
+        "carry the satchel",
+        "take the poultice",
+        "agree to carry"
+      ],
       "observable": "talks quietly with Wren",
       "effects": [
-        {"type": "gear.transfer", "args": {"item": "wren_satchel", "to": "pov"}},
+        {
+          "type": "gear.transfer",
+          "args": {
+            "item": "wren_satchel",
+            "to": "pov"
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2502,12 +4247,25 @@
     {
       "id": "agree_help_joss",
       "label": "Offer to find Joss a new millstone",
-      "requires": ["at(pov, 'wend_mill')", "at('joss_tamber', here)"],
+      "requires": [
+        "at(pov, 'wend_mill')",
+        "at('joss_tamber', here)"
+      ],
       "duration": 15,
-      "lexicon": ["help joss", "find a millstone", "offer to help the miller"],
+      "lexicon": [
+        "help joss",
+        "find a millstone",
+        "offer to help the miller"
+      ],
       "observable": "talks with Joss",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "joss_helping", "value": true}},
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "joss_helping",
+            "value": true
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2519,34 +4277,86 @@
     {
       "id": "ask_marta_cart",
       "label": "Ask Marta to lend her handcart",
-      "requires": ["at(pov, 'dunmore_forge')", "at('marta_dunmore', here)"],
+      "requires": [
+        "at(pov, 'dunmore_forge')",
+        "at('marta_dunmore', here)"
+      ],
       "duration": 10,
-      "lexicon": ["borrow the cart", "ask marta for the cart"],
+      "lexicon": [
+        "borrow the cart",
+        "ask marta for the cart"
+      ],
       "observable": "talks with Marta",
       "effects": [
-        {"type": "set_flag", "args": {"flag": "cart_permission", "value": true}},
-        {"type": "gear.lend", "args": {"item": "handcart_dunmore", "to": "pov", "until": "=clock + 2880"}}
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "cart_permission",
+            "value": true
+          }
+        },
+        {
+          "type": "gear.lend",
+          "args": {
+            "item": "handcart_dunmore",
+            "to": "pov",
+            "until": "=clock + 2880"
+          }
+        }
       ]
     },
     {
       "id": "ask_bell",
       "label": "Ask about the Quiet Bell",
-      "requires": ["count_at(here, 'person') >= 2"],
+      "requires": [
+        "count_at(here, 'person') >= 2"
+      ],
       "duration": 15,
-      "lexicon": ["ask about the bell", "the quiet bell", "why doesn't the bell ring"],
+      "lexicon": [
+        "ask about the bell",
+        "the quiet bell",
+        "why doesn't the bell ring"
+      ],
       "observable": "asks around",
-      "effects": [{"type": "set_flag", "args": {"flag": "bell_asks", "value": "=story.bell_asks + 1"}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "bell_asks",
+            "value": "=story.bell_asks + 1"
+          }
+        }
+      ]
     },
     {
       "id": "haul_stone",
       "label": "Haul the spare stone to the mill",
-      "requires": ["at(pov, 'hollin_quarry')", "story.cart_permission", "at('millstone_spare', 'hollin_quarry')"],
+      "requires": [
+        "at(pov, 'hollin_quarry')",
+        "story.cart_permission",
+        "at('millstone_spare', 'hollin_quarry')"
+      ],
       "duration": 120,
-      "lexicon": ["haul the stone", "bring the stone home"],
+      "lexicon": [
+        "haul the stone",
+        "bring the stone home"
+      ],
       "observable": "heaves a millstone onto a cart",
       "effects": [
-        {"type": "move", "args": {"entity": "millstone_spare", "to": "wend_mill"}},
-        {"type": "move", "args": {"entity": "pov", "to": "wend_mill"}},
+        {
+          "type": "move",
+          "args": {
+            "entity": "millstone_spare",
+            "to": "wend_mill"
+          }
+        },
+        {
+          "type": "move",
+          "args": {
+            "entity": "pov",
+            "to": "wend_mill"
+          }
+        },
         {
           "type": "note",
           "args": {
@@ -2558,63 +4368,276 @@
     {
       "id": "compare_charters",
       "label": "Compare the two Charters",
-      "requires": ["at(pov, 'reeves_hall')", "carries(pov, 'charter_original')"],
+      "requires": [
+        "at(pov, 'reeves_hall')",
+        "carries(pov, 'charter_original')"
+      ],
       "duration": 30,
-      "lexicon": ["compare the charters", "read the old charter"],
+      "lexicon": [
+        "compare the charters",
+        "read the old charter"
+      ],
       "observable": "studies two documents",
-      "effects": [{"type": "set_flag", "args": {"flag": "charters_compared", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "charters_compared",
+            "value": true
+          }
+        }
+      ]
     },
     {
       "id": "show_charter",
       "label": "Show the original Charter to Ilsabet or Hollis",
-      "requires": ["carries(pov, 'charter_original')", "at('ilsabet_vane', here) or at('hollis_garrow', here)"],
+      "requires": [
+        "carries(pov, 'charter_original')",
+        "at('ilsabet_vane', here) or at('hollis_garrow', here)"
+      ],
       "duration": 20,
-      "lexicon": ["show the charter"],
+      "lexicon": [
+        "show the charter"
+      ],
       "observable": "shows a document",
-      "effects": [{"type": "set_flag", "args": {"flag": "charters_compared", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "charters_compared",
+            "value": true
+          }
+        }
+      ]
     },
     {
       "id": "ask_hollis_charter",
       "label": "Ask Hollis about the Charter",
-      "requires": ["at(pov, 'reeves_hall')", "at('hollis_garrow', here)"],
+      "requires": [
+        "at(pov, 'reeves_hall')",
+        "at('hollis_garrow', here)"
+      ],
       "duration": 10,
-      "lexicon": ["ask hollis about the charter"],
+      "lexicon": [
+        "ask hollis about the charter"
+      ],
       "observable": "talks with the reeve",
-      "effects": [{"type": "set_flag", "args": {"flag": "hollis_questioned", "value": true}}]
+      "effects": [
+        {
+          "type": "set_flag",
+          "args": {
+            "flag": "hollis_questioned",
+            "value": true
+          }
+        }
+      ]
     }
   ],
   "sheets": {
-    "scale": [1, 10],
+    "scale": [
+      1,
+      10
+    ],
     "stats": [
-      {"id": "brawn", "label": "Brawn"},
-      {"id": "wits", "label": "Wits"},
-      {"id": "grace", "label": "Grace"},
-      {"id": "heart", "label": "Heart"}
+      {
+        "id": "brawn",
+        "label": "Brawn"
+      },
+      {
+        "id": "wits",
+        "label": "Wits"
+      },
+      {
+        "id": "grace",
+        "label": "Grace"
+      },
+      {
+        "id": "heart",
+        "label": "Heart"
+      }
     ],
     "derived": {
-      "health": {"label": "Health", "formula": "8 + brawn"},
-      "composure": {"label": "Composure", "formula": "6 + floor((wits + heart) / 3)"}
+      "health": {
+        "label": "Health",
+        "formula": "8 + brawn"
+      },
+      "composure": {
+        "label": "Composure",
+        "formula": "6 + floor((wits + heart) / 3)"
+      }
     }
   },
   "categories": {
-    "groceries_staples": {"name": "Market staples", "basis": "Ford market stalls: a loaf for a bit, cheese and flour by the wheel and sack.", "band": {"min": 1, "typical": 4, "max": 55}},
-    "groceries_baskets": {"name": "A week's food", "basis": "Bread, pottage, cheese and small beer for one, about two days' labourer's wage.", "band": {"min": 20, "typical": 35, "max": 80}},
-    "meals_out": {"name": "Meals at the Kettle and the stalls", "basis": "A bowl of stew to a market-day feast.", "band": {"min": 2, "typical": 4, "max": 20}},
-    "coffee": {"name": "Hot drinks", "basis": "Herb tea, mulled cider and spiced milk by the cup.", "band": {"min": 1, "typical": 1, "max": 3}},
-    "alcohol": {"name": "Ale, cider and spirits", "basis": "A mug of ale to a stoppered bottle of southern brandy.", "band": {"min": 1, "typical": 2, "max": 40}},
-    "clothing": {"name": "Clothing", "basis": "Caps and hose to a good wool cloak or fine guild cloth.", "band": {"min": 10, "typical": 120, "max": 800}},
-    "electronics": {"name": "Curios and clockwork", "basis": "Pedlars' trinkets to a brass clockwork toy from the city.", "band": {"min": 4, "typical": 60, "max": 1200}},
-    "tools_hardware": {"name": "Tools and hardware", "basis": "Nails by the handful to a smith-made axe or saw.", "band": {"min": 2, "typical": 20, "max": 200}},
-    "household_goods": {"name": "Household goods", "basis": "Tallow candles and crockery to a joined chest or bedstead.", "band": {"min": 1, "typical": 10, "max": 400}},
-    "personal_care": {"name": "Soap, shaves and simples", "basis": "A cake of soap or a barber's shave to scented oil.", "band": {"min": 1, "typical": 4, "max": 30}},
-    "medical": {"name": "Healing", "basis": "A poultice from the herb-wife to a city surgeon's fee.", "band": {"min": 2, "typical": 10, "max": 200}},
-    "entertainment": {"name": "Diversions", "basis": "A ballad sheet or a seat at the travelling players.", "band": {"min": 1, "typical": 4, "max": 40}},
-    "transport": {"name": "Travel and beasts", "basis": "A ferry crossing to a riding horse.", "band": {"min": 1, "typical": 8, "max": 4800}},
-    "fuel": {"name": "Firewood, oil and fodder", "basis": "A bundle of faggots, lamp oil or a night's fodder.", "band": {"min": 1, "typical": 3, "max": 20}},
-    "vehicle_services": {"name": "Hire and wages", "basis": "Day wages and the farrier, wheelwright and carter.", "band": {"min": 2, "typical": 16, "max": 60}},
-    "lodging": {"name": "Lodging", "basis": "A bed at the Kettle or stabling for the night.", "band": {"min": 2, "typical": 8, "max": 40}},
-    "utilities": {"name": "Messengers and town dues", "basis": "A runner across town to the quarter's well and wall dues.", "band": {"min": 1, "typical": 4, "max": 30}},
-    "subscriptions": {"name": "Guild and temple dues", "basis": "A season's dues to a craft guild or the ford shrine.", "band": {"min": 5, "typical": 20, "max": 200}},
-    "gifts": {"name": "Gifts and tokens", "basis": "Ribbons and sweetmeats to a silver brooch.", "band": {"min": 2, "typical": 30, "max": 800}}
+    "groceries_staples": {
+      "name": "Market staples",
+      "basis": "Ford market stalls: a loaf for a bit, cheese and flour by the wheel and sack.",
+      "band": {
+        "min": 1,
+        "typical": 4,
+        "max": 55
+      }
+    },
+    "groceries_baskets": {
+      "name": "A week's food",
+      "basis": "Bread, pottage, cheese and small beer for one, about two days' labourer's wage.",
+      "band": {
+        "min": 20,
+        "typical": 35,
+        "max": 80
+      }
+    },
+    "meals_out": {
+      "name": "Meals at the Kettle and the stalls",
+      "basis": "A bowl of stew to a market-day feast.",
+      "band": {
+        "min": 2,
+        "typical": 4,
+        "max": 20
+      }
+    },
+    "coffee": {
+      "name": "Hot drinks",
+      "basis": "Herb tea, mulled cider and spiced milk by the cup.",
+      "band": {
+        "min": 1,
+        "typical": 1,
+        "max": 3
+      }
+    },
+    "alcohol": {
+      "name": "Ale, cider and spirits",
+      "basis": "A mug of ale to a stoppered bottle of southern brandy.",
+      "band": {
+        "min": 1,
+        "typical": 2,
+        "max": 40
+      }
+    },
+    "clothing": {
+      "name": "Clothing",
+      "basis": "Caps and hose to a good wool cloak or fine guild cloth.",
+      "band": {
+        "min": 10,
+        "typical": 120,
+        "max": 800
+      }
+    },
+    "electronics": {
+      "name": "Curios and clockwork",
+      "basis": "Pedlars' trinkets to a brass clockwork toy from the city.",
+      "band": {
+        "min": 4,
+        "typical": 60,
+        "max": 1200
+      }
+    },
+    "tools_hardware": {
+      "name": "Tools and hardware",
+      "basis": "Nails by the handful to a smith-made axe or saw.",
+      "band": {
+        "min": 2,
+        "typical": 20,
+        "max": 200
+      }
+    },
+    "household_goods": {
+      "name": "Household goods",
+      "basis": "Tallow candles and crockery to a joined chest or bedstead.",
+      "band": {
+        "min": 1,
+        "typical": 10,
+        "max": 400
+      }
+    },
+    "personal_care": {
+      "name": "Soap, shaves and simples",
+      "basis": "A cake of soap or a barber's shave to scented oil.",
+      "band": {
+        "min": 1,
+        "typical": 4,
+        "max": 30
+      }
+    },
+    "medical": {
+      "name": "Healing",
+      "basis": "A poultice from the herb-wife to a city surgeon's fee.",
+      "band": {
+        "min": 2,
+        "typical": 10,
+        "max": 200
+      }
+    },
+    "entertainment": {
+      "name": "Diversions",
+      "basis": "A ballad sheet or a seat at the travelling players.",
+      "band": {
+        "min": 1,
+        "typical": 4,
+        "max": 40
+      }
+    },
+    "transport": {
+      "name": "Travel and beasts",
+      "basis": "A ferry crossing to a riding horse.",
+      "band": {
+        "min": 1,
+        "typical": 8,
+        "max": 4800
+      }
+    },
+    "fuel": {
+      "name": "Firewood, oil and fodder",
+      "basis": "A bundle of faggots, lamp oil or a night's fodder.",
+      "band": {
+        "min": 1,
+        "typical": 3,
+        "max": 20
+      }
+    },
+    "vehicle_services": {
+      "name": "Hire and wages",
+      "basis": "Day wages and the farrier, wheelwright and carter.",
+      "band": {
+        "min": 2,
+        "typical": 16,
+        "max": 60
+      }
+    },
+    "lodging": {
+      "name": "Lodging",
+      "basis": "A bed at the Kettle or stabling for the night.",
+      "band": {
+        "min": 2,
+        "typical": 8,
+        "max": 40
+      }
+    },
+    "utilities": {
+      "name": "Messengers and town dues",
+      "basis": "A runner across town to the quarter's well and wall dues.",
+      "band": {
+        "min": 1,
+        "typical": 4,
+        "max": 30
+      }
+    },
+    "subscriptions": {
+      "name": "Guild and temple dues",
+      "basis": "A season's dues to a craft guild or the ford shrine.",
+      "band": {
+        "min": 5,
+        "typical": 20,
+        "max": 200
+      }
+    },
+    "gifts": {
+      "name": "Gifts and tokens",
+      "basis": "Ribbons and sweetmeats to a silver brooch.",
+      "band": {
+        "min": 2,
+        "typical": 30,
+        "max": 800
+      }
+    }
   }
 }

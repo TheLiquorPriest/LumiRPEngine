@@ -135,9 +135,12 @@ export interface SectionRenderer {
 
 export interface MaterializerDef {
   domain: DomainId;
+  /** The generator a new world pins. */
   version: number;
-  /** Samples detail within the entity's current representation (DESIGN §9.2). */
-  materialize(entity: EntityId, ctx: ReadContext, rng: Rng): LedgerEvent[];
+  /** Every generator version this build still carries (DESIGN §9.2 pinned versions); just `version` when absent. */
+  versions?: readonly number[];
+  /** Samples detail within the entity's current representation (DESIGN §9.2), as the world's pinned generator does. */
+  materialize(entity: EntityId, ctx: ReadContext, rng: Rng, version: number): LedgerEvent[];
 }
 
 export interface SlotInfo {

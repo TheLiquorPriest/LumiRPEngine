@@ -16,9 +16,15 @@ import { paramCandidates, resolveAction } from "../../../src/engine/resolve";
 import { payMethodOf } from "../../../src/packs/economy/core/index";
 import { ALL_PACKS, STARTER_WORLDS } from "../../../src/packs/index";
 import { modernUsWorld } from "../riverton";
-import { bandByLabel, netWorth, priceOf, wealthOf } from "../../../src/packs/economy/core/model";
-import { buildMoneyView } from "../../../src/packs/economy/core/view";
+import { bandByLabel, priceOf } from "../../../src/packs/economy/core/model";
+import type { ReadContext } from "../../../src/engine/registry";
 import { fold, startState, trialBalance } from "../support";
+
+const worthOf = (w: Working, who: string): number => w.ctx.query("economy.net_worth")(w.ctx, who) ?? 0;
+const bandOf = (w: Working, who: string): string => w.ctx.query("wealth")(w.ctx, who);
+
+/** The POV's money as the Money panel shows it. */
+const moneyView = (ctx: ReadContext) => ctx.query("economy.finance")(ctx, ctx.world.pov, true);
 
 const reg: Registry = createRegistry(ALL_PACKS);
 
@@ -48,55 +54,16 @@ describe("economy: ledger and level contract", () => {
     expect(w.state.accounts.card).toBe(-38000);
     expect(w.state.accounts["economy.external:you"]).toBe(-(8400 + 214000 + 650000 - 38000));
     expect(trialBalance(w.state)).toBe(0);
-    expect(netWorth(w.state, "you")).toBe(8400 + 214000 + 650000 - 38000);
-  });
-
-  test("payday nets withholding: occupation federal+FICA plus the state rate (Money 4)", () => {
-    const { w } = setup();
-    const before = w.state.accounts.checking ?? 0;
-    lapse(w, 15 * 1440);
-    const pay = posts(w, /^Payroll/);
-    expect(pay.length).toBeGreaterThanOrEqual(1);
-    const p = pay.find((x) => x.lines.some((l) => l.account === "checking")) as PostEvent;
-    const gross = Math.round(3740000 / 26);
-    const federal = Math.round((gross * 14) / 100);
-    const state = Math.round((gross * 1.4) / 100);
-    expect(p.lines).toEqual([
-      { account: "economy.external:employer:brightline", amount: -gross },
-      { account: "checking", amount: gross - federal - state },
-      { account: "economy.external:tax:federal", amount: federal },
-      { account: "economy.external:tax:state", amount: state },
-    ]);
-    expect(p.lines.reduce((a, l) => a + l.amount, 0)).toBe(0);
-    expect((w.state.accounts.checking ?? 0) - before).toBeGreaterThanOrEqual(gross - federal - state - 200000);
-    expect(trialBalance(w.state)).toBe(0);
-  });
-
-  test("after a multi-day timelapse in Port Alder the change lines (8 at most) still name the payday and the payroll posting", () => {
-    const make = STARTER_WORLDS.modern_slice_of_life;
-    if (!make) throw new Error("no Port Alder starter");
-    const world = make("pa", "Port Alder");
-    const s0 = startState(world);
-    const w = new Working(reg, world, s0);
-    materializeAll(reg, w, world.pov, "run");
-    lapse(w, 5 * 1440); // Mon 06:15 to Sat 06:15, past Friday's payday
-    const events = coarsen(reg, world, s0, w.events);
-    // In plain order the payday comes after the first eight lines: routine fills them.
-    const all = playerLines(reg, world, w.state, world.pov, events, 1000);
-    expect(all.findIndex((l) => l.startsWith("Payday:"))).toBeGreaterThanOrEqual(8);
-    const lines = playerLines(reg, world, w.state, world.pov, events, 8);
-    expect(lines).toHaveLength(8);
-    expect(lines.some((l) => l.startsWith("Payday:"))).toBe(true);
-    expect(lines.some((l) => l.startsWith("Payroll"))).toBe(true);
+    expect(worthOf(w, "you")).toBe(8400 + 214000 + 650000 - 38000);
   });
 
   test("a card statement shows interest and a minimum payment; autopay pays the minimum on the due date", () => {
     const { w } = setup();
     lapse(w, 20 * 1440); // past Nov 3 (statement day 3)
     const st = w.events.find((e) => e.type === "economy.statement");
-    expect(st && "data" in st ? st.data : null).toMatchObject({ account: "card", interest: Math.round((38000 * 22) / 100 / 12), closing: 38000 + Math.round((38000 * 22) / 100 / 12), minimum: 3500 });
-    const view = buildMoneyView(reg.context(w.world, w.state));
-    expect(view.accounts.find((a) => a.id === "card")?.due).toEqual({ label: expect.stringContaining("Minimum due"), cents: 3500 });
+    expect(st && "data" in st ? st.data : null).toMatchObject({ account: "card", interest: 0, closing: 38000, minimum: 3500 }); // a first statement is in its grace period: the opening balance carries no interest yet
+    const view = moneyView(reg.context(w.world, w.state));
+    expect(view.accounts.find((a) => a.id === "card")?.due).toMatchObject({ label: expect.stringContaining("Minimum due"), cents: 3500 });
     lapse(w, 26 * 1440); // past the due date (Nov 28)
     expect(posts(w, /autopay/).some((p) => p.lines.some((l) => l.account === "card" && l.amount === 3500))).toBe(true);
     expect(trialBalance(w.state)).toBe(0);
@@ -110,7 +77,7 @@ describe("economy: ledger and level contract", () => {
     const give = applyEffects(reg, w, [{ type: "economy.transfer", args: { from: "you", to: "maya", cents: 300000, memo: "Gift" } }], { bindings: {}, rng: createRng("t") });
     expect(give.rejected).toEqual([]);
     expect(w.state.accounts["economy.external:maya"]).toBe(300000);
-    expect(wealthOf(w.state, "maya")).toBe("modest"); // poor (typical $450) + $3,000 crosses into modest
+    expect(bandOf(w, "maya")).toBe("modest"); // poor (typical $450) + $3,000 crosses into modest
     const back = applyEffects(reg, w, [{ type: "economy.transfer", args: { from: "maya", to: "you", cents: 100000, memo: "Repay" } }], { bindings: {}, rng: createRng("u") });
     expect(back.rejected).toEqual([]);
     expect(trialBalance(w.state)).toBe(0);
@@ -122,19 +89,19 @@ describe("economy: ledger and level contract", () => {
 
   test("demote → spend → promote keeps the totals and restores nothing stale (L23)", () => {
     const { w } = setup();
-    const worth = netWorth(w.state, "you");
+    const worth = worthOf(w, "you");
     const materialized = structuredClone(w.state.materialized);
     applyMarker(w.state, { kind: "resolve", domain: "money", scope: { all: true }, to: 2 });
     const spent = applyEffects(reg, w, [{ type: "economy.buy", args: { payer: "you", item: "eggs_large", qty: 2 } }], { bindings: {}, rng: createRng("buy") });
     expect(spent.rejected).toEqual([]);
-    const cost = worth - netWorth(w.state, "you");
+    const cost = worth - worthOf(w, "you");
     expect(cost).toBeGreaterThan(0);
     applyMarker(w.state, { kind: "resolve", domain: "money", scope: { all: true }, to: 1 });
     applyEffects(reg, w, [{ type: "economy.transfer", args: { from: "you", to: "jordan", cents: 2500, memo: "Coffee money" } }], { bindings: {}, rng: createRng("l1") });
     applyMarker(w.state, { kind: "resolve", domain: "money", scope: { all: true }, to: 4 });
     materializeAll(reg, w, "you", "run");
     expect(w.state.materialized).toEqual(materialized);
-    expect(netWorth(w.state, "you")).toBe(worth - cost - 2500);
+    expect(worthOf(w, "you")).toBe(worth - cost - 2500);
     expect(trialBalance(w.state)).toBe(0);
   });
 
@@ -146,12 +113,12 @@ describe("economy: ledger and level contract", () => {
       // Jordan (comfortable, no accounts) spends down at level 1.
       const spend = applyEffects(reg, w, [{ type: "economy.transfer", args: { from: "jordan", to: "you", cents: 5_000_000, memo: "Big purchase" } }], { bindings: {}, rng: createRng("s") });
       expect(spend.rejected).toEqual([]);
-      expect(wealthOf(w.state, "jordan")).toBe("modest");
+      expect(bandOf(w, "jordan")).toBe("modest");
       applyMarker(w.state, { kind: "resolve", domain: "money", scope: { all: true }, to: 3 });
       const events = materializeAll(reg, w, "jordan", seed);
       expect(events.map((e) => e.domain)).toEqual(["gear", "money"]);
       const band = bandByLabel("modest");
-      const worth = netWorth(w.state, "jordan");
+      const worth = worthOf(w, "jordan");
       expect(worth).toBeGreaterThanOrEqual(band.min);
       expect(worth).toBeLessThan(band.max);
       expect(trialBalance(w.state)).toBe(0);
@@ -242,7 +209,7 @@ describe("economy: pricing and declines", () => {
     expect([card.card < 0, card.cash, card.checking]).toEqual([true, 0, 0]);
     const debit = delta("my debit card");
     expect([debit.checking < 0, debit.cash, debit.card]).toEqual([true, 0, 0]);
-    expect([payMethodOf("savings"), payMethodOf("in cash"), payMethodOf("Visa"), payMethodOf("whatever")]).toEqual(["savings", "cash", "card", "auto"]);
+    expect([payMethodOf("savings"), payMethodOf("in cash"), payMethodOf("Visa"), payMethodOf("whatever")]).toEqual(["savings", "cash", "credit", "auto"]);
   });
 
   test("a narrated purchase whose payer names an account, or a way of paying, is paid by the holder from it", () => {

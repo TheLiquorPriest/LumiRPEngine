@@ -2,26 +2,27 @@
 // on each account shown. Each change is one GM edit with its own Corrected chip.
 
 import { useState } from "preact/hooks";
-import type { GmMoney } from "../../../shared/state-view";
+import type { FinanceView } from "../../../shared/finance";
 import { formatMoney } from "../../../shared/world";
 import { Card, Empty, Row } from "../../../frontend/components";
 import type { GmSectionProps } from "../../../frontend/registry";
 import { adjustOp } from "../../../frontend/requests";
 
-function PersonMoney(props: { money: GmMoney; section: GmSectionProps }) {
+function PersonMoney(props: { money: FinanceView; section: GmSectionProps }) {
   const { money: m, section } = props;
   const [amount, setAmount] = useState("");
-  const valid = adjustOp(m.entity, amount, section.currency, false) !== null;
+  const valid = adjustOp(m.party, amount, section.currency, false) !== null;
+  const netWorth = m.overview?.netWorth ?? null;
   return (
     <Card title={`Money · ${m.name}`} aside={<span class="lre-badge">Money {m.level}</span>}>
       {m.band ? <Row k="Band" v={m.band} /> : null}
-      {m.netWorthCents !== null ? <Row k="Net worth" v={formatMoney(m.netWorthCents, section.currency)} /> : null}
+      {netWorth !== null ? <Row k="Net worth" v={formatMoney(netWorth, section.currency)} /> : null}
       {!m.opened ? <div class="lre-small lre-muted">Not opened yet: these are the opening balances it will start from.</div> : null}
       {m.accounts.map((a) => (
         <Row
           key={a.id}
           k={a.name}
-          sub={a.kind}
+          sub={a.classLabel}
           v={
             <span class="lre-inline">
               {formatMoney(a.cents, section.currency)}
@@ -51,7 +52,7 @@ export function GmMoneySection(props: GmSectionProps) {
   return (
     <>
       {props.gm.money.map((m) => (
-        <PersonMoney key={m.entity} money={m} section={props} />
+        <PersonMoney key={m.party} money={m} section={props} />
       ))}
     </>
   );

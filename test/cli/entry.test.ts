@@ -102,7 +102,7 @@ describe("the lumirpengine entry", () => {
     writeFileSync(path, run.out);
     const check = await cli(["check", path]);
     expect(check.code).toBe(0);
-    expect(JSON.parse(check.out)).toMatchObject({ ok: true, loads: true, errors: 0, contents: { entities: 38 } });
+    expect(JSON.parse(check.out)).toMatchObject({ ok: true, loads: true, errors: 0, contents: { entities: 41 } });
     // A script goes by the exit code: a file that doesn't load, or loads with lint errors, is a failure.
     const broken = join(home, "broken-world.json");
     writeFileSync(broken, "{ nope");

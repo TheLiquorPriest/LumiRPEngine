@@ -585,6 +585,12 @@ export interface CycleState {
   penalty: boolean;
   /** Installment loans: months left after this statement. */
   months_left?: number;
+  /** Consecutive cycles paid on time (six lift a penalty rate), and the history the credit report counts. */
+  streak?: number;
+  ontime?: number;
+  late30?: number;
+  late60?: number;
+  late90?: number;
 }
 
 /** One statement as a dashboard lists it. */
@@ -763,7 +769,7 @@ export const FEATURE_DEFS: Readonly<Record<FinanceFeature, FeatureDef>> = Object
   daily_limits: { label: "Daily card limits", floor: 2, on: 4 },
   overdraft: { label: "Overdraft policies", floor: 2, on: 4 },
   average_daily: { label: "Interest on the average daily balance", floor: 3, on: 4 },
-  withholding: { label: "Withholding on pay", floor: 3, on: 4 },
+  withholding: { label: "Withholding on pay", floor: 3, on: 3 },
   tax_brackets: { label: "Tax brackets", floor: 3, on: 4 },
   sales_tax: { label: "Sales tax", floor: 3, on: 4 },
   business_tax: { label: "Business taxes", floor: 3, on: 4 },
@@ -1007,7 +1013,27 @@ export const FINANCE_EVENTS = {
   credit: "economy.credit",
   score: "economy.score",
   spend: "economy.spend",
+  open: "economy.open",
+  status: "economy.status",
+  accrue: "economy.accrue",
 } as const;
+
+/** `economy.open`: accounts whose opening balances have posted (a joint account opens once, with whichever holder's money opens first). */
+export interface OpenData {
+  accounts: EntityId[];
+}
+
+/** `economy.status`: an account's status set in play (frozen, collections, charged off, paid off, closed, open again). */
+export interface StatusData {
+  account: EntityId;
+  status: AccountStatus;
+}
+
+/** `economy.accrue`: an interest period ends for an account; its average daily balance starts again from `at`. */
+export interface AccrueData {
+  account: EntityId;
+  at: number;
+}
 
 /** `economy.txn`: a posting's journal lines (one per account in the world it touches) and what it was. */
 export interface TxnData {
@@ -1024,6 +1050,8 @@ export interface TxnData {
   /** A narrated price the charge doesn't match. */
   narrated?: number;
   limited?: "cap" | "band";
+  /** When it happened, when that isn't the time it folds (a flow at its own instant inside a slot). */
+  at?: number;
 }
 
 /**
@@ -1051,6 +1079,13 @@ export interface StatementData {
   lates?: number;
   penalty?: boolean;
   months_left?: number;
+  /** The statement's own instant (older ones close at the time they fold). */
+  at?: number;
+  streak?: number;
+  ontime?: number;
+  late30?: number;
+  late60?: number;
+  late90?: number;
 }
 
 /** `economy.card_paid`: a payment toward a credit account's statement. */
@@ -1269,7 +1304,10 @@ export interface BusinessView {
   owners: OwnerLine[];
   accounts: EntityId[];
   places: { id: string; name: string }[];
+  /** Year to date. */
   books: { period: string; revenue: number; expenses: number; payroll: number; taxes: number; profit: number; lines: { category: string; cents: number }[] };
+  /** The last 12 months, newest first. */
+  months: { period: string; revenue: number; expenses: number; profit: number }[];
   sales: JournalLine[];
   invoices: (Invoice & { customerName: string; issuedAt: string; dueAt: string })[];
   employees: JobView[];
@@ -1301,6 +1339,10 @@ export interface InvestmentsView {
   realisedLong?: number;
   taxDue?: { cents: number; at: string } | null;
   holdings: HoldingView[];
+  /** Assets the party can buy and doesn't hold, at their price now. */
+  market?: { asset: string; label: string; class: AssetClass; symbol: string | null; price: number }[];
+  /** Accounts that can hold a new position. */
+  accounts?: EntityId[];
 }
 
 export interface PropertyView {
@@ -1312,6 +1354,8 @@ export interface PropertyView {
   share: number;
   value: number;
   equity: number;
+  /** The asking price when it's for sale; a property for sale the party doesn't own comes with share 0. */
+  forSale?: number | null;
   mortgage: { id: EntityId; name: string; owed: number; payment: number | null; monthsLeft: number | null } | null;
   leases: LeaseView[];
   /** Property tax, insurance and upkeep flows. */

@@ -12,6 +12,7 @@ import { derivedUnpricedCap } from "../../src/packs/economy/core/model";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import { Rig } from "../support/rig";
+import { heldBy } from "../../src/shared/finance";
 
 const EXTRACT_MARK = "You read a narrator's roleplay reply";
 const INTERPRET_MARK = "You map a player's typed input";
@@ -32,15 +33,19 @@ async function folded(rig: Rig, chatId: string) {
   return { state, world, ctx: rig.rt.registry.context(world, state) };
 }
 
-/** The "Bought …" charges the payer's history records, with what each charged. */
+/** The "Bought …" charges on the POV's own accounts' journals, with what each charged. */
 async function bought(rig: Rig, chatId: string): Promise<{ memo: string; cents: number }[]> {
-  const { state } = await folded(rig, chatId);
-  const history = state.packs.economy?.history;
-  return (Array.isArray(history) ? history : []).flatMap((h) => {
-    if (!h || typeof h !== "object" || Array.isArray(h) || typeof h.memo !== "string" || !h.memo.startsWith("Bought ")) return [];
-    const lines = Array.isArray(h.lines) ? h.lines : [];
-    return [{ memo: h.memo, cents: lines.reduce((sum: number, l) => sum + (l && typeof l === "object" && !Array.isArray(l) && typeof l.amount === "number" ? Math.abs(l.amount) : 0), 0) }];
-  });
+  const { state, world } = await folded(rig, chatId);
+  const journal = state.packs.economy?.journal;
+  const out: { memo: string; cents: number; at: number }[] = [];
+  for (const [account, entries] of Object.entries(journal && typeof journal === "object" && !Array.isArray(journal) ? journal : {})) {
+    if (!heldBy(state.entities, account, world.pov)) continue;
+    for (const j of Array.isArray(entries) ? entries : []) {
+      if (!j || typeof j !== "object" || Array.isArray(j) || typeof j.memo !== "string" || !j.memo.startsWith("Bought ")) continue;
+      out.push({ memo: j.memo, cents: typeof j.cents === "number" ? Math.abs(j.cents) : 0, at: typeof j.at === "number" ? j.at : 0 });
+    }
+  }
+  return out.sort((x, y) => x.at - y.at).map(({ memo, cents }) => ({ memo, cents }));
 }
 
 /** A typed Buy of a $3 kazoo, and a reply the extractor reads as `narrated`. */
@@ -149,8 +154,9 @@ describe("the cash ✎ corrects cash with a balanced posting", () => {
     rig.body(await rig.send({ type: "lre.fix", chatId, entity: world.pov, field: "cash", value: 1234 }));
     const { state } = await folded(rig, chatId);
     expect(state.accounts.acct_pov_cash).toBe(1234);
-    const history = state.packs.economy?.history;
-    expect((Array.isArray(history) ? history : []).some((h) => !!h && typeof h === "object" && !Array.isArray(h) && h.memo === "Correction")).toBe(true);
+    const journal = state.packs.economy?.journal;
+    const cash = journal && typeof journal === "object" && !Array.isArray(journal) ? journal.acct_pov_cash : undefined;
+    expect((Array.isArray(cash) ? cash : []).some((j) => !!j && typeof j === "object" && !Array.isArray(j) && j.memo === "Correction")).toBe(true);
   });
 });
 

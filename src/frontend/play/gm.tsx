@@ -8,6 +8,7 @@
 import { useEffect, useId, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import type { EditOp } from "../../shared/protocol";
+
 import type { GmEntity, GmField, GmRelation, GmView } from "../../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../shared/world";
 import { useApp } from "../app";

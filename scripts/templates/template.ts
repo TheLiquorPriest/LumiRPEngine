@@ -26,20 +26,37 @@ export interface TplRegard {
   axes: Record<string, number>;
 }
 
+/**
+ * A character's work. With a rate it is a job: a job entity the work module pays from (who employs
+ * them, at what rate, how often, where the pay goes). Without one, the occupation and workplace
+ * alone, which castlife reads.
+ */
 export interface TplJob {
+  /** The job entity's id; `job_<character>` when absent. */
+  id?: string;
+  name?: string;
+  title?: string;
+  /** Who pays: a business record, a place (the business there), or an outside employer named in words. */
   employer: string | null;
+  /** Where they work, when it isn't the employer itself (castlife's `employer`). */
+  workplace?: string;
   occupation: string | null;
-  hourlyCents?: number;
+  /** hourly (default) or salary. */
+  basis?: string;
+  /** Per hour, or a year's salary, in base units. */
+  rateCents?: number;
   hoursPerWeek?: number;
-  payFrequency?: string;
-  payday?: string;
-  depositTo?: string;
+  /** weekly, biweekly, semimonthly or monthly. */
+  payEvery?: string;
+  payWeekday?: number;
+  payDays?: number[];
+  /** Where pay goes besides the worker's deposit account, which takes the rest. */
+  splits?: { to: string; pct?: number; cents?: number }[];
+  deductions?: { label: string; cents: number; pretax?: boolean; kind?: string; to?: string }[];
   shiftPattern?: string;
-  selfEmployed?: boolean;
-  retired?: boolean;
+  /** The date they started. */
+  start?: string;
   tipped?: boolean;
-  estimatedAnnualIncomeCents?: number;
-  incomeMonthlyCents?: number;
 }
 
 export interface TplCharacter {
@@ -77,6 +94,10 @@ export interface TplPlace {
   description: string;
   grid?: string;
   cell?: { x: number; y: number };
+  /** A cash machine here (DESIGN §25.9): its bank, its surcharge to other banks' customers, its most per withdrawal, and whether it takes deposits. */
+  atm?: { bank: string; fee?: number; limit?: number; deposits?: boolean };
+  /** A branch of a bank, where its customers bank at the counter. */
+  branch?: { bank: string };
 }
 
 export interface TplRoute {
@@ -162,41 +183,106 @@ export interface TplVehicle {
   description: string;
 }
 
+export interface TplOwner {
+  party: string;
+  /** owner (default), joint, custodian, beneficiary, trustee or authorized_user. */
+  role?: string;
+  share?: number;
+}
+
 export interface TplAccount {
   id: string;
   name: string;
-  kind: string;
-  owner: string;
+  /** A world product (`economy.products`) or a class: cash, checking, business_checking, savings, credit_card, loan, mortgage, brokerage, … */
+  product: string;
+  owners: TplOwner[];
   institution?: string;
+  /** A cash account's container (a purse, a till). */
   container?: string;
-  balance?: number;
-  owedCents?: number;
+  /** The balance at the start, from the holder's side: negative for what a card or a loan owes. */
+  opening?: number;
+  /** A cash account's coins, which sum to its opening. */
+  coins?: Record<string, number>;
   limitCents?: number;
-  principalCents?: number;
-  remainingMonths?: number;
-  paymentCents?: number;
   aprPct?: number;
+  apyPct?: number;
   statementDay?: number;
   dueDay?: number;
+  /** none, minimum, statement, full or fixed. */
   autopay?: string;
-  /** Brokerage: market value of the holdings at the start, in cents (the converter turns it into units at the symbol's starting price). */
-  holdingsCents?: number;
-  /** Brokerage: the symbol held; defaults to the finance table's broad US equity index. */
-  symbol?: string;
+  autopayFrom?: string;
+  autopayCents?: number;
+  paymentCents?: number;
+  termMonths?: number;
+  monthsLeft?: number;
+  securedBy?: string;
+  /** decline, fee or linked. */
+  overdraft?: string;
+  overdraftLimitCents?: number;
+  overdraftLink?: string;
 }
 
-export interface TplBill {
+export interface TplCard {
   id: string;
-  payer: string;
-  /** A character (the money lands in their account) or an outside counterparty named in words. */
-  payee: string;
+  name: string;
+  account: string;
+  holder: string;
+  network: "debit" | "credit" | "charge";
+  /** The gear item that is the physical card. */
+  item?: string;
+  last4?: string;
+}
+
+/** A scheduled movement of money (DESIGN §25.5). */
+export interface TplFlow {
+  id: string;
   label: string;
+  /** bill (default), rent, utility, subscription, premium, transfer, savings, income, draw, … */
+  kind?: string;
+  /** An account, or a party without accounts, who pays out of their means; an outside payer named in words pays in. */
+  from: string;
+  /** An account, a party (paid into their deposit account), or an outside counterparty named in words. */
+  to: string;
   amountCents: number;
-  /** `month` (day 1-28) or `week` (day 0-6, the calendar's weekday). */
-  every: string;
-  day: number;
-  /** The payer's account it is paid from; omitted for a payer without accounts, who pays out of their means. */
-  from?: string;
+  every?: "day" | "week" | "month" | "year";
+  interval?: number;
+  /** Days of the month (1-31; -1 the last), weekdays (0-6, the calendar's) and months (1-12) it falls on. */
+  days?: number[];
+  weekdays?: number[];
+  months?: number[];
+  at?: string;
+  once?: string;
+  start?: string;
+  end?: string;
+  /** skip (default), partial, defer, retry, fallback or overdraft. */
+  shortfall?: string;
+  retryDays?: number;
+  retries?: number;
+  fallback?: string;
+  category?: string;
+  /** What it belongs to: the vehicle it insures, the property it rents. */
+  link?: string;
+  shares?: { party: string; pct: number }[];
+  /** Modern only, checked by the validator: the catalog row, vehicle class, or usage and rate the amount comes from. */
+  catalogItem?: string;
+  vehicleClass?: string;
+  usageKwh?: number;
+  rateCentsPerKwh?: number;
+}
+
+export interface TplHousehold {
+  id: string;
+  name: string;
+  members: { id: string; role?: string }[];
+}
+
+/** A record the money modules keep as an entity (a business, an invoice, a property, a holding), written as the entity's fields. */
+export interface TplRecord {
+  id: string;
+  kind: string;
+  name: string;
+  tier?: string;
+  fields: JsonObject;
 }
 
 export interface TplStage {
@@ -318,7 +404,12 @@ export interface Template {
   kits: TplKit[];
   vehicles: TplVehicle[];
   accounts: TplAccount[];
-  bills?: TplBill[];
+  cards?: TplCard[];
+  flows?: TplFlow[];
+  households?: TplHousehold[];
+  records?: TplRecord[];
+  /** The economy pack's config: products, Custom money toggles, assets, and module keys (taxes). */
+  economy?: JsonObject;
   prices?: { id: string; name: string; unit: string; category: string; band: { min: number; typical: number; max: number } }[];
   /** Price bands for every `economy.categories` row, in the world's own base units, for a world with no data pack (replaces the Modern US bands in cents). */
   categories?: Record<string, { name: string; basis: string; band: { min: number; typical: number; max: number } }>;

@@ -14,6 +14,7 @@
 // doors steer the POV across grids, things lie in cells, and cells and zones trigger rules
 // (`positions.ts`).
 
+import { FILING_STATUSES } from "../../../shared/finance";
 import type { JsonValue } from "../../../shared/json";
 import { hasOwn, isRecord } from "../../../shared/json";
 import { cellIndex, findPath, gridMinutes, gridOf, SIGHT_MAX, standingGrid, type GridPath } from "../../../shared/grid";
@@ -136,6 +137,9 @@ export const PERSON: KindDef = {
     occupation: { type: "text", label: "Occupation", domain: "money", level: 3, table: "economy.occupations" },
     region: { type: "text", label: "Region", domain: "money", level: 3, table: "economy.regions" },
     employer: { type: "ref", label: "Employer", domain: "money", level: 3 },
+    pay_prefs: { type: "list", label: "Pays with, in order ({use, min?, max?, categories?, except?})", domain: "money", level: 3 },
+    filing_status: { type: "enum", label: "Tax filing status", values: [...FILING_STATUSES], domain: "money", level: 4 },
+    local_tax: { type: "bool", label: "Pays local income tax", domain: "money", level: 4 },
     might: { type: "number", label: "Might", min: 3, max: 18, domain: "sheets", level: 1 },
     agility: { type: "number", label: "Agility", min: 3, max: 18, domain: "sheets", level: 1 },
     wits: { type: "number", label: "Wits", min: 3, max: 18, domain: "sheets", level: 1 },

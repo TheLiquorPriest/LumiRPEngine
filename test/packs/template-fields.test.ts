@@ -15,13 +15,16 @@ import { priceOf } from "../../src/packs/economy/core/model";
 import { routeAt } from "../../src/packs/space/core/travel";
 import { modernUsWorld } from "./riverton";
 import { startState, trialBalance } from "./support";
+import { migrateMoney } from "../../src/engine/money-migrate";
 
 const reg = createRegistry(ALL_PACKS);
 
 function setup(patch: (w: WorldDoc) => void): Working {
-  const world = modernUsWorld("w", "R");
-  world.realism.levels.money = 4;
-  patch(world);
+  const authored = modernUsWorld("w", "R");
+  authored.realism.levels.money = 4;
+  patch(authored);
+  // The fields as a template writes them, read as the converter's world reads them (migrated).
+  const world = migrateMoney(authored);
   const w = new Working(reg, world, startState(world));
   materializeAll(reg, w, world.pov, "run");
   return w;
@@ -37,26 +40,6 @@ function posts(w: Working, memo: RegExp): Extract<LedgerEvent, { type: "post" }>
 }
 
 describe("template fields: money", () => {
-  test("hourly pay on a named weekday goes to depositTo; bills charge their `from` account weekly or monthly", () => {
-    const w = setup((wd) => {
-      Object.assign(wd.entities.you!.fields, { hourly_cents: 2350, hours_per_week: 40, pay_frequency: "weekly", payday: "Thursday", deposit_to: "savings" });
-      wd.entities.you!.fields.bills = [
-        { label: "Streaming", payee: "StreamBox", amountCents: 1799, every: "month", day: 3, from: "card" },
-        { label: "Gym", payee: "Gym", amountCents: 2500, every: "week", day: "Monday", from: "checking" },
-      ];
-    });
-    lapse(w, 28);
-    const pay = posts(w, /^Payroll/).filter((p) => p.lines.some((l) => l.account === "savings"));
-    expect(pay).toHaveLength(4);
-    for (const p of pay) {
-      expect(p.lines.find((l) => l.account === "savings")?.amount).toBeGreaterThan(0);
-      expect(-(p.lines.find((l) => l.account.includes("employer"))?.amount ?? 0)).toBe(94000);
-    }
-    expect(posts(w, /^Streaming/).map((p) => p.lines.find((l) => l.account === "card")?.amount)).toEqual([-1799]);
-    expect(posts(w, /^Gym/).every((p) => p.lines.some((l) => l.account === "checking" && l.amount === -2500))).toBe(true);
-    expect(posts(w, /^Gym/)).toHaveLength(4);
-    expect(trialBalance(w.state)).toBe(0);
-  });
 
   test("a loan pays its amortized payment on dueDay (once, even when a bill to the lender repeats it); a card's `minimum from <account>` autopay pays from that account on dueDay", () => {
     const w = setup((wd) => {
@@ -66,7 +49,7 @@ describe("template fields: money", () => {
       you.bills = [...(Array.isArray(you.bills) ? you.bills : []), { label: "Auto loan payment", payee: "Lakeshore CU", amountCents: 43631, every: "month", day: 10, from: "checking" }];
     });
     lapse(w, 45);
-    const loan = posts(w, /^Auto loan payment/);
+    const loan = posts(w, /^Auto loan autopay/);
     expect(loan).toHaveLength(1);
     expect(Math.abs((loan[0]?.lines.find((l) => l.account === "loan")?.amount ?? 0) - 43631)).toBeLessThanOrEqual(2);
     const autopay = posts(w, /^Visa card autopay/);

@@ -21,12 +21,18 @@ async function boughtLines(rig: Rig, chatId: string): Promise<{ memo: string; ce
   const core = await rig.rt.ledger.core(chatId, rig.host.userId);
   const state = core?.fold(toChain(await rig.host.chats.messages(chatId, rig.host.userId))).state;
   if (!state) throw new Error("no state");
-  const history = state.packs.economy?.history;
-  return (Array.isArray(history) ? history : []).flatMap((h) => {
-    if (!h || typeof h !== "object" || Array.isArray(h) || typeof h.memo !== "string" || !h.memo.startsWith("Bought ")) return [];
-    const lines = Array.isArray(h.lines) ? h.lines : [];
-    return [{ memo: h.memo, cents: lines.reduce((sum: number, l) => sum + (l && typeof l === "object" && !Array.isArray(l) && typeof l.amount === "number" ? Math.abs(l.amount) : 0), 0) }];
-  });
+  // The journal keeps each posting's line per account, under the posting's id: one purchase is the lines sharing an id.
+  const journal = state.packs.economy?.journal;
+  const byId = new Map<string, { memo: string; cents: number; at: number }>();
+  for (const entries of Object.values(journal && typeof journal === "object" && !Array.isArray(journal) ? journal : {})) {
+    for (const j of Array.isArray(entries) ? entries : []) {
+      if (!j || typeof j !== "object" || Array.isArray(j) || typeof j.memo !== "string" || !j.memo.startsWith("Bought ") || typeof j.id !== "string") continue;
+      const seen = byId.get(j.id) ?? { memo: j.memo, cents: 0, at: typeof j.at === "number" ? j.at : 0 };
+      seen.cents += typeof j.cents === "number" ? Math.abs(j.cents) : 0;
+      byId.set(j.id, seen);
+    }
+  }
+  return [...byId.entries()].sort((x, y) => x[1].at - y[1].at || x[0].localeCompare(y[0])).map(([, v]) => ({ memo: v.memo, cents: v.cents }));
 }
 
 /**

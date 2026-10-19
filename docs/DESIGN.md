@@ -621,7 +621,7 @@ Each pack ships a pure `core` (kinds, relations, level contract, services, query
 | **Space & travel** | Places, routes with modes (walk, road, off-road, water), distances, terrain, grids, positions, tracking. Reachability is a query: a move across a gap no single-mode route spans is declined. |
 | **Gear & containers** | Own, hold, wear and store; equip slots; containers with weight and volume limits; stacks; kits as template plus overrides (a piece named in free text matches by its words in any order: "metric combination wrench" finds "combination wrench, metric"); condition, wear, consumables.<br>**Use grants** (lending): a loan ends at the time the player says ("until 7 tonight", "for 3 hours", "tomorrow morning", "Friday"), which wins over the days; words that name no time fall back to the days, and with neither there is no loan. When a loan runs out the thing stays where it is, is flagged *overdue*, and the owner's planner schedules retrieval. A thing handed back to its owner, or given to a new owner, ends its loans and clears *overdue*; passed on to someone else, it stays lent. |
 | **Vehicles** | Road, marine and off-road kinds; fuel type, capacity, consumption by mode, terrain and load; range; odometer or engine hours; condition; maintenance; status; location and **home base**; owner; **assigned to** (a use grant with the same expiry semantics); passengers and cargo as containment; refuel, repair and service through `economy.charge`; seeded breakdowns. |
-| **Economy** | A double-entry ledger with an external-economy counterparty.<br>**Accounts:** cash (wallet-bound at Gear ≥2), checking, savings, cards (autopay from level 3), loans, brokerage.<br>**Flows:** payroll from jobs, with flat withholding per occupation and region; rent, utilities, subscriptions. Recurring payments come from checking, a card or savings, never from wallet cash. A bill paid to someone in the world (a person, or anything holding accounts) lands in their deposit account; any other payee is an outside counterparty. Two bills due the same morning see each other, so they can't both spend what covers one. **Living costs:** every Monday at 09:00 (the calendar's weekday 1), everyone but the POV who holds accounts pays a week of everyday spending for their current wealth band: the world's own `livingCosts` (economy config, a weekly amount per band in its minor units), else, for the Modern US data, one adult's weekly grocery basket (thrifty, moderate or liberal) times 1 to 8 by band, at the region's cost of living; a world with neither has none.<br>**Everyone's records:** a history line is filed with every holder it touches: the POV's history feeds the Money panel, and each other person's record (their last 12 lines and 6 notes) feeds the GM view. Their payday, bill and decline notes are secret `economy.note` events, never signals, so they never reach the player or stop the player's timelapse. Someone whose money is a band alone keeps no lines or notes.<br>**Card rules:** interest, fees, statements, minimum payments, limits and declines.<br>**Markets:** investments on process-seeded price paths.<br>**Pricing:** catalogs plus category price bands.<br>**Reports:** budgets, net worth, cash flow. A funds guard on posting refuses any payment the account cannot cover (a Keep conversion is the player's own adjustment and may leave an account short). |
+| **Economy** | The money foundation (§25): parties holding accounts through owners and roles; products as data with class traits; cards; flows for every scheduled movement of money; one statement cycle for every credit product; a journal with holds; credit reports and scores; payment preferences; cash machines and branches; overdraft policies; households; catalog and category-band pricing. Work, payroll, businesses and taxes are its work module (§26); holdings, prices, property and net-worth sources its holdings module (§27). Money levels and the features each turns on are §25.12. |
 | **Cast life** | Commitments (jobs, school terms and timetables, appointments, trips and vacations, chores); needs and drives; agendas; a day planner (deterministic utility, seeded tie-breaks, recorded tie-zone decisions, re-planning on interrupts); off-screen execution; NPC↔NPC encounters. |
 | **Relationships** | Per-pair multi-axis regard; appraisal rules; closed-form decay; bands that feed the planner and narrator voice; history; groups (factions, families, households, companies) with membership roles and group regard; kinship (`parent_of`/`child_of`, `sibling_of`, `spouse_of`, `partner_of`). |
 | **Sheets & checks; Weather; Story** | §3, §8, §10. |
@@ -1325,3 +1325,94 @@ The Cast life planner (§8) lays each character's own plans into their days and 
 - **Swipes:** a Re-narrate copies its source's pre-reply events, so it reuses the pre phase's minds. A Re-run asks again. A Re-read edit writes the memory again from the edited text.
 - **No model calls:** the background lane (Playtest, Check world) runs no model and records no mind. Plans already recorded still drive the planner (§24.8).
 - **Replay:** a replay, a restart or the other fold gives the same minds state. The property suite generates minds turns, replies that record presence and memory, and GM minds controls, and checks them on every view.
+
+## 25. Money foundation
+
+The economy pack's core (`src/packs/economy/core/`) is one double-entry ledger with an outside-economy counterparty (`economy.external:<id>`), and everything money does is built on it. The work module (§26) and the holdings module (§27) register through the `FinanceRegistry` it hands them (`module.ts`; the list is `modules.ts`): fields on its kinds, flow sources, amount providers, net-worth sources, sale hooks, view sections and summary lines. No module registers a kind or a second ledger, and none adds a top-level world collection: money is entity kinds (account, card, flow, trust, business, job, holding, property, invoice), the person fields `pay_prefs`, `filing_status` and `local_tax`, the place fields `atm` and `branch`, and `packs.economy.config` (`products`, `features`, `assets`, and module keys such as `taxes`).
+
+### 25.1 Parties, owners and roles
+
+A party is a person, a business, a trust or a household. An account, a holding, a property or a business lists `owners: [{party, role, share?}]`. The role grants the rights: `owner` and `joint` spend, manage and count it; `authorized_user` spends; `custodian` and `trustee` manage it for a `beneficiary`, who counts it. Every "your own things" read in the engine goes through `heldBy`, so held accounts and cards count as a character's own. The first owner opens the account. A joint account opens once, by `economy.open`, whichever owner's money materializes first. Shares split what a shared account is worth among its owners.
+
+### 25.2 Products and classes
+
+`product` names a world product (`packs.economy.config.products`) or a class. Classes are cash, checking, business checking, savings, money market, CD, trust, escrow, credit card, charge card, line of credit, loan, mortgage, brokerage and retirement. A product gives terms (APR or APY, fees, grace days, minimum rule, limits, hold days, term); the finance table's class defaults fill whatever it leaves out. Rules read class traits (`CLASS_TRAITS`: asset, liability, pays, revolving, installment, locked, …), never a class name. A locked class (retirement, CD) can't be chosen to pay, moved from or drawn on by a flow; its own module may post from it.
+
+### 25.3 Cards
+
+A card is an entity on an account, in a holder's hands. It carries a network (debit, credit or charge), a state (active, frozen, lost or cancelled), daily purchase and cash limits, and optionally the gear item that is the physical card. Freezing and reporting a card lost are the holder's actions. A replacement is a new card on the same account; the old one is cancelled, and its gear card is replaced where gear runs. A purchase by card posts at once, pending until it settles a day later where holds run.
+
+### 25.4 One statement cycle
+
+Every credit product runs through one cycle (`cycle.ts`). Revolving accounts close a statement on their statement day: interest falls only on a balance carried past a grace period, and the first statement is always in grace, so an opening balance isn't charged at once. Interest follows the average daily balance where that feature runs, or the month's balance otherwise. Each statement also posts any annual fee and rewards, and sets the minimum due (a percentage plus interest, with a floor).
+
+On the due day, autopay pays the minimum, the statement balance, the full balance or a fixed amount, capped at what's owed. If less than the minimum arrives, the account moves through the delinquency stages: late, 30, 60, 90, 120, collections and charged off. A late fee posts, never more than the minimum. At 60 days the penalty APR starts, at 90 the account freezes, and from 120 it goes to collections and then charged off. Each stage is a credit-report entry. Six on-time payments in a row lift the penalty APR.
+
+Installment accounts bill an amortized payment on their due day. `months_left` counts down, the last payment takes everything left, and the loan is paid off at its term. Deposit accounts earn interest and pay any maintenance fee on the 1st.
+
+### 25.5 Flows
+
+Every scheduled movement of money is a flow: authored flow entities, and flows the foundation and its modules derive. The foundation's own are card and loan autopay, living costs and vehicle premiums. The modules' are payroll, owner's draws and invoices.
+
+A flow has:
+- a payer and a payee;
+- an amount: fixed, from a formula, a table, a percentage, what's due, or an amount provider's;
+- a schedule (`every`, `interval`, `days`, `weekdays`, `months`, `except`, an `at` time, `once`, start, end and count), with a roll to a business day;
+- splits;
+- a link to what it belongs to;
+- a shortfall policy for when the payer can't cover it: skip, partial, defer (added to the next occurrence), retry (after a number of days, a set number of times), fallback (another account), or overdraft.
+
+The money process (`economy.money`) runs every occurrence, statement and due check in a slot at its own instant, in time order. It works on a scratch state, so two payments due the same morning see each other. A payment to someone in the world lands in their deposit account; any other payee is an outside counterparty.
+
+### 25.6 Journal and holds
+
+Every posting writes a journal line on each account it touches: memo, kind, category, counterparty, card, flow, and status (pending or posted). The journal keeps the last 40 lines per account, monthly totals for 13 months, the last 6 statements and the notes. A hold makes part of a balance unavailable until its time: an authorization, or a deposit's hold days at a cash machine. Release is the GM's control. What can be spent is the balance, less holds, plus overdraft room.
+
+### 25.7 Credit
+
+Each person has a credit report: inquiries, accounts opened, on-time and late payments, collections, charge-offs, closures and payoffs. A score is computed monthly from payment history, utilisation, account age, new credit and mix (`credit.ts`), and the report keeps its history. Applying for credit makes a hard inquiry; the score then sets the APR tier and the limit, or a decline that says why. Below the level where credit runs, an application simply opens the account.
+
+### 25.8 Payment preferences
+
+A person's `pay_prefs` lists ways to pay, in order: cash, debit, credit, charge, checking, savings, or a named card or account. Each tier can set `min`, `max`, `categories` and `except`. A payment takes the first tier that fits and can cover it, then any account the payer can spend from. Cash needs a till, an in-person sale where the payer is. A method or account the player names ("with my card") goes before the preferences.
+
+### 25.9 Cash, machines and branches
+
+Where cash needs a machine (the `atm` feature, at the top level), a withdrawal takes one of two routes. At a branch of the account's own bank (a place's `branch`) it needs no card and has no limit. At a cash machine (a place's `atm`, found at the person's place or a place it is inside) it takes an active card on the account. The machine's per-withdrawal limit and the card's daily cash limit both apply. Another bank's machine charges its surcharge plus the account's out-of-network fee, and cash from a credit account is a cash advance, with its fee. A cash deposit is available at once at a branch; at a machine that takes deposits, the account's hold days apply. Below the top level, cash moves freely between the wallet and the accounts.
+
+### 25.10 Overdraft
+
+A deposit account's `overdraft` policy decides a payment the balance can't cover. `decline` refuses it. `fee` pays it up to `overdraft_limit` and charges the product's overdraft fee. `linked` draws the gap from `overdraft_link`. A flow that bounces may charge a fee for insufficient funds.
+
+### 25.11 Households and views
+
+A household is a party its members belong to. Its accounts, the joint accounts every member holds, and its shared flows (paid by it, or split among its members) make its view: who pays what share of the month. `FinanceView` is one party's money at their own level: overview, accounts, cards, flows, jobs, businesses, investments, properties, credit and household. The POV's view is `economy.money`; every party's, POV first, is the GM's `economy.people_money`; and any one party's is `economy.finance`. Player views show "someone" for any party the POV can't see.
+
+### 25.12 Realism gating
+
+The Money level sets a baseline.
+
+| Level | What runs |
+| --- | --- |
+| 1 | A wealth band, following a notional net worth. |
+| 2 | Cash plus one account. |
+| 3 | Every account, cards, flows, payment preferences, households and living costs. |
+| 4 | Statements, interest, fees, delinquency, credit, cash machines, holds, limits and overdrafts. |
+
+Each feature in `FEATURE_DEFS` has a floor (the lowest level it can run at) and the level where it turns on by itself. A world's Custom toggles (`packs.economy.config.features`) switch a feature on anywhere from its floor up, or off. Flows take the payer's level when the payer is in the world, else the payee's. Demotion stops processes and narrows views; balances stay live, and the trial balance is 0 at every level mix.
+
+### 25.13 Minds
+
+`economy.summary` is a character's own money in plain second-person lines, for their mind: cash and the bank, what they owe and when it's due, what comes in and goes out in the next two weeks, the modules' lines (their pay, their business), and what's pressing. It also returns the band and roughly what they could spend today. It never says anything about anyone else's money.
+
+### 25.14 Older worlds
+
+`migrateWorld` reads older revisions through `migrateMoney` (`src/engine/money-migrate.ts`). It converts:
+- an account's `owner` and `type` to its owners list and product, and `remaining_months` to `months_left`;
+- an autopay sentence ("minimum from acct_x") to a mode and the account it pays from;
+- a deposit account's `apr_pct` to its `apy_pct`;
+- a party's `bills` to flow entities, dropping a lender's bill that the loan's own autopay already pays, and linking a car insurance bill to the owner's vehicle;
+- a person's occupation and payroll fields to a job;
+- a brokerage's units of a symbol to a holding of that asset (`<account>:<symbol>`, the id the holdings module's trades add to), with the symbol added to the world's assets.
+
+Only a world with the old shapes is migrated, so a migrated world has nothing left to migrate. The starter templates are written in the foundation's vocabulary (`data-src/templates/README.md`).

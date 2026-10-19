@@ -1,32 +1,60 @@
-// Play → Money (DESIGN §9.1 Money levels): a wealth band at level 1; cash plus accounts from level 2;
-// cards, recurring bills and income from 3; APR, statements and loans at 4. The view model is
-// already at the POV's level; this only lays it out. Amounts sit left of the right gutter.
+// Play → Money (DESIGN §9.1 Money levels, §25): a wealth band at level 1; cash plus accounts from
+// level 2; cards, flows and income from 3; APR, statements and loans at 4. The view model
+// (`FinanceView`) is already at the POV's level; this only lays it out. Amounts sit left of the
+// right gutter.
 
+import { ACCOUNT_CLASSES, type AccountClass } from "../../../shared/finance";
 import { isRecord } from "../../../shared/json";
 import { Card, Empty, JsonView, Row } from "../../../frontend/components";
 import { list, num, oneOf, optNum, str } from "../../../frontend/decode";
 import { formatCents } from "../../../frontend/format";
 import type { PanelProps } from "../../../frontend/registry";
 
-import { ACCOUNT_TYPES } from "../core/model";
-import type { AccountType } from "../core/model";
-import type { MoneyView } from "../core/view";
+const CLASS_ICON: Record<AccountClass, string> = {
+  cash: "💵",
+  checking: "🏦",
+  business_checking: "🏦",
+  savings: "🐖",
+  money_market: "🐖",
+  cd: "🔒",
+  trust: "🏛",
+  escrow: "🏛",
+  credit_card: "💳",
+  charge_card: "💳",
+  line_of_credit: "💳",
+  loan: "📄",
+  mortgage: "🏠",
+  brokerage: "📈",
+  retirement: "📈",
+};
 
-const KIND_ICON: Record<AccountType, string> = { cash: "💵", checking: "🏦", savings: "🐖", card: "💳", loan: "📄", brokerage: "📈" };
+/** What this panel lays out of a `FinanceView`. */
+export interface MoneyPanelView {
+  level: number;
+  band: string | null;
+  netWorthCents: number | null;
+  cash: { band: string } | { cents: number } | null;
+  accounts: { id: string; name: string; class: AccountClass; cents: number; limitCents?: number; aprPct?: number; due?: { label: string; cents: number } }[];
+  recent: { at: string; memo: string; cents: number; account: string }[];
+  upcoming: { at: string; label: string; cents: number }[];
+}
 
-export function decodeMoneyView(value: unknown): MoneyView | null {
+export function decodeMoneyView(value: unknown): MoneyPanelView | null {
   if (!isRecord(value) || (!Array.isArray(value.accounts) && typeof value.band !== "string")) return null;
+  const overview = isRecord(value.overview) ? value.overview : null;
   return {
     level: num(value.level, 1),
     band: typeof value.band === "string" ? value.band : null,
-    netWorthCents: typeof value.netWorthCents === "number" ? value.netWorthCents : null,
+    netWorthCents: overview && typeof overview.netWorth === "number" ? overview.netWorth : null,
     cash: isRecord(value.cash) ? (typeof value.cash.cents === "number" ? { cents: value.cash.cents } : { band: str(value.cash.band) }) : null,
     accounts: list(value.accounts, (a) => {
       const due = isRecord(a.due) ? { label: str(a.due.label), cents: num(a.due.cents) } : undefined;
-      return typeof a.id === "string" ? { id: a.id, name: str(a.name, a.id), kind: oneOf(a.kind, ACCOUNT_TYPES, "checking"), cents: num(a.cents), limitCents: optNum(a.limitCents), aprPct: optNum(a.aprPct), due } : null;
+      const limitCents = optNum(a.limit);
+      const aprPct = optNum(a.aprPct);
+      return typeof a.id === "string" ? { id: a.id, name: str(a.name, a.id), class: oneOf(a.class, ACCOUNT_CLASSES, "checking"), cents: num(a.cents), ...(limitCents !== undefined ? { limitCents } : {}), ...(aprPct !== undefined ? { aprPct } : {}), ...(due ? { due } : {}) } : null;
     }),
     recent: list(value.recent, (t) => ({ at: str(t.at), memo: str(t.memo), cents: num(t.cents), account: str(t.account) })),
-    upcoming: list(value.upcoming, (u) => ({ at: str(u.at), label: str(u.label), cents: num(u.cents) })),
+    upcoming: list(overview?.upcoming, (u) => ({ at: str(u.at), label: str(u.label), cents: num(u.cents) })),
   };
 }
 
@@ -53,7 +81,7 @@ export function MoneyPanel(props: PanelProps) {
                 key={a.id}
                 k={
                   <>
-                    <span aria-hidden="true">{KIND_ICON[a.kind]}</span> {a.name}
+                    <span aria-hidden="true">{CLASS_ICON[a.class]}</span> {a.name}
                   </>
                 }
                 sub={subs.length > 0 ? subs.join(" · ") : undefined}
