@@ -129,6 +129,42 @@ describe("minds around a turn", () => {
     expect(minds).toContain("Intends: Danny Okafor means to ask about the weekend.");
   });
 
+  test("under full secrecy a mind reaches no helper step, no contradiction chip and no choice", async () => {
+    const rig = new Rig({ shipped: true });
+    // Every step on, every turn: brief, outline, choices, contradiction, extract and the rest.
+    const steps = Object.fromEntries(["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices"].map((p) => [p, { enabled: true, signals: ["always"] }]));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "full" } } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { preset: "custom", steps } } }));
+    fakeModels(rig);
+    const minds = rig.host.quietReply;
+    // A choices helper that suggests whatever intent it is shown, and a contradiction helper that calls
+    // any mind among the facts contradicted: either would carry the mind onto a chip.
+    rig.host.quietReply = (req) => {
+      const system = req.messages[0]?.content ?? "";
+      const user = req.messages[1]?.content ?? "";
+      if (system.includes("Suggest three short")) return JSON.stringify({ choices: [/Intends: ([^.\n]+)/.exec(user)?.[1] ?? "I wave back"] });
+      const asked = /^"contradicts": .* Criteria: (\{.*\})$/m.exec(user)?.[1];
+      if (system.startsWith("Answer each question about the state") && asked) {
+        const criteria: Record<string, string> = JSON.parse(asked);
+        const pick = Object.keys(criteria).find((k) => criteria[k]?.includes("PRIVATE")) ?? "none";
+        return JSON.stringify({ contradicts: { probabilities: { [pick]: 1 } } });
+      }
+      return minds?.(req) ?? "{}";
+    };
+    const chatId = await alderChat(rig, { secrecy: "full" });
+    await rig.turn(chatId, "Hello.", "They look up.");
+    // The narrator has the minds whole; nothing else does.
+    expect(section(rig, "Minds")).toContain("PRIVATE thoughts of Danny Okafor");
+    const leaks = /PRIVATE|means to ask about the weekend/;
+    const helpers = rig.host.quietCalls.filter((c) => !MIND.test(c.messages[0]?.content ?? "") && !MEMORY.test(c.messages[0]?.content ?? ""));
+    const asked = helpers.map((c) => /You brief|You outline|Suggest three short|propose concrete state changes|"contradicts"/.exec(`${c.messages[0]?.content ?? ""} ${c.messages[1]?.content ?? ""}`)?.[0]);
+    for (const step of ["You brief", "You outline", "Suggest three short", "propose concrete state changes", '"contradicts"']) expect(asked).toContain(step);
+    for (const c of helpers) expect(JSON.stringify(c.messages)).not.toMatch(leaks);
+    const chips = (await rig.rt.view(chatId, rig.host.userId)).chips;
+    expect(chips.some((c) => c.kind === "choice")).toBe(true);
+    expect(JSON.stringify(chips)).not.toMatch(leaks);
+  });
+
   test("Re-narrate reuses the pre phase's minds; Re-run asks again", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);
