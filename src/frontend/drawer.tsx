@@ -17,6 +17,7 @@ import type { Rect } from "./layout";
 import { Play } from "./play/play";
 import { scrollParent } from "./scroll";
 import { Settings } from "./settings/settings";
+import { useSelect } from "./store";
 
 const MODES: readonly { id: Mode; label: string; icon: IconName }[] = [
   { id: "play", label: "Play", icon: "dice" },
@@ -28,20 +29,24 @@ const MODES: readonly { id: Mode; label: string; icon: IconName }[] = [
 export function Drawer(props: { measure(el: Element): Rect }) {
   const app = useApp();
   const mode = useUi((ui) => ui.mode);
+  const open = useSelect(app.host.drawer, (drawer) => drawer.open);
   const root = useRef<HTMLDivElement>(null);
   const modebar = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const bodyId = useId();
+  /** The chat heads as last measured; none while the drawer is closed. */
+  const heads = useRef<readonly Rect[]>([]);
+  /** Re-measures the gutters and the published heights. */
+  const relayout = useRef<() => void>(() => {});
   useEffect(() => {
     const el = root.current;
     if (!el) return;
-    const heads = watchChatHeads(props.measure);
     // A percentage min-height can't fill the host's panel: our root's height is its content's. The
     // panel that scrolls us is found again once the host moves the tab elsewhere.
     let scroller: HTMLElement | null = null;
     const observer = new ResizeObserver(() => apply());
     const apply = () => {
-      const gutters = headGutters(props.measure(el), heads.get());
+      const gutters = headGutters(props.measure(el), heads.current);
       el.style.setProperty("--lre-gutter-l", `${gutters.left}px`);
       el.style.setProperty("--lre-gutter-r", `${gutters.right}px`);
       if (modebar.current) el.style.setProperty("--lre-modebar-h", `${modebar.current.offsetHeight}px`);
@@ -56,19 +61,34 @@ export function Drawer(props: { measure(el: Element): Rect }) {
         el.style.setProperty("--lre-fill-h", `${Math.max(0, Math.floor(fill))}px`);
       }
     };
+    relayout.current = apply;
     apply();
-    const off = heads.subscribe(apply);
     observer.observe(el);
     if (modebar.current) observer.observe(modebar.current);
     // The host slides the drawer in with a transform, which no ResizeObserver sees: re-measure when it settles.
     document.addEventListener("transitionend", apply, true);
     return () => {
-      off();
-      heads.dispose();
       observer.disconnect();
       document.removeEventListener("transitionend", apply, true);
     };
   }, []);
+  // The heads are watched only while the drawer is open: the watcher observes the whole page, and a
+  // closed drawer has nothing to keep clear of them.
+  useEffect(() => {
+    if (!open) return;
+    const watch = watchChatHeads(props.measure);
+    const sync = () => {
+      heads.current = watch.get();
+      relayout.current();
+    };
+    sync();
+    const off = watch.subscribe(sync);
+    return () => {
+      off();
+      watch.dispose();
+      heads.current = [];
+    };
+  }, [open]);
   const select = (next: Mode) => app.ui.update((ui) => ({ ...ui, mode: next }));
   // WAI-ARIA tabs: Left/Right/Home/End move between modes and focus the new one.
   const onKeyDown = (event: KeyboardEvent, index: number) => {
