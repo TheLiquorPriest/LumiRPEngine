@@ -312,16 +312,20 @@ function householdView(hooks: FinanceHooks, ctx: ReadContext, viewer: Viewer, ho
 export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: EntityId, player: boolean): FinanceView {
   const viewer: Viewer = { pov: player ? ctx.world.pov : null };
   const e = own(ctx.state.entities, party);
-  const level = ctx.levelOf(party, "money");
+  const kind = partyKindOf(ctx, party);
+  // A household is its members' shared money: it is followed as closely as its most closely followed member, though it holds no account of its own.
+  const members = kind === "household" ? membersOf(ctx.registry, ctx.world, ctx.state, party) : [];
+  const level = Math.max(ctx.levelOf(party, "money"), ...members.map((m) => ctx.levelOf(m, "money")));
   const tog = toggles(ctx.world);
   const detail = level >= 4 || Object.values(tog).some((v) => v === true);
   const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));
   const mine = accountsOf(ctx, party);
-  const empty: FinanceView = { party, name: e?.name ?? party, partyKind: partyKindOf(ctx, party), level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
+  const empty: FinanceView = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
   if (level === 0) return empty;
   const worth = netWorthParts(hooks, ctx, party, (id) => shown(ctx, id));
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
+  if (kind === "household" && level >= 3 && mine.length === 0) return { ...empty, band, cash: { band }, opened, household: householdView(hooks, ctx, viewer, party, allFlows(hooks, ctx)) };
   if (level === 1 || mine.length === 0) return { ...empty, band, cash: { band }, opened };
   const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
   const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf(ctx, id) === "cash" || id === firstTransactional);
@@ -384,7 +388,7 @@ export function buildFinanceView(hooks: FinanceHooks, ctx: ReadContext, party: E
     .map((j) => journalLine(ctx, viewer, j));
   const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
   const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));
-  const household = householdOf(ctx, party);
+  const household = kind === "household" ? party : householdOf(ctx, party);
   const view: FinanceView = {
     ...empty,
     band,

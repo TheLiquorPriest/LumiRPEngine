@@ -36,6 +36,11 @@ describe("Port Alder's money", () => {
     expect(household?.members.map((m) => m.id).sort()).toEqual(["helen_kowalczyk", "jess_kowalczyk", "maddie_kowalczyk"]);
     expect(household?.flows.map((f) => f.id)).toContain("flow_kowalczyk_groceries");
     expect(household?.monthly.parts.find((p) => p.id === "jess_kowalczyk")?.cents).toBeGreaterThan(0);
+    // The household's own view, as the GM picks it, is followed as closely as Helen and shows the same members and shared costs.
+    const own = w.ctx.query("economy.finance")(w.ctx, "household_kowalczyk", false);
+    expect(own.level).toBe(w.ctx.levelOf("helen_kowalczyk", "money"));
+    expect(own.household?.members.map((m) => m.id).sort()).toEqual(["helen_kowalczyk", "jess_kowalczyk", "maddie_kowalczyk"]);
+    expect(own.household?.flows.map((f) => f.id)).toContain("flow_kowalczyk_groceries");
   });
 
   test("the POV carries a debit and a credit card, and the savings transfer moves on the 2nd", () => {
