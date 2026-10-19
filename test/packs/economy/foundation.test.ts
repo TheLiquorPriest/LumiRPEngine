@@ -13,6 +13,7 @@ import { migrateMoney } from "../../../src/engine/money-migrate";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
 import { createRng } from "../../../src/engine/rng";
+import { optionalService } from "../../../src/engine/pack-kit";
 import { placeOfEntity } from "../../../src/engine/scope";
 import { runTimelapse } from "../../../src/engine/time";
 import { Working } from "../../../src/engine/working";
@@ -43,6 +44,11 @@ function setup(patch: (w: WorldDoc) => void = () => undefined): Working {
 function lapse(w: Working, days: number): void {
   const out = runTimelapse(reg, w, { type: "duration", minutes: days * DAY }, { runSeed: "run", overrides: { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" } });
   if ("code" in out) throw new Error(out.reason);
+}
+
+/** One of the POV's accounts as the Money view shows it. */
+function accountView(w: Working, id = ""): { cents: number; available: number | null } | undefined {
+  return w.ctx.query("economy.finance")(w.ctx, "you", true).accounts.find((a) => a.id === id);
 }
 
 function dataOf(w: Working, type: string): JsonObject[] {
@@ -198,6 +204,22 @@ describe("money foundation: authoring and settings", () => {
     lapse(w, 15);
     expect(dataOf(w, "economy.flow_run").filter((d) => d.flow === "gift")).toHaveLength(1);
     expect(w.ctx.query("economy.finance")(w.ctx, "you", true).flows.find((f) => f.id === "gift")?.status).toBe("ended");
+  });
+});
+
+describe("money foundation: accounts before they open", () => {
+  test("an unopened account shows its opening as available, and a GM correction on it opens it first", () => {
+    const world = modernUsWorld("w", "Riverton");
+    const w = new Working(reg, world, startState(world));
+    const view = (id: string): ReturnType<typeof accountView> => accountView(w, id);
+    expect(view("checking")).toMatchObject({ cents: 214000, available: 214000 });
+    expect(view("card")?.available).toBe(400000 - 38000);
+    const adjust = optionalService(w.ctx, "economy.adjust");
+    const out = adjust?.(w.ctx, "checking", -100000);
+    if (!out || "code" in out) throw new Error(out?.reason ?? "no adjust service");
+    w.applyAll(out);
+    expect(w.state.accounts.checking).toBe(114000);
+    expect(trialBalance(w.state)).toBe(0);
   });
 });
 

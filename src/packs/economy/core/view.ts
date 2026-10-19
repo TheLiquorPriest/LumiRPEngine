@@ -58,6 +58,11 @@ function shown(ctx: ReadContext, account: EntityId): number {
   return balance(ctx.state, account) + (opened ? 0 : Math.round(numOf(own(ctx.state.entities, account)?.fields.opening)));
 }
 
+/** What an account can spend as a view shows it: until it opens, its opening counts as posted. */
+function shownAvailable(ctx: ReadContext, account: EntityId): number {
+  return availableOf(ctx, account) + shown(ctx, account) - balance(ctx.state, account);
+}
+
 function journalLine(ctx: ReadContext, viewer: Viewer, j: JournalEntry): JournalLine {
   return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty: j.counterparty ?? null, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
 }
@@ -162,7 +167,7 @@ function accountView(ctx: ReadContext, viewer: Viewer, party: EntityId, account:
     institution: p?.institution || null,
     status: statusOf(ctx.state, account),
     cents,
-    available: level >= 2 ? (t.liability ? (p?.limit === null && cls === "charge_card" ? null : availableOf(ctx, account)) : availableOf(ctx, account) + overdraftRoom(ctx, account)) : null,
+    available: level >= 2 ? (t.liability ? (p?.limit === null && cls === "charge_card" ? null : shownAvailable(ctx, account)) : shownAvailable(ctx, account) + overdraftRoom(ctx, account)) : null,
     owners: owners.map((o) => ({ party: o.party, name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
     role,
     limit: level >= 3 && t.liability ? (p?.limit ?? null) : null,

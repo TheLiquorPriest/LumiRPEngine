@@ -55,17 +55,22 @@ export function openingBalances(entity: EntityId, ctx: ReadContext): LedgerEvent
  * that steps them at that level, their opening balances post as the same `materialize` event a
  * view would record, so their flows draw on the money the author gave them.
  */
-export function openAccounts(slot: SlotInfo, ctx: ReadContext): LedgerEvent[] {
-  const version = pinnedVersion(ctx.world, ctx.registry, "money");
-  if (typeof version !== "number") return [];
+export function openAccounts(ctx: ReadContext): LedgerEvent[] {
   const out: LedgerEvent[] = [];
   for (const who of parties(ctx)) {
     if (ctx.levelOf(who, "money") < 3 || isMaterialized(ctx.state, who, "money")) continue;
-    const events = openingBalances(who, ctx);
-    if (events.length > 0) out.push({ type: "materialize", entity: who, domain: "money", generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events });
+    const opening = openingEvent(ctx, who);
+    if (opening) out.push(opening);
   }
-  void slot;
   return out;
+}
+
+/** A party's opening balances as the `materialize` event a view records when it first shows them; null when nothing is left to open. */
+export function openingEvent(ctx: ReadContext, who: EntityId): LedgerEvent | null {
+  const version = pinnedVersion(ctx.world, ctx.registry, "money");
+  if (typeof version !== "number") return null;
+  const events = openingBalances(who, ctx);
+  return events.length > 0 ? { type: "materialize", entity: who, domain: "money", generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events } : null;
 }
 
 /** The money engine's step: every money instant in the slot, in time order, each seeing the last. */

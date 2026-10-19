@@ -34,7 +34,7 @@ import type { FinanceApi, FinanceHooks, FinanceKind, FinanceRegistry, Payment, P
 import { applyForCredit, closeAccount, createFlow, deposit, openAccount, releaseHold, replaceCard, setAutopay, setCardState, setFlowStatus, setPayPrefs, setStatus, updateFlow, withdraw } from "./actions";
 import { currentScore } from "./credit";
 import { allFlows, businessDay, livingCost, occurrences, splitAmount } from "./flows";
-import { EVENTS, reject } from "./journal";
+import { EVENTS, isOpened, reject } from "./journal";
 import { financeKinds } from "./kinds";
 import { catalogName, itemName, stem } from "./items";
 import {
@@ -48,6 +48,7 @@ import {
   external,
   hasLedger,
   holdersOf,
+  openerOf,
   ownersOf,
   priceOf,
   productOf,
@@ -58,7 +59,7 @@ import {
   type PriceRef,
 } from "./model";
 import { accountLevel, asUnit, charge, featureFor, isParty, isRejection, l1Move, loseWith, move, overdraftRoom, payMethodOf, postGuard, posting, reprice, setCash, signal, transfer, transferParty, depositAccount, type ChargeOptions, type ChargeService, type PayMethod } from "./pay";
-import { materializeMoney, moneyStep, openAccounts } from "./process";
+import { materializeMoney, moneyStep, openAccounts, openingEvent } from "./process";
 import { moneySummary } from "./summary";
 import { buildFinanceView, buildMoneyView, buildPeopleMoney } from "./view";
 import { canAfford, netWorth, wealthOf } from "./worth";
@@ -389,7 +390,10 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       { account, amount: cents },
       { account: CORRECTION_ACCOUNT, amount: -cents },
     ];
-    return asUnit(posting(lines, { memo: "Correction", kind: "adjustment", category: "correction" }));
+    // An account not yet open opens first, as showing it would: the correction moves the balance the GM sees on it.
+    const opener = openerOf(ctx.state, account);
+    const opening = opener !== null && !isOpened(ctx.state, account, opener) ? openingEvent(ctx, opener) : null;
+    return asUnit([...(opening ? [opening] : []), ...posting(lines, { memo: "Correction", kind: "adjustment", category: "correction" })]);
   });
   r.service("economy.reopen", (ctx, account, cents) => {
     const opener = ownersOf(ctx.state, account)[0]?.party ?? "";
@@ -453,7 +457,7 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
   registerActions(r);
 
   // Openings first, so the money engine sees every authored balance.
-  r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (slot, ctx) => openAccounts(slot, ctx) });
+  r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (_slot, ctx) => openAccounts(ctx) });
   r.process({ id: "economy.money", domain: "money", minLevel: 2, step: (slot, ctx, rng) => moneyStep(hooks, slot, ctx, rng) });
   r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity, ctx, rng, version) => materializeMoney(entity, ctx, rng, version) });
 
