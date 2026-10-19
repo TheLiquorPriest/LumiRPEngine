@@ -1,8 +1,9 @@
 // Older worlds' money in the foundation's shapes (DESIGN §25.13): an account's single `owner`
 // becomes its owners list and its `type` a product; a loan's `remaining_months` its `months_left`;
 // an autopay sentence ("minimum from acct_x") a mode and the account it pays from; a deposit's
-// `apr_pct` its `apy_pct`; a party's `bills` list flow entities; and a person's pay (their
-// occupation and the payroll fields beside it) a job entity. Read on every revision
+// `apr_pct` its `apy_pct`; a party's `bills` list flow entities; a person's pay (their
+// occupation and the payroll fields beside it) a job entity; and a brokerage's units of a symbol
+// a holding of that asset. Read on every revision
 // (`migrateWorld`), so a world stored before the rebuild plays as one authored after it. A world
 // with none of the old shapes is returned as it is: an author's choice not to give someone a job
 // is never overridden.
@@ -29,7 +30,7 @@ function isLegacy(doc: WorldDoc): boolean {
       Array.isArray(e.fields.bills) ||
       // A job keeps its own pay fields; only a person carrying them is the older shape.
       (e.kind !== "job" && PAYROLL.some((k) => e.fields[k] !== undefined)) ||
-      (e.kind === "account" && (typeof e.fields.owner === "string" || (typeof e.fields.type === "string" && e.fields.product === undefined) || e.fields.remaining_months !== undefined || (typeof e.fields.autopay === "string" && / from /i.test(` ${e.fields.autopay}`)))),
+      (e.kind === "account" && (typeof e.fields.owner === "string" || typeof e.fields.units === "number" || (typeof e.fields.type === "string" && e.fields.product === undefined) || e.fields.remaining_months !== undefined || (typeof e.fields.autopay === "string" && / from /i.test(` ${e.fields.autopay}`)))),
   );
 }
 
@@ -133,15 +134,41 @@ function jobOf(doc: WorldDoc, person: EntityDef, taken: Set<string>): EntityDef 
   return { id: freeId(doc, taken, `job_${person.id}`), kind: "job", name: `${person.name}'s work`, tier: "background", fields: job, relations: [] };
 }
 
+/** The id the holdings module's trades look up, so a later buy of the asset adds to this holding. */
+function holdingId(account: string, asset: string): string {
+  return `${account}:${asset}`;
+}
+
+/**
+ * A brokerage's old units of a symbol as a holding of that asset, bought at the symbol's starting
+ * price of 100 on the world's start date; the asset is added to the world's assets when missing.
+ */
+function holdingOf(doc: WorldDoc, account: EntityDef, assets: JsonObject): EntityDef | null {
+  const units = account.fields.units;
+  const symbol = typeof account.fields.symbol === "string" && account.fields.symbol !== "" ? account.fields.symbol : "broad_us_equity_index";
+  if (typeof units !== "number" || !(units > 0)) return null;
+  if (!hasOwn(assets, symbol)) assets[symbol] = { label: symbol.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), class: "fund", price: 10000, model: symbol };
+  return { id: holdingId(account.id, symbol), kind: "holding", name: account.name, tier: "background", fields: { account: account.id, asset: symbol, lots: [{ qty: units, cost: Math.round(units * 10000), at: doc.start.at.slice(0, 10) }] }, relations: [] };
+}
+
 /** The world with its money in the foundation's shapes; the same document when nothing is older. */
 export function migrateMoney(doc: WorldDoc): WorldDoc {
   if (!isLegacy(doc)) return doc;
+  const economy = doc.packs.economy;
+  const assets: JsonObject = { ...(isRecord(economy?.config.assets) ? economy.config.assets : {}) };
   const entities: Record<string, EntityDef> = {};
   const taken = new Set<string>();
   const added: EntityDef[] = [];
   const employed = new Set(Object.values(doc.entities).flatMap((e) => (e.kind === "job" && typeof e.fields.worker === "string" ? [e.fields.worker] : [])));
   for (const [id, e] of Object.entries(doc.entities)) {
     let next = e.kind === "account" ? account(e) : e;
+    const holding = e.kind === "account" ? holdingOf(doc, e, assets) : null;
+    if (holding && !hasOwn(doc.entities, holding.id)) {
+      added.push(holding);
+      const fields: JsonObject = { ...next.fields };
+      delete fields.units;
+      next = { ...next, fields };
+    }
     if (Array.isArray(e.fields.bills)) added.push(...billFlows(doc, e, taken));
     if (e.kind !== "job" && !employed.has(id) && typeof e.fields.occupation === "string") {
       const job = jobOf(doc, e, taken);
@@ -156,5 +183,6 @@ export function migrateMoney(doc: WorldDoc): WorldDoc {
     entities[id] = next;
   }
   for (const e of added) entities[e.id] = e;
-  return { ...doc, entities };
+  const packs = economy && Object.keys(assets).length > 0 ? { ...doc.packs, economy: { ...economy, config: { ...economy.config, assets } } } : doc.packs;
+  return { ...doc, entities, packs };
 }

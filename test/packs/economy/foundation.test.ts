@@ -243,6 +243,16 @@ describe("money foundation: older worlds", () => {
     expect(migrateMoney(out)).toBe(out);
   });
 
+  test("an old brokerage's units become a holding of its symbol, and the symbol an asset", () => {
+    const world = modernUsWorld("w", "Riverton");
+    world.entities.fund = entity("fund", "account", { owner: "you", type: "brokerage", symbol: "broad_us_equity_index", units: 31.25, opening: 0 });
+    const out = migrateMoney(world);
+    expect(out.entities.fund?.fields.units).toBeUndefined();
+    expect(out.entities["fund:broad_us_equity_index"]).toMatchObject({ kind: "holding", fields: { account: "fund", asset: "broad_us_equity_index", lots: [{ qty: 31.25, cost: 312500 }] } });
+    expect(out.packs.economy?.config.assets).toMatchObject({ broad_us_equity_index: { class: "fund", price: 10000, model: "broad_us_equity_index" } });
+    expect(migrateMoney(out)).toBe(out);
+  });
+
   test("the starters are built migrated: owners lists and products, no bills or payroll fields, nothing left to migrate", () => {
     for (const [id, make] of Object.entries(STARTER_WORLDS)) {
       const world = (make as (id: string, name: string) => WorldDoc)("s", id);
