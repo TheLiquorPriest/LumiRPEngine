@@ -90,3 +90,36 @@ describe("a flow's fallback is the payer's own", () => {
     expect(lintWorld(world, reg).filter((i) => i.path === "entities.mint.fields.fallback")).toEqual([expect.objectContaining({ severity: "error" })]);
   });
 });
+
+describe("the player's money view never names or sends someone they can't see", () => {
+  const secret = (world: WorldDoc): void => {
+    world.entities.viktor = { id: "viktor", kind: "person", name: "Viktor Kane", tier: "supporting", visibility: "secret", fields: { place: "cafe", wealth: "rich" }, relations: [] } as EntityDef;
+    world.entities.joint = entity("joint", "account", { owners: [{ party: "you", role: "joint" }, { party: "maya", role: "joint" }], product: "checking", opening: 150_000 });
+    world.entities.shared = entity("shared", "account", { owners: [{ party: "you", role: "joint" }, { party: "viktor", role: "joint" }], product: "savings", opening: 10_000 });
+    world.entities.viktor_checking = entity("viktor_checking", "account", { owners: [{ party: "viktor", role: "owner" }], product: "checking", opening: 10_000 });
+    world.entities.hush = entity("hush", "flow", { flow_kind: "transfer", from: "joint", to: "viktor", amount_cents: 20_000, once: "2026-10-17T09:00", shortfall: "skip", status: "active" });
+  };
+
+  test("a hidden payee, co-owner and flow side reach the player as \"someone\", with no id", () => {
+    const w = setup(secret);
+    lapse(w, 2);
+    expect(flowRuns(w, "hush").map((r) => r.outcome)).toEqual(["paid"]);
+    const view = w.ctx.query("economy.finance")(w.ctx, "you", true);
+    expect(JSON.stringify(view).toLowerCase()).not.toContain("viktor");
+    const shared = view.accounts.find((a) => a.id === "shared");
+    expect(shared?.owners.find((o) => o.name === "someone")?.party).toBeNull();
+    const joint = view.accounts.find((a) => a.id === "joint");
+    expect(joint?.transactions.find((t) => t.cents === -20_000)?.counterparty).toBe("someone");
+    const hush = view.flows.find((f) => f.id === "hush");
+    expect([hush?.to, hush?.spec, hush?.payer]).toEqual(["someone", null, "joint"]);
+  });
+
+  test("the GM sees every name and id", () => {
+    const w = setup(secret);
+    lapse(w, 2);
+    const view = w.ctx.query("economy.finance")(w.ctx, "you", false);
+    expect(view.accounts.find((a) => a.id === "shared")?.owners.map((o) => o.party)).toEqual(["you", "viktor"]);
+    expect(view.accounts.find((a) => a.id === "joint")?.transactions.find((t) => t.cents === -20_000)?.counterparty).toBe("Viktor Kane");
+    expect(view.flows.find((f) => f.id === "hush")?.spec?.to).toBe("viktor");
+  });
+});

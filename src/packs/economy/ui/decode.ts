@@ -81,7 +81,9 @@ function journalLine(o: Obj): JournalLine | null {
 }
 
 function ownerLine(o: Obj): OwnerLine | null {
-  return typeof o.party === "string" ? { party: o.party, name: str(o.name, o.party), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share) } : null;
+  // An owner the player can't see comes with a null id and the name "someone".
+  const party = typeof o.party === "string" ? o.party : o.party === null ? null : undefined;
+  return party !== undefined ? { party, name: str(o.name, party ?? "someone"), role: oneOf(o.role, OWNER_ROLES, "owner"), share: num(o.share) } : null;
 }
 
 function card(o: Obj): CardView | null {
@@ -92,7 +94,7 @@ function card(o: Obj): CardView | null {
     network: oneOf(o.network, CARD_NETWORKS, "debit"),
     state: oneOf(o.state, CARD_STATES, "active"),
     holder: str(o.holder),
-    holderId: str(o.holderId),
+    holderId: nullableStr(o.holderId),
     account: str(o.account),
     last4: nullableStr(o.last4),
     item: nullableStr(o.item),
@@ -224,12 +226,13 @@ function flowView(o: Obj): FlowView | null {
     status: oneOf(o.status, FLOW_STATUSES, "active"),
     category: nullableStr(o.category),
     link: idName(o.link),
+    payer: nullableStr(o.payer),
     editable: bool(o.editable),
     source: str(o.source, "entity"),
     done: num(o.done),
     missed: num(o.missed),
     deferred: num(o.deferred),
-    spec: decodeFlow({ id: o.id, ...(obj(o.spec) ?? {}) }),
+    spec: obj(o.spec) ? decodeFlow({ id: o.id, ...(obj(o.spec) ?? {}) }) : null,
   };
 }
 
@@ -437,10 +440,10 @@ export function decodeFinanceView(value: unknown): FinanceView | null {
         ? {
             id: household.id,
             name: str(household.name, household.id),
-            members: list(household.members, (m) => (typeof m.id === "string" ? { id: m.id, name: str(m.name, m.id), role: str(m.role), share: num(m.share) } : null)),
+            members: list(household.members, (m) => (typeof m.id === "string" || m.id === null ? { id: typeof m.id === "string" ? m.id : null, name: str(m.name, typeof m.id === "string" ? m.id : "someone"), role: str(m.role), share: num(m.share) } : null)),
             accounts: strings(household.accounts),
             flows: list(household.flows, flowView),
-            monthly: { total: num(obj(household.monthly)?.total), parts: list(obj(household.monthly)?.parts, (p) => (typeof p.id === "string" ? { id: p.id, name: str(p.name, p.id), cents: num(p.cents) } : null)) },
+            monthly: { total: num(obj(household.monthly)?.total), parts: list(obj(household.monthly)?.parts, (p) => (typeof p.id === "string" || p.id === null ? { id: typeof p.id === "string" ? p.id : null, name: str(p.name, typeof p.id === "string" ? p.id : "someone"), cents: num(p.cents) } : null)) },
           }
         : null,
     recent: list(value.recent, journalLine),

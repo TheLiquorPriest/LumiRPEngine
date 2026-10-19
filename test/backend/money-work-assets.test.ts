@@ -399,7 +399,7 @@ describe("Play → Money → Properties: each control plays as the player's turn
     expect(rent.link?.id).toBe("prop_harbor_114");
     expect(flowControls(view, rent)).toEqual(["edit", "pause", "end_lease", "delete"]);
     expect(await chat.play(leaseEndAction(RENT))).toContain("done");
-    expect(find((await chat.hub()).flows, RENT).spec.end).toBe(TODAY);
+    expect(find((await chat.hub()).flows, RENT).spec?.end).toBe(TODAY);
   });
 });
 

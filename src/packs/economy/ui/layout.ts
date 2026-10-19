@@ -151,7 +151,8 @@ export function flowControls(view: FinanceView, flow: FlowView): FlowControl[] {
     out.push("delete");
     return out;
   }
-  const billed = flow.spec.from === view.party || view.businesses.some((b) => b.id === flow.spec.from && rights(b.role).manage);
+  const payer = flow.payer;
+  const billed = payer !== null && (payer === view.party || view.businesses.some((b) => b.id === payer && rights(b.role).manage));
   return view.level >= 3 && flow.source === "invoice" && flow.link !== null && billed ? ["pay_now"] : [];
 }
 
