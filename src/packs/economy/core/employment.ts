@@ -313,11 +313,33 @@ export function periodsPerYear(ctx: ReadContext, api: FinanceApi, job: Job): num
   }
 }
 
+/**
+ * A cycle's anchor moved back by whole cycles to `fromDay` or before. Occurrences start at their
+ * anchor, but the first payday closes a period that began a cycle earlier, and that payday must be seen.
+ */
+function anchorBefore(cal: Calendar, s: FlowSchedule, anchor: number, fromDay: number): number {
+  if (anchor <= fromDay) return anchor;
+  const interval = Math.max(1, Math.round(s.interval ?? 1));
+  if (s.every === "day" || s.every === "week") {
+    const period = interval * (s.every === "week" ? 7 : 1);
+    return anchor - Math.ceil((anchor - fromDay) / period) * period;
+  }
+  // A month or year cycle repeats each `interval` years; 29 February steps back as the 28th.
+  const d = dateAt(cal, clockAt(cal, anchor, 0));
+  const day = d.month === 2 && d.day === 29 ? 28 : d.day;
+  for (let years = interval; years <= 400 * interval; years += interval) {
+    const back = dayIndexOfText(cal, `${String(d.year - years).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+    if (back <= fromDay) return back;
+  }
+  return anchor;
+}
+
 /** A job's scheduled paydays (before any roll) whose day falls in [fromDay, toDay], as day indexes. */
 function cycleDays(ctx: ReadContext, api: FinanceApi, job: Job, fromDay: number, toDay: number): number[] {
   const cal = calendarOf(ctx.world);
-  const anchor = job.anchor === null ? undefined : dateText(cal, job.anchor);
-  return api.occurrences(ctx, cycleOf(cal, job), clockAt(cal, fromDay, 0) - 1, clockAt(cal, toDay + 1, 0) - 1, anchor).map((at) => dateAt(cal, at).dayIndex);
+  const cycle = cycleOf(cal, job);
+  const anchor = job.anchor === null ? undefined : dateText(cal, anchorBefore(cal, cycle, job.anchor, fromDay));
+  return api.occurrences(ctx, cycle, clockAt(cal, fromDay, 0) - 1, clockAt(cal, toDay + 1, 0) - 1, anchor).map((at) => dateAt(cal, at).dayIndex);
 }
 
 /**
