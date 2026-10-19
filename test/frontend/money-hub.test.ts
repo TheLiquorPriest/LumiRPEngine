@@ -3,9 +3,16 @@
 // sends.
 
 import { describe, expect, test } from "bun:test";
-import type { AccountView, BusinessView, CardView, FinanceView, Flow, FlowView, HoldingView, PropertyView } from "../../src/shared/finance";
+import { featureOn, FINANCE_FEATURES, type AccountView, type BusinessView, type CardView, type FinanceView, type Flow, type FlowView, type HoldingView, type PropertyView } from "../../src/shared/finance";
+import type { Level } from "../../src/shared/ids";
+import type { JsonObject } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import { DEFAULT_CURRENCY } from "../../src/shared/world";
+import { DEFAULT_CURRENCY, type WorldDoc } from "../../src/shared/world";
+import { materializeAll } from "../../src/engine/materialize";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { Working } from "../../src/engine/working";
+import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
+import { startState } from "../packs/support";
 import { Row } from "../../src/frontend/components";
 import { decodeFinanceView } from "../../src/packs/economy/ui/decode";
 import { accountBlocks, accountControls, businessControls, cardControls, creditBlocks, endableLeases, flowControls, holdingControls, householdRows, hubTabs, invoiceControls, investmentBlocks, overviewBlocks, propertyControls, transferTargets, workBlocks } from "../../src/packs/economy/ui/layout";
@@ -56,6 +63,29 @@ const cash = account({ id: "wallet", class: "cash", cents: 4600 });
 const checking = account({ id: "chk", class: "checking", cents: 124018, available: 124018 });
 const savings = account({ id: "sav", class: "savings", cents: 350000 });
 const visa = account({ id: "visa", class: "credit_card", cents: -41255, limit: 120000, available: 78745, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, statements: [{ at: "Oct 1", closing: 41255, interest: 0, fees: 0, minimum: 3500, due: "Oct 28", paid: 0, apr: 22, stage: "current", state: "open" }], terms: [{ label: "APR", value: "22%" }], holds: [{ id: "h1", cents: 3211, until: "Oct 20", kind: "authorization", memo: "Shell" }] });
+
+/** Every money feature that runs at the top level unless a toggle turns it off. */
+const TOP = FINANCE_FEATURES.filter((f) => featureOn(4, f));
+
+const reg = createRegistry(ALL_PACKS);
+
+/** The POV's money in Port Alder at a Money level with the world's toggles, as the backend builds it and the hub decodes it. */
+function portAlderMoney(level: Level, toggles: JsonObject): FinanceView {
+  const world = (STARTER_WORLDS.modern_slice_of_life as (id: string, name: string) => WorldDoc)("pa", "Port Alder");
+  world.realism.levels.money = level;
+  world.packs.economy = { ...world.packs.economy, config: { ...(world.packs.economy?.config ?? {}), features: toggles } };
+  const w = new Working(reg, world, startState(world));
+  materializeAll(reg, w, world.pov, "run");
+  const decoded = decodeFinanceView(JSON.parse(JSON.stringify(w.ctx.query("economy.finance")(w.ctx, world.pov, true))));
+  if (!decoded) throw new Error("the hub can't draw the POV's money");
+  return decoded;
+}
+
+function accountIn(v: FinanceView, id: string): AccountView {
+  const a = v.accounts.find((x) => x.id === id);
+  if (!a) throw new Error(`no ${id} in the view`);
+  return a;
+}
 
 describe("the view as it arrives", () => {
   test("a party's view decodes field for field, and anything else is no view", () => {
@@ -130,13 +160,20 @@ describe("realism gating", () => {
   test("below the top level an account shows its balance and a few lines, never its terms, statements, pending lines or holds", () => {
     const simple = accountBlocks(view({ accounts: [visa] }), visa);
     expect(simple).toMatchObject({ terms: false, statements: false, pending: false, holds: false, owners: false, transactions: 5 });
-    const full = accountBlocks(view({ level: 4, detail: true, accounts: [visa] }), visa);
+    const full = accountBlocks(view({ level: 4, detail: true, features: TOP, accounts: [visa] }), visa);
     expect(full).toMatchObject({ terms: true, statements: true, holds: true, owners: true, transactions: 40 });
   });
 
-  test("a Custom toggle shows its own detail below the top level, and nothing else", () => {
-    const custom = accountBlocks(view({ features: ["flows", "cards", "statements"], accounts: [visa] }), visa);
-    expect(custom).toMatchObject({ statements: true, terms: false, holds: false });
+  test("a feature the world switches on shows its own detail below the top level and nothing more; one switched off is gone at the top level too", () => {
+    const low = portAlderMoney(3, { flows: true, daily_limits: true });
+    expect([low.level, low.detail]).toEqual([3, false]);
+    expect(accountBlocks(low, accountIn(low, "acct_pov_card"))).toMatchObject({ cardLimits: true, terms: false, pending: false, holds: false, transactions: 5 });
+    expect(overviewBlocks(low)).toMatchObject({ cashFlowByCategory: false, cashFlowAhead: false, upcoming: 5, recent: 5 });
+    expect(workBlocks(low)).toMatchObject({ deductions: false, books: false, sales: false });
+    const top = portAlderMoney(4, { daily_limits: false, capital_gains: false });
+    expect([top.level, top.detail]).toEqual([4, true]);
+    expect(accountBlocks(top, accountIn(top, "acct_pov_card"))).toMatchObject({ cardLimits: false, transactions: 40 });
+    expect(investmentBlocks(top)).toEqual({ lots: false, gains: false, income: true });
   });
 
   test("a shared account names its owners at any level", () => {
@@ -150,7 +187,7 @@ describe("realism gating", () => {
     expect(investmentBlocks(view())).toEqual({ lots: false, gains: false, income: false });
     expect(investmentBlocks(view({ features: ["capital_gains"] }))).toEqual({ lots: true, gains: true, income: false });
     expect(creditBlocks(view())).toEqual({ factors: false, report: false, history: 0 });
-    expect(workBlocks(view({ level: 4, detail: true }))).toEqual({ withholding: true, deductions: true, books: true, sales: true, taxes: true });
+    expect(workBlocks(view({ level: 4, detail: true, features: TOP }))).toEqual({ withholding: true, deductions: true, books: true, sales: true, taxes: true });
     expect(workBlocks(view())).toEqual({ withholding: false, deductions: false, books: false, sales: false, taxes: false });
   });
 });

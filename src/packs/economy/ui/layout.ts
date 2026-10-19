@@ -278,12 +278,13 @@ export function sharedAccounts(view: FinanceView, h: HouseholdView): { names: st
 // ---------------------------------------------------------------- realism gating
 
 /**
- * Whether a party's view shows a detailed feature: always at the top level (`detail`), else only
- * where the world's Custom toggles run the feature for it. Below that the books stay simple, even
- * when the view carries more (the GM's view of someone at a lower level).
+ * Whether a party's view shows a feature's own detail: wherever the feature runs for the party,
+ * from its usual level or from its floor where the world switches it on, and nowhere it's switched
+ * off, the top level included. The rest of the full books (`detail`) is the top level's alone, so
+ * a feature switched on lower shows its own detail and nothing else.
  */
 function shows(view: FinanceView, feature: FinanceFeature): boolean {
-  return view.detail || view.features.includes(feature);
+  return view.features.includes(feature);
 }
 
 export interface OverviewBlocks {

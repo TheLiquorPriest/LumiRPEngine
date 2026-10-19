@@ -1,7 +1,8 @@
 // The money hub (DESIGN §12, §25): one party's money, in sections. The player's Play → Money shows
 // the POV's, with in-world actions as controls; the GM view shows anyone's, with edits. Both draw
 // the same `FinanceView`, which the core built at the party's Money level: a band at level 1, the
-// simple books below the top level, everything at the top level or where Custom turns a feature on.
+// simple books below the top level, and everything at the top level; a feature the world switches
+// on shows its own detail wherever it runs, and one it switches off shows nowhere.
 
 import { useEffect, useId, useState } from "preact/hooks";
 import type { FinanceView } from "../../../shared/finance";
