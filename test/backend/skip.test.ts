@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import type { LedgerEvent } from "../../src/shared/ledger";
 import type { JsonObject } from "../../src/shared/json";
-import { calendarOf, clockAt, dateAt, formatHHMM } from "../../src/engine/calendar";
+import { calendarOf, clockAt, dateAt, formatHHMM, formatStamp } from "../../src/engine/calendar";
 import { placeOfEntity } from "../../src/engine/scope";
 import { runTimelapse } from "../../src/engine/time";
 import { turnStart } from "../../src/engine/turn";
@@ -179,6 +179,28 @@ describe("time skips", () => {
     await skipDays(rig, chatId, 2);
     const skip = ofType((await folded(rig, chatId)).record?.events, "minds.skip")[0];
     expect(skip && "data" in skip ? skip.data.beats : null).toEqual(expect.arrayContaining([{ at: festival, reason: "The harbour festival", source: "model" }]));
+  });
+
+  test("a skip whose beats' minds give nothing replays as it ran before the reply, ending where that run ended", async () => {
+    const { rig, chatId, day, at } = await portAlder();
+    // Two agent-days a segment: the early-morning and morning slots run, midday (11:30 to 14:00) doesn't fit.
+    rig.body(await rig.send({ type: "lre.marker", chatId, kind: "time", control: "unit_cap", scope: { all: true }, to: { agentDays: 2, events: 5000 } }));
+    rig.body(await rig.send({ type: "lre.settings.set", patch: { modelUse: { steps: { skip: { enabled: true, signals: ["always"] } } } } }));
+    const { world } = await folded(rig, chatId);
+    const lunch = at(day, "12:30");
+    rig.host.quietReply = (req) => (req.messages.some((m) => m.content.includes("skipping ahead in time")) ? JSON.stringify({ beats: [{ at: formatStamp(calendarOf(world), lunch), reason: "Lunch at the diner" }] }) : "{}");
+    // Every mind's call fails, so no beat records a mind; the last minds asked are the skip's end.
+    const calls: { at: number; reason: string }[] = [];
+    rig.rt.beatMinds = async (input) => {
+      calls.push({ at: input.moment.at, reason: input.moment.reason });
+      return { events: [], traces: [] };
+    };
+    await skipDays(rig, chatId, 3);
+    const end = calls.at(-1);
+    expect(end?.reason).toStartWith("The time skip ends");
+    const { state, record } = await folded(rig, chatId);
+    expect(record?.events.find((e) => e.type === "timelapse")).toMatchObject({ to: end?.at });
+    expect(state.clock).toBe(end?.at ?? NaN);
   });
 
   test("the skip step makes no call until the user turns it on", async () => {

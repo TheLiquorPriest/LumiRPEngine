@@ -238,7 +238,8 @@ export async function runSkip(deps: SkipDeps, input: SkipInput): Promise<SkipRun
     run.advanceTo(beat.at);
     if (run.clock !== beat.at) break;
     const applied = run.apply(await mindsAt(deps, input, w, beat.who, perBeat, `Time skips ahead; it is now ${formatClock(cal, beat.at)}.`, traces));
-    if (applied.length > 0) record.beats.push({ at: beat.at, events: applied });
+    // Every beat reached is recorded, with its minds' events or none, so the plan's replay cuts the run where this one did.
+    record.beats.push({ at: beat.at, events: applied });
     const stopper = interrupter(w, applied);
     if (stopper) {
       record.stop = { by: "mind", at: beat.at, entity: stopper };
