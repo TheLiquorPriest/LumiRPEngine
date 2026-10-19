@@ -177,7 +177,7 @@ An **asset** is defined once, in `packs.economy.config.assets` by id: `label`, `
 ]
 ```
 
-A **property** is an entity of kind `property`, real estate tied to a `place`: `owners`, its `value`, `appreciation_pct` a year, and its upkeep (`tax_pct` of value a year, the region's when left out; `insurance` a month; `upkeep_pct` a year). A mortgage is an account of the `mortgage` class whose `secured_by` names the property, and the property's `mortgage` names the account back. A lease is a `rent` flow from the tenant to the owner, `link`ed to the property.
+A **property** is an entity of kind `property`, real estate tied to a `place`: `owners`, its `value` now, `appreciation_pct` a year, what it cost and when (`purchase_price`, `purchased`), and its upkeep (`tax_pct` of value a year, the region's when left out; `insurance` a month; `upkeep_pct` a year). A mortgage is an account of the `mortgage` class whose `secured_by` names the property, and the property's `mortgage` names the account back. A lease is a `rent` flow from the tenant to the owner, `link`ed to the property.
 
 ### Paying: preferences, cash machines and credit
 
