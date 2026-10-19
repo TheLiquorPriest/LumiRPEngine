@@ -1249,7 +1249,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - **Precedence:** the world's step template for the purpose (the first by id), then the user's own prompt (Settings → Minds, with a reset to the default), then the built-in.
   - **Placeholders:** `{{character}}`, `{{world}}`, `{{pov}}`, `{{place}}` and `{{clock}}` are filled.
   - **Answer format:** the engine appends the purpose's answer format (`MIND_ANSWER_FORMATS`), which no template replaces, and then the preset's `RPEngine · <purpose>` block (§6.8).
-  - **Lint:** a minds template's signals are ignored (`minds.step_signals`), and a second template for one purpose is never used (`minds.step_duplicate`).
+  - **Lint:** a minds template's signals are ignored (`minds.step_signals`), a blank one is skipped (`minds.step_blank`), and every other template for the purpose but the one used is warned of (`minds.step_duplicate`). The runtime, lint and Build → World → Minds pick the used one alike (`worldMindTemplate`: the first by id, in `localeCompare` order, with any text).
 - **Calls:** every mind is its own call, made in parallel on the pre phase's wall clock, apart from its call count. The inspector lists each call (§6.5) with no text: purpose, phase, level, outcome (`recorded` or `failed`), time, tokens, whose prompt it ran, and the character by name. A call for someone the POV can't see or hasn't met isn't listed at all, so the panel never shows that someone unseen is in the room or that an unmet person matters; a history kept by an earlier build, which named them "Someone", reads back without those calls.
 
 ### 24.6 Settings and cost

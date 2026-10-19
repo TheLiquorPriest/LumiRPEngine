@@ -8,7 +8,7 @@
 import type { JsonObject, JsonValue } from "./json";
 import { hasOwn, isRecord, safeKey } from "./json";
 import type { EntityId, MessageId, PlaceId } from "./ids";
-import type { Selector, StepPurpose } from "./world";
+import type { Selector, StepPurpose, StepTemplateDef, WorldDoc } from "./world";
 
 // ---------------------------------------------------------------- fidelity
 
@@ -283,6 +283,17 @@ export const MIND_PURPOSES: readonly MindPurpose[] = ["mind", "memory", "skip", 
 /** Whether a step purpose is one of the minds'. */
 export function isMindPurpose(purpose: StepPurpose): purpose is MindPurpose {
   return (MIND_PURPOSES as readonly string[]).includes(purpose);
+}
+
+/**
+ * The world's template for a minds step (DESIGN §24.5), which runs unless the player has a prompt of
+ * their own: the first by id of the purpose's templates with any text, a blank one being skipped. The
+ * runtime, lint and Build → World → Minds all read this, so they agree on which one is used.
+ */
+export function worldMindTemplate(world: Pick<WorldDoc, "steps">, purpose: MindPurpose): StepTemplateDef | undefined {
+  return Object.values(world.steps)
+    .filter((t) => t.purpose === purpose && t.template.trim() !== "")
+    .sort((a, b) => a.id.localeCompare(b.id))[0];
 }
 
 /** The user's overrides of a world's memory config: whatever they set wins, part by part. */

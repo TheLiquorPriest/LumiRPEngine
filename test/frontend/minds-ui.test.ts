@@ -11,11 +11,12 @@ import { parseEditOps } from "../../src/engine/edits";
 import { editRequest } from "../../src/frontend/requests";
 import type { JsonObject } from "../../src/shared/json";
 import type { MindCallTrace, MindsSettings, WorldMindsConfig } from "../../src/shared/minds";
-import { DEFAULT_WORLD_MINDS, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_PRESETS, worldMindsOf } from "../../src/shared/minds";
+import { DEFAULT_WORLD_MINDS, defaultMindsSettings, MIND_PROMPT_DEFAULTS, MIND_PROMPT_MAX, MINDS_PRESETS, worldMindsOf, worldMindTemplate } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { Rig } from "../support/rig";
 import { stepUpdatePatch } from "../../src/frontend/settings/steps";
-import { mindsOn, mindsStepConfig } from "../../src/backend/minds";
+import { mindPrompt, mindsOn, mindsStepConfig } from "../../src/backend/minds";
+import { lintWorld } from "../../src/engine/authoring";
 import { HELPER_MAX_TOKENS, stepConfigOf, type ModelUseSettings } from "../../src/shared/settings";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { ALL_PACKS } from "../../src/packs/index";
@@ -129,6 +130,23 @@ describe("Settings → Steps with the minds steps", () => {
 });
 
 describe("Build → World → Minds", () => {
+  test("lint and the editor mark as used the template the runtime runs: a blank one is skipped, ids in the runtime's order", () => {
+    const reg = createRegistry(ALL_PACKS);
+    const w = modernUsWorld("w", "R");
+    const step = (id: string, template: string) => ({ id, purpose: "mind" as const, template, output: "text" as const, signals: [] });
+    w.steps = { ...w.steps, mind_a: step("mind_a", "  \n "), Mind_b: step("Mind_b", "Think as {{character}}, B."), mind_c: step("mind_c", "Think as {{character}}, C.") };
+    const runs = mindPrompt("mind", w, defaultMindsSettings(), { character: "Maya" });
+    expect(runs.source).toBe("world");
+    expect(runs.text.startsWith("Think as Maya, B.")).toBe(true);
+    // The editor's used template, and lint's verdict on each.
+    expect(worldMindTemplate(w, "mind")?.id).toBe("Mind_b");
+    const issues = lintWorld(w, reg).filter((i) => i.code === "minds.step_blank" || i.code === "minds.step_duplicate");
+    expect(issues.map((i) => [i.path, i.code])).toEqual([
+      ["steps.mind_a.template", "minds.step_blank"],
+      ["steps.mind_c", "minds.step_duplicate"],
+    ]);
+  });
+
   test("the defaults save as no config; anything else saves whole, an unset selector left out", () => {
     expect(mindsPartValue(structuredClone(DEFAULT_WORLD_MINDS) as WorldMindsConfig)).toEqual({});
     const edited: WorldMindsConfig = { ...structuredClone(DEFAULT_WORLD_MINDS), secrecy: "full", always: { tag: ["lead"] } } as WorldMindsConfig;
