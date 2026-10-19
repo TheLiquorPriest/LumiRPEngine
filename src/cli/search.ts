@@ -4,7 +4,7 @@
 
 import { isRecord } from "../shared/json";
 import { pointerOf } from "../shared/json-patch";
-import { isCollection } from "./diff";
+import type { WorldItem } from "./diff";
 import { cutAt, nameOf } from "./read";
 
 export interface SearchHit {
@@ -27,46 +27,6 @@ export interface ScoredHit extends SearchHit {
   score: number;
 }
 
-/** One item a search reads: an item of a collection, an item of a pack's config map, or a part of the world whole. */
-export interface WorldItem {
-  collection: string;
-  /** Empty for a part. */
-  id: string;
-  pointer: string;
-  value: unknown;
-}
-
-/** A pack's config map keyed by id (the economy's `products`): an object of objects, so it reads as a collection does. */
-function idMap(value: unknown): value is Record<string, Record<string, unknown>> {
-  return isRecord(value) && Object.keys(value).length > 0 && Object.values(value).every(isRecord);
-}
-
-/**
- * A world document as the items a search reads. A pack's id-keyed config maps are opened up item
- * by item, each as its own collection named by its key, so a product or an asset is a hit with its
- * own name; the rest of the pack's config stays the pack's item.
- */
-export function itemsOf(doc: unknown): WorldItem[] {
-  if (!isRecord(doc)) return [];
-  const out: WorldItem[] = [];
-  for (const [key, value] of Object.entries(doc)) {
-    if (!isCollection(key) || !isRecord(value)) {
-      out.push({ collection: key, id: "", pointer: pointerOf([key]), value });
-      continue;
-    }
-    for (const [id, item] of Object.entries(value)) {
-      const config = key === "packs" && isRecord(item) && isRecord(item.config) ? item.config : null;
-      const maps = config === null ? [] : Object.entries(config).filter((e): e is [string, Record<string, Record<string, unknown>>] => idMap(e[1]));
-      if (config === null || maps.length === 0 || !isRecord(item)) {
-        out.push({ collection: key, id, pointer: pointerOf([key, id]), value: item });
-        continue;
-      }
-      out.push({ collection: key, id, pointer: pointerOf([key, id]), value: { ...item, config: Object.fromEntries(Object.entries(config).filter(([, v]) => !idMap(v))) } });
-      for (const [name, map] of maps) for (const [entry, v] of Object.entries(map)) out.push({ collection: name, id: entry, pointer: pointerOf([key, id, "config", name, entry]), value: v });
-    }
-  }
-  return out;
-}
 
 /** The query's words, lowercased, each once. */
 export function searchWords(query: string): string[] {

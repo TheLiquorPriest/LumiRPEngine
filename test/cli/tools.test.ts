@@ -392,6 +392,47 @@ describe("live tools", () => {
     expect((products.data.hits as { id: string }[]).map((h) => h.id).sort()).toEqual(["gull_card", "gull_card", "harbor_checking"]);
   });
 
+  test("lre_edit, lre_diff and the conflict check see a pack's products one by one, not the pack as one change", async () => {
+    const fake = new FakeLumiverse();
+    const w = fake.lre.seed("Alpha");
+    const worldId = w.index.id;
+    const { ctx } = client(fake);
+    await call(ctx, "lre_edit", { worldId, ops: [{ op: "add", path: "/packs/economy", value: { version: 1, config: { region: "harbor_county", products: { gull_card: { label: "Gull Rewards card", class: "credit_card", apr_pct: 24 } } } } }] });
+    await call(ctx, "lre_commit", { worldId });
+    const edit = await call(ctx, "lre_edit", {
+      worldId,
+      ops: [
+        { op: "replace", path: "/packs/economy/config/products/gull_card/apr_pct", value: 19.9 },
+        { op: "add", path: "/packs/economy/config/products/harbor_checking", value: { label: "Harbor checking", class: "checking" } },
+      ],
+    });
+    expect(edit.data.changed).toEqual({ products: { changed: 1, added: 1 } });
+    expect(edit.data.items).toEqual([
+      { key: "/packs/economy/config/products/gull_card", label: "products › Gull Rewards card (gull_card)", kind: "changed" },
+      { key: "/packs/economy/config/products/harbor_checking", label: "products › Harbor checking (harbor_checking)", kind: "added" },
+    ]);
+    // The pack's own change lists only its own fields: the products are changes of their own.
+    await call(ctx, "lre_edit", { worldId, ops: [{ op: "replace", path: "/packs/economy/config/region", value: "gull_island" }] });
+    const diff = await call(ctx, "lre_diff", { worldId });
+    const changes = diff.data.changes as { key: string; fields?: { path: string }[] }[];
+    expect(changes.map((c) => c.key)).toEqual(["/packs/economy", "/packs/economy/config/products/gull_card", "/packs/economy/config/products/harbor_checking"]);
+    expect(changes[0]?.fields?.map((f) => f.path)).toEqual(["/packs/economy/config/region"]);
+    expect(changes[1]?.fields?.map((f) => f.path)).toEqual(["/packs/economy/config/products/gull_card/apr_pct"]);
+    // Build changes one product between the agent's read and its patch; the agent's patch to another goes on top.
+    const handle = fake.lre.handle.bind(fake.lre);
+    let raced = false;
+    fake.lre.handle = (r) => {
+      if (!raced && r.type === "lre.editor" && r.op === "patch") {
+        raced = true;
+        handle({ lre: 1, type: "lre.editor", reqId: "build", op: "patch", worldId, base: null, ops: [{ op: "replace", path: "/packs/economy/config/products/gull_card/label", value: "Gull card" }] });
+      }
+      return handle(r);
+    };
+    const other = await call(ctx, "lre_edit", { worldId, ops: [{ op: "replace", path: "/packs/economy/config/products/harbor_checking/label", value: "Harbor everyday checking" }] });
+    expect(other.isError).toBe(false);
+    expect(other.data.meanwhile).toMatchObject({ items: ["products › Gull card (gull_card)"] });
+  });
+
   test("lre_search and lre_worlds go on past a world they can't read, and name it", async () => {
     const fake = new FakeLumiverse();
     const good = fake.lre.seed("Alpha");

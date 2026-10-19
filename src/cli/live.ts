@@ -16,15 +16,15 @@ import type { Args } from "./args";
 import { boolArg, intArg, neededText, textArg, textsArg, ToolError } from "./args";
 import type { Connection } from "./connection";
 import { LreError } from "./connection";
-import { changesBetween, countsOf, fieldChanges } from "./diff";
-import type { Change, FieldChange } from "./diff";
+import { changesBetween, countsOf, fieldChanges, idMap, itemsOf, packItems } from "./diff";
+import type { Change, FieldChange, WorldItem } from "./diff";
 import { loadWorld, worldInput } from "./offline";
 import { getAt, jsonEqual, parsePointer } from "../shared/json-patch";
 import { BODY_LIMIT, clip, jsonText, readAt } from "./read";
 import type { ToolResult } from "./report";
 import { contentsOf, entityKindsOf, json, lintSummary, newHazards, schemaIssues } from "./report";
-import { itemsOf, rank, searchItems, searchWords } from "./search";
-import type { ScoredHit, WorldItem } from "./search";
+import { rank, searchItems, searchWords } from "./search";
+import type { ScoredHit } from "./search";
 
 export type EditorBody = ResultBodies["lre.editor"];
 
@@ -172,6 +172,8 @@ export async function searchTool(live: Live, args: Args): Promise<ToolResult> {
   const seenCollections = new Set(WORLD_KEYS);
   const note = (doc: WorldDoc): WorldItem[] => {
     for (const kind of Object.keys(doc.kinds)) seenKinds.add(kind);
+    // A pack's config map with nothing in it yet is still one a search may name.
+    for (const pack of Object.values(doc.packs)) if (isRecord(pack.config)) for (const [key, value] of Object.entries(pack.config)) if (idMap(value)) seenCollections.add(key);
     const items = itemsOf(doc);
     for (const item of items) seenCollections.add(item.collection);
     return items;
@@ -453,8 +455,12 @@ export async function diffTool(live: Live, args: Args): Promise<ToolResult> {
     const entry: Shown = { ...change };
     if (change.kind === "changed") {
       const tokens = parsePointer(change.key);
-      // A world document is plain JSON; its interface just doesn't say so.
-      const detail = fieldChanges(getAt(from.world as unknown as JsonValue, tokens), getAt(to.world as unknown as JsonValue, tokens), change.key, 12);
+      // A world document is plain JSON; its interface just doesn't say so. A pack is compared without its config maps, whose entries are changes of their own.
+      const at = (world: WorldDoc): unknown => {
+        const value = getAt(world as unknown as JsonValue, tokens);
+        return tokens.length === 2 && tokens[0] === "packs" ? packItems(tokens[1] ?? "", value)[0]?.value : value;
+      };
+      const detail = fieldChanges(at(from.world), at(to.world), change.key, 12);
       entry.fields = detail.changes;
       if (detail.more > 0) entry.moreFields = detail.more;
     }
