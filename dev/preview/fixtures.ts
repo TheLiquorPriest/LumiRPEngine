@@ -1,7 +1,7 @@
 // Preview fixtures: a modern slice-of-life world in play. Shapes follow the contracts
 // (`StateView`, `WorldDoc`, `UserSettings`) and the panel view models of the UI packs.
 
-import type { FinanceView, JournalLine } from "../../src/shared/finance";
+import type { AccountView, CardView, FinanceView, Flow, FlowView, JournalLine } from "../../src/shared/finance";
 import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
@@ -82,28 +82,7 @@ export function stateFixture(chatId: string): StateView {
           { title: "Status", rows: [{ label: "Energy", value: "62%", fix: { entity: "pov", field: "energy", type: "number", value: 62, min: 0, max: 100 } }, { label: "Hunger", value: "Peckish" }, { label: "Job", value: "Server at Rosie's" }] },
         ],
       },
-      "economy.money": {
-        level: 3,
-        band: null,
-        netWorthCents: 447363,
-        accounts: [
-          { id: "cash", name: "Wallet cash", kind: "cash", cents: 4600 },
-          { id: "chk", name: "Checking", kind: "checking", cents: 124018 },
-          { id: "sav", name: "Savings", kind: "savings", cents: 350000 },
-          { id: "visa", name: "Visa ··4421", kind: "card", cents: -41255, limitCents: 120000, due: { label: "min due Oct 28", cents: 3500 } },
-        ],
-        recent: [
-          { at: "Tue 07:40", memo: "Rosie's · coffee", cents: -325, account: "Visa" },
-          { at: "Mon 18:12", memo: "Shell Route 9 · 9.2 gal", cents: -3211, account: "Visa" },
-          { at: "Mon 09:00", memo: "Payroll · Rosie's (net)", cents: 61240, account: "Checking" },
-          { at: "Mon 09:00", memo: "Rent autopay", cents: -85000, account: "Checking" },
-        ],
-        upcoming: [
-          { at: "Fri", label: "Payday", cents: 61240 },
-          { at: "Oct 28", label: "Visa minimum", cents: -3500 },
-          { at: "Nov 1", label: "Phone", cents: -4500 },
-        ],
-      },
+      "economy.money": samMoney() as unknown as JsonValue,
       "vehicles.garage": {
         level: 3,
         vehicles: [
@@ -503,6 +482,80 @@ function gmMoney(party: string, name: string, level: number, opened: boolean, ac
   };
 }
 
+/** Sam's money at Money 3 as Play → Money draws it: cash, checking with its debit card, savings and a Visa, the flows that move it, and how Sam pays. */
+function samMoney(): FinanceView {
+  const line = (id: string, at: string, memo: string, cents: number, accountId: string, account: string, category: string): JournalLine => ({ id, at, memo, cents, account, accountId, kind: cents > 0 ? "income" : "purchase", category, counterparty: null, card: null, status: "posted" });
+  const account = (id: string, name: string, cls: AccountView["class"], classLabel: string, cents: number, rest: Partial<AccountView> = {}): AccountView => ({ id, name, class: cls, classLabel, product: { id: cls, label: classLabel }, institution: cls === "cash" ? null : "Maple Credit Union", status: "open", cents, available: cents, owners: [{ party: "pov", name: "Sam Rivera", role: "owner", share: 1 }], role: "owner", limit: null, aprPct: null, apyPct: null, terms: [], autopay: null, due: null, statements: [], cards: [], pending: [], holds: [], transactions: [], securedBy: null, loan: null, ...rest });
+  const card = (id: string, name: string, network: CardView["network"], accountId: string, last4: string): CardView => ({ id, name, network, state: "active", holder: "Sam Rivera", holderId: "pov", account: accountId, last4, item: null, dailyPurchaseLimit: null, dailyAtmLimit: network === "debit" ? 50000 : null, spentToday: 325 });
+  const flow = (spec: Flow, amount: string, cents: number, schedule: string, next: string, from: string, to: string): FlowView => ({ id: spec.id, label: spec.label, kind: spec.kind, from, to, amount, cents, schedule, next, shortfall: spec.shortfall, status: spec.status, category: spec.category ?? null, link: null, editable: spec.source === "entity", source: spec.source, done: 3, missed: 0, deferred: 0, spec });
+  const recent = [
+    line("v:1", "Tue 07:40", "Rosie's · coffee", -325, "visa", "Visa ··4421", "food"),
+    line("v:0", "Mon 18:12", "Shell Route 9 · 9.2 gal", -3211, "visa", "Visa ··4421", "fuel"),
+    line("c:1", "Mon 09:00", "Payroll · Rosie's (net)", 61240, "chk", "Checking", "income"),
+    line("c:0", "Mon 09:00", "Rent", -85000, "chk", "Checking", "housing"),
+  ];
+  const debit = card("chk_card", "Debit card ··1180", "debit", "chk", "1180");
+  const visaCard = card("visa_card", "Visa ··4421", "credit", "visa", "4421");
+  const accounts = [
+    account("cash", "Wallet cash", "cash", "Cash", 4600),
+    account("chk", "Checking", "checking", "Checking", 124018, { cards: [debit], transactions: recent.filter((r) => r.accountId === "chk") }),
+    account("sav", "Savings", "savings", "Savings", 350000),
+    account("visa", "Visa ··4421", "credit_card", "Credit card", -41255, { available: 78745, limit: 120000, autopay: { mode: "minimum", from: "chk", fromName: "Checking", cents: null }, cards: [visaCard], transactions: recent.filter((r) => r.accountId === "visa") }),
+  ];
+  const rent: Flow = { id: "flow_rent", label: "Rent", kind: "rent", from: "chk", to: "Maple Street Properties", amount: { fixed: 85000 }, schedule: { every: "month", days: [1] }, shortfall: "retry", retry_days: 3, retries: 2, category: "housing", status: "active", source: "entity" };
+  const phone: Flow = { id: "flow_phone", label: "Phone", kind: "subscription", from: "visa", to: "Northwind Mobile", amount: { fixed: 4500 }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "utilities", status: "active", source: "entity" };
+  const payday: Flow = { id: "job_server:pay", label: "Payday · Rosie's", kind: "payroll", from: "npc_rosie", to: "chk", amount: { provider: "economy.payroll" }, schedule: { every: "week", weekdays: [5] }, shortfall: "skip", category: "income", status: "active", source: "job" };
+  return {
+    party: "pov",
+    name: "Sam Rivera",
+    partyKind: "person",
+    level: 3,
+    detail: false,
+    features: ["flows", "cards", "payment_prefs"],
+    band: null,
+    opened: true,
+    cash: { cents: 4600 },
+    overview: {
+      netWorth: 437363,
+      assets: 478618,
+      liabilities: 41255,
+      breakdown: [
+        { label: "Cash", cents: 4600 },
+        { label: "Deposits", cents: 474018 },
+        { label: "Debts", cents: -41255 },
+      ],
+      cashFlow: { period: "the last 30 days", in: 244960, out: 197436, byCategory: [{ category: "housing", cents: -85000 }, { category: "food", cents: -6200 }, { category: "fuel", cents: -3211 }], nextIn: 122480, nextOut: 89500 },
+      upcoming: [
+        { at: "Fri 09:00", clock: 6300, label: "Payday · Rosie's", cents: 61240, flow: payday.id, account: null },
+        { at: "Sun 1 Nov, 09:00", clock: 9180, label: "Rent", cents: -85000, flow: rent.id, account: "chk" },
+        { at: "Sun 1 Nov, 09:00", clock: 9180, label: "Phone", cents: -4500, flow: phone.id, account: "visa" },
+      ],
+      alerts: [{ tone: "warn", text: "Visa ··4421: autopay pays the minimum from Checking on the 28th.", account: "visa" }],
+    },
+    accounts,
+    cards: [debit, visaCard],
+    flows: [flow(payday, "$612.40 after tax", 61240, "every Friday", "Fri 09:00", "Rosie Alvarez", "Checking"), flow(rent, "$850.00", 85000, "monthly on the 1st", "Sun 1 Nov, 09:00", "Checking", "Maple Street Properties"), flow(phone, "$45.00", 4500, "monthly on the 1st", "Sun 1 Nov, 09:00", "Visa ··4421", "Northwind Mobile")],
+    jobs: [],
+    businesses: [],
+    investments: null,
+    properties: [],
+    credit: null,
+    household: null,
+    recent,
+    notes: [],
+    payPrefs: [{ use: "cash", max: 2000 }, { use: "visa_card" }],
+  };
+}
+
+/** A starter world's Play → Money in a new chat, built by the engine itself (as `starterMap` builds its map). */
+function starterMoney(template: string): JsonValue {
+  const world = STARTER_WORLDS[template]?.("preview", template);
+  if (!world) return null;
+  const registry = createRegistry(ALL_PACKS);
+  const def = registry.views.find((v) => v.panel === "economy.money");
+  return def ? def.build(registry.context(world, initialState(world, "preview", registry)), { mapDisplay: null }) : null;
+}
+
 export function gmFixture(): GmView {
   const entity = (id: string, name: string, kind: string, tier: string, place: string | null, rest: Partial<GmEntity> = {}): GmEntity => ({ id, name, kind, tier, agent: false, pov: false, gone: false, spawned: false, visibility: "public", place, holder: null, fields: [], relations: [], levels: gmLevels(tier === "principal" ? LEADS : tier === "supporting" ? SUPPORTING : BACKGROUND), class: {}, tags: [], sheet: null, life: { state: "alive", label: "Alive", acts: true, everyone: true, aware: [], unaware: [] }, ...rest });
   return {
@@ -640,25 +693,7 @@ export function freshFixture(chatId: string): StateView {
     view.hud.cash = { cents: 8500 };
     if (view.hud.fixes.cash) view.hud.fixes.cash.value = 8500;
   }
-  view.panels["economy.money"] = {
-    level: 4,
-    band: "broke",
-    netWorthCents: -972623,
-    cash: { cents: 8500 },
-    accounts: [
-      { id: "acct_pov_cash", name: "Your wallet cash", kind: "cash", cents: 8500 },
-      { id: "acct_pov_checking", name: "Your checking account", kind: "checking", cents: 184217, aprPct: 0.1 },
-      { id: "acct_pov_savings", name: "Your savings account", kind: "savings", cents: 326000, aprPct: 3.8 },
-      { id: "acct_pov_card", name: "Your credit card", kind: "card", cents: -63840, limitCents: 450000, aprPct: 22 },
-      { id: "acct_pov_auto_loan", name: "Your auto loan", kind: "loan", cents: -1740000, aprPct: 9.4 },
-      { id: "acct_pov_brokerage", name: "Your index-fund account", kind: "brokerage", cents: 312500 },
-    ],
-    recent: [],
-    upcoming: [
-      { at: "day 1", label: "Rent", cents: -145000 },
-      { at: "every Friday", label: "Payday", cents: 98000 },
-    ],
-  };
+  view.panels["economy.money"] = starterMoney("modern_slice_of_life");
   return view;
 }
 
