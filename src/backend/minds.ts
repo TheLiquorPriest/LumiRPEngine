@@ -235,7 +235,7 @@ export async function runMinds(deps: MindsDeps, input: RunMindsInput): Promise<R
     const raw = input.signal.aborted ? null : await deps.steps.helperJson("mind", prompt.text, mindContext(scope), config, userId, input.signal, { guidance, usage });
     const ms = Math.round(performance.now() - t0);
     const data = raw === null ? null : mindData(reg, world, state, who, raw, input.moment, level, input.reasons?.[who] ?? input.moment.reason);
-    return { data, trace: { ...base, outcome: data === null ? "failed" : data.withheld ? "leak_blocked" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source } };
+    return { data, trace: { ...base, outcome: data === null ? "failed" : "recorded", ms, tokens: usage.tokens, prompt: prompt.source } };
   });
   const results = await Promise.all(calls);
   // Each checked against the state it will fold on: one that doesn't validate is dropped.

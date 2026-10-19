@@ -1214,7 +1214,7 @@ A value out of range or of the wrong kind plays as its default, and lint (`minds
 - **The section:** a section of its own (slot `minds`, outlet `lre_minds`). Every world has it, even one that defines its own sections. It takes this round's minds for the people at the POV's place that the POV can see, plus anyone whose mind interrupted a time skip. A mind from an earlier round isn't the narrator's.
 - **Its budget:** a token budget of its own (Settings → Minds), apart from the section budget, so minds never crowd out Scene or People. When the section is over its budget it is left out for that turn, as a clipped section is.
 - **`full` secrecy:** each mind's monologue, intent, conditional reactions, mood and depiction go to the narrator. The section's note says to depict them, never to state a thought, and never to let one character act on another's mind. Under `full` the narrator may read a character's own secrets in their monologue; that is the author's choice.
-- **`brief` secrecy:** only the depiction, written as behaviour anyone present could see. It is screened as Stance's cues are: an unrevealed secret (`findLeaks`) or a name the POV can't see (`namesHidden`) withholds it. The screen runs when the mind is recorded (the event is marked `withheld`, and the inspector shows `leak_blocked`), and again when the section is drawn. The monologue stays in the GM view.
+- **`brief` secrecy:** only the depiction, written as behaviour anyone present could see. It is screened as Stance's cues are: an unrevealed secret (`findLeaks`) or a name the POV can't see (`namesHidden`) withholds it. The screen runs when the mind is recorded (the event is marked `withheld`, which only the GM view shows; the inspector reads the call as `recorded`), and again when the section is drawn. The monologue stays in the GM view.
 - **Stance:** whoever has a line in the Minds section is left out of Stance (`minds.minded`). Stance still tells of everyone else with the POV.
 
 ### 24.4 Memory
@@ -1250,7 +1250,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - **Placeholders:** `{{character}}`, `{{world}}`, `{{pov}}`, `{{place}}` and `{{clock}}` are filled.
   - **Answer format:** the engine appends the purpose's answer format (`MIND_ANSWER_FORMATS`), which no template replaces, and then the preset's `RPEngine · <purpose>` block (§6.8).
   - **Lint:** a minds template's signals are ignored (`minds.step_signals`), and a second template for one purpose is never used (`minds.step_duplicate`).
-- **Calls:** every mind is its own call, made in parallel on the pre phase's wall clock, apart from its call count. The inspector lists each call (§6.5) with no text: purpose, phase, level, outcome, time, tokens, whose prompt it ran, and the character by name only when the POV knows them, else "Someone".
+- **Calls:** every mind is its own call, made in parallel on the pre phase's wall clock, apart from its call count. The inspector lists each call (§6.5) with no text: purpose, phase, level, outcome (`recorded` or `failed`), time, tokens, whose prompt it ran, and the character by name. A call for someone the POV can't see or hasn't met isn't listed at all, so the panel never shows that someone unseen is in the room or that an unmet person matters; a history kept by an earlier build, which named them "Someone", reads back without those calls.
 
 ### 24.6 Settings and cost
 - **The user's minds settings** (`UserSettings.minds`, Settings → Minds): on or off; the Live limit; the Near triggers and their counts; the Far period; the refresh limit; the levels that get memory; the Minds section's budget; memory overrides; prompt overrides; and a time skip's caps (beats per skip, minds per beat). "No limit" is `"none"`.
@@ -1319,7 +1319,7 @@ The Cast life planner (§8) lays each character's own plans into their days and 
   - pin a level, or unpin (`mind_pin`);
   - ask for a fresh mind next turn (`mind_refresh`);
   - add, edit or delete a note, commitment or plan (`mind_memory`; a value names only the fields that change).
-- **Player surfaces:** never any of it. Every minds event words nothing for a player's line, so no Journal note, chip, Cast or other panel tells a mind. The inspector's traces carry no text.
+- **Player surfaces:** never any of it. Every minds event words nothing for a player's line, so no Journal note, chip, Cast or other panel tells a mind. The inspector's traces carry no text, list only people the POV can see and has met, and never say a depiction was kept from the narrator.
 
 ### 24.10 Determinism
 - **Events:** every model answer is recorded as an event: `minds.round` and `minds.mind` before the plan; `minds.presence`, `minds.memory` and `minds.consolidated` with the reply's read. Each apply reads only its own data, the minds slice and the clock, never an entity's fields, so a coarsened record (L21) folds the same.
