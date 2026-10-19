@@ -396,6 +396,22 @@ function dayIndexOfText(cal, text) {
     throw new RangeError(`expected YYYY-MM-DD, got ${text}`);
   return dayIndexOf(cal, Number(m[1]), Number(m[2]), Number(m[3]));
 }
+function formatStamp(cal, clock, offsetMinutes = 0) {
+  const d = dateAt(cal, clock + offsetMinutes);
+  return `${d.year < 0 ? "-" : ""}${String(Math.abs(d.year)).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ${formatHHMM(d.minuteOfDay)}`;
+}
+function clockOfStamp(cal, text) {
+  const m = /^\s*(-?\d{1,6})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})\s*$/.exec(text);
+  if (!m)
+    return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const minute = Number(m[4]) * 60 + Number(m[5]);
+  if (month < 1 || month > cal.system.months || day < 1 || day > cal.system.monthLength(year, month) || Number(m[4]) > 23 || Number(m[5]) > 59)
+    return null;
+  return clockAt(cal, dayIndexOf(cal, year, month, day), minute);
+}
 function nextTimeOfDay(cal, clock, minuteOfDay) {
   const d = dateAt(cal, clock);
   const today = clockAt(cal, d.dayIndex, minuteOfDay);
@@ -10472,7 +10488,7 @@ function businessBooks(api, books, business, from, to) {
       sum[k] += b[k];
     for (const account of accounts) {
       for (const [category, t] of Object.entries(totalsOf(books.state, account, month))) {
-        if (BOOKED_CATEGORIES.includes(category))
+        if (BOOKED_CATEGORIES.includes(category) || category === "opening")
           continue;
         otherIn += t.in;
         if (t.out > 0)
@@ -12350,6 +12366,7 @@ function businessView(ctx, api, business, viewer) {
     const b = businessBooks(api, ctx, business, from, from + 1);
     return { period: m, revenue: b.revenue, expenses: b.expenses, profit: b.profit };
   });
+  const routed = api.shareOf(ctx.state, business, viewer) > 0 ? optionalQuery(ctx, "economy.stake_route")?.(ctx, viewer, business) ?? null : undefined;
   return {
     id: business,
     name: labelOf(ctx, business),
@@ -12362,7 +12379,8 @@ function businessView(ctx, api, business, viewer) {
     sales,
     invoices,
     employees,
-    taxes
+    taxes,
+    route: routed === undefined ? null : routed === null ? { to: null, reinvest: false } : ("reinvest" in routed) ? { to: null, reinvest: true } : { to: routed.account, reinvest: false }
   };
 }
 function businessesOf(ctx, api, party) {
@@ -13414,6 +13432,13 @@ function routeOf(state, holding) {
     return { reinvest: true, to: null };
   return { reinvest: false, to: route !== "" && own(state.entities, route)?.kind === "account" ? route : null };
 }
+function shownRoute(api, ctx, viewer, to, reinvest) {
+  if (reinvest)
+    return { to: null, reinvest: true };
+  if (to === null)
+    return { to: null, reinvest: false };
+  return api.accountsOf(ctx, viewer, "sees").includes(to) ? { to, reinvest: false } : { to: null, reinvest: false, elsewhere: true };
+}
 function realise(api, state, world, holding, taken, proceeds, label) {
   const total = taken.reduce((a, t) => a + t.qty, 0);
   if (total <= 0)
@@ -13657,7 +13682,7 @@ function setRoute(api, ctx, party, holding, to) {
     return [];
   return [{ type: "set", entity: holding, field: "route", value: route }];
 }
-function holdingView(api, ctx, holding, detail) {
+function holdingView(api, ctx, holding, detail, viewer) {
   const e = own(ctx.state.entities, holding);
   const a = assetOf(ctx, strOf(e?.fields.asset));
   if (!e || !a)
@@ -13680,7 +13705,7 @@ function holdingView(api, ctx, holding, detail) {
     gain: detail ? value - cost : 0,
     lots: detail ? lots.map((l) => ({ qty: l.qty, cost: l.cost, at: dateText3(ctx.world, l.at), gain: Math.round(l.qty * price) - l.cost, term: ctx.state.clock - l.at >= YEAR_MINUTES ? "long" : "short" })) : [],
     option: a.option && under ? { right: a.option.right, underlying: under.label, strike: a.option.strike, expiry: dateText3(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf2(ctx, under), a.option.strike) > 0 } : null,
-    route: a.pays > 0 || a.bond ? { to: route.to ?? accountOfHolding(ctx.state, holding), reinvest: route.reinvest } : null
+    route: a.pays > 0 || a.bond ? shownRoute(api, ctx, viewer, route.to, route.reinvest) : null
   };
 }
 function visibleHoldings(api, ctx, party) {
@@ -14987,6 +15012,7 @@ function propertyView(api, ctx, id, party, flows) {
   const owed = loans.reduce((a, l) => a + l.owed, 0);
   const place = strOf(e?.fields.place);
   const asking = num4(e?.fields.asking_price);
+  const rentTo = strOf(e?.fields.rent_to);
   return {
     id,
     name: e?.name ?? id,
@@ -14998,7 +15024,8 @@ function propertyView(api, ctx, id, party, flows) {
     mortgage: loan ? { id: loan.loan, name: labelOf(ctx, loan.loan), owed, payment: num4(fieldsOf(ctx.state, loan.loan).payment) ?? null, monthsLeft: num4(fieldsOf(ctx.state, loan.loan).months_left) ?? null } : null,
     leases: leaseViews(ctx, id),
     costs: flows.filter((f) => f.link?.id === id && f.kind !== "rent"),
-    forSale: asking ?? null
+    forSale: asking ?? null,
+    route: api.ownersOf(ctx.state, id).some((o) => o.party === party) ? shownRoute(api, ctx, party, own(ctx.state.entities, rentTo)?.kind === "account" ? rentTo : null, false) : null
   };
 }
 function visibleProperties(api, ctx, party) {
@@ -15361,7 +15388,7 @@ function about(ctx, cents) {
   return formatMoney(Math.sign(cents) * Math.round(abs / step) * step, ctx.world.currency);
 }
 function investmentsView(api, ctx, party, detail) {
-  const holdings = visibleHoldings(api, ctx, party).map((id) => holdingView(api, ctx, id, detail)).filter((h) => h !== null);
+  const holdings = visibleHoldings(api, ctx, party).map((id) => holdingView(api, ctx, id, detail, party)).filter((h) => h !== null);
   if (holdings.length === 0 && !api.feature(ctx, party, "investments"))
     return null;
   const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
@@ -18095,7 +18122,7 @@ var GROUPS = [
   { label: "Cards and credit lines", test: (c) => CLASS_TRAITS[c].revolving },
   { label: "Loans", test: (c) => CLASS_TRAITS[c].installment }
 ];
-function netWorthParts(hooks, ctx, party, shown = (id) => balance(ctx.state, id)) {
+function netWorthParts(hooks, ctx, party) {
   const byGroup = new Map;
   let assets = 0;
   let liabilities = 0;
@@ -18103,7 +18130,8 @@ function netWorthParts(hooks, ctx, party, shown = (id) => balance(ctx.state, id)
     const cls = classOf2(ctx, id);
     if (!cls)
       continue;
-    const cents = Math.round(shown(id) * shareOf(ctx.state, id, party) / 100);
+    const held = balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
+    const cents = Math.round(held * shareOf(ctx.state, id, party) / 100);
     if (cents >= 0)
       assets += cents;
     else
@@ -18498,7 +18526,7 @@ function buildFinanceView(hooks, ctx, party, player) {
   const empty = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
   if (level === 0)
     return empty;
-  const worth = netWorthParts(hooks, ctx, party, (id) => shown2(ctx, id));
+  const worth = netWorthParts(hooks, ctx, party);
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
   if (kind === "household" && level >= 3 && mine.length === 0)
@@ -26030,7 +26058,7 @@ ${texts.reply}`);
     const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
     const author = never ? "background" : always ? "live" : null;
     const t = config.thresholds;
-    const atHand = here !== null && place === here || closeBy(world, place, here) || namedIn(e.name, said);
+    const atHand = here !== null && place === here || namedIn(e.name, said);
     const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
     if (score >= t.live && !atHand)
       reasons.push({ label: "Not at hand, so Near at most", points: 0 });
@@ -60026,7 +60054,7 @@ async function interpret(steps, text, world, actions, scene, config, userId, sig
 ${worldBrief(world, `Scene: ${JSON.stringify(scene)}.`)}
 Action catalog:
 ${catalog}
-Rules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it. If the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours"), add "then": {"minutes": number} or {"until": a day part, "shift" or "commitment"}; time passing is never in "more" or "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`;
+Rules: only the player character's own deliberate actions in the input count. Speech to others, requests, hypotheticals, past recaps and feelings are not actions (action null). Return the first action as "action" with its "params". If the input has more actions after it, list them in order in "more" (at most ${ACTION_QUEUE_LIMIT - 1}), each {"action": a catalog id, "params": {...}, "text": that action written as the player would type it}: "I walk to the market and buy bread" \u2192 "action" for the walk, and "more": [{"action": <the buy's id>, "params": {"item": "bread"}, "text": "I buy bread"}]. An action after them that no catalog action fits goes in "next", written as the player would type it. If the input lets time pass after its last action ("\u2026and sleep until the next morning", "\u2026then wait two hours", "\u2026then skip ahead to Friday at 6 PM"), add "then": {"minutes": number}, {"until": a day part, "shift" or "commitment"} or {"at": "YYYY-MM-DD HH:MM"} for a stated day and time; time passing is never in "more" or "next", nor is anything else that isn't an action. Use world ids for params. A text param that names an item keeps its qualifiers as written (size, kind, how: "large pizza, delivered", not "pizza"). Money params are plain amounts in ${world.currency.code} as written (200 for ${world.currency.symbol}200). Output JSON only: {"action": string|null, "params": {...}, "confidence": number, "more"?: [{"action": string, "params": {...}, "text": string}], "then"?: {...}, "next"?: string}.`;
   const raw = await steps.helperJson("interpret", system, text, config, userId, signal, { retryTransient: true, lore, guidance });
   if (!isRecord(raw))
     return null;
@@ -61105,22 +61133,19 @@ function capBeats(beats, max) {
   const kept = Number.isFinite(max) ? [...merged].sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, Math.max(0, max)) : merged;
   return kept.sort((a, b) => a.at - b.at);
 }
-function stamp(world, at) {
-  const d = dateAt(calendarOf(world), at);
-  return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")} ${formatHHMM(d.minuteOfDay)}`;
-}
 async function proposedBeats(deps, input, state, scanned) {
   const config = mindsStepConfig(input.settings.modelUse, "skip");
   if (!config || input.signal.aborted)
     return [];
   const ctx = deps.registry.context(input.world, state);
+  const cal = calendarOf(input.world);
   const plans = optionalQuery(ctx, "minds.plans");
   const intents = [...new Set(scanned.beats.flatMap((b) => b.who))].flatMap((id) => {
     const theirs = plans?.(ctx, id) ?? [];
-    return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${stamp(input.world, p.when.from)})`).join("; ")}`] : [];
+    return theirs.length > 0 ? [`${own(state.entities, id)?.name ?? id}: ${theirs.map((p) => `${p.what} (${formatStamp(cal, p.when.from)})`).join("; ")}`] : [];
   });
-  const user = [`The skip runs from ${stamp(input.world, scanned.from)} to ${stamp(input.world, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:
-${scanned.beats.map((b) => `- ${stamp(input.world, b.at)}: ${b.reason}`).join(`
+  const user = [`The skip runs from ${formatStamp(cal, scanned.from)} to ${formatStamp(cal, scanned.to)}.`, scanned.beats.length > 0 ? `Moments found:
+${scanned.beats.map((b) => `- ${formatStamp(cal, b.at)}: ${b.reason}`).join(`
 `)}` : "No moments found.", intents.length > 0 ? `What the people involved plan:
 ${intents.join(`
 `)}` : ""].filter((part) => part !== "").join(`
@@ -63293,6 +63318,24 @@ function lentAlong(p, pre, state) {
   };
   return pre.some((e) => e.type === "link" && e.rel === "uses" && e.from === to && (e.to === item || inside(e.to)));
 }
+function movedAlong(p, pre, state) {
+  if (p.type !== "transfer" || typeof p.from !== "string" || typeof p.to !== "string")
+    return false;
+  const from = p.from.trim();
+  const to = p.to.trim();
+  if (from === "" || to === "")
+    return false;
+  const cents = transferCents(p);
+  const near = (v) => !Number.isFinite(cents) || Math.abs(Math.abs(cents) - v) <= 0.25 * v;
+  const names = (side, account) => account === side || account === `${EXTERNAL_ACCOUNT_PREFIX}${side}` || heldBy(state.entities, account, side);
+  return pre.some((e) => {
+    if (e.type !== "post")
+      return false;
+    const left = e.lines.reduce((sum, l) => sum + (l.amount < 0 && names(from, l.account) ? -l.amount : 0), 0);
+    const reached = e.lines.reduce((sum, l) => sum + (l.amount > 0 && names(to, l.account) ? l.amount : 0), 0);
+    return left > 0 && reached > 0 && (near(left) || near(reached));
+  });
+}
 var ANOTHER = /\b(?:another|second|third|extra|(?:one|two|three|some|a few) more)\b/i;
 var FOR_SOMEONE = { him: true, her: true, them: true, friend: true, wife: true, husband: true, partner: true, son: true, daughter: true, kid: true, child: true, mom: true, dad: true, mother: true, father: true, brother: true, sister: true, boyfriend: true, girlfriend: true, date: true, guest: true };
 var CONTRAST = Object.fromEntries([
@@ -63505,7 +63548,7 @@ class Runtime {
     this.steps = new Steps(this.host, this.meter);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792443333" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792445205" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
@@ -63784,7 +63827,10 @@ class Runtime {
     }
     const scene = { place: placeOfEntity(render.state, render.world.pov) };
     const dayParts = render.world.calendar.dayParts.map((d) => d.id);
-    const timelapseEntry = { id: TIMELAPSE_ACTION2, label: `Let time pass (wait, sleep, skip ahead): minutes for a stated duration, or until one of ${[...dayParts, "shift", "commitment"].join(", ")} ("next <day part>" for the following day's)`, params: ["minutes", "until"], lexicon: TIMELAPSE_LEXICON };
+    const cal = calendarOf(render.world);
+    const offset = placeOffset(render.world, render.state.clock, placeOfEntity(render.state, render.world.pov));
+    const now = `${weekdayName(cal, dateAt(cal, render.state.clock + offset).weekday)} ${formatStamp(cal, render.state.clock, offset)}`;
+    const timelapseEntry = { id: TIMELAPSE_ACTION2, label: `Let time pass (wait, sleep, skip ahead): minutes for a stated duration; until one of ${[...dayParts, "shift", "commitment"].join(", ")} ("next <day part>" for the following day's); or at a stated day and time, as "YYYY-MM-DD HH:MM" (it is now ${now})`, params: ["minutes", "until", "at"], lexicon: TIMELAPSE_LEXICON };
     const puzzles = openPuzzleTitles(this.registry, render.world, render.state);
     const labelOf = (a) => a.pack === "story" && a.id === "answer" && puzzles.length > 0 ? `${a.label} (open: ${puzzles.join("; ")})` : a.label;
     const paramsOf = (a) => Object.entries(a.params).map(([name, p]) => p.table !== undefined ? `${name} (one of: ${tableChoices(hasOwn(render.world.tables, p.table) ? render.world.tables[p.table] : undefined).map((c) => c.key).join(" | ")})` : name);
@@ -63800,7 +63846,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       criteria[TIMELAPSE_ACTION2] = timelapseEntry.label;
       const answer = await this.steps.decide("interpret", { text, scene }, { action: { type: "choice", instructions: run.template?.template ?? "Which engine action does the player character deliberately take in this typed input?", criteria } }, run.config, userId, budget.signal, lore, run.guidance);
       const a = answer?.answers.action;
-      const chosen = a?.type === "choice" && a.choice !== "none" ? a.choice === TIMELAPSE_ACTION2 ? { id: TIMELAPSE_ACTION2, params: { minutes: null, until: null } } : offered.find((x) => x.id === a.choice) : undefined;
+      const chosen = a?.type === "choice" && a.choice !== "none" ? a.choice === TIMELAPSE_ACTION2 ? { id: TIMELAPSE_ACTION2, params: { minutes: null, until: null, at: null } } : offered.find((x) => x.id === a.choice) : undefined;
       if (!chosen)
         result = a?.type === "choice" ? { action: null, params: {}, probabilities: a.probabilities } : null;
       else if (Object.keys(chosen.params).length === 0)
@@ -63834,7 +63880,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
     const timeOnly = result.action === TIMELAPSE_ACTION2 ? result.params : !result.action && result.then ? result.then : null;
     if (timeOnly) {
       bridge.setNext(text, joinActions([...(result.queue ?? []).map((q) => chipText(q.text)), ...next]) || null);
-      const target = interpretedTarget(timeOnly, render.world, render.state.clock, text);
+      const target = interpretedTarget(timeOnly, render.world, render.state, text);
       const over = target?.type === "duration" && target.minutes > INTERPRETED_TIMELAPSE_CAP;
       bridge.setOffer(text, over ? target : null);
       bridge.setIntent(text, target && !over ? timelapseIntent(target) : null, target !== null && !over);
@@ -63878,7 +63924,7 @@ ${this.trackWords(render.world, render.state)}`, links: this.sceneLinks(render.w
       queue.push({ action: def.id, params: ready, text: chipText(q.text) });
     }
     bridge.setNext(text, joinActions(next) || null);
-    bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state.clock, text) : null);
+    bridge.setOffer(text, then ? interpretedTarget(then, render.world, render.state, text) : null);
     const intent = { action: result.action, params, probabilities: result.probabilities, ...then ? { then } : {}, ...queue.length > 0 ? { queue } : {} };
     if (misfit) {
       this.host.log("info", `[LumiRPEngine] interpret: queued ${misfit.label} names nothing in the world; the queue ends before it`, userId);
@@ -64108,7 +64154,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const typed = intent ? [{ action: intent.action, params: intent.params }, ...intent.queue ?? []].flatMap((a) => a.action === "buy" && typeof a.params.price === "number" ? [a.params.price] : []) : [];
     const unsure = new Set;
     const deduped = dedupeProposals([...extracted, ...effects.flat()].flatMap((p) => splitAlongBuy(p, context.pre, ctx)), context.world.pov).filter((p) => {
-      if (lentAlong(p, context.pre, context.state))
+      if (lentAlong(p, context.pre, context.state) || movedAlong(p, context.pre, context.state))
         return false;
       const along = boughtAlong(p, context.pre, ctx, typed, text);
       if (along === "unsure")
@@ -64355,7 +64401,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     const offer = input.kind === "continue" || plan?.stopped ? undefined : bridge.offerFor(userText);
     if (offer) {
       const part = offer.type === "day_part" ? chipWorld?.calendar.dayParts.find((d) => d.id === offer.dayPart)?.label.toLowerCase() : undefined;
-      const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
+      const label = offer.type === "duration" ? `Timelapse ${compactSpan(offer.minutes)}?` : offer.type === "day_part" ? `Timelapse to ${part ?? offer.dayPart}?` : offer.type === "at" && chipWorld ? `Timelapse to ${shortClock(calendarOf(chipWorld), headState.clock, offer.at)}?` : offer.type === "shift" ? "Timelapse to your next shift?" : offer.type === "commitment" ? "Timelapse to your next commitment?" : "Timelapse?";
       const detail = offer.type === "duration" && offer.minutes > INTERPRETED_TIMELAPSE_CAP ? "That's longer than one turn runs on its own. Run it as a timelapse?" : "You said time passes after that. Run it as a timelapse?";
       stored.push({ id: `tlo:${at}`, kind: "timelapse_offer", ...base, label, detail, actions: [{ id: "timelapse", label: "Timelapse", style: "primary" }], expires: "next_send", payload: { target: JSON.parse(JSON.stringify(offer)) } });
     }
@@ -64763,8 +64809,12 @@ function openPuzzleTitles(registry, world, state) {
 var TIMELAPSE_LEXICON = ["wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "hours later", "days later", "wait for"];
 var INTERPRETED_TIMELAPSE_CAP = 1440;
 var NEXT_DAY_PART_GAP = 180;
-function interpretedTarget(params, world, now, text) {
+function interpretedTarget(params, world, state, text) {
   const cal = calendarOf(world);
+  const now = state.clock;
+  const local = typeof params.at === "string" ? clockOfStamp(cal, params.at) : null;
+  if (local !== null)
+    return { type: "at", at: local - placeOffset(world, local, placeOfEntity(state, world.pov)) };
   const raw = typeof params.until === "string" ? params.until.trim().toLowerCase() : "";
   const next = /^(the\s+)?(next|tomorrow)\b/.test(raw);
   const until = raw.replace(/^(the\s+)?(next|tomorrow)\s*/, "");

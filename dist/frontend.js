@@ -19501,7 +19501,6 @@ function holding(o) {
     return null;
   const asset = obj(o.asset) ?? {};
   const option = obj(o.option);
-  const route = obj(o.route);
   return {
     id: o.id,
     account: nullableStr(o.account),
@@ -19513,8 +19512,12 @@ function holding(o) {
     gain: num(o.gain),
     lots: list(o.lots, (l) => ({ qty: num(l.qty), cost: num(l.cost), at: str(l.at), gain: num(l.gain), term: l.term === "long" ? "long" : "short" })),
     option: option ? { right: option.right === "put" ? "put" : "call", underlying: str(option.underlying), strike: num(option.strike), expiry: str(option.expiry), inTheMoney: bool(option.inTheMoney) } : null,
-    route: route ? { to: nullableStr(route.to), reinvest: bool(route.reinvest) } : null
+    route: distributionRoute(o.route)
   };
+}
+function distributionRoute(value) {
+  const r = obj(value);
+  return r ? { to: nullableStr(r.to), reinvest: bool(r.reinvest), ...r.elsewhere === true ? { elsewhere: true } : {} } : null;
 }
 function property(o) {
   if (typeof o.id !== "string")
@@ -19531,7 +19534,8 @@ function property(o) {
     mortgage: mortgage && typeof mortgage.id === "string" ? { id: mortgage.id, name: str(mortgage.name, mortgage.id), owed: num(mortgage.owed), payment: nullableNum(mortgage.payment), monthsLeft: nullableNum(mortgage.monthsLeft) } : null,
     leases: list(o.leases, (l) => ({ flow: str(l.flow), tenant: str(l.tenant), rent: num(l.rent), start: nullableStr(l.start), end: nullableStr(l.end), state: oneOf(l.state, ["let", "vacant", "ended"], "let") })),
     costs: list(o.costs, flowView),
-    forSale: nullableNum(o.forSale)
+    forSale: nullableNum(o.forSale),
+    route: distributionRoute(o.route)
   };
 }
 function credit(o) {
@@ -19628,7 +19632,8 @@ function decodeFinanceView(value) {
           dueAt: str(i.dueAt)
         } : null),
         employees: list(b.employees, job),
-        taxes: list(b.taxes, (t) => ({ label: str(t.label), cents: num(t.cents), due: nullableStr(t.due) }))
+        taxes: list(b.taxes, (t) => ({ label: str(t.label), cents: num(t.cents), due: nullableStr(t.due) })),
+        route: distributionRoute(b.route)
       };
     }),
     investments: investments ? {
@@ -20038,6 +20043,16 @@ function jobSpawnOps(id, name, fields) {
 }
 
 // src/packs/economy/ui/layout.ts
+var ROUTE_ELSEWHERE = " elsewhere";
+function routePick(route) {
+  if (!route)
+    return "";
+  if (route.reinvest)
+    return "reinvest";
+  if (route.elsewhere)
+    return ROUTE_ELSEWHERE;
+  return route.to ?? " ";
+}
 var SECTION_LABELS = { overview: "Overview", accounts: "Accounts", flows: "Flows", jobs: "Jobs", businesses: "Businesses", investments: "Investments", properties: "Properties", credit: "Credit", household: "Household" };
 function hubTabs(view) {
   if (view.level <= 0)
@@ -21736,14 +21751,16 @@ function RouteControl(props) {
   const { view, controls } = props;
   if (controls.mode === "player" && view.level < 3)
     return null;
+  const pick = routePick(props.route);
+  const choices = routeChoices(view, props.reinvest);
   return /* @__PURE__ */ u3(SelectField, {
     label: props.label,
-    value: props.now === null ? "" : props.now === "" ? " " : props.now,
-    empty: props.now === null ? "Choose" : undefined,
-    options: routeChoices(view, props.reinvest),
+    value: pick,
+    empty: pick === "" ? "Choose" : undefined,
+    options: pick === ROUTE_ELSEWHERE ? [...choices, { value: ROUTE_ELSEWHERE, label: "Another owner's account" }] : choices,
     disabled: controls.busy,
     onChange: (picked) => {
-      if (picked === "")
+      if (picked === "" || picked === ROUTE_ELSEWHERE)
         return;
       const to = picked.trim();
       if (controls.mode === "player")
@@ -21914,7 +21931,6 @@ function HoldingCard(props) {
   const fmt = (cents) => formatMoney(cents, controls.currency);
   const blocks = investmentBlocks(view);
   const accountName = h.account ? view.accounts.find((a) => a.id === h.account)?.name ?? h.account : "held directly";
-  const now = h.route ? h.route.reinvest ? "reinvest" : h.route.to ?? "" : "";
   const can = holdingControls(view, h);
   return /* @__PURE__ */ u3(Card, {
     title: `${h.asset.label}${h.asset.symbol ? ` (${h.asset.symbol})` : ""}`,
@@ -21963,7 +21979,7 @@ function HoldingCard(props) {
         view,
         controls,
         target: { holding: h.id },
-        now,
+        route: h.route,
         reinvest: true,
         label: "Distributions go to"
       }, undefined, false, undefined, this) : null,
@@ -22319,7 +22335,7 @@ function PropertyCard(props) {
         view,
         controls,
         target: { property: p.id },
-        now: null,
+        route: p.route,
         reinvest: false,
         label: "Rent goes to"
       }, undefined, false, undefined, this) : null,
@@ -23696,7 +23712,7 @@ function BusinessCard(props) {
         view,
         controls,
         target: { business: b.id },
-        now: null,
+        route: b.route,
         reinvest: true,
         label: controls.mode === "player" ? "Your share of its profit goes to" : `${view.name}'s share of its profit goes to`
       }, undefined, false, undefined, this) : null,

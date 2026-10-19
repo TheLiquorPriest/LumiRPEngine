@@ -11107,7 +11107,7 @@ function businessBooks(api, books, business, from, to) {
       sum[k] += b[k];
     for (const account of accounts) {
       for (const [category, t] of Object.entries(totalsOf(books.state, account, month))) {
-        if (BOOKED_CATEGORIES.includes(category))
+        if (BOOKED_CATEGORIES.includes(category) || category === "opening")
           continue;
         otherIn += t.in;
         if (t.out > 0)
@@ -12985,6 +12985,7 @@ function businessView(ctx, api, business, viewer) {
     const b = businessBooks(api, ctx, business, from, from + 1);
     return { period: m, revenue: b.revenue, expenses: b.expenses, profit: b.profit };
   });
+  const routed = api.shareOf(ctx.state, business, viewer) > 0 ? optionalQuery(ctx, "economy.stake_route")?.(ctx, viewer, business) ?? null : undefined;
   return {
     id: business,
     name: labelOf(ctx, business),
@@ -12997,7 +12998,8 @@ function businessView(ctx, api, business, viewer) {
     sales,
     invoices,
     employees,
-    taxes
+    taxes,
+    route: routed === undefined ? null : routed === null ? { to: null, reinvest: false } : ("reinvest" in routed) ? { to: null, reinvest: true } : { to: routed.account, reinvest: false }
   };
 }
 function businessesOf(ctx, api, party) {
@@ -14049,6 +14051,13 @@ function routeOf(state, holding) {
     return { reinvest: true, to: null };
   return { reinvest: false, to: route !== "" && own(state.entities, route)?.kind === "account" ? route : null };
 }
+function shownRoute(api, ctx, viewer, to, reinvest) {
+  if (reinvest)
+    return { to: null, reinvest: true };
+  if (to === null)
+    return { to: null, reinvest: false };
+  return api.accountsOf(ctx, viewer, "sees").includes(to) ? { to, reinvest: false } : { to: null, reinvest: false, elsewhere: true };
+}
 function realise(api, state, world, holding, taken, proceeds, label) {
   const total = taken.reduce((a, t) => a + t.qty, 0);
   if (total <= 0)
@@ -14292,7 +14301,7 @@ function setRoute(api, ctx, party, holding, to) {
     return [];
   return [{ type: "set", entity: holding, field: "route", value: route }];
 }
-function holdingView(api, ctx, holding, detail) {
+function holdingView(api, ctx, holding, detail, viewer) {
   const e = own(ctx.state.entities, holding);
   const a = assetOf(ctx, strOf(e?.fields.asset));
   if (!e || !a)
@@ -14315,7 +14324,7 @@ function holdingView(api, ctx, holding, detail) {
     gain: detail ? value - cost : 0,
     lots: detail ? lots.map((l) => ({ qty: l.qty, cost: l.cost, at: dateText3(ctx.world, l.at), gain: Math.round(l.qty * price) - l.cost, term: ctx.state.clock - l.at >= YEAR_MINUTES ? "long" : "short" })) : [],
     option: a.option && under ? { right: a.option.right, underlying: under.label, strike: a.option.strike, expiry: dateText3(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf2(ctx, under), a.option.strike) > 0 } : null,
-    route: a.pays > 0 || a.bond ? { to: route.to ?? accountOfHolding(ctx.state, holding), reinvest: route.reinvest } : null
+    route: a.pays > 0 || a.bond ? shownRoute(api, ctx, viewer, route.to, route.reinvest) : null
   };
 }
 function visibleHoldings(api, ctx, party) {
@@ -15622,6 +15631,7 @@ function propertyView(api, ctx, id, party, flows) {
   const owed = loans.reduce((a, l) => a + l.owed, 0);
   const place = strOf(e?.fields.place);
   const asking = num4(e?.fields.asking_price);
+  const rentTo = strOf(e?.fields.rent_to);
   return {
     id,
     name: e?.name ?? id,
@@ -15633,7 +15643,8 @@ function propertyView(api, ctx, id, party, flows) {
     mortgage: loan ? { id: loan.loan, name: labelOf(ctx, loan.loan), owed, payment: num4(fieldsOf(ctx.state, loan.loan).payment) ?? null, monthsLeft: num4(fieldsOf(ctx.state, loan.loan).months_left) ?? null } : null,
     leases: leaseViews(ctx, id),
     costs: flows.filter((f) => f.link?.id === id && f.kind !== "rent"),
-    forSale: asking ?? null
+    forSale: asking ?? null,
+    route: api.ownersOf(ctx.state, id).some((o) => o.party === party) ? shownRoute(api, ctx, party, own(ctx.state.entities, rentTo)?.kind === "account" ? rentTo : null, false) : null
   };
 }
 function visibleProperties(api, ctx, party) {
@@ -15996,7 +16007,7 @@ function about(ctx, cents) {
   return formatMoney(Math.sign(cents) * Math.round(abs / step) * step, ctx.world.currency);
 }
 function investmentsView(api, ctx, party, detail) {
-  const holdings = visibleHoldings(api, ctx, party).map((id) => holdingView(api, ctx, id, detail)).filter((h) => h !== null);
+  const holdings = visibleHoldings(api, ctx, party).map((id) => holdingView(api, ctx, id, detail, party)).filter((h) => h !== null);
   if (holdings.length === 0 && !api.feature(ctx, party, "investments"))
     return null;
   const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
@@ -18730,7 +18741,7 @@ var GROUPS = [
   { label: "Cards and credit lines", test: (c) => CLASS_TRAITS[c].revolving },
   { label: "Loans", test: (c) => CLASS_TRAITS[c].installment }
 ];
-function netWorthParts(hooks, ctx, party, shown = (id) => balance(ctx.state, id)) {
+function netWorthParts(hooks, ctx, party) {
   const byGroup = new Map;
   let assets = 0;
   let liabilities = 0;
@@ -18738,7 +18749,8 @@ function netWorthParts(hooks, ctx, party, shown = (id) => balance(ctx.state, id)
     const cls = classOf2(ctx, id);
     if (!cls)
       continue;
-    const cents = Math.round(shown(id) * shareOf(ctx.state, id, party) / 100);
+    const held = balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
+    const cents = Math.round(held * shareOf(ctx.state, id, party) / 100);
     if (cents >= 0)
       assets += cents;
     else
@@ -19133,7 +19145,7 @@ function buildFinanceView(hooks, ctx, party, player) {
   const empty = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
   if (level === 0)
     return empty;
-  const worth = netWorthParts(hooks, ctx, party, (id) => shown2(ctx, id));
+  const worth = netWorthParts(hooks, ctx, party);
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
   if (kind === "household" && level >= 3 && mine.length === 0)
@@ -26591,7 +26603,7 @@ ${texts.reply}`);
     const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
     const author = never ? "background" : always ? "live" : null;
     const t = config.thresholds;
-    const atHand = here !== null && place === here || closeBy(world, place, here) || namedIn(e.name, said);
+    const atHand = here !== null && place === here || namedIn(e.name, said);
     const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
     if (score >= t.live && !atHand)
       reasons.push({ label: "Not at hand, so Near at most", points: 0 });
@@ -55359,7 +55371,7 @@ Level 0 turns a domain off. Story systems (tracks) do not depend on realism. Tim
     - \`auto\`: the turn runs that timelapse itself, with the interrupt policy and a Montage.
     - Activities first seen by extraction always get the offer chip, since the engine never starts a generation on its own.
     - Shorter spans elapse within the turn.
-  - **Typed time.** The action catalog always includes "Let time pass" (minutes, or until a day part, shift or commitment). A duration up to 24 hours runs as the turn's own timelapse; a longer one is offered as a Timelapse chip and never run unasked, so a misread number can't skip days. An *until* isn't capped: "until my next shift" runs as the turn's timelapse however far off the shift is, inside the unit cap. A span typed after other actions ("…then wait until morning") is offered, not run, once they have all played.
+  - **Typed time.** The action catalog always includes "Let time pass" (minutes; until a day part, shift or commitment; or at a stated day and time). Its label tells \`interpret\` the day and time as the HUD shows them, in the POV's place's time zone ("it is now Mon 2026-09-14 06:45"), so "skip ahead to Friday at 6 PM" can be read as \`at: "2026-09-18 18:00"\`, and \`then\` may carry an \`at\` too. The engine reads it with the world's calendar, as local time at the POV's place, into an \`at\` target. Only \`YYYY-MM-DD HH:MM\` (or with \`T\`) naming a day the calendar has, at a time from 00:00 to 23:59, is a stated time; anything else is none, and the other parameters are read instead. A stated time that has passed, or lies beyond the 366-day timelapse reach, is refused like any target the timelapse can't reach: the turn runs none and records the note ("Timelapse not run: that time has passed"). A duration up to 24 hours runs as the turn's own timelapse; a longer one is offered as a Timelapse chip and never run unasked, so a misread number can't skip days. An *until* or a stated time isn't capped: "until my next shift" runs as the turn's timelapse however far off the shift is, inside the unit cap. A span typed after other actions ("…then wait until morning") is offered, not run, once they have all played; a stated time is offered as "Timelapse to Fri 18:00?".
   - **Extraction** may propose a bounded \`time.advance\` only for narrated time **beyond** what the swipe has already applied: it is given the clock from its fold prefix (P2, §4.3) and the time already applied for this swipe (the turn's elapsed time plus any earlier advance, \`cont\` or \`narr\` reading). It proposes none on timelapse or Speed-through turns.
     - **Under the cap** (240 minutes a proposal, §9.4) the advance applies together with its **catch-up**: the interval runs whole, like a timelapse segment (every LOD1 agent and the POV's routine, inside the unit cap, every interrupt class at \`note\`), so it equals a timelapse to that time. Under \`auto\` it is computed at once in the post pass and stored with it; under \`confirm\` the post pass checks it the same way and offers a confirm chip, and Apply runs it from the head's clock and stores it in the confirm entry, paused clock or not, as \`auto\` does. It is all or nothing: if the interval exceeds the unit cap or the catch-up cannot finish within the post-pass bound, the advance is not applied and becomes the Timelapse chip below. **During a fight** (\`fightHoldsClock\`) none applies in either mode and none is offered: the post pass declines it with a decline chip, and the next reply is told so; Apply on an earlier chip is refused while one is under way (§11).
     - **Over the cap,** up to the 366-day timelapse reach, or when its catch-up cannot apply whole, it becomes a **Timelapse** action chip to that time, with every interrupt class at \`note\` (§9.4). A skip beyond 366 days is dropped, with no chip.
@@ -55385,7 +55397,7 @@ Each pack ships a pure \`core\` (kinds, relations, level contract, services, que
 | Channel | Bound |
 |---|---|
 | \`interpret\` → action and parameters | Validated by the action's requirements; a ref param that names nothing that fits plays as roleplay, with a decline chip saying why (§5.2). Each queued action likewise, played in order against the state the one before it left; the queue stops at a check, a failure or an interruption (§11), and what it leaves is only offered. "Not an action?" undo. |
-| \`interpret\` → a timelapse target | A model-read duration over 24 hours isn't run; it becomes a Timelapse chip. An *until* target (a part of the day, the POV's next shift or commitment) isn't capped: it runs as the turn's own timelapse, inside the unit cap, however far off it is. Activity spans are engine-defined, so Speed through \`auto\` may still apply. The plan is made after \`interpret\` (§5.1), so the turn simulates the action it read. |
+| \`interpret\` → a timelapse target | A model-read duration over 24 hours isn't run; it becomes a Timelapse chip. An *until* target (a part of the day, the POV's next shift or commitment) or a stated day and time isn't capped: it runs as the turn's own timelapse, inside the unit cap, however far off it is. A stated day and time counts only as \`YYYY-MM-DD HH:MM\` naming a day the world's calendar has, read as local time at the POV's place; one that has passed or lies beyond the 366-day reach is refused with a note (§9.2). Activity spans are engine-defined, so Speed through \`auto\` may still apply. The plan is made after \`interpret\` (§5.1), so the turn simulates the action it read. |
 | \`extract\` → \`time.advance\` | Only narrated time beyond what the swipe has already applied (the folded clock plus earlier advances); none on timelapse or Speed-through turns. Up to 240 minutes a proposal, whole, with its catch-up: applied in the post pass under \`auto\` (its starting mode), or on a confirm chip's Apply under \`confirm\`. Longer, up to the 366-day timelapse reach, or when the catch-up cannot run whole, it becomes a Timelapse chip with every interrupt class at \`note\` (§9.2), in either mode; beyond 366 days it is dropped, with no chip. During a fight it never applies, in either mode: it gets a decline chip ("Didn't apply: +N min", a fight is under way, with Remove it and Accept) and an Outcome note for the next reply (§9.5), adds nothing to the changes chip, and a confirm chip's Apply is refused. A paused clock holds ticks and action durations, not time the reply says passed, so under a pause Apply does what \`auto\` does. Explicit timelapses (palette, chip) are user input, not this channel. |
 | \`extract\` → spawns | At most the world's spawn cap a chat (\`spawnCap\`, set in Build's World part: a whole number from 0 to 500, 24 when absent; 0 lets no reply introduce anyone), deduplicated by name; the kind and place are validated. |
 | \`extract\` → \`knows\` | Public facts only: a public entity, or a \`known_by\` or \`discoverable\` place the POV can't see yet (by id or name); never a secret one (§7). |
@@ -55421,6 +55433,7 @@ I then re-measured with the engine's own \`extract\` step as shipped (strict rul
   - a narrated give of money becomes a transfer of that amount with method "cash", converted once before dedupe. A give is money only when the whole item is: an optional article, an amount with the currency's symbol or code or a money word, or a cash word, then optionally "bill", "note" or "in cash" ("$20", "a twenty", "a $20 bill", "20 dollars in cash"). A priced thing ("my $300 jacket", "a $20 gift card") stays a thing. A Gear give never makes money into a thing: "cash", "$20", "a twenty" and "20 dollars" are refused as items ("2 old daggers" in pence is an item, since a letter currency symbol counts only beside the number);
   - each side of a narrated transfer is a person or a person's own cash, checking, savings or card account. An account stands for its holder, paying from it (\`from\`) or depositing into it (\`to\`), and two sides of one holder move money between two of their accounts, so money is conserved. A thing, a loan or brokerage account, or an account no person holds is refused with a *Didn't apply* chip, and nothing moves. The extract prompt states the contract: transfers are between people (entity ids) or their own cash, checking, savings or card accounts, never things, with method "cash" when bills or coins change hands in person ("hands me $20", "slips her a twenty") and no method for a bank transfer, an app payment or a card;
   - cash handed over (a transfer with method "cash") lands in the payee's carried cash, else checking, and comes from the payer's carried cash when it covers, else the usual source, so "Danny hands me $20 for gas" adds $20 to the wallet. A transfer's other stated method picks the payer's account the way a purchase's does, so *Pay another way* on a declined transfer tries each account;
+  - a narrated transfer that tells again a movement of money the turn's own actions made (\`movedAlong\`): a withdrawal, a deposit, a move between accounts or a payment, as a posting among the turn's pre-reply events. It is dropped when both sides name that posting's and its amount is the purchase rule's near: within ±25% of what left the one side or reached the other (a machine's fee makes them differ), or no amount stated. A side names a posting's side as an account it drew on (\`from\`) or paid into (\`to\`), a party holding one, or a party whose outside account it moved. "I take $60 out of the machine" told as checking paying the wallet $60 moves the money once; a transfer of another amount, or to another account, keeps its chip;
   - in **lenient** worlds a narrated price inside the band is accepted, and one outside it is clamped with a chip. A capped or clamped purchase's chip has *Edit amount*: on a confirm chip it applies the purchase at the amount typed; on an automatic one's Undo chip \`economy.reprice\` posts the difference between the same two accounts.
   - **A decline after the prose** shows a chip: *Pay another way* (retries savings, then card, then checking, then cash), *Remove it* or *Accept*. By default the item stays unowned and the next Outcome slot says so ("the payment was declined; they don't have it"). Remove and Accept only reword that note. Notes go to the next turn and its swipes, and are dropped once a later message has committed and another follows. They are kept in \`userStorage/runs/<chat>/outcome-notes.json\`, so a restart before the next turn still tells it.
 
@@ -55945,7 +55958,7 @@ Simulated perspectives drive the characters, and the mechanics ground them. Each
   - **Story involvement:** they own a track under way; up to three tracks under way name them in their stages; their role facet values, a value nested under a weighted one counting as it (a villain under antagonist); and they are named by a world rule.
   - **Pending interactions with the POV:** an invitation, an appointment together, an open plan or commitment with the POV, up to three.
   - **Tier and recency:** the detail band of their tier, and being seen with the POV lately (all of it right after, nothing a day later).
-- **Who decides:** the GM's pin in the chat decides first. Then the author's \`never\` selector (always Background), which wins over \`always\` (always Live). Then the score against the world's thresholds, each read as at least the next one down. Live is only for people at hand: someone neither in the POV's scene, close by nor named this turn is Near at most, however high their score, so a Live slot never goes to someone across town while a person in the room has none. The GM view shows each input's points, any pin and that cap.
+- **Who decides:** the GM's pin in the chat decides first. Then the author's \`never\` selector (always Background), which wins over \`always\` (always Live). Then the score against the world's thresholds, each read as at least the next one down. Live is only for people at hand: someone neither in the POV's scene nor named this turn is Near at most, however high their score, so a Live slot never goes to someone across town while a person in the room has none. "Close by" scores but doesn't count as at hand: it means under the same parent place, which in a town is the whole town. The GM view shows each input's points, any pin and that cap.
 - **Who thinks this turn** (the user's cadence, §24.6):
   - Live characters think every turn, best score first, up to the Live limit ("none" for no limit).
   - Near characters, and Live ones past the limit, think on their triggers: their first mind, a rise on the ladder, entering the POV's scene, being named, a number of turns, or a number of game minutes since their last mind.
@@ -56015,7 +56028,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
 - **Cost:** minds' calls aren't counted in §5.3's per-preset tables. A turn makes one call per mind that runs, and after the reply one \`memory\` call per present character at a chosen level and the occasional \`consolidate\`.
 
 ### 24.7 Time skips
-A timelapse turn (§9.2: the palette, a chip or typed time) is a **time skip** while minds are on: before the reply, the skip finds its beats, lets the minds of the people each beat involves think there, and may stop where one of them would interrupt it (\`backend/skip.ts\`). The background lane and Re-narrate never run one, and minds off leaves a plain timelapse.
+A timelapse turn (§9.2: the palette, a chip or typed time) is a **time skip** while minds are on: before the reply, the skip finds its beats, lets the minds of the people each beat involves think there, and may stop where one of them would interrupt it (\`backend/skip.ts\`). The background lane and Re-narrate never run one, and minds off leaves a plain timelapse. Typed time that states a day and time ends the skip exactly then: "I put in my shifts all week. Skip ahead to Friday at 6 PM." typed on Monday morning skips to Friday 18:00, with the week's beats on the way, unless something stops it first.
 - **The state it starts from** is exactly the plan's: the fold before the turn's target, the turn's decisions and its minds round, and the turn's first steps (§5.1). So it reaches each beat in the state the plan will.
 - **The beat scan** finds the following without a model, only up to where the skip would end on its own:
   - the POV's appointments;
@@ -56385,8 +56398,9 @@ Everything a party owns besides money in accounts: positions in securities, fund
 - **Selling part of a stake** (\`stake_sell\`): the buyer pays, the shares move between them with everyone else's unchanged, and the seller realises the gain against what they put in (a stake play didn't record cost nothing: a founder's, held since before the story). A buyer outside the world can only take a whole business from its only owner.
 
 ### 27.11 Net worth, dashboards and summaries
-- **Net worth** (§25) adds each party's share of every holding at market, every property's value and every business stake. The mortgage is already one of the party's accounts, so nothing is counted twice.
+- **Net worth** (§25) adds each party's share of every holding at market, every property's value and every business stake. The mortgage is already one of the party's accounts, so nothing is counted twice. An account that hasn't opened yet counts at the authored opening it will post, as the money views show it, so a party's worth at a chat's start is what it is once their accounts open.
 - **The investment view** (\`FinanceView.investments\`): the holdings the party sees, with units, price, value and, where the books show detail, cost, gain and lots with their terms; the year's realised gains, income and estimated tax; the assets they could buy and the accounts that can hold them. **The property view** lists the properties they hold a share of, and those for sale: value, equity, the mortgage, every lease and vacant unit, and the cost flows. Alerts: contracts expiring within a week, bonds maturing within a month.
+- **Routes in force.** A holding that pays, a property its viewer owns and a business they hold a share of each carry where its payouts go now (\`route\`: an account of the viewer's, reinvested, or the usual place); another owner's account shows only as that, unnamed. The hub's pickers open on it.
 - **A mind's money summary** (\`economy.summary\`) gets plain sentences: what they have invested, the properties they own and what's left on the mortgage, the rent they collect, the businesses they own.
 - **Secrecy.** Prices, mints, lots, income, disposals and routes are bookkeeping, never a player line; another party's trades and holdings show only in the GM view. What the POV sees of its own is the postings' lines and the notes its expiries and maturities send.
 `;
@@ -56829,7 +56843,7 @@ The input bar has four buttons for the world: **World actions…**, **Timelapse�
 
 You don't have to use the palette. When what you type looks like an action (a risky verb, handing something over, travel, quantities, money, a place, losing something, letting time pass), the engine asks a small helper call to read it as an action and fills in the details. The action still has to satisfy its requirements, and a name that matches nothing in the world makes it plain roleplay instead of an action that would only fail: the reply shows **Pay: couldn't** (with the action's own name) and why, for example "Rena isn't anyone in this world", and the next reply is told it didn't happen. One message can hold several actions ("I walk to Bluebird Coffee, buy a latte and sit by the window"): up to five play in order in the same turn, each from where the one before left you, and their times add up. The turn stops early at a check (it rolls, and you see how it fell before going on), at an action that fails (a requirement, a declined payment), or when something comes up: you go down (dying, or worse), a fight, a long activity such as sleep that offers or runs a Timelapse, being moved somewhere you didn't go, or anything you'd stop a Timelapse for (an invitation, someone arriving), as long as you could see it. Then the reply offers the rest as a chip whose **Send** sends it as your next message, so it plays as its own turn. If it got it wrong, tap **Not an action?**: that undoes it, and a Re-run treats the text as plain roleplay. On Lean and Standard, text that doesn't look like an action is just roleplay and costs nothing; Full reads every message you type, so each one costs a call.
 
-Typed text can also let time pass. Phrases like "wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "wait for" (or "hours later", "days later") make the engine read a request to let time pass: a number of minutes, or *until* a part of the day, your next shift, or your next commitment. A number of minutes up to 24 hours runs as the turn's own Timelapse, with your interrupt policy and a Montage; a longer one is never run unasked: a **Timelapse 3 d?** chip offers it, and **Timelapse** runs it. An *until* runs as the turn's own Timelapse however far off it is, so "sleep until my next shift" runs to the shift even when it is days away (a long run still stops at the safety cap, with a **Continue timelapse** chip). The narration can still skip ahead on its own, as described in [When the story jumps ahead](#when-the-story-jumps-ahead).
+Typed text can also let time pass. Phrases like "wait until", "sleep until", "next morning", "skip ahead", "skip to", "pass the time", "sleep through", "wait for" (or "hours later", "days later") make the engine read a request to let time pass: a number of minutes; *until* a part of the day, your next shift, or your next commitment; or a day and time you name ("skip ahead to Friday at 6 PM"). A number of minutes up to 24 hours runs as the turn's own Timelapse, with your interrupt policy and a Montage; a longer one is never run unasked: a **Timelapse 3 d?** chip offers it, and **Timelapse** runs it. An *until* runs as the turn's own Timelapse however far off it is, so "sleep until my next shift" runs to the shift even when it is days away (a long run still stops at the safety cap, with a **Continue timelapse** chip). A day and time you name runs to exactly then, in the time where your character is (the time the HUD shows), however far off it is; a time that has already passed, or one more than 366 days away, doesn't run, and the Journal says why ("Timelapse not run: that time has passed"). The Timelapse sheet in the palette has no day-and-time entry; type it instead. The narration can still skip ahead on its own, as described in [When the story jumps ahead](#when-the-story-jumps-ahead).
 
 Some details can be said in your own words. A loan ends when you say it does: "I lend Danny my truck until 7 tonight", "for 3 hours", "until Friday", "tomorrow morning". A said end wins over the days. Words that name no time fall back to the days you gave, and a lend with neither is declined ("… names no time; say how many days or until when"). A piece of a kit can be named by its words in any order ("the metric combination wrench"): filler words and plurals don't count, at least half the words must match, and a lone number doesn't.
 
@@ -57191,7 +57205,7 @@ Each mind is recorded on the turn, so swipes and branches keep it: **Re-narrate*
 
 Every turn, and at each beat of a time skip, each character gets a focus score and a level from it:
 
-- **Live**: they think every turn, best score first, up to your Live limit. Only people at hand are Live: in your scene, close by, or named this turn. Anyone else is Near at most, however much of the story they carry.
+- **Live**: they think every turn, best score first, up to your Live limit. Only people at hand are Live: in your scene, or named this turn. Anyone else is Near at most, however much of the story they carry.
 - **Near**: they think again when something calls for it: they come into the scene, they are named, or their mind is old enough (the Near refresh).
 - **Far**: they think now and then, on the Far refresh period, and their plans shape their day.
 - **Background**: no mind; they follow their routine.

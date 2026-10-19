@@ -11633,7 +11633,7 @@ function businessBooks(api, books, business, from, to) {
       sum[k] += b[k];
     for (const account of accounts) {
       for (const [category, t] of Object.entries(totalsOf(books.state, account, month))) {
-        if (BOOKED_CATEGORIES.includes(category))
+        if (BOOKED_CATEGORIES.includes(category) || category === "opening")
           continue;
         otherIn += t.in;
         if (t.out > 0)
@@ -13511,6 +13511,7 @@ function businessView(ctx, api, business, viewer) {
     const b = businessBooks(api, ctx, business, from, from + 1);
     return { period: m, revenue: b.revenue, expenses: b.expenses, profit: b.profit };
   });
+  const routed = api.shareOf(ctx.state, business, viewer) > 0 ? optionalQuery(ctx, "economy.stake_route")?.(ctx, viewer, business) ?? null : undefined;
   return {
     id: business,
     name: labelOf(ctx, business),
@@ -13523,7 +13524,8 @@ function businessView(ctx, api, business, viewer) {
     sales,
     invoices,
     employees,
-    taxes
+    taxes,
+    route: routed === undefined ? null : routed === null ? { to: null, reinvest: false } : ("reinvest" in routed) ? { to: null, reinvest: true } : { to: routed.account, reinvest: false }
   };
 }
 function businessesOf(ctx, api, party) {
@@ -14575,6 +14577,13 @@ function routeOf(state, holding) {
     return { reinvest: true, to: null };
   return { reinvest: false, to: route !== "" && own(state.entities, route)?.kind === "account" ? route : null };
 }
+function shownRoute(api, ctx, viewer, to, reinvest) {
+  if (reinvest)
+    return { to: null, reinvest: true };
+  if (to === null)
+    return { to: null, reinvest: false };
+  return api.accountsOf(ctx, viewer, "sees").includes(to) ? { to, reinvest: false } : { to: null, reinvest: false, elsewhere: true };
+}
 function realise(api, state, world, holding, taken, proceeds, label) {
   const total = taken.reduce((a, t) => a + t.qty, 0);
   if (total <= 0)
@@ -14818,7 +14827,7 @@ function setRoute(api, ctx, party, holding, to) {
     return [];
   return [{ type: "set", entity: holding, field: "route", value: route }];
 }
-function holdingView(api, ctx, holding, detail) {
+function holdingView(api, ctx, holding, detail, viewer) {
   const e = own(ctx.state.entities, holding);
   const a = assetOf(ctx, strOf(e?.fields.asset));
   if (!e || !a)
@@ -14841,7 +14850,7 @@ function holdingView(api, ctx, holding, detail) {
     gain: detail ? value - cost : 0,
     lots: detail ? lots.map((l) => ({ qty: l.qty, cost: l.cost, at: dateText3(ctx.world, l.at), gain: Math.round(l.qty * price) - l.cost, term: ctx.state.clock - l.at >= YEAR_MINUTES ? "long" : "short" })) : [],
     option: a.option && under ? { right: a.option.right, underlying: under.label, strike: a.option.strike, expiry: dateText3(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf2(ctx, under), a.option.strike) > 0 } : null,
-    route: a.pays > 0 || a.bond ? { to: route.to ?? accountOfHolding(ctx.state, holding), reinvest: route.reinvest } : null
+    route: a.pays > 0 || a.bond ? shownRoute(api, ctx, viewer, route.to, route.reinvest) : null
   };
 }
 function visibleHoldings(api, ctx, party) {
@@ -16148,6 +16157,7 @@ function propertyView(api, ctx, id, party, flows) {
   const owed = loans.reduce((a, l) => a + l.owed, 0);
   const place = strOf(e?.fields.place);
   const asking = num4(e?.fields.asking_price);
+  const rentTo = strOf(e?.fields.rent_to);
   return {
     id,
     name: e?.name ?? id,
@@ -16159,7 +16169,8 @@ function propertyView(api, ctx, id, party, flows) {
     mortgage: loan ? { id: loan.loan, name: labelOf(ctx, loan.loan), owed, payment: num4(fieldsOf(ctx.state, loan.loan).payment) ?? null, monthsLeft: num4(fieldsOf(ctx.state, loan.loan).months_left) ?? null } : null,
     leases: leaseViews(ctx, id),
     costs: flows.filter((f) => f.link?.id === id && f.kind !== "rent"),
-    forSale: asking ?? null
+    forSale: asking ?? null,
+    route: api.ownersOf(ctx.state, id).some((o) => o.party === party) ? shownRoute(api, ctx, party, own(ctx.state.entities, rentTo)?.kind === "account" ? rentTo : null, false) : null
   };
 }
 function visibleProperties(api, ctx, party) {
@@ -16522,7 +16533,7 @@ function about(ctx, cents) {
   return formatMoney(Math.sign(cents) * Math.round(abs / step) * step, ctx.world.currency);
 }
 function investmentsView(api, ctx, party, detail) {
-  const holdings = visibleHoldings(api, ctx, party).map((id) => holdingView(api, ctx, id, detail)).filter((h) => h !== null);
+  const holdings = visibleHoldings(api, ctx, party).map((id) => holdingView(api, ctx, id, detail, party)).filter((h) => h !== null);
   if (holdings.length === 0 && !api.feature(ctx, party, "investments"))
     return null;
   const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
@@ -19256,7 +19267,7 @@ var GROUPS = [
   { label: "Cards and credit lines", test: (c) => CLASS_TRAITS[c].revolving },
   { label: "Loans", test: (c) => CLASS_TRAITS[c].installment }
 ];
-function netWorthParts(hooks, ctx, party, shown = (id) => balance(ctx.state, id)) {
+function netWorthParts(hooks, ctx, party) {
   const byGroup = new Map;
   let assets = 0;
   let liabilities = 0;
@@ -19264,7 +19275,8 @@ function netWorthParts(hooks, ctx, party, shown = (id) => balance(ctx.state, id)
     const cls = classOf2(ctx, id);
     if (!cls)
       continue;
-    const cents = Math.round(shown(id) * shareOf(ctx.state, id, party) / 100);
+    const held = balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
+    const cents = Math.round(held * shareOf(ctx.state, id, party) / 100);
     if (cents >= 0)
       assets += cents;
     else
@@ -19659,7 +19671,7 @@ function buildFinanceView(hooks, ctx, party, player) {
   const empty = { party, name: e?.name ?? party, partyKind: kind, level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
   if (level === 0)
     return empty;
-  const worth = netWorthParts(hooks, ctx, party, (id) => shown2(ctx, id));
+  const worth = netWorthParts(hooks, ctx, party);
   const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
   const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
   if (kind === "household" && level >= 3 && mine.length === 0)
@@ -26645,7 +26657,7 @@ ${texts.reply}`);
     const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
     const author = never ? "background" : always ? "live" : null;
     const t = config.thresholds;
-    const atHand = here !== null && place === here || closeBy(world, place, here) || namedIn(e.name, said);
+    const atHand = here !== null && place === here || namedIn(e.name, said);
     const scored = score >= t.live ? atHand ? "live" : "near" : score >= t.near ? "near" : score >= t.far ? "far" : "background";
     if (score >= t.live && !atHand)
       reasons.push({ label: "Not at hand, so Near at most", points: 0 });
