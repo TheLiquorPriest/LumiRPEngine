@@ -12,7 +12,7 @@
 
 import type { EntityId } from "../../../shared/ids";
 import type { LedgerEvent, PostingLine } from "../../../shared/ledger";
-import type { AccountClass, AlertLine, ClassTraits, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine } from "../../../shared/finance";
+import type { AccountClass, AlertLine, ClassTraits, FinanceFeature, FinanceView, Flow, FlowSchedule, FlowSplit, MoneySummary, Owner, PartyKind, ResolvedProduct, TxnKind, UpcomingLine } from "../../../shared/finance";
 import type { FieldDef } from "../../../shared/world";
 import type { CoreRegistry, ReadContext, Rejection } from "../../../engine/registry";
 import type { WorldState } from "../../../engine/state";
@@ -129,16 +129,19 @@ export interface OpenAccount {
   card?: boolean;
 }
 
+/** What a read of the books needs: the world (its products and features) and the state. */
+export type Books = Pick<ReadContext, "world" | "state">;
+
 /** The foundation's money surface for modules. Every function is pure. */
 export interface FinanceApi {
-  classOf(state: Readonly<WorldState>, account: EntityId): AccountClass | null;
-  traitsOf(state: Readonly<WorldState>, account: EntityId): ClassTraits | null;
+  classOf(books: Books, account: EntityId): AccountClass | null;
+  traitsOf(books: Books, account: EntityId): ClassTraits | null;
   /** The owners of any entity with an `owners` list (accounts, businesses, holdings, properties); an older single `owner` reads as the owner. */
   ownersOf(state: Readonly<WorldState>, entity: EntityId): Owner[];
   /** A party's share of an entity's worth, percent (0 when its role carries none). */
   shareOf(state: Readonly<WorldState>, entity: EntityId, party: EntityId): number;
   /** The accounts a party holds with a right (`spend`, `worth` or `sees`), in class order. */
-  accountsOf(state: Readonly<WorldState>, party: EntityId, right?: "spend" | "worth" | "sees"): EntityId[];
+  accountsOf(books: Books, party: EntityId, right?: "spend" | "worth" | "sees"): EntityId[];
   balance(state: Readonly<WorldState>, account: EntityId): number;
   /** What can be spent or drawn now: the balance (or credit left), less holds, plus overdraft room. */
   available(ctx: ReadContext, account: EntityId): number;
@@ -175,8 +178,8 @@ export interface FinanceApi {
 export interface FinanceRegistry {
   readonly core: CoreRegistry;
   readonly api: FinanceApi;
-  /** Declared fields a module adds to one of the economy's kinds (`business`, `account`, `trust`). */
-  fields(kind: "business" | "account" | "trust" | "card" | "flow", fields: Record<string, FieldDef>): void;
+  /** Declared fields a module adds to one of the foundation's kinds. */
+  fields(kind: FinanceKind, fields: Record<string, FieldDef>): void;
   flows(source: FlowSource): void;
   amount(id: string, provider: AmountProvider): void;
   worth(source: WorthSource): void;
@@ -196,4 +199,16 @@ export interface FinanceHooks {
   sales: SaleHook[];
   views: ViewSection[];
   summaries: SummarySource[];
+}
+
+/** The kinds the foundation registers, whose fields modules may add to. */
+export type FinanceKind = "account" | "card" | "flow" | "trust" | "business" | "job" | "holding" | "property";
+
+declare module "../../../engine/registry" {
+  interface QueryMap {
+    /** A character's own money in plain words, for their mind (DESIGN §24, §25.11). */
+    "economy.summary": (ctx: ReadContext, who: EntityId) => MoneySummary;
+    /** Every party an account (or any owned entity) names on its owners list. */
+    "economy.holders": (ctx: ReadContext, entity: EntityId) => EntityId[];
+  }
 }

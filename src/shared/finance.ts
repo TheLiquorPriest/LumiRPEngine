@@ -16,7 +16,7 @@
 // Money is always integer minor units; percentages are percent units (22 is 22 %).
 
 import type { EntityId, Level } from "./ids";
-import type { JsonObject } from "./json";
+import { hasOwn, type JsonObject } from "./json";
 
 // ---------------------------------------------------------------- account classes
 
@@ -155,6 +155,40 @@ export function worthShares(owners: readonly Owner[]): Record<EntityId, number> 
   for (const o of owners) out[o.party] = out[o.party] ?? 0;
   for (const o of holders) out[o.party] = (out[o.party] ?? 0) + (given.length === 0 ? 100 / holders.length : given.includes(o) ? ((o.share ?? 0) * 100) / total : 0);
   return out;
+}
+
+/**
+ * The owners an entity's fields name: its `owners` list (entries without a party are skipped, an
+ * unknown role reads as `owner`), else an older single `owner` as the owner.
+ */
+export function ownersIn(fields: Readonly<JsonObject>): Owner[] {
+  const list = fields.owners;
+  if (Array.isArray(list)) {
+    const out: Owner[] = [];
+    for (const raw of list) {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
+      const party = raw.party;
+      if (typeof party !== "string" || party === "") continue;
+      const share = raw.share;
+      out.push({ party, role: isOwnerRole(raw.role) ? raw.role : "owner", ...(typeof share === "number" && Number.isFinite(share) ? { share } : {}) });
+    }
+    return out;
+  }
+  return typeof fields.owner === "string" && fields.owner !== "" ? [{ party: fields.owner, role: "owner" }] : [];
+}
+
+/**
+ * Whether `who` holds an entity: names it as its owner, or on its owners list with any role, as
+ * its card holder, or (a holding or a card on an account) holds the account it belongs to. The
+ * engine's "your own things" reads this, so accounts, cards, holdings and properties count as
+ * their holders' like any owned thing.
+ */
+export function heldBy(entities: Readonly<Record<string, { fields: JsonObject }>>, id: EntityId, who: EntityId): boolean {
+  const e = hasOwn(entities, id) ? entities[id] : undefined;
+  if (!e) return false;
+  if (e.fields.holder === who || ownersIn(e.fields).some((o) => o.party === who)) return true;
+  const account = e.fields.account;
+  return typeof account === "string" && account !== id && hasOwn(entities, account) && ownersIn(entities[account]?.fields ?? {}).some((o) => o.party === who);
 }
 
 // ---------------------------------------------------------------- products
@@ -797,15 +831,22 @@ export interface JobFields {
   /** A contractor's pay has nothing withheld (the occupation's `self_employed` by default). */
   contractor?: boolean;
   /** A recurring season, `MM-DD` to `MM-DD` (a summer job). */
-  season?: { from: string; to: string };
+  season_from?: string;
+  season_to?: string;
   pay_every: PayEvery;
   /** The first payday (weekly and biweekly count from it). */
   pay_anchor?: string;
   /** Semimonthly and monthly: the days of the month. */
   pay_days?: number[];
   pay_weekday?: number;
-  /** `custom`: the schedule. */
-  pay_schedule?: FlowSchedule;
+  /** `custom`: the schedule, flattened like a flow's (`pay_days`, `pay_weekday` and `pay_anchor` too). */
+  pay_unit?: "day" | "week" | "month" | "year";
+  pay_interval?: number;
+  pay_weekdays?: number[];
+  pay_months?: number[];
+  pay_except?: string[];
+  /** Every cycle's roll off a weekend or day-off holiday; `before` when absent. */
+  pay_roll?: "none" | "before" | "after";
   start?: string;
   end?: string;
   deductions?: Deduction[];
@@ -862,6 +903,16 @@ export type AssetClass = (typeof ASSET_CLASSES)[number];
 
 /** An asset positions are held in (`packs.economy.config.assets`, id → def). */
 export interface AssetDef {
+  /** Distributions a year (dividends, coupons). */
+  pays_per_year?: number;
+  /** How closely it follows its class's market, 0 to 1. */
+  correlation?: number;
+  /** Bonds: face value (minor units), coupon and maturity date. */
+  face?: number;
+  coupon_pct?: number;
+  maturity?: string;
+  /** Options: delivered in units, or settled in cash. */
+  settlement?: "physical" | "cash";
   label: string;
   class: AssetClass;
   symbol?: string;
@@ -909,7 +960,7 @@ export interface HoldingFields {
 export interface PropertyFields {
   place?: string;
   owners: Owner[];
-  /** Its value at the start; it moves by `appreciation_pct` a year. */
+  /** Its value now: the holdings module's appreciation step moves it, and a GM edit sets it. */
   value: number;
   appreciation_pct?: number;
   purchase_price?: number;
@@ -973,6 +1024,16 @@ export interface TxnData {
   /** A narrated price the charge doesn't match. */
   narrated?: number;
   limited?: "cap" | "band";
+}
+
+/**
+ * Money in and out of one account in one calendar month, by category (`other` when a line has
+ * none), kept by the journal for books and cash flow: the economy slice's
+ * `totals[account]["YYYY-MM"][category]`. The last 13 months are kept.
+ */
+export interface MonthTotals {
+  in: number;
+  out: number;
 }
 
 /** `economy.statement`: a credit account's statement closes (older ones carry only the first five fields). */
@@ -1234,6 +1295,11 @@ export interface InvestmentsView {
   cost: number;
   unrealised: number;
   realised: number;
+  /** This year: distributions received, gains realised short and long term, and the capital-gains tax estimated and when it's due. */
+  income?: number;
+  realisedShort?: number;
+  realisedLong?: number;
+  taxDue?: { cents: number; at: string } | null;
   holdings: HoldingView[];
 }
 
@@ -1347,4 +1413,9 @@ export const FINANCE_ACTIONS = {
   trade: "trade",
   exercise: "exercise_option",
   route: "route_distributions",
+  propertyBuy: "property_buy",
+  propertySell: "property_sell",
+  leaseStart: "lease_start",
+  leaseEnd: "lease_end",
+  stakeSell: "stake_sell",
 } as const;
