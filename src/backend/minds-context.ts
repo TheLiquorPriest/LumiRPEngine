@@ -68,6 +68,13 @@ export function povLabel(scope: Pick<MindScope, "state" | "world" | "who">): str
   return known ? nameOf(scope, pov) : "a stranger";
 }
 
+/** The narration speaks to the POV in the second person; a mind told "You are X" would otherwise read every "you" in it as X. */
+function storyVoice(scope: Pick<MindScope, "state" | "world" | "who">): string {
+  const pov = povLabel(scope);
+  const them = pov === "a stranger" ? "that stranger" : pov;
+  return `The story is told to ${pov === "a stranger" ? "a stranger, the player character" : `${pov}, the player character`}: in the story's text, "you" and "your" mean ${them}, never you.`;
+}
+
 /** The assistant messages of the turns `who` was in the POV's scene for, oldest first (`minds.presence`). */
 export function presentTurns(state: Readonly<WorldState>, who: EntityId): MessageId[] {
   const out: MessageId[] = [];
@@ -236,8 +243,8 @@ export function mindContext(scope: MindScope): string {
     block("What you remember, and what you saw or were told", memoryLines(scope, c)),
     last ? block(`Your last thoughts (${formatClock(cal, last.at)})`, [last.monologue, last.intent !== "" ? `You meant to: ${last.intent}` : "", last.mood ? `You felt ${last.mood}.` : ""].filter((l) => l !== "")) : "",
     block("What you know of the world", loreLines(scope, place)),
-    block("Turns you were there for (ignore any narration of other people's private thoughts)", recall.map((t) => t.text)),
-    block("Now", now),
+    block("Turns you were there for (ignore any narration of other people's private thoughts)", recall.length > 0 ? [storyVoice(scope), ...recall.map((t) => t.text)] : []),
+    block("Now", now.length > 0 && withPov && moment.kind !== "beat" ? [storyVoice(scope), ...now] : now),
   ].filter((p) => p !== "");
   return clip(parts.join("\n\n"), CONTEXT_MAX);
 }
@@ -255,7 +262,7 @@ export function memoryContext(scope: MindScope, turn: { user: string; reply: str
     block("Your open commitments (by id)", commitments),
     block("Your plans", plans),
     block("What you remember", memoryLines(scope, c)),
-    block("The turn just written", [turn.user.trim() !== "" ? `Player: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")),
+    block("The turn just written", [storyVoice(scope), turn.user.trim() !== "" ? `${povLabel(scope)} (the player character) wrote: ${clip(turn.user, RECALL_SIDE)}` : "", `Story: ${clip(readableReply(turn.reply, scope.hideJson), RECALL_SIDE * 2)}`].filter((l) => l !== "")),
   ].filter((p) => p !== "");
   return clip(parts.join("\n\n"), CONTEXT_MAX);
 }

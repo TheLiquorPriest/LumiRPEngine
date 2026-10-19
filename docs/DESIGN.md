@@ -1191,7 +1191,7 @@ Simulated perspectives drive the characters, and the mechanics ground them. Each
   - **Story involvement:** they own a track under way; up to three tracks under way name them in their stages; their role facet values, a value nested under a weighted one counting as it (a villain under antagonist); and they are named by a world rule.
   - **Pending interactions with the POV:** an invitation, an appointment together, an open plan or commitment with the POV, up to three.
   - **Tier and recency:** the detail band of their tier, and being seen with the POV lately (all of it right after, nothing a day later).
-- **Who decides:** the GM's pin in the chat decides first. Then the author's `never` selector (always Background), which wins over `always` (always Live). Then the score against the world's thresholds, each read as at least the next one down. The GM view shows each input's points and any pin.
+- **Who decides:** the GM's pin in the chat decides first. Then the author's `never` selector (always Background), which wins over `always` (always Live). Then the score against the world's thresholds, each read as at least the next one down. Live is only for people at hand: someone neither in the POV's scene, close by nor named this turn is Near at most, however high their score, so a Live slot never goes to someone across town while a person in the room has none. The GM view shows each input's points, any pin and that cap.
 - **Who thinks this turn** (the user's cadence, §24.6):
   - Live characters think every turn, best score first, up to the Live limit ("none" for no limit).
   - Near characters, and Live ones past the limit, think on their triggers: their first mind, a rise on the ladder, entering the POV's scene, being named, a number of turns, or a number of game minutes since their last mind.
@@ -1237,6 +1237,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - lore read as them: public entries, `known_by` entries by what they know, and of the secrets whose gate doesn't hold only their own (an entry that links them);
   - recall by presence, told to ignore narration of other people's private thoughts;
   - the moment: what the POV just said and did if they are with the POV; else a note that they aren't.
+  - Wherever story text appears (recall, the moment, the memory step's turn), a line says that its "you" is the POV, never the character. Narration speaks to the POV in the second person, and a mind told "You are X" would otherwise take it as itself.
 - **Never in it:** the GM view, another character's mind, or a turn they weren't present for.
 - **The answer:** JSON `{monologue, depiction, intent, reactions[], plans[{what, kind, when{from, to}, where?, with?[], priority}], mood?, interrupt?{reason}}`.
   - Lengths are capped.
