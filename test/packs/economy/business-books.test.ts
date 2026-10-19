@@ -36,3 +36,18 @@ describe("business books: revenue and expenses", () => {
     expect(books).toMatchObject({ revenue: 0, expenses: 0, profit: 0 });
   });
 });
+
+describe("business books: invoices", () => {
+  test("customers outside the world are billed at most the world's cap on unlisted prices in a month", () => {
+    const { w } = setup();
+    // Riverton's own price data tops out at $6,000.
+    const bill = (customer: Record<string, string>, cents: number, seed: string) => act(w, "economy.invoice_issue", { business: "brightline", ...customer, cents, memo: "Freight", by: "jordan" }, seed).rejected;
+    expect(bill({ customer_name: "Acme Freight" }, 700_000, "i1")).toHaveLength(1);
+    expect(bill({ customer_name: "Acme Freight" }, 500_000, "i2")).toEqual([]);
+    expect(bill({ customer_name: "Lakeview Shipping" }, 200_000, "i3")).toHaveLength(1);
+    expect(bill({ customer_name: "Lakeview Shipping" }, 100_000, "i4")).toEqual([]);
+    // Someone in the world pays from their own money, so their invoices aren't bounded this way.
+    expect(bill({ customer: "rosa" }, 700_000, "i5")).toEqual([]);
+    expect(Object.values(w.state.entities).filter((e) => e.kind === "invoice").map((e) => e.fields.cents)).toEqual([500_000, 100_000, 700_000]);
+  });
+});

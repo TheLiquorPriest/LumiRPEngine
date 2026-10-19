@@ -21,6 +21,7 @@ import { canSeeEntity } from "../../../engine/visibility";
 import { addToBooks, addToPayables, businessBooks, monthBook, monthOf, monthsBetween, operatingAccount, payablesOf } from "./books";
 import { allJobs, businessAt, businessIds, jobBlocks, jobView, manages, placesOf, type Job } from "./employment";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
+import { unpricedCap } from "./model";
 import { corporateTax, salesTaxAccount, salesTaxOn, salesTaxPct, structureOf, taxExempt, taxRegionOf } from "./taxes";
 
 /** The foundation's invoice kind (`kinds.ts`): one invoice a business issued. */
@@ -346,6 +347,16 @@ function issueInvoice(ctx: EffectContext, api: FinanceApi, args: Record<string, 
   if (customer === "" || customer === business) return reject("bad_party", "an invoice needs someone to bill");
   const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
   if (!(cents > 0)) return reject("bad_amount", "an invoice needs an amount");
+  // A customer outside the world pays what it is billed from money nobody in the world had, so what a
+  // business bills such customers in a month is bounded by the world's cap on prices nothing lists.
+  if (!own(ctx.state.entities, customer)) {
+    const cap = unpricedCap(ctx.world);
+    const month = monthOf(ctx.world, ctx.state.clock);
+    const billed = allInvoices(ctx)
+      .filter((i) => i.business === business && i.party === null && i.state !== "void" && monthOf(ctx.world, i.issued) === month)
+      .reduce((a, i) => a + i.cents, 0);
+    if (billed + cents > cap) return reject("over_cap", `${labelOf(ctx, business)} can bill customers outside the world at most ${api.money(ctx, cap)} a month, and has billed ${api.money(ctx, billed)}`);
+  }
   const days = typeof args.days === "number" && args.days >= 0 ? Math.round(args.days) : Math.round(numOf(own(ctx.state.entities, business)?.fields.invoice_days, INVOICE_DAYS));
   const cal = calendarOf(ctx.world);
   const due = dateText(ctx, dateAt(cal, ctx.state.clock).dayIndex + days);
