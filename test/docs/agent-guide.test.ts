@@ -70,10 +70,10 @@ describe("the agent guide's examples", () => {
     const missing: string[] = [];
     for (const e of added) {
       const f = e.fields;
-      // Fields that only ever hold an id; `from`, `to` and `employer` also take an outside party's name, which has spaces or capitals.
+      // Fields that only ever hold an id; `from`, `to` and `employer` also take an outside party's name, which has spaces or capitals, and an employer may be a place.
       for (const key of ["account", "worker", "autopay_from", "from", "to", "employer"]) {
         const v = f[key];
-        if (typeof v === "string" && /^[a-z0-9_]+$/.test(v) && !(v in after.entities)) missing.push(`${e.id}.${key}: ${v}`);
+        if (typeof v === "string" && /^[a-z0-9_]+$/.test(v) && !(v in after.entities) && !(key === "employer" && v in after.places)) missing.push(`${e.id}.${key}: ${v}`);
       }
       if (typeof f.workplace === "string" && !(f.workplace in after.places)) missing.push(`${e.id}.workplace: ${f.workplace}`);
       if (typeof f.asset === "string" && !(isRecord(assets) && f.asset in assets)) missing.push(`${e.id}.asset: ${f.asset}`);
