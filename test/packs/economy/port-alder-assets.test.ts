@@ -100,4 +100,21 @@ describe("Port Alder's holdings and property", () => {
     const his = w.ctx.query("economy.finance")(w.ctx, "marcus_delgado", false).properties.find((p) => p.id === "prop_birch_lane_12");
     expect([his?.place, his?.mortgage?.id, his?.owners.map((o) => o.name)]).toEqual(["12 Birch Lane", "acct_marcus_mortgage", ["Marcus Delgado"]]);
   });
+
+  test("the POV's pickup, ATV and boat count in its net worth at their used prices, so it reads comfortable, not broke", () => {
+    const w = portAlder();
+    const view = w.ctx.query("economy.finance")(w.ctx, w.world.pov, true);
+    const vehicles = (view.overview?.breakdown ?? []).filter((l) => ["Your pickup", "Your ATV", "Your fishing boat"].includes(l.label));
+    expect(vehicles).toEqual([
+      { label: "Your ATV", cents: 500_000 },
+      { label: "Your fishing boat", cents: 3_200_000 },
+      { label: "Your pickup", cents: 3_000_000 },
+    ]);
+    expect(view.band).toBe("comfortable");
+    // A vehicle's own value is what counts when it has one; and Dale's pontoon is Dale's.
+    w.apply({ type: "set", entity: "pov_truck", field: "value", value: 1_800_000 });
+    const after = w.ctx.query("economy.finance")(w.ctx, w.world.pov, true);
+    expect((after.overview?.netWorth ?? 0) - (view.overview?.netWorth ?? 0)).toBe(1_800_000 - 3_000_000);
+    expect(after.overview?.breakdown.some((l) => l.label === "Dale's pontoon")).toBe(false);
+  });
 });

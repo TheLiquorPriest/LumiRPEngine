@@ -1068,6 +1068,7 @@ Extends `container`.
 | `last_service` | Last service (mi or h) | number | ≥ 0 |  |  |  | live from vehicles 4 |
 | `odometer_mi` | Odometer (mi) | number | ≥ 0 |  |  |  | live from vehicles 3; locked |
 | `status` | Status | enum: ok, needs_service, broken |  | `"ok"` |  |  | live from vehicles 1; bound confirm |
+| `value` | Value | money | ≥ 0 |  |  |  | live from money 3 |
 
 ### Effects
 

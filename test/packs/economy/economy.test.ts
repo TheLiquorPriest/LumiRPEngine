@@ -54,7 +54,8 @@ describe("economy: ledger and level contract", () => {
     expect(w.state.accounts.card).toBe(-38000);
     expect(w.state.accounts["economy.external:you"]).toBe(-(8400 + 214000 + 650000 - 38000));
     expect(trialBalance(w.state)).toBe(0);
-    expect(worthOf(w, "you")).toBe(8400 + 214000 + 650000 - 38000);
+    // Net worth is the accounts and the pickup, at a midsize pickup's typical used price.
+    expect(worthOf(w, "you")).toBe(8400 + 214000 + 650000 - 38000 + 3_000_000);
   });
 
   test("a card statement shows interest and a minimum payment; autopay pays the minimum on the due date", () => {
