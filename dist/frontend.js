@@ -17210,6 +17210,77 @@ var castlife = {
 };
 var ui_default3 = castlife;
 
+// src/shared/finance.ts
+var ACCOUNT_CLASSES = [
+  "cash",
+  "checking",
+  "business_checking",
+  "savings",
+  "money_market",
+  "cd",
+  "trust",
+  "escrow",
+  "credit_card",
+  "charge_card",
+  "line_of_credit",
+  "loan",
+  "mortgage",
+  "brokerage",
+  "retirement"
+];
+var traits = (label, t) => ({ label, cash: false, asset: false, liability: false, pays: false, depositRank: null, transactional: false, revolving: false, installment: false, investment: false, earns: false, locked: false, ...t });
+var CLASS_TRAITS = Object.freeze({
+  cash: traits("Cash", { cash: true, asset: true, pays: true, depositRank: 1 }),
+  checking: traits("Checking", { asset: true, pays: true, depositRank: 0, transactional: true, earns: true }),
+  business_checking: traits("Business checking", { asset: true, pays: true, depositRank: 0, transactional: true, earns: true }),
+  savings: traits("Savings", { asset: true, pays: true, depositRank: 2, earns: true }),
+  money_market: traits("Money market", { asset: true, pays: true, depositRank: 3, earns: true }),
+  cd: traits("Certificate of deposit", { asset: true, earns: true, locked: true }),
+  trust: traits("Trust account", { asset: true, pays: true, depositRank: 4, earns: true }),
+  escrow: traits("Escrow", { asset: true, pays: true, earns: true }),
+  credit_card: traits("Credit card", { liability: true, pays: true, revolving: true }),
+  charge_card: traits("Charge card", { liability: true, pays: true, revolving: true }),
+  line_of_credit: traits("Line of credit", { liability: true, pays: true, revolving: true }),
+  loan: traits("Loan", { liability: true, installment: true }),
+  mortgage: traits("Mortgage", { liability: true, installment: true }),
+  brokerage: traits("Brokerage", { asset: true, depositRank: 5, investment: true }),
+  retirement: traits("Retirement", { asset: true, investment: true, locked: true })
+});
+var LEGACY_TYPE_CLASS = Object.freeze({ cash: "cash", checking: "checking", savings: "savings", card: "credit_card", loan: "loan", brokerage: "brokerage" });
+var ROLE_RIGHTS = Object.freeze({
+  owner: { spend: true, worth: true, sees: true, manage: true },
+  joint: { spend: true, worth: true, sees: true, manage: true },
+  custodian: { spend: true, worth: false, sees: true, manage: true },
+  beneficiary: { spend: false, worth: true, sees: true, manage: false },
+  trustee: { spend: true, worth: false, sees: true, manage: true },
+  authorized_user: { spend: true, worth: false, sees: true, manage: false }
+});
+var FEATURE_DEFS = Object.freeze({
+  flows: { label: "Standing payments and income", floor: 2, on: 3 },
+  cards: { label: "Payment cards", floor: 2, on: 3 },
+  payment_prefs: { label: "Payment preferences", floor: 2, on: 3 },
+  households: { label: "Household shares", floor: 2, on: 3 },
+  living_costs: { label: "Living costs", floor: 2, on: 3 },
+  statements: { label: "Statements and minimum payments", floor: 3, on: 4 },
+  interest: { label: "Interest", floor: 3, on: 4 },
+  fees: { label: "Fees", floor: 3, on: 4 },
+  delinquency: { label: "Late payments, penalty rates and collections", floor: 3, on: 4 },
+  credit: { label: "Credit reports and scores", floor: 3, on: 4 },
+  atm: { label: "Cash needs a machine or a branch", floor: 2, on: 4 },
+  holds: { label: "Holds on deposits and card payments", floor: 3, on: 4 },
+  daily_limits: { label: "Daily card limits", floor: 2, on: 4 },
+  overdraft: { label: "Overdraft policies", floor: 2, on: 4 },
+  average_daily: { label: "Interest on the average daily balance", floor: 3, on: 4 },
+  withholding: { label: "Withholding on pay", floor: 3, on: 3 },
+  tax_brackets: { label: "Tax brackets", floor: 3, on: 4 },
+  sales_tax: { label: "Sales tax", floor: 3, on: 4 },
+  business_tax: { label: "Business taxes", floor: 3, on: 4 },
+  capital_gains: { label: "Capital gains", floor: 3, on: 4 },
+  investments: { label: "Investments", floor: 3, on: 4 },
+  options: { label: "Options", floor: 3, on: 4 },
+  property: { label: "Property values, leases and upkeep", floor: 3, on: 3 }
+});
+
 // src/engine/pack-kit.ts
 function bandOfJson(v) {
   if (!isRecord(v))
@@ -17794,6 +17865,7 @@ var BOOKKEEPING = new Set([
   "castlife.override",
   "economy.price",
   "economy.txn",
+  "economy.flow_run",
   "story.flag",
   "combat.turn",
   "combat.spend",
@@ -17815,9 +17887,8 @@ var EXTERNAL_ACCOUNT_PREFIX = "economy.external:";
 var TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: SPEED_THRESHOLD_MINUTES, agentDays: [1, 600], events: [1, 5000] });
 
 // src/packs/economy/core/model.ts
-var ACCOUNT_TYPES = ["cash", "checking", "savings", "card", "loan", "brokerage"];
-var MARKET = `${EXTERNAL_ACCOUNT_PREFIX}market`;
 var CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
+var BANK_PREFIX = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
 function derivedUnpricedCap(world) {
   let top = 0;
   for (const table of ["economy.catalog", "economy.categories"])
@@ -17851,7 +17922,8 @@ function EconomyConfig(props) {
 function PersonMoney(props) {
   const { money: m, section } = props;
   const [amount, setAmount] = d2("");
-  const valid = adjustOp(m.entity, amount, section.currency, false) !== null;
+  const valid = adjustOp(m.party, amount, section.currency, false) !== null;
+  const netWorth = m.overview?.netWorth ?? null;
   return /* @__PURE__ */ u3(Card, {
     title: `Money · ${m.name}`,
     aside: /* @__PURE__ */ u3("span", {
@@ -17866,9 +17938,9 @@ function PersonMoney(props) {
         k: "Band",
         v: m.band
       }, undefined, false, undefined, this) : null,
-      m.netWorthCents !== null ? /* @__PURE__ */ u3(Row, {
+      netWorth !== null ? /* @__PURE__ */ u3(Row, {
         k: "Net worth",
-        v: formatMoney(m.netWorthCents, section.currency)
+        v: formatMoney(netWorth, section.currency)
       }, undefined, false, undefined, this) : null,
       !m.opened ? /* @__PURE__ */ u3("div", {
         class: "lre-small lre-muted",
@@ -17876,7 +17948,7 @@ function PersonMoney(props) {
       }, undefined, false, undefined, this) : null,
       m.accounts.map((a) => /* @__PURE__ */ u3(Row, {
         k: a.name,
-        sub: a.kind,
+        sub: a.classLabel,
         v: /* @__PURE__ */ u3("span", {
           class: "lre-inline",
           children: [
@@ -17936,26 +18008,45 @@ function GmMoneySection(props) {
     children: props.gm.money.map((m) => /* @__PURE__ */ u3(PersonMoney, {
       money: m,
       section: props
-    }, m.entity, false, undefined, this))
+    }, m.party, false, undefined, this))
   }, undefined, false, undefined, this);
 }
 
 // src/packs/economy/ui/panel.tsx
-var KIND_ICON = { cash: "\uD83D\uDCB5", checking: "\uD83C\uDFE6", savings: "\uD83D\uDC16", card: "\uD83D\uDCB3", loan: "\uD83D\uDCC4", brokerage: "\uD83D\uDCC8" };
+var CLASS_ICON = {
+  cash: "\uD83D\uDCB5",
+  checking: "\uD83C\uDFE6",
+  business_checking: "\uD83C\uDFE6",
+  savings: "\uD83D\uDC16",
+  money_market: "\uD83D\uDC16",
+  cd: "\uD83D\uDD12",
+  trust: "\uD83C\uDFDB",
+  escrow: "\uD83C\uDFDB",
+  credit_card: "\uD83D\uDCB3",
+  charge_card: "\uD83D\uDCB3",
+  line_of_credit: "\uD83D\uDCB3",
+  loan: "\uD83D\uDCC4",
+  mortgage: "\uD83C\uDFE0",
+  brokerage: "\uD83D\uDCC8",
+  retirement: "\uD83D\uDCC8"
+};
 function decodeMoneyView(value) {
   if (!isRecord(value) || !Array.isArray(value.accounts) && typeof value.band !== "string")
     return null;
+  const overview = isRecord(value.overview) ? value.overview : null;
   return {
     level: num(value.level, 1),
     band: typeof value.band === "string" ? value.band : null,
-    netWorthCents: typeof value.netWorthCents === "number" ? value.netWorthCents : null,
+    netWorthCents: overview && typeof overview.netWorth === "number" ? overview.netWorth : null,
     cash: isRecord(value.cash) ? typeof value.cash.cents === "number" ? { cents: value.cash.cents } : { band: str(value.cash.band) } : null,
     accounts: list(value.accounts, (a) => {
       const due = isRecord(a.due) ? { label: str(a.due.label), cents: num(a.due.cents) } : undefined;
-      return typeof a.id === "string" ? { id: a.id, name: str(a.name, a.id), kind: oneOf(a.kind, ACCOUNT_TYPES, "checking"), cents: num(a.cents), limitCents: optNum(a.limitCents), aprPct: optNum(a.aprPct), due } : null;
+      const limitCents = optNum(a.limit);
+      const aprPct = optNum(a.aprPct);
+      return typeof a.id === "string" ? { id: a.id, name: str(a.name, a.id), class: oneOf(a.class, ACCOUNT_CLASSES, "checking"), cents: num(a.cents), ...limitCents !== undefined ? { limitCents } : {}, ...aprPct !== undefined ? { aprPct } : {}, ...due ? { due } : {} } : null;
     }),
     recent: list(value.recent, (t) => ({ at: str(t.at), memo: str(t.memo), cents: num(t.cents), account: str(t.account) })),
-    upcoming: list(value.upcoming, (u) => ({ at: str(u.at), label: str(u.label), cents: num(u.cents) }))
+    upcoming: list(overview?.upcoming, (u) => ({ at: str(u.at), label: str(u.label), cents: num(u.cents) }))
   };
 }
 function MoneyPanel(props) {
@@ -18006,7 +18097,7 @@ function MoneyPanel(props) {
               children: [
                 /* @__PURE__ */ u3("span", {
                   "aria-hidden": "true",
-                  children: KIND_ICON[a.kind]
+                  children: CLASS_ICON[a.class]
                 }, undefined, false, undefined, this),
                 " ",
                 a.name

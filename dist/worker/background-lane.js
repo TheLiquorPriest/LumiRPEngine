@@ -3334,6 +3334,214 @@ function classOf(value) {
   return out;
 }
 
+// src/shared/finance.ts
+var ACCOUNT_CLASSES = [
+  "cash",
+  "checking",
+  "business_checking",
+  "savings",
+  "money_market",
+  "cd",
+  "trust",
+  "escrow",
+  "credit_card",
+  "charge_card",
+  "line_of_credit",
+  "loan",
+  "mortgage",
+  "brokerage",
+  "retirement"
+];
+var traits = (label, t) => ({ label, cash: false, asset: false, liability: false, pays: false, depositRank: null, transactional: false, revolving: false, installment: false, investment: false, earns: false, locked: false, ...t });
+var CLASS_TRAITS = Object.freeze({
+  cash: traits("Cash", { cash: true, asset: true, pays: true, depositRank: 1 }),
+  checking: traits("Checking", { asset: true, pays: true, depositRank: 0, transactional: true, earns: true }),
+  business_checking: traits("Business checking", { asset: true, pays: true, depositRank: 0, transactional: true, earns: true }),
+  savings: traits("Savings", { asset: true, pays: true, depositRank: 2, earns: true }),
+  money_market: traits("Money market", { asset: true, pays: true, depositRank: 3, earns: true }),
+  cd: traits("Certificate of deposit", { asset: true, earns: true, locked: true }),
+  trust: traits("Trust account", { asset: true, pays: true, depositRank: 4, earns: true }),
+  escrow: traits("Escrow", { asset: true, pays: true, earns: true }),
+  credit_card: traits("Credit card", { liability: true, pays: true, revolving: true }),
+  charge_card: traits("Charge card", { liability: true, pays: true, revolving: true }),
+  line_of_credit: traits("Line of credit", { liability: true, pays: true, revolving: true }),
+  loan: traits("Loan", { liability: true, installment: true }),
+  mortgage: traits("Mortgage", { liability: true, installment: true }),
+  brokerage: traits("Brokerage", { asset: true, depositRank: 5, investment: true }),
+  retirement: traits("Retirement", { asset: true, investment: true, locked: true })
+});
+function isAccountClass(v) {
+  return typeof v === "string" && ACCOUNT_CLASSES.includes(v);
+}
+function isCredit(c) {
+  return CLASS_TRAITS[c].revolving || CLASS_TRAITS[c].installment;
+}
+var LEGACY_TYPE_CLASS = Object.freeze({ cash: "cash", checking: "checking", savings: "savings", card: "credit_card", loan: "loan", brokerage: "brokerage" });
+var OWNER_ROLES = ["owner", "joint", "custodian", "beneficiary", "trustee", "authorized_user"];
+var ROLE_RIGHTS = Object.freeze({
+  owner: { spend: true, worth: true, sees: true, manage: true },
+  joint: { spend: true, worth: true, sees: true, manage: true },
+  custodian: { spend: true, worth: false, sees: true, manage: true },
+  beneficiary: { spend: false, worth: true, sees: true, manage: false },
+  trustee: { spend: true, worth: false, sees: true, manage: true },
+  authorized_user: { spend: true, worth: false, sees: true, manage: false }
+});
+function isOwnerRole(v) {
+  return typeof v === "string" && OWNER_ROLES.includes(v);
+}
+function worthShares(owners) {
+  const out = {};
+  const holders = owners.filter((o) => ROLE_RIGHTS[o.role].worth);
+  const given = holders.filter((o) => typeof o.share === "number" && Number.isFinite(o.share) && o.share > 0);
+  const total = given.reduce((a, o) => a + (o.share ?? 0), 0);
+  for (const o of owners)
+    out[o.party] = out[o.party] ?? 0;
+  for (const o of holders)
+    out[o.party] = (out[o.party] ?? 0) + (given.length === 0 ? 100 / holders.length : given.includes(o) ? (o.share ?? 0) * 100 / total : 0);
+  return out;
+}
+function ownersIn(fields) {
+  const list = fields.owners;
+  if (Array.isArray(list)) {
+    const out = [];
+    for (const raw of list) {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+        continue;
+      const party = raw.party;
+      if (typeof party !== "string" || party === "")
+        continue;
+      const share = raw.share;
+      out.push({ party, role: isOwnerRole(raw.role) ? raw.role : "owner", ...typeof share === "number" && Number.isFinite(share) ? { share } : {} });
+    }
+    return out;
+  }
+  return typeof fields.owner === "string" && fields.owner !== "" ? [{ party: fields.owner, role: "owner" }] : [];
+}
+function heldBy(entities, id, who) {
+  const e = hasOwn(entities, id) ? entities[id] : undefined;
+  if (!e)
+    return false;
+  if (e.fields.holder === who || ownersIn(e.fields).some((o) => o.party === who))
+    return true;
+  const account = e.fields.account;
+  return typeof account === "string" && account !== id && hasOwn(entities, account) && ownersIn(entities[account]?.fields ?? {}).some((o) => o.party === who);
+}
+var OVERDRAFT_POLICIES = ["decline", "fee", "linked"];
+var ACCOUNT_STATUSES = ["open", "frozen", "collections", "charged_off", "closed", "paid_off", "matured"];
+var AUTOPAY_MODES = ["none", "minimum", "statement", "full", "fixed"];
+var CARD_NETWORKS = ["debit", "credit", "charge"];
+var CARD_STATES = ["active", "frozen", "lost", "cancelled"];
+var FLOW_KINDS = ["transfer", "bill", "rent", "utility", "subscription", "premium", "loan_payment", "card_payment", "savings", "income", "payroll", "allowance", "living", "tax", "distribution", "invoice", "draw", "other"];
+var FLOW_SHORTFALLS = ["skip", "partial", "retry", "fallback", "overdraft", "defer"];
+var FLOW_STATUSES = ["active", "paused", "ended"];
+var DELINQUENCY_STAGES = ["current", "late", "30", "60", "90", "120", "collections", "charged_off"];
+function creditTierOf(score) {
+  if (score >= 781)
+    return "super_prime";
+  if (score >= 661)
+    return "prime";
+  if (score >= 601)
+    return "nonprime";
+  if (score >= 501)
+    return "subprime";
+  return "deep_subprime";
+}
+function scoreBand(score) {
+  if (score >= 800)
+    return "exceptional";
+  if (score >= 740)
+    return "very good";
+  if (score >= 670)
+    return "good";
+  if (score >= 580)
+    return "fair";
+  return "poor";
+}
+var SCORE_MIN = 300;
+var SCORE_MAX = 850;
+var FINANCE_FEATURES = [
+  "flows",
+  "cards",
+  "payment_prefs",
+  "households",
+  "living_costs",
+  "statements",
+  "interest",
+  "fees",
+  "delinquency",
+  "credit",
+  "atm",
+  "holds",
+  "daily_limits",
+  "overdraft",
+  "average_daily",
+  "withholding",
+  "tax_brackets",
+  "sales_tax",
+  "business_tax",
+  "capital_gains",
+  "investments",
+  "options",
+  "property"
+];
+var FEATURE_DEFS = Object.freeze({
+  flows: { label: "Standing payments and income", floor: 2, on: 3 },
+  cards: { label: "Payment cards", floor: 2, on: 3 },
+  payment_prefs: { label: "Payment preferences", floor: 2, on: 3 },
+  households: { label: "Household shares", floor: 2, on: 3 },
+  living_costs: { label: "Living costs", floor: 2, on: 3 },
+  statements: { label: "Statements and minimum payments", floor: 3, on: 4 },
+  interest: { label: "Interest", floor: 3, on: 4 },
+  fees: { label: "Fees", floor: 3, on: 4 },
+  delinquency: { label: "Late payments, penalty rates and collections", floor: 3, on: 4 },
+  credit: { label: "Credit reports and scores", floor: 3, on: 4 },
+  atm: { label: "Cash needs a machine or a branch", floor: 2, on: 4 },
+  holds: { label: "Holds on deposits and card payments", floor: 3, on: 4 },
+  daily_limits: { label: "Daily card limits", floor: 2, on: 4 },
+  overdraft: { label: "Overdraft policies", floor: 2, on: 4 },
+  average_daily: { label: "Interest on the average daily balance", floor: 3, on: 4 },
+  withholding: { label: "Withholding on pay", floor: 3, on: 3 },
+  tax_brackets: { label: "Tax brackets", floor: 3, on: 4 },
+  sales_tax: { label: "Sales tax", floor: 3, on: 4 },
+  business_tax: { label: "Business taxes", floor: 3, on: 4 },
+  capital_gains: { label: "Capital gains", floor: 3, on: 4 },
+  investments: { label: "Investments", floor: 3, on: 4 },
+  options: { label: "Options", floor: 3, on: 4 },
+  property: { label: "Property values, leases and upkeep", floor: 3, on: 3 }
+});
+function featureOn(level, feature, toggles) {
+  const def = FEATURE_DEFS[feature];
+  if (level < def.floor)
+    return false;
+  const set = toggles?.[feature];
+  return typeof set === "boolean" ? set : level >= def.on;
+}
+var PAY_BASES = ["salary", "hourly", "per_shift", "commission", "tips", "stipend"];
+var PAY_EVERY = ["weekly", "biweekly", "semimonthly", "monthly", "per_job", "custom"];
+var FILING_STATUSES = ["single", "married_filing_jointly", "head_of_household"];
+var INVOICE_STATES = ["open", "paid", "late", "void"];
+var ASSET_CLASSES = ["security", "fund", "bond", "option", "property", "business_stake", "crypto", "other"];
+var FINANCE_EVENTS = {
+  anchor: "economy.anchor",
+  txn: "economy.txn",
+  note: "economy.note",
+  modifier: "economy.modifier",
+  statement: "economy.statement",
+  cardPaid: "economy.card_paid",
+  price: "economy.price",
+  decline: "economy.decline",
+  delinquency: "economy.delinquency",
+  flowRun: "economy.flow_run",
+  hold: "economy.hold",
+  settle: "economy.settle",
+  credit: "economy.credit",
+  score: "economy.score",
+  spend: "economy.spend",
+  open: "economy.open",
+  status: "economy.status",
+  accrue: "economy.accrue"
+};
+
 // src/shared/hash.ts
 var C1 = 597399067;
 var C2 = 2869860233;
@@ -3523,6 +3731,9 @@ function hashParts(...parts) {
   for (const w of hashWords(...parts))
     s += w.toString(16).padStart(8, "0");
   return s;
+}
+function hash32(...parts) {
+  return hashWords(...parts)[0];
 }
 var MAX_JSON_DEPTH = 128;
 function canonicalJson(v, depth) {
@@ -3732,7 +3943,7 @@ function eventVisible(reg, world, state, pov, e) {
       return !!t && visibilityOf(t.visibility) === "public";
     }
     case "post":
-      return e.lines.some((l) => own(state.entities, l.account)?.fields.owner === pov);
+      return e.lines.some((l) => heldBy(state.entities, l.account, pov));
     case "clock":
     case "timelapse":
       return true;
@@ -4762,13 +4973,14 @@ var BOOKKEEPING = new Set([
   "castlife.override",
   "economy.price",
   "economy.txn",
+  "economy.flow_run",
   "story.flag",
   "combat.turn",
   "combat.spend",
   "combat.decision"
 ]);
 function postLine(world, state, pov, memo, lines) {
-  const mine = lines.filter((l) => own(state.entities, l.account)?.fields.owner === pov);
+  const mine = lines.filter((l) => heldBy(state.entities, l.account, pov));
   const label = memo !== "" ? memo : "Money moved";
   if (mine.length === 0)
     return memo !== "" ? memo : null;
@@ -4799,7 +5011,7 @@ function metBy(state, pov, id) {
   const p = own(state.entities, pov);
   if (!e || !p)
     return false;
-  if (e.fields.owner === pov || knows(state, pov, id))
+  if (heldBy(state.entities, id, pov) || knows(state, pov, id))
     return true;
   let holder = id;
   for (let i = 0;holder && i < HOLD_DEPTH; i++) {
@@ -5059,15 +5271,17 @@ function rawLine(reg, world, state, pov, e, player) {
   }
 }
 function lineRank(reg, world, state, pov, e) {
-  if (e.type === "post" || e.type === "stage" || e.type === ENGINE_EVENTS.signal || e.type.startsWith("economy."))
+  if (e.type === "post" || e.type === "stage" || e.type.startsWith("economy."))
     return 0;
   if ((e.type === "set" || e.type === "add") && fieldDef(reg, world, own(state.entities, e.entity)?.kind ?? "", e.field)?.type === "money")
     return 0;
+  if (e.type === ENGINE_EVENTS.signal)
+    return "data" in e && (e.data.class === "bill" || e.data.class === "decline") ? 0 : 1;
   if (e.type === "set" && (e.field === "activity" || e.field === "place" && e.entity !== pov))
-    return 2;
+    return 3;
   if (e.type.startsWith("castlife."))
-    return 2;
-  return 1;
+    return 3;
+  return 2;
 }
 function playerLines(reg, world, state, pov, events, max = 8) {
   return wordedLines(reg, world, state, pov, events, max, true);
@@ -5625,6 +5839,20 @@ function applyEvent(types, event, state, ctx) {
   if (def)
     def.apply(event, state, ctx);
 }
+function eventUnits(events) {
+  const out = [];
+  let i = 0;
+  while (i < events.length) {
+    const group = events[i]?.group;
+    let j = i + 1;
+    if (group !== undefined)
+      while (j < events.length && events[j]?.group === group)
+        j++;
+    out.push([i, j]);
+    i = j;
+  }
+  return out;
+}
 var TIME_BOUNDS = Object.freeze({ tick: [0, 1440], scale: [0.25, 10], thresholdMinutes: SPEED_THRESHOLD_MINUTES, agentDays: [1, 600], events: [1, 5000] });
 
 // src/engine/ruleset.ts
@@ -5952,9 +6180,10 @@ function pinnedVersion(world, reg, domain) {
   if (!def)
     return { code: "no_materializer", reason: `no materializer for ${domain}` };
   const pin = world.pins.generators[domain];
-  if (pin !== undefined && pin !== def.version)
-    return { code: "generator_pin", reason: `${domain} is pinned to generator v${pin}; this build has v${def.version}` };
-  return def.version;
+  const carried = def.versions ?? [def.version];
+  if (pin !== undefined && !carried.includes(pin))
+    return { code: "generator_pin", reason: `${domain} is pinned to generator v${pin}; this build has v${carried.join(", v")}` };
+  return pin ?? def.version;
 }
 function sample(reg, ctx, entity, domain, runSeed) {
   const def = reg.materializers.get(domain);
@@ -5963,7 +6192,7 @@ function sample(reg, ctx, entity, domain, runSeed) {
   const version = pinnedVersion(ctx.world, reg, domain);
   if (typeof version !== "number")
     return null;
-  const events = def.materialize(entity, ctx, createRng(materializationSeed(runSeed, entity, domain)));
+  const events = def.materialize(entity, ctx, createRng(materializationSeed(runSeed, entity, domain)), version);
   if (events.length === 0)
     return null;
   return { type: "materialize", entity, domain, generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events };
@@ -8732,7 +8961,7 @@ function paramCandidates(reg, world, state, action, param, actor = world.pov) {
       continue;
     if (def.of && !selectorMatches(reg, world, state, def.of, id))
       continue;
-    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && e.fields.owner !== actor)
+    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && !heldBy(state.entities, id, actor))
       continue;
     if (!canSeeEntity(reg, world, state, actor, id))
       continue;
@@ -9799,7 +10028,7 @@ function speedThrough(state, activity, remainingMinutes) {
   return policy.mode;
 }
 function ownedBy(state, id, pov) {
-  return id === pov || own(state.entities, id)?.fields.owner === pov;
+  return id === pov || heldBy(state.entities, id, pov);
 }
 function buildMontage(reg, world, before, after, events, granularity) {
   const pov = world.pov;
@@ -11056,6 +11285,9 @@ var PERSON = {
     occupation: { type: "text", label: "Occupation", domain: "money", level: 3, table: "economy.occupations" },
     region: { type: "text", label: "Region", domain: "money", level: 3, table: "economy.regions" },
     employer: { type: "ref", label: "Employer", domain: "money", level: 3 },
+    pay_prefs: { type: "list", label: "Pays with, in order ({use, min?, max?, categories?, except?})", domain: "money", level: 3 },
+    filing_status: { type: "enum", label: "Tax filing status", values: [...FILING_STATUSES], domain: "money", level: 4 },
+    local_tax: { type: "bool", label: "Pays local income tax", domain: "money", level: 4 },
     might: { type: "number", label: "Might", min: 3, max: 18, domain: "sheets", level: 1 },
     agility: { type: "number", label: "Agility", min: 3, max: 18, domain: "sheets", level: 1 },
     wits: { type: "number", label: "Wits", min: 3, max: 18, domain: "sheets", level: 1 },
@@ -11301,13 +11533,147 @@ function minorUnitPlural(currency) {
   return `${unit}s`;
 }
 
+// src/packs/economy/core/books.ts
+var BOOK_KEYS = [
+  "sales",
+  "takings",
+  "cogs",
+  "tax_collected",
+  "tax_remitted",
+  "invoices",
+  "bills",
+  "payroll",
+  "business_tax",
+  "draws",
+  "distributions"
+];
+var BOOKED_CATEGORIES = ["sales", "cogs", "sales_tax", "invoice", "payroll", "business_tax", "draw", "distribution", "transfer"];
+var MONTHS_KEPT = 25;
+function monthOf(world, clock) {
+  const d = dateAt(calendarOf(world), clock);
+  return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}`;
+}
+function addToBooks(state, business, month, entries) {
+  const books = sliceRecord(state, "economy", "books");
+  const cur = objOf(own(objOf(own(books, business)), month));
+  const next = { ...cur };
+  for (const k of BOOK_KEYS) {
+    const v = entries[k];
+    if (typeof v === "number" && v !== 0)
+      next[k] = numOf(cur[k]) + v;
+  }
+  const months = { ...objOf(own(books, business)), [month]: next };
+  const keys = Object.keys(months).sort();
+  for (const old of keys.slice(0, Math.max(0, keys.length - MONTHS_KEPT)))
+    delete months[old];
+  books[business] = months;
+}
+function monthBook(state, business, month) {
+  const row = objOf(own(objOf(own(objOf(sliceOf(state, "economy").books), business)), month));
+  const out = {};
+  for (const k of BOOK_KEYS)
+    out[k] = numOf(row[k]);
+  return out;
+}
+function payablesOf(state, business) {
+  const p = objOf(own(objOf(sliceOf(state, "economy").payables), business));
+  return { sales_tax: numOf(p.sales_tax), suppliers: numOf(p.suppliers) };
+}
+function addToPayables(state, business, delta) {
+  const all = sliceRecord(state, "economy", "payables");
+  const cur = payablesOf(state, business);
+  all[business] = { sales_tax: cur.sales_tax + (delta.sales_tax ?? 0), suppliers: cur.suppliers + (delta.suppliers ?? 0) };
+}
+function monthsBetween(world, from, to) {
+  const out = [];
+  const cal = calendarOf(world);
+  const first = dateAt(cal, from);
+  const last = dateAt(cal, Math.max(from, to - 1));
+  for (let { year: y, month: m } = first, guard = 0;guard < 1200 && (y < last.year || y === last.year && m <= last.month); guard++) {
+    out.push(`${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`);
+    m = m === 12 ? 1 : m + 1;
+    if (m === 1)
+      y++;
+  }
+  return out;
+}
+function totalsOf(state, account, month) {
+  const raw = objOf(own(objOf(own(objOf(sliceOf(state, "economy").totals), account)), month));
+  const out = {};
+  for (const [category, v] of Object.entries(raw))
+    out[category] = { in: numOf(objOf(v).in), out: numOf(objOf(v).out) };
+  return out;
+}
+function operatingAccount(api, books, business) {
+  const accounts = api.accountsOf(books, business, "spend");
+  const named = strOf(own(books.state.entities, business)?.fields.operating_account);
+  if (named !== "" && accounts.includes(named))
+    return named;
+  const rank = (a) => api.traitsOf(books, a)?.depositRank ?? Infinity;
+  return accounts.filter((a) => rank(a) !== Infinity).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))[0] ?? null;
+}
+function businessBooks(api, books, business, from, to) {
+  const accounts = api.accountsOf(books, business, "worth");
+  const sum = {};
+  for (const k of BOOK_KEYS)
+    sum[k] = 0;
+  let otherIn = 0;
+  const otherOut = {};
+  for (const month of monthsBetween(books.world, from, to)) {
+    const b = monthBook(books.state, business, month);
+    for (const k of BOOK_KEYS)
+      sum[k] += b[k];
+    for (const account of accounts) {
+      for (const [category, t] of Object.entries(totalsOf(books.state, account, month))) {
+        if (BOOKED_CATEGORIES.includes(category))
+          continue;
+        otherIn += t.in;
+        if (t.out > 0)
+          otherOut[category] = (otherOut[category] ?? 0) + t.out;
+      }
+    }
+  }
+  const otherIncome = Math.max(0, otherIn - sum.takings);
+  const expenseLines = Object.entries(otherOut).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const revenue = sum.sales + sum.invoices + otherIncome;
+  const expenses = sum.cogs + sum.payroll + sum.business_tax + sum.bills + expenseLines.reduce((a, [, c]) => a + c, 0);
+  const owed = invoicesOwed(books.state, business);
+  const payables = payablesOf(books.state, business);
+  const lines = [
+    { category: "sales", cents: sum.sales },
+    { category: "invoices", cents: sum.invoices },
+    { category: "other income", cents: otherIncome },
+    { category: "cost of goods", cents: -sum.cogs },
+    { category: "payroll", cents: -sum.payroll },
+    { category: "bills", cents: -sum.bills },
+    { category: "income tax", cents: -sum.business_tax },
+    ...expenseLines.map(([category, c]) => ({ category, cents: -c }))
+  ].filter((l) => l.cents !== 0);
+  return { revenue, expenses, profit: revenue - expenses, receivables: owed.receivable, payables: owed.payable + Math.max(0, payables.sales_tax) + Math.max(0, payables.suppliers), payroll: sum.payroll, taxes: sum.business_tax, lines, draws: sum.draws, distributions: sum.distributions };
+}
+function invoicesOwed(state, business) {
+  let receivable = 0;
+  let payable = 0;
+  for (const e of Object.values(state.entities)) {
+    if (e.kind !== "invoice" || e.fields.state !== "open" && e.fields.state !== "late")
+      continue;
+    const left = Math.max(0, numOf(e.fields.cents) + numOf(e.fields.late_fee) - numOf(e.fields.paid));
+    if (e.fields.business === business)
+      receivable += left;
+    if (e.fields.customer === business)
+      payable += left;
+  }
+  return { receivable, payable };
+}
+
 // src/packs/economy/core/model.ts
-var ACCOUNT_TYPES = ["cash", "checking", "savings", "card", "loan", "brokerage"];
-var MARKET = `${EXTERNAL_ACCOUNT_PREFIX}market`;
-var DEFAULT_SYMBOL = "broad_us_equity_index";
 var CORRECTION_ACCOUNT = `${EXTERNAL_ACCOUNT_PREFIX}correction`;
+var BANK_PREFIX = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
 function external(id) {
   return `${EXTERNAL_ACCOUNT_PREFIX}${id}`;
+}
+function bankSide(institution) {
+  return `${BANK_PREFIX}${institution || "bank"}`;
 }
 var WEALTH_BANDS = [
   { label: "broke", min: -Infinity, max: 1e4, typical: 5000 },
@@ -11323,27 +11689,253 @@ function wealthBand(cents) {
 function bandByLabel(label) {
   return WEALTH_BANDS.find((b) => b.label === label) ?? WEALTH_BANDS[2];
 }
-function accountType(state, id) {
-  const t = own(state.entities, id)?.fields.type;
-  return typeof t === "string" && ACCOUNT_TYPES.includes(t) ? t : null;
+function worldProducts(world) {
+  const raw = objOf(objOf(world.packs.economy?.config).products);
+  const out = {};
+  for (const [id, p] of Object.entries(raw)) {
+    const def = objOf(p);
+    if (isAccountClass(def.class))
+      out[id] = def;
+  }
+  return out;
 }
-function accountsOf(state, owner) {
-  return Object.keys(state.entities).filter((id) => own(state.entities, id)?.kind === "account" && own(state.entities, id)?.fields.owner === owner).sort((a, b) => ACCOUNT_TYPES.indexOf(accountType(state, a) ?? "cash") - ACCOUNT_TYPES.indexOf(accountType(state, b) ?? "cash") || a.localeCompare(b));
+function classOf2(books, id) {
+  const e = own(books.state.entities, id);
+  if (!e || e.kind !== "account")
+    return null;
+  const product = strOf(e.fields.product);
+  if (product !== "") {
+    const def = own(worldProducts(books.world), product);
+    if (def)
+      return def.class;
+    if (isAccountClass(product))
+      return product;
+  }
+  return own(LEGACY_TYPE_CLASS, strOf(e.fields.type)) ?? null;
+}
+function traitsOf(books, id) {
+  const c = classOf2(books, id);
+  return c ? CLASS_TRAITS[c] : null;
+}
+var DEBIT_PURCHASE_LIMIT = 300000;
+var DEBIT_ATM_LIMIT = 50000;
+var DEPOSIT_HOLD_DAYS = 2;
+var OVERDRAFT_LIMIT = 50000;
+function typical(v, fallback) {
+  if (typeof v === "number" && Number.isFinite(v))
+    return v;
+  const o = objOf(v);
+  return typeof o.typical === "number" ? o.typical : fallback;
+}
+function classDefaults(books, cls) {
+  const rows = books.tables.get("economy.finance")?.rows ?? {};
+  const card = objOf(rows.credit_card?.values);
+  const deposits = objOf(rows.deposit_accounts?.values);
+  const fees = objOf(deposits.checking_fees_cents);
+  const loans = objOf(rows.loans?.values);
+  const personal = objOf(loans.personal);
+  const mortgage = objOf(loans.mortgage);
+  const minimum = objOf(objOf(card.minimum_payment).default);
+  const lateFees = objOf(card.late_fee_cents);
+  const advance = objOf(card.cash_advance_fee);
+  const cardMinimum = { pct: numOf(minimum.principal_pct, 1), floor: numOf(minimum.floor_cents, 3500), plus_interest: minimum.includes_interest_and_fees !== false };
+  const noFees = { annual: 0, late_first: 0, late_repeat: 0, overdraft: 0, nsf: 0, atm: 0, cash_advance_pct: 0, cash_advance_min: 0, maintenance: 0, maintenance_waive: 0, card_replacement: 0 };
+  const creditFees = { ...noFees, late_first: numOf(lateFees.first, 3200), late_repeat: numOf(lateFees.repeat, 4300), nsf: typical(card.returned_payment_fee_cents, 3200), cash_advance_pct: numOf(advance.pct, 5), cash_advance_min: numOf(advance.minimum_cents, 1000) };
+  const bankFees = {
+    ...noFees,
+    overdraft: typical(fees.overdraft, 2700),
+    nsf: typical(fees.nsf_returned_item, 1700),
+    atm: typical(fees.atm_out_of_network_total, 473),
+    maintenance: typical(fees.monthly_maintenance, 500),
+    maintenance_waive: typical(fees.minimum_balance_to_waive_cents, 150000),
+    card_replacement: typical(fees.debit_card_replacement, 0)
+  };
+  const base = {
+    class: cls,
+    limit: null,
+    apr_pct: 0,
+    apy_pct: 0,
+    interest: "average_daily",
+    penalty_apr_pct: 0,
+    cash_advance_apr_pct: 0,
+    due_days: typical(card.grace_period_days, 25),
+    statement_day: 1,
+    minimum: cardMinimum,
+    fees: noFees,
+    rewards_pct: 0,
+    daily_purchase_limit: null,
+    daily_atm_limit: null,
+    hold_days: DEPOSIT_HOLD_DAYS,
+    overdraft: "decline",
+    overdraft_limit: OVERDRAFT_LIMIT,
+    term_months: null,
+    secured: false
+  };
+  const savings = objOf(deposits.savings_apy_pct);
+  switch (cls) {
+    case "checking":
+    case "business_checking":
+      return { ...base, apy_pct: typical(deposits.checking_apy_pct, 0.07), fees: bankFees, daily_purchase_limit: DEBIT_PURCHASE_LIMIT, daily_atm_limit: DEBIT_ATM_LIMIT };
+    case "savings":
+    case "trust":
+      return { ...base, apy_pct: typical(savings.regular_national_average, 0.4), fees: { ...bankFees, maintenance: 0 } };
+    case "money_market":
+      return { ...base, apy_pct: typical(deposits.money_market_apy_pct, 3.5), fees: { ...bankFees, maintenance: 0 } };
+    case "cd":
+      return { ...base, apy_pct: typical(deposits.cd_12_month_apy_pct, 4), term_months: 12 };
+    case "credit_card":
+      return { ...base, limit: typical(objOf(card.credit_limit_cents), 1e6), apr_pct: typical(card.apr_pct, 22), penalty_apr_pct: numOf(card.penalty_apr_pct, 29.99), cash_advance_apr_pct: numOf(advance.apr_pct_typical, 27), fees: creditFees };
+    case "charge_card":
+      return { ...base, minimum: { pct: 100, floor: 0, plus_interest: false }, fees: { ...creditFees, annual: numOf(objOf(card.annual_fee_cents).rewards_typical, 9500) } };
+    case "line_of_credit":
+      return { ...base, limit: typical(personal.amount_cents, 800000), apr_pct: typical(personal.apr_pct, 12.3), penalty_apr_pct: numOf(card.penalty_apr_pct, 29.99), fees: creditFees };
+    case "loan":
+      return { ...base, apr_pct: typical(personal.apr_pct, 12.3), term_months: typical(personal.term_months, 36), fees: { ...creditFees, nsf: 0 } };
+    case "mortgage":
+      return { ...base, apr_pct: typical(mortgage.apr_pct_30yr_fixed, 6.4), term_months: typical(mortgage.term_months, 360), secured: true, fees: { ...creditFees, nsf: 0 } };
+    default:
+      return base;
+  }
+}
+function productOf(books, id) {
+  const cls = classOf2(books, id);
+  const e = own(books.state.entities, id);
+  if (!cls || !e)
+    return null;
+  const productId = strOf(e.fields.product) || cls;
+  const def = own(worldProducts(books.world), productId) ?? {};
+  const base = classDefaults(books, cls);
+  const f = e.fields;
+  const num = (field, fallback) => numOf(f[field], fallback);
+  const fees = { ...base.fees, ...objOf(def.fees) };
+  const minimum = { ...base.minimum, ...def.minimum ?? {} };
+  if (typeof f.min_pct === "number")
+    minimum.pct = f.min_pct;
+  if (typeof f.min_floor === "number")
+    minimum.floor = f.min_floor;
+  const limit = typeof f.limit === "number" ? f.limit : def.limit === null ? null : typeof def.limit === "number" ? def.limit : base.limit;
+  const policy = strOf(f.overdraft, def.overdraft ?? base.overdraft);
+  return {
+    id: productId,
+    label: def.label ?? CLASS_TRAITS[cls].label,
+    class: cls,
+    institution: strOf(f.institution, def.institution ?? ""),
+    limit,
+    apr_pct: CLASS_TRAITS[cls].asset ? 0 : num("apr_pct", def.apr_pct ?? base.apr_pct),
+    apy_pct: CLASS_TRAITS[cls].asset ? num("apy_pct", typeof f.apr_pct === "number" ? f.apr_pct : def.apy_pct ?? base.apy_pct) : 0,
+    interest: def.interest ?? base.interest,
+    penalty_apr_pct: def.penalty_apr_pct ?? base.penalty_apr_pct,
+    cash_advance_apr_pct: def.cash_advance_apr_pct ?? base.cash_advance_apr_pct,
+    due_days: num("due_days", def.due_days ?? base.due_days),
+    statement_day: num("statement_day", def.statement_day ?? base.statement_day),
+    minimum,
+    fees,
+    rewards_pct: def.rewards_pct ?? base.rewards_pct,
+    daily_purchase_limit: def.daily_purchase_limit ?? base.daily_purchase_limit,
+    daily_atm_limit: def.daily_atm_limit ?? base.daily_atm_limit,
+    hold_days: def.hold_days ?? base.hold_days,
+    overdraft: policy === "fee" || policy === "linked" ? policy : "decline",
+    overdraft_limit: num("overdraft_limit", def.overdraft_limit ?? base.overdraft_limit),
+    term_months: typeof f.term_months === "number" ? f.term_months : def.term_months ?? base.term_months,
+    secured: def.secured ?? base.secured
+  };
+}
+function ownersOf(state, id) {
+  const e = own(state.entities, id);
+  return e ? ownersIn(e.fields) : [];
+}
+function holdersOf(state, id) {
+  return [...new Set(ownersOf(state, id).map((o) => o.party))];
+}
+function rightsOf(state, id, party) {
+  const roles = ownersOf(state, id).filter((o) => o.party === party && isOwnerRole(o.role));
+  if (roles.length === 0)
+    return null;
+  return roles.reduce((acc, o) => {
+    const r = ROLE_RIGHTS[o.role];
+    return { spend: acc.spend || r.spend, worth: acc.worth || r.worth, sees: acc.sees || r.sees, manage: acc.manage || r.manage };
+  }, { spend: false, worth: false, sees: false, manage: false });
+}
+function canSpend(state, account, party) {
+  return rightsOf(state, account, party)?.spend === true;
+}
+function shareOf(state, id, party) {
+  return own(worthShares(ownersOf(state, id)), party) ?? 0;
+}
+function openerOf(state, account) {
+  return ownersOf(state, account)[0]?.party ?? null;
+}
+function accountsOf(books, party, right = "sees") {
+  const out = [];
+  for (const [id, e] of Object.entries(books.state.entities)) {
+    if (e.kind !== "account" || !classOf2(books, id))
+      continue;
+    if (rightsOf(books.state, id, party)?.[right] === true)
+      out.push(id);
+  }
+  const order = (id) => ACCOUNT_CLASSES.indexOf(classOf2(books, id) ?? "cash");
+  return out.sort((a, b) => order(a) - order(b) || a.localeCompare(b));
+}
+function hasLedger(books, party) {
+  return accountsOf(books, party).length > 0;
 }
 function balance(state, account) {
   return own(state.accounts, account) ?? 0;
 }
-function priceOfSymbol(state, symbol) {
-  return numOf(own(objOf(sliceOf(state, "economy").prices), symbol), 100);
+function statusOf(state, account) {
+  const set = strOf(own(objOf(sliceOf(state, "economy").status), account));
+  const field = strOf(own(state.entities, account)?.fields.status);
+  const v = set || field;
+  return v === "frozen" || v === "collections" || v === "charged_off" || v === "closed" || v === "paid_off" || v === "matured" ? v : "open";
 }
-function holdingsValue(state, account) {
-  const e = own(state.entities, account);
-  if (!e || accountType(state, account) !== "brokerage")
+function holdsOn(state, account) {
+  const raw = objOf(own(objOf(sliceOf(state, "economy").holds), account));
+  const out = [];
+  for (const [id, h] of Object.entries(raw)) {
+    const o = objOf(h);
+    const until = numOf(o.until);
+    if (until > state.clock)
+      out.push({ id, account, cents: Math.round(numOf(o.cents)), until, kind: o.kind === "authorization" ? "authorization" : "deposit", memo: strOf(o.memo) });
+  }
+  return out.sort((a, b) => a.until - b.until || a.id.localeCompare(b.id));
+}
+function availableOf(books, account) {
+  const t = traitsOf(books, account);
+  if (!t)
     return 0;
-  return Math.round(numOf(e.fields.units) * priceOfSymbol(state, strOf(e.fields.symbol, DEFAULT_SYMBOL)) * 100);
+  const b = balance(books.state, account);
+  if (t.liability) {
+    const p = productOf(books, account);
+    if (p?.class === "charge_card" && p.limit === null)
+      return Number.MAX_SAFE_INTEGER;
+    return (p?.limit ?? 0) + b;
+  }
+  return b - holdsOn(books.state, account).reduce((a, h) => a + h.cents, 0);
 }
-function netWorth(state, owner) {
-  return accountsOf(state, owner).reduce((a, id) => a + balance(state, id) + holdingsValue(state, id), 0);
+function containersOf(state, id) {
+  const out = [];
+  let cur = id;
+  for (let guard = 0;guard < 16; guard++) {
+    const to = own(state.entities, cur)?.relations.find((r) => r.type === "in")?.to;
+    if (!to || out.includes(to))
+      break;
+    out.push(to);
+    cur = to;
+  }
+  return out;
+}
+function cashOnHolder(state, account, holder) {
+  const chain = containersOf(state, account);
+  return chain.length === 0 || chain.includes(holder);
+}
+function isLost(state, id) {
+  return [id, ...containersOf(state, id)].some((x) => own(state.entities, x)?.fields.lost === true);
+}
+function accountsWorth(books, party, shown) {
+  let total = 0;
+  for (const id of accountsOf(books, party, "worth"))
+    total += (shown ? shown(id) : balance(books.state, id)) * shareOf(books.state, id, party) / 100;
+  return Math.round(total);
 }
 function anchorOf(state, entity) {
   const band = strOf(own(state.entities, entity)?.fields.wealth, "modest");
@@ -11355,21 +11947,6 @@ function anchorOf(state, entity) {
 function notional(state, entity) {
   const a = anchorOf(state, entity);
   return a.typical + (balance(state, external(entity)) - a.base);
-}
-function wealthOf(state, entity) {
-  return accountsOf(state, entity).length > 0 ? wealthBand(netWorth(state, entity)) : strOf(own(state.entities, entity)?.fields.wealth, "modest");
-}
-function spendable(state, owner) {
-  let total = 0;
-  for (const id of accountsOf(state, owner)) {
-    const t = accountType(state, id);
-    const b = balance(state, id);
-    if (t === "cash" || t === "checking")
-      total += Math.max(0, b);
-    if (t === "card")
-      total += Math.max(0, numOf(own(state.entities, id)?.fields.limit) + b);
-  }
-  return total;
 }
 function regionRow(ctx, who = ctx.world.pov) {
   const configured = ctx.world.packs.economy?.config.region;
@@ -11445,10 +12022,6603 @@ function derivedUnpricedCap(world) {
       top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
   return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
-function withholding(ctx, person) {
-  const occ = rowOf(ctx, "economy.occupations", strOf(own(ctx.state.entities, person)?.fields.occupation));
+
+// src/packs/economy/core/taxes.ts
+var WAGE_BASE = 17610000;
+var ADDITIONAL_MEDICARE_FROM = 20000000;
+var SE_EARNINGS_SHARE = 0.9235;
+var CORPORATE_PCT = 21;
+function bracketsOf(v) {
+  if (!Array.isArray(v))
+    return [];
+  return v.map((raw) => objOf(raw)).filter((b) => typeof b.from_cents === "number" && typeof b.rate_pct === "number").map((b) => ({ from: numOf(b.from_cents), to: typeof b.to_cents === "number" ? b.to_cents : null, pct: numOf(b.rate_pct) })).sort((a, b) => a.from - b.from);
+}
+function federalTables(ctx) {
+  const v = objOf(ctx.tables.get("economy.finance")?.rows.taxes_federal?.values);
+  const fica = objOf(v.fica);
+  const sd = objOf(v.standard_deduction_cents);
+  const single = bracketsOf(v.brackets_single);
+  const joint = bracketsOf(v.brackets_married_filing_jointly);
+  const base = own(fica, `social_security_wage_base_cents_${numOf(v.tax_year)}`);
+  return {
+    brackets: { single, married_filing_jointly: joint.length > 0 ? joint : single, head_of_household: single },
+    standardDeduction: { single: numOf(sd.single), married_filing_jointly: numOf(sd.married_filing_jointly), head_of_household: numOf(sd.head_of_household) },
+    socialSecurityPct: numOf(fica.social_security_employee_pct, 6.2),
+    wageBase: typeof base === "number" ? base : WAGE_BASE,
+    medicarePct: numOf(fica.medicare_employee_pct, 1.45),
+    additionalMedicarePct: numOf(fica.additional_medicare_pct_over_200k_single, 0.9),
+    additionalMedicareFrom: ADDITIONAL_MEDICARE_FROM,
+    selfEmploymentPct: numOf(fica.self_employment_pct, 15.3)
+  };
+}
+function bracketTax(brackets, taxable) {
+  let tax = 0;
+  for (const b of brackets) {
+    if (taxable <= b.from)
+      break;
+    tax += ((b.to === null ? taxable : Math.min(taxable, b.to)) - b.from) * b.pct / 100;
+  }
+  return Math.round(tax);
+}
+function filingStatusOf(ctx, person) {
+  const raw = strOf(own(ctx.state.entities, person)?.fields.filing_status);
+  return FILING_STATUSES.includes(raw) ? raw : "single";
+}
+function stateTaxPct(ctx, person) {
   const region = regionRow(ctx, person);
-  return { federalPct: numOf(occ?.withholding_rate_pct), statePct: numOf(region.state_income_tax_effective_pct) + (own(ctx.state.entities, person)?.fields.local_tax === true ? numOf(region.local_income_tax_pct_typical) : 0) };
+  return { state: numOf(region.state_income_tax_effective_pct), local: own(ctx.state.entities, person)?.fields.local_tax === true ? numOf(region.local_income_tax_pct_typical) : 0 };
+}
+var YEARS_KEPT = 2;
+function yearPay(state, person, year) {
+  const y = objOf(own(objOf(own(objOf(sliceOf(state, "economy").ytd), person)), String(year)));
+  const contract = {};
+  for (const [m, c] of Object.entries(objOf(y.contract)))
+    if (typeof c === "number")
+      contract[m] = c;
+  return { gross: numOf(y.gross), fica: numOf(y.fica), withheld: numOf(y.withheld), pretax: numOf(y.pretax), contract };
+}
+function addPay(state, person, year, month, pay) {
+  const ytd = sliceRecord(state, "economy", "ytd");
+  const mine = { ...objOf(own(ytd, person)) };
+  const cur = yearPay(state, person, year);
+  const contract = { ...cur.contract };
+  if (pay.contract)
+    contract[String(month)] = numOf(contract[String(month)]) + pay.gross;
+  mine[String(year)] = { gross: cur.gross + pay.gross, fica: cur.fica + pay.fica, withheld: cur.withheld + pay.withheld, pretax: cur.pretax + pay.pretax, contract };
+  for (const old of Object.keys(mine).sort().slice(0, Math.max(0, Object.keys(mine).length - YEARS_KEPT)))
+    delete mine[old];
+  ytd[person] = mine;
+}
+function taxTotal(t) {
+  return t.federal + t.socialSecurity + t.medicare + t.state + t.local;
+}
+function payTaxes(ctx, person, input) {
+  if (input.selfEmployed || input.gross <= 0)
+    return { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
+  const taxable = Math.max(0, input.gross - input.pretax.income);
+  const { state, local } = stateTaxPct(ctx, person);
+  const stateTax = Math.round(taxable * state / 100);
+  const localTax = Math.round(taxable * local / 100);
+  if (!input.brackets) {
+    const occ = rowOf(ctx, "economy.occupations", strOf(own(ctx.state.entities, person)?.fields.occupation));
+    return { federal: Math.round(taxable * numOf(occ?.withholding_rate_pct) / 100), socialSecurity: 0, medicare: 0, state: stateTax, local: localTax };
+  }
+  const t = federalTables(ctx);
+  const filing = filingStatusOf(ctx, person);
+  const periods = Math.max(1, input.periods);
+  const federal = Math.round(bracketTax(t.brackets[filing], Math.max(0, taxable * periods - t.standardDeduction[filing])) / periods);
+  if (input.ficaExempt)
+    return { federal, socialSecurity: 0, medicare: 0, state: stateTax, local: localTax };
+  const wages = Math.max(0, input.gross - input.pretax.fica);
+  const socialSecurity = Math.round(Math.min(wages, Math.max(0, t.wageBase - input.ytdFica)) * t.socialSecurityPct / 100);
+  const over = Math.min(wages, Math.max(0, input.ytdFica + wages - Math.max(input.ytdFica, t.additionalMedicareFrom)));
+  const medicare = Math.round((wages * t.medicarePct + over * t.additionalMedicarePct) / 100);
+  return { federal, socialSecurity, medicare, state: stateTax, local: localTax };
+}
+var STRUCTURES = ["sole_proprietorship", "partnership", "llc", "s_corp", "c_corp"];
+function structureOf(state, business) {
+  const s = strOf(own(state.entities, business)?.fields.structure);
+  return STRUCTURES.includes(s) ? s : "llc";
+}
+function selfEmployedProfit(structure) {
+  return structure !== "s_corp" && structure !== "c_corp";
+}
+function corporateTax(ctx, business, profit) {
+  if (profit <= 0)
+    return 0;
+  const federal = numOf(objOf(objOf(ctx.world.packs.economy?.config).taxes).corporatePct, CORPORATE_PCT);
+  return Math.round(profit * (federal + numOf(regionRow(ctx, business).state_income_tax_effective_pct)) / 100);
+}
+var ESTIMATE_DUE = [
+  { month: 1, months: [9, 10, 11, 12], lastYear: true },
+  { month: 4, months: [1, 2, 3], lastYear: false },
+  { month: 6, months: [4, 5], lastYear: false },
+  { month: 9, months: [6, 7, 8], lastYear: false }
+];
+function period(year, months) {
+  return { year, months, key: `${year}:${months.join(",")}` };
+}
+function periodsBack(year, month) {
+  const out = [];
+  let i = ESTIMATE_DUE.findIndex((d) => d.month === month);
+  if (i < 0)
+    return out;
+  let y = year;
+  for (let n = 0;n < ESTIMATE_DUE.length; n++) {
+    const due = ESTIMATE_DUE[i];
+    if (due)
+      out.push(period(due.lastYear ? y - 1 : y, due.months));
+    i--;
+    if (i < 0) {
+      i = ESTIMATE_DUE.length - 1;
+      y--;
+    }
+  }
+  return out;
+}
+function monthsSpan(ctx, year, months) {
+  const cal = calendarOf(ctx.world);
+  const first = months[0] ?? 1;
+  const last = months[months.length - 1] ?? 12;
+  const next = last === 12 ? dayIndexOf(cal, year + 1, 1, 1) : dayIndexOf(cal, year, last + 1, 1);
+  return { from: clockAt(cal, dayIndexOf(cal, year, first, 1), 0), to: clockAt(cal, next, 0) };
+}
+function passThroughShares(ctx, api, person) {
+  const out = [];
+  for (const id of Object.keys(ctx.state.entities).sort()) {
+    if (isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "business"))
+      continue;
+    const structure = structureOf(ctx.state, id);
+    if (structure === "c_corp")
+      continue;
+    const share = api.shareOf(ctx.state, id, person);
+    if (share > 0)
+      out.push({ business: id, share, selfEmployed: selfEmployedProfit(structure) });
+  }
+  return out;
+}
+function ordinaryIncome(api, ctx, person, year) {
+  const pay = yearPay(ctx.state, person, year);
+  const span = monthsSpan(ctx, year, [1, 12]);
+  let gross = pay.gross;
+  for (const s of passThroughShares(ctx, api, person))
+    gross += Math.round(Math.max(0, businessBooks(api, ctx, s.business, span.from, span.to).profit) * s.share / 100);
+  const filing = filingStatusOf(ctx, person);
+  return { gross, taxable: Math.max(0, gross - pay.pretax - federalTables(ctx).standardDeduction[filing]), filing };
+}
+function estimatedTax(api, ctx, person, p) {
+  const pay = yearPay(ctx.state, person, p.year);
+  const contract = api.feature(ctx, person, "withholding") ? p.months.reduce((a, m) => a + numOf(own(pay.contract, String(m))), 0) : 0;
+  const span = monthsSpan(ctx, p.year, p.months);
+  let seIncome = contract;
+  let other = 0;
+  for (const s of passThroughShares(ctx, api, person)) {
+    if (!api.feature(ctx, s.business, "business_tax"))
+      continue;
+    const part = Math.round(Math.max(0, businessBooks(api, ctx, s.business, span.from, span.to).profit) * s.share / 100);
+    if (s.selfEmployed)
+      seIncome += part;
+    else
+      other += part;
+  }
+  const income = seIncome + other;
+  if (income <= 0)
+    return { cents: 0, income: 0 };
+  const state = income * stateTaxPct(ctx, person).state / 100;
+  if (!api.feature(ctx, person, "tax_brackets")) {
+    const occ = rowOf(ctx, "economy.occupations", strOf(own(ctx.state.entities, person)?.fields.occupation));
+    return { cents: Math.round(income * numOf(occ?.estimated_tax_set_aside_pct, 15) / 100 + state), income };
+  }
+  const t = federalTables(ctx);
+  const filing = filingStatusOf(ctx, person);
+  const scale = 12 / p.months.length;
+  const se = seIncome * SE_EARNINGS_SHARE * t.selfEmploymentPct / 100;
+  const contractYear = Object.values(pay.contract).reduce((a, c) => a + c, 0);
+  const wagesYear = Math.max(0, pay.gross - contractYear - pay.pretax) * 12 / Math.max(1, ...p.months);
+  const base = Math.max(0, wagesYear - t.standardDeduction[filing]);
+  const stacked = Math.max(0, wagesYear + (income - se / 2) * scale - t.standardDeduction[filing]);
+  const federal = (bracketTax(t.brackets[filing], stacked) - bracketTax(t.brackets[filing], base)) / scale;
+  return { cents: Math.round(federal + se + state), income };
+}
+function taxRegionOf(ctx, place) {
+  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+    const p = own(ctx.world.places, id);
+    if (!p)
+      break;
+    const region = p.fields.tax_region;
+    if (typeof region === "string" && region !== "")
+      return region;
+    id = p.parent;
+  }
+  const configured = objOf(ctx.world.packs.economy?.config).region;
+  return typeof configured === "string" && configured !== "" ? configured : "us";
+}
+function salesTaxPct(ctx, place) {
+  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+    const p = own(ctx.world.places, id);
+    if (!p)
+      break;
+    const pct = p.fields.sales_tax_pct;
+    if (typeof pct === "number" && Number.isFinite(pct) && pct >= 0)
+      return pct;
+    id = p.parent;
+  }
+  return numOf(rowOf(ctx, "economy.regions", taxRegionOf(ctx, place))?.sales_tax_combined_avg_pct);
+}
+function taxExempt(ctx, place, category) {
+  const named = (v) => Array.isArray(v) && v.includes(category);
+  if (named(objOf(objOf(ctx.world.packs.economy?.config).taxes).exempt))
+    return true;
+  for (let id = place ?? undefined, guard = 0;id && guard < 32; guard++) {
+    const p = own(ctx.world.places, id);
+    if (!p)
+      break;
+    if (named(p.fields.tax_exempt))
+      return true;
+    id = p.parent;
+  }
+  return false;
+}
+function salesTaxOn(cents, pct) {
+  return cents > 0 && pct > 0 ? Math.round(cents * pct / 100) : 0;
+}
+function salesTaxAccount(api, region) {
+  return api.outside(`tax:sales:${region}`);
+}
+function str3(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+var PERIODS_KEPT = 8;
+var ESTIMATED_TAX = {
+  type: "economy.estimated_tax",
+  validate: (e, ctx) => own(ctx.state.entities, str3(e, "party")) && Array.isArray(e.data.periods) ? null : { code: "bad_event", reason: "estimated tax needs its payer and the periods it pays" },
+  apply: (e, state, ctx) => {
+    const party = str3(e, "party");
+    const all = sliceRecord(state, "economy", "estimated");
+    const paid = { ...objOf(own(all, party)) };
+    let total = 0;
+    for (const raw of Array.isArray(e.data.periods) ? e.data.periods : []) {
+      const p = objOf(raw);
+      const key = strOf(p.key);
+      paid[key] = numOf(paid[key]) + numOf(p.cents);
+      total += numOf(p.cents);
+    }
+    for (const old of Object.keys(paid).sort().slice(0, Math.max(0, Object.keys(paid).length - PERIODS_KEPT)))
+      delete paid[old];
+    all[party] = paid;
+    if (e.data.business === true)
+      addToBooks(state, party, monthOf(ctx.world, state.clock), { business_tax: total });
+  },
+  describe: (e) => `Estimated tax: ${str3(e, "party")}`
+};
+function estimateFlow(id, label, from, to, party, business) {
+  return { id, label, kind: "tax", from, to, amount: { provider: "estimated_tax", args: { party, business } }, schedule: { every: "year", months: ESTIMATE_DUE.map((d) => d.month), days: [15], roll: "after" }, shortfall: "skip", category: business ? "business_tax" : "tax", link: party, status: "active", source: "estimated_tax" };
+}
+function owesEstimates(ctx, api, person) {
+  if (passThroughShares(ctx, api, person).length > 0)
+    return true;
+  return Object.values(ctx.state.entities).some((e) => e.kind === "job" && e.fields.worker === person && (e.fields.contractor === true || e.fields.contractor === undefined && rowOf(ctx, "economy.occupations", strOf(e.fields.occupation))?.self_employed === true));
+}
+function registerTaxes(r) {
+  const { api, core } = r;
+  core.event(ESTIMATED_TAX);
+  r.flows({
+    id: "estimated_tax",
+    flows: (ctx) => {
+      const out = [];
+      for (const id of Object.keys(ctx.state.entities).sort()) {
+        const e = own(ctx.state.entities, id);
+        if (!e || isGone(ctx.state, id))
+          continue;
+        if (kindIs(ctx.registry, ctx.world, e.kind, "person") && owesEstimates(ctx, api, id))
+          out.push(estimateFlow(`esttax:${id}`, "Estimated tax", id, api.outside("tax:federal"), id, false));
+        else if (kindIs(ctx.registry, ctx.world, e.kind, "business") && structureOf(ctx.state, id) === "c_corp")
+          out.push(estimateFlow(`esttax:${id}`, "Corporate income tax", operatingAccount(api, ctx, id) ?? api.outside(id), api.outside("tax:federal"), id, true));
+      }
+      return out;
+    }
+  });
+  r.amount("estimated_tax", (ctx, flow, at) => {
+    const args = "provider" in flow.amount ? objOf(flow.amount.args) : {};
+    const party = strOf(args.party);
+    const business = args.business === true;
+    if (!own(ctx.state.entities, party) || business && !api.feature(ctx, party, "business_tax"))
+      return null;
+    const d = dateAt(calendarOf(ctx.world), at);
+    const paid = objOf(own(objOf(sliceOf(ctx.state, "economy").estimated), party));
+    const periods = [];
+    for (const [i, p] of periodsBack(d.year, d.month).entries()) {
+      if (i > 0 && own(paid, p.key) !== undefined)
+        continue;
+      const span = monthsSpan(ctx, p.year, p.months);
+      const tax = business ? corporateTax(ctx, party, businessBooks(api, ctx, party, span.from, span.to).profit) : estimatedTax(api, ctx, party, p).cents;
+      const due = tax - numOf(own(paid, p.key));
+      if (due > 0)
+        periods.push({ key: p.key, cents: due });
+    }
+    const cents = periods.reduce((a, p) => a + p.cents, 0);
+    if (cents <= 0)
+      return null;
+    return { cents, memo: business ? "Corporate income tax" : "Estimated tax", kind: "payment", category: business ? "business_tax" : "tax", extra: [{ type: "economy.estimated_tax", data: { party, periods, ...business ? { business: true } : {} } }] };
+  });
+  core.query("economy.ordinary_income", (ctx, person, year) => ordinaryIncome(api, ctx, person, year));
+  core.query("economy.income_tax", (ctx, filing, taxable) => bracketTax(federalTables(ctx).brackets[filing], taxable));
+}
+
+// src/packs/economy/core/employment.ts
+var JOB_KIND = "job";
+var HOURS_SOURCES = ["scheduled", "attended", "contract"];
+function monthDay(text) {
+  const m = /^(\d{1,2})-(\d{1,2})$/.exec(text.trim());
+  if (!m)
+    return null;
+  const month = Number(m[1]);
+  const day = Number(m[2]);
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31 ? month * 100 + day : null;
+}
+function dayOfField(cal, v) {
+  if (typeof v !== "string" || v === "")
+    return null;
+  try {
+    return dayIndexOfText(cal, v);
+  } catch {
+    return null;
+  }
+}
+function numbers(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "number" && Number.isFinite(x)) : [];
+}
+function strings(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string" && x !== "") : [];
+}
+function deductionsOf(v) {
+  if (!Array.isArray(v))
+    return [];
+  return v.flatMap((raw) => {
+    const d = objOf(raw);
+    const cents = typeof d.cents === "number" && d.cents > 0 ? Math.round(d.cents) : undefined;
+    const pct = typeof d.pct === "number" && d.pct > 0 ? Math.min(100, d.pct) : undefined;
+    if (cents === undefined && pct === undefined)
+      return [];
+    const kind = d.kind === "retirement" || d.kind === "health" ? d.kind : "other";
+    return [{ label: strOf(d.label, "Deduction"), kind, pretax: d.pretax === true, ...cents !== undefined ? { cents } : {}, ...pct !== undefined ? { pct } : {}, ...typeof d.match_pct === "number" && d.match_pct > 0 ? { match_pct: d.match_pct } : {}, ...typeof d.to === "string" && d.to !== "" ? { to: d.to } : {} }];
+  });
+}
+function splitsOf(v) {
+  if (!Array.isArray(v))
+    return [];
+  return v.flatMap((raw) => {
+    const s = objOf(raw);
+    const to = strOf(s.to);
+    const cents = typeof s.cents === "number" && s.cents > 0 ? Math.round(s.cents) : undefined;
+    const pct = typeof s.pct === "number" && s.pct > 0 ? Math.min(100, s.pct) : undefined;
+    return to === "" || cents === undefined && pct === undefined ? [] : [{ to, ...cents !== undefined ? { cents } : {}, ...pct !== undefined ? { pct } : {} }];
+  });
+}
+function placesOf(ctx, business) {
+  const e = own(ctx.state.entities, business);
+  if (!e)
+    return [];
+  const listed = strings(e.fields.places).filter((p) => own(ctx.world.places, p) !== undefined);
+  if (listed.length > 0)
+    return listed;
+  const here = placeOfEntity(ctx.state, business);
+  return here ? [here] : [];
+}
+function businessIds(ctx) {
+  return Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "business") && !isGone(ctx.state, id)).sort();
+}
+function businessAt(ctx, place) {
+  if (!place)
+    return null;
+  let best = null;
+  for (const id of businessIds(ctx)) {
+    for (const p of placesOf(ctx, id)) {
+      if (!placeWithin(ctx.world, place, p))
+        continue;
+      let depth = 0;
+      for (let cur = own(ctx.world.places, p)?.parent;cur && depth < 32; cur = own(ctx.world.places, cur)?.parent)
+        depth++;
+      if (!best || depth > best.depth)
+        best = { id, depth };
+    }
+  }
+  return best?.id ?? null;
+}
+function everyOfOccupation(freq) {
+  if (freq === "weekly_gig")
+    return "weekly";
+  if (freq === "none")
+    return null;
+  return PAY_EVERY.includes(freq) ? freq : "biweekly";
+}
+function readJob(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (!e || !kindIs(ctx.registry, ctx.world, e.kind, JOB_KIND) || isGone(ctx.state, id))
+    return null;
+  const f = e.fields;
+  const worker = strOf(f.worker);
+  if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker))
+    return null;
+  const cal = calendarOf(ctx.world);
+  const occupation = strOf(f.occupation, strOf(own(ctx.state.entities, worker)?.fields.occupation));
+  const occ = rowOf(ctx, "economy.occupations", occupation) ?? {};
+  const employer = strOf(f.employer);
+  const business = employer !== "" && own(ctx.state.entities, employer) && !isGone(ctx.state, employer) ? employer : own(ctx.world.places, employer) ? businessAt(ctx, employer) : null;
+  const freq = strOf(occ.pay_frequency);
+  const basis = PAY_BASES.includes(strOf(f.basis)) ? strOf(f.basis) : freq === "semimonthly" || freq === "monthly" ? "salary" : "hourly";
+  const tipped = occ.tipped === true && typeof f.rate !== "number";
+  const median = numOf(occ.median_cents_per_h);
+  const cashWage = numOf(occ.tipped_cash_wage_cents_per_h, median);
+  const defaults = { salary: numOf(occ.typical_earnings_cents_per_year), hourly: tipped ? cashWage : median, per_shift: Math.round(median * 8), commission: 0, tips: Math.max(0, median - cashWage), stipend: 0 };
+  const hoursPerWeek = numOf(f.hours_per_week, numOf(occ.typical_hours_per_week, 40));
+  const from = monthDay(strOf(f.season_from));
+  const to = monthDay(strOf(f.season_to));
+  const workplace = strOf(f.workplace);
+  const workplaces = own(ctx.world.places, workplace) ? [workplace] : business ? placesOf(ctx, business) : own(ctx.world.places, employer) ? [employer] : [];
+  const status = f.status === "leave" || f.status === "ended" ? f.status : "active";
+  const every = PAY_EVERY.includes(strOf(f.pay_every)) ? strOf(f.pay_every) : everyOfOccupation(freq);
+  const roll = f.pay_roll === "after" || f.pay_roll === "none" ? f.pay_roll : "before";
+  const unit = f.pay_unit === "day" || f.pay_unit === "week" || f.pay_unit === "month" || f.pay_unit === "year" ? f.pay_unit : "month";
+  const start = dayOfField(cal, f.start);
+  const weekday = Math.round(numOf(f.pay_weekday, 5));
+  const custom = { every: unit, interval: Math.max(1, Math.round(numOf(f.pay_interval, 1))), ...numbers(f.pay_weekdays).length > 0 ? { weekdays: numbers(f.pay_weekdays) } : unit === "week" ? { weekdays: [weekday] } : {}, ...numbers(f.pay_days).length > 0 ? { days: numbers(f.pay_days) } : {}, ...numbers(f.pay_months).length > 0 ? { months: numbers(f.pay_months) } : {}, ...strings(f.pay_except).length > 0 ? { except: strings(f.pay_except) } : {} };
+  return {
+    id,
+    worker,
+    employer,
+    business,
+    title: strOf(f.title, strOf(occ.title, "Job")),
+    occupation,
+    basis,
+    rate: Math.max(0, Math.round(numOf(f.rate, defaults[basis]))),
+    hours: HOURS_SOURCES.includes(strOf(f.hours)) ? strOf(f.hours) : null,
+    hoursPerWeek,
+    shiftsPerWeek: numOf(f.shifts_per_week, hoursPerWeek / 8),
+    weeksPerYear: Math.min(52, Math.max(0, numOf(f.weeks_per_year, numOf(occ.weeks_per_year, 52)))),
+    commissionPct: numOf(f.commission_pct),
+    tipsPerHour: numOf(f.tips_per_hour, tipped && basis === "hourly" ? Math.max(0, median - cashWage) : 0),
+    every,
+    weekday,
+    anchor: dayOfField(cal, f.pay_anchor) ?? (start === null ? null : start + ((weekday - dateAt(cal, clockAt(cal, start, 0)).weekday) % 7 + 7) % 7),
+    custom,
+    roll,
+    start,
+    end: dayOfField(cal, f.end),
+    season: from !== null && to !== null ? { from, to } : null,
+    deductions: deductionsOf(f.deductions),
+    splits: splitsOf(f.splits),
+    status,
+    workplaces,
+    contractor: typeof f.contractor === "boolean" ? f.contractor : occ.self_employed === true,
+    ficaExempt: occ.fica_exempt === true
+  };
+}
+function jobIds(ctx) {
+  return Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", JOB_KIND) && !isGone(ctx.state, id)).sort();
+}
+function allJobs(ctx) {
+  return jobIds(ctx).flatMap((id) => readJob(ctx, id) ?? []);
+}
+function workingDay(cal, job, day) {
+  if (job.start !== null && day < job.start)
+    return false;
+  if (job.end !== null && day > job.end)
+    return false;
+  if (!job.season)
+    return true;
+  const d = dateAt(cal, clockAt(cal, day, 0));
+  const md = d.month * 100 + d.day;
+  return job.season.from <= job.season.to ? md >= job.season.from && md <= job.season.to : md >= job.season.from || md <= job.season.to;
+}
+function workingDays(cal, job, fromDay, toDay) {
+  let n = 0;
+  for (let d = fromDay;d < toDay; d++)
+    if (workingDay(cal, job, d))
+      n++;
+  return n;
+}
+function dateText(cal, day) {
+  const d = dateAt(cal, clockAt(cal, day, 0));
+  return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+}
+var PER_JOB_AT = "21:00";
+function cycleOf(cal, job) {
+  switch (job.every) {
+    case "weekly":
+    case "biweekly":
+      return { every: "week", interval: job.every === "weekly" ? 1 : 2, weekdays: [job.anchor === null ? job.weekday : dateAt(cal, clockAt(cal, job.anchor, 0)).weekday] };
+    case "semimonthly":
+      return { every: "month", days: job.custom.days ?? [15, -1] };
+    case "monthly":
+      return { every: "month", days: [job.custom.days?.[0] ?? -1] };
+    case "per_job":
+      return { every: "day", at: PER_JOB_AT };
+    default:
+      return { ...job.custom };
+  }
+}
+function payFlowSchedule(ctx, job) {
+  const cycle = cycleOf(calendarOf(ctx.world), job);
+  return { ...cycle, roll: job.every === "per_job" ? "none" : job.roll };
+}
+function periodsPerYear(ctx, api, job) {
+  switch (job.every) {
+    case "weekly":
+      return 52;
+    case "biweekly":
+      return 26;
+    case "semimonthly":
+      return 24;
+    case "monthly":
+      return 12;
+    case "per_job":
+      return 260;
+    default: {
+      const cal = calendarOf(ctx.world);
+      const start = clockAt(cal, job.anchor ?? 0, 0);
+      return Math.max(1, api.occurrences(ctx, cycleOf(cal, job), start, start + 365 * MINUTES_PER_DAY, job.anchor === null ? undefined : dateText(cal, job.anchor)).length);
+    }
+  }
+}
+function anchorBefore(cal, s, anchor, fromDay) {
+  if (anchor <= fromDay)
+    return anchor;
+  const interval = Math.max(1, Math.round(s.interval ?? 1));
+  if (s.every === "day" || s.every === "week") {
+    const period = interval * (s.every === "week" ? 7 : 1);
+    return anchor - Math.ceil((anchor - fromDay) / period) * period;
+  }
+  const d = dateAt(cal, clockAt(cal, anchor, 0));
+  const day = d.month === 2 && d.day === 29 ? 28 : d.day;
+  for (let years = interval;years <= 400 * interval; years += interval) {
+    const back = dayIndexOfText(cal, `${String(d.year - years).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+    if (back <= fromDay)
+      return back;
+  }
+  return anchor;
+}
+function cycleDays(ctx, api, job, fromDay, toDay) {
+  const cal = calendarOf(ctx.world);
+  const cycle = cycleOf(cal, job);
+  const anchor = job.anchor === null ? undefined : dateText(cal, anchorBefore(cal, cycle, job.anchor, fromDay));
+  return api.occurrences(ctx, cycle, clockAt(cal, fromDay, 0) - 1, clockAt(cal, toDay + 1, 0) - 1, anchor).map((at) => dateAt(cal, at).dayIndex);
+}
+function salaryPeriods(ctx, api, job, payDay) {
+  if (!job.season)
+    return periodsPerYear(ctx, api, job);
+  const cal = calendarOf(ctx.world);
+  const days = cycleDays(ctx, api, job, payDay - 366 - 62, payDay);
+  const inSeason = { start: null, end: null, season: job.season };
+  let n = 0;
+  for (let i = 1;i < days.length; i++) {
+    const hi = days[i] ?? 0;
+    if (hi <= payDay - 366)
+      continue;
+    for (let d = (days[i - 1] ?? 0) + 1;d <= hi; d++) {
+      if (workingDay(cal, inSeason, d)) {
+        n++;
+        break;
+      }
+    }
+  }
+  return Math.max(1, n);
+}
+function scheduledPaydays(ctx, api, job, fromDay, payDay) {
+  const days = cycleDays(ctx, api, job, Math.min(fromDay, payDay) - 70, payDay + 12);
+  const roll = (day) => job.roll === "none" ? day : api.businessDay(ctx, day, job.roll);
+  const target = days.find((d) => d >= payDay - 12 && roll(d) === payDay) ?? [...days].reverse().find((d) => d <= payDay);
+  if (target === undefined)
+    return [];
+  const first = [...days].reverse().find((d) => d < target && d <= fromDay) ?? [...days].reverse().find((d) => d < target);
+  return days.filter((d) => (first === undefined || d >= first) && d <= target);
+}
+function jobBlocks(ctx, job, from, to) {
+  const commitments = optionalQuery(ctx, "castlife.commitments");
+  if (!commitments || job.workplaces.length === 0 || to <= from)
+    return [];
+  const cal = calendarOf(ctx.world);
+  const out = [];
+  for (const b of commitments(ctx, job.worker, from, to)) {
+    if (b.kind !== "work" && b.kind !== "other")
+      continue;
+    const place = b.place;
+    if (!place || !job.workplaces.some((w) => placeWithin(ctx.world, place, w)))
+      continue;
+    const start = Math.max(b.start, from);
+    const end = Math.min(b.end, to);
+    if (end > start && workingDay(cal, job, dateAt(cal, b.start).dayIndex))
+      out.push({ start, end });
+  }
+  return out;
+}
+var ROUTINE_WINDOW = 14 * MINUTES_PER_DAY;
+function hoursSource(ctx, job, around) {
+  if (job.hours)
+    return job.hours;
+  if (jobBlocks(ctx, job, around - ROUTINE_WINDOW, around + ROUTINE_WINDOW).length === 0)
+    return "contract";
+  return job.worker === ctx.world.pov ? "attended" : "scheduled";
+}
+function daysIn(cal, job, from, to) {
+  let n = 0;
+  for (let d = dateAt(cal, from - 1).dayIndex + 1;clockAt(cal, d, 0) < to; d++)
+    if (workingDay(cal, job, d))
+      n++;
+  return n;
+}
+function chatStart(world) {
+  return minutesBetween(world.calendar.epoch, world.start.at);
+}
+function workIn(ctx, job, from, to) {
+  const source = hoursSource(ctx, job, to);
+  const cal = calendarOf(ctx.world);
+  if (source === "contract") {
+    const days = daysIn(cal, job, from, to);
+    const share = job.season ? 1 : job.weeksPerYear / 52;
+    return { minutes: Math.round(job.hoursPerWeek * 60 * days / 7 * share), shifts: Math.round(job.shiftsPerWeek * days / 7 * share * 100) / 100, source };
+  }
+  const count = (list, extraDays = []) => ({ minutes: list.reduce((a, b) => a + (b.end - b.start), 0), shifts: new Set([...list.map((b) => dateAt(cal, b.start).dayIndex), ...extraDays]).size, source });
+  if (source !== "attended" || job.worker !== ctx.world.pov)
+    return count(jobBlocks(ctx, job, from, to));
+  const sheet = objOf(objOf(own(payrollSlice(ctx.state), job.id)).sheet);
+  const sheetDays = Array.isArray(sheet.days) ? sheet.days.filter((d) => typeof d === "number") : [];
+  const early = count(jobBlocks(ctx, job, from, Math.min(to, chatStart(ctx.world))), sheetDays);
+  return { minutes: early.minutes + numOf(sheet.minutes), shifts: early.shifts, source };
+}
+function payrollSlice(state) {
+  return objOf(sliceOf(state, "economy").payroll);
+}
+function payRecord(state, job) {
+  return objOf(own(payrollSlice(state), job));
+}
+function pct(cents, rate) {
+  return Math.round(cents * rate / 100);
+}
+function ownsAccount(api, state, party, account) {
+  return api.ownersOf(state, account).some((o) => o.party === party);
+}
+function emptyCheck(job, from, to, work) {
+  return { job: job.id, worker: job.worker, from, to, work, gross: 0, parts: { pay: 0, tips: 0, commission: 0 }, taxes: { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 }, deductions: [], net: 0, routed: [], match: 0, employerFica: 0, ficaWages: 0, pretax: 0, lines: [] };
+}
+function paycheckFor(ctx, api, job, at, from) {
+  if (job.every === null || job.status === "ended" && job.end === null)
+    return null;
+  const cal = calendarOf(ctx.world);
+  const payDay = dateAt(cal, at).dayIndex;
+  const cutoff = job.every === "per_job" ? at : clockAt(cal, payDay, 0);
+  const record = payRecord(ctx.state, job.id);
+  const paidThrough = typeof record.through === "number" ? record.through : null;
+  const periodic = job.basis === "salary" || job.basis === "stipend";
+  const paydays = job.every === "per_job" ? [payDay - 1, payDay] : scheduledPaydays(ctx, api, job, paidThrough === null ? payDay : dateAt(cal, paidThrough).dayIndex, payDay);
+  if (paydays.length < 2)
+    return null;
+  const firstStart = clockAt(cal, (paydays[paydays.length - 2] ?? payDay) + (periodic ? 1 : 0), 0);
+  const startClock = job.start === null ? -Infinity : clockAt(cal, job.start, 0);
+  const since = paidThrough ?? Math.max(startClock, job.every === "per_job" ? clockAt(cal, payDay, 0) : firstStart);
+  const through = periodic ? clockAt(cal, (paydays[paydays.length - 1] ?? payDay) + 1, 0) : Math.max(since, cutoff);
+  if (through <= since)
+    return null;
+  const work = workIn(ctx, job, since, Math.max(since, cutoff));
+  if (job.status === "leave")
+    return emptyCheck(job, since, through, work);
+  let pay = 0;
+  if (periodic) {
+    const perPeriod = job.basis === "salary" ? job.rate / salaryPeriods(ctx, api, job, payDay) : job.rate;
+    for (let i = 1;i < paydays.length; i++) {
+      const lo = (paydays[i - 1] ?? 0) + 1;
+      const hi = (paydays[i] ?? 0) + 1;
+      if (paidThrough !== null && clockAt(cal, hi, 0) <= paidThrough)
+        continue;
+      pay += perPeriod * workingDays(cal, job, lo, hi) / Math.max(1, hi - lo);
+    }
+    pay = Math.round(pay);
+  } else if (job.basis === "hourly" || job.basis === "tips")
+    pay = Math.round(job.rate * work.minutes / 60);
+  else if (job.basis === "per_shift")
+    pay = Math.round(job.rate * work.shifts);
+  const tips = job.basis === "tips" ? 0 : Math.round(job.tipsPerHour * work.minutes / 60);
+  const commission = pct(numOf(record.sales), job.basis === "commission" && job.commissionPct === 0 ? job.rate : job.commissionPct);
+  const gross = pay + tips + commission;
+  if (gross <= 0)
+    return emptyCheck(job, since, through, work);
+  const pretax = { income: 0, fica: 0 };
+  const deductions = [];
+  const matched = [];
+  let left = gross;
+  for (const d of job.deductions) {
+    const cents = Math.min(left, d.cents ?? pct(gross, d.pct ?? 0));
+    if (cents <= 0)
+      continue;
+    left -= cents;
+    const to = d.to && own(ctx.state.entities, d.to) ? d.to : api.outside(`payee:${(d.to ?? d.label).toLowerCase().replace(/\W+/g, "_")}`);
+    deductions.push({ label: d.label, cents, to });
+    if (d.pretax) {
+      pretax.income += cents;
+      if (d.kind !== "retirement")
+        pretax.fica += cents;
+    }
+    if (d.match_pct && job.business && own(ctx.state.entities, to))
+      matched.push({ to, cents: Math.min(cents, pct(gross, d.match_pct)) });
+  }
+  const brackets = api.feature(ctx, job.worker, "tax_brackets");
+  const year = dateAt(cal, at).year;
+  const taxes = api.feature(ctx, job.worker, "withholding") ? payTaxes(ctx, job.worker, { gross, pretax, periods: periodsPerYear(ctx, api, job), ytdFica: yearPay(ctx.state, job.worker, year).fica, brackets, selfEmployed: job.contractor, ficaExempt: job.ficaExempt }) : { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
+  taxes.federal = Math.max(0, taxes.federal - Math.max(0, taxTotal(taxes) - left));
+  const net = left - taxTotal(taxes);
+  const deposit = api.depositAccount(ctx, job.worker) ?? api.outside(job.worker);
+  const routed = api.split(net, job.splits.filter((s) => ownsAccount(api, ctx.state, job.worker, s.to)), deposit).filter((r) => r.cents > 0);
+  const match = matched.reduce((a, m) => a + m.cents, 0);
+  const employerFica = brackets && job.business !== null && !job.contractor && !job.ficaExempt ? taxes.socialSecurity + taxes.medicare : 0;
+  const lines = [];
+  const add = (account, amount) => {
+    if (amount === 0)
+      return;
+    const line = lines.find((l) => l.account === account);
+    if (line)
+      line.amount += amount;
+    else
+      lines.push({ account, amount });
+  };
+  add(from, -(gross + match + employerFica));
+  for (const r of routed)
+    add(r.to, r.cents);
+  for (const d of deductions)
+    add(d.to, d.cents);
+  for (const m of matched)
+    add(m.to, m.cents);
+  add(api.outside("tax:federal"), taxes.federal + taxes.socialSecurity + taxes.medicare + employerFica);
+  add(api.outside("tax:state"), taxes.state);
+  add(api.outside("tax:local"), taxes.local);
+  const ficaWages = taxes.socialSecurity > 0 || taxes.medicare > 0 ? Math.max(0, gross - pretax.fica) : 0;
+  return { job: job.id, worker: job.worker, from: since, to: through, work, gross, parts: { pay, tips, commission }, taxes, deductions, net, routed, match, employerFica, ficaWages, pretax: pretax.income, lines: lines.filter((l) => l.amount !== 0) };
+}
+function str4(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+function reject5(code, reason) {
+  return { code, reason };
+}
+var PAYSLIP = {
+  type: "economy.payslip",
+  validate: (e, ctx) => own(ctx.state.entities, str4(e, "job")) && own(ctx.state.entities, str4(e, "worker")) && typeof e.data.through === "number" ? null : reject5("bad_event", "a payslip needs its job, its worker and the time it pays through"),
+  apply: (e, state, ctx) => {
+    const job = str4(e, "job");
+    const gross = numOf(e.data.gross);
+    sliceRecord(state, "economy", "payroll")[job] = { through: numOf(e.data.through), last: { at: state.clock, gross, taxes: numOf(e.data.taxes), deductions: numOf(e.data.deductions), net: numOf(e.data.net), minutes: numOf(e.data.minutes), shifts: numOf(e.data.shifts) } };
+    if (gross === 0)
+      return;
+    addPay(state, str4(e, "worker"), numOf(e.data.year), numOf(e.data.month), { gross, fica: numOf(e.data.fica), withheld: numOf(e.data.taxes), pretax: numOf(e.data.pretax), contract: e.data.contract === true });
+    const business = str4(e, "business");
+    if (business !== "")
+      addToBooks(state, business, monthOf(ctx.world, state.clock), { payroll: numOf(e.data.cost) });
+  },
+  describe: (e) => `Payslip: ${str4(e, "job")}`
+};
+function sheetDays(v) {
+  return Array.isArray(v) ? v.filter((d) => typeof d === "number") : [];
+}
+var TIMESHEET = {
+  type: "economy.timesheet",
+  validate: (e, ctx) => own(ctx.state.entities, str4(e, "job")) && typeof e.data.minutes === "number" && e.data.minutes > 0 ? null : reject5("bad_event", "a timesheet entry needs its job and minutes"),
+  apply: (e, state) => {
+    const job = str4(e, "job");
+    const payroll = sliceRecord(state, "economy", "payroll");
+    const cur = objOf(own(payroll, job));
+    const sheet = objOf(cur.sheet);
+    const days = [...new Set([...sheetDays(sheet.days), ...sheetDays(e.data.days)])].sort((a, b) => a - b);
+    payroll[job] = { ...cur, sheet: { minutes: numOf(sheet.minutes) + numOf(e.data.minutes), days } };
+  },
+  describe: (e) => `Worked ${Math.round(numOf(e.data.minutes) / 60 * 10) / 10} h`,
+  coarsen: {
+    key: (e) => `${str4(e, "job")}:${numOf(e.data.since)}`,
+    merge: (a, b) => ({ ...b, data: { ...b.data, minutes: numOf(a.data.minutes) + numOf(b.data.minutes), days: [...new Set([...sheetDays(a.data.days), ...sheetDays(b.data.days)])].sort((x, y) => x - y) } })
+  }
+};
+var COMMISSION = {
+  type: "economy.commission",
+  validate: (e, ctx) => own(ctx.state.entities, str4(e, "job")) && typeof e.data.cents === "number" ? null : reject5("bad_event", "a commission credit needs its job and amount"),
+  apply: (e, state) => {
+    const job = str4(e, "job");
+    const payroll = sliceRecord(state, "economy", "payroll");
+    const cur = objOf(own(payroll, job));
+    payroll[job] = { ...cur, sales: numOf(cur.sales) + numOf(e.data.cents) };
+  },
+  describe: (e) => `Commission on sales: ${str4(e, "job")}`,
+  coarsen: {
+    key: (e) => `${str4(e, "job")}:${numOf(e.data.since)}`,
+    merge: (a, b) => ({ ...b, data: { ...b.data, cents: numOf(a.data.cents) + numOf(b.data.cents) } })
+  }
+};
+function payslipEvent(ctx, job, check, at) {
+  return {
+    type: "economy.payslip",
+    data: {
+      job: check.job,
+      worker: check.worker,
+      through: check.to,
+      gross: check.gross,
+      taxes: taxTotal(check.taxes),
+      deductions: check.deductions.reduce((a, d) => a + d.cents, 0),
+      net: check.net,
+      minutes: check.work.minutes,
+      shifts: check.work.shifts,
+      year: dateAt(calendarOf(ctx.world), at).year,
+      month: dateAt(calendarOf(ctx.world), at).month,
+      fica: check.ficaWages,
+      pretax: check.pretax,
+      ...job.contractor ? { contract: true } : {},
+      ...job.business ? { business: job.business, cost: check.gross + check.match + check.employerFica } : {}
+    }
+  };
+}
+function payerOf(ctx, api, job) {
+  if (job.business)
+    return operatingAccount(api, ctx, job.business) ?? api.outside(job.business);
+  return api.outside(`employer:${(job.employer || job.occupation || "work").toLowerCase().replace(/\W+/g, "_")}`);
+}
+function payrollFlow(ctx, api, job) {
+  if (job.every === null)
+    return null;
+  const cal = calendarOf(ctx.world);
+  const schedule = payFlowSchedule(ctx, job);
+  const start = job.anchor !== null && (job.every === "weekly" || job.every === "biweekly") ? dateText(cal, job.anchor) : undefined;
+  const settle = job.end === null ? undefined : api.occurrences(ctx, schedule, clockAt(cal, job.end + 1, 0) - 1, clockAt(cal, job.end + 63, 0), start)[0];
+  return {
+    id: `pay:${job.id}`,
+    label: `Pay: ${job.title}`,
+    kind: "payroll",
+    from: payerOf(ctx, api, job),
+    to: job.worker,
+    ...job.splits.length > 0 ? { splits: job.splits } : {},
+    amount: { provider: "payroll", args: { job: job.id } },
+    schedule,
+    ...start ? { start } : {},
+    ...settle !== undefined ? { end: dateText(cal, dateAt(cal, settle).dayIndex) } : {},
+    shortfall: "skip",
+    category: "payroll",
+    link: job.id,
+    status: job.status === "ended" && job.end === null ? "ended" : "active",
+    source: "job"
+  };
+}
+function timesheet(slot, ctx) {
+  const pov = ctx.world.pov;
+  if (ctx.levelOf(pov, "money") < 3)
+    return [];
+  const out = [];
+  const cal = calendarOf(ctx.world);
+  const here = placeOfEntity(ctx.state, pov);
+  const begun = chatStart(ctx.world);
+  for (const job of allJobs(ctx)) {
+    if (job.worker !== pov || job.status !== "active" || hoursSource(ctx, job, slot.end) !== "attended")
+      continue;
+    let minutes = 0;
+    const days = new Set;
+    for (const b of jobBlocks(ctx, job, Math.max(begun, slot.start - MINUTES_PER_DAY), slot.end + MINUTES_PER_DAY)) {
+      if (b.end <= slot.start || b.end > slot.end)
+        continue;
+      if (!job.workplaces.some((w) => placeWithin(ctx.world, here, w) || (placeVisit(ctx.state, w)?.last ?? -Infinity) >= b.start))
+        continue;
+      minutes += b.end - b.start;
+      days.add(dateAt(cal, b.start).dayIndex);
+    }
+    if (minutes > 0)
+      out.push({ type: "economy.timesheet", data: { job: job.id, minutes, days: [...days].sort((a, b) => a - b), since: numOf(payRecord(ctx.state, job.id).through) } });
+  }
+  return out;
+}
+function manages(api, state, who, business) {
+  return api.ownersOf(state, business).some((o) => o.party === who && (o.role === "owner" || o.role === "joint" || o.role === "trustee"));
+}
+function today(ctx) {
+  return dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+}
+function hire(api, args, ctx) {
+  const business = strOf(args.business);
+  const worker = strOf(args.worker);
+  if (!own(ctx.state.entities, business) || isGone(ctx.state, business) || api.partyKind(ctx, business) !== "business")
+    return reject5("missing_entity", `no business ${labelOf(ctx, business)}`);
+  if (!own(ctx.state.entities, worker) || isGone(ctx.state, worker) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, worker)?.kind ?? "", "person"))
+    return reject5("missing_entity", `no person ${labelOf(ctx, worker)}`);
+  const by = strOf(args.by);
+  if (by !== "" && !manages(api, ctx.state, by, business))
+    return reject5("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  const jobs = allJobs(ctx);
+  if (jobs.some((j) => j.worker === worker && j.business === business && j.status !== "ended"))
+    return reject5("exists", `${labelOf(ctx, worker)} already works for ${labelOf(ctx, business)}`);
+  const cal = calendarOf(ctx.world);
+  const fields = { worker, employer: business, status: "active", start: typeof args.start === "string" && args.start !== "" ? args.start : dateText(cal, today(ctx)) };
+  for (const k of ["title", "occupation", "basis", "hours", "pay_every"])
+    if (typeof args[k] === "string" && args[k] !== "")
+      fields[k] = args[k];
+  if (typeof args.rate === "number" && args.rate > 0)
+    fields.rate = Math.round(args.rate);
+  if (typeof args.hours_per_week === "number" && args.hours_per_week > 0)
+    fields.hours_per_week = args.hours_per_week;
+  const peer = jobs.find((j) => j.business === business && j.status === "active" && j.every !== null);
+  if (fields.pay_every === undefined && peer?.every) {
+    fields.pay_every = peer.every;
+    if (peer.anchor !== null && (peer.every === "weekly" || peer.every === "biweekly"))
+      fields.pay_anchor = dateText(cal, peer.anchor);
+    if (peer.custom.days)
+      fields.pay_days = peer.custom.days;
+  }
+  const id = `job:${hashParts(ctx.rng.seed, "hire", business, worker, String(ctx.state.clock)).slice(0, 10)}`;
+  const entity = { id, kind: JOB_KIND, name: `${labelOf(ctx, worker)} at ${labelOf(ctx, business)}`, tier: "background", fields, relations: [] };
+  return [{ type: "spawn", entity }];
+}
+function endJob(api, args, ctx) {
+  const job = readJob(ctx, strOf(args.job));
+  if (!job)
+    return reject5("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
+  const by = strOf(args.by);
+  if (by !== "" && by !== job.worker && !(job.business && manages(api, ctx.state, by, job.business)))
+    return reject5("not_owner", `${labelOf(ctx, by)} can't end that job`);
+  if (job.status === "ended")
+    return reject5("ended", "that job has already ended");
+  const end = typeof args.end === "string" && args.end !== "" ? args.end : dateText(calendarOf(ctx.world), today(ctx));
+  return [
+    { type: "set", entity: job.id, field: "end", value: end },
+    { type: "set", entity: job.id, field: "status", value: "ended" }
+  ];
+}
+function raise(api, args, ctx) {
+  const job = readJob(ctx, strOf(args.job));
+  if (!job)
+    return reject5("missing_entity", `no job ${labelOf(ctx, strOf(args.job))}`);
+  const by = strOf(args.by);
+  if (by !== "" && !(job.business && manages(api, ctx.state, by, job.business)))
+    return reject5("not_owner", `${labelOf(ctx, by)} doesn't set that pay`);
+  const rate = typeof args.rate === "number" && args.rate > 0 ? Math.round(args.rate) : typeof args.pct === "number" && args.pct > -100 ? Math.round(job.rate * (1 + args.pct / 100)) : NaN;
+  if (!(rate > 0))
+    return reject5("bad_amount", "a raise needs a new rate above nothing, or a percentage");
+  return [{ type: "set", entity: job.id, field: "rate", value: rate }];
+}
+var BASIS_WORDS = { salary: "a year", hourly: "an hour", per_shift: "a shift", commission: "commission", tips: "an hour in tips", stipend: "a period" };
+function jobView(ctx, api, job) {
+  const cal = calendarOf(ctx.world);
+  const now = ctx.state.clock;
+  const flow = api.flows(ctx).find((f) => f.source === "job" && f.link === job.id);
+  const next = flow && job.status !== "ended" ? api.occurrences(ctx, flow.schedule, now, now + 62 * MINUTES_PER_DAY, flow.start)[0] ?? null : null;
+  const record = payRecord(ctx.state, job.id);
+  const last = objOf(record.last);
+  const sheet = objOf(record.sheet);
+  const since = typeof record.through === "number" ? record.through : now - 7 * MINUTES_PER_DAY;
+  const scheduled = hoursSource(ctx, job, now) === "contract" ? null : jobBlocks(ctx, job, since, now).reduce((a, b) => a + (b.end - b.start), 0);
+  const money = (c) => api.money(ctx, c);
+  const entity = own(ctx.state.entities, job.id);
+  return {
+    id: job.id,
+    title: job.title,
+    employer: job.business ? labelOf(ctx, job.business) : job.employer,
+    employerId: job.business,
+    worker: labelOf(ctx, job.worker),
+    workerId: job.worker,
+    basis: job.basis,
+    pay: job.basis === "commission" ? `${job.commissionPct || job.rate}% commission` : `${money(job.rate)} ${BASIS_WORDS[job.basis]}${job.tipsPerHour > 0 ? ` plus about ${money(job.tipsPerHour)} an hour in tips` : ""}${job.commissionPct > 0 ? ` plus ${job.commissionPct}% commission` : ""}`,
+    rate: job.rate,
+    payEvery: job.every ?? "custom",
+    schedule: job.every === null ? "unpaid" : job.every.replace("_", " "),
+    nextPay: next === null ? null : formatClock(cal, next),
+    grossPerPeriod: job.basis === "salary" ? Math.round(job.rate / periodsPerYear(ctx, api, job)) : job.basis === "stipend" ? job.rate : null,
+    status: job.status,
+    hours: scheduled === null && job.hours !== "attended" ? null : { scheduled: Math.round((scheduled ?? 0) / 6) / 10, attended: Math.round(numOf(sheet.minutes) / 6) / 10 },
+    lastPay: Object.keys(last).length > 0 ? { at: formatClock(cal, numOf(last.at)), gross: numOf(last.gross), taxes: numOf(last.taxes), deductions: numOf(last.deductions), net: numOf(last.net) } : null,
+    deductions: job.deductions.map((d) => ({ label: d.label, value: d.cents !== undefined ? money(d.cents) : `${d.pct ?? 0}%` })),
+    splits: job.splits.map((s) => ({ to: labelOf(ctx, s.to), value: s.cents !== undefined ? money(s.cents) : `${s.pct ?? 0}%` })),
+    spec: entity?.fields ?? {}
+  };
+}
+function registerEmployment(r) {
+  const { api, core } = r;
+  for (const def of [PAYSLIP, TIMESHEET, COMMISSION])
+    core.event(def);
+  r.flows({ id: "job", flows: (ctx) => allJobs(ctx).flatMap((job) => payrollFlow(ctx, api, job) ?? []) });
+  r.amount("payroll", (ctx, flow, at) => {
+    const id = "provider" in flow.amount ? strOf(objOf(flow.amount.args).job, flow.link ?? "") : flow.link ?? "";
+    const job = readJob(ctx, id);
+    if (!job)
+      return null;
+    const check = paycheckFor(ctx, api, job, at, flow.from);
+    if (!check)
+      return null;
+    if (check.gross === 0)
+      return { cents: 0, lines: [], extra: [payslipEvent(ctx, job, check, at)] };
+    const withheld = taxTotal(check.taxes) + check.deductions.reduce((a, d) => a + d.cents, 0);
+    const memo = withheld > 0 ? `Payroll: ${api.money(ctx, check.gross)} gross, ${api.money(ctx, withheld)} withheld` : "Payroll";
+    const note = api.note(ctx, job.worker, "bill", `Payday: ${api.money(ctx, check.net)} net${withheld > 0 ? ` (${api.money(ctx, check.gross)} gross)` : ""}.`);
+    return { cents: check.gross, lines: check.lines, memo, kind: "income", category: "payroll", extra: [payslipEvent(ctx, job, check, at), ...note] };
+  });
+  core.process({ id: "economy.timesheet", domain: "money", minLevel: 3, step: (slot, ctx) => timesheet(slot, ctx) });
+  core.effect({ type: "economy.hire", args: ["business", "worker", "title?", "occupation?", "basis?", "rate?", "hours?", "hours_per_week?", "pay_every?", "start?", "by?"], resolve: (args, ctx) => hire(api, args, ctx) });
+  core.effect({ type: "economy.job_end", args: ["job", "end?", "by?"], resolve: (args, ctx) => endJob(api, args, ctx) });
+  core.effect({ type: "economy.job_raise", args: ["job", "rate?", "pct?", "by?"], resolve: (args, ctx) => raise(api, args, ctx) });
+  core.formula("manages", (ctx, who, business) => manages(api, ctx.state, String(who ?? ""), String(business ?? "")));
+  core.formula("employs", (ctx, business, who) => allJobs(ctx).some((j) => j.business === String(business ?? "") && j.worker === String(who ?? "") && j.status !== "ended"));
+  core.action({ id: "job_hire", label: "Hire", pack: "economy", params: { business: { type: "ref", ref: "business" }, worker: { type: "ref", ref: "person" }, title: { type: "text", optional: true }, basis: { type: "text", optional: true, label: "Pay basis" }, rate: { type: "money", optional: true, label: "Pay rate" }, hours_per_week: { type: "number", optional: true }, pay_every: { type: "text", optional: true, label: "Paid every" } }, requires: ["manages(self, business)", "not employs(business, worker)", "level.money >= 3"], outcomes: { default: [{ type: "economy.hire", args: { business: "business", worker: "worker", title: "=params.title", basis: "=params.basis", rate: "=params.rate", hours_per_week: "=params.hours_per_week", pay_every: "=params.pay_every", by: "self" } }] }, duration: "15", lexicon: ["hire", "take on", "give a job to"], observable: "talks business" });
+  core.action({ id: "job_end", label: "End a job", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND } }, requires: ["job.worker == self or manages(self, job.employer)", "job.status != 'ended'", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_end", args: { job: "job", by: "self" } }] }, duration: "10", lexicon: ["fire", "let go", "quit", "resign", "hand in my notice"], observable: "talks business" });
+  core.action({ id: "job_raise", label: "Give a raise", pack: "economy", params: { job: { type: "ref", ref: JOB_KIND }, rate: { type: "money", label: "New rate" } }, requires: ["manages(self, job.employer)", "rate > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.job_raise", args: { job: "job", rate: "=rate", by: "self" } }] }, duration: "5", lexicon: ["give a raise", "raise the pay", "pay more"], observable: "talks business" });
+  r.view((ctx, party) => api.partyKind(ctx, party) === "person" ? { jobs: allJobs(ctx).filter((j) => j.worker === party).map((j) => jobView(ctx, api, j)) } : {});
+  r.summary((ctx, who) => allJobs(ctx).filter((j) => j.worker === who && j.status === "active").map((j) => `${j.title} for ${j.business ? labelOf(ctx, j.business) : j.employer || "an outside employer"}, ${api.money(ctx, j.rate)} ${BASIS_WORDS[j.basis]}, paid ${j.every === null ? "nothing" : j.every.replace("_", " ")}.`));
+}
+
+// src/packs/economy/core/business.ts
+var INVOICE_KIND = "invoice";
+var BUSINESS_FIELDS = {
+  daily_sales: { type: "money", label: "Walk-in takings a trading day", min: 0, domain: "money", level: 3 },
+  sales_spread_pct: { type: "number", label: "Takings vary by up to \xB1 %", min: 0, max: 100, default: 30, domain: "money", level: 3 },
+  trading_days: { type: "list", of: "number", label: "Trading days (0 is Sunday)", domain: "money", level: 3 }
+};
+var INVOICE_DAYS = 30;
+var LATE_FEE_EVERY = 30;
+var CLOSING = "17:00";
+var SALES_KEPT = 20;
+function reject6(code, reason) {
+  return { code, reason };
+}
+function str5(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+function unit(events, extra) {
+  const all = [...events, ...extra];
+  if (all.length < 2)
+    return all;
+  const group = events.find((e) => e.group)?.group ?? `work:${hashParts(JSON.stringify(all)).slice(0, 10)}`;
+  return all.map((e) => ({ ...e, group }));
+}
+function isBusiness(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  return !!e && !isGone(ctx.state, id) && kindIs(ctx.registry, ctx.world, e.kind, "business");
+}
+function marginOf(state, business) {
+  return Math.min(100, Math.max(0, numOf(own(state.entities, business)?.fields.margin_pct, 100)));
+}
+function tradingDays(state, business) {
+  const v = own(state.entities, business)?.fields.trading_days;
+  const days = Array.isArray(v) ? v.filter((d) => typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  return days.length > 0 ? days : [1, 2, 3, 4, 5];
+}
+var SALE = {
+  type: "economy.sale",
+  validate: (e, ctx) => own(ctx.state.entities, str5(e, "business")) && typeof e.data.cents === "number" ? null : reject6("bad_event", "a sale needs its business and price"),
+  apply: (e, state, ctx) => {
+    const business = str5(e, "business");
+    const cents = numOf(e.data.cents);
+    const tax = numOf(e.data.tax);
+    const cogs = numOf(e.data.cogs);
+    addToBooks(state, business, monthOf(ctx.world, state.clock), { sales: cents, cogs, tax_collected: tax, takings: numOf(e.data.takings) });
+    addToPayables(state, business, { sales_tax: tax, suppliers: cogs });
+    const sales = sliceRecord(state, "economy", "sales");
+    const list = Array.isArray(own(sales, business)) ? own(sales, business) : [];
+    sales[business] = [...list.slice(-(SALES_KEPT - 1)), { at: state.clock, cents, tax, memo: str5(e, "memo"), payer: str5(e, "payer"), category: str5(e, "category") }];
+  },
+  describe: (e) => `Sale: ${str5(e, "memo")}`
+};
+var REMIT = {
+  type: "economy.remit",
+  validate: (e, ctx) => own(ctx.state.entities, str5(e, "business")) && (e.data.what === "sales_tax" || e.data.what === "suppliers") ? null : reject6("bad_event", "a remittance needs its business and what it settles"),
+  apply: (e, state, ctx) => {
+    const business = str5(e, "business");
+    const cents = numOf(e.data.cents);
+    if (e.data.what === "sales_tax") {
+      addToPayables(state, business, { sales_tax: -cents });
+      addToBooks(state, business, monthOf(ctx.world, state.clock), { tax_remitted: cents });
+    } else
+      addToPayables(state, business, { suppliers: -cents });
+  },
+  describe: (e) => e.data.what === "sales_tax" ? "Sales tax paid" : "Suppliers paid"
+};
+function commissions(ctx, business, cents, working) {
+  const jobs = allJobs(ctx).filter((j) => j.business === business && j.status === "active" && (j.commissionPct > 0 || j.basis === "commission") && working(j));
+  if (jobs.length === 0 || cents <= 0)
+    return [];
+  const each = Math.floor(cents / jobs.length);
+  return jobs.map((j, i) => ({ type: "economy.commission", data: { job: j.id, cents: i === 0 ? cents - each * (jobs.length - 1) : each, since: numOf(objOf(own(objOf(sliceOf(ctx.state, "economy").payroll), j.id)).through) } }));
+}
+function saleTerms(ctx, api, sale) {
+  const seller = businessAt(ctx, sale.place);
+  const business = seller !== null && seller !== sale.payer ? seller : null;
+  const collects = business === null || own(ctx.state.entities, business)?.fields.collects_sales_tax !== false;
+  const taxed = collects && api.feature(ctx, sale.payer, "sales_tax") && !taxExempt(ctx, sale.place, sale.category);
+  const tax = taxed ? salesTaxOn(sale.cents, salesTaxPct(ctx, sale.place)) : 0;
+  const authority = salesTaxAccount(api, taxRegionOf(ctx, sale.place));
+  if (!business)
+    return tax > 0 ? { tax, taxAccount: authority } : null;
+  const deposit = operatingAccount(api, ctx, business);
+  const held = deposit !== null && api.feature(ctx, business, "sales_tax") ? tax : 0;
+  const cogs = Math.round(sale.cents * (100 - marginOf(ctx.state, business)) / 100);
+  const here = (j) => j.workplaces.some((w) => placeWithin(ctx.world, placeOfEntity(ctx.state, j.worker), w));
+  const extra = [{ type: "economy.sale", data: { business, cents: sale.cents, tax: held, cogs, takings: deposit ? sale.cents + held : 0, payer: sale.payer, memo: sale.item, category: sale.category } }, ...commissions(ctx, business, sale.cents, here)];
+  return { seller: business, ...deposit ? { deposit } : {}, tax, taxAccount: held > 0 && deposit ? deposit : authority, extra };
+}
+function walkInFlow(ctx, api, business) {
+  const daily = numOf(own(ctx.state.entities, business)?.fields.daily_sales);
+  const deposit = operatingAccount(api, ctx, business);
+  if (daily <= 0 || !deposit)
+    return null;
+  const closed = ctx.world.calendar.holidays.filter((h) => h.dayOff).map((h) => h.id);
+  return { id: `walkin:${business}`, label: "Walk-in takings", kind: "income", from: "Walk-in customers", to: deposit, amount: { provider: "walk_in_sales", args: { business } }, schedule: { every: "week", weekdays: tradingDays(ctx.state, business), at: CLOSING, roll: "none", ...closed.length > 0 ? { except: closed } : {} }, shortfall: "skip", category: "sales", link: business, status: "active", source: "business" };
+}
+function walkInPosting(ctx, api, business, at, rng) {
+  const e = own(ctx.state.entities, business);
+  const deposit = operatingAccount(api, ctx, business);
+  const daily = numOf(e?.fields.daily_sales);
+  if (!e || !deposit || daily <= 0)
+    return null;
+  const spread = Math.min(100, Math.max(0, numOf(e.fields.sales_spread_pct, 30))) / 100;
+  const cents = Math.max(0, Math.round(daily * (1 + spread * (rng.next() + rng.next() - 1))));
+  if (cents === 0)
+    return null;
+  const place = placesOf(ctx, business)[0] ?? null;
+  const collects = e.fields.collects_sales_tax !== false;
+  const tax = collects && api.feature(ctx, business, "sales_tax") ? salesTaxOn(cents, salesTaxPct(ctx, place)) : 0;
+  const cal = calendarOf(ctx.world);
+  const day = dateAt(cal, at).dayIndex;
+  const worked = (j) => jobBlocks(ctx, j, clockAt(cal, day, 0), clockAt(cal, day + 1, 0)).length > 0;
+  const lines = [
+    { account: api.outside(`customers:${business}`), amount: -(cents + tax) },
+    { account: deposit, amount: cents + tax }
+  ];
+  const extra = [{ type: "economy.sale", data: { business, cents, tax, cogs: Math.round(cents * (100 - marginOf(ctx.state, business)) / 100), takings: 0, payer: "", memo: "Walk-in customers", category: "sales", walkin: true } }, ...commissions(ctx, business, cents, worked)];
+  return { cents: cents + tax, lines, memo: "Walk-in takings", kind: "sale", category: "sales", extra };
+}
+function settleFlows(ctx, api, business) {
+  const deposit = operatingAccount(api, ctx, business);
+  if (!deposit)
+    return [];
+  const out = [];
+  if (marginOf(ctx.state, business) < 100)
+    out.push({ id: `suppliers:${business}`, label: "Suppliers", kind: "bill", from: deposit, to: "Suppliers", amount: { provider: "settle", args: { business, what: "suppliers" } }, schedule: { every: "month", days: [10], roll: "after" }, shortfall: "skip", category: "cogs", link: business, status: "active", source: "business" });
+  if (own(ctx.state.entities, business)?.fields.collects_sales_tax !== false)
+    out.push({ id: `salestax:${business}`, label: "Sales tax", kind: "tax", from: deposit, to: "Sales tax", amount: { provider: "settle", args: { business, what: "sales_tax" } }, schedule: { every: "month", days: [20], roll: "after" }, shortfall: "skip", category: "sales_tax", link: business, status: "active", source: "business" });
+  return out;
+}
+function settlePosting(ctx, api, business, what) {
+  const deposit = operatingAccount(api, ctx, business);
+  const cents = payablesOf(ctx.state, business)[what];
+  if (!deposit || cents <= 0)
+    return null;
+  const to = what === "sales_tax" ? salesTaxAccount(api, taxRegionOf(ctx, placesOf(ctx, business)[0] ?? null)) : api.outside(`suppliers:${business}`);
+  return { cents, lines: [{ account: deposit, amount: -cents }, { account: to, amount: cents }], memo: what === "sales_tax" ? "Sales tax" : "Suppliers", kind: "payment", category: what === "sales_tax" ? "sales_tax" : "cogs", extra: [{ type: "economy.remit", data: { business, what, cents } }] };
+}
+function clockOf(ctx, v) {
+  if (typeof v === "number" && Number.isFinite(v))
+    return v;
+  if (typeof v !== "string" || v === "")
+    return null;
+  try {
+    return clockOfLocal(calendarOf(ctx.world), v);
+  } catch {
+    return null;
+  }
+}
+function readInvoice(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (!e || isGone(ctx.state, id) || !kindIs(ctx.registry, ctx.world, e.kind, INVOICE_KIND))
+    return null;
+  const f = e.fields;
+  const business = strOf(f.business);
+  const customer = strOf(f.customer);
+  const issued = clockOf(ctx, f.issued) ?? 0;
+  const cal = calendarOf(ctx.world);
+  const due = clockAt(cal, dateAt(cal, clockOf(ctx, f.due) ?? issued + INVOICE_DAYS * MINUTES_PER_DAY).dayIndex, 0);
+  const state = INVOICE_STATES.includes(strOf(f.state)) ? strOf(f.state) : "open";
+  const cents = Math.max(0, Math.round(numOf(f.cents)));
+  const lateFee = Math.max(0, Math.round(numOf(f.late_fee)));
+  const paid = Math.max(0, Math.round(numOf(f.paid)));
+  const party = customer !== "" && own(ctx.state.entities, customer) && !isGone(ctx.state, customer) ? customer : null;
+  return { id, business, customer, party, cents, memo: strOf(f.memo, "Invoice"), issued, due, state, paid, late_fee: lateFee, left: state === "open" || state === "late" ? Math.max(0, cents + lateFee - paid) : 0, fees: Math.round(numOf(f.fees)) };
+}
+function invoiceIds(ctx) {
+  return Object.keys(ctx.state.entities).filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", INVOICE_KIND) && !isGone(ctx.state, id)).sort();
+}
+function allInvoices(ctx) {
+  return invoiceIds(ctx).flatMap((id) => readInvoice(ctx, id) ?? []);
+}
+var INVOICE_PAID = {
+  type: "economy.invoice_paid",
+  validate: (e, ctx) => own(ctx.state.entities, str5(e, "invoice")) && typeof e.data.cents === "number" ? null : reject6("bad_event", "an invoice payment needs its invoice and amount"),
+  apply: (e, state, ctx) => {
+    const month = monthOf(ctx.world, state.clock);
+    const cents = numOf(e.data.cents);
+    if (own(state.entities, str5(e, "business")))
+      addToBooks(state, str5(e, "business"), month, { invoices: cents });
+    const customer = str5(e, "customer");
+    if (own(state.entities, customer) && kindIs(ctx.registry, ctx.world, own(state.entities, customer)?.kind ?? "", "business"))
+      addToBooks(state, customer, month, { bills: cents });
+  },
+  describe: (e) => `Invoice paid: ${str5(e, "invoice")}`
+};
+function invoiceSettled(inv, cents) {
+  return [
+    { type: "set", entity: inv.id, field: "paid", value: inv.paid + cents },
+    { type: "set", entity: inv.id, field: "state", value: "paid" },
+    { type: "economy.invoice_paid", data: { invoice: inv.id, business: inv.business, customer: inv.customer, cents } }
+  ];
+}
+function dateText2(ctx, day) {
+  const d = dateAt(calendarOf(ctx.world), clockAt(calendarOf(ctx.world), day, 0));
+  return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+}
+function invoiceFlow(ctx, api, inv) {
+  if (inv.left <= 0 || !isBusiness(ctx, inv.business))
+    return null;
+  const cal = calendarOf(ctx.world);
+  const day = dateAt(cal, inv.due).dayIndex;
+  return {
+    id: `invoice:${inv.id}`,
+    label: `Invoice: ${inv.memo}`,
+    kind: "invoice",
+    from: inv.party ?? inv.customer,
+    to: operatingAccount(api, ctx, inv.business) ?? inv.business,
+    amount: { provider: "invoice", args: { invoice: inv.id } },
+    schedule: { every: "week", weekdays: [dateAt(cal, inv.due).weekday], roll: "none" },
+    start: dateText2(ctx, day),
+    shortfall: "skip",
+    category: "invoice",
+    link: inv.id,
+    status: "active",
+    method: "account",
+    source: "invoice"
+  };
+}
+function lateInvoices(slot, ctx, api) {
+  const out = [];
+  const cal = calendarOf(ctx.world);
+  const today = dateAt(cal, slot.end).dayIndex;
+  for (const inv of allInvoices(ctx)) {
+    if (inv.left <= 0 || !isBusiness(ctx, inv.business) || ctx.levelOf(inv.business, "money") < 3)
+      continue;
+    const daysLate = today - dateAt(cal, inv.due).dayIndex;
+    if (daysLate < 1)
+      continue;
+    const owed = 1 + Math.floor((daysLate - 1) / LATE_FEE_EVERY);
+    const pct = numOf(own(ctx.state.entities, inv.business)?.fields.late_fee_pct);
+    const fees = pct > 0 ? owed : inv.fees;
+    if (inv.state === "late" && fees <= inv.fees)
+      continue;
+    const fee = pct > 0 ? Math.round(inv.cents * pct * (fees - inv.fees) / 100) : 0;
+    if (inv.state !== "late")
+      out.push({ type: "set", entity: inv.id, field: "state", value: "late" });
+    if (fees > inv.fees)
+      out.push({ type: "set", entity: inv.id, field: "fees", value: fees }, ...fee > 0 ? [{ type: "set", entity: inv.id, field: "late_fee", value: inv.late_fee + fee }] : []);
+    const amount = api.money(ctx, inv.left + fee);
+    if (inv.party)
+      out.push(...api.note(ctx, inv.party, "bill", `${inv.memo} from ${shownName2(ctx, inv.party, inv.business, "a business")} is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} due.`));
+    for (const o of api.ownersOf(ctx.state, inv.business))
+      if (o.role === "owner" || o.role === "joint")
+        out.push(...api.note(ctx, o.party, "bill", `${inv.memo}, billed to ${inv.party ? shownName2(ctx, o.party, inv.party, "a customer") : inv.customer}, is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} owed.`));
+  }
+  return out;
+}
+function issueInvoice(ctx, api, args) {
+  const business = strOf(args.business);
+  if (!isBusiness(ctx, business))
+    return reject6("missing_entity", `no business ${labelOf(ctx, business)}`);
+  const by = strOf(args.by);
+  if (by !== "" && !manages(api, ctx.state, by, business))
+    return reject6("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  const customer = strOf(args.customer) || strOf(args.customer_name).trim();
+  if (customer === "" || customer === business)
+    return reject6("bad_party", "an invoice needs someone to bill");
+  const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
+  if (!(cents > 0))
+    return reject6("bad_amount", "an invoice needs an amount");
+  const days = typeof args.days === "number" && args.days >= 0 ? Math.round(args.days) : Math.round(numOf(own(ctx.state.entities, business)?.fields.invoice_days, INVOICE_DAYS));
+  const cal = calendarOf(ctx.world);
+  const due = dateText2(ctx, dateAt(cal, ctx.state.clock).dayIndex + days);
+  const memo = strOf(args.memo).trim() || `${labelOf(ctx, business)} invoice`;
+  const id = `invoice:${hashParts(ctx.rng.seed, "invoice", business, customer, String(ctx.state.clock), String(cents)).slice(0, 10)}`;
+  const entity = { id, kind: INVOICE_KIND, name: memo, tier: "background", fields: { business, customer, cents, memo, issued: ctx.state.clock, due, state: "open", paid: 0, late_fee: 0, fees: 0 }, relations: [] };
+  return [{ type: "spawn", entity }];
+}
+function payInvoice(ctx, api, args) {
+  const inv = readInvoice(ctx, strOf(args.invoice));
+  if (!inv)
+    return reject6("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
+  if (inv.left <= 0)
+    return reject6("settled", `${inv.memo} is ${inv.state === "void" ? "void" : "paid"}`);
+  const by = strOf(args.by);
+  const payer = inv.party ?? inv.customer;
+  if (by !== "" && by !== inv.party && !(inv.party && isBusiness(ctx, inv.party) && manages(api, ctx.state, by, inv.party)))
+    return reject6("not_customer", `${labelOf(ctx, by)} isn't billed for ${inv.memo}`);
+  const deposit = operatingAccount(api, ctx, inv.business);
+  const paid = inv.party ? api.pay(ctx, { from: inv.party, to: inv.business, cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", method: "account", ...deposit ? { deposit } : {} }) : api.post(ctx, [{ account: api.outside(`customer:${payer}`), amount: -inv.left }, { account: deposit ?? api.outside(inv.business), amount: inv.left }], { memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", counterparty: payer });
+  if (!Array.isArray(paid))
+    return paid;
+  return unit(paid, invoiceSettled(inv, inv.left));
+}
+function voidInvoice(ctx, api, args) {
+  const inv = readInvoice(ctx, strOf(args.invoice));
+  if (!inv)
+    return reject6("missing_entity", `no invoice ${labelOf(ctx, strOf(args.invoice))}`);
+  const by = strOf(args.by);
+  if (by !== "" && !manages(api, ctx.state, by, inv.business))
+    return reject6("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, inv.business)}`);
+  if (inv.state === "paid" || inv.state === "void")
+    return reject6("settled", `${inv.memo} is already ${inv.state}`);
+  return [{ type: "set", entity: inv.id, field: "state", value: "void" }];
+}
+var PAYOUT = {
+  type: "economy.payout",
+  validate: (e, ctx) => own(ctx.state.entities, str5(e, "business")) && typeof e.data.cents === "number" ? null : reject6("bad_event", "a payout needs its business and amount"),
+  apply: (e, state, ctx) => {
+    const business = str5(e, "business");
+    addToBooks(state, business, monthOf(ctx.world, state.clock), e.data.what === "draw" ? { draws: numOf(e.data.cents) } : { distributions: numOf(e.data.cents) });
+    if (e.data.what === "distribution")
+      sliceRecord(state, "economy", "distributed")[business] = state.clock;
+  },
+  describe: (e) => e.data.what === "draw" ? "Owner's draw" : "Profit distributed"
+};
+function mayDraw(api, state, who, business) {
+  return structureOf(state, business) !== "c_corp" && api.ownersOf(state, business).some((o) => o.party === who && (o.role === "owner" || o.role === "joint"));
+}
+function ownerDraw(ctx, api, args) {
+  const business = strOf(args.business);
+  const owner = strOf(args.owner) || strOf(args.by);
+  if (!isBusiness(ctx, business))
+    return reject6("missing_entity", `no business ${labelOf(ctx, business)}`);
+  if (!mayDraw(api, ctx.state, owner, business))
+    return reject6("not_owner", structureOf(ctx.state, business) === "c_corp" ? `${labelOf(ctx, business)} is a corporation: it pays its owners by salary or dividends` : `${labelOf(ctx, owner)} doesn't own ${labelOf(ctx, business)}`);
+  const cents = typeof args.cents === "number" ? Math.round(args.cents) : NaN;
+  if (!(cents > 0))
+    return reject6("bad_amount", "a draw needs an amount");
+  const from = operatingAccount(api, ctx, business);
+  if (!from)
+    return reject6("no_account", `${labelOf(ctx, business)} has no account to draw on`);
+  const paid = api.pay(ctx, { from, to: owner, cents, memo: "Owner's draw", kind: "income", category: "draw" });
+  if (!Array.isArray(paid))
+    return paid;
+  return unit(paid, [{ type: "economy.payout", data: { business, what: "draw", cents } }]);
+}
+function distribution(ctx, api, business, total) {
+  const from = operatingAccount(api, ctx, business);
+  if (!from || total <= 0)
+    return null;
+  const owners = api.ownersOf(ctx.state, business).map((o) => ({ party: o.party, share: api.shareOf(ctx.state, business, o.party) })).filter((o) => o.share > 0);
+  const shareSum = owners.reduce((a, o) => a + o.share, 0);
+  if (owners.length === 0 || shareSum <= 0)
+    return null;
+  const route = optionalQuery(ctx, "economy.stake_route");
+  const stakePaid = optionalService(ctx, "economy.stake_paid");
+  const lines = [];
+  const extra = [];
+  let given = 0;
+  let paid = 0;
+  for (const [i, o] of owners.entries()) {
+    const cents = i === owners.length - 1 ? total - given : Math.round(total * o.share / shareSum);
+    given += cents;
+    if (cents <= 0)
+      continue;
+    const r = route?.(ctx, o.party, business) ?? null;
+    const reinvest = r !== null && "reinvest" in r;
+    if (!reinvest) {
+      const to = r !== null && "account" in r ? r.account : api.depositAccount(ctx, o.party) ?? api.outside(o.party);
+      const line = lines.find((l) => l.account === to);
+      if (line)
+        line.amount += cents;
+      else
+        lines.push({ account: to, amount: cents });
+      paid += cents;
+    }
+    extra.push(...stakePaid?.(ctx, o.party, business, cents, reinvest) ?? []);
+  }
+  if (paid > 0)
+    lines.unshift({ account: from, amount: -paid });
+  extra.push({ type: "economy.payout", data: { business, what: "distribution", cents: total } });
+  return { lines, extra, paid };
+}
+function distribute(ctx, api, args) {
+  const business = strOf(args.business);
+  if (!isBusiness(ctx, business))
+    return reject6("missing_entity", `no business ${labelOf(ctx, business)}`);
+  const by = strOf(args.by);
+  if (by !== "" && !manages(api, ctx.state, by, business))
+    return reject6("not_owner", `${labelOf(ctx, by)} doesn't run ${labelOf(ctx, business)}`);
+  const since = numOf(own(objOf(sliceOf(ctx.state, "economy").distributed), business), monthStart(ctx, ctx.state.clock));
+  const pct = numOf(own(ctx.state.entities, business)?.fields.distribution_pct, 100);
+  const total = typeof args.cents === "number" && args.cents > 0 ? Math.round(args.cents) : Math.round(Math.max(0, businessBooks(api, ctx, business, since, ctx.state.clock + 1).profit) * pct / 100);
+  if (!(total > 0))
+    return reject6("bad_amount", `${labelOf(ctx, business)} has no profit to distribute`);
+  const d = distribution(ctx, api, business, total);
+  if (!d)
+    return reject6("no_owners", `${labelOf(ctx, business)} has no owners with a share, or no account to pay from`);
+  if (d.lines.length === 0)
+    return d.extra;
+  const posted = api.post(ctx, d.lines, { memo: "Profit distribution", kind: "income", category: "distribution" });
+  if (!Array.isArray(posted))
+    return posted;
+  return unit(posted, d.extra);
+}
+function monthStart(ctx, clock) {
+  const cal = calendarOf(ctx.world);
+  const d = dateAt(cal, clock);
+  return clockAt(cal, dayIndexOf(cal, d.year, d.month, 1), 0);
+}
+function distributionPeriod(ctx, every, at) {
+  const cal = calendarOf(ctx.world);
+  const d = dateAt(cal, at);
+  const months = every === "year" ? 12 : every === "quarter" ? 3 : 1;
+  const firstOfMonth = (y, m) => clockAt(cal, dayIndexOf(cal, y, m, 1), 0);
+  let y = d.year;
+  let m = d.month - months;
+  while (m < 1) {
+    m += 12;
+    y--;
+  }
+  return { from: firstOfMonth(y, m), to: firstOfMonth(d.year, d.month) };
+}
+function distributionFlow(ctx, api, business) {
+  const f = own(ctx.state.entities, business)?.fields;
+  const pct = numOf(f?.distribution_pct);
+  const from = operatingAccount(api, ctx, business);
+  if (!f || pct <= 0 || !from)
+    return null;
+  const every = strOf(f.distribution_every, "quarter");
+  const schedule = every === "month" ? { every: "month", days: [10], roll: "after" } : every === "year" ? { every: "year", months: [1], days: [10], roll: "after" } : { every: "year", months: [1, 4, 7, 10], days: [10], roll: "after" };
+  return { id: `distribute:${business}`, label: "Profit distribution", kind: "distribution", from, to: "Owners", amount: { provider: "distribution", args: { business } }, schedule, shortfall: "skip", category: "distribution", link: business, status: "active", source: "business" };
+}
+function shownName2(ctx, viewer, id, fallback) {
+  if (!own(ctx.state.entities, id))
+    return id;
+  if (viewer === ctx.world.pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id))
+    return fallback;
+  return labelOf(ctx, id);
+}
+function ownerLines(ctx, api, viewer, business) {
+  return api.ownersOf(ctx.state, business).map((o) => ({ party: o.party, name: shownName2(ctx, viewer, o.party, "an owner"), role: o.role, share: api.shareOf(ctx.state, business, o.party) }));
+}
+function nextDue(ctx, api, flowId) {
+  const flow = api.flows(ctx).find((f) => f.id === flowId);
+  const next = flow ? api.occurrences(ctx, flow.schedule, ctx.state.clock, ctx.state.clock + 400 * MINUTES_PER_DAY, flow.start)[0] : undefined;
+  return next === undefined ? null : formatClock(calendarOf(ctx.world), next);
+}
+function businessView(ctx, api, business, viewer) {
+  const cal = calendarOf(ctx.world);
+  const now = ctx.state.clock;
+  const d = dateAt(cal, now);
+  const yearStart = clockAt(cal, dayIndexOf(cal, d.year, 1, 1), 0);
+  const year = businessBooks(api, ctx, business, yearStart, now + 1);
+  const deposit = operatingAccount(api, ctx, business);
+  const role = api.ownersOf(ctx.state, business).find((o) => o.party === viewer)?.role ?? null;
+  const salesList = own(objOf(sliceOf(ctx.state, "economy").sales), business);
+  const sales = (Array.isArray(salesList) ? salesList : []).map((raw, i) => ({ raw: objOf(raw), i })).reverse().map(({ raw, i }) => ({ id: `${business}:sale:${i}`, at: formatClock(cal, numOf(raw.at)), memo: strOf(raw.memo, "Sale"), cents: numOf(raw.cents) + numOf(raw.tax), account: deposit ? labelOf(ctx, deposit) : labelOf(ctx, business), accountId: deposit ?? business, kind: "sale", category: strOf(raw.category) || null, counterparty: strOf(raw.payer) === "" ? "walk-in customers" : shownName2(ctx, viewer, strOf(raw.payer), "a customer"), card: null, status: "posted" }));
+  const invoices = allInvoices(ctx).filter((i) => i.business === business || i.party === business).sort((a, b) => b.issued - a.issued).map((i) => ({ id: i.id, business: i.business, customer: i.customer, cents: i.cents, memo: i.memo, issued: i.issued, due: i.due, state: i.state, paid: i.paid, late_fee: i.late_fee, ...i.state === "late" ? { days_late: dateAt(cal, now).dayIndex - dateAt(cal, i.due).dayIndex } : {}, flow: `invoice:${i.id}`, customerName: i.party ? shownName2(ctx, viewer, i.party, "a customer") : i.customer, issuedAt: formatClock(cal, i.issued), dueAt: formatClock(cal, i.due) }));
+  const employees = allJobs(ctx).filter((j) => j.business === business && j.status !== "ended").map((j) => {
+    const v = jobView(ctx, api, j);
+    return { ...v, worker: shownName2(ctx, viewer, j.worker, "an employee") };
+  });
+  const owed = payablesOf(ctx.state, business);
+  const taxes = [];
+  if (owed.sales_tax !== 0)
+    taxes.push({ label: "Sales tax collected, to pay", cents: owed.sales_tax, due: nextDue(ctx, api, `salestax:${business}`) });
+  if (owed.suppliers !== 0)
+    taxes.push({ label: "Owed to suppliers", cents: owed.suppliers, due: nextDue(ctx, api, `suppliers:${business}`) });
+  if (structureOf(ctx.state, business) === "c_corp" && api.feature(ctx, business, "business_tax"))
+    taxes.push({ label: "Income tax on this year's profit", cents: corporateTax(ctx, business, year.profit), due: nextDue(ctx, api, `esttax:${business}`) });
+  const months = monthsBetween(ctx.world, now - 335 * MINUTES_PER_DAY, now + 1).reverse().map((m) => {
+    const [y, mo] = m.split("-").map(Number);
+    const from = clockAt(cal, dayIndexOf(cal, y ?? d.year, mo ?? 1, 1), 0);
+    const b = businessBooks(api, ctx, business, from, from + 1);
+    return { period: m, revenue: b.revenue, expenses: b.expenses, profit: b.profit };
+  });
+  return {
+    id: business,
+    name: labelOf(ctx, business),
+    role,
+    owners: ownerLines(ctx, api, viewer, business),
+    accounts: api.accountsOf(ctx, business, "sees"),
+    places: placesOf(ctx, business).map((p) => ({ id: p, name: own(ctx.world.places, p)?.name ?? p })),
+    books: { period: String(d.year), revenue: year.revenue, expenses: year.expenses, payroll: year.payroll, taxes: year.taxes, profit: year.profit, lines: year.lines },
+    months,
+    sales,
+    invoices,
+    employees,
+    taxes
+  };
+}
+function businessesOf(ctx, api, party) {
+  if (isBusiness(ctx, party))
+    return [party];
+  return businessIds(ctx).filter((b) => api.ownersOf(ctx.state, b).some((o) => o.party === party));
+}
+function invoiceAlerts(ctx, api, party) {
+  const mine = businessesOf(ctx, api, party);
+  const out = [];
+  for (const inv of allInvoices(ctx)) {
+    if (inv.state !== "late" || inv.left <= 0)
+      continue;
+    if (inv.party === party || inv.party !== null && mine.includes(inv.party))
+      out.push({ tone: "neg", text: `${inv.memo} from ${shownName2(ctx, party, inv.business, "a business")} is late: ${api.money(ctx, inv.left)} due.`, flow: `invoice:${inv.id}` });
+    else if (mine.includes(inv.business))
+      out.push({ tone: "warn", text: `${inv.memo}, billed to ${inv.party ? shownName2(ctx, party, inv.party, "a customer") : inv.customer}, is late: ${api.money(ctx, inv.left)} owed.`, flow: `invoice:${inv.id}` });
+  }
+  return out;
+}
+function registerBusiness(r) {
+  const { api, core } = r;
+  r.fields("business", BUSINESS_FIELDS);
+  for (const def of [SALE, REMIT, INVOICE_PAID, PAYOUT])
+    core.event(def);
+  r.sale((ctx, sale) => saleTerms(ctx, api, sale));
+  r.flows({
+    id: "business",
+    flows: (ctx) => businessIds(ctx).flatMap((b) => {
+      const out = [...settleFlows(ctx, api, b)];
+      const walkIn = walkInFlow(ctx, api, b);
+      if (walkIn)
+        out.push(walkIn);
+      const dist = distributionFlow(ctx, api, b);
+      if (dist)
+        out.push(dist);
+      return out;
+    })
+  });
+  r.flows({ id: "invoice", flows: (ctx) => allInvoices(ctx).flatMap((inv) => invoiceFlow(ctx, api, inv) ?? []) });
+  r.amount("walk_in_sales", (ctx, flow, at, rng) => walkInPosting(ctx, api, strOf("provider" in flow.amount ? objOf(flow.amount.args).business : undefined, flow.link ?? ""), at, rng));
+  r.amount("settle", (ctx, flow) => {
+    const args = "provider" in flow.amount ? objOf(flow.amount.args) : {};
+    return settlePosting(ctx, api, strOf(args.business), args.what === "sales_tax" ? "sales_tax" : "suppliers");
+  });
+  r.amount("invoice", (ctx, flow) => {
+    const inv = readInvoice(ctx, strOf("provider" in flow.amount ? objOf(flow.amount.args).invoice : undefined, flow.link ?? ""));
+    if (!inv || inv.left <= 0)
+      return null;
+    return { cents: inv.left, memo: `Invoice: ${inv.memo}`, kind: "payment", category: "invoice", extra: invoiceSettled(inv, inv.left) };
+  });
+  r.amount("distribution", (ctx, flow, at) => {
+    const business = strOf("provider" in flow.amount ? objOf(flow.amount.args).business : undefined, flow.link ?? "");
+    const f = own(ctx.state.entities, business)?.fields;
+    if (!f)
+      return null;
+    const period = distributionPeriod(ctx, strOf(f.distribution_every, "quarter"), at);
+    const total = Math.round(Math.max(0, businessBooks(api, ctx, business, period.from, period.to).profit) * numOf(f.distribution_pct) / 100);
+    const d = distribution(ctx, api, business, total);
+    return d ? { cents: d.paid, lines: d.lines, memo: "Profit distribution", kind: "income", category: "distribution", extra: d.extra } : null;
+  });
+  core.process({ id: "economy.invoices", domain: "money", minLevel: 3, step: (slot, ctx) => lateInvoices(slot, ctx, api) });
+  core.effect({ type: "economy.invoice_issue", args: ["business", "customer?", "customer_name?", "cents", "memo?", "days?", "by?"], resolve: (args, ctx) => issueInvoice(ctx, api, args) });
+  core.effect({ type: "economy.invoice_pay", args: ["invoice", "by?"], resolve: (args, ctx) => payInvoice(ctx, api, args) });
+  core.effect({ type: "economy.invoice_void", args: ["invoice", "by?"], resolve: (args, ctx) => voidInvoice(ctx, api, args) });
+  core.effect({ type: "economy.owner_draw", args: ["business", "cents", "owner?", "by?"], resolve: (args, ctx) => ownerDraw(ctx, api, args) });
+  core.effect({ type: "economy.distribute", args: ["business", "cents?", "by?"], resolve: (args, ctx) => distribute(ctx, api, args) });
+  core.formula("may_draw", (ctx, who, business) => mayDraw(api, ctx.state, String(who ?? ""), String(business ?? "")));
+  core.action({ id: "invoice_issue", label: "Send an invoice", pack: "economy", params: { business: { type: "ref", ref: "business" }, customer: { type: "ref", optional: true, label: "Bill (someone here)" }, customer_name: { type: "text", optional: true, label: "Or bill (a name)" }, amount: { type: "money" }, memo: { type: "text", optional: true, label: "For" }, days: { type: "number", optional: true, label: "Days to pay" } }, requires: ["manages(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_issue", args: { business: "business", customer: "customer", customer_name: "=params.customer_name", cents: "=amount", memo: "=params.memo", days: "=params.days", by: "self" } }] }, duration: "10", lexicon: ["send an invoice", "invoice", "bill them"], observable: "does paperwork" });
+  core.action({ id: "invoice_pay", label: "Pay an invoice", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["invoice.customer == self or manages(self, invoice.customer)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_pay", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["pay the invoice", "settle the bill"], observable: "checks their phone" });
+  core.action({ id: "invoice_void", label: "Void an invoice", pack: "economy", params: { invoice: { type: "ref", ref: INVOICE_KIND } }, requires: ["manages(self, invoice.business)", "invoice.state == 'open' or invoice.state == 'late'", "level.money >= 3"], outcomes: { default: [{ type: "economy.invoice_void", args: { invoice: "invoice", by: "self" } }] }, duration: "5", lexicon: ["void the invoice", "cancel the invoice", "write it off"], observable: "does paperwork" });
+  core.action({ id: "owner_draw", label: "Take an owner's draw", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money" } }, requires: ["may_draw(self, business)", "amount > 0", "level.money >= 3"], outcomes: { default: [{ type: "economy.owner_draw", args: { business: "business", cents: "=amount", owner: "self", by: "self" } }] }, duration: "5", lexicon: ["take a draw", "pay myself", "take money out of the business"], observable: "checks their phone" });
+  core.action({ id: "distribute_profit", label: "Distribute profit", pack: "economy", params: { business: { type: "ref", ref: "business" }, amount: { type: "money", optional: true, label: "Amount (else its share of the profit)" } }, requires: ["manages(self, business)", "level.money >= 3"], outcomes: { default: [{ type: "economy.distribute", args: { business: "business", cents: "=params.amount", by: "self" } }] }, duration: "10", lexicon: ["distribute profit", "pay dividends", "pay out the owners"], observable: "does paperwork" });
+  core.query("economy.business_books", (ctx, business, from, to) => {
+    const b = businessBooks(api, ctx, business, from, to);
+    return { revenue: b.revenue, expenses: b.expenses, profit: b.profit, receivables: b.receivables, payables: b.payables };
+  });
+  core.query("economy.operating_account", (ctx, business) => operatingAccount(api, ctx, business));
+  r.view((ctx, party) => {
+    const mine = businessesOf(ctx, api, party);
+    const alerts = invoiceAlerts(ctx, api, party);
+    return { ...mine.length > 0 ? { businesses: mine.map((b) => businessView(ctx, api, b, party)) } : {}, ...alerts.length > 0 ? { alerts } : {} };
+  });
+  r.summary((ctx, who) => {
+    const out = [];
+    const now = ctx.state.clock;
+    for (const b of businessesOf(ctx, api, who)) {
+      if (b === who)
+        continue;
+      const month = monthBook(ctx.state, b, monthOf(ctx.world, now));
+      const books = businessBooks(api, ctx, b, monthStart(ctx, now), now + 1);
+      out.push(`${labelOf(ctx, b)}, which they own, has ${books.profit >= 0 ? "made" : "lost"} ${api.money(ctx, Math.abs(books.profit))} so far this month on ${api.money(ctx, books.revenue)} taken in${month.payroll > 0 ? `, ${api.money(ctx, month.payroll)} of it gone on wages` : ""}.`);
+      const acct = operatingAccount(api, ctx, b);
+      if (acct)
+        out.push(`Its account holds ${api.money(ctx, api.balance(ctx.state, acct))}.`);
+    }
+    for (const inv of allInvoices(ctx)) {
+      if (inv.left <= 0)
+        continue;
+      if (inv.party === who)
+        out.push(`They owe ${labelOf(ctx, inv.business)} ${api.money(ctx, inv.left)} for ${inv.memo}${inv.state === "late" ? ", and it is late" : `, due ${formatClock(calendarOf(ctx.world), inv.due)}`}.`);
+    }
+    return out;
+  });
+  core.lint({
+    code: "economy.business",
+    check(world) {
+      const issues = [];
+      for (const e of Object.values(world.entities)) {
+        if (e.kind === INVOICE_KIND) {
+          if (typeof e.fields.business !== "string" || own(world.entities, e.fields.business)?.kind !== "business")
+            issues.push({ severity: "error", code: "economy.business", message: `Invoice ${e.name} isn't from a business.`, path: `entities.${e.id}.fields.business` });
+          if (typeof e.fields.customer !== "string" || e.fields.customer === "")
+            issues.push({ severity: "error", code: "economy.business", message: `Invoice ${e.name} bills nobody.`, path: `entities.${e.id}.fields.customer` });
+          if (!(typeof e.fields.cents === "number" && e.fields.cents > 0))
+            issues.push({ severity: "error", code: "economy.business", message: `Invoice ${e.name} needs an amount.`, path: `entities.${e.id}.fields.cents` });
+        }
+        if (e.kind !== "business")
+          continue;
+        const places = e.fields.places;
+        if (Array.isArray(places)) {
+          for (const p of places)
+            if (typeof p !== "string" || !own(world.places, p))
+              issues.push({ severity: "error", code: "economy.business", message: `${e.name} trades at a place that doesn't exist: ${String(p)}.`, path: `entities.${e.id}.fields.places` });
+        }
+        const operating = e.fields.operating_account;
+        if (typeof operating === "string" && operating !== "" && !own(world.entities, operating))
+          issues.push({ severity: "error", code: "economy.business", message: `${e.name}'s operating account doesn't exist.`, path: `entities.${e.id}.fields.operating_account` });
+        const margin = e.fields.margin_pct;
+        if (margin !== undefined && !(typeof margin === "number" && margin >= 0 && margin <= 100))
+          issues.push({ severity: "error", code: "economy.business", message: `${e.name}'s margin must be a percentage from 0 to 100.`, path: `entities.${e.id}.fields.margin_pct` });
+      }
+      return issues;
+    }
+  });
+}
+
+// src/packs/economy/core/work.ts
+function registerWork(r) {
+  registerEmployment(r);
+  registerBusiness(r);
+  registerTaxes(r);
+}
+
+// src/packs/economy/core/pricing.ts
+var YEAR_MINUTES = 365 * 1440;
+function normal(rng) {
+  const u1 = Math.max(Number.MIN_VALUE, rng.next());
+  const u2 = rng.next();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+function correlated(factor, own, rho) {
+  const r = Math.min(1, Math.max(0, rho));
+  return r * factor + Math.sqrt(1 - r * r) * own;
+}
+function gbmStep(price, driftPct, volPct, dt, z) {
+  const mu = driftPct / 100;
+  const sigma = volPct / 100;
+  return price * Math.exp((mu - sigma * sigma / 2) * dt + sigma * Math.sqrt(dt) * z);
+}
+function normCdf(x) {
+  const ax = Math.abs(x);
+  let c;
+  if (ax > 37)
+    c = 0;
+  else {
+    const e = Math.exp(-ax * ax / 2);
+    if (ax < 7.07106781186547) {
+      let n = 0.0352624965998911 * ax + 0.700383064443688;
+      n = n * ax + 6.37396220353165;
+      n = n * ax + 33.912866078383;
+      n = n * ax + 112.079291497871;
+      n = n * ax + 221.213596169931;
+      n = n * ax + 220.206867912376;
+      let d = 0.0883883476483184 * ax + 1.75566716318264;
+      d = d * ax + 16.064177579207;
+      d = d * ax + 86.7807322029461;
+      d = d * ax + 296.564248779674;
+      d = d * ax + 637.333633378831;
+      d = d * ax + 793.826512519948;
+      d = d * ax + 440.413735824752;
+      c = e * n / d;
+    } else {
+      let b = ax + 0.65;
+      b = ax + 4 / b;
+      b = ax + 3 / b;
+      b = ax + 2 / b;
+      b = ax + 1 / b;
+      c = e / b / 2.506628274631;
+    }
+  }
+  return x > 0 ? 1 - c : c;
+}
+function intrinsic(right, spot, strike) {
+  return Math.max(0, right === "call" ? spot - strike : strike - spot);
+}
+function blackScholes(o) {
+  if (!(o.spot > 0) || !(o.strike > 0))
+    return o.years <= 0 ? intrinsic(o.right, Math.max(0, o.spot), Math.max(0, o.strike)) : 0;
+  if (o.years <= 0)
+    return intrinsic(o.right, o.spot, o.strike);
+  const r = o.ratePct / 100;
+  const q = o.yieldPct / 100;
+  const sigma = o.volPct / 100;
+  const forward = o.spot * Math.exp(-q * o.years);
+  const discounted = o.strike * Math.exp(-r * o.years);
+  if (!(sigma > 0))
+    return Math.max(0, o.right === "call" ? forward - discounted : discounted - forward);
+  const sd = sigma * Math.sqrt(o.years);
+  const d1 = (Math.log(o.spot / o.strike) + (r - q + sigma * sigma / 2) * o.years) / sd;
+  const d2 = d1 - sd;
+  return o.right === "call" ? forward * normCdf(d1) - discounted * normCdf(d2) : discounted * normCdf(-d2) - forward * normCdf(-d1);
+}
+function bondPrice(b) {
+  if (b.years <= 0)
+    return b.face;
+  const m = Math.max(1, Math.round(b.frequency));
+  const periods = b.years * m;
+  const n = Math.ceil(periods - 0.000000001);
+  const coupon = b.face * b.couponPct / 100 / m;
+  const y = b.yieldPct / 100 / m;
+  let price = 0;
+  for (let k = 1;k <= n; k++) {
+    const t = periods - (n - k);
+    price += coupon / Math.pow(1 + y, t);
+  }
+  return price + b.face / Math.pow(1 + y, periods);
+}
+var QTY_EPSILON = 0.000000001;
+function roundQty(qty) {
+  return Math.round(qty * 1e6) / 1e6;
+}
+function takeFifo(lots, qty) {
+  const held = lots.reduce((a, l) => a + l.qty, 0);
+  if (qty > held + QTY_EPSILON)
+    return null;
+  const left = [];
+  const taken = [];
+  let want = qty;
+  for (const lot of lots) {
+    if (want <= QTY_EPSILON) {
+      left.push({ ...lot });
+      continue;
+    }
+    if (lot.qty <= want + QTY_EPSILON) {
+      taken.push({ ...lot });
+      want -= lot.qty;
+      continue;
+    }
+    const part = roundQty(want);
+    const cost = Math.round(lot.cost * part / lot.qty);
+    taken.push({ qty: part, cost, at: lot.at });
+    left.push({ qty: roundQty(lot.qty - part), cost: lot.cost - cost, at: lot.at });
+    want = 0;
+  }
+  return { left, taken };
+}
+
+// src/packs/economy/core/assets.ts
+function reject7(code, reason) {
+  return { code, reason };
+}
+function holdingsSlice(state) {
+  return objOf(sliceOf(state, "economy").holdings);
+}
+function holdingsRecord(state, key) {
+  const economy = mutableSlice(state, "economy");
+  const current = economy.holdings;
+  const mine = isRecord(current) ? current : {};
+  economy.holdings = mine;
+  const inner = mine[key];
+  if (isRecord(inner))
+    return inner;
+  const fresh = {};
+  mine[key] = fresh;
+  return fresh;
+}
+function clockOfDate(world, v) {
+  if (typeof v === "number" && Number.isFinite(v))
+    return v;
+  if (typeof v !== "string" || v === "")
+    return null;
+  try {
+    return clockOfLocal(calendarOf(world), v);
+  } catch {
+    return null;
+  }
+}
+function dateText3(world, clock) {
+  const d = dateAt(calendarOf(world), clock);
+  return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+}
+var MARKET_CLOSE = 16 * 60;
+function closeOf(world, v) {
+  if (!v)
+    return null;
+  const at = clockOfDate(world, v);
+  return at === null ? null : /^\d{4}-\d{2}-\d{2}$/.test(v) ? at + MARKET_CLOSE : at;
+}
+function addMonths(world, clock, months) {
+  const cal = calendarOf(world);
+  const d = dateAt(cal, clock);
+  const count = cal.system.months;
+  const index = d.year * count + (d.month - 1) + Math.round(months);
+  const year = Math.floor(index / count);
+  const month = index - year * count + 1;
+  const day = Math.min(d.day, cal.system.monthLength(year, month));
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+var CLASS_MODELS = {
+  security: { recipe: "broad_us_equity_index", market: "equity", rho: 0.6, pays: 4, daily: false },
+  fund: { recipe: "broad_us_equity_index", market: "equity", rho: 0.95, pays: 4, daily: false },
+  bond: { recipe: "bonds_aggregate", market: "bond", rho: 0.9, pays: 12, daily: false },
+  crypto: { recipe: "crypto", market: "crypto", rho: 0.8, pays: 0, daily: true, drift: 20, vol: 65, yieldPct: 0 },
+  option: { recipe: null, market: "option", rho: 0, pays: 0, daily: false, drift: 0, vol: 0, yieldPct: 0 },
+  property: { recipe: "real_estate_home_price_appreciation_pct", market: "housing", rho: 0.7, pays: 0, daily: false },
+  business_stake: { recipe: null, market: "business", rho: 0, pays: 0, daily: false, drift: 0, vol: 0, yieldPct: 0 },
+  other: { recipe: null, market: "other", rho: 0, pays: 0, daily: false, drift: 0, vol: 0, yieldPct: 0 }
+};
+var RECIPE_MARKETS = {
+  broad_us_equity_index: "equity",
+  bonds_aggregate: "bond",
+  crypto: "crypto",
+  cash: "cash",
+  real_estate_home_price_appreciation_pct: "housing"
+};
+function investingRows(ctx) {
+  return objOf(ctx.tables.get("economy.finance")?.rows.investing?.values);
+}
+function num3(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+function readAssetDef(v) {
+  if (!isRecord(v))
+    return null;
+  const o = v;
+  const cls = o.class;
+  if (typeof cls !== "string" || !ASSET_CLASSES.includes(cls))
+    return null;
+  const def = { label: strOf(o.label), class: cls };
+  const text = (k) => {
+    if (typeof o[k] === "string" && o[k] !== "")
+      def[k] = o[k];
+  };
+  const number = (k) => {
+    const n = num3(o[k]);
+    if (n !== undefined)
+      def[k] = n;
+  };
+  for (const k of ["symbol", "model", "underlying", "expiry", "maturity", "entity"])
+    text(k);
+  for (const k of ["price", "annual_return_pct", "annual_volatility_pct", "yield_pct", "strike", "multiplier", "pays_per_year", "correlation", "face", "coupon_pct"])
+    number(k);
+  if (o.right === "call" || o.right === "put")
+    def.right = o.right;
+  if (o.settlement === "physical" || o.settlement === "cash")
+    def.settlement = o.settlement;
+  return def;
+}
+function configAssets(world) {
+  return objOf(objOf(world.packs.economy?.config).assets);
+}
+function assetDefOf(ctx, id) {
+  if (!safeKey(id))
+    return null;
+  const authored = readAssetDef(own(configAssets(ctx.world), id));
+  if (authored)
+    return authored;
+  const minted = readAssetDef(own(objOf(holdingsSlice(ctx.state).minted), id));
+  if (minted)
+    return minted;
+  if (isRecord(own(investingRows(ctx), id)))
+    return { label: id.replace(/_/g, " "), class: "fund", model: id, price: 1e4 };
+  return null;
+}
+function assetOf(ctx, id) {
+  const def = assetDefOf(ctx, id);
+  return def ? assetFromDef(ctx, id, def) : null;
+}
+function assetFromDef(ctx, id, def) {
+  const rows = investingRows(ctx);
+  const classRow = objOf(own(objOf(rows.asset_classes), def.class));
+  const fallback = CLASS_MODELS[def.class];
+  const recipe = def.model ?? (typeof classRow.model === "string" ? classRow.model : fallback.recipe);
+  const row = recipe ? objOf(own(rows, recipe)) : {};
+  const cashLike = recipe === "cash";
+  const yieldPct = def.yield_pct ?? num3(classRow.dividend_yield_pct) ?? (cashLike ? num3(row.annual_return_pct) : num3(row.dividend_yield_pct) ?? num3(row.yield_to_maturity_pct)) ?? fallback.yieldPct ?? 0;
+  const total = def.annual_return_pct ?? num3(classRow.annual_return_pct) ?? num3(row.annual_return_arithmetic_pct) ?? num3(row.annual_return_pct) ?? num3(row.typical) ?? fallback.drift ?? 0;
+  const vol = def.annual_volatility_pct ?? num3(classRow.annual_volatility_pct) ?? (cashLike ? 0 : num3(row.annual_volatility_pct) ?? num3(row.volatility_pct)) ?? fallback.vol ?? 0;
+  const maturity = closeOf(ctx.world, def.maturity);
+  const bond = def.class === "bond" && typeof def.face === "number" && def.face > 0 && maturity !== null ? { face: def.face, couponPct: def.coupon_pct ?? 0, maturity, baseYield: num3(objOf(own(rows, "bonds_aggregate")).yield_to_maturity_pct) ?? 4.4 } : null;
+  const expiry = closeOf(ctx.world, def.expiry);
+  const option = def.class === "option" && def.underlying && typeof def.strike === "number" && def.strike > 0 && expiry !== null && (def.right === "call" || def.right === "put") ? { underlying: def.underlying, strike: def.strike, expiry, right: def.right, multiplier: def.multiplier ?? 100, settlement: def.settlement ?? "physical" } : null;
+  const pays = def.pays_per_year ?? (bond ? 2 : num3(classRow.pays_per_year) ?? fallback.pays);
+  return {
+    id,
+    label: def.label || id,
+    class: def.class,
+    symbol: def.symbol ?? null,
+    start: def.price ?? 1e4,
+    drift: bond ? 0 : total - yieldPct,
+    vol,
+    yieldPct: bond ? 0 : yieldPct,
+    pays: Math.max(0, Math.round(pays)),
+    rho: Math.min(1, Math.max(0, def.correlation ?? num3(classRow.correlation) ?? fallback.rho)),
+    market: (recipe ? own(RECIPE_MARKETS, recipe) : undefined) ?? fallback.market,
+    daily: classRow.trades_daily === true || fallback.daily,
+    bond,
+    option,
+    entity: def.entity ?? null
+  };
+}
+function riskFreePct(ctx) {
+  return num3(objOf(ctx.tables.get("economy.finance")?.rows.macro?.values).treasury_bill_3m_yield_pct) ?? 3.8;
+}
+function bondYield(ctx, a) {
+  const marked = num3(own(objOf(holdingsSlice(ctx.state).yields), a.id));
+  if (marked !== undefined)
+    return marked;
+  if (!a.bond)
+    return 0;
+  const def = assetDefOf(ctx, a.id);
+  return typeof def?.price === "number" && def.price > 0 ? impliedYield(a.bond, def.price, clockOfDate(ctx.world, ctx.world.start.at) ?? 0, a.pays || 2) : a.bond.baseYield;
+}
+function impliedYield(bond, price, at, frequency) {
+  const years = (bond.maturity - at) / YEAR_MINUTES;
+  if (years <= 0)
+    return bond.baseYield;
+  let lo = -5;
+  let hi = 60;
+  for (let i = 0;i < 80; i++) {
+    const mid = (lo + hi) / 2;
+    if (bondPrice({ face: bond.face, couponPct: bond.couponPct, yieldPct: mid, years, frequency }) > price)
+      lo = mid;
+    else
+      hi = mid;
+  }
+  return Math.round((lo + hi) / 2 * 1e4) / 1e4;
+}
+function priceOf2(ctx, a, at = ctx.state.clock) {
+  if (a.option) {
+    const under = assetOf(ctx, a.option.underlying);
+    if (!under || under.option)
+      return 0;
+    const spot = priceOf2(ctx, under, at);
+    const years = (a.option.expiry - at) / YEAR_MINUTES;
+    const perUnit = years <= 0 ? intrinsic(a.option.right, spot, a.option.strike) : blackScholes({ right: a.option.right, spot, strike: a.option.strike, years, ratePct: riskFreePct(ctx), volPct: under.vol, yieldPct: under.yieldPct });
+    return mark(perUnit * a.option.multiplier);
+  }
+  if (a.bond) {
+    const years = (a.bond.maturity - at) / YEAR_MINUTES;
+    return mark(bondPrice({ face: a.bond.face, couponPct: a.bond.couponPct, yieldPct: bondYield(ctx, a), years, frequency: a.pays || 2 }));
+  }
+  const marked = num3(own(objOf(holdingsSlice(ctx.state).quotes), a.id));
+  if (marked !== undefined)
+    return marked;
+  const legacy = num3(own(objOf(sliceOf(ctx.state, "economy").prices), a.id));
+  if (legacy !== undefined)
+    return legacy * 100;
+  return a.start;
+}
+function quoteOf(ctx, id, at = ctx.state.clock) {
+  const a = assetOf(ctx, id);
+  return a ? priceOf2(ctx, a, at) : null;
+}
+function marketAssets(ctx) {
+  const ids = new Set(Object.keys(configAssets(ctx.world)));
+  for (const e of Object.values(ctx.state.entities))
+    if (e.kind === "holding" && typeof e.fields.asset === "string")
+      ids.add(e.fields.asset);
+  return [...ids].filter((id) => assetDefOf(ctx, id) !== null).sort();
+}
+function mark(n) {
+  return Math.round(n * 1e4) / 1e4;
+}
+function instantIn(ctx, slot, minuteOfDay) {
+  const cal = calendarOf(ctx.world);
+  const first = dateAt(cal, slot.start).dayIndex;
+  for (const day of [first, first + 1]) {
+    const at = clockAt(cal, day, minuteOfDay);
+    if (at >= slot.start && at < slot.end)
+      return { day, at, date: dateAt(cal, at) };
+  }
+  return null;
+}
+var YIELD_REVERSION = 0.3;
+var YIELD_SWING = 0.8;
+function marketStep(ctx, api, slot, rng) {
+  const at = instantIn(ctx, slot, MARKET_CLOSE);
+  if (!at)
+    return [];
+  const business = api.businessDay(ctx, at.day, "after") === at.day;
+  const factors = new Map;
+  const factor = (market) => {
+    let z = factors.get(market);
+    if (z === undefined) {
+      z = normal(rng(`market:${market}`));
+      factors.set(market, z);
+    }
+    return z;
+  };
+  const out = [];
+  for (const id of marketAssets(ctx)) {
+    const a = assetOf(ctx, id);
+    if (!a || a.option || a.class === "property" || a.class === "business_stake")
+      continue;
+    if (!a.daily && !business)
+      continue;
+    const dt = a.daily ? 1 / 365 : 1 / 252;
+    if (a.bond) {
+      if (at.at >= a.bond.maturity)
+        continue;
+      const z = correlated(factor(a.market), normal(rng(`asset:${id}`)), a.rho);
+      const y = bondYield(ctx, a);
+      const next = Math.max(0, y + YIELD_REVERSION * (a.bond.baseYield - y) * dt - YIELD_SWING * Math.sqrt(dt) * z);
+      out.push({ type: "economy.quote", data: { asset: id, yield: mark(next) } });
+      continue;
+    }
+    if (a.vol <= 0 && a.drift === 0)
+      continue;
+    const price = priceOf2(ctx, a);
+    if (!(price > 0))
+      continue;
+    const z = correlated(factor(a.market), normal(rng(`asset:${id}`)), a.rho);
+    out.push({ type: "economy.quote", data: { asset: id, price: mark(gbmStep(price, a.drift, a.vol, dt, z)) } });
+  }
+  return out;
+}
+function optionId(underlying, right, strike, expiry) {
+  return `opt:${underlying}:${right}:${Math.round(strike)}:${expiry}`;
+}
+function optionDef(ctx, underlying, right, strike, expiry) {
+  const under = assetOf(ctx, underlying);
+  const at = closeOf(ctx.world, expiry);
+  if (!under || under.option || under.class === "property" || under.class === "business_stake" || !(strike > 0) || at === null || at <= ctx.state.clock)
+    return null;
+  const money = formatMoney(Math.round(strike), ctx.world.currency);
+  return { label: `${under.symbol ?? under.label} ${expiry} ${money} ${right}`, class: "option", underlying, strike: Math.round(strike), expiry, right, multiplier: 100, settlement: "physical" };
+}
+function str6(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+var EVENTS = [
+  {
+    type: "economy.price",
+    validate: (e) => typeof e.data.price === "number" && e.data.price > 0 && safeKey(str6(e, "symbol")) ? null : reject7("bad_event", "price needs a symbol and a positive price"),
+    apply: (e, state) => {
+      const economy = mutableSlice(state, "economy");
+      const prices = isRecord(economy.prices) ? economy.prices : {};
+      prices[str6(e, "symbol")] = numOf(e.data.price);
+      economy.prices = prices;
+    },
+    describe: (e, _ctx, viewer) => viewer ? "" : `${str6(e, "symbol")} at ${numOf(e.data.price).toFixed(2)}`
+  },
+  {
+    type: "economy.quote",
+    validate: (e) => {
+      const price = e.data.price;
+      const y = e.data.yield;
+      if (!safeKey(str6(e, "asset")))
+        return reject7("bad_event", "a quote names its asset");
+      if (price === undefined && y === undefined)
+        return reject7("bad_event", "a quote carries a price or a yield");
+      if (price !== undefined && !(typeof price === "number" && Number.isFinite(price) && price > 0))
+        return reject7("bad_event", "a price is above zero");
+      return y === undefined || typeof y === "number" && Number.isFinite(y) && y >= 0 ? null : reject7("bad_event", "a yield is a percentage");
+    },
+    apply: (e, state) => {
+      if (typeof e.data.price === "number")
+        holdingsRecord(state, "quotes")[str6(e, "asset")] = e.data.price;
+      if (typeof e.data.yield === "number")
+        holdingsRecord(state, "yields")[str6(e, "asset")] = e.data.yield;
+    },
+    describe: (e, ctx, viewer) => {
+      if (viewer)
+        return "";
+      const label = assetDefOf(ctx, str6(e, "asset"))?.label || str6(e, "asset");
+      return typeof e.data.price === "number" ? `${label} at ${formatMoney(Math.round(e.data.price), ctx.world.currency)}` : `${label} yields ${numOf(e.data.yield)}%`;
+    },
+    coarsen: { key: (e) => `${str6(e, "asset")}:${typeof e.data.price === "number" ? "p" : "y"}`, merge: (_a, b) => b }
+  },
+  {
+    type: "economy.mint",
+    validate: (e, ctx) => {
+      const id = str6(e, "asset");
+      const def = readAssetDef(e.data.def);
+      if (!safeKey(id) || !def || def.class !== "option")
+        return reject7("bad_event", "a minted asset is an option contract");
+      if (own(configAssets(ctx.world), id))
+        return reject7("bad_event", `${id} is an authored asset`);
+      return assetOf(ctx, def.underlying ?? "") ? null : reject7("missing_asset", `no asset ${def.underlying ?? ""}`);
+    },
+    apply: (e, state) => {
+      const def = readAssetDef(e.data.def);
+      if (def)
+        holdingsRecord(state, "minted")[str6(e, "asset")] = def;
+    },
+    describe: (e, _ctx, viewer) => viewer ? "" : `Contract listed: ${strOf(objOf(e.data.def).label, str6(e, "asset"))}`
+  }
+];
+function setPrice(ctx, asset, price) {
+  const a = assetOf(ctx, asset);
+  if (!a)
+    return reject7("missing_asset", `no asset ${asset}`);
+  if (a.option)
+    return reject7("derived_price", `${a.label} is priced from ${a.option.underlying}; set its price instead`);
+  if (a.class === "property" || a.class === "business_stake")
+    return reject7("derived_price", `${a.label} is valued from what it stands for`);
+  if (!(Number.isFinite(price) && price > 0))
+    return reject7("bad_amount", "a price is above zero");
+  if (a.bond)
+    return [{ type: "economy.quote", data: { asset, yield: impliedYield(a.bond, price, ctx.state.clock, a.pays || 2) } }];
+  return [{ type: "economy.quote", data: { asset, price: mark(price) } }];
+}
+function registerMarkets(r) {
+  for (const def of EVENTS)
+    r.core.event(def);
+  r.core.process({
+    id: "economy.markets",
+    domain: "money",
+    minLevel: 3,
+    step: (slot, ctx, rng) => r.api.feature(ctx, ctx.world.pov, "investments") ? marketStep(ctx, r.api, slot, rng) : []
+  });
+  r.core.effect({
+    type: "economy.set_price",
+    args: ["asset", "price"],
+    gm: true,
+    resolve: (a, ctx) => setPrice(ctx, strOf(a.asset), typeof a.price === "number" ? a.price : NaN)
+  });
+  r.core.formula("asset_price", (ctx, id) => quoteOf(ctx, String(id ?? "")) ?? 0);
+  r.core.lint({
+    code: "economy.assets",
+    check(world) {
+      const issues = [];
+      const books = { world, state: { clock: 0, entities: {}, packs: {} }, tables: { get: (id) => own(world.tables, id) } };
+      for (const [id, raw] of Object.entries(configAssets(world))) {
+        const path = `packs.economy.config.assets.${id}`;
+        const def = readAssetDef(raw);
+        if (!def) {
+          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${id} needs a class (${ASSET_CLASSES.join(", ")}).`, path });
+          continue;
+        }
+        if (def.class === "option") {
+          if (!def.underlying || !own(configAssets(world), def.underlying))
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} names no underlying asset the world lists.`, path: `${path}.underlying` });
+          if (!(typeof def.strike === "number" && def.strike > 0))
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs a strike above zero.`, path: `${path}.strike` });
+          if (clockOfDate(world, def.expiry) === null)
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} needs an expiry date (YYYY-MM-DD).`, path: `${path}.expiry` });
+          if (def.right !== "call" && def.right !== "put")
+            issues.push({ severity: "error", code: "economy.assets", message: `Option ${def.label || id} is a call or a put.`, path: `${path}.right` });
+        }
+        if (def.class === "bond" && def.face !== undefined && clockOfDate(world, def.maturity) === null)
+          issues.push({ severity: "error", code: "economy.assets", message: `Bond ${def.label || id} has a face value but no maturity date (YYYY-MM-DD).`, path: `${path}.maturity` });
+        if (def.model !== undefined && !isRecord(own(investingRows(books), def.model)))
+          issues.push({ severity: "warning", code: "economy.assets", message: `Asset ${def.label || id} follows ${def.model}, which the finance table doesn't list; it takes its class's model.`, path: `${path}.model` });
+        if (def.price !== undefined && !(def.price > 0))
+          issues.push({ severity: "error", code: "economy.assets", message: `Asset ${def.label || id} needs a price above zero.`, path: `${path}.price` });
+      }
+      return issues;
+    }
+  });
+}
+
+// src/packs/economy/core/records.ts
+var REALISED_KEPT = 24;
+function byShare(shares, cents) {
+  return Object.entries(shares).filter(([, pct]) => pct > 0).sort(([a], [b]) => a.localeCompare(b)).map(([party, pct]) => ({ party, cents: Math.round(cents * pct / 100) }));
+}
+function yearOf(world, clock) {
+  return String(dateAt(calendarOf(world), clock).year);
+}
+function recordGain(state, world, party, g) {
+  if (!safeKey(party))
+    return;
+  const year = yearOf(world, state.clock);
+  const gains = holdingsRecord(state, "gains");
+  const mine = objOf(own(gains, party));
+  const y = objOf(own(mine, year));
+  mine[year] = { ...y, [g.term]: numOf(y[g.term]) + g.gain, proceeds: numOf(y.proceeds) + g.proceeds, basis: numOf(y.basis) + g.basis, ...g.home ? { home: numOf(y.home) + g.gain } : {} };
+  gains[party] = mine;
+  const realised = holdingsRecord(state, "realised");
+  const list = Array.isArray(own(realised, party)) ? own(realised, party) : [];
+  realised[party] = [...list.slice(-(REALISED_KEPT - 1)), { at: state.clock, label: g.label, qty: g.qty, proceeds: g.proceeds, basis: g.basis, gain: g.gain, term: g.term }];
+}
+function gainsIn(state, party, year) {
+  const y = objOf(own(objOf(own(objOf(holdingsSlice(state).gains), party)), String(year)));
+  return { short: numOf(y.short), long: numOf(y.long), home: numOf(y.home), proceeds: numOf(y.proceeds), basis: numOf(y.basis) };
+}
+function recordedYears(state, party) {
+  const years = new Set;
+  for (const key of ["gains", "income"])
+    for (const y of Object.keys(objOf(own(objOf(holdingsSlice(state)[key]), party))))
+      if (/^-?\d+$/.test(y))
+        years.add(Number(y));
+  return [...years].sort((a, b) => a - b);
+}
+function recordedParties(state) {
+  const out = new Set;
+  for (const key of ["gains", "income"])
+    for (const p of Object.keys(objOf(holdingsSlice(state)[key])))
+      out.add(p);
+  return [...out].sort();
+}
+var INCOME_KINDS = ["dividend", "interest", "profit"];
+function recordIncome(state, world, party, kind, cents) {
+  if (!safeKey(party) || cents === 0)
+    return;
+  const year = yearOf(world, state.clock);
+  const income = holdingsRecord(state, "income");
+  const mine = objOf(own(income, party));
+  const y = objOf(own(mine, year));
+  mine[year] = { ...y, [kind]: numOf(y[kind]) + cents };
+  income[party] = mine;
+}
+function incomeIn(state, party, year) {
+  const y = objOf(own(objOf(own(objOf(holdingsSlice(state).income), party)), String(year)));
+  return { dividend: numOf(y.dividend), interest: numOf(y.interest), profit: numOf(y.profit) };
+}
+function basisRecord(state, entity, party) {
+  const r = own(objOf(own(objOf(holdingsSlice(state).basis), entity)), party);
+  if (r === undefined)
+    return null;
+  const o = objOf(r);
+  return { basis: numOf(o.basis), since: typeof o.since === "number" ? o.since : null };
+}
+function setBasisRecord(state, entity, party, value) {
+  if (!safeKey(entity) || !safeKey(party))
+    return;
+  const all = holdingsRecord(state, "basis");
+  const mine = objOf(own(all, entity));
+  if (value === null)
+    delete mine[party];
+  else
+    mine[party] = { basis: value.basis, ...value.since !== null ? { since: value.since } : {} };
+  all[entity] = mine;
+}
+
+// src/packs/economy/core/gains.ts
+var TAX_PROVIDER = "investment_tax";
+function basisOf(api, ctx, entity, party) {
+  const recorded = basisRecord(ctx.state, entity, party);
+  if (recorded)
+    return recorded;
+  const e = own(ctx.state.entities, entity);
+  if (e?.kind !== "property")
+    return { basis: 0, since: null };
+  const authored = own(ctx.world.entities, entity)?.fields.value;
+  const whole = numOf(e.fields.purchase_price, typeof authored === "number" ? authored : numOf(e.fields.value));
+  return { basis: Math.round(whole * api.shareOf(ctx.state, entity, party) / 100), since: clockOfDate(ctx.world, e.fields.purchased) };
+}
+function isHome(state, property, party) {
+  const home = own(state.entities, party)?.fields.home;
+  const place = own(state.entities, property)?.fields.place;
+  return typeof home === "string" && home !== "" && (home === property || home === place);
+}
+function str7(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+function disposeEvent(api) {
+  return {
+    type: "economy.dispose",
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, str7(e, "entity")) || !own(ctx.state.entities, str7(e, "party")))
+        return reject7("missing_entity", "a disposal names what was sold and who sold it");
+      const pct = e.data.pct;
+      const proceeds = e.data.proceeds;
+      if (typeof pct !== "number" || !(pct > 0 && pct <= 100))
+        return reject7("bad_event", "a disposal is of a part of a share");
+      return typeof proceeds === "number" && Number.isSafeInteger(proceeds) && proceeds >= 0 ? null : reject7("bad_event", "a disposal's proceeds are a whole amount");
+    },
+    apply: (e, state, ctx) => {
+      const entity = str7(e, "entity");
+      const party = str7(e, "party");
+      const pct = numOf(e.data.pct);
+      const proceeds = numOf(e.data.proceeds);
+      const b = basisOf(api, { world: ctx.world, state }, entity, party);
+      const part = Math.round(b.basis * pct / 100);
+      const held = b.since === null ? Infinity : state.clock - b.since;
+      const home = own(state.entities, entity)?.kind === "property" && isHome(state, entity, party) && held >= 2 * YEAR_MINUTES;
+      recordGain(state, ctx.world, party, { term: held >= YEAR_MINUTES ? "long" : "short", gain: proceeds - part, proceeds, basis: part, label: strOf(e.data.label, `Sold ${labelOf(ctx, entity)}`), qty: pct / 100, ...home ? { home: true } : {} });
+      setBasisRecord(state, entity, party, pct >= 100 ? null : { basis: b.basis - part, since: b.since });
+    },
+    describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str7(e, "party"))} sold ${numOf(e.data.pct)}% of their share of ${labelOf(ctx, str7(e, "entity"))}`
+  };
+}
+var acquireEvent = {
+  type: "economy.acquire",
+  validate: (e, ctx) => {
+    if (!own(ctx.state.entities, str7(e, "entity")) || !own(ctx.state.entities, str7(e, "party")))
+      return reject7("missing_entity", "an acquisition names what was bought and who bought it");
+    const cents = e.data.cents;
+    return typeof cents === "number" && Number.isSafeInteger(cents) && cents >= 0 ? null : reject7("bad_event", "an acquisition costs a whole amount");
+  },
+  apply: (e, state) => {
+    const r = basisRecord(state, str7(e, "entity"), str7(e, "party"));
+    setBasisRecord(state, str7(e, "entity"), str7(e, "party"), { basis: (r?.basis ?? 0) + numOf(e.data.cents), since: r?.since ?? state.clock });
+  },
+  describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str7(e, "party"))} bought into ${labelOf(ctx, str7(e, "entity"))}`
+};
+function federal(ctx) {
+  return objOf(ctx.tables.get("economy.finance")?.rows.taxes_federal?.values);
+}
+function byFiling(o, prefix, suffix) {
+  const out = {};
+  for (const f of FILING_STATUSES) {
+    const v = own(o, `${prefix}${f}${suffix}`);
+    if (v !== undefined)
+      out[f] = v;
+  }
+  return out;
+}
+function taxTables(ctx) {
+  const fed = federal(ctx);
+  const ltcg = objOf(fed.capital_gains_long_term_pct);
+  const bands = Array.isArray(ltcg.bands) ? ltcg.bands.map((b) => numOf(b)) : [0, 15, 20];
+  const thresholds = byFiling(ltcg, "thresholds_", "_cents");
+  const pair = (v) => Array.isArray(v) && v.length >= 2 ? [numOf(v[0]), numOf(v[1])] : null;
+  const single = pair(thresholds.single);
+  const niit = objOf(fed.net_investment_income_tax);
+  const niitBy = byFiling(niit, "threshold_", "_cents");
+  const exclusion = objOf(fed.home_sale_exclusion_cents);
+  const brackets = byFiling(fed, "brackets_", "");
+  const readBrackets = (v) => Array.isArray(v) ? v.map((raw) => objOf(raw)).filter((b) => Object.keys(b).length > 0).map((b) => ({ from: numOf(b.from_cents), to: typeof b.to_cents === "number" ? b.to_cents : null, pct: numOf(b.rate_pct) })) : [];
+  const singleBrackets = readBrackets(brackets.single);
+  const record = (read) => Object.fromEntries(FILING_STATUSES.map((f) => [f, read(f)]));
+  return {
+    ltcgPct: [bands[0] ?? 0, bands[1] ?? 15, bands[2] ?? 20],
+    ltcgThresholds: single ? record((f) => pair(thresholds[f]) ?? single) : null,
+    niitPct: numOf(niit.pct),
+    niitThreshold: record((f) => numOf(niitBy[f], numOf(niitBy.single, Infinity))),
+    lossLimit: numOf(fed.capital_loss_limit_cents, 300000),
+    homeExclusion: record((f) => numOf(own(exclusion, f), numOf(exclusion.single))),
+    brackets: record((f) => {
+      const own = readBrackets(brackets[f]);
+      return own.length > 0 ? own : singleBrackets;
+    })
+  };
+}
+function ordinaryTax(ctx, t, filing, taxable) {
+  const x = Math.max(0, taxable);
+  const query = optionalQuery(ctx, "economy.income_tax");
+  if (query)
+    return query(ctx, filing, x);
+  return t.brackets[filing].reduce((sum, b) => sum + Math.max(0, Math.min(x, b.to ?? Infinity) - b.from) * b.pct / 100, 0);
+}
+function overlap(from, amount, lo, hi) {
+  return Math.max(0, Math.min(from + amount, hi) - Math.max(from, lo));
+}
+function statePct(ctx, party) {
+  const configured = ctx.world.packs.economy?.config.region;
+  const region = strOf(own(ctx.state.entities, party)?.fields.region, typeof configured === "string" ? configured : "us");
+  return numOf(objOf(own(objOf(ctx.tables.get("economy.regions")?.rows), region)).state_income_tax_effective_pct);
+}
+function carryInto(ctx, party, year, t, depth = 0) {
+  const years = recordedYears(ctx.state, party).filter((y) => y < year);
+  const last = years[years.length - 1];
+  if (last === undefined || depth > 64)
+    return { short: 0, long: 0 };
+  return investmentTax(ctx, party, last, t, depth + 1).carry;
+}
+function investmentTax(ctx, party, year, t = taxTables(ctx), depth = 0) {
+  const g = gainsIn(ctx.state, party, year);
+  const inc = incomeIn(ctx.state, party, year);
+  const carried = carryInto(ctx, party, year, t, depth);
+  const ordinary = optionalQuery(ctx, "economy.ordinary_income")?.(ctx, party, year) ?? { gross: 0, taxable: 0, filing: FILING_STATUSES.includes(strOf(own(ctx.state.entities, party)?.fields.filing_status)) ? strOf(own(ctx.state.entities, party)?.fields.filing_status) : "single" };
+  const filing = ordinary.filing;
+  let st = g.short + carried.short;
+  let lt = g.long - Math.min(Math.max(0, g.home), t.homeExclusion[filing]) + carried.long;
+  if (st < 0 && lt > 0) {
+    lt += st;
+    st = lt < 0 ? lt : 0;
+    lt = Math.max(0, lt);
+  } else if (lt < 0 && st > 0) {
+    st += lt;
+    lt = st < 0 ? st : 0;
+    st = Math.max(0, st);
+  }
+  let deduction = Math.min(t.lossLimit, Math.max(0, -(Math.min(0, st) + Math.min(0, lt))));
+  const offShort = Math.min(deduction, Math.max(0, -st));
+  const carry = { short: Math.min(0, st) + offShort, long: Math.min(0, lt) + (deduction - offShort) };
+  deduction = Math.min(deduction, ordinary.taxable);
+  const shortGains = Math.max(0, st);
+  const longGains = Math.max(0, lt);
+  const base = ordinary.taxable + inc.interest + shortGains - deduction;
+  const ordinaryPart = ordinaryTax(ctx, t, filing, base) - ordinaryTax(ctx, t, filing, ordinary.taxable);
+  const preferential = longGains + inc.dividend;
+  const [, mid, top] = t.ltcgPct;
+  const bands = t.ltcgThresholds?.[filing];
+  const stackFrom = Math.max(0, base);
+  const longPart = bands ? (overlap(stackFrom, preferential, bands[0], bands[1]) * mid + overlap(stackFrom, preferential, bands[1], Infinity) * top) / 100 : preferential * mid / 100;
+  const investment = inc.interest + inc.dividend + shortGains + longGains;
+  const niit = Math.min(investment, Math.max(0, ordinary.gross + investment - t.niitThreshold[filing])) * t.niitPct / 100;
+  const state = Math.max(0, investment - deduction) * statePct(ctx, party) / 100;
+  return { year, cents: Math.round(ordinaryPart + longPart + niit + state), shortGains, longGains, carry, filing };
+}
+function yearAt(world, clock) {
+  return dateAt(calendarOf(world), clock).year;
+}
+function taxFlow(api, ctx, party) {
+  if (!own(ctx.state.entities, party) || api.partyKind(ctx, party) === "business" || !api.feature(ctx, party, "capital_gains"))
+    return null;
+  if (recordedYears(ctx.state, party).length === 0)
+    return null;
+  return {
+    id: `investment_tax:${party}`,
+    label: "Tax on investment income",
+    kind: "tax",
+    from: party,
+    to: "tax:federal",
+    amount: { provider: TAX_PROVIDER, args: { party } },
+    schedule: { every: "year", months: [4], days: [15], roll: "after" },
+    shortfall: "defer",
+    category: "taxes",
+    status: "active",
+    method: "account",
+    source: "investment_tax"
+  };
+}
+function taxPosting(api, ctx, party, at) {
+  const year = yearAt(ctx.world, at) - 1;
+  const tax = investmentTax(ctx, party, year);
+  const memo = `Tax on ${year} investment income`;
+  if (tax.cents > 0)
+    return { cents: tax.cents, memo, kind: "payment", category: "taxes" };
+  const deposit = api.depositAccount(ctx, party);
+  if (tax.cents === 0 || !deposit)
+    return null;
+  return {
+    cents: -tax.cents,
+    lines: [
+      { account: api.outside("tax:federal"), amount: tax.cents },
+      { account: deposit, amount: -tax.cents }
+    ],
+    memo: `Refund of ${year} investment tax`,
+    kind: "refund",
+    category: "taxes"
+  };
+}
+function taxEstimate(api, ctx, party) {
+  if (!api.feature(ctx, party, "capital_gains"))
+    return null;
+  const year = yearAt(ctx.world, ctx.state.clock);
+  const tax = investmentTax(ctx, party, year);
+  if (tax.cents === 0)
+    return null;
+  const due = clockOfDate(ctx.world, `${String(year + 1).padStart(4, "0")}-04-15`);
+  return due === null ? null : { cents: tax.cents, at: due };
+}
+function registerGains(r) {
+  r.core.event(disposeEvent(r.api));
+  r.core.event(acquireEvent);
+  r.flows({ id: "investment_tax", flows: (ctx) => recordedParties(ctx.state).flatMap((p) => taxFlow(r.api, ctx, p) ?? []) });
+  const provider = (ctx, flow, at) => {
+    const args = "provider" in flow.amount ? objOf(flow.amount.args) : {};
+    return taxPosting(r.api, ctx, strOf(args.party), at);
+  };
+  r.amount(TAX_PROVIDER, provider);
+}
+function disposal(entity, party, pct, proceeds, label) {
+  return { type: "economy.dispose", data: { entity, party, pct: Math.min(100, Math.max(0, pct)), proceeds: Math.max(0, Math.round(proceeds)), label } };
+}
+function acquisition(entity, party, cents) {
+  return { type: "economy.acquire", data: { entity, party, cents: Math.max(0, Math.round(cents)) } };
+}
+
+// src/packs/economy/core/holdings.ts
+var LEGACY_UNIT_PRICE = 1e4;
+var LEGACY_SYMBOL = "broad_us_equity_index";
+function accountOfHolding(state, holding) {
+  const account = strOf(own(state.entities, holding)?.fields.account);
+  return account !== "" && own(state.entities, account) ? account : null;
+}
+function holdingOwners(api, state, holding) {
+  const account = accountOfHolding(state, holding);
+  return api.ownersOf(state, account ?? holding);
+}
+function holdingIds(state) {
+  return Object.keys(state.entities).filter((id) => own(state.entities, id)?.kind === "holding").sort();
+}
+function legacyHolding(state, account) {
+  const units = own(state.entities, account)?.fields.units;
+  if (typeof units !== "number" || units === 0)
+    return null;
+  const symbol = strOf(own(state.entities, account)?.fields.symbol, LEGACY_SYMBOL);
+  return holdingIds(state).find((id) => own(state.entities, id)?.fields.account === account && own(state.entities, id)?.fields.asset === symbol) ?? null;
+}
+function readLots(world, raw) {
+  if (!Array.isArray(raw))
+    return [];
+  const out = [];
+  for (const l of raw) {
+    if (!isRecord(l))
+      continue;
+    const qty = typeof l.qty === "number" && Number.isFinite(l.qty) ? l.qty : 0;
+    if (qty <= QTY_EPSILON)
+      continue;
+    const cost = typeof l.cost === "number" && Number.isFinite(l.cost) ? Math.round(l.cost) : 0;
+    out.push({ qty, cost, at: clockOfDate(world, l.at) ?? 0 });
+  }
+  return out;
+}
+function lotsOf(books, holding) {
+  const e = own(books.state.entities, holding);
+  if (!e || e.kind !== "holding")
+    return [];
+  const lots = readLots(books.world, e.fields.lots);
+  const account = accountOfHolding(books.state, holding);
+  if (!account || legacyHolding(books.state, account) !== holding)
+    return lots;
+  const units = numOf(own(books.state.entities, account)?.fields.units);
+  if (units > 0)
+    return [...lots, { qty: roundQty(units), cost: Math.round(units * LEGACY_UNIT_PRICE), at: 0 }];
+  return takeFifo(lots, Math.min(-units, qtyOf(lots)))?.left ?? [];
+}
+function qtyOf(lots) {
+  return roundQty(lots.reduce((a, l) => a + l.qty, 0));
+}
+function holdingValue(books, holding) {
+  const a = assetOf(books, strOf(own(books.state.entities, holding)?.fields.asset));
+  return a ? Math.round(qtyOf(lotsOf(books, holding)) * priceOf2(books, a)) : 0;
+}
+function findHolding(state, asset, account, party) {
+  return holdingIds(state).find((id) => {
+    const f = own(state.entities, id)?.fields;
+    if (!f || f.asset !== asset)
+      return false;
+    return account ? f.account === account : strOf(f.account) === "" && ownersIn(f).some((o) => o.party === party);
+  }) ?? null;
+}
+function canTrade(api, ctx, party, holding) {
+  const account = accountOfHolding(ctx.state, holding);
+  if (account)
+    return api.accountsOf(ctx, party, "spend").includes(account);
+  return ownersIn(own(ctx.state.entities, holding)?.fields ?? {}).some((o) => o.party === party && ROLE_RIGHTS[o.role].spend);
+}
+function seesHolding(api, ctx, party, holding) {
+  const account = accountOfHolding(ctx.state, holding);
+  if (account)
+    return api.accountsOf(ctx, party, "sees").includes(account);
+  return ownersIn(own(ctx.state.entities, holding)?.fields ?? {}).some((o) => o.party === party && ROLE_RIGHTS[o.role].sees);
+}
+function holdingShare(api, state, holding, party) {
+  return api.shareOf(state, accountOfHolding(state, holding) ?? holding, party);
+}
+function routeOf(state, holding) {
+  const route = strOf(own(state.entities, holding)?.fields.route);
+  if (route === "reinvest")
+    return { reinvest: true, to: null };
+  return { reinvest: false, to: route !== "" && own(state.entities, route)?.kind === "account" ? route : null };
+}
+function realise(api, state, world, holding, taken, proceeds, label) {
+  const total = taken.reduce((a, t) => a + t.qty, 0);
+  if (total <= 0)
+    return;
+  const parts = { short: { qty: 0, proceeds: 0, basis: 0 }, long: { qty: 0, proceeds: 0, basis: 0 } };
+  let left = proceeds;
+  taken.forEach((t, i) => {
+    const p = i === taken.length - 1 ? left : Math.round(proceeds * t.qty / total);
+    left -= p;
+    const term = state.clock - t.at >= YEAR_MINUTES ? "long" : "short";
+    parts[term].qty += t.qty;
+    parts[term].proceeds += p;
+    parts[term].basis += t.cost;
+  });
+  const shares = worthShares(holdingOwners(api, state, holding));
+  for (const term of ["short", "long"]) {
+    const part = parts[term];
+    if (part.qty <= 0)
+      continue;
+    for (const { party } of byShare(shares, 1)) {
+      const pct = shares[party] ?? 0;
+      const scale = (n) => Math.round(n * pct / 100);
+      recordGain(state, world, party, { term, gain: scale(part.proceeds - part.basis), proceeds: scale(part.proceeds), basis: scale(part.basis), label, qty: roundQty(part.qty * pct / 100) });
+    }
+  }
+}
+function str8(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+function applyLots(api, state, world, tables, holding, qty, cents, label, realised = true) {
+  const e = own(state.entities, holding);
+  if (!e)
+    return;
+  const books = { world, state, tables };
+  let lots = lotsOf(books, holding);
+  const account = accountOfHolding(state, holding);
+  if (account && legacyHolding(state, account) === holding) {
+    const a = own(state.entities, account);
+    if (a)
+      state.entities[account] = { ...a, fields: { ...a.fields, units: 0 } };
+  }
+  if (qty > 0)
+    lots.push({ qty: roundQty(qty), cost: cents, at: state.clock });
+  else {
+    const taken = takeFifo(lots, -qty);
+    if (!taken)
+      return;
+    lots = taken.left;
+    if (realised)
+      realise(api, state, world, holding, taken.taken, cents, label);
+  }
+  state.entities[holding] = { ...e, fields: { ...e.fields, lots: lots.map((l) => ({ qty: l.qty, cost: l.cost, at: l.at })) } };
+}
+function lotsEvent(api) {
+  return {
+    type: "economy.lots",
+    validate(e, ctx) {
+      const holding = str8(e, "holding");
+      const h = own(ctx.state.entities, holding);
+      if (!h || h.kind !== "holding")
+        return reject7("missing_holding", `no holding ${labelOf(ctx, holding)}`);
+      const qty = e.data.qty;
+      const cents = e.data.cents;
+      if (typeof qty !== "number" || !Number.isFinite(qty) || Math.abs(qty) <= QTY_EPSILON)
+        return reject7("bad_event", "lots change by a number of units");
+      if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents < 0)
+        return reject7("bad_event", "lots change for a whole amount, nothing or more");
+      const held = qtyOf(lotsOf(ctx, holding));
+      return qty < 0 && held + qty < -QTY_EPSILON ? reject7("declined", `${h.name} holds ${held} units, not ${-qty}`) : null;
+    },
+    apply: (e, state, ctx) => applyLots(api, state, ctx.world, ctx.tables, str8(e, "holding"), numOf(e.data.qty), numOf(e.data.cents), strOf(e.data.label, labelOf(ctx, str8(e, "holding")))),
+    describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str8(e, "holding"))}: ${numOf(e.data.qty) > 0 ? "+" : ""}${numOf(e.data.qty)} units (${strOf(e.data.kind, "trade")}) for ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`,
+    touches: (e) => [{ entity: str8(e, "holding"), field: "lots" }, ...str8(e, "legacy") !== "" ? [{ entity: str8(e, "legacy"), field: "units" }] : []]
+  };
+}
+function lotsChange(state, holding, qty, cents, kind, label) {
+  const account = accountOfHolding(state, holding);
+  const legacy = account && legacyHolding(state, account) === holding ? account : null;
+  return { type: "economy.lots", data: { holding, qty: roundQty(qty), cents, kind, label, ...legacy ? { legacy } : {} } };
+}
+function unit2(events) {
+  if (events.length < 2)
+    return [...events];
+  const bare = events.map(({ group: _group, ...rest }) => rest);
+  const group = `pay:${hashParts(JSON.stringify(bare)).slice(0, 10)}`;
+  return bare.map((e) => ({ ...e, group }));
+}
+function isRejection2(v) {
+  return !Array.isArray(v);
+}
+function unitsText(qty) {
+  return Number.isInteger(qty) ? String(qty) : qty.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+function newHoldingId(state, base) {
+  const clean = base.replace(/[^\w:.-]/g, "_");
+  if (!own(state.entities, clean))
+    return clean;
+  for (let i = 2;i < 1000; i++)
+    if (!own(state.entities, `${clean}:${i}`))
+      return `${clean}:${i}`;
+  return `${clean}:${hashParts(clean, state.clock).slice(0, 6)}`;
+}
+function marketOf(api, asset) {
+  return api.outside(`market:${asset}`);
+}
+function proceedsAccount(api, ctx, party, holding, to) {
+  const account = accountOfHolding(ctx.state, holding);
+  if (account && api.traitsOf(ctx, account)?.locked && to && to !== account)
+    return reject7("locked", `${labelOf(ctx, account)} keeps what its holdings pay; move it out from the account itself`);
+  if (to) {
+    if (own(ctx.state.entities, to)?.kind !== "account")
+      return reject7("not_account", `${labelOf(ctx, to)} isn't an account`);
+    if (!api.accountsOf(ctx, party, "worth").includes(to) && !api.accountsOf(ctx, party, "spend").includes(to))
+      return reject7("not_yours", `${labelOf(ctx, to)} isn't ${labelOf(ctx, party)}'s`);
+    return to;
+  }
+  return account ?? api.depositAccount(ctx, party) ?? reject7("no_account", `${labelOf(ctx, party)} has no account the money could go to`);
+}
+function trade(api, ctx, t) {
+  const { party } = t;
+  if (!own(ctx.state.entities, party))
+    return reject7("missing_entity", `no ${labelOf(ctx, party)}`);
+  if (!api.feature(ctx, party, "investments"))
+    return reject7("level", "investments aren't followed at this money level");
+  const events = [];
+  let holding = t.holding && own(ctx.state.entities, t.holding)?.kind === "holding" ? t.holding : null;
+  if (t.holding && !holding)
+    return reject7("missing_holding", `no holding ${labelOf(ctx, t.holding)}`);
+  let assetId = holding ? strOf(own(ctx.state.entities, holding)?.fields.asset) : t.asset ?? "";
+  let asset = assetOf(ctx, assetId);
+  if (t.option && !holding) {
+    if (!api.feature(ctx, party, "options"))
+      return reject7("level", "options aren't followed at this money level");
+    const def = optionDef(ctx, assetId, t.option.right, t.option.strike, t.option.expiry);
+    if (!def)
+      return reject7("bad_option", `there's no ${t.option.right} on ${labelOf(ctx, assetId)} at that strike and expiry`);
+    assetId = optionId(assetId, t.option.right, t.option.strike, t.option.expiry);
+    asset = assetFromDef(ctx, assetId, def);
+    if (!assetDefOf(ctx, assetId))
+      events.push({ type: "economy.mint", data: { asset: assetId, def } });
+  }
+  if (!asset)
+    return reject7("missing_asset", `no asset ${assetId || "named"}`);
+  if (asset.option && !api.feature(ctx, party, "options"))
+    return reject7("level", "options aren't followed at this money level");
+  if (asset.class === "property" || asset.class === "business_stake")
+    return reject7("not_traded", `${asset.label} changes hands as a property or a stake, not a trade`);
+  const account = holding ? accountOfHolding(ctx.state, holding) : t.account && own(ctx.state.entities, t.account) ? t.account : null;
+  if (t.account && !account)
+    return reject7("missing_account", `no account ${labelOf(ctx, t.account)}`);
+  if (account && !holding) {
+    if (!api.traitsOf(ctx, account)?.investment)
+      return reject7("not_investment", `${labelOf(ctx, account)} doesn't hold investments`);
+    if (!api.accountsOf(ctx, party, "spend").includes(account))
+      return reject7("not_yours", `${labelOf(ctx, account)} isn't ${labelOf(ctx, party)}'s to trade in`);
+  }
+  holding ??= findHolding(ctx.state, assetId, account, party);
+  if (holding && !canTrade(api, ctx, party, holding))
+    return reject7("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to trade`);
+  if (asset.option && ctx.state.clock >= asset.option.expiry)
+    return reject7("expired", `${asset.label} has expired`);
+  if (asset.bond && ctx.state.clock >= asset.bond.maturity)
+    return reject7("matured", `${asset.label} has matured`);
+  const price = priceOf2(ctx, asset);
+  if (!(price > 0))
+    return reject7("no_price", `${asset.label} has no price to trade at`);
+  const whole = asset.option !== null;
+  const held = holding ? qtyOf(lotsOf(ctx, holding)) : 0;
+  const money = (c) => formatMoney(c, ctx.world.currency);
+  if (t.side === "buy") {
+    const raw = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : 0;
+    const qty = whole ? Math.floor(raw + 0.000000001) : roundQty(raw);
+    if (!(qty > QTY_EPSILON))
+      return reject7("bad_amount", whole ? `${money(Math.round(t.amount ?? 0))} buys no whole contract at ${money(Math.round(price))}` : "say how much to buy");
+    const cents = Math.round(qty * price);
+    if (cents <= 0)
+      return reject7("bad_amount", "say how much to buy");
+    let source;
+    if (t.from) {
+      if (!api.accountsOf(ctx, party, "spend").includes(t.from))
+        return reject7("not_yours", `${labelOf(ctx, t.from)} isn't ${labelOf(ctx, party)}'s to pay from`);
+      source = t.from;
+    } else
+      source = account ?? api.depositAccount(ctx, party);
+    if (!source)
+      return reject7("no_account", `${labelOf(ctx, party)} has no account to pay from`);
+    const spawned = !holding;
+    if (!holding) {
+      holding = newHoldingId(ctx.state, `${account ?? party}:${assetId}`);
+      events.push({ type: "spawn", entity: { id: holding, kind: "holding", name: asset.symbol ? `${asset.symbol}${account ? ` in ${labelOf(ctx, account)}` : ""}` : asset.label, tier: "background", fields: { asset: assetId, lots: [], ...account ? { account } : { owners: [{ party, role: "owner" }] } }, relations: [] } });
+    }
+    const label = `Bought ${unitsText(qty)} ${asset.symbol ?? asset.label}`;
+    const lines = [
+      { account: source, amount: -cents },
+      { account: marketOf(api, assetId), amount: cents }
+    ];
+    const posted = api.post(ctx, lines, { memo: label, kind: "purchase", category: "investment" });
+    if (isRejection2(posted))
+      return posted;
+    const lots = spawned ? { type: "economy.lots", data: { holding, qty, cents, kind: "buy", label } } : lotsChange(ctx.state, holding, qty, cents, "buy", label);
+    return unit2([...events, ...posted, lots]);
+  }
+  if (!holding || held <= QTY_EPSILON)
+    return reject7("nothing_held", `${labelOf(ctx, party)} holds no ${asset.label}`);
+  const wanted = typeof t.qty === "number" && t.qty > 0 ? t.qty : typeof t.amount === "number" && t.amount > 0 ? t.amount / price : held;
+  const qty = whole ? Math.min(held, Math.floor(wanted + 0.000000001)) : Math.min(held, roundQty(wanted));
+  if (!(qty > QTY_EPSILON))
+    return reject7("bad_amount", "say how much to sell");
+  if (typeof t.qty === "number" && t.qty > held + QTY_EPSILON)
+    return reject7("declined", `${labelOf(ctx, holding)} holds ${unitsText(held)}, not ${unitsText(t.qty)}`);
+  const cents = Math.round(qty * price);
+  const dest = proceedsAccount(api, ctx, party, holding, t.to);
+  if (typeof dest !== "string")
+    return dest;
+  const label = `Sold ${unitsText(qty)} ${asset.symbol ?? asset.label}`;
+  const lines = [
+    { account: marketOf(api, assetId), amount: -cents },
+    { account: dest, amount: cents }
+  ];
+  const posted = cents > 0 ? api.post(ctx, lines, { memo: label, kind: "sale", category: "investment" }) : [];
+  if (isRejection2(posted))
+    return posted;
+  return unit2([...posted, lotsChange(ctx.state, holding, -qty, cents, "sell", label)]);
+}
+function setRoute(api, ctx, party, holding, to) {
+  if (own(ctx.state.entities, holding)?.kind !== "holding")
+    return reject7("missing_holding", `no holding ${labelOf(ctx, holding)}`);
+  if (!canTrade(api, ctx, party, holding))
+    return reject7("not_yours", `${labelOf(ctx, holding)} isn't ${labelOf(ctx, party)}'s to manage`);
+  const route = to.trim();
+  if (route !== "" && route !== "reinvest") {
+    if (own(ctx.state.entities, route)?.kind !== "account")
+      return reject7("not_account", `${labelOf(ctx, route)} isn't an account`);
+    const account = accountOfHolding(ctx.state, holding);
+    if (account && api.traitsOf(ctx, account)?.locked && route !== account)
+      return reject7("locked", `${labelOf(ctx, account)} keeps what its holdings pay`);
+    if (!api.accountsOf(ctx, party, "worth").includes(route) && !api.accountsOf(ctx, party, "spend").includes(route))
+      return reject7("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, party)}'s`);
+  }
+  if (strOf(own(ctx.state.entities, holding)?.fields.route) === route)
+    return [];
+  return [{ type: "set", entity: holding, field: "route", value: route }];
+}
+function holdingView(api, ctx, holding, detail) {
+  const e = own(ctx.state.entities, holding);
+  const a = assetOf(ctx, strOf(e?.fields.asset));
+  if (!e || !a)
+    return null;
+  const lots = lotsOf(ctx, holding);
+  const qty = qtyOf(lots);
+  const price = priceOf2(ctx, a);
+  const value = Math.round(qty * price);
+  const cost = lots.reduce((s, l) => s + l.cost, 0);
+  const under = a.option ? assetOf(ctx, a.option.underlying) : null;
+  const route = routeOf(ctx.state, holding);
+  return {
+    id: holding,
+    account: accountOfHolding(ctx.state, holding),
+    asset: { id: a.id, label: a.label, class: a.class, symbol: a.symbol },
+    qty,
+    price,
+    value,
+    cost: detail ? cost : 0,
+    gain: detail ? value - cost : 0,
+    lots: detail ? lots.map((l) => ({ qty: l.qty, cost: l.cost, at: dateText3(ctx.world, l.at), gain: Math.round(l.qty * price) - l.cost, term: ctx.state.clock - l.at >= YEAR_MINUTES ? "long" : "short" })) : [],
+    option: a.option && under ? { right: a.option.right, underlying: under.label, strike: a.option.strike, expiry: dateText3(ctx.world, a.option.expiry), inTheMoney: intrinsic(a.option.right, priceOf2(ctx, under), a.option.strike) > 0 } : null,
+    route: a.pays > 0 || a.bond ? { to: route.to ?? accountOfHolding(ctx.state, holding), reinvest: route.reinvest } : null
+  };
+}
+function visibleHoldings(api, ctx, party) {
+  return holdingIds(ctx.state).filter((id) => seesHolding(api, ctx, party, id) && qtyOf(lotsOf(ctx, id)) > QTY_EPSILON);
+}
+function holdingsWorth(api, ctx, party) {
+  const lines = [];
+  let assets = 0;
+  for (const id of holdingIds(ctx.state)) {
+    const share = holdingShare(api, ctx.state, id, party);
+    if (share <= 0)
+      continue;
+    const cents = Math.round(holdingValue(ctx, id) * share / 100);
+    if (cents === 0)
+      continue;
+    assets += cents;
+    lines.push({ label: labelOf(ctx, id), cents });
+  }
+  return { assets, lines };
+}
+function tradeArgs(a, ctx) {
+  const n = (k) => typeof a[k] === "number" && Number.isFinite(a[k]) ? a[k] : undefined;
+  const s = (k) => typeof a[k] === "string" && a[k] !== "" ? a[k] : undefined;
+  const right = s("right");
+  const strike = n("strike");
+  const expiry = s("expiry");
+  const qty = n("qty");
+  const amount = n("amount");
+  const holding = s("holding");
+  const asset = s("asset");
+  const account = s("account");
+  const from = s("from");
+  const to = s("to");
+  return {
+    side: a.side === "sell" ? "sell" : "buy",
+    party: s("party") ?? ctx.world.pov,
+    ...holding ? { holding } : {},
+    ...asset ? { asset } : {},
+    ...account ? { account } : {},
+    ...qty !== undefined ? { qty } : {},
+    ...amount !== undefined ? { amount } : {},
+    ...from ? { from } : {},
+    ...to ? { to } : {},
+    ...(right === "call" || right === "put") && strike !== undefined && expiry ? { option: { right, strike, expiry } } : {}
+  };
+}
+function registerHoldings(r) {
+  r.core.event(lotsEvent(r.api));
+  r.core.effect({
+    type: "economy.trade",
+    args: ["side?", "party?", "holding?", "asset?", "account?", "qty?", "amount?", "from?", "to?", "right?", "strike?", "expiry?"],
+    resolve: (a, ctx) => trade(r.api, ctx, tradeArgs(a, ctx))
+  });
+  r.core.action({
+    id: "trade",
+    label: "Buy or sell investments",
+    pack: "economy",
+    params: {
+      side: { type: "text", label: "Buy or sell", optional: true },
+      holding: { type: "ref", ref: "holding", optional: true },
+      asset: { type: "text", label: "Asset", optional: true },
+      account: { type: "ref", ref: "account", label: "Held in", optional: true },
+      qty: { type: "number", label: "Units", optional: true },
+      amount: { type: "money", label: "Amount", optional: true },
+      from: { type: "ref", ref: "account", label: "Pay from", optional: true },
+      to: { type: "ref", ref: "account", label: "Proceeds to", optional: true },
+      right: { type: "text", label: "Call or put", optional: true },
+      strike: { type: "money", label: "Strike", optional: true },
+      expiry: { type: "text", label: "Expiry (YYYY-MM-DD)", optional: true }
+    },
+    requires: ["money_feature('investments', self)"],
+    outcomes: { default: [{ type: "economy.trade", args: { party: "self", side: "=params.side", holding: "=params.holding", asset: "=params.asset", account: "=params.account", qty: "=params.qty", amount: "=params.amount", from: "=params.from", to: "=params.to", right: "=params.right", strike: "=params.strike", expiry: "=params.expiry" } }] },
+    duration: "2",
+    lexicon: ["invest", "buy stocks", "buy shares", "sell stocks", "sell shares", "cash out", "buy an option"],
+    observable: "checks their phone"
+  });
+  r.core.formula("holding_value", (ctx, id) => holdingValue(ctx, String(id ?? "")));
+  r.core.formula("holding_units", (ctx, id) => qtyOf(lotsOf(ctx, String(id ?? ""))));
+  r.core.lint({
+    code: "economy.holdings",
+    check(world) {
+      const issues = [];
+      const assets = objOf(objOf(world.packs.economy?.config).assets);
+      for (const e of Object.values(world.entities)) {
+        if (e.kind !== "holding")
+          continue;
+        const asset = strOf(e.fields.asset);
+        if (!own(assets, asset))
+          issues.push({ severity: "error", code: "economy.holdings", message: `Holding ${e.name} names asset "${asset}", which the economy's assets don't list.`, path: `entities.${e.id}.fields.asset` });
+        const account = strOf(e.fields.account);
+        if (account !== "" && own(world.entities, account)?.kind !== "account")
+          issues.push({ severity: "error", code: "economy.holdings", message: `Holding ${e.name} sits in ${account}, which isn't an account.`, path: `entities.${e.id}.fields.account` });
+        if (account === "" && ownersIn(e.fields).length === 0)
+          issues.push({ severity: "error", code: "economy.holdings", message: `Holding ${e.name} sits in no account and has no owners.`, path: `entities.${e.id}.fields.owners` });
+        if (e.fields.lots !== undefined && !Array.isArray(e.fields.lots))
+          issues.push({ severity: "error", code: "economy.holdings", message: `Holding ${e.name}'s lots are a list of {qty, cost, at}.`, path: `entities.${e.id}.fields.lots` });
+        const route = strOf(e.fields.route);
+        if (route !== "" && route !== "reinvest" && own(world.entities, route)?.kind !== "account")
+          issues.push({ severity: "warning", code: "economy.holdings", message: `Holding ${e.name} routes its payouts to ${route}, which isn't an account; they go to its account instead.`, path: `entities.${e.id}.fields.route` });
+      }
+      return issues;
+    }
+  });
+}
+
+// src/packs/economy/core/income.ts
+var INCOME_PROVIDER = "holding_income";
+function payout(api, ctx, owners, cents, source, to, account) {
+  const into = to ?? account;
+  if (into)
+    return { lines: [{ account: source, amount: -cents }, { account: into, amount: cents }], paid: cents };
+  const parts = byShare(worthShares(owners), cents);
+  const lines = [];
+  let paid = 0;
+  parts.forEach((p, i) => {
+    const deposit = api.depositAccount(ctx, p.party);
+    const part = i === parts.length - 1 ? cents - parts.slice(0, -1).reduce((a, x) => a + x.cents, 0) : p.cents;
+    if (!deposit || part <= 0)
+      return;
+    lines.push({ account: deposit, amount: part });
+    paid += part;
+  });
+  return paid > 0 ? { lines: [{ account: source, amount: -paid }, ...lines], paid } : { lines: [], paid: 0 };
+}
+function paymentMonths(pays, last, monthsInYear = 12) {
+  const n = Math.max(1, Math.min(monthsInYear, Math.round(pays)));
+  const out = new Set;
+  for (let k = 0;k < n; k++)
+    out.add(((last - 1 - Math.round(k * monthsInYear / n)) % monthsInYear + monthsInYear) % monthsInYear + 1);
+  return [...out].sort((a, b) => a - b);
+}
+function perUnit(ctx, a, at) {
+  if (a.bond)
+    return a.bond.face * a.bond.couponPct / 100 / Math.max(1, a.pays);
+  return a.pays > 0 ? priceOf2(ctx, a, at) * a.yieldPct / 100 / a.pays : 0;
+}
+function incomeFlow(api, ctx, holding) {
+  const a = assetOf(ctx, strOf(own(ctx.state.entities, holding)?.fields.asset));
+  if (!a || a.option || a.pays <= 0 || (a.bond ? a.bond.couponPct <= 0 : a.yieldPct <= 0))
+    return null;
+  if (qtyOf(lotsOf(ctx, holding)) <= QTY_EPSILON)
+    return null;
+  const owners = holdingOwners(api, ctx.state, holding);
+  if (!owners.some((o) => api.feature(ctx, o.party, "investments")))
+    return null;
+  const route = routeOf(ctx.state, holding);
+  const account = accountOfHolding(ctx.state, holding);
+  const cal = calendarOf(ctx.world);
+  const name = a.symbol ?? a.label;
+  const interest = a.bond !== null || a.class === "bond";
+  const due = a.bond ? dateAt(cal, a.bond.maturity) : null;
+  const months = paymentMonths(a.pays, due ? due.month : cal.system.months, cal.system.months);
+  return {
+    id: `income:${holding}`,
+    label: `${name} ${interest ? "interest" : "dividend"}`,
+    kind: "distribution",
+    from: a.label,
+    to: route.to ?? account ?? (owners[0] ? owners[0].party : ""),
+    amount: { provider: INCOME_PROVIDER, args: { holding } },
+    schedule: months.length >= cal.system.months ? { every: "month", days: [due ? due.day : 15], roll: "after" } : { every: "year", months, days: [due ? due.day : 15], roll: "after" },
+    ...a.bond ? { end: dateText3(ctx.world, a.bond.maturity) } : {},
+    shortfall: "skip",
+    category: interest ? "interest" : "dividends",
+    link: holding,
+    status: "active",
+    source: "holdings"
+  };
+}
+function holdingIncome(api, ctx, holding, at) {
+  const a = assetOf(ctx, strOf(own(ctx.state.entities, holding)?.fields.asset));
+  if (!a)
+    return null;
+  const qty = qtyOf(lotsOf(ctx, holding));
+  if (qty <= QTY_EPSILON)
+    return null;
+  const cents = Math.round(qty * perUnit(ctx, a, at));
+  if (cents <= 0)
+    return null;
+  const interest = a.bond !== null || a.class === "bond";
+  const kind = interest ? "interest" : "dividend";
+  const name = a.symbol ?? a.label;
+  const issuer = api.outside(`issuer:${a.id}`);
+  const category = interest ? "interest" : "dividends";
+  const route = routeOf(ctx.state, holding);
+  const price = priceOf2(ctx, a, at);
+  if (route.reinvest && price > 0) {
+    const memo = `${name} ${kind} reinvested`;
+    return {
+      cents,
+      lines: [
+        { account: issuer, amount: -cents },
+        { account: marketOf(api, a.id), amount: cents }
+      ],
+      memo,
+      kind: "income",
+      category,
+      extra: [{ type: "economy.income", data: { source: holding, cents, kind, reinvested: true } }, lotsChange(ctx.state, holding, roundQty(cents / price), cents, "reinvest", memo)]
+    };
+  }
+  const account = accountOfHolding(ctx.state, holding);
+  const to = account && api.traitsOf(ctx, account)?.locked ? account : route.to;
+  const paid = payout(api, ctx, holdingOwners(api, ctx.state, holding), cents, issuer, to, account);
+  if (paid.paid <= 0)
+    return null;
+  return { cents: paid.paid, lines: paid.lines, memo: `${name} ${kind}`, kind: "income", category, extra: [{ type: "economy.income", data: { source: holding, cents: paid.paid, kind } }] };
+}
+function sourceOwners(api, state, source) {
+  return own(state.entities, source)?.kind === "holding" ? holdingOwners(api, state, source) : api.ownersOf(state, source);
+}
+function str9(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+function incomeEvent(api) {
+  return {
+    type: "economy.income",
+    validate: (e, ctx) => {
+      if (!own(ctx.state.entities, str9(e, "source")))
+        return reject7("missing_entity", `no ${labelOf(ctx, str9(e, "source"))}`);
+      if (!INCOME_KINDS.includes(str9(e, "kind")))
+        return reject7("bad_event", "income is a dividend, interest or a profit share");
+      const cents = e.data.cents;
+      if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents <= 0)
+        return reject7("bad_event", "income is a whole amount above nothing");
+      return str9(e, "party") === "" || own(ctx.state.entities, str9(e, "party")) ? null : reject7("missing_entity", `no ${labelOf(ctx, str9(e, "party"))}`);
+    },
+    apply: (e, state, ctx) => {
+      const kind = str9(e, "kind");
+      const cents = numOf(e.data.cents);
+      const party = str9(e, "party");
+      const source = str9(e, "source");
+      if (party !== "") {
+        recordIncome(state, ctx.world, party, kind, cents);
+        if (e.data.reinvested === true && kind === "profit") {
+          const r = basisRecord(state, source, party);
+          setBasisRecord(state, source, party, { basis: (r?.basis ?? 0) + cents, since: r?.since ?? null });
+        }
+        return;
+      }
+      const shares = worthShares(sourceOwners(api, state, source));
+      for (const p of byShare(shares, cents))
+        recordIncome(state, ctx.world, p.party, kind, p.cents);
+    },
+    describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str9(e, "source"))} paid ${str9(e, "kind")} of ${numOf(e.data.cents)}`
+  };
+}
+function registerIncome(r) {
+  r.core.event(incomeEvent(r.api));
+  r.flows({
+    id: "holdings",
+    flows: (ctx) => holdingIds(ctx.state).flatMap((id) => incomeFlow(r.api, ctx, id) ?? [])
+  });
+  const provider = (ctx, flow, at) => {
+    const args = "provider" in flow.amount ? objOf(flow.amount.args) : {};
+    return holdingIncome(r.api, ctx, strOf(args.holding), at);
+  };
+  r.amount(INCOME_PROVIDER, provider);
+}
+function incomeFor(source, party, cents, kind, reinvested = false) {
+  return cents > 0 ? [{ type: "economy.income", data: { source, party, cents, kind, ...reinvested ? { reinvested: true } : {} } }] : [];
+}
+
+// src/packs/economy/core/options.ts
+function isRejection3(v) {
+  return !Array.isArray(v);
+}
+function str10(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+function exerciseEvent(api) {
+  return {
+    type: "economy.exercise",
+    validate(e, ctx) {
+      const option = str10(e, "option");
+      const into = str10(e, "into");
+      const qty = numOf(e.data.qty);
+      const units = numOf(e.data.units);
+      const cash = e.data.cash;
+      if (own(ctx.state.entities, option)?.kind !== "holding" || own(ctx.state.entities, into)?.kind !== "holding")
+        return reject7("missing_holding", "an exercise names its contracts and the holding of their underlying");
+      if (!(qty > 0) || !(units > 0) || typeof cash !== "number" || !Number.isSafeInteger(cash) || cash < 0)
+        return reject7("bad_event", "an exercise is a number of contracts, their units and the strike's cash");
+      if (qtyOf(lotsOf(ctx, option)) + QTY_EPSILON < qty)
+        return reject7("declined", `${labelOf(ctx, option)} holds fewer than ${qty} contracts`);
+      if (e.data.right === "put" && qtyOf(lotsOf(ctx, into)) + QTY_EPSILON < units)
+        return reject7("declined", `${labelOf(ctx, into)} holds fewer than ${unitsText(units)} units to deliver`);
+      return e.data.right === "call" || e.data.right === "put" ? null : reject7("bad_event", "an exercise is of a call or a put");
+    },
+    apply(e, state, ctx) {
+      const option = str10(e, "option");
+      const into = str10(e, "into");
+      const cash = numOf(e.data.cash);
+      const contracts = takeFifo(lotsOf({ world: ctx.world, state, tables: ctx.tables }, option), numOf(e.data.qty));
+      if (!contracts)
+        return;
+      const premium = contracts.taken.reduce((a, l) => a + l.cost, 0);
+      const label = strOf(e.data.label, `Exercised ${labelOf(ctx, option)}`);
+      applyLots(api, state, ctx.world, ctx.tables, option, -numOf(e.data.qty), 0, label, false);
+      if (e.data.right === "call")
+        applyLots(api, state, ctx.world, ctx.tables, into, numOf(e.data.units), cash + premium, label);
+      else
+        applyLots(api, state, ctx.world, ctx.tables, into, -numOf(e.data.units), Math.max(0, cash - premium), label);
+    },
+    describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str10(e, "option"))}: ${numOf(e.data.qty)} exercised`,
+    touches: (e) => [
+      { entity: str10(e, "option"), field: "lots" },
+      { entity: str10(e, "into"), field: "lots" }
+    ]
+  };
+}
+function exercise(api, ctx, x) {
+  const h = own(ctx.state.entities, x.holding);
+  if (!h || h.kind !== "holding")
+    return reject7("missing_holding", `no holding ${labelOf(ctx, x.holding)}`);
+  const a = assetOf(ctx, strOf(h.fields.asset));
+  if (!a?.option)
+    return reject7("not_option", `${h.name} isn't an option`);
+  if (!api.feature(ctx, x.party, "options"))
+    return reject7("level", "options aren't followed at this money level");
+  if (!canTrade(api, ctx, x.party, x.holding))
+    return reject7("not_yours", `${h.name} isn't ${labelOf(ctx, x.party)}'s to exercise`);
+  if (ctx.state.clock >= a.option.expiry)
+    return reject7("expired", `${a.label} has expired`);
+  const held = qtyOf(lotsOf(ctx, x.holding));
+  const qty = typeof x.qty === "number" && x.qty > 0 ? Math.floor(x.qty + 0.000000001) : Math.floor(held + 0.000000001);
+  if (qty < 1)
+    return reject7("nothing_held", `${labelOf(ctx, x.party)} holds no whole contract of ${a.label}`);
+  if (qty > held + QTY_EPSILON)
+    return reject7("declined", `${h.name} holds ${unitsText(held)} contracts, not ${qty}`);
+  const under = assetOf(ctx, a.option.underlying);
+  if (!under)
+    return reject7("missing_asset", `no asset ${a.option.underlying}`);
+  const units = qty * a.option.multiplier;
+  const strike = Math.round(units * a.option.strike);
+  const account = accountOfHolding(ctx.state, x.holding);
+  const money = (c) => formatMoney(c, ctx.world.currency);
+  const label = `Exercised ${qty} ${a.label}`;
+  if (a.option.settlement === "cash") {
+    const cash = Math.round(units * intrinsic(a.option.right, priceOf2(ctx, under), a.option.strike));
+    if (cash <= 0)
+      return reject7("out_of_money", `${a.label} is worth nothing to exercise`);
+    const posted = settle(api, ctx, x.holding, a, qty, cash, label, x.to);
+    return isRejection3(posted) ? posted : unit2(posted);
+  }
+  const into = findHolding(ctx.state, under.id, account, x.party);
+  const events = [];
+  const market = marketOf(api, under.id);
+  let lines;
+  let target = into;
+  if (a.option.right === "call") {
+    const from = x.from ?? account ?? api.depositAccount(ctx, x.party);
+    if (!from)
+      return reject7("no_account", `${labelOf(ctx, x.party)} has no account to pay the strike from`);
+    if (x.from && !api.accountsOf(ctx, x.party, "spend").includes(x.from))
+      return reject7("not_yours", `${labelOf(ctx, x.from)} isn't ${labelOf(ctx, x.party)}'s to pay from`);
+    if (!target) {
+      target = `${account ?? x.party}:${under.id}`;
+      for (let i = 2;own(ctx.state.entities, target); i++)
+        target = `${account ?? x.party}:${under.id}:${i}`;
+      events.push({ type: "spawn", entity: { id: target, kind: "holding", name: under.symbol ?? under.label, tier: "background", fields: { asset: under.id, lots: [], ...account ? { account } : { owners: [{ party: x.party, role: "owner" }] } }, relations: [] } });
+    }
+    lines = [
+      { account: from, amount: -strike },
+      { account: market, amount: strike }
+    ];
+  } else {
+    if (!target || qtyOf(lotsOf(ctx, target)) + QTY_EPSILON < units)
+      return reject7("nothing_to_deliver", `exercising ${qty} ${a.label} delivers ${unitsText(units)} ${under.symbol ?? under.label}, which ${labelOf(ctx, x.party)} doesn't hold${account ? ` in ${labelOf(ctx, account)}` : ""}`);
+    const to = x.to ?? account ?? api.depositAccount(ctx, x.party);
+    if (!to)
+      return reject7("no_account", `${labelOf(ctx, x.party)} has no account the strike could go to`);
+    lines = [
+      { account: market, amount: -strike },
+      { account: to, amount: strike }
+    ];
+  }
+  const posted = api.post(ctx, lines, { memo: `${label}: ${money(strike)} for ${unitsText(units)} ${under.symbol ?? under.label}`, kind: a.option.right === "call" ? "purchase" : "sale", category: "investment" });
+  if (isRejection3(posted))
+    return posted;
+  return unit2([...events, ...posted, { type: "economy.exercise", data: { option: x.holding, into: target, qty, units, cash: strike, right: a.option.right, label } }]);
+}
+function settle(api, ctx, holding, a, qty, cash, label, to) {
+  const source = marketOf(api, a.option?.underlying ?? a.id);
+  const account = accountOfHolding(ctx.state, holding);
+  const paid = payout(api, ctx, holdingOwners(api, ctx.state, holding), cash, source, to ?? null, account);
+  if (paid.paid <= 0)
+    return reject7("no_account", `nobody holding ${a.label} has an account the cash could go to`);
+  const posted = api.post(ctx, paid.lines, { memo: label, kind: "sale", category: "investment" });
+  if (isRejection3(posted))
+    return posted;
+  return [...posted, lotsChange(ctx.state, holding, -qty, paid.paid, "settle", label)];
+}
+function settlements(api, ctx, slot) {
+  const at = instantIn(ctx, slot, MARKET_CLOSE);
+  if (!at)
+    return [];
+  const out = [];
+  const money = (c) => formatMoney(c, ctx.world.currency);
+  for (const holding of holdingIds(ctx.state)) {
+    const a = assetOf(ctx, strOf(own(ctx.state.entities, holding)?.fields.asset));
+    const due = a?.option?.expiry ?? a?.bond?.maturity;
+    if (!a || due === undefined || due > at.at)
+      continue;
+    const qty = qtyOf(lotsOf(ctx, holding));
+    if (qty <= QTY_EPSILON)
+      continue;
+    const owners = holdingOwners(api, ctx.state, holding);
+    const notes = (text) => owners.flatMap((o) => api.note(ctx, o.party, "bill", text));
+    if (a.bond) {
+      const cash = Math.round(qty * a.bond.face);
+      const label = `${a.label} matured`;
+      const settled = settle(api, ctx, holding, { ...a, option: null }, qty, cash, label);
+      out.push(...isRejection3(settled) ? [] : unit2([...settled, ...notes(`${a.label} matured: ${money(cash)} paid out.`)]));
+      continue;
+    }
+    if (!a.option)
+      continue;
+    const under = assetOf(ctx, a.option.underlying);
+    const value = under ? Math.round(roundQty(qty) * a.option.multiplier * intrinsic(a.option.right, priceOf2(ctx, under, at.at), a.option.strike)) : 0;
+    if (value > 0) {
+      const label = `${a.label} exercised at expiry`;
+      const settled = settle(api, ctx, holding, a, qty, value, label);
+      if (!isRejection3(settled)) {
+        out.push(...unit2([...settled, ...notes(`${a.label} was exercised at expiry and settled for ${money(value)}.`)]));
+        continue;
+      }
+    }
+    out.push(...unit2([lotsChange(ctx.state, holding, -qty, 0, "expire", `${a.label} expired`), ...notes(`${a.label} expired worthless.`)]));
+  }
+  return out;
+}
+function registerOptions(r) {
+  r.core.event(exerciseEvent(r.api));
+  r.core.effect({
+    type: "economy.exercise",
+    args: ["holding", "qty?", "from?", "to?", "party?"],
+    resolve: (a, ctx) => exercise(r.api, ctx, { party: strOf(a.party) || ctx.world.pov, holding: strOf(a.holding), ...typeof a.qty === "number" ? { qty: a.qty } : {}, ...strOf(a.from) !== "" ? { from: strOf(a.from) } : {}, ...strOf(a.to) !== "" ? { to: strOf(a.to) } : {} })
+  });
+  r.core.action({
+    id: "exercise_option",
+    label: "Exercise an option",
+    pack: "economy",
+    params: { holding: { type: "ref", ref: "holding" }, qty: { type: "number", label: "Contracts", optional: true }, from: { type: "ref", ref: "account", label: "Pay the strike from", optional: true }, to: { type: "ref", ref: "account", label: "Strike to", optional: true } },
+    requires: ["money_feature('options', self)"],
+    outcomes: { default: [{ type: "economy.exercise", args: { party: "self", holding: "holding", qty: "=params.qty", from: "=params.from", to: "=params.to" } }] },
+    duration: "2",
+    lexicon: ["exercise the option", "exercise my calls", "exercise my puts"],
+    observable: "checks their phone"
+  });
+  r.core.process({ id: "economy.settlements", domain: "money", minLevel: 3, step: (slot, ctx) => settlements(r.api, ctx, slot) });
+}
+
+// src/packs/economy/core/journal.ts
+var JOURNAL_CAP = 40;
+var NOTES_CAP = 12;
+var MONTHS_KEPT2 = 13;
+var CREDIT_CAP = 60;
+var SCORES_KEPT = 24;
+var STATEMENTS_KEPT = 6;
+function reject8(code, reason) {
+  return { code, reason };
+}
+function str11(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+function monthKey(ctx, at) {
+  const d = dateAt(calendarOf(ctx.world), at);
+  return `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}`;
+}
+function journalOf(state, account) {
+  const raw = own(objOf(sliceOf(state, "economy").journal), account);
+  return Array.isArray(raw) ? raw.map((x) => objOf(x)) : [];
+}
+function cycleOf2(state, account) {
+  const raw = objOf(own(objOf(sliceOf(state, "economy").cycles), account));
+  if (Object.keys(raw).length === 0)
+    return null;
+  return {
+    closing: numOf(raw.closing),
+    interest: numOf(raw.interest),
+    fees: numOf(raw.fees),
+    minimum: numOf(raw.minimum),
+    due: numOf(raw.due),
+    paid: numOf(raw.paid),
+    at: numOf(raw.at),
+    apr: numOf(raw.apr),
+    stage: DELINQUENCY_STAGES.includes(strOf(raw.stage)) ? strOf(raw.stage) : "current",
+    grace: raw.grace !== false,
+    past_due: numOf(raw.past_due),
+    lates: numOf(raw.lates),
+    penalty: raw.penalty === true,
+    ...typeof raw.months_left === "number" ? { months_left: raw.months_left } : {},
+    streak: numOf(raw.streak),
+    ontime: numOf(raw.ontime),
+    late30: numOf(raw.late30),
+    late60: numOf(raw.late60),
+    late90: numOf(raw.late90)
+  };
+}
+function flowRunOf(state, flow) {
+  const raw = objOf(own(objOf(sliceOf(state, "economy").flows), flow));
+  const retry = objOf(raw.retry);
+  return {
+    done: numOf(raw.done),
+    missed: numOf(raw.missed),
+    ...typeof raw.last === "number" ? { last: raw.last } : {},
+    ...typeof retry.at === "number" ? { retry: { at: retry.at, left: numOf(retry.left), cents: numOf(retry.cents) } } : {},
+    ...numOf(raw.deferred) > 0 ? { deferred: numOf(raw.deferred) } : {},
+    ...raw.ended === true ? { ended: true } : {}
+  };
+}
+function isOpened(state, account, opener) {
+  if (own(objOf(sliceOf(state, "economy").opened), account) === true)
+    return true;
+  return opener !== null && Object.prototype.hasOwnProperty.call(state.materialized, `${opener}:money`);
+}
+function accrualOf(state, account) {
+  const raw = objOf(own(objOf(sliceOf(state, "economy").adb), account));
+  return typeof raw.from === "number" ? { from: raw.from, at: numOf(raw.at, raw.from), sum: numOf(raw.sum), spent: numOf(raw.spent) } : null;
+}
+function averageBalance(state, account, now) {
+  const a = accrualOf(state, account);
+  const b = balance(state, account);
+  if (!a || now <= a.from)
+    return b;
+  return (a.sum + b * Math.max(0, now - a.at)) / (now - a.from);
+}
+function spendOf(state, card, day) {
+  const raw = objOf(own(objOf(sliceOf(state, "economy").spend), card));
+  return numOf(raw.day, NaN) === day ? { purchase: numOf(raw.purchase), atm: numOf(raw.atm) } : { purchase: 0, atm: 0 };
+}
+function pushCapped(list, entry, cap) {
+  return [...Array.isArray(list) ? list.slice(-(cap - 1)) : [], entry];
+}
+function fileLine(state, ctx, account, amount, at, data, seq) {
+  const journal = sliceRecord(state, "economy", "journal");
+  const status = data.status === "pending" ? "pending" : "posted";
+  const entry = { id: `j${seq}`, at, account, cents: amount, memo: strOf(data.memo), status };
+  for (const k of ["kind", "category", "counterparty", "card", "flow"])
+    if (typeof data[k] === "string" && data[k] !== "")
+      entry[k] = data[k];
+  if (status === "pending" && typeof data.settles === "number")
+    entry.settles = data.settles;
+  journal[account] = pushCapped(journal[account], entry, JOURNAL_CAP);
+  const totals = sliceRecord(state, "economy", "totals");
+  const months = objOf(totals[account]);
+  const key = monthKey(ctx, at);
+  const month = objOf(months[key]);
+  const category = strOf(data.category) || "other";
+  const cell = objOf(month[category]);
+  month[category] = { in: numOf(cell.in) + Math.max(0, amount), out: numOf(cell.out) + Math.max(0, -amount) };
+  months[key] = month;
+  for (const old of Object.keys(months).sort().slice(0, -MONTHS_KEPT2))
+    delete months[old];
+  totals[account] = months;
+}
+function accrue(state, account, amount, at, purchase) {
+  const adb = sliceRecord(state, "economy", "adb");
+  const cur = objOf(adb[account]);
+  const before = balance(state, account) - amount;
+  if (typeof cur.from !== "number") {
+    adb[account] = { from: at, at, sum: 0, spent: purchase ? -amount : 0 };
+    return;
+  }
+  const last = numOf(cur.at, cur.from);
+  const dt = Math.max(0, at - last);
+  adb[account] = { from: cur.from, at: Math.max(last, at), sum: numOf(cur.sum) + before * dt, spent: numOf(cur.spent) + (purchase ? -amount : 0) };
+}
+function isCreditAccount(ctx, account) {
+  const c = classOf2(ctx, account);
+  return c !== null && isCredit(c);
+}
+var EVENTS2 = [
+  {
+    type: FINANCE_EVENTS.anchor,
+    validate: (e, ctx) => own(ctx.state.entities, str11(e, "entity")) && typeof e.data.typical === "number" && typeof e.data.base === "number" ? null : reject8("bad_event", "anchor needs entity, typical and base"),
+    apply: (e, state) => {
+      sliceRecord(state, "economy", "anchors")[str11(e, "entity")] = { band: str11(e, "band"), typical: numOf(e.data.typical), base: numOf(e.data.base) };
+    },
+    describe: (e) => `${str11(e, "entity")} is ${str11(e, "band")}`,
+    coarsen: { key: (e) => str11(e, "entity"), merge: (_a, b) => b }
+  },
+  {
+    type: FINANCE_EVENTS.txn,
+    validate: () => null,
+    apply: (e, state, ctx) => {
+      const lines = Array.isArray(e.data.lines) ? e.data.lines.map((l) => objOf(l)) : [];
+      const at = typeof e.data.at === "number" ? e.data.at : state.clock;
+      const s = mutableSlice(state, "economy");
+      let seq = numOf(s.seq);
+      const totals = new Map;
+      for (const l of lines) {
+        const account = strOf(l.account);
+        if (!own(state.entities, account))
+          continue;
+        totals.set(account, (totals.get(account) ?? 0) + Math.round(numOf(l.amount)));
+      }
+      for (const [account, amount] of totals) {
+        seq += 1;
+        fileLine(state, ctx, account, amount, at, e.data, seq);
+        accrue(state, account, amount, at, e.data.kind === "purchase" && isCreditAccount(ctx, account));
+      }
+      mutableSlice(state, "economy").seq = seq;
+    },
+    describe: (e) => str11(e, "memo")
+  },
+  {
+    type: FINANCE_EVENTS.note,
+    validate: (e, ctx) => own(ctx.state.entities, str11(e, "entity")) && str11(e, "text") !== "" ? null : reject8("bad_event", "a money note needs a party and its text"),
+    apply: (e, state) => {
+      const notes = sliceRecord(state, "economy", "notes");
+      notes[str11(e, "entity")] = pushCapped(notes[str11(e, "entity")], { at: typeof e.data.at === "number" ? e.data.at : state.clock, class: str11(e, "class"), text: str11(e, "text") }, NOTES_CAP);
+    },
+    describe: (e) => str11(e, "text")
+  },
+  {
+    type: FINANCE_EVENTS.modifier,
+    validate: (e) => str11(e, "id") !== "" && (e.data.mult === undefined || typeof e.data.mult === "number" && e.data.mult > 0) ? null : reject8("bad_event", "a price modifier needs an id and a positive multiplier"),
+    apply: (e, state) => {
+      const mods = sliceRecord(state, "economy", "modifiers");
+      if (typeof e.data.mult !== "number")
+        delete mods[str11(e, "id")];
+      else
+        mods[str11(e, "id")] = { scope: strOf(e.data.scope, "all"), place: strOf(e.data.place), mult: e.data.mult, ...typeof e.data.until === "number" ? { until: e.data.until } : {} };
+    },
+    describe: (e) => typeof e.data.mult === "number" ? `Prices \xD7${e.data.mult}` : "Prices back to normal"
+  },
+  {
+    type: FINANCE_EVENTS.statement,
+    validate: (e, ctx) => isCreditAccount(ctx, str11(e, "account")) ? null : reject8("bad_event", "statements are for credit accounts"),
+    apply: (e, state) => {
+      const account = str11(e, "account");
+      const at = typeof e.data.at === "number" ? e.data.at : state.clock;
+      const d = e.data;
+      const cycle = { closing: numOf(d.closing), interest: numOf(d.interest), fees: numOf(d.fees), minimum: numOf(d.minimum), due: numOf(d.due), paid: 0, at, apr: numOf(d.apr), stage: strOf(d.stage, "current"), grace: d.grace !== false, past_due: numOf(d.past_due), lates: numOf(d.lates), penalty: d.penalty === true };
+      for (const k of ["months_left", "streak", "ontime", "late30", "late60", "late90"])
+        if (typeof d[k] === "number")
+          cycle[k] = d[k];
+      const cycles = sliceRecord(state, "economy", "cycles");
+      if (cycles[account] !== undefined) {
+        const past = sliceRecord(state, "economy", "statements");
+        past[account] = pushCapped(past[account], cycles[account], STATEMENTS_KEPT);
+      }
+      cycles[account] = cycle;
+      sliceRecord(state, "economy", "adb")[account] = { from: at, at, sum: 0, spent: 0 };
+    },
+    describe: (e, ctx) => `Statement: ${formatMoney(numOf(e.data.closing), ctx.world.currency)}, minimum ${formatMoney(numOf(e.data.minimum), ctx.world.currency)}`
+  },
+  {
+    type: FINANCE_EVENTS.cardPaid,
+    validate: (e, ctx) => isCreditAccount(ctx, str11(e, "account")) ? null : reject8("bad_event", "statement payments are for credit accounts"),
+    apply: (e, state) => {
+      const cycles = sliceRecord(state, "economy", "cycles");
+      const account = str11(e, "account");
+      const cur = objOf(cycles[account]);
+      if (Object.keys(cur).length > 0)
+        cycles[account] = { ...cur, paid: numOf(cur.paid) + numOf(e.data.cents) };
+    },
+    describe: (e, ctx) => `Payment ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`
+  },
+  {
+    type: FINANCE_EVENTS.delinquency,
+    validate: (e, ctx) => isCreditAccount(ctx, str11(e, "account")) && DELINQUENCY_STAGES.includes(str11(e, "stage")) ? null : reject8("bad_event", "a delinquency stage needs a credit account and a stage"),
+    apply: (e, state) => {
+      const cycles = sliceRecord(state, "economy", "cycles");
+      const account = str11(e, "account");
+      const cur = objOf(cycles[account]);
+      const next = { ...cur, stage: str11(e, "stage"), past_due: numOf(e.data.past_due), lates: numOf(e.data.lates), penalty: e.data.penalty === true };
+      for (const k of ["streak", "ontime", "late30", "late60", "late90"])
+        if (typeof e.data[k] === "number")
+          next[k] = e.data[k];
+      cycles[account] = next;
+    },
+    describe: (e) => `Payment status: ${str11(e, "stage")}`,
+    coarsen: { key: (e) => str11(e, "account"), merge: (_a, b) => b }
+  },
+  {
+    type: FINANCE_EVENTS.flowRun,
+    validate: (e) => str11(e, "flow") !== "" && typeof e.data.state === "object" ? null : reject8("bad_event", "a flow run needs its flow and state"),
+    apply: (e, state) => {
+      sliceRecord(state, "economy", "flows")[str11(e, "flow")] = objOf(e.data.state);
+    },
+    describe: (e) => `${str11(e, "label") || str11(e, "flow")}: ${str11(e, "outcome")}`,
+    coarsen: { key: (e) => str11(e, "flow"), merge: (_a, b) => b }
+  },
+  {
+    type: FINANCE_EVENTS.hold,
+    validate: (e, ctx) => {
+      const account = str11(e, "account");
+      if (!own(ctx.state.entities, account) || str11(e, "id") === "")
+        return reject8("bad_event", "a hold needs an account and an id");
+      if (e.data.release === true)
+        return null;
+      const cents = numOf(e.data.cents);
+      if (!(cents > 0) || typeof e.data.until !== "number")
+        return reject8("bad_event", "a hold needs an amount and an end");
+      return e.data.kind === "authorization" && availableOf(ctx, account) < cents ? reject8("declined", `${own(ctx.state.entities, account)?.name ?? account} can't cover ${formatMoney(cents, ctx.world.currency)}`) : null;
+    },
+    apply: (e, state) => {
+      const holds = sliceRecord(state, "economy", "holds");
+      const account = str11(e, "account");
+      const mine = objOf(holds[account]);
+      for (const [id, h] of Object.entries(mine))
+        if (numOf(objOf(h).until) <= state.clock)
+          delete mine[id];
+      if (e.data.release === true)
+        delete mine[str11(e, "id")];
+      else
+        mine[str11(e, "id")] = { cents: Math.round(numOf(e.data.cents)), until: numOf(e.data.until), kind: e.data.kind === "authorization" ? "authorization" : "deposit", memo: str11(e, "memo") };
+      holds[account] = mine;
+    },
+    describe: (e, ctx) => e.data.release === true ? "Hold released" : `Hold of ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`
+  },
+  {
+    type: FINANCE_EVENTS.settle,
+    validate: (e, ctx) => own(ctx.state.entities, str11(e, "account")) && typeof e.data.upto === "number" ? null : reject8("bad_event", "settling needs an account and a time"),
+    apply: (e, state) => {
+      const journal = sliceRecord(state, "economy", "journal");
+      const account = str11(e, "account");
+      const upto = numOf(e.data.upto);
+      const list = Array.isArray(journal[account]) ? journal[account] : [];
+      journal[account] = list.map((x) => {
+        const o = objOf(x);
+        if (o.status !== "pending" || numOf(o.settles) > upto)
+          return x;
+        const { settles: _settles, ...rest } = o;
+        return { ...rest, status: "posted" };
+      });
+    },
+    describe: () => "Card payments posted",
+    coarsen: { key: (e) => str11(e, "account"), merge: (_a, b) => b }
+  },
+  {
+    type: FINANCE_EVENTS.credit,
+    validate: (e, ctx) => own(ctx.state.entities, str11(e, "person")) && str11(e, "kind") !== "" ? null : reject8("bad_event", "a credit entry needs a person and a kind"),
+    apply: (e, state) => {
+      const credit = sliceRecord(state, "economy", "credit");
+      const person = str11(e, "person");
+      const cur = objOf(credit[person]);
+      const { person: _person, ...entry } = e.data;
+      credit[person] = { ...cur, entries: pushCapped(cur.entries, { ...entry, at: typeof e.data.at === "number" ? e.data.at : state.clock }, CREDIT_CAP) };
+    },
+    describe: (e) => `Credit report: ${str11(e, "kind")}`
+  },
+  {
+    type: FINANCE_EVENTS.score,
+    validate: (e, ctx) => own(ctx.state.entities, str11(e, "person")) && typeof e.data.score === "number" ? null : reject8("bad_event", "a score needs a person and a number"),
+    apply: (e, state) => {
+      const credit = sliceRecord(state, "economy", "credit");
+      const person = str11(e, "person");
+      const cur = objOf(credit[person]);
+      const at = typeof e.data.at === "number" ? e.data.at : state.clock;
+      credit[person] = { ...cur, score: numOf(e.data.score), factors: objOf(e.data.factors), at, history: pushCapped(cur.history, { at, score: numOf(e.data.score) }, SCORES_KEPT) };
+    },
+    describe: (e) => `Credit score ${numOf(e.data.score)}`
+  },
+  {
+    type: FINANCE_EVENTS.spend,
+    validate: (e, ctx) => own(ctx.state.entities, str11(e, "card")) && typeof e.data.day === "number" ? null : reject8("bad_event", "card spending needs a card and a day"),
+    apply: (e, state) => {
+      sliceRecord(state, "economy", "spend")[str11(e, "card")] = { day: numOf(e.data.day), purchase: numOf(e.data.purchase), atm: numOf(e.data.atm) };
+    },
+    describe: () => "Card spending",
+    coarsen: { key: (e) => str11(e, "card"), merge: (_a, b) => b }
+  },
+  {
+    type: FINANCE_EVENTS.open,
+    validate: (e, ctx) => {
+      const list = Array.isArray(e.data.accounts) ? e.data.accounts : [];
+      const opened = objOf(sliceOf(ctx.state, "economy").opened);
+      for (const a of list) {
+        if (typeof a !== "string" || !own(ctx.state.entities, a))
+          return reject8("bad_event", "only accounts open");
+        if (own(opened, a) === true)
+          return reject8("opened", `${own(ctx.state.entities, a)?.name ?? a} is already open`);
+      }
+      return list.length > 0 ? null : reject8("bad_event", "nothing to open");
+    },
+    apply: (e, state) => {
+      const opened = sliceRecord(state, "economy", "opened");
+      for (const a of Array.isArray(e.data.accounts) ? e.data.accounts : [])
+        if (typeof a === "string")
+          opened[a] = true;
+    },
+    describe: () => "Accounts opened"
+  },
+  {
+    type: FINANCE_EVENTS.status,
+    validate: (e, ctx) => own(ctx.state.entities, str11(e, "account"))?.kind === "account" && ACCOUNT_STATUSES.includes(str11(e, "status")) ? null : reject8("bad_event", "a status needs an account and a status"),
+    apply: (e, state) => {
+      sliceRecord(state, "economy", "status")[str11(e, "account")] = str11(e, "status");
+    },
+    describe: (e, ctx) => `${own(ctx.state.entities, str11(e, "account"))?.name ?? str11(e, "account")}: ${str11(e, "status").replace(/_/g, " ")}`,
+    coarsen: { key: (e) => str11(e, "account"), merge: (_a, b) => b }
+  },
+  {
+    type: FINANCE_EVENTS.accrue,
+    validate: (e, ctx) => own(ctx.state.entities, str11(e, "account")) && typeof e.data.at === "number" ? null : reject8("bad_event", "an accrual needs an account and a time"),
+    apply: (e, state) => {
+      const at = numOf(e.data.at);
+      sliceRecord(state, "economy", "adb")[str11(e, "account")] = { from: at, at, sum: 0, spent: 0 };
+    },
+    describe: () => "Interest period"
+  },
+  { type: FINANCE_EVENTS.decline, validate: () => null, apply: () => {
+    return;
+  }, describe: (e) => `Declined: ${str11(e, "memo")}` }
+];
+
+// src/packs/economy/core/property.ts
+var PROPERTY_COST_PROVIDER = "property_cost";
+var COSTS = ["tax", "insurance", "upkeep"];
+var PROPERTY_FIELDS = {
+  region: { type: "text", label: "Region (for its property tax)", table: "economy.regions", domain: "money", level: 3 },
+  units: { type: "number", label: "Units to let", min: 1, default: 1, domain: "money", level: 3 },
+  market_rent: { type: "money", label: "Market rent, a unit a month", min: 0, domain: "money", level: 3 },
+  managed: { type: "bool", label: "Let to outside tenants", default: false, domain: "money", level: 3 },
+  lease_months: { type: "number", label: "Lease term, months", min: 1, default: 12, domain: "money", level: 3 },
+  vacancy_months: { type: "number", label: "Months empty between tenants, on average", min: 0, default: 1, domain: "money", level: 3 },
+  let_from: { type: "date", label: "Let since", domain: "money", level: 3 },
+  rent_to: { type: "ref", ref: "account", label: "Rent paid into", domain: "money", level: 3 },
+  asking_price: { type: "money", label: "Asking price (for sale)", min: 0, domain: "money", level: 3 },
+  volatility_pct: { type: "number", label: "Value swings, % a year", min: 0, domain: "money", level: 4 },
+  tax_installments: { type: "number", label: "Property tax bills a year", min: 1, max: 12, default: 2, domain: "money", level: 3 }
+};
+var UPKEEP_PCT = 1;
+function num4(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+function fieldsOf(state, id) {
+  return own(state.entities, id)?.fields ?? {};
+}
+function propertyIds(state) {
+  return Object.keys(state.entities).filter((id) => own(state.entities, id)?.kind === "property").sort();
+}
+function propertyValue(state, id) {
+  return Math.max(0, Math.round(numOf(fieldsOf(state, id).value)));
+}
+function payers(api, state, id) {
+  const owners = api.ownersOf(state, id);
+  const shares = worthShares(owners);
+  return { owners: owners.filter((o) => (shares[o.party] ?? 0) > 0), shares };
+}
+function payingSide(owners, shares) {
+  const first = owners[0]?.party ?? "";
+  if (owners.length < 2)
+    return { from: first };
+  return { from: first, shares: owners.map((o) => ({ party: o.party, pct: shares[o.party] ?? 0 })) };
+}
+function rentSide(api, ctx, id) {
+  const rentTo = strOf(fieldsOf(ctx.state, id).rent_to);
+  if (rentTo !== "" && own(ctx.state.entities, rentTo)?.kind === "account")
+    return { to: rentTo };
+  const { owners, shares } = payers(api, ctx.state, id);
+  const deposits = owners.map((o) => ({ party: o.party, account: api.depositAccount(ctx, o.party) })).filter((d) => d.account !== null);
+  const [first, ...rest] = deposits;
+  if (!first)
+    return null;
+  return rest.length === 0 ? { to: first.account } : { to: first.account, splits: rest.map((d) => ({ to: d.account, pct: shares[d.party] ?? 0 })) };
+}
+function regionOf(ctx, id) {
+  const region = strOf(fieldsOf(ctx.state, id).region);
+  if (region !== "")
+    return region;
+  const owner = ownersIn(fieldsOf(ctx.state, id))[0]?.party;
+  const configured = ctx.world.packs.economy?.config.region;
+  return strOf(owner ? fieldsOf(ctx.state, owner).region : undefined, typeof configured === "string" ? configured : "us");
+}
+function mortgageRow(ctx) {
+  return objOf(objOf(ctx.tables.get("economy.finance")?.rows.loans?.values).mortgage);
+}
+function propertyTaxPct(ctx, id) {
+  const region = objOf(own(objOf(ctx.tables.get("economy.regions")?.rows), regionOf(ctx, id)));
+  return num4(fieldsOf(ctx.state, id).tax_pct) ?? num4(region.property_tax_effective_pct) ?? num4(objOf(mortgageRow(ctx).property_tax_pct_of_value_per_year).typical) ?? 1;
+}
+function insurancePerMonth(ctx, id) {
+  const authored = num4(fieldsOf(ctx.state, id).insurance);
+  if (authored !== undefined)
+    return Math.max(0, Math.round(authored));
+  const row = mortgageRow(ctx);
+  const band = objOf(row.homeowners_insurance_cents_per_month);
+  const typical = numOf(band.typical, 20000);
+  const median = numOf(row.median_existing_home_price_cents, 41000000);
+  const scaled = typical * propertyValue(ctx.state, id) / Math.max(1, median);
+  return Math.round(Math.min(numOf(band.max, Infinity), Math.max(numOf(band.min, 0), scaled)));
+}
+function costOf(ctx, id, cost) {
+  const value = propertyValue(ctx.state, id);
+  const f = fieldsOf(ctx.state, id);
+  switch (cost) {
+    case "tax":
+      return Math.round(value * propertyTaxPct(ctx, id) / 100 / Math.max(1, Math.round(numOf(f.tax_installments, 2))));
+    case "insurance":
+      return insurancePerMonth(ctx, id);
+    case "upkeep":
+      return Math.round(value * numOf(f.upkeep_pct, UPKEEP_PCT) / 100 / 12);
+  }
+}
+function housingModel(ctx, id) {
+  const rows = investingRows(ctx);
+  const row = objOf(own(rows, "real_estate_home_price_appreciation_pct"));
+  const cls = objOf(own(objOf(rows.asset_classes), "property"));
+  const f = fieldsOf(ctx.state, id);
+  return {
+    drift: num4(f.appreciation_pct) ?? num4(cls.annual_return_pct) ?? num4(row.typical) ?? 4,
+    vol: num4(f.volatility_pct) ?? num4(cls.annual_volatility_pct) ?? num4(row.volatility_pct) ?? 5,
+    rho: Math.min(1, Math.max(0, num4(cls.correlation) ?? 0.7))
+  };
+}
+function followed(api, ctx, id) {
+  const owners = api.ownersOf(ctx.state, id);
+  return owners.length > 0 ? owners.some((o) => own(ctx.state.entities, o.party) && api.feature(ctx, o.party, "property")) : api.feature(ctx, ctx.world.pov, "property");
+}
+function valueStep(api, ctx, slot, rng) {
+  const at = instantIn(ctx, slot, 0);
+  if (!at || at.date.day !== 1)
+    return [];
+  const out = [];
+  let factor = null;
+  for (const id of propertyIds(ctx.state)) {
+    const value = propertyValue(ctx.state, id);
+    if (value <= 0 || !followed(api, ctx, id))
+      continue;
+    factor ??= normal(rng("market:housing"));
+    const m = housingModel(ctx, id);
+    const next = Math.round(gbmStep(value, m.drift, m.vol, 1 / 12, correlated(factor, normal(rng(`property:${id}`)), m.rho)));
+    if (next !== value)
+      out.push({ type: "add", entity: id, field: "value", delta: next - value });
+  }
+  return out;
+}
+function costFlows(api, ctx, id) {
+  if (propertyValue(ctx.state, id) <= 0 || !followed(api, ctx, id))
+    return [];
+  const { owners, shares } = payers(api, ctx.state, id);
+  if (owners.length === 0)
+    return [];
+  const side = payingSide(owners, shares);
+  const name = labelOf(ctx, id);
+  const f = fieldsOf(ctx.state, id);
+  const cal = calendarOf(ctx.world);
+  const common = { ...side, link: id, status: "active", method: "account", source: "property" };
+  const amount = (cost) => ({ provider: PROPERTY_COST_PROVIDER, args: { property: id, cost } });
+  return [
+    { ...common, id: `property_tax:${id}`, label: `Property tax, ${name}`, kind: "tax", to: `tax:property:${regionOf(ctx, id)}`, amount: amount("tax"), schedule: { every: "year", months: paymentMonths(numOf(f.tax_installments, 2), cal.system.months, cal.system.months), days: [1], roll: "after" }, shortfall: "defer", category: "property_tax" },
+    { ...common, id: `property_insurance:${id}`, label: `Insurance, ${name}`, kind: "premium", to: "insurance:property", amount: amount("insurance"), schedule: { every: "month", days: [1], roll: "after" }, shortfall: "retry", retry_days: 7, retries: 2, category: "insurance" },
+    { ...common, id: `property_upkeep:${id}`, label: `Upkeep, ${name}`, kind: "bill", to: "upkeep:property", amount: amount("upkeep"), schedule: { every: "month", days: [15], roll: "after" }, shortfall: "skip", category: "home_maintenance" }
+  ];
+}
+function authoredLeases(ctx, id) {
+  return Object.keys(ctx.state.entities).sort().flatMap((fid) => {
+    const e = own(ctx.state.entities, fid);
+    if (!e || e.kind !== "flow" || e.fields.flow_kind !== "rent" || e.fields.link !== id)
+      return [];
+    const start = clockOfDate(ctx.world, e.fields.start);
+    const end = clockOfDate(ctx.world, e.fields.end);
+    return [{ id: fid, tenant: strOf(e.fields.from), rent: Math.round(numOf(e.fields.amount_cents)), start, end: end === null ? null : end + 1440, status: strOf(e.fields.status, "active") }];
+  });
+}
+function inForce(l, at) {
+  return l.status === "active" && (l.start === null || l.start <= at) && (l.end === null || at < l.end);
+}
+function monthIndex(world, clock) {
+  const cal = calendarOf(world);
+  const d = dateAt(cal, clock);
+  return d.year * cal.system.months + d.month - 1;
+}
+function monthStart2(world, index) {
+  const cal = calendarOf(world);
+  const year = Math.floor(index / cal.system.months);
+  return clockAt(cal, dayIndexOf(cal, year, index - year * cal.system.months + 1, 1), 0);
+}
+function managedLeases(ctx, id, at = ctx.state.clock) {
+  const f = fieldsOf(ctx.state, id);
+  const marketRent = numOf(f.market_rent);
+  if (f.managed !== true || marketRent <= 0)
+    return [];
+  const units = Math.max(1, Math.round(numOf(f.units, 1)));
+  const covered = authoredLeases(ctx, id).filter((l) => inForce(l, at)).length;
+  const term = Math.max(1, Math.round(numOf(f.lease_months, 12)));
+  const vacancy = Math.max(0, Math.round(numOf(f.vacancy_months, 1)));
+  const since = clockOfDate(ctx.world, f.let_from) ?? clockOfDate(ctx.world, ctx.world.start.at) ?? 0;
+  const first = monthIndex(ctx.world, since);
+  const now = monthIndex(ctx.world, at);
+  const growth = housingModel(ctx, id).drift;
+  const rentFrom = (month) => Math.round(marketRent * Math.pow(1 + growth / 100, (month - first) / 12));
+  const out = [];
+  for (let k = covered + 1;k <= units; k++) {
+    let from = first - hash32("lease", id, k) % term;
+    for (let n = 0;n < 1e5; n++) {
+      const to = from + term;
+      const gap = vacancy > 0 ? hash32("vacancy", id, k, n) % (2 * vacancy + 1) : 0;
+      if (to > now) {
+        out.push({ unit: k, n, from, to, rent: rentFrom(from) });
+        const next = to + gap;
+        out.push({ unit: k, n: n + 1, from: next, to: next + term, rent: rentFrom(next) });
+        break;
+      }
+      from = to + gap;
+    }
+  }
+  return out;
+}
+function managedFlow(api, ctx, id, l, side) {
+  const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
+  const name = labelOf(ctx, id);
+  return {
+    id: `lease:${id}:${l.unit}:${l.n}`,
+    label: units > 1 ? `Rent, ${name}, unit ${l.unit}` : `Rent, ${name}`,
+    kind: "rent",
+    from: `tenant:${id}:${l.unit}`,
+    ...side,
+    amount: { fixed: l.rent },
+    schedule: { every: "month", days: [1] },
+    start: dateText3(ctx.world, monthStart2(ctx.world, l.from)),
+    end: dateText3(ctx.world, monthStart2(ctx.world, l.to) - 1440),
+    shortfall: "skip",
+    category: "rent",
+    link: id,
+    status: "active",
+    source: "leases"
+  };
+}
+function leaseViews(ctx, id) {
+  const now = ctx.state.clock;
+  const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
+  const out = [];
+  let let_ = 0;
+  for (const l of authoredLeases(ctx, id)) {
+    const live = inForce(l, now);
+    if (live)
+      let_++;
+    out.push({ flow: l.id, tenant: labelOf(ctx, l.tenant), rent: l.rent, start: l.start === null ? null : dateText3(ctx.world, l.start), end: l.end === null ? null : dateText3(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
+  }
+  for (const l of managedLeases(ctx, id)) {
+    const from = monthStart2(ctx.world, l.from);
+    if (from > now)
+      continue;
+    let_++;
+    out.push({ flow: `lease:${id}:${l.unit}:${l.n}`, tenant: "Outside tenant", rent: l.rent, start: dateText3(ctx.world, from), end: dateText3(ctx.world, monthStart2(ctx.world, l.to) - 1440), state: "let" });
+  }
+  const marketRent = Math.round(numOf(fieldsOf(ctx.state, id).market_rent));
+  for (let k = let_;k < units; k++)
+    out.push({ flow: "", tenant: "", rent: marketRent, start: null, end: null, state: "vacant" });
+  return out;
+}
+function isRejection4(v) {
+  return !Array.isArray(v);
+}
+function securedLoans(api, state, id) {
+  const ids = new Set(api.securedBy(state, id));
+  const named = strOf(fieldsOf(state, id).mortgage);
+  if (named !== "" && own(state.entities, named)?.kind === "account")
+    ids.add(named);
+  const owed = (loan) => api.balance(state, loan) + (isOpened(state, loan, openerOf(state, loan)) ? 0 : Math.round(numOf(own(state.entities, loan)?.fields.opening)));
+  return [...ids].sort().map((loan) => ({ loan, owed: Math.max(0, -owed(loan)) }));
+}
+function buyProperty(api, ctx, x) {
+  const e = own(ctx.state.entities, x.property);
+  if (!e || e.kind !== "property")
+    return reject7("missing_property", `no property ${labelOf(ctx, x.property)}`);
+  if (!api.feature(ctx, x.party, "property"))
+    return reject7("level", "property isn't followed at this money level");
+  const { owners, shares } = payers(api, ctx.state, x.property);
+  if (owners.some((o) => o.party === x.party))
+    return reject7("already_yours", `${e.name} is already ${labelOf(ctx, x.party)}'s`);
+  const asking = num4(e.fields.asking_price);
+  if (owners.length > 0 && asking === undefined)
+    return reject7("not_for_sale", `${e.name} isn't for sale`);
+  const price = Math.round(x.price ?? asking ?? propertyValue(ctx.state, x.property));
+  if (!(price > 0))
+    return reject7("bad_amount", "a price is above nothing");
+  const money = (c) => formatMoney(c, ctx.world.currency);
+  if (asking !== undefined && price < asking)
+    return reject7("declined", `the sellers want ${money(Math.round(asking))} for ${e.name}`);
+  const down = Math.round(x.down ?? price);
+  if (down < 0 || down > price)
+    return reject7("bad_amount", "a down payment is between nothing and the price");
+  const financed = price - down;
+  const from = x.from ?? api.depositAccount(ctx, x.party);
+  if (!from)
+    return reject7("no_account", `${labelOf(ctx, x.party)} has no account to pay from`);
+  if (x.from && !api.accountsOf(ctx, x.party, "spend").includes(x.from))
+    return reject7("not_yours", `${labelOf(ctx, x.from)} isn't ${labelOf(ctx, x.party)}'s to pay from`);
+  const events = [];
+  let mortgage = null;
+  if (financed > 0) {
+    mortgage = `${x.property}:mortgage`;
+    for (let i = 2;own(ctx.state.entities, mortgage); i++)
+      mortgage = `${x.property}:mortgage:${i}`;
+    const opened = api.openAccount(ctx, { id: mortgage, name: `Mortgage, ${e.name}`, product: "mortgage", owners: [{ party: x.party, role: "owner" }], cents: financed, ...x.term_months ? { term_months: x.term_months } : {}, ...x.apr_pct !== undefined ? { apr_pct: x.apr_pct } : {}, secured_by: x.property });
+    if (isRejection4(opened))
+      return opened;
+    events.push(...opened);
+  }
+  const lines = [{ account: from, amount: -down }];
+  if (financed > 0)
+    lines.push({ account: api.outside(`closing:${x.property}`), amount: -financed });
+  const loans = securedLoans(api, ctx.state, x.property);
+  const owed = loans.reduce((a, l) => a + l.owed, 0);
+  if (owed > price)
+    return reject7("declined", `the price doesn't cover what ${e.name}'s sellers owe on it`);
+  for (const l of loans)
+    if (l.owed > 0)
+      lines.push({ account: l.loan, amount: l.owed });
+  const net = price - owed;
+  const sellers = owners.length > 0 ? byShare(shares, net) : [];
+  const disposals = [];
+  let left = net;
+  sellers.forEach((s, i) => {
+    const part = i === sellers.length - 1 ? left : s.cents;
+    left -= part;
+    const deposit = api.depositAccount(ctx, s.party);
+    lines.push({ account: deposit ?? api.outside(s.party), amount: part });
+    disposals.push(disposal(x.property, s.party, 100, Math.round(price * (shares[s.party] ?? 0) / 100), `Sold ${e.name}`));
+  });
+  if (sellers.length === 0 && net > 0)
+    lines.push({ account: api.outside(`seller:${x.property}`), amount: net });
+  const posted = api.post(ctx, lines.filter((l) => l.amount !== 0), { memo: `Bought ${e.name} for ${money(price)}`, kind: "purchase", category: "property" });
+  if (isRejection4(posted))
+    return posted;
+  const today = dateText3(ctx.world, ctx.state.clock);
+  return unit2([
+    ...events,
+    ...posted,
+    ...disposals,
+    { type: "set", entity: x.property, field: "owners", value: [{ party: x.party, role: "owner", share: 100 }] },
+    { type: "set", entity: x.property, field: "purchase_price", value: price },
+    { type: "set", entity: x.property, field: "purchased", value: today },
+    { type: "set", entity: x.property, field: "mortgage", value: mortgage },
+    ...asking !== undefined ? [{ type: "set", entity: x.property, field: "asking_price", value: null }] : [],
+    ...strOf(e.fields.rent_to) !== "" ? [{ type: "set", entity: x.property, field: "rent_to", value: null }] : [],
+    acquisition(x.property, x.party, price),
+    ...moveLeases(api, ctx, x.property, owners.map((o) => o.party), x.party)
+  ]);
+}
+function moveLeases(api, ctx, property, sellers, buyer) {
+  const out = [];
+  const deposit = buyer ? api.depositAccount(ctx, buyer) : null;
+  for (const l of authoredLeases(ctx, property)) {
+    if (!inForce(l, ctx.state.clock))
+      continue;
+    const to = strOf(fieldsOf(ctx.state, l.id).to);
+    const sellerSide = sellers.includes(to) || sellers.some((s) => api.ownersOf(ctx.state, to).some((o) => o.party === s));
+    if (!sellerSide)
+      continue;
+    out.push(deposit ? { type: "set", entity: l.id, field: "to", value: deposit } : { type: "set", entity: l.id, field: "end", value: dateText3(ctx.world, ctx.state.clock) });
+  }
+  return out;
+}
+function sellProperty(api, ctx, x) {
+  const e = own(ctx.state.entities, x.property);
+  if (!e || e.kind !== "property")
+    return reject7("missing_property", `no property ${labelOf(ctx, x.property)}`);
+  if (!api.feature(ctx, x.party, "property"))
+    return reject7("level", "property isn't followed at this money level");
+  const owners = api.ownersOf(ctx.state, x.property);
+  const mine = owners.find((o) => o.party === x.party);
+  const share = api.shareOf(ctx.state, x.property, x.party);
+  if (!mine || share <= 0)
+    return reject7("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to sell`);
+  const price = Math.round(x.price);
+  if (!(price > 0))
+    return reject7("bad_amount", "a price is above nothing");
+  if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party))
+    return reject7("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
+  const to = x.to ?? api.depositAccount(ctx, x.party);
+  if (!to)
+    return reject7("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
+  if (x.to && !api.accountsOf(ctx, x.party, "worth").includes(x.to) && !api.accountsOf(ctx, x.party, "spend").includes(x.to))
+    return reject7("not_yours", `${labelOf(ctx, x.to)} isn't ${labelOf(ctx, x.party)}'s`);
+  const money = (c) => formatMoney(c, ctx.world.currency);
+  const memo = `Sold ${share < 100 ? `a ${Math.round(share)}% share of ` : ""}${e.name} for ${money(price)}`;
+  const loans = securedLoans(api, ctx.state, x.property).filter((l) => api.ownersOf(ctx.state, l.loan).some((o) => o.party === x.party) && l.owed > 0);
+  const owed = loans.reduce((a, l) => a + l.owed, 0);
+  const events = [];
+  if (x.buyer) {
+    const paid = api.pay(ctx, { from: x.buyer, to: x.party, cents: price, memo, deposit: to, kind: "purchase", category: "property" });
+    if (isRejection4(paid))
+      return paid;
+    events.push(...paid);
+    if (owed > 0) {
+      const payoff = api.post(ctx, [{ account: to, amount: -owed }, ...loans.map((l) => ({ account: l.loan, amount: l.owed }))], { memo: `${e.name}: mortgage paid off`, kind: "payment", category: "property", unchecked: true });
+      if (isRejection4(payoff))
+        return payoff;
+      events.push(...payoff);
+    }
+  } else {
+    const lines = [{ account: api.outside(`buyer:${x.property}`), amount: -price }, ...loans.map((l) => ({ account: l.loan, amount: l.owed }))];
+    if (price !== owed)
+      lines.push({ account: to, amount: price - owed });
+    const posted = api.post(ctx, lines, { memo, kind: "sale", category: "property" });
+    if (isRejection4(posted))
+      return posted;
+    events.push(...posted);
+  }
+  const others = owners.filter((o) => o.party !== x.party);
+  const next = x.buyer ? [...others, { party: x.buyer, role: mine.role === "owner" || mine.role === "joint" ? mine.role : "owner", share }] : others;
+  const shares = worthShares(owners);
+  const written = next.map((o) => ({ party: o.party, role: o.role, share: Math.round((o.party === x.buyer ? share : shares[o.party] ?? 0) * 100) / 100 }));
+  const sold = next.length === 0 || others.length === 0 && x.buyer !== undefined;
+  return unit2([
+    ...events,
+    disposal(x.property, x.party, 100, price, memo),
+    { type: "set", entity: x.property, field: "owners", value: written },
+    ...x.buyer ? [acquisition(x.property, x.buyer, price)] : [],
+    ...sold && loans.length > 0 ? [{ type: "set", entity: x.property, field: "mortgage", value: null }] : [],
+    ...num4(e.fields.asking_price) !== undefined ? [{ type: "set", entity: x.property, field: "asking_price", value: null }] : [],
+    ...others.length === 0 && strOf(e.fields.rent_to) !== "" ? [{ type: "set", entity: x.property, field: "rent_to", value: null }] : [],
+    ...others.length === 0 ? moveLeases(api, ctx, x.property, [x.party], x.buyer ?? null) : []
+  ]);
+}
+function startLease(api, ctx, x) {
+  const e = own(ctx.state.entities, x.property);
+  if (!e || e.kind !== "property")
+    return reject7("missing_property", `no property ${labelOf(ctx, x.property)}`);
+  if (!api.feature(ctx, x.party, "property"))
+    return reject7("level", "property isn't followed at this money level");
+  if (api.shareOf(ctx.state, x.property, x.party) <= 0)
+    return reject7("not_yours", `${e.name} isn't ${labelOf(ctx, x.party)}'s to let`);
+  if (!own(ctx.state.entities, x.tenant) || x.tenant === x.party)
+    return reject7("missing_entity", `no tenant ${labelOf(ctx, x.tenant)}`);
+  const rent = Math.round(x.rent);
+  if (!(rent > 0))
+    return reject7("bad_amount", "rent is above nothing");
+  const units = Math.max(1, Math.round(numOf(e.fields.units, 1)));
+  if (authoredLeases(ctx, x.property).filter((l) => inForce(l, ctx.state.clock)).length >= units)
+    return reject7("full", `every unit of ${e.name} is let`);
+  if (x.from && !api.ownersOf(ctx.state, x.from).some((o) => o.party === x.tenant))
+    return reject7("not_yours", `${labelOf(ctx, x.from)} isn't ${labelOf(ctx, x.tenant)}'s`);
+  const side = rentSide(api, ctx, x.property);
+  if (!side)
+    return reject7("no_account", `${labelOf(ctx, x.party)} has no account the rent could go to`);
+  const months = Math.max(1, Math.round(x.months ?? 12));
+  const day = Math.min(28, Math.max(1, Math.round(x.day ?? 1)));
+  const last = clockOfDate(ctx.world, addMonths(ctx.world, ctx.state.clock, months));
+  let id = `lease:${x.property}:${x.tenant}`;
+  for (let i = 2;own(ctx.state.entities, id); i++)
+    id = `lease:${x.property}:${x.tenant}:${i}`;
+  const fields = {
+    flow_kind: "rent",
+    from: x.from ?? x.tenant,
+    to: side.to,
+    ...side.splits ? { splits: side.splits } : {},
+    amount_cents: rent,
+    every: "month",
+    days: [day],
+    start: dateText3(ctx.world, ctx.state.clock),
+    end: dateText3(ctx.world, (last ?? ctx.state.clock) - 1440),
+    shortfall: "retry",
+    retry_days: 5,
+    retries: 2,
+    category: "rent",
+    link: x.property,
+    status: "active"
+  };
+  return [{ type: "spawn", entity: { id, kind: "flow", name: `Lease: ${labelOf(ctx, x.tenant)}, ${x.unit ? `${x.unit}, ` : ""}${e.name}`, tier: "background", fields, relations: [] } }];
+}
+function endLease(api, ctx, party, lease, on) {
+  const f = own(ctx.state.entities, lease);
+  if (!f || f.kind !== "flow" || f.fields.flow_kind !== "rent")
+    return reject7("missing_lease", `no lease ${labelOf(ctx, lease)}`);
+  const property = strOf(f.fields.link);
+  const from = strOf(f.fields.from);
+  const tenant = from === party || api.ownersOf(ctx.state, from).some((o) => o.party === party);
+  if (!tenant && api.shareOf(ctx.state, property, party) <= 0)
+    return reject7("not_yours", `${f.name} isn't ${labelOf(ctx, party)}'s to end`);
+  const at = on ? clockOfDate(ctx.world, on) : ctx.state.clock;
+  if (at === null)
+    return reject7("bad_date", "a lease ends on a date (YYYY-MM-DD)");
+  const date = dateText3(ctx.world, Math.max(at, ctx.state.clock));
+  return strOf(f.fields.end) === date ? [] : [{ type: "set", entity: lease, field: "end", value: date }];
+}
+function ownerLines2(api, ctx, id) {
+  const owners = api.ownersOf(ctx.state, id);
+  const shares = worthShares(owners);
+  return owners.map((o) => ({ party: o.party, name: labelOf(ctx, o.party), role: o.role, share: Math.round((shares[o.party] ?? 0) * 100) / 100 }));
+}
+function propertyView(api, ctx, id, party, flows) {
+  const e = own(ctx.state.entities, id);
+  const value = propertyValue(ctx.state, id);
+  const loans = securedLoans(api, ctx.state, id);
+  const loan = loans[0];
+  const owed = loans.reduce((a, l) => a + l.owed, 0);
+  const place = strOf(e?.fields.place);
+  const asking = num4(e?.fields.asking_price);
+  return {
+    id,
+    name: e?.name ?? id,
+    place: place !== "" ? own(ctx.world.places, place)?.name ?? labelOf(ctx, place) : null,
+    owners: ownerLines2(api, ctx, id),
+    share: api.shareOf(ctx.state, id, party),
+    value,
+    equity: value - owed,
+    mortgage: loan ? { id: loan.loan, name: labelOf(ctx, loan.loan), owed, payment: num4(fieldsOf(ctx.state, loan.loan).payment) ?? null, monthsLeft: num4(fieldsOf(ctx.state, loan.loan).months_left) ?? null } : null,
+    leases: leaseViews(ctx, id),
+    costs: flows.filter((f) => f.link?.id === id && f.kind !== "rent"),
+    forSale: asking ?? null
+  };
+}
+function visibleProperties(api, ctx, party) {
+  return propertyIds(ctx.state).filter((id) => api.ownersOf(ctx.state, id).some((o) => o.party === party) || num4(fieldsOf(ctx.state, id).asking_price) !== undefined);
+}
+function propertyWorth(api, ctx, party) {
+  const lines = [];
+  let assets = 0;
+  for (const id of propertyIds(ctx.state)) {
+    const share = api.shareOf(ctx.state, id, party);
+    if (share <= 0)
+      continue;
+    const cents = Math.round(propertyValue(ctx.state, id) * share / 100);
+    if (cents === 0)
+      continue;
+    assets += cents;
+    lines.push({ label: labelOf(ctx, id), cents });
+  }
+  return { assets, lines };
+}
+function monthlyRent(api, ctx, party) {
+  let total = 0;
+  for (const id of propertyIds(ctx.state)) {
+    const share = api.shareOf(ctx.state, id, party);
+    if (share <= 0)
+      continue;
+    const authored = authoredLeases(ctx, id).filter((l) => inForce(l, ctx.state.clock)).reduce((a, l) => a + l.rent, 0);
+    const managed = managedLeases(ctx, id).filter((l) => monthStart2(ctx.world, l.from) <= ctx.state.clock && ctx.state.clock < monthStart2(ctx.world, l.to)).reduce((a, l) => a + l.rent, 0);
+    total += Math.round((authored + managed) * share / 100);
+  }
+  return total;
+}
+function registerProperty(r) {
+  r.fields("property", PROPERTY_FIELDS);
+  r.core.process({ id: "economy.property_values", domain: "money", minLevel: 3, step: (slot, ctx, rng) => valueStep(r.api, ctx, slot, rng) });
+  r.flows({ id: "property", flows: (ctx) => propertyIds(ctx.state).flatMap((id) => costFlows(r.api, ctx, id)) });
+  r.flows({
+    id: "leases",
+    flows: (ctx) => propertyIds(ctx.state).flatMap((id) => {
+      if (!followed(r.api, ctx, id))
+        return [];
+      const leases = managedLeases(ctx, id);
+      const side = leases.length > 0 ? rentSide(r.api, ctx, id) : null;
+      return side ? leases.map((l) => managedFlow(r.api, ctx, id, l, side)) : [];
+    })
+  });
+  const provider = (ctx, flow) => {
+    const args = "provider" in flow.amount ? objOf(flow.amount.args) : {};
+    const cost = strOf(args.cost);
+    if (!COSTS.includes(cost))
+      return null;
+    const cents = costOf(ctx, strOf(args.property), cost);
+    return cents > 0 ? { cents, memo: flow.label, kind: "payment", category: flow.category ?? "property" } : null;
+  };
+  r.amount(PROPERTY_COST_PROVIDER, provider);
+  const n = (a, k) => typeof a[k] === "number" && Number.isFinite(a[k]) ? a[k] : undefined;
+  const s = (a, k) => typeof a[k] === "string" && a[k] !== "" ? a[k] : undefined;
+  const party = (a, ctx) => s(a, "party") ?? ctx.world.pov;
+  r.core.effect({
+    type: "economy.property_buy",
+    args: ["property", "price?", "from?", "down?", "term_months?", "apr_pct?", "party?"],
+    resolve: (a, ctx) => {
+      const price = n(a, "price");
+      const from = s(a, "from");
+      const down = n(a, "down");
+      const term = n(a, "term_months");
+      const apr = n(a, "apr_pct");
+      return buyProperty(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), ...price !== undefined ? { price } : {}, ...from ? { from } : {}, ...down !== undefined ? { down } : {}, ...term !== undefined ? { term_months: term } : {}, ...apr !== undefined ? { apr_pct: apr } : {} });
+    }
+  });
+  r.core.effect({
+    type: "economy.property_sell",
+    args: ["property", "price", "buyer?", "to?", "party?"],
+    resolve: (a, ctx) => {
+      const buyer = s(a, "buyer");
+      const to = s(a, "to");
+      return sellProperty(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), price: n(a, "price") ?? NaN, ...buyer ? { buyer } : {}, ...to ? { to } : {} });
+    }
+  });
+  r.core.effect({
+    type: "economy.lease_start",
+    args: ["property", "tenant", "rent", "months?", "day?", "unit?", "from?", "party?"],
+    resolve: (a, ctx) => {
+      const months = n(a, "months");
+      const day = n(a, "day");
+      const unitName = s(a, "unit");
+      const from = s(a, "from");
+      return startLease(r.api, ctx, { party: party(a, ctx), property: strOf(a.property), tenant: strOf(a.tenant), rent: n(a, "rent") ?? NaN, ...months !== undefined ? { months } : {}, ...day !== undefined ? { day } : {}, ...unitName ? { unit: unitName } : {}, ...from ? { from } : {} });
+    }
+  });
+  r.core.effect({ type: "economy.lease_end", args: ["lease", "on?", "party?"], resolve: (a, ctx) => endLease(r.api, ctx, party(a, ctx), strOf(a.lease), s(a, "on")) });
+  const requires = ["money_feature('property', self)"];
+  r.core.action({
+    id: "property_buy",
+    label: "Buy a property",
+    pack: "economy",
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Offer", optional: true }, from: { type: "ref", ref: "account", label: "Pay from", optional: true }, down: { type: "money", label: "Down payment (the rest on a mortgage)", optional: true }, term_months: { type: "number", label: "Mortgage term, months", optional: true }, apr_pct: { type: "number", label: "Mortgage APR %", optional: true } },
+    requires,
+    outcomes: { default: [{ type: "economy.property_buy", args: { party: "self", property: "property", price: "=params.price", from: "=params.from", down: "=params.down", term_months: "=params.term_months", apr_pct: "=params.apr_pct" } }] },
+    duration: "60",
+    lexicon: ["buy the house", "buy the property", "make an offer on"],
+    observable: "signs a stack of papers"
+  });
+  r.core.action({
+    id: "property_sell",
+    label: "Sell a property",
+    pack: "economy",
+    params: { property: { type: "ref", ref: "property" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
+    requires,
+    outcomes: { default: [{ type: "economy.property_sell", args: { party: "self", property: "property", price: "=params.price", buyer: "=params.buyer", to: "=params.to" } }] },
+    duration: "60",
+    lexicon: ["sell the house", "sell the property"],
+    observable: "signs a stack of papers"
+  });
+  r.core.action({
+    id: "lease_start",
+    label: "Let a unit",
+    pack: "economy",
+    params: { property: { type: "ref", ref: "property" }, tenant: { type: "ref", ref: "person", label: "Tenant" }, rent: { type: "money", label: "Rent a month" }, months: { type: "number", label: "Term, months", optional: true }, day: { type: "number", label: "Rent day", optional: true }, unit: { type: "text", label: "Unit", optional: true } },
+    requires,
+    outcomes: { default: [{ type: "economy.lease_start", args: { party: "self", property: "property", tenant: "tenant", rent: "=params.rent", months: "=params.months", day: "=params.day", unit: "=params.unit" } }] },
+    duration: "20",
+    lexicon: ["rent out", "sign a lease", "let the apartment"],
+    observable: "signs a lease"
+  });
+  r.core.action({
+    id: "lease_end",
+    label: "End a lease",
+    pack: "economy",
+    params: { lease: { type: "ref", ref: "flow" }, on: { type: "text", label: "Last day (YYYY-MM-DD)", optional: true } },
+    requires,
+    outcomes: { default: [{ type: "economy.lease_end", args: { party: "self", lease: "lease", on: "=params.on" } }] },
+    duration: "10",
+    lexicon: ["end the lease", "give notice", "move out"],
+    observable: "writes a letter"
+  });
+  r.core.formula("property_value", (ctx, id) => propertyValue(ctx.state, String(id ?? "")));
+  r.core.lint({
+    code: "economy.property",
+    check(world) {
+      const issues = [];
+      for (const e of Object.values(world.entities)) {
+        if (e.kind !== "property")
+          continue;
+        const path = `entities.${e.id}.fields`;
+        const place = strOf(e.fields.place);
+        if (place !== "" && !own(world.places, place))
+          issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} is at "${place}", which isn't a place.`, path: `${path}.place` });
+        if (!(numOf(e.fields.value) > 0))
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} has no value, so it adds nothing to anyone's worth and costs nothing to keep.`, path: `${path}.value` });
+        for (const o of ownersIn(e.fields))
+          if (!own(world.entities, o.party))
+            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name} names owner "${o.party}", who isn't in the world.`, path: `${path}.owners` });
+        const mortgage = strOf(e.fields.mortgage);
+        if (mortgage !== "") {
+          const loan = own(world.entities, mortgage);
+          if (loan?.kind !== "account")
+            issues.push({ severity: "error", code: "economy.property", message: `Property ${e.name}'s mortgage "${mortgage}" isn't an account.`, path: `${path}.mortgage` });
+          else if (strOf(loan.fields.secured_by) !== e.id)
+            issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name}'s mortgage ${loan.name} isn't secured by it (its secured_by names ${strOf(loan.fields.secured_by) || "nothing"}).`, path: `entities.${mortgage}.fields.secured_by` });
+        }
+        if (e.fields.managed === true && !(numOf(e.fields.market_rent) > 0))
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name} is let to outside tenants but has no market rent, so it lets nothing.`, path: `${path}.market_rent` });
+        const rentTo = strOf(e.fields.rent_to);
+        if (rentTo !== "" && own(world.entities, rentTo)?.kind !== "account")
+          issues.push({ severity: "warning", code: "economy.property", message: `Property ${e.name}'s rent goes to "${rentTo}", which isn't an account; it goes to the owners' accounts instead.`, path: `${path}.rent_to` });
+      }
+      for (const e of Object.values(world.entities)) {
+        if (e.kind !== "flow" || e.fields.flow_kind !== "rent" || typeof e.fields.link !== "string" || e.fields.link === "")
+          continue;
+        if (own(world.entities, e.fields.link)?.kind !== "property")
+          continue;
+        const property = own(world.entities, e.fields.link);
+        if (property && clockOfDate(world, e.fields.end) === null && e.fields.end !== undefined)
+          issues.push({ severity: "warning", code: "economy.property", message: `Lease ${e.name} on ${property.name} has an end that isn't a date (YYYY-MM-DD).`, path: `entities.${e.id}.fields.end` });
+      }
+      return issues;
+    }
+  });
+}
+
+// src/packs/economy/core/stakes.ts
+var VALUATION_MULTIPLE = 3;
+var BUSINESS_FIELDS2 = {
+  value: { type: "money", label: "Value (set: overrides the books)", min: 0, domain: "money", level: 3 },
+  valuation_multiple: { type: "number", label: "Valued at this many years of profit, over its books", min: 0, default: VALUATION_MULTIPLE, domain: "money", level: 4 }
+};
+var valuing = new Set;
+function businessIds2(api, ctx) {
+  return Object.keys(ctx.state.entities).filter((id) => api.partyKind(ctx, id) === "business").sort();
+}
+function businessValue(api, ctx, business) {
+  const f = own(ctx.state.entities, business)?.fields ?? {};
+  if (typeof f.value === "number" && Number.isFinite(f.value))
+    return Math.max(0, Math.round(f.value));
+  if (valuing.has(business))
+    return 0;
+  valuing.add(business);
+  try {
+    const books = optionalQuery(ctx, "economy.business_books")?.(ctx, business, ctx.state.clock - YEAR_MINUTES, ctx.state.clock);
+    const book = api.netWorth(ctx, business) + (books ? books.receivables - books.payables : 0);
+    const multiple = Math.max(0, numOf(f.valuation_multiple, VALUATION_MULTIPLE));
+    return Math.max(0, Math.round(book + Math.max(0, books?.profit ?? 0) * multiple));
+  } finally {
+    valuing.delete(business);
+  }
+}
+function stakeWorth(api, ctx, party) {
+  const lines = [];
+  let assets = 0;
+  for (const id of businessIds2(api, ctx)) {
+    if (id === party)
+      continue;
+    const share = api.shareOf(ctx.state, id, party);
+    if (share <= 0)
+      continue;
+    const cents = Math.round(businessValue(api, ctx, id) * share / 100);
+    if (cents === 0)
+      continue;
+    assets += cents;
+    lines.push({ label: `${labelOf(ctx, id)} (${Math.round(share * 100) / 100}%)`, cents });
+  }
+  return { assets, lines };
+}
+function stakeRoute(ctx, owner, business) {
+  const route = strOf(own(objOf(own(objOf(holdingsSlice(ctx.state).routes), business)), owner));
+  if (route === "reinvest")
+    return { reinvest: true };
+  return route !== "" && own(ctx.state.entities, route)?.kind === "account" ? { account: route } : null;
+}
+function str12(e, k) {
+  return typeof e.data[k] === "string" ? e.data[k] : "";
+}
+var routeEvent = {
+  type: "economy.stake_route",
+  validate: (e, ctx) => own(ctx.state.entities, str12(e, "business")) && own(ctx.state.entities, str12(e, "owner")) ? null : reject7("missing_entity", "a route names a business and its owner"),
+  apply: (e, state) => {
+    const routes = holdingsRecord(state, "routes");
+    const mine = objOf(own(routes, str12(e, "business")));
+    if (str12(e, "to") === "")
+      delete mine[str12(e, "owner")];
+    else
+      mine[str12(e, "owner")] = str12(e, "to");
+    routes[str12(e, "business")] = mine;
+  },
+  describe: (e, ctx, viewer) => viewer ? "" : `${labelOf(ctx, str12(e, "owner"))}'s profit from ${labelOf(ctx, str12(e, "business"))} goes to ${str12(e, "to") || "their account"}`
+};
+function setStakeRoute(api, ctx, owner, business, to) {
+  if (api.partyKind(ctx, business) !== "business")
+    return reject7("not_business", `${labelOf(ctx, business)} isn't a business`);
+  if (api.shareOf(ctx.state, business, owner) <= 0)
+    return reject7("not_yours", `${labelOf(ctx, owner)} owns no part of ${labelOf(ctx, business)}`);
+  const route = to.trim();
+  if (route !== "" && route !== "reinvest") {
+    if (own(ctx.state.entities, route)?.kind !== "account")
+      return reject7("not_account", `${labelOf(ctx, route)} isn't an account`);
+    if (!api.accountsOf(ctx, owner, "worth").includes(route) && !api.accountsOf(ctx, owner, "spend").includes(route))
+      return reject7("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, owner)}'s`);
+  }
+  const current = stakeRoute(ctx, owner, business);
+  const now = current === null ? "" : ("reinvest" in current) ? "reinvest" : current.account;
+  return now === route ? [] : [{ type: "economy.stake_route", data: { business, owner, to: route } }];
+}
+function sellStake(api, ctx, x) {
+  if (api.partyKind(ctx, x.business) !== "business")
+    return reject7("not_business", `${labelOf(ctx, x.business)} isn't a business`);
+  const owners = api.ownersOf(ctx.state, x.business);
+  const shares = worthShares(owners);
+  const held = shares[x.party] ?? 0;
+  if (held <= 0)
+    return reject7("not_yours", `${labelOf(ctx, x.party)} owns no part of ${labelOf(ctx, x.business)}`);
+  const share = Math.min(held, x.share);
+  if (!(share > 0))
+    return reject7("bad_amount", "say what share to sell");
+  if (x.share > held + 0.000000001)
+    return reject7("declined", `${labelOf(ctx, x.party)} owns ${Math.round(held * 100) / 100}% of ${labelOf(ctx, x.business)}, not ${x.share}%`);
+  const price = Math.round(x.price);
+  if (!(price >= 0) || !Number.isSafeInteger(price))
+    return reject7("bad_amount", "a price is a whole amount");
+  if (x.buyer !== undefined && (!own(ctx.state.entities, x.buyer) || x.buyer === x.party || x.buyer === x.business))
+    return reject7("missing_entity", `no buyer ${labelOf(ctx, x.buyer)}`);
+  const whole = Math.abs(share - held) < 0.000000001;
+  if (x.buyer === undefined && !(whole && held >= 100 - 0.000000001))
+    return reject7("needs_buyer", `selling part of ${labelOf(ctx, x.business)} needs a buyer in the world`);
+  const to = x.to ?? api.depositAccount(ctx, x.party);
+  if (!to)
+    return reject7("no_account", `${labelOf(ctx, x.party)} has no account the money could go to`);
+  const memo = `Sold ${Math.round(share * 100) / 100}% of ${labelOf(ctx, x.business)} for ${formatMoney(price, ctx.world.currency)}`;
+  const events = [];
+  if (price > 0) {
+    const paid = x.buyer ? api.pay(ctx, { from: x.buyer, to: x.party, cents: price, memo, deposit: to, kind: "purchase", category: "investment" }) : api.post(ctx, [{ account: api.outside(`buyer:${x.business}`), amount: -price }, { account: to, amount: price }], { memo, kind: "sale", category: "investment" });
+    if (!Array.isArray(paid))
+      return paid;
+    events.push(...paid);
+  }
+  const next = [];
+  for (const o of owners) {
+    const pct = (shares[o.party] ?? 0) - (o.party === x.party ? share : 0) + (o.party === x.buyer ? share : 0);
+    if (o.party === x.party && pct <= 0.000000001)
+      continue;
+    next.push({ party: o.party, role: o.role, share: Math.round(pct * 1e4) / 1e4 });
+  }
+  if (x.buyer && !next.some((o) => o.party === x.buyer))
+    next.push({ party: x.buyer, role: "owner", share: Math.round(share * 1e4) / 1e4 });
+  return unit2([
+    ...events,
+    disposal(x.business, x.party, share / held * 100, price, memo),
+    { type: "set", entity: x.business, field: "owners", value: next },
+    ...x.buyer ? [acquisition(x.business, x.buyer, price)] : []
+  ]);
+}
+function registerStakes(r) {
+  r.fields("business", BUSINESS_FIELDS2);
+  r.core.event(routeEvent);
+  r.core.query("economy.stake_route", stakeRoute);
+  r.core.service("economy.stake_paid", (_ctx, owner, business, cents, reinvested) => incomeFor(business, owner, Math.round(cents), "profit", reinvested));
+  r.core.effect({
+    type: "economy.stake_sell",
+    args: ["business", "share", "price", "buyer?", "to?", "party?"],
+    resolve: (a, ctx) => {
+      const buyer = strOf(a.buyer);
+      const to = strOf(a.to);
+      return sellStake(r.api, ctx, { party: strOf(a.party) || ctx.world.pov, business: strOf(a.business), share: typeof a.share === "number" ? a.share : NaN, price: typeof a.price === "number" ? a.price : NaN, ...buyer ? { buyer } : {}, ...to ? { to } : {} });
+    }
+  });
+  r.core.action({
+    id: "stake_sell",
+    label: "Sell a share of a business",
+    pack: "economy",
+    params: { business: { type: "ref", ref: "business" }, share: { type: "number", label: "Share, %" }, price: { type: "money", label: "Price" }, buyer: { type: "ref", ref: "person", label: "Buyer", optional: true }, to: { type: "ref", ref: "account", label: "Proceeds to", optional: true } },
+    requires: ["money_feature('investments', self)"],
+    outcomes: { default: [{ type: "economy.stake_sell", args: { party: "self", business: "business", share: "=params.share", price: "=params.price", buyer: "=params.buyer", to: "=params.to" } }] },
+    duration: "60",
+    lexicon: ["sell my share of the business", "sell the shop"],
+    observable: "signs a stack of papers"
+  });
+  r.core.formula("business_value", (ctx, id) => businessValue(r.api, ctx, String(id ?? "")));
+}
+
+// src/packs/economy/core/wealth.ts
+function setRentRoute(api, ctx, party, property, to) {
+  if (own(ctx.state.entities, property)?.kind !== "property")
+    return reject7("missing_property", `no property ${labelOf(ctx, property)}`);
+  if (!api.ownersOf(ctx.state, property).some((o) => o.party === party && (o.role === "owner" || o.role === "joint" || o.role === "trustee" || o.role === "custodian")))
+    return reject7("not_yours", `${labelOf(ctx, property)} isn't ${labelOf(ctx, party)}'s to manage`);
+  const route = to.trim();
+  if (route === "reinvest")
+    return reject7("bad_route", "rent goes to an account");
+  if (route !== "") {
+    if (own(ctx.state.entities, route)?.kind !== "account")
+      return reject7("not_account", `${labelOf(ctx, route)} isn't an account`);
+    if (!api.accountsOf(ctx, party, "worth").includes(route) && !api.accountsOf(ctx, party, "spend").includes(route))
+      return reject7("not_yours", `${labelOf(ctx, route)} isn't ${labelOf(ctx, party)}'s`);
+  }
+  if (strOf(own(ctx.state.entities, property)?.fields.rent_to) === route)
+    return [];
+  return [{ type: "set", entity: property, field: "rent_to", value: route === "" ? null : route }];
+}
+function about(ctx, cents) {
+  const abs = Math.abs(cents);
+  const step = abs >= 1e5 ? Math.pow(10, Math.floor(Math.log10(abs)) - 1) : 100;
+  return formatMoney(Math.sign(cents) * Math.round(abs / step) * step, ctx.world.currency);
+}
+function investmentsView(api, ctx, party, detail) {
+  const holdings = visibleHoldings(api, ctx, party).map((id) => holdingView(api, ctx, id, detail)).filter((h) => h !== null);
+  if (holdings.length === 0 && !api.feature(ctx, party, "investments"))
+    return null;
+  const year = dateAt(calendarOf(ctx.world), ctx.state.clock).year;
+  const gains = gainsIn(ctx.state, party, year);
+  const income = incomeIn(ctx.state, party, year);
+  const held = new Set(holdings.map((h) => h.asset.id));
+  const market = Object.keys(configAssets(ctx.world)).sort().flatMap((id) => {
+    const def = readAssetDef(own(configAssets(ctx.world), id));
+    const a = def ? assetOf(ctx, id) : null;
+    if (!a || held.has(id) || a.class === "property" || a.class === "business_stake")
+      return [];
+    if (a.option && (!api.feature(ctx, party, "options") || ctx.state.clock >= a.option.expiry))
+      return [];
+    return [{ asset: id, label: a.label, class: a.class, symbol: a.symbol, price: priceOf2(ctx, a) }];
+  });
+  const tax = detail ? taxEstimate(api, ctx, party) : null;
+  return {
+    value: holdings.reduce((s, h) => s + h.value, 0),
+    cost: holdings.reduce((s, h) => s + h.cost, 0),
+    unrealised: holdings.reduce((s, h) => s + h.gain, 0),
+    realised: detail ? gains.short + gains.long : 0,
+    income: income.dividend + income.interest + income.profit,
+    realisedShort: detail ? gains.short : 0,
+    realisedLong: detail ? gains.long : 0,
+    taxDue: tax ? { cents: tax.cents, at: dateText3(ctx.world, tax.at) } : null,
+    holdings,
+    market,
+    accounts: api.accountsOf(ctx, party, "spend").filter((a) => api.traitsOf(ctx, a)?.investment === true)
+  };
+}
+function alertsFor(api, ctx, party) {
+  const out = [];
+  const day = 1440;
+  for (const id of visibleHoldings(api, ctx, party)) {
+    const a = assetOf(ctx, strOf(own(ctx.state.entities, id)?.fields.asset));
+    if (!a)
+      continue;
+    const qty = qtyOf(lotsOf(ctx, id));
+    if (a.option && a.option.expiry > ctx.state.clock && a.option.expiry - ctx.state.clock <= 7 * day)
+      out.push({ tone: "warn", text: `${unitsWord(qty, "contract")} of ${a.label} expire ${dateText3(ctx.world, a.option.expiry)}.` });
+    if (a.bond && a.bond.maturity > ctx.state.clock && a.bond.maturity - ctx.state.clock <= 31 * day)
+      out.push({ tone: "info", text: `${a.label} matures ${dateText3(ctx.world, a.bond.maturity)}.` });
+  }
+  return out;
+}
+function unitsWord(qty, word) {
+  return `${Math.round(qty * 1e4) / 1e4} ${word}${qty === 1 ? "" : "s"}`;
+}
+function summaryLines(api, ctx, who) {
+  const out = [];
+  const invested = holdingsWorth(api, ctx, who).assets;
+  if (invested > 0)
+    out.push(`Has about ${about(ctx, invested)} invested.`);
+  for (const id of propertyIds(ctx.state)) {
+    const share = api.shareOf(ctx.state, id, who);
+    if (share <= 0)
+      continue;
+    const owed = securedLoans(api, ctx.state, id).reduce((a, l) => a + l.owed, 0);
+    const part = share < 100 ? `a ${Math.round(share)}% share of ` : "";
+    out.push(`Owns ${part}${labelOf(ctx, id)} (worth ${about(ctx, propertyValue(ctx.state, id))}${owed > 0 ? `; ${about(ctx, owed)} left on the mortgage` : ""}).`);
+  }
+  const rent = monthlyRent(api, ctx, who);
+  if (rent > 0)
+    out.push(`Collects about ${about(ctx, rent)} a month in rent.`);
+  for (const id of businessIds2(api, ctx)) {
+    const share = api.shareOf(ctx.state, id, who);
+    if (share <= 0 || id === who)
+      continue;
+    out.push(`Owns ${share < 100 ? `${Math.round(share)}% of ` : ""}${labelOf(ctx, id)} (worth about ${about(ctx, Math.round(businessValue(api, ctx, id) * share / 100))}).`);
+  }
+  return out;
+}
+function registerAssets(r) {
+  registerMarkets(r);
+  registerHoldings(r);
+  registerIncome(r);
+  registerOptions(r);
+  registerGains(r);
+  registerProperty(r);
+  registerStakes(r);
+  r.core.effect({
+    type: "economy.route",
+    args: ["holding?", "property?", "business?", "to?", "party?"],
+    gm: true,
+    resolve: (a, ctx) => {
+      const party = strOf(a.party) || ctx.world.pov;
+      const to = strOf(a.to);
+      if (strOf(a.holding) !== "")
+        return setRoute(r.api, ctx, party, strOf(a.holding), to);
+      if (strOf(a.property) !== "")
+        return setRentRoute(r.api, ctx, party, strOf(a.property), to);
+      if (strOf(a.business) !== "")
+        return setStakeRoute(r.api, ctx, party, strOf(a.business), to);
+      return reject7("bad_route", "say which holding, property or business");
+    }
+  });
+  r.core.action({
+    id: "route_distributions",
+    label: "Route dividends, rent or profits",
+    pack: "economy",
+    params: {
+      holding: { type: "ref", ref: "holding", optional: true },
+      property: { type: "ref", ref: "property", optional: true },
+      business: { type: "ref", ref: "business", optional: true },
+      to: { type: "text", label: "To (an account, or reinvest)", optional: true }
+    },
+    requires: ["level.money >= 3"],
+    outcomes: { default: [{ type: "economy.route", args: { party: "self", holding: "=params.holding", property: "=params.property", business: "=params.business", to: "=params.to" } }] },
+    duration: "1",
+    lexicon: ["reinvest dividends", "send dividends to", "send the rent to"],
+    observable: "checks their phone"
+  });
+  r.worth((ctx, party) => {
+    const h = holdingsWorth(r.api, ctx, party);
+    const p = propertyWorth(r.api, ctx, party);
+    const s = stakeWorth(r.api, ctx, party);
+    return { assets: h.assets + p.assets + s.assets, liabilities: 0, lines: [...h.lines, ...p.lines, ...s.lines] };
+  });
+  r.view((ctx, party, view) => ({
+    investments: investmentsView(r.api, ctx, party, view.detail),
+    properties: r.api.feature(ctx, party, "property") || visibleProperties(r.api, ctx, party).some((id) => r.api.shareOf(ctx.state, id, party) > 0) ? visibleProperties(r.api, ctx, party).map((id) => propertyView(r.api, ctx, id, party, view.flows)) : [],
+    alerts: alertsFor(r.api, ctx, party)
+  }));
+  r.summary((ctx, who) => summaryLines(r.api, ctx, who));
+}
+
+// src/packs/economy/core/modules.ts
+var FINANCE_MODULES = [
+  { id: "work", register: registerWork },
+  { id: "assets", register: registerAssets }
+];
+
+// src/packs/economy/core/credit.ts
+var MONTH = 1440 * 30.4;
+function creditEntriesOf(ctx, person) {
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
+  return (Array.isArray(raw.entries) ? raw.entries : []).map((x) => objOf(x));
+}
+function creditAccounts(ctx, person) {
+  return accountsOf(ctx, person, "worth").filter((id) => {
+    const c = classOf2(ctx, id);
+    return c !== null && isCredit(c);
+  });
+}
+function ageMonths(ctx, account) {
+  const opened = strOf(own(ctx.state.entities, account)?.fields.opened);
+  let at = 0;
+  if (opened !== "") {
+    try {
+      at = clockOfLocal(calendarOf(ctx.world), opened.slice(0, 10));
+    } catch {
+      at = 0;
+    }
+  }
+  return Math.max(0, (ctx.state.clock - at) / MONTH);
+}
+function scoreFactors(ctx, person) {
+  const accounts = creditAccounts(ctx, person);
+  const entries = creditEntriesOf(ctx, person);
+  if (accounts.length === 0 && entries.length === 0)
+    return null;
+  const now = ctx.state.clock;
+  const recent = entries.filter((e) => now - numOf(e.at) <= 24 * MONTH);
+  let payment = 1;
+  for (const e of recent) {
+    if (e.kind === "late")
+      payment -= e.days === 30 ? 0.15 : e.days === 60 ? 0.25 : 0.35;
+    if (e.kind === "collections")
+      payment -= 0.5;
+    if (e.kind === "charged_off")
+      payment -= 0.6;
+  }
+  let limit = 0;
+  let owed = 0;
+  let revolving = false;
+  let installment = false;
+  for (const id of accounts) {
+    const c = classOf2(ctx, id);
+    if (CLASS_TRAITS[c].revolving) {
+      revolving = true;
+      const p = productOf(ctx, id);
+      if (p?.limit !== null && p?.limit !== undefined) {
+        limit += p.limit;
+        owed += Math.max(0, -balance(ctx.state, id));
+      }
+    }
+    if (CLASS_TRAITS[c].installment)
+      installment = true;
+  }
+  const u = limit > 0 ? owed / limit : null;
+  const utilisation = u === null ? 0.7 : u <= 0.1 ? 1 : u <= 0.3 ? 0.85 : u <= 0.5 ? 0.6 : u <= 0.75 ? 0.35 : 0.1;
+  const ages = accounts.map((id) => ageMonths(ctx, id));
+  const age = ages.length > 0 ? Math.min(1, ages.reduce((a, b) => a + b, 0) / ages.length / 120) : 0;
+  const mix = revolving && installment ? 1 : revolving || installment ? 0.6 : 0.3;
+  const inquiries = entries.filter((e) => e.kind === "inquiry" && now - numOf(e.at) <= 12 * MONTH).length;
+  return { payment: Math.max(0, payment), utilisation, age, mix, recent: Math.max(0.4, 1 - 0.1 * inquiries) };
+}
+function scoreOf(f) {
+  const weighted = 0.35 * f.payment + 0.3 * f.utilisation + 0.15 * f.age + 0.1 * f.mix + 0.1 * f.recent;
+  return Math.max(SCORE_MIN, Math.min(SCORE_MAX, Math.round(SCORE_MIN + (SCORE_MAX - SCORE_MIN) * weighted)));
+}
+function currentScore(ctx, person) {
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
+  if (typeof raw.score === "number")
+    return raw.score;
+  const f = scoreFactors(ctx, person);
+  return f ? scoreOf(f) : null;
+}
+function monthlyScore(ctx, person, at) {
+  const f = scoreFactors(ctx, person);
+  return f ? [{ type: FINANCE_EVENTS.score, data: { person, score: scoreOf(f), factors: { ...f }, at } }] : [];
+}
+var TIER_KEYS = { super_prime: "super_prime_781_850", prime: "prime_661_780", nonprime: "nonprime_601_660", subprime: "subprime_501_600", deep_subprime: "deep_subprime_300_500" };
+function aprFor(ctx, cls, score) {
+  const tier = creditTierOf(score ?? 700);
+  const rows = ctx.tables.get("economy.finance")?.rows ?? {};
+  const loans = objOf(rows.loans?.values);
+  const auto = objOf(objOf(loans.auto).apr_by_credit_tier_used_pct);
+  if (cls === "loan" && typeof auto[TIER_KEYS[tier]] === "number")
+    return auto[TIER_KEYS[tier]];
+  const band = cls === "credit_card" ? objOf(objOf(rows.credit_card?.values).apr_pct) : cls === "mortgage" ? objOf(objOf(loans.mortgage).apr_pct_30yr_fixed) : cls === "line_of_credit" ? objOf(objOf(loans.personal).apr_pct) : null;
+  if (!band || typeof band.min !== "number" || typeof band.max !== "number")
+    return null;
+  const step = ["super_prime", "prime", "nonprime", "subprime", "deep_subprime"].indexOf(tier) / 4;
+  return Math.round((band.min + (band.max - band.min) * step) * 100) / 100;
+}
+function limitFor(ctx, cls, score) {
+  if (!CLASS_TRAITS[cls].revolving || cls === "charge_card")
+    return null;
+  const limits = objOf(objOf(ctx.tables.get("economy.finance")?.rows.credit_card?.values).credit_limit_cents);
+  const tier = creditTierOf(score ?? 700);
+  return tier === "super_prime" ? numOf(limits.good_credit, 1500000) : tier === "prime" ? numOf(limits.typical, 1e6) : numOf(limits.starter, 50000);
+}
+function decide(ctx, person, app) {
+  const products = worldProducts(ctx.world);
+  const def = own(products, app.product);
+  const cls = def?.class ?? (isAccountClass(app.product) ? app.product : null);
+  if (!cls || !isCredit(cls))
+    return reject8("not_credit", `${app.product.replace(/_/g, " ")} isn't a kind of credit`);
+  const score = currentScore(ctx, person);
+  const entries = creditEntriesOf(ctx, person);
+  const chargedOff = entries.some((e) => e.kind === "charged_off" && ctx.state.clock - numOf(e.at) <= 24 * MONTH);
+  const secured = app.secured_by !== undefined && own(ctx.state.entities, app.secured_by) !== undefined;
+  const label = def?.label ?? CLASS_TRAITS[cls].label;
+  const tier = creditTierOf(score ?? 650);
+  if (!secured && (tier === "deep_subprime" || chargedOff))
+    return { approved: false, reason: chargedOff ? "a recent charge-off on their report" : "their credit score is too low", apr: null, limit: null, cls, label };
+  return { approved: true, reason: "", apr: def?.apr_pct ?? aprFor(ctx, cls, score), limit: typeof def?.limit === "number" ? def.limit : limitFor(ctx, cls, score), cls, label };
+}
+function creditReport(ctx, person) {
+  const cal = calendarOf(ctx.world);
+  const raw = objOf(own(objOf(sliceOf(ctx.state, "economy").credit), person));
+  const factors = scoreFactors(ctx, person);
+  const score = typeof raw.score === "number" ? raw.score : factors ? scoreOf(factors) : null;
+  const accounts = creditAccounts(ctx, person);
+  const entries = creditEntriesOf(ctx, person);
+  let limit = 0;
+  let owed = 0;
+  let ontime = 0;
+  let late = 0;
+  const rows = accounts.map((id) => {
+    const c = classOf2(ctx, id);
+    const p = productOf(ctx, id);
+    const cycle = cycleOf2(ctx.state, id);
+    const debt = Math.max(0, -balance(ctx.state, id));
+    if (CLASS_TRAITS[c].revolving && p?.limit) {
+      limit += p.limit;
+      owed += debt;
+    }
+    ontime += cycle?.ontime ?? 0;
+    late += (cycle?.late30 ?? 0) + (cycle?.late60 ?? 0) + (cycle?.late90 ?? 0);
+    const opened = strOf(own(ctx.state.entities, id)?.fields.opened);
+    return { id, name: labelOf(ctx, id), class: c, status: statusOf(ctx.state, id), limit: p?.limit ?? null, owed: debt, opened: opened !== "" ? opened : null, late30: cycle?.late30 ?? 0, late60: cycle?.late60 ?? 0, late90: cycle?.late90 ?? 0 };
+  });
+  const ages = accounts.map((id) => ageMonths(ctx, id));
+  const when = (at) => formatClock(cal, at).split(",")[0] ?? "";
+  const products = { ...Object.fromEntries(["credit_card", "line_of_credit", "loan"].map((c) => [c, { label: CLASS_TRAITS[c].label, class: c }])), ...Object.fromEntries(Object.entries(worldProducts(ctx.world)).map(([id, p]) => [id, { label: p.label, class: p.class }])) };
+  const offers = Object.entries(products).filter(([, p]) => isCredit(p.class) && p.class !== "mortgage").map(([product, p]) => ({ product, label: p.label, class: p.class, aprPct: aprFor(ctx, p.class, score), limit: limitFor(ctx, p.class, score) }));
+  return {
+    person,
+    score,
+    band: score === null ? null : scoreBand(score),
+    tier: score === null ? null : creditTierOf(score),
+    asOf: typeof raw.at === "number" ? when(raw.at) : null,
+    factors,
+    history: (Array.isArray(raw.history) ? raw.history : []).map((h) => objOf(h)).map((h) => ({ at: when(numOf(h.at)), score: numOf(h.score) })),
+    utilisationPct: limit > 0 ? Math.round(owed * 1000 / limit) / 10 : 0,
+    ageMonths: ages.length > 0 ? Math.round(ages.reduce((a, b) => a + b, 0) / ages.length) : 0,
+    onTimePct: ontime + late > 0 ? Math.round(ontime * 1000 / (ontime + late)) / 10 : 100,
+    accounts: rows,
+    inquiries: entries.filter((e) => e.kind === "inquiry").map((e) => ({ at: when(numOf(e.at)), note: strOf(e.note) })),
+    marks: entries.filter((e) => e.kind === "collections" || e.kind === "charged_off" || e.kind === "late").map((e) => ({ at: when(numOf(e.at)), kind: e.kind, note: e.kind === "late" ? `${labelOf(ctx, strOf(e.account))}: ${numOf(e.days)} days late` : `${labelOf(ctx, strOf(e.account))}: ${e.kind.replace(/_/g, " ")}` })),
+    offers
+  };
+}
+function hasCreditFile(ctx, person) {
+  return creditAccounts(ctx, person).length > 0 || creditEntriesOf(ctx, person).length > 0;
+}
+function scoreInstants(ctx, from, to) {
+  const cal = calendarOf(ctx.world);
+  const out = [];
+  for (let d = dateAt(cal, from).dayIndex;d <= dateAt(cal, to).dayIndex; d++) {
+    const at = clockAt(cal, d, 360);
+    if (dateAt(cal, at).day === 1 && at > from && at <= to)
+      out.push(at);
+  }
+  return out;
+}
+
+// src/packs/economy/core/pay.ts
+var PAY_METHODS = ["auto", "cash", "card", "credit", "debit", "charge", "checking", "savings", "account"];
+function payMethodOf(text) {
+  const t = text.trim().toLowerCase();
+  const exact = PAY_METHODS.find((m) => m === t);
+  if (exact)
+    return exact === "card" ? "credit" : exact === "checking" ? "debit" : exact;
+  if (/\b(debit|checking|check|bank)\b/.test(t))
+    return "debit";
+  if (/\bsavings?\b/.test(t))
+    return "savings";
+  if (/\bcharge card\b/.test(t))
+    return "charge";
+  if (/\b(credit|card|visa|mastercard|amex)\b/.test(t))
+    return "credit";
+  if (/\b(cash|wallet|coins?)\b/.test(t))
+    return "cash";
+  return "auto";
+}
+function isRejection5(v) {
+  return !Array.isArray(v);
+}
+function toggles(world) {
+  return objOf(objOf(world.packs.economy?.config).features);
+}
+function featureFor(ctx, party, feature) {
+  return featureOn(ctx.levelOf(party, "money"), feature, toggles(ctx.world));
+}
+function accountLevel(ctx, account) {
+  const owners = ownersOf(ctx.state, account).filter((o) => own(ctx.state.entities, o.party));
+  const spenders = owners.filter((o) => rightsOf(ctx.state, account, o.party)?.spend);
+  return Math.max(0, ...(spenders.length > 0 ? spenders : owners).map((o) => ctx.levelOf(o.party, "money")));
+}
+function accountFeature(ctx, account, feature) {
+  return featureOn(accountLevel(ctx, account), feature, toggles(ctx.world));
+}
+function isParty(ctx, id) {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  return kind !== "" && ["person", "business", "trust", "household"].some((k) => kindIs(ctx.registry, ctx.world, kind, k));
+}
+function cardsOn(state, account) {
+  return Object.keys(state.entities).filter((id) => own(state.entities, id)?.kind === "card" && own(state.entities, id)?.fields.account === account).sort();
+}
+function cardProblem(ctx, card, holder) {
+  const e = own(ctx.state.entities, card);
+  if (!e || e.kind !== "card")
+    return "isn't a card";
+  const name = e.name;
+  if (strOf(e.fields.holder) !== holder)
+    return `${name} isn't theirs`;
+  const state = strOf(e.fields.state, "active");
+  if (state !== "active")
+    return `${name} is ${state}`;
+  const item = strOf(e.fields.item);
+  if (item !== "" && own(ctx.state.entities, item) && isLost(ctx.state, item))
+    return `${name} is lost`;
+  const account = strOf(e.fields.account);
+  if (statusOf(ctx.state, account) !== "open")
+    return `${own(ctx.state.entities, account)?.name ?? account} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`;
+  return null;
+}
+function spendable(ctx, party) {
+  return accountsOf(ctx, party, "spend").filter((id) => statusOf(ctx.state, id) === "open" && traitsOf(ctx, id)?.pays === true);
+}
+function cardSources(ctx, payer, accounts, via, till, problems) {
+  const out = [];
+  const cards = featureFor(ctx, payer, "cards");
+  for (const account of accounts) {
+    const instruments = cardsOn(ctx.state, account);
+    if (!till || !cards || instruments.length === 0) {
+      out.push({ account, via });
+      continue;
+    }
+    for (const card of instruments) {
+      if (strOf(own(ctx.state.entities, card)?.fields.holder) !== payer)
+        continue;
+      const problem = cardProblem(ctx, card, payer);
+      if (problem)
+        problems.push(problem);
+      else
+        out.push({ account, card, via });
+    }
+  }
+  return out;
+}
+function sourcesFor(ctx, payer, use, till, problems) {
+  const mine = spendable(ctx, payer);
+  const where = (pred) => mine.filter((id) => {
+    const t = traitsOf(ctx, id);
+    return t !== null && pred(t, classOf2(ctx, id) ?? "");
+  });
+  switch (use) {
+    case "cash":
+      return till ? where((t) => t.cash).filter((id) => cashOnHolder(ctx.state, id, payer)).map((account) => ({ account, via: "cash" })) : [];
+    case "debit":
+    case "checking":
+      return cardSources(ctx, payer, where((t) => t.transactional), till ? "debit" : "account", till, problems);
+    case "credit":
+    case "card":
+      return cardSources(ctx, payer, where((_t, c) => c === "credit_card" || !till && c === "line_of_credit"), "credit", till, problems);
+    case "charge":
+      return cardSources(ctx, payer, where((_t, c) => c === "charge_card"), "charge", till, problems);
+    case "savings":
+      return where((_t, c) => c === "savings" || c === "money_market" || c === "trust").map((account) => ({ account, via: "savings" }));
+    default: {
+      const e = own(ctx.state.entities, use);
+      if (e?.kind === "card") {
+        const problem = cardProblem(ctx, use, payer);
+        if (problem) {
+          problems.push(problem);
+          return [];
+        }
+        const account = strOf(e.fields.account);
+        return mine.includes(account) ? [{ account, card: use, via: e.fields.network === "debit" ? "debit" : e.fields.network === "charge" ? "charge" : "credit" }] : [];
+      }
+      return mine.includes(use) ? [{ account: use, via: classOf2(ctx, use) === "cash" ? "cash" : "account" }] : [];
+    }
+  }
+}
+function overdraftRoom(ctx, account) {
+  const t = traitsOf(ctx, account);
+  if (!t?.transactional || !accountFeature(ctx, account, "overdraft"))
+    return 0;
+  const p = productOf(ctx, account);
+  if (!p)
+    return 0;
+  if (p.overdraft === "fee")
+    return Math.max(0, p.overdraft_limit);
+  if (p.overdraft === "linked") {
+    const link = strOf(own(ctx.state.entities, account)?.fields.overdraft_link);
+    const holders = holdersOf(ctx.state, account);
+    return link !== "" && holders.some((h) => canSpend(ctx.state, link, h)) ? Math.max(0, availableOf(ctx, link)) : 0;
+  }
+  return 0;
+}
+function cardRoom(ctx, card, what) {
+  const e = own(ctx.state.entities, card);
+  if (!e)
+    return Infinity;
+  const account = strOf(e.fields.account);
+  if (!accountFeature(ctx, account, "daily_limits"))
+    return Infinity;
+  const p = productOf(ctx, account);
+  const field = what === "purchase" ? "daily_purchase_limit" : "daily_atm_limit";
+  const limit = typeof e.fields[field] === "number" ? e.fields[field] : p?.[field] ?? null;
+  if (limit === null)
+    return Infinity;
+  const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+  const spent = spendOf(ctx.state, card, day)[what];
+  return Math.max(0, limit - spent);
+}
+function covers(ctx, s, cents, overdraft) {
+  if (s.card && cardRoom(ctx, s.card, "purchase") < cents)
+    return false;
+  return availableOf(ctx, s.account) + (overdraft ? overdraftRoom(ctx, s.account) : 0) >= cents;
+}
+function defaultTiers2(ctx, who) {
+  const e = own(ctx.state.entities, who);
+  const band = hasLedger(ctx, who) ? wealthBand(shownWorth(ctx, who)) : strOf(e?.fields.wealth, "modest");
+  const traits = (Array.isArray(e?.fields.traits) ? e.fields.traits : []).map((t) => String(t).toLowerCase()).join(" ");
+  const careful = /\b(frugal|thrifty|careful|cautious|old-fashioned|old fashioned|prudent|stingy|saver)\b/.test(traits);
+  const loose = /\b(impulsive|reckless|spendthrift|flashy|extravagant|generous|lavish)\b/.test(traits);
+  if (kindIs(ctx.registry, ctx.world, e?.kind ?? "", "business"))
+    return [{ use: "debit" }, { use: "credit" }];
+  if (loose)
+    return [{ use: "credit" }, { use: "charge" }, { use: "debit" }, { use: "cash" }];
+  switch (band) {
+    case "broke":
+    case "poor":
+      return [{ use: "cash", max: careful ? 5000 : 2000 }, { use: "debit" }, { use: "credit" }];
+    case "modest":
+      return careful ? [{ use: "cash", max: 5000 }, { use: "debit" }, { use: "credit", min: 50000 }] : [{ use: "cash", max: 1000 }, { use: "debit", max: 20000 }, { use: "credit" }, { use: "debit" }];
+    case "comfortable":
+      return careful ? [{ use: "cash", max: 1000 }, { use: "debit" }, { use: "credit" }] : [{ use: "cash", max: 500 }, { use: "credit" }, { use: "debit" }];
+    default:
+      return [{ use: "charge" }, { use: "credit" }, { use: "debit" }];
+  }
+}
+function shownWorth(ctx, who) {
+  return accountsWorth(ctx, who, (id) => balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening))));
+}
+function tiersOf(ctx, who) {
+  const raw = own(ctx.state.entities, who)?.fields.pay_prefs;
+  const own_ = [];
+  for (const t of Array.isArray(raw) ? raw : []) {
+    const o = objOf(t);
+    if (typeof o.use !== "string" || o.use === "")
+      continue;
+    const list = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : undefined;
+    own_.push({ use: o.use, ...typeof o.min === "number" ? { min: o.min } : {}, ...typeof o.max === "number" ? { max: o.max } : {}, ...list(o.categories) ? { categories: list(o.categories) } : {}, ...list(o.except) ? { except: list(o.except) } : {} });
+  }
+  return own_.length > 0 ? own_ : defaultTiers2(ctx, who);
+}
+function tierFits(t, cents, category) {
+  if (t.min !== undefined && cents < t.min)
+    return false;
+  if (t.max !== undefined && cents > t.max)
+    return false;
+  if (t.categories && t.categories.length > 0 && !t.categories.includes(category))
+    return false;
+  return !(t.except && t.except.includes(category));
+}
+function chooseSource(ctx, payer, cents, opts) {
+  const level = ctx.levelOf(payer, "money");
+  const problems = [];
+  const money = (c) => formatMoney(c, ctx.world.currency);
+  const usable = (s) => s.account !== opts.except;
+  if (opts.source) {
+    const named = sourcesFor(ctx, payer, opts.source, opts.till, problems).filter(usable);
+    const first = named[0];
+    if (first) {
+      if (level < 2 || covers(ctx, first, cents, opts.overdraft))
+        return first;
+      return reject8("declined", first.card ? `${labelOf(ctx, first.card)} was declined for ${money(cents)}` : `${labelOf(ctx, first.account)} can't cover ${money(cents)}`);
+    }
+    if (problems.length > 0)
+      return reject8("declined", `${problems[0]}`);
+  }
+  const method = opts.method ?? "auto";
+  const category = opts.category ?? "";
+  let uses;
+  if (method === "account")
+    uses = ["checking", "credit", "charge", "savings"];
+  else if (method === "auto") {
+    const tiers = level >= 2 && featureFor(ctx, payer, "payment_prefs") ? tiersOf(ctx, payer).filter((t) => tierFits(t, cents, category)).map((t) => t.use) : [];
+    uses = [...tiers, ...level >= 2 ? ["cash", "debit", "credit", "charge"] : ["cash", "debit", "credit", "savings"]];
+  } else
+    uses = method === "card" ? ["credit", "charge"] : method === "checking" ? ["debit"] : [method];
+  const tried = new Set;
+  const candidates = [];
+  for (const use of uses) {
+    for (const s of sourcesFor(ctx, payer, use, opts.till, problems).filter(usable)) {
+      const key = `${s.account}|${s.card ?? ""}`;
+      if (tried.has(key))
+        continue;
+      tried.add(key);
+      candidates.push(s);
+      if (covers(ctx, s, cents, opts.overdraft))
+        return s;
+    }
+  }
+  if (level < 2) {
+    const fallback = candidates[0] ?? spendable(ctx, payer).filter((id) => id !== opts.except).map((account) => ({ account, via: "account" }))[0];
+    if (fallback)
+      return fallback;
+  }
+  const name = own(ctx.state.entities, payer)?.name ?? payer;
+  if (problems.length > 0 && (method !== "auto" || candidates.length === 0))
+    return reject8("declined", problems[0] ?? `${name}'s card was declined`);
+  return reject8("declined", method === "credit" || method === "card" || method === "charge" ? `${name}'s card was declined` : `${name} doesn't have ${money(cents)} available`);
+}
+function depositAccount(ctx, party, except) {
+  const operating = strOf(own(ctx.state.entities, party)?.fields.operating_account);
+  if (operating !== "" && operating !== except && rightsOf(ctx.state, operating, party)?.worth && statusOf(ctx.state, operating) === "open")
+    return operating;
+  const ranked = accountsOf(ctx, party, "worth").filter((id) => id !== except && statusOf(ctx.state, id) === "open").map((id) => ({ id, rank: traitsOf(ctx, id)?.depositRank ?? null })).filter((x) => x.rank !== null && !(traitsOf(ctx, x.id)?.cash === true && !cashOnHolder(ctx.state, x.id, party)));
+  ranked.sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id));
+  return ranked[0]?.id ?? null;
+}
+function cashAccount(ctx, party) {
+  const cash = accountsOf(ctx, party, "spend").filter((id) => classOf2(ctx, id) === "cash");
+  return cash.find((id) => cashOnHolder(ctx.state, id, party)) ?? cash[0] ?? null;
+}
+function l1Move(state, who, delta) {
+  const a = anchorOf(state, who);
+  const after = notional(state, who) + delta;
+  const band = wealthBand(after);
+  const explicit = strOf(objOf(own(objOf(objOf(state.packs.economy).anchors), who)).band) === a.band;
+  const out = [];
+  if (!explicit || band !== a.band)
+    out.push({ type: FINANCE_EVENTS.anchor, data: { entity: who, band, typical: a.typical, base: a.base } });
+  if (band !== strOf(own(state.entities, who)?.fields.wealth, "modest"))
+    out.push({ type: "set", entity: who, field: "wealth", value: band });
+  return out;
+}
+function payeeSide(ctx, opts, cents) {
+  const payee = opts.payee;
+  if (payee && own(ctx.state.entities, payee)) {
+    if (hasLedger(ctx, payee) && ctx.levelOf(payee, "money") >= 1) {
+      const named = opts.deposit && rightsOf(ctx.state, opts.deposit, payee) && statusOf(ctx.state, opts.deposit) === "open" ? opts.deposit : undefined;
+      const deposit = named ?? depositAccount(ctx, payee);
+      if (deposit)
+        return { account: deposit, extra: [] };
+    }
+    const extra = ctx.levelOf(payee, "money") >= 1 && !hasLedger(ctx, payee) ? l1Move(ctx.state, payee, cents) : [];
+    return { account: external(payee), extra };
+  }
+  return { account: external(opts.counterparty ?? "market"), extra: [] };
+}
+function txn(lines, meta) {
+  const mine = lines.filter((l) => !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX));
+  const data = { memo: meta.memo, lines: mine.map((l) => ({ account: l.account, amount: l.amount })) };
+  if (meta.kind)
+    data.kind = meta.kind;
+  if (meta.category)
+    data.category = meta.category;
+  if (meta.counterparty)
+    data.counterparty = meta.counterparty;
+  if (meta.card)
+    data.card = meta.card;
+  if (meta.flow)
+    data.flow = meta.flow;
+  if (meta.pending !== undefined) {
+    data.status = "pending";
+    data.settles = meta.pending;
+  }
+  if (meta.narrated) {
+    data.narrated = meta.narrated.cents;
+    data.limited = meta.narrated.limited;
+  }
+  if (meta.at !== undefined)
+    data.at = meta.at;
+  return { type: FINANCE_EVENTS.txn, data };
+}
+function posting(lines, meta) {
+  return [{ type: "post", lines, memo: meta.memo }, txn(lines, meta)];
+}
+function asUnit(events) {
+  if (events.length < 2)
+    return events;
+  const group = `pay:${hashParts(JSON.stringify(events)).slice(0, 10)}`;
+  return events.map((e) => ({ ...e, group }));
+}
+function merged(lines) {
+  const out = [];
+  for (const l of lines) {
+    if (l.amount === 0)
+      continue;
+    const same = out.find((x) => x.account === l.account);
+    if (same)
+      same.amount += l.amount;
+    else
+      out.push({ ...l });
+  }
+  return out.filter((l) => l.amount !== 0);
+}
+function overdraftFeesToday(ctx, account) {
+  const cal = calendarOf(ctx.world);
+  const today = dateAt(cal, ctx.state.clock).dayIndex;
+  return journalOf(ctx.state, account).filter((j) => j.kind === "fee" && j.category === "overdraft" && dateAt(cal, j.at).dayIndex === today).length;
+}
+function overdraftEvents(ctx, account, total, at) {
+  const short = total - availableOf(ctx, account);
+  if (short <= 0 || overdraftRoom(ctx, account) <= 0)
+    return { before: [], after: [] };
+  const p = productOf(ctx, account);
+  if (!p)
+    return { before: [], after: [] };
+  if (p.overdraft === "linked") {
+    const link = strOf(own(ctx.state.entities, account)?.fields.overdraft_link);
+    const lines = [
+      { account: link, amount: -short },
+      { account, amount: short }
+    ];
+    return { before: posting(lines, { memo: `Overdraft transfer from ${labelOf(ctx, link)}`, kind: "transfer", category: "transfer", at }), after: [] };
+  }
+  const fee = accountFeature(ctx, account, "fees") && overdraftFeesToday(ctx, account) < 3 ? p.fees.overdraft : 0;
+  if (fee <= 0)
+    return { before: [], after: [] };
+  const lines = [
+    { account, amount: -fee },
+    { account: bankSide(p.institution), amount: fee }
+  ];
+  return { before: [], after: posting(lines, { memo: "Overdraft fee", kind: "fee", category: "overdraft", at }) };
+}
+function saleTermsOf(hooks, ctx, payer, cents, category, sale) {
+  for (const hook of hooks.sales) {
+    const terms = hook(ctx, { payer, place: sale.place, category, cents, item: sale.item });
+    if (terms)
+      return terms;
+  }
+  return null;
+}
+function charge(hooks, ctx, payer, rawCents, memo, opts = {}) {
+  if (!own(ctx.state.entities, payer))
+    return reject8("missing_entity", `no payer ${labelOf(ctx, payer)}`);
+  const cents = Math.round(rawCents);
+  if (!(cents > 0))
+    return [];
+  const level = ctx.levelOf(payer, "money");
+  if (level === 0)
+    return [];
+  const at = opts.at ?? ctx.state.clock;
+  const terms = opts.sale ? saleTermsOf(hooks, ctx, payer, cents, opts.category ?? "", opts.sale) : null;
+  const tax = Math.max(0, Math.round(terms?.tax ?? 0));
+  const cashback = Math.max(0, Math.round(opts.cashback ?? 0));
+  const total = cents + tax + cashback;
+  const overdraft = opts.overdraft !== false;
+  const out = [];
+  let source;
+  let picked = null;
+  if (hasLedger(ctx, payer)) {
+    const p = chooseSource(ctx, payer, total, { method: opts.method, source: opts.source, category: opts.category, till: opts.sale !== undefined, overdraft });
+    if ("code" in p)
+      return p;
+    picked = p;
+    source = p.account;
+    if (cashback > 0 && p.via !== "debit")
+      return reject8("no_cashback", "cash back comes only with a debit card");
+  } else {
+    if (cashback > 0)
+      return reject8("no_cashback", "cash back needs an account");
+    if (level >= 1 && notional(ctx.state, payer) < total)
+      return reject8("declined", `${labelOf(ctx, payer)} can't afford ${formatMoney(total, ctx.world.currency)}`);
+    source = external(payer);
+    out.push(...l1Move(ctx.state, payer, -total));
+  }
+  const dest = terms?.seller ? payeeSide(ctx, { payee: terms.seller, ...terms.deposit ? { deposit: terms.deposit } : {} }, cents) : payeeSide(ctx, opts, cents);
+  const wallet = cashback > 0 ? cashAccount(ctx, payer) : null;
+  if (cashback > 0 && !wallet)
+    return reject8("no_cashback", `${labelOf(ctx, payer)} has nowhere to carry cash`);
+  const lines = merged([
+    { account: source, amount: -total },
+    { account: dest.account, amount: cents },
+    ...tax > 0 ? [{ account: terms?.taxAccount ?? dest.account, amount: tax }] : [],
+    ...wallet ? [{ account: wallet, amount: cashback }] : []
+  ]);
+  const od = picked && overdraft ? overdraftEvents(ctx, source, total, at) : { before: [], after: [] };
+  const holds = picked?.card !== undefined && featureFor(ctx, payer, "holds");
+  const counterparty = opts.payee ? labelOf(ctx, terms?.seller ?? opts.payee) : terms?.seller ? labelOf(ctx, terms.seller) : opts.counterparty ?? undefined;
+  const meta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...opts.category ? { category: opts.category } : {}, ...counterparty ? { counterparty: counterparty.replace(/_/g, " ") } : {}, ...picked?.card ? { card: picked.card } : {}, ...opts.flow ? { flow: opts.flow } : {}, ...holds ? { pending: at + 1440 } : {}, ...opts.narrated ? { narrated: opts.narrated } : {}, ...opts.at !== undefined ? { at: opts.at } : {} };
+  const spend = [];
+  if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
+    const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+    const s = spendOf(ctx.state, picked.card, day);
+    spend.push({ type: FINANCE_EVENTS.spend, data: { card: picked.card, day, purchase: s.purchase + cents + tax, atm: s.atm } });
+  }
+  return asUnit([...od.before, { type: "post", lines, memo }, ...out, ...dest.extra, txn(lines, meta), ...terms?.extra ?? [], ...od.after, ...spend]);
+}
+function moverOf(ctx, from, to) {
+  return holdersOf(ctx.state, from).find((p) => canSpend(ctx.state, from, p) && rightsOf(ctx.state, to, p) !== null) ?? null;
+}
+function move(ctx, from, to, cents, memo, opts = {}) {
+  const s = ctx.state;
+  if (own(s.entities, from)?.kind !== "account" || own(s.entities, to)?.kind !== "account")
+    return reject8("missing_account", "both accounts must exist");
+  if (from === to)
+    return reject8("bad_party", `${labelOf(ctx, from)} can't pay itself`);
+  const party = moverOf(ctx, from, to);
+  if (!party)
+    return reject8("not_owner", "both accounts must belong to the same holder");
+  const fromTraits = traitsOf(ctx, from);
+  const toTraits = traitsOf(ctx, to);
+  if (!fromTraits || !toTraits)
+    return reject8("missing_account", "both accounts must exist");
+  if (fromTraits.locked)
+    return reject8("locked", `${labelOf(ctx, from)} can't be drawn on here`);
+  let c = Math.round(cents);
+  if (!(c > 0))
+    return reject8("bad_amount", "the amount must be positive");
+  if (toTraits.liability) {
+    const owed = -balance(s, to);
+    if (owed <= 0)
+      return reject8("nothing_owed", `${labelOf(ctx, to)} owes nothing`);
+    if (c > owed) {
+      if (!opts.cap)
+        return reject8("overpay", `${labelOf(ctx, to)} owes only ${formatMoney(owed, ctx.world.currency)}`);
+      c = owed;
+    }
+  }
+  if (!opts.unchecked && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c)
+    return reject8("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c, ctx.world.currency)}`);
+  const lines = [
+    { account: from, amount: -c },
+    { account: to, amount: c }
+  ];
+  const out = [{ type: "post", lines, memo }];
+  if (toTraits.liability)
+    out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
+  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: "transfer", ...opts.flow ? { flow: opts.flow } : {}, ...opts.at !== undefined ? { at: opts.at } : {} }));
+  return asUnit(out);
+}
+function transferParty(ctx, id, side) {
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return reject8("missing_entity", `no ${labelOf(ctx, id)}`);
+  if (isParty(ctx, id))
+    return { holder: id };
+  const t = traitsOf(ctx, id);
+  if (t && (side === "to" || t.pays)) {
+    const holders = holdersOf(ctx.state, id).filter((h) => own(ctx.state.entities, h) && isParty(ctx, h) && (side === "to" || canSpend(ctx.state, id, h)));
+    const holder = holders[0];
+    if (holder)
+      return { holder, account: id };
+  }
+  return reject8("bad_party", `${labelOf(ctx, id)} isn't someone, or an account someone can ${side === "from" ? "pay from" : "pay into"}`);
+}
+function transfer(hooks, ctx, from, to, cents, memo, method = "auto") {
+  const payer = transferParty(ctx, from, "from");
+  if ("code" in payer)
+    return payer;
+  const payee = transferParty(ctx, to, "to");
+  if ("code" in payee)
+    return payee;
+  const paying = method === "cash" ? "auto" : method;
+  const cash = method === "cash" ? cashAccount(ctx, payee.holder) ?? undefined : undefined;
+  const sameSide = payer.holder === payee.holder || payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true;
+  if (!sameSide) {
+    const deposit = payee.account ?? cash;
+    const source = payer.account ?? (method === "cash" ? cashAccount(ctx, payer.holder) ?? undefined : undefined);
+    const fromCash = method === "cash" && source !== undefined && availableOf(ctx, source) >= Math.round(cents) ? source : payer.account;
+    return charge(hooks, ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, kind: "transfer", ...fromCash ? { source: fromCash } : {}, ...deposit ? { deposit } : {}, overdraft: false });
+  }
+  if (!payer.account && !payee.account)
+    return reject8("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
+  const level = ctx.levelOf(payer.holder, "money");
+  if (level === 0)
+    return [];
+  const c = Math.round(cents);
+  let source = payer.account;
+  if (!source) {
+    const picked = chooseSource(ctx, payer.holder, c, { method: paying, ...payee.account ? { except: payee.account } : {}, till: false, overdraft: false });
+    if ("code" in picked)
+      return picked;
+    source = picked.account;
+  }
+  const target = payee.account ?? (cash !== undefined && cash !== source ? cash : depositAccount(ctx, payee.holder, source) ?? undefined);
+  if (!target || target === source)
+    return reject8("bad_party", `${labelOf(ctx, source)} can't pay itself`);
+  return move(ctx, source, target, c, memo, { cap: true });
+}
+function postGuard(ctx, lines) {
+  const s = ctx.state;
+  if (lines.some((l) => l.amount > 0 && l.account.startsWith(BANK_PREFIX)))
+    return null;
+  for (const l of lines) {
+    if (l.amount >= 0)
+      continue;
+    const t = traitsOf(ctx, l.account);
+    if (!t || t.installment)
+      continue;
+    const holders = holdersOf(s, l.account).filter((h) => own(s.entities, h));
+    if (holders.length === 0 || accountLevel(ctx, l.account) < 2)
+      continue;
+    if (lines.some((x) => holders.some((h) => x.account === external(h))))
+      continue;
+    const name = labelOf(ctx, l.account);
+    const status = statusOf(s, l.account);
+    if (status !== "open")
+      return reject8("declined", `${name} is ${status.replace(/_/g, " ")}`);
+    if (availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) {
+      return reject8("declined", t.liability ? `${name} has no room for ${formatMoney(-l.amount, ctx.world.currency)}` : `${name} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
+    }
+  }
+  return null;
+}
+function loseWith(ctx, item, thief) {
+  const s = ctx.state;
+  if (!own(s.entities, item))
+    return reject8("missing_entity", `no ${labelOf(ctx, item)}`);
+  if (thief && !own(s.entities, thief))
+    return reject8("missing_entity", `no ${labelOf(ctx, thief)}`);
+  const out = [];
+  for (const id of Object.keys(s.entities).sort()) {
+    const cents = balance(s, id);
+    if (classOf2(ctx, id) !== "cash" || cents <= 0)
+      continue;
+    let inside = false;
+    for (let cur = own(s.entities, id)?.relations.find((r) => r.type === "in")?.to, guard = 0;cur && guard < 16 && !inside; cur = own(s.entities, cur)?.relations.find((r) => r.type === "in")?.to, guard++)
+      inside = cur === item;
+    if (!inside)
+      continue;
+    const memo = thief ? `Stolen with ${own(s.entities, item)?.name ?? item}` : `Lost with ${own(s.entities, item)?.name ?? item}`;
+    const dest = thief ? payeeSide(ctx, { payee: thief }, cents) : { account: external("lost"), extra: [] };
+    const lines = [
+      { account: id, amount: -cents },
+      { account: dest.account, amount: cents }
+    ];
+    out.push(...asUnit([{ type: "post", lines, memo }, ...dest.extra, txn(lines, { memo, kind: "adjustment", category: "lost" })]));
+  }
+  return out;
+}
+function setCash(ctx, holder, cents) {
+  const s = ctx.state;
+  const cash = accountsOf(ctx, holder, "spend").filter((id) => classOf2(ctx, id) === "cash");
+  const [first, ...rest] = [...cash.filter((id) => cashOnHolder(s, id, holder)), ...cash.filter((id) => !cashOnHolder(s, id, holder))];
+  if (!first)
+    return null;
+  const target = Math.round(cents);
+  if (!Number.isSafeInteger(target) || target < 0)
+    return reject8("bad_amount", "cash can't be less than nothing");
+  let left = target - cash.reduce((a, id) => a + balance(s, id), 0);
+  if (left === 0)
+    return [];
+  const lines = left > 0 ? [{ account: first, amount: left }] : [];
+  for (const id of [first, ...rest]) {
+    if (left >= 0)
+      break;
+    const take = Math.min(-left, Math.max(0, balance(s, id)));
+    if (take > 0)
+      lines.push({ account: id, amount: -take });
+    left += take;
+  }
+  lines.push({ account: CORRECTION_ACCOUNT, amount: -lines.reduce((a, l) => a + l.amount, 0) });
+  return asUnit(posting(lines, { memo: "Correction", kind: "adjustment", category: "correction" }));
+}
+function reprice(ctx, events, cents) {
+  const posts = events.filter((e) => e.type === "post");
+  const purchase = events.find((e) => e.type === FINANCE_EVENTS.txn && ("data" in e) && e.data.kind === "purchase");
+  const memo = purchase && "data" in purchase ? strOf(purchase.data.memo) : undefined;
+  const post = (memo !== undefined ? posts.find((p) => p.memo === memo) : undefined) ?? (posts.length === 1 && posts[0]?.lines.length === 2 ? posts[0] : undefined);
+  const paid = post?.lines.find((l) => l.amount < 0);
+  const got = post ? [...post.lines].filter((l) => l.amount > 0).sort((a, b) => b.amount - a.amount)[0] : undefined;
+  if (!post || !paid || !got)
+    return reject8("not_a_purchase", "there's no purchase to reprice");
+  const total = Math.round(cents);
+  if (!Number.isSafeInteger(total) || total <= 0)
+    return reject8("bad_amount", "the amount must be positive");
+  const diff = total - got.amount;
+  if (diff === 0)
+    return [];
+  const note = `${post.memo}: price corrected`;
+  const lines = [
+    { account: paid.account, amount: -diff },
+    { account: got.account, amount: diff }
+  ];
+  return asUnit(posting(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund" }));
+}
+function signal(cls, text, who, at) {
+  return { type: ENGINE_EVENTS.signal, data: { class: cls, text, entity: who, visibility: "known_by", at } };
+}
+function noted(ctx, events) {
+  const pov = ctx.world.pov;
+  return events.flatMap((e) => {
+    if (!("data" in e))
+      return [e];
+    if (e.type === FINANCE_EVENTS.txn)
+      return Array.isArray(e.data.lines) && e.data.lines.some((l) => own(ctx.state.entities, strOf(objOf(l).account))) ? [e] : [];
+    if (e.type === ENGINE_EVENTS.signal && typeof e.data.entity === "string" && e.data.entity !== pov)
+      return hasLedger(ctx, e.data.entity) ? [{ type: FINANCE_EVENTS.note, data: { entity: e.data.entity, class: strOf(e.data.class), text: strOf(e.data.text), visibility: "secret", ...typeof e.data.at === "number" ? { at: e.data.at } : {} } }] : [];
+    return [e];
+  });
+}
+
+// src/packs/economy/core/actions.ts
+function money(ctx, cents) {
+  return formatMoney(cents, ctx.world.currency);
+}
+function featureAt(ctx, who, field) {
+  let cur = placeOfEntity(ctx.state, who) ?? undefined;
+  for (let guard = 0;cur && guard < 32; guard++) {
+    const p = own(ctx.world.places, cur);
+    const f = objOf(p?.fields[field]);
+    if (typeof f.bank === "string" && f.bank !== "")
+      return { place: cur, feature: f };
+    cur = p?.parent;
+  }
+  return null;
+}
+function debitCard(ctx, who, account) {
+  return cardsOn(ctx.state, account).find((c) => strOf(own(ctx.state.entities, c)?.fields.holder) === who && cardProblem(ctx, c, who) === null) ?? null;
+}
+function withdraw(ctx, who, account, raw) {
+  const cents = Math.round(raw);
+  if (!(cents > 0))
+    return reject8("bad_amount", "the amount must be positive");
+  if (!canSpend(ctx.state, account, who) || !traitsOf(ctx, account)?.pays || traitsOf(ctx, account)?.cash)
+    return reject8("not_owner", `${labelOf(ctx, who)} can't draw cash from ${labelOf(ctx, account)}`);
+  if (statusOf(ctx.state, account) !== "open")
+    return reject8("declined", `${labelOf(ctx, account)} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`);
+  const wallet = cashAccount(ctx, who);
+  if (!wallet)
+    return reject8("no_wallet", `${labelOf(ctx, who)} has nowhere to carry cash`);
+  const p = productOf(ctx, account);
+  if (!p)
+    return reject8("missing_account", "no such account");
+  const t = traitsOf(ctx, account);
+  const atTop = featureFor(ctx, who, "atm");
+  const lines = [{ account: wallet, amount: cents }];
+  const extra = [];
+  let fees = 0;
+  let card = null;
+  let where = "";
+  if (atTop) {
+    const branch = featureAt(ctx, who, "branch");
+    const atm = featureAt(ctx, who, "atm");
+    if (branch && branch.feature.bank === p.institution)
+      where = `at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
+    else if (atm) {
+      card = debitCard(ctx, who, account);
+      if (!card)
+        return reject8("no_card", cardsOn(ctx.state, account).length > 0 ? `none of ${labelOf(ctx, who)}'s cards on ${labelOf(ctx, account)} works` : `${labelOf(ctx, account)} has no card for a cash machine`);
+      if (typeof atm.feature.limit === "number" && cents > atm.feature.limit)
+        return reject8("over_limit", `the machine gives at most ${money(ctx, atm.feature.limit)} at a time`);
+      if (cardRoom(ctx, card, "atm") < cents)
+        return reject8("over_limit", `${labelOf(ctx, card)} has ${money(ctx, cardRoom(ctx, card, "atm"))} left of its daily cash limit`);
+      where = `at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
+      if (accountFeature(ctx, account, "fees") && atm.feature.bank !== p.institution) {
+        const surcharge = Math.max(0, Math.round(numOf(atm.feature.fee)));
+        if (surcharge > 0)
+          lines.push({ account: external(`atm:${atm.feature.bank}`), amount: surcharge });
+        if (p.fees.atm > 0)
+          lines.push({ account: bankSide(p.institution), amount: p.fees.atm });
+        fees += surcharge + p.fees.atm;
+      }
+      if (Number.isFinite(cardRoom(ctx, card, "atm"))) {
+        const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+        const s = spendOf(ctx.state, card, day);
+        extra.push({ type: FINANCE_EVENTS.spend, data: { card, day, purchase: s.purchase, atm: s.atm + cents } });
+      }
+    } else
+      return reject8("no_atm", `there's no cash machine or ${p.institution || "bank"} branch here`);
+  }
+  if (t?.revolving && accountFeature(ctx, account, "fees")) {
+    const advance = Math.max(p.fees.cash_advance_min, Math.round(cents * p.fees.cash_advance_pct / 100));
+    if (advance > 0) {
+      lines.push({ account: bankSide(p.institution), amount: advance });
+      fees += advance;
+    }
+  }
+  const total = cents + fees;
+  if (availableOf(ctx, account) < total)
+    return reject8("declined", `${labelOf(ctx, account)} can't cover ${money(ctx, total)}`);
+  lines.unshift({ account, amount: -total });
+  const merged = [];
+  for (const l of lines) {
+    const same = merged.find((x) => x.account === l.account);
+    if (same)
+      same.amount += l.amount;
+    else
+      merged.push({ ...l });
+  }
+  const memo = `Cash withdrawal${where ? ` ${where}` : ""}${fees > 0 ? ` (${money(ctx, fees)} in fees)` : ""}`;
+  return asUnit([...posting(merged, { memo, kind: "withdrawal", category: "transfer", ...card ? { card } : {} }), ...extra]);
+}
+function deposit(ctx, who, account, raw) {
+  const cents = Math.round(raw);
+  if (!(cents > 0))
+    return reject8("bad_amount", "the amount must be positive");
+  if (!rightsOf(ctx.state, account, who) || traitsOf(ctx, account)?.cash || traitsOf(ctx, account)?.locked)
+    return reject8("not_owner", `${labelOf(ctx, who)} can't pay cash into ${labelOf(ctx, account)}`);
+  const wallet = cashAccount(ctx, who);
+  if (!wallet || availableOf(ctx, wallet) < cents)
+    return reject8("declined", `${labelOf(ctx, who)} doesn't have ${money(ctx, cents)} in cash`);
+  const p = productOf(ctx, account);
+  if (!p)
+    return reject8("missing_account", "no such account");
+  if (traitsOf(ctx, account)?.liability && cents > -balance(ctx.state, account))
+    return reject8("overpay", `${labelOf(ctx, account)} owes only ${money(ctx, Math.max(0, -balance(ctx.state, account)))}`);
+  let held = false;
+  let where = "";
+  if (featureFor(ctx, who, "atm")) {
+    const branch = featureAt(ctx, who, "branch");
+    const atm = featureAt(ctx, who, "atm");
+    if (branch && branch.feature.bank === p.institution)
+      where = ` at ${own(ctx.world.places, branch.place)?.name ?? "the branch"}`;
+    else if (atm && atm.feature.deposits === true && atm.feature.bank === p.institution) {
+      where = ` at ${own(ctx.world.places, atm.place)?.name ?? "a cash machine"}`;
+      held = accountFeature(ctx, account, "holds") && p.hold_days > 0;
+    } else
+      return reject8("no_atm", `there's no ${p.institution || "bank"} branch or deposit machine here`);
+  }
+  const lines = [
+    { account: wallet, amount: -cents },
+    { account, amount: cents }
+  ];
+  const events = posting(lines, { memo: `Cash deposit${where}`, kind: "deposit", category: "transfer" });
+  if (traitsOf(ctx, account)?.liability)
+    events.push({ type: FINANCE_EVENTS.cardPaid, data: { account, cents } });
+  if (held)
+    events.push({ type: FINANCE_EVENTS.hold, data: { id: `dep:${hashParts(account, ctx.state.clock, cents).slice(0, 10)}`, account, cents, until: ctx.state.clock + p.hold_days * 1440, kind: "deposit", memo: "Cash deposit" } });
+  return asUnit(events);
+}
+function setCardState(ctx, who, card, state) {
+  const e = own(ctx.state.entities, card);
+  if (e?.kind !== "card")
+    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+  if (strOf(e.fields.holder) !== who && !rightsOf(ctx.state, strOf(e.fields.account), who)?.manage)
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+  if (!CARD_STATES.includes(state))
+    return reject8("bad_state", `a card can't be ${state}`);
+  const now = strOf(e.fields.state, "active");
+  if (now === state)
+    return [];
+  if (now === "lost" || now === "cancelled")
+    return reject8("bad_state", `${e.name} is ${now}; replace it`);
+  return [{ type: "set", entity: card, field: "state", value: state }];
+}
+function replaceCard(ctx, who, card) {
+  const e = own(ctx.state.entities, card);
+  if (e?.kind !== "card")
+    return reject8("not_card", `${labelOf(ctx, card)} isn't a payment card`);
+  const holder = strOf(e.fields.holder);
+  if (holder !== who && !rightsOf(ctx.state, strOf(e.fields.account), who)?.manage)
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s`);
+  if (strOf(e.fields.state) === "cancelled" && strOf(e.fields.replaced_by) !== "")
+    return reject8("bad_state", `${e.name} was already replaced`);
+  let n = 2;
+  while (own(ctx.state.entities, `${card}_r${n}`))
+    n++;
+  const id = `${card}_r${n}`;
+  const last4 = String(1000 + Number.parseInt(hashParts(card, n).slice(0, 6), 16) % 9000);
+  const fields = { ...e.fields, state: "active", replaces: card, last4 };
+  delete fields.replaced_by;
+  delete fields.item;
+  const out = [{ type: "spawn", entity: { id, kind: "card", name: e.name, tier: "background", fields, relations: [] } }, { type: "set", entity: card, field: "state", value: "cancelled" }, { type: "set", entity: card, field: "replaced_by", value: id }];
+  const spawn = optionalService(ctx, "gear.spawn");
+  const oldItem = strOf(e.fields.item);
+  if (spawn && ctx.levelOf(holder, "gear") >= 1) {
+    const place = oldItem !== "" ? own(ctx.state.entities, oldItem)?.relations.find((r) => r.type === "in")?.to : undefined;
+    const made = spawn(ctx, { name: own(ctx.state.entities, oldItem)?.name ?? e.name, owner: holder, holder: place && own(ctx.state.entities, place) && !own(ctx.state.entities, oldItem)?.fields.lost ? place : holder, salt: `card:${id}` });
+    if (Array.isArray(made)) {
+      out.push(...made);
+      const item = made.find((x) => x.type === "spawn");
+      if (item?.type === "spawn")
+        out.push({ type: "set", entity: id, field: "item", value: item.entity.id });
+    }
+  }
+  const account = strOf(e.fields.account);
+  const p = productOf(ctx, account);
+  if (p && p.fees.card_replacement > 0 && accountFeature(ctx, account, "fees"))
+    out.push(...posting([{ account, amount: -p.fees.card_replacement }, { account: bankSide(p.institution), amount: p.fees.card_replacement }], { memo: `${e.name} replacement`, kind: "fee", category: "card_replacement" }));
+  return asUnit(out);
+}
+function setAutopay(ctx, who, account, mode, from, cents) {
+  const cls = classOf2(ctx, account);
+  if (!cls || !isCredit(cls))
+    return reject8("not_credit", `${labelOf(ctx, account)} isn't a card or a loan`);
+  if (!rightsOf(ctx.state, account, who)?.manage)
+    return reject8("not_owner", `${labelOf(ctx, account)} isn't ${labelOf(ctx, who)}'s to change`);
+  if (!AUTOPAY_MODES.includes(mode))
+    return reject8("bad_mode", `autopay can't be ${mode}`);
+  if (from !== "" && (!canSpend(ctx.state, from, who) || !traitsOf(ctx, from)?.pays || traitsOf(ctx, from)?.liability))
+    return reject8("bad_account", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  if (mode === "fixed" && !(cents > 0))
+    return reject8("bad_amount", "fixed autopay needs an amount");
+  const out = [{ type: "set", entity: account, field: "autopay", value: mode }];
+  if (from !== "")
+    out.push({ type: "set", entity: account, field: "autopay_from", value: from });
+  if (mode === "fixed")
+    out.push({ type: "set", entity: account, field: "autopay_cents", value: Math.round(cents) });
+  return out;
+}
+var FLOW_PARAM_FIELDS = { label: "", kind: "flow_kind", from: "from", to: "to", amount: "amount_cents", every: "every", interval: "interval", at: "at", start: "start", end: "end", count: "count", shortfall: "shortfall", retry_days: "retry_days", retries: "retries", fallback: "fallback", roll: "roll", category: "category" };
+function flowFields(args) {
+  const fields = {};
+  let label;
+  for (const [param, field] of Object.entries(FLOW_PARAM_FIELDS)) {
+    const v = args[param];
+    if (v === undefined || v === null || v === "")
+      continue;
+    if (param === "label")
+      label = String(v).slice(0, 80);
+    else
+      fields[field] = v;
+  }
+  if (typeof fields.flow_kind === "string" && !FLOW_KINDS.includes(fields.flow_kind))
+    return reject8("bad_flow", `a flow can't be a ${fields.flow_kind}`);
+  if (typeof fields.shortfall === "string" && !FLOW_SHORTFALLS.includes(fields.shortfall))
+    return reject8("bad_flow", `there's no shortfall policy ${fields.shortfall}`);
+  if (typeof fields.amount_cents === "number")
+    fields.amount_cents = Math.round(fields.amount_cents);
+  const every = args.every;
+  if (every === "once") {
+    delete fields.every;
+    fields.once = strOf(args.once);
+    if (fields.once === "")
+      return reject8("bad_flow", "a one-off flow needs its date and time");
+  } else if (every !== undefined && every !== null && every !== "") {
+    if (!["day", "week", "month", "year"].includes(String(every)))
+      return reject8("bad_flow", `a flow can't fall every ${String(every)}`);
+    fields.once = "";
+    if (typeof args.weekday === "number")
+      fields.weekdays = [args.weekday];
+    else if (every !== "week")
+      fields.weekdays = [];
+    if (typeof args.day === "number")
+      fields.days = [args.day];
+    else if (every === "week" || every === "day")
+      fields.days = [];
+    if (typeof args.month === "number")
+      fields.months = [args.month];
+    else if (every !== "year")
+      fields.months = [];
+  } else {
+    if (typeof args.weekday === "number")
+      fields.weekdays = [args.weekday];
+    if (typeof args.day === "number")
+      fields.days = [args.day];
+    if (typeof args.month === "number")
+      fields.months = [args.month];
+  }
+  return { fields, ...label !== undefined ? { label } : {} };
+}
+function mayPayFrom(ctx, who, from) {
+  return from === who || canSpend(ctx.state, from, who);
+}
+function createFlow(ctx, who, args) {
+  const made = flowFields(args);
+  if ("code" in made)
+    return made;
+  const f = made.fields;
+  const from = strOf(f.from);
+  const to = strOf(f.to);
+  if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0))
+    return reject8("bad_flow", "a flow needs who pays, who is paid and an amount");
+  if (!mayPayFrom(ctx, who, from))
+    return reject8("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  if (f.once === undefined && f.every === undefined)
+    return reject8("bad_flow", "a flow needs a schedule");
+  const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
+  const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
+  const fields = { flow_kind: toMine ? "transfer" : "bill", shortfall: "skip", status: "active", ...f };
+  const id = `flow_${who}_${hashParts(who, label, ctx.state.clock).slice(0, 8)}`;
+  const entity = { id, kind: "flow", name: label, tier: "background", fields, relations: [] };
+  return [{ type: "spawn", entity }];
+}
+function updateFlow(ctx, who, flow, args) {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow")
+    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+  const made = flowFields(args);
+  if ("code" in made)
+    return made;
+  if (typeof made.fields.from === "string" && !mayPayFrom(ctx, who, made.fields.from))
+    return reject8("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, made.fields.from)}`);
+  const out = Object.entries(made.fields).map(([field, value]) => ({ type: "set", entity: flow, field, value }));
+  return out;
+}
+function setFlowStatus(ctx, who, flow, status) {
+  const e = own(ctx.state.entities, flow);
+  if (e?.kind !== "flow")
+    return reject8("not_flow", `${labelOf(ctx, flow)} isn't a standing payment`);
+  if (!mayPayFrom(ctx, who, strOf(e.fields.from)))
+    return reject8("not_owner", `${e.name} isn't ${labelOf(ctx, who)}'s to change`);
+  const out = [{ type: "set", entity: flow, field: "status", value: status }];
+  if (status === "ended")
+    out.push({ type: "set", entity: flow, field: GONE_FIELD, value: true });
+  return out;
+}
+function newAccountId(ctx, spec) {
+  const base = `${spec.owners[0]?.party ?? "acct"}_${spec.product}`;
+  let id = spec.id ?? `${base}_${hashParts(base, spec.name, ctx.state.clock).slice(0, 6)}`;
+  while (own(ctx.state.entities, id))
+    id = `${id}x`;
+  return id;
+}
+function openAccount(ctx, spec) {
+  const products = worldProducts(ctx.world);
+  const cls = own(products, spec.product)?.class ?? (isAccountClass(spec.product) ? spec.product : null);
+  if (!cls)
+    return reject8("bad_product", `there's no product ${spec.product.replace(/_/g, " ")}`);
+  const holder = spec.owners[0]?.party;
+  if (!holder || !own(ctx.state.entities, holder))
+    return reject8("missing_entity", "an account needs an owner");
+  const id = newAccountId(ctx, spec);
+  const cal = calendarOf(ctx.world);
+  const d = dateAt(cal, ctx.state.clock);
+  const opened = `${String(d.year).padStart(4, "0")}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+  const t = CLASS_TRAITS[cls];
+  const fields = { owners: spec.owners.map((o) => ({ party: o.party, role: o.role, ...o.share !== undefined ? { share: o.share } : {} })), product: spec.product, opening: 0, opened, status: "open" };
+  if (spec.apr_pct !== undefined)
+    fields.apr_pct = spec.apr_pct;
+  if (t.revolving && typeof spec.cents === "number")
+    fields.limit = Math.round(spec.cents);
+  if (t.installment) {
+    if (spec.term_months !== undefined) {
+      fields.term_months = spec.term_months;
+      fields.months_left = spec.term_months;
+    }
+    fields.due_day = Math.min(28, d.day);
+    const from = depositAccount(ctx, holder);
+    if (from) {
+      fields.autopay = "minimum";
+      fields.autopay_from = from;
+    }
+  }
+  if (spec.secured_by)
+    fields.secured_by = spec.secured_by;
+  if (t.revolving)
+    fields.statement_day = Math.min(28, d.day);
+  const out = [{ type: "spawn", entity: { id, kind: "account", name: spec.name, tier: "background", fields, relations: [] } }, { type: FINANCE_EVENTS.open, data: { accounts: [id] } }];
+  if (t.installment && typeof spec.cents === "number" && spec.cents > 0) {
+    const into = spec.into ?? depositAccount(ctx, holder) ?? external(holder);
+    out.push(...posting([{ account: id, amount: -Math.round(spec.cents) }, { account: into, amount: Math.round(spec.cents) }], { memo: `${spec.name}: loan paid out`, kind: "deposit", category: "loan" }));
+  }
+  if (spec.card && (t.revolving || t.transactional)) {
+    const cardId = `${id}_card`;
+    out.push({ type: "spawn", entity: { id: cardId, kind: "card", name: /\bcard$/i.test(spec.name) ? spec.name : `${spec.name} card`, tier: "background", fields: { account: id, holder, network: cls === "charge_card" ? "charge" : t.revolving ? "credit" : "debit", state: "active" }, relations: [] } });
+  }
+  for (const o of spec.owners)
+    if (o.role === "owner" || o.role === "joint") {
+      if (isParty(ctx, o.party) && t.liability)
+        out.push({ type: FINANCE_EVENTS.credit, data: { person: o.party, kind: "opened", account: id } });
+    }
+  return out;
+}
+function applyForCredit(ctx, who, product, cents, term, securedBy) {
+  if (!isParty(ctx, who))
+    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
+  const inquiry = { type: FINANCE_EVENTS.credit, data: { person: who, kind: "inquiry", note: product.replace(/_/g, " ") } };
+  if (!featureFor(ctx, who, "credit")) {
+    const products = worldProducts(ctx.world);
+    const label = own(products, product)?.label ?? product.replace(/_/g, " ");
+    const opened = openAccount(ctx, { name: label, product, owners: [{ party: who, role: "owner" }], ...cents !== undefined ? { cents } : {}, ...term !== undefined ? { term_months: term } : {}, card: true });
+    return opened;
+  }
+  const d = decide(ctx, who, { product, ...cents !== undefined ? { cents } : {}, ...term !== undefined ? { term_months: term } : {}, ...securedBy ? { secured_by: securedBy } : {} });
+  if ("code" in d)
+    return d;
+  if (!d.approved)
+    return [inquiry, signal("decline", `The application for a ${d.label.toLowerCase()} was declined: ${d.reason}.`, who, ctx.state.clock)];
+  const owners = [{ party: who, role: "owner" }];
+  const limit = CLASS_TRAITS[d.cls].revolving ? Math.min(cents ?? Number.MAX_SAFE_INTEGER, d.limit ?? cents ?? 0) : undefined;
+  const opened = openAccount(ctx, { name: d.label, product, owners, ...limit !== undefined ? { cents: limit } : cents !== undefined ? { cents } : {}, ...term !== undefined ? { term_months: term } : {}, ...d.apr !== null ? { apr_pct: d.apr } : {}, ...securedBy ? { secured_by: securedBy } : {}, card: CLASS_TRAITS[d.cls].revolving });
+  if ("code" in opened)
+    return opened;
+  return [inquiry, ...opened, signal("bill", `Approved: a ${d.label.toLowerCase()}${d.apr !== null ? ` at ${d.apr}% APR` : ""}${limit ? ` with a ${money(ctx, limit)} limit` : ""}.`, who, ctx.state.clock)];
+}
+function setPayPrefs(ctx, who, tiers) {
+  if (!isParty(ctx, who))
+    return reject8("missing_entity", `no ${labelOf(ctx, who)}`);
+  let raw = tiers;
+  if (typeof tiers === "string") {
+    try {
+      raw = JSON.parse(tiers);
+    } catch {
+      return reject8("bad_tiers", "payment preferences are a list of ways to pay");
+    }
+  }
+  const list = Array.isArray(raw) ? raw.map((t) => objOf(t)).filter((t) => typeof t.use === "string" && t.use !== "") : null;
+  if (!list)
+    return reject8("bad_tiers", "payment preferences are a list of ways to pay");
+  return [{ type: "set", entity: who, field: "pay_prefs", value: list }];
+}
+function closeAccount(ctx, account) {
+  if (own(ctx.state.entities, account)?.kind !== "account")
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  if (balance(ctx.state, account) !== 0)
+    return reject8("not_empty", `${labelOf(ctx, account)} still has ${money(ctx, balance(ctx.state, account))} on it`);
+  return [{ type: FINANCE_EVENTS.status, data: { account, status: "closed" } }, ...cardsOn(ctx.state, account).map((c) => ({ type: "set", entity: c, field: "state", value: "cancelled" }))];
+}
+function setStatus(ctx, account, status) {
+  if (own(ctx.state.entities, account)?.kind !== "account")
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  if (!ACCOUNT_STATUSES.includes(status))
+    return reject8("bad_status", `an account can't be ${status}`);
+  return statusOf(ctx.state, account) === status ? [] : [{ type: FINANCE_EVENTS.status, data: { account, status } }];
+}
+function releaseHold(ctx, account, hold) {
+  if (!own(ctx.state.entities, account))
+    return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+  return [{ type: FINANCE_EVENTS.hold, data: { id: hold, account, release: true } }];
+}
+
+// src/packs/economy/core/flows.ts
+var DEFAULT_FLOW_MINUTE = 9 * 60;
+function isBusinessDay(cal, day) {
+  const weekday = dateAt(cal, clockAt(cal, day, 0)).weekday;
+  if (cal.def.system === "gregorian" && (weekday === 0 || weekday === 6))
+    return false;
+  return !holidaysOn(cal, day).some((h) => h.dayOff);
+}
+function businessDay(cal, day, roll) {
+  let d = day;
+  for (let guard = 0;guard < 14 && !isBusinessDay(cal, d); guard++)
+    d += roll === "before" ? -1 : 1;
+  return d;
+}
+function safeDay(cal, text) {
+  if (!text)
+    return null;
+  try {
+    return dayIndexOfText(cal, text.slice(0, 10));
+  } catch {
+    return null;
+  }
+}
+function dayMatches(cal, days, d) {
+  const date = dateAt(cal, clockAt(cal, d, 0));
+  const len = cal.system.monthLength(date.year, date.month);
+  return days.some((n) => n > 0 ? Math.min(n, len) === date.day : n < 0 && len + n + 1 === date.day);
+}
+function falls(cal, s, d, anchor) {
+  const interval = Math.max(1, Math.round(s.interval ?? 1));
+  const date = dateAt(cal, clockAt(cal, d, 0));
+  const start = dateAt(cal, clockAt(cal, anchor, 0));
+  switch (s.every) {
+    case "day":
+      return d >= anchor && (d - anchor) % interval === 0;
+    case "week": {
+      const weekdays = s.weekdays && s.weekdays.length > 0 ? s.weekdays : [start.weekday];
+      if (!weekdays.includes(date.weekday))
+        return false;
+      const weekStart = anchor - start.weekday;
+      return d >= weekStart && Math.floor((d - weekStart) / 7) % interval === 0;
+    }
+    case "month": {
+      if (!dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], d))
+        return false;
+      const months = date.year * 12 + date.month - (start.year * 12 + start.month);
+      return months >= 0 && months % interval === 0;
+    }
+    case "year": {
+      const months = s.months && s.months.length > 0 ? s.months : [start.month];
+      if (!months.includes(date.month) || !dayMatches(cal, s.days && s.days.length > 0 ? s.days : [start.day], d))
+        return false;
+      const years = date.year - start.year;
+      return years >= 0 && years % interval === 0;
+    }
+    default:
+      return false;
+  }
+}
+function occurrences(ctx, s, from, to, start, end) {
+  if (to <= from)
+    return [];
+  const cal = calendarOf(ctx.world);
+  if (s.once !== undefined && s.once !== "") {
+    let at = null;
+    if (typeof s.once === "number")
+      at = s.once;
+    else {
+      try {
+        at = clockOfLocal(cal, s.once);
+      } catch {
+        at = null;
+      }
+    }
+    return at !== null && at > from && at <= to ? [{ at, day: dateAt(cal, at).dayIndex }] : [];
+  }
+  if (!s.every)
+    return [];
+  let minute = DEFAULT_FLOW_MINUTE;
+  if (s.at) {
+    try {
+      minute = parseHHMM(s.at);
+    } catch {
+      minute = DEFAULT_FLOW_MINUTE;
+    }
+  }
+  const startDay = safeDay(cal, start);
+  const endDay = safeDay(cal, end);
+  const anchor = startDay ?? 0;
+  const roll = s.roll === "before" || s.roll === "after" ? s.roll : null;
+  const margin = roll ? 10 : 1;
+  const out = [];
+  for (let d = dateAt(cal, from).dayIndex - margin;d <= dateAt(cal, to).dayIndex + margin; d++) {
+    if (startDay !== null && d < startDay || endDay !== null && d > endDay)
+      continue;
+    if (!falls(cal, s, d, anchor))
+      continue;
+    if (s.except && s.except.length > 0 && holidaysOn(cal, d).some((h) => s.except?.includes(h.id)))
+      continue;
+    const at = clockAt(cal, roll ? businessDay(cal, d, roll) : d, minute);
+    if (at > from && at <= to)
+      out.push({ at, day: d });
+  }
+  return out.sort((a, b) => a.at - b.at || a.day - b.day);
+}
+function present(v) {
+  return v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && v.length === 0);
+}
+function nums(v) {
+  return Array.isArray(v) && v.length > 0 ? v.filter((x) => typeof x === "number" && Number.isFinite(x)) : undefined;
+}
+function strs(v) {
+  return Array.isArray(v) && v.length > 0 ? v.filter((x) => typeof x === "string" && x !== "") : undefined;
+}
+function amountOfFields(f) {
+  if (present(f.amount_cents))
+    return { fixed: Math.round(numOf(f.amount_cents)) };
+  if (present(f.amount_formula))
+    return { formula: strOf(f.amount_formula) };
+  if (present(f.amount_table)) {
+    const [table, row, column] = splitTableRef(strOf(f.amount_table));
+    return table ? { table, row, ...column ? { column } : {} } : null;
+  }
+  if (present(f.amount_min) || present(f.amount_max))
+    return { range: { min: Math.round(numOf(f.amount_min)), max: Math.round(numOf(f.amount_max, numOf(f.amount_min))) } };
+  if (present(f.amount_pct))
+    return { percent: numOf(f.amount_pct), ...present(f.amount_of) ? { of: strOf(f.amount_of) } : {} };
+  if (f.amount_due === "minimum" || f.amount_due === "statement" || f.amount_due === "balance")
+    return { due: f.amount_due };
+  return null;
+}
+function splitTableRef(ref) {
+  const parts = ref.split(".");
+  return parts.length >= 3 ? [`${parts[0]}.${parts[1]}`, parts[2] ?? "", parts.length > 3 ? parts.slice(3).join(".") : undefined] : ["", "", undefined];
+}
+function isFlowKind(v) {
+  return typeof v === "string" && FLOW_KINDS.includes(v);
+}
+function isShortfall(v) {
+  return typeof v === "string" && FLOW_SHORTFALLS.includes(v);
+}
+function flowOfEntity(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (!e || e.kind !== "flow" || isGone(ctx.state, id))
+    return null;
+  const f = e.fields;
+  const amount = amountOfFields(f);
+  const from = strOf(f.from);
+  const to = strOf(f.to);
+  if (!amount || from === "" || to === "")
+    return null;
+  const every = f.every === "day" || f.every === "week" || f.every === "month" || f.every === "year" ? f.every : undefined;
+  const schedule = {
+    ...every ? { every } : {},
+    ...present(f.interval) ? { interval: numOf(f.interval, 1) } : {},
+    ...nums(f.weekdays) ? { weekdays: nums(f.weekdays) } : {},
+    ...nums(f.days) ? { days: nums(f.days) } : {},
+    ...nums(f.months) ? { months: nums(f.months) } : {},
+    ...strs(f.except) ? { except: strs(f.except) } : {},
+    ...f.roll === "before" || f.roll === "after" ? { roll: f.roll } : {},
+    ...present(f.at) ? { at: strOf(f.at) } : {},
+    ...present(f.once) ? { once: typeof f.once === "number" ? f.once : strOf(f.once) } : {}
+  };
+  const splits = Array.isArray(f.splits) ? f.splits.map((x) => objOf(x)).filter((x) => strOf(x.to) !== "").map((x) => ({ to: strOf(x.to), ...typeof x.cents === "number" ? { cents: x.cents } : {}, ...typeof x.pct === "number" ? { pct: x.pct } : {} })) : [];
+  const shares = Array.isArray(f.shares) ? f.shares.map((x) => objOf(x)).filter((x) => strOf(x.party) !== "").map((x) => ({ party: strOf(x.party), pct: numOf(x.pct), ...present(x.from) ? { from: strOf(x.from) } : {} })) : [];
+  const status = f.status === "paused" || f.status === "ended" ? f.status : "active";
+  return {
+    id,
+    label: e.name,
+    kind: isFlowKind(f.flow_kind) ? f.flow_kind : "bill",
+    from,
+    to,
+    ...splits.length > 0 ? { splits } : {},
+    ...shares.length > 0 ? { shares } : {},
+    amount,
+    schedule,
+    ...present(f.start) ? { start: strOf(f.start) } : {},
+    ...present(f.end) ? { end: strOf(f.end) } : {},
+    ...present(f.count) ? { count: numOf(f.count) } : {},
+    shortfall: isShortfall(f.shortfall) ? f.shortfall : "skip",
+    ...present(f.retry_days) ? { retry_days: numOf(f.retry_days) } : {},
+    ...present(f.retries) ? { retries: numOf(f.retries) } : {},
+    ...present(f.fallback) ? { fallback: strOf(f.fallback) } : {},
+    ...present(f.category) ? { category: strOf(f.category) } : {},
+    ...present(f.link) ? { link: strOf(f.link) } : {},
+    status,
+    ...present(f.method) ? { method: strOf(f.method) } : {},
+    source: "entity"
+  };
+}
+var LIVING_COSTS = {
+  broke: { basket: "basket_person_thrifty", times: 1 },
+  poor: { basket: "basket_person_thrifty", times: 1.5 },
+  modest: { basket: "basket_person_moderate", times: 2 },
+  comfortable: { basket: "basket_person_moderate", times: 3 },
+  rich: { basket: "basket_person_liberal", times: 4 },
+  wealthy: { basket: "basket_person_liberal", times: 8 }
+};
+function livingCost(ctx, band) {
+  const authored = objOf(objOf(ctx.world.packs.economy?.config).livingCosts);
+  if (Object.keys(authored).length > 0) {
+    const weekly = numOf(own(authored, band));
+    return weekly > 0 ? Math.round(weekly) : null;
+  }
+  const def = own(LIVING_COSTS, band);
+  const basket = def ? priceOf(ctx, { catalog: def.basket, place: null }) : null;
+  return def && basket ? Math.round(basket.cents * def.times) : null;
+}
+function dueDayOf(ctx, account) {
+  const f = own(ctx.state.entities, account)?.fields;
+  return typeof f?.due_day === "number" ? f.due_day : null;
+}
+function foundationFlows(ctx) {
+  const out = [];
+  const s = ctx.state;
+  for (const [id, e] of Object.entries(s.entities)) {
+    if (e.kind !== "account")
+      continue;
+    const t = traitsOf(ctx, id);
+    if (!t || !(t.revolving || t.installment) || ["closed", "charged_off", "paid_off", "collections"].includes(statusOf(s, id)))
+      continue;
+    const mode = strOf(e.fields.autopay, "none");
+    if (mode === "none" || mode === "")
+      continue;
+    const holder = holdersOf(s, id)[0];
+    if (!holder || !own(s.entities, holder))
+      continue;
+    const named = strOf(e.fields.autopay_from);
+    const from = named !== "" && own(s.entities, named) ? named : depositAccount(ctx, holder, id) ?? "";
+    if (from === "")
+      continue;
+    const level = accountLevel(ctx, id);
+    const statements = featureOn(level, "statements", toggles(ctx.world));
+    const amount = mode === "fixed" ? { fixed: Math.round(numOf(e.fields.autopay_cents)) } : t.installment ? { due: "minimum" } : statements ? { due: mode === "minimum" ? "minimum" : mode === "statement" ? "statement" : "balance" } : { due: "balance" };
+    let schedule;
+    if (t.installment)
+      schedule = { every: "month", days: [dueDayOf(ctx, id) ?? numOf(e.fields.statement_day, 1)] };
+    else if (statements) {
+      const cycle = cycleOf2(s, id);
+      if (!cycle)
+        continue;
+      const cal = calendarOf(ctx.world);
+      schedule = { once: clockAt(cal, dateAt(cal, cycle.due).dayIndex, DEFAULT_FLOW_MINUTE) };
+    } else
+      schedule = { every: "month", days: [productOf(ctx, id)?.statement_day ?? 1] };
+    out.push({ id: `autopay:${id}`, label: `${e.name} autopay`, kind: t.installment ? "loan_payment" : "card_payment", from, to: id, amount, schedule, shortfall: "skip", category: "transfer", link: id, status: "active", source: "autopay" });
+  }
+  const pov = ctx.world.pov;
+  for (const id of Object.keys(s.entities).sort()) {
+    const e = own(s.entities, id);
+    if (!e || id === pov || isGone(s, id) || !hasLedger(ctx, id) || !isParty(ctx, id) || e.kind === "household")
+      continue;
+    if (!featureOn(ctx.levelOf(id, "money"), "living_costs", toggles(ctx.world)) || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
+      continue;
+    out.push({ id: `living:${id}`, label: "Living costs", kind: "living", from: id, to: "market", amount: { provider: "economy.living" }, schedule: { every: "week", weekdays: [1] }, shortfall: "partial", category: "living", status: "active", method: "auto", source: "living" });
+  }
+  const insured = new Set(Object.values(s.entities).filter((e) => e.kind === "flow" && !isGone(s, strOf(e.fields.link)) && e.fields.status !== "ended").map((e) => strOf(e.fields.link)));
+  for (const p of optionalQuery(ctx, "vehicles.insurance")?.(ctx) ?? []) {
+    if (insured.has(p.vehicle) || p.cents <= 0)
+      continue;
+    out.push({ id: `insurance:${p.vehicle}`, label: p.label, kind: "premium", from: p.owner, to: "insurer", amount: { fixed: p.cents }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "insurance", link: p.vehicle, status: "active", method: "account", source: "vehicle" });
+  }
+  return out;
+}
+function allFlows(hooks, ctx) {
+  const out = [];
+  for (const id of Object.keys(ctx.state.entities).sort()) {
+    const f = flowOfEntity(ctx, id);
+    if (f)
+      out.push(f);
+  }
+  out.push(...foundationFlows(ctx));
+  for (const source of hooks.flows)
+    out.push(...source.flows(ctx));
+  return out;
+}
+function sideOf(ctx, id) {
+  const e = own(ctx.state.entities, id);
+  if (e?.kind === "account" && classOf2(ctx, id))
+    return { account: id, party: holdersOf(ctx.state, id).find((h) => own(ctx.state.entities, h)) ?? null };
+  if (e && isParty(ctx, id))
+    return { party: id };
+  return { outside: id };
+}
+function flowLevel(ctx, flow) {
+  const level = (side) => ("account" in side) ? accountLevel(ctx, side.account) : ("party" in side) ? ctx.levelOf(side.party, "money") : null;
+  return level(sideOf(ctx, flow.from)) ?? level(sideOf(ctx, flow.to)) ?? 0;
+}
+function outsideAccount(name) {
+  return external(name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "outside");
+}
+function landing(ctx, to, cents) {
+  const side = sideOf(ctx, to);
+  if ("account" in side)
+    return { account: side.account, extra: [], counterparty: labelOf(ctx, side.account) };
+  if ("party" in side) {
+    const dest = payeeSide(ctx, { payee: side.party }, cents);
+    return { ...dest, counterparty: labelOf(ctx, side.party) };
+  }
+  return { account: outsideAccount(side.outside), extra: [], counterparty: side.outside.replace(/_/g, " ") };
+}
+function tableAmount(ctx, table, row, column) {
+  const r = own(ctx.tables.get(table)?.rows ?? {}, row);
+  if (!r)
+    return null;
+  const v = column ? own(r, column) : own(r, "price_cents") ?? own(r, "cents");
+  if (typeof v === "number")
+    return v;
+  const band = objOf(v);
+  return typeof band.typical === "number" ? band.typical : null;
+}
+function occurrenceAmount(hooks, ctx, flow, at, rng, deferred) {
+  const a = flow.amount;
+  let cents = null;
+  if ("fixed" in a)
+    cents = a.fixed;
+  else if ("formula" in a) {
+    const self = sideOf(ctx, flow.from);
+    const who = "party" in self && self.party ? self.party : ctx.world.pov;
+    cents = Math.round(evalNumber(a.formula, scopeEnv({ reg: ctx.registry, ctx, bindings: { self: who } }), 0));
+  } else if ("table" in a) {
+    const v = tableAmount(ctx, a.table, a.row, a.column);
+    cents = v === null ? null : Math.round(v * (a.scale ?? 1));
+  } else if ("range" in a)
+    cents = a.range.max > a.range.min ? rng.int(a.range.min, a.range.max) : a.range.min;
+  else if ("percent" in a) {
+    const side = sideOf(ctx, flow.from);
+    const of = a.of ?? ("account" in side ? side.account : "");
+    cents = of !== "" ? Math.round(Math.max(0, balance(ctx.state, of)) * a.percent / 100) : null;
+  } else if ("due" in a) {
+    const account = flow.to;
+    const owed = -balance(ctx.state, account);
+    const cycle = cycleOf2(ctx.state, account);
+    if (owed <= 0)
+      return null;
+    if (a.due === "balance" || !cycle)
+      cents = owed;
+    else
+      cents = Math.min(owed, Math.max(0, (a.due === "minimum" ? cycle.minimum : cycle.closing) - cycle.paid));
+  } else {
+    const provider = own(hooks.amounts, a.provider);
+    if (!provider)
+      return reject8("no_provider", `nothing works out ${flow.label}`);
+    const made = provider(ctx, flow, at, rng);
+    if (made === null || "code" in made)
+      return made;
+    return { cents: Math.round(made.cents), posting: made };
+  }
+  if (cents === null || !Number.isFinite(cents))
+    return null;
+  const total = Math.round(cents) + Math.max(0, deferred);
+  return total > 0 ? { cents: total } : null;
+}
+function splitAmount(cents, splits, rest) {
+  const out = [];
+  let left = cents;
+  for (const s of splits) {
+    if (typeof s.cents !== "number")
+      continue;
+    const c = Math.min(left, Math.max(0, Math.round(s.cents)));
+    if (c > 0)
+      out.push({ to: s.to, cents: c });
+    left -= c;
+  }
+  const base = left;
+  for (const s of splits) {
+    if (typeof s.cents === "number" || typeof s.pct !== "number")
+      continue;
+    const c = Math.min(left, Math.max(0, Math.round(base * s.pct / 100)));
+    if (c > 0)
+      out.push({ to: s.to, cents: c });
+    left -= c;
+  }
+  if (left > 0)
+    out.push({ to: rest, cents: left });
+  return out;
+}
+function payFrom(hooks, ctx, flow, fromId, cents, at, overdraft, made) {
+  const from = sideOf(ctx, fromId);
+  const memo = made?.memo ?? flow.label;
+  const meta = { kind: made?.kind ?? (flow.kind === "income" || flow.kind === "payroll" || flow.kind === "distribution" || flow.kind === "allowance" ? "income" : flow.to === flow.from ? "transfer" : "payment"), category: made?.category ?? flow.category ?? flow.kind, flow: flow.id, at };
+  const targets = splitAmount(cents, flow.splits ?? [], flow.to);
+  if ("party" in from && !("account" in from)) {
+    if (targets.length !== 1 || !targets[0])
+      return reject8("bad_flow", `${flow.label} splits a payment that has no account to pay from`);
+    const land = landing(ctx, targets[0].to, cents);
+    const side = sideOf(ctx, targets[0].to);
+    const payee = "party" in side && !("account" in side) ? side.party : undefined;
+    const paid = charge(hooks, ctx, from.party, cents, memo, { ...payee ? { payee } : { counterparty: land.counterparty }, ..."account" in side ? { deposit: side.account, payee: side.party ?? undefined } : {}, method: flow.method ?? "account", kind: meta.kind, category: meta.category, flow: flow.id, at, overdraft });
+    return isRejection5(paid) ? paid : { events: paid, paid: cents };
+  }
+  const source = "account" in from ? from.account : outsideAccount(from.outside);
+  if ("account" in from) {
+    if (statusOf(ctx.state, from.account) !== "open")
+      return reject8("declined", `${labelOf(ctx, from.account)} is ${statusOf(ctx.state, from.account).replace(/_/g, " ")}`);
+    if (traitsOf(ctx, from.account)?.locked)
+      return reject8("locked", `${labelOf(ctx, from.account)} can't be drawn on`);
+    const room = availableOf(ctx, from.account) + (overdraft ? overdraftRoom(ctx, from.account) : 0);
+    if (accountLevel(ctx, from.account) >= 2 && room < cents)
+      return reject8("declined", `${labelOf(ctx, from.account)} can't cover ${formatMoney(cents, ctx.world.currency)}`);
+  }
+  const lines = [{ account: source, amount: -cents }];
+  const extra = [];
+  let counterparty = "";
+  for (const t of targets) {
+    const land = landing(ctx, t.to, t.cents);
+    lines.push({ account: land.account, amount: t.cents });
+    extra.push(...land.extra);
+    counterparty ||= land.counterparty;
+    if (traitsOf(ctx, land.account)?.liability)
+      extra.push({ type: FINANCE_EVENTS.cardPaid, data: { account: land.account, cents: t.cents } });
+  }
+  const merged = [];
+  for (const l of lines) {
+    const same = merged.find((x) => x.account === l.account);
+    if (same)
+      same.amount += l.amount;
+    else
+      merged.push({ ...l });
+  }
+  const finalLines = merged.filter((l) => l.amount !== 0);
+  if (finalLines.length < 2)
+    return reject8("bad_flow", `${flow.label} pays itself`);
+  return { events: asUnit([...posting(finalLines, { memo, ...meta, counterparty }), ...extra]), paid: cents };
+}
+function providedAttempt(ctx, flow, made, at) {
+  const lines = (made.lines ?? []).filter((l) => l.amount !== 0);
+  if (lines.length === 0)
+    return { events: made.extra ?? [], paid: 0 };
+  if (lines.reduce((a, l) => a + l.amount, 0) !== 0)
+    return reject8("unbalanced", `${flow.label} doesn't balance`);
+  for (const l of lines) {
+    if (l.amount >= 0 || !own(ctx.state.entities, l.account))
+      continue;
+    if (statusOf(ctx.state, l.account) !== "open")
+      return reject8("declined", `${labelOf(ctx, l.account)} is ${statusOf(ctx.state, l.account)}`);
+    if (accountLevel(ctx, l.account) >= 2 && availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0)
+      return reject8("declined", `${labelOf(ctx, l.account)} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
+  }
+  const memo = made.memo ?? flow.label;
+  const card = lines.filter((l) => l.amount > 0 && traitsOf(ctx, l.account)?.liability).map((l) => ({ type: FINANCE_EVENTS.cardPaid, data: { account: l.account, cents: l.amount } }));
+  return { events: asUnit([...posting(lines, { memo, kind: made.kind ?? "payment", category: made.category ?? flow.category ?? flow.kind, flow: flow.id, at }), ...card, ...made.extra ?? []]), paid: made.cents };
+}
+function noteParty(ctx, flow) {
+  for (const id of [flow.from, flow.to]) {
+    const side = sideOf(ctx, id);
+    if ("account" in side && side.party)
+      return side.party;
+    if ("party" in side && !("account" in side))
+      return side.party;
+  }
+  return null;
+}
+function runEvent(flow, at, outcome, cents, next, short = 0) {
+  const state = { done: next.done, missed: next.missed, last: at };
+  if (next.retry)
+    state.retry = { at: next.retry.at, left: next.retry.left, cents: next.retry.cents };
+  if (next.deferred && next.deferred > 0)
+    state.deferred = next.deferred;
+  if (next.ended)
+    state.ended = true;
+  return { type: FINANCE_EVENTS.flowRun, data: { flow: flow.id, label: flow.label, at, outcome, cents, ...short > 0 ? { short } : {}, state } };
+}
+function runOccurrence(hooks, run, flow, at, rng, retry) {
+  const ctx = run.ctx;
+  const before = flowRunOf(ctx.state, flow.id);
+  if (before.ended)
+    return;
+  const amount = retry && before.retry ? { cents: before.retry.cents } : occurrenceAmount(hooks, ctx, flow, at, rng, flow.amount && !("provider" in flow.amount) ? before.deferred ?? 0 : 0);
+  const ended = (done, missed) => flow.count !== undefined && done + missed >= flow.count || false;
+  const who = noteParty(ctx, flow);
+  const money = (c) => formatMoney(c, ctx.world.currency);
+  if (amount === null)
+    return;
+  if ("code" in amount) {
+    const next = { done: before.done, missed: before.missed + 1, ended: ended(before.done, before.missed + 1) };
+    run.emit([runEvent(flow, at, "declined", 0, next)]);
+    return;
+  }
+  const cents = amount.cents;
+  const overdraft = flow.shortfall === "overdraft" || flow.shortfall === "skip" || flow.shortfall === "retry" || flow.shortfall === "defer" || flow.shortfall === "fallback" || flow.shortfall === "partial";
+  const own_lines = amount.posting?.lines?.some((l) => l.amount !== 0) === true;
+  const extra = amount.posting && !own_lines ? amount.posting.extra ?? [] : [];
+  const computed = (c) => {
+    if (c <= 0)
+      return { events: extra, paid: 0 };
+    const made = flow.shares && flow.shares.length > 0 ? sharedAttempt(hooks, ctx, flow, c, at) : payFrom(hooks, ctx, flow, flow.from, c, at, overdraft, amount.posting);
+    return "code" in made || extra.length === 0 ? made : { events: asUnit([...made.events.map(({ group: _g, ...e }) => e), ...extra]), paid: made.paid };
+  };
+  const attempt = amount.posting && own_lines ? providedAttempt(ctx, flow, amount.posting, at) : computed(cents);
+  if (!("code" in attempt)) {
+    const applied = run.emit(attempt.events);
+    if (applied.length > 0 || attempt.events.length === 0) {
+      const next = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
+      run.emit([runEvent(flow, at, "paid", attempt.paid, next)]);
+      if (who && flow.kind !== "living" && attempt.paid > 0)
+        run.emit([signal("bill", `${flow.label}: ${money(attempt.paid)} ${flowIsIncome(ctx, flow, who) ? "received" : "paid"}.`, who, at)]);
+      return;
+    }
+  }
+  const reason = "code" in attempt ? attempt.reason : "the payment didn't go through";
+  const nsf = bounceFee(ctx, flow, at);
+  switch (flow.shortfall) {
+    case "partial": {
+      const side = sideOf(ctx, flow.from);
+      const have = "account" in side ? Math.max(0, availableOf(ctx, side.account)) : ("party" in side) ? partyHas(ctx, side.party) : 0;
+      const part = Math.min(have, cents - 1);
+      const paid = part > 0 && !own_lines ? computed(part) : null;
+      if (paid && !("code" in paid) && run.emit(paid.events).length > 0) {
+        const next = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
+        run.emit([runEvent(flow, at, "partial", part, next, cents - part)]);
+        if (who)
+          run.emit([signal("decline", `${flow.label}: only ${money(part)} of ${money(cents)} paid.`, who, at)]);
+        return;
+      }
+      break;
+    }
+    case "retry": {
+      const left = retry && before.retry ? before.retry.left : Math.max(0, Math.round(flow.retries ?? 2));
+      if (left > 0) {
+        const next = { done: before.done, missed: before.missed, retry: { at: at + Math.max(1, Math.round(flow.retry_days ?? 3)) * 1440, left: left - 1, cents }, ...before.deferred ? { deferred: 0 } : {} };
+        run.emit([...nsf, runEvent(flow, at, "retry", 0, next, cents)]);
+        if (who)
+          run.emit([signal("decline", `${flow.label} (${money(cents)}) didn't go through; it will be tried again.`, who, at)]);
+        return;
+      }
+      break;
+    }
+    case "fallback": {
+      if (flow.fallback && !own_lines) {
+        const paid = payFrom(hooks, ctx, flow, flow.fallback, cents, at, true, amount.posting);
+        if (!("code" in paid) && run.emit(paid.events).length > 0) {
+          const next = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
+          run.emit([runEvent(flow, at, "fallback", cents, next)]);
+          if (who)
+            run.emit([signal("bill", `${flow.label}: ${money(cents)} paid from ${labelOf(ctx, flow.fallback)}.`, who, at)]);
+          return;
+        }
+      }
+      break;
+    }
+    case "defer": {
+      const next = { done: before.done, missed: before.missed + 1, deferred: cents, ended: ended(before.done, before.missed + 1) };
+      run.emit([runEvent(flow, at, "deferred", 0, next, cents)]);
+      if (who)
+        run.emit([signal("decline", `${flow.label} (${money(cents)}) couldn't be paid; it carries to next time.`, who, at)]);
+      return;
+    }
+    default:
+      break;
+  }
+  const next = { done: before.done, missed: before.missed + 1, ended: ended(before.done, before.missed + 1) };
+  run.emit([...nsf, runEvent(flow, at, flow.shortfall === "skip" ? "skipped" : "declined", 0, next, cents)]);
+  if (who)
+    run.emit([signal("decline", `${flow.label} (${money(cents)}) was declined: ${reason}.`, who, at)]);
+}
+function flowIsIncome(ctx, flow, who) {
+  const from = sideOf(ctx, flow.from);
+  return !(("account" in from) && from.party === who || ("party" in from) && !("account" in from) && from.party === who);
+}
+function partyHas(ctx, party) {
+  return accountsOf(ctx, party, "spend").reduce((a, id) => a + (traitsOf(ctx, id)?.asset && !traitsOf(ctx, id)?.locked ? Math.max(0, availableOf(ctx, id)) : 0), 0);
+}
+function bounceFee(ctx, flow, at) {
+  const side = sideOf(ctx, flow.from);
+  if (!("account" in side) || !traitsOf(ctx, side.account)?.transactional || !featureOn(accountLevel(ctx, side.account), "fees", toggles(ctx.world)))
+    return [];
+  const p = productOf(ctx, side.account);
+  if (!p || p.fees.nsf <= 0)
+    return [];
+  const lines = [
+    { account: side.account, amount: -p.fees.nsf },
+    { account: `economy.external:bank:${p.institution || "bank"}`, amount: p.fees.nsf }
+  ];
+  return asUnit(posting(lines, { memo: "Returned payment fee", kind: "fee", category: "nsf", flow: flow.id, at }));
+}
+function sharedAttempt(hooks, ctx, flow, cents, at) {
+  const shares = flow.shares ?? [];
+  const total = shares.reduce((a, s) => a + Math.max(0, s.pct), 0);
+  if (total <= 0)
+    return reject8("bad_flow", `${flow.label} has no shares`);
+  const events = [];
+  let left = cents;
+  for (const [i, s] of shares.entries()) {
+    const part = i === shares.length - 1 ? left : Math.round(cents * s.pct / total);
+    left -= part;
+    if (part <= 0)
+      continue;
+    const share = { ...flow, from: s.from ?? s.party, label: flow.label };
+    const paid = payFrom(hooks, { ...ctx }, share, s.from ?? s.party, part, at, true);
+    if ("code" in paid)
+      return reject8("declined", `${labelOf(ctx, s.party)}'s share: ${paid.reason}`);
+    events.push(...paid.events);
+  }
+  return { events, paid: cents };
+}
+
+// src/packs/economy/core/kinds.ts
+var OWNERS = { type: "list", label: "Owners ({party, role, share?})", domain: "money", level: 1 };
+var ACCOUNT_FIELDS = {
+  owners: OWNERS,
+  product: { type: "text", label: `Product (a world product, or a class: ${ACCOUNT_CLASSES.join(", ")})`, domain: "money", level: 2 },
+  institution: { type: "text", label: "Institution", domain: "money", level: 3 },
+  opening: { type: "money", label: "Opening balance", locked: true },
+  status: { type: "enum", label: "Status", values: [...ACCOUNT_STATUSES], default: "open", domain: "money", level: 2 },
+  opened: { type: "date", label: "Opened", domain: "money", level: 4 },
+  limit: { type: "money", label: "Credit limit", min: 0, domain: "money", level: 3 },
+  apr_pct: { type: "number", label: "APR %", min: 0, domain: "money", level: 4 },
+  apy_pct: { type: "number", label: "APY %", min: 0, domain: "money", level: 4 },
+  statement_day: { type: "number", label: "Statement day", min: 1, max: 28, domain: "money", level: 3 },
+  due_day: { type: "number", label: "Due day of month", min: 1, max: 31, domain: "money", level: 3 },
+  min_pct: { type: "number", label: "Minimum payment % of balance", min: 0, max: 100, domain: "money", level: 4 },
+  min_floor: { type: "money", label: "Minimum payment floor", min: 0, domain: "money", level: 4 },
+  payment: { type: "money", label: "Monthly payment (loans)", min: 0, domain: "money", level: 3 },
+  term_months: { type: "number", label: "Term in months", min: 0, domain: "money", level: 3 },
+  months_left: { type: "number", label: "Months left (loans)", min: 0, domain: "money", level: 3 },
+  secured_by: { type: "ref", label: "Secured by", domain: "money", level: 3 },
+  overdraft: { type: "enum", label: "Overdraft policy", values: [...OVERDRAFT_POLICIES], domain: "money", level: 2 },
+  overdraft_link: { type: "ref", label: "Overdraft from", ref: "account", domain: "money", level: 2 },
+  overdraft_limit: { type: "money", label: "Overdraft limit", min: 0, domain: "money", level: 2 },
+  autopay: { type: "enum", label: "Autopay", values: [...AUTOPAY_MODES], default: "none", domain: "money", level: 3 },
+  autopay_from: { type: "ref", label: "Autopay from", ref: "account", domain: "money", level: 3 },
+  autopay_cents: { type: "money", label: "Autopay amount (fixed)", min: 0, domain: "money", level: 3 }
+};
+var CARD_FIELDS = {
+  account: { type: "ref", label: "Account", ref: "account", domain: "money", level: 2 },
+  holder: { type: "ref", label: "Holder", domain: "money", level: 2 },
+  network: { type: "enum", label: "Card type", values: [...CARD_NETWORKS], domain: "money", level: 2 },
+  state: { type: "enum", label: "State", values: [...CARD_STATES], default: "active", domain: "money", level: 2 },
+  item: { type: "ref", label: "The card in gear", domain: "money", level: 2 },
+  last4: { type: "text", label: "Last four digits", domain: "money", level: 3 },
+  daily_purchase_limit: { type: "money", label: "Daily purchase limit", min: 0, domain: "money", level: 4 },
+  daily_atm_limit: { type: "money", label: "Daily cash machine limit", min: 0, domain: "money", level: 4 },
+  replaces: { type: "ref", label: "Replaces", ref: "card", domain: "money", level: 2 },
+  replaced_by: { type: "ref", label: "Replaced by", ref: "card", domain: "money", level: 2 }
+};
+var FLOW_FIELDS = {
+  flow_kind: { type: "enum", label: "Kind", values: [...FLOW_KINDS], default: "bill", domain: "money", level: 2 },
+  from: { type: "text", label: "From (an account, a party, or an outside payer)", domain: "money", level: 2 },
+  to: { type: "text", label: "To (an account, a party, or an outside payee)", domain: "money", level: 2 },
+  splits: { type: "list", label: "Splits ({to, cents?, pct?})", domain: "money", level: 3 },
+  shares: { type: "list", label: "Shares ({party, pct, from?})", domain: "money", level: 3 },
+  amount_cents: { type: "money", label: "Amount", min: 0, domain: "money", level: 2 },
+  amount_formula: { type: "text", label: "Amount formula", domain: "money", level: 3 },
+  amount_table: { type: "text", label: "Amount from a table (table.row.column)", domain: "money", level: 3 },
+  amount_min: { type: "money", label: "Amount at least", min: 0, domain: "money", level: 3 },
+  amount_max: { type: "money", label: "Amount at most", min: 0, domain: "money", level: 3 },
+  amount_pct: { type: "number", label: "Percent of a balance", min: 0, max: 100, domain: "money", level: 3 },
+  amount_of: { type: "ref", label: "Percent of this account's balance", ref: "account", domain: "money", level: 3 },
+  amount_due: { type: "enum", label: "What's due on the credit account it pays", values: ["minimum", "statement", "balance"], domain: "money", level: 3 },
+  every: { type: "enum", label: "Every", values: ["day", "week", "month", "year"], domain: "money", level: 2 },
+  interval: { type: "number", label: "Every Nth period", min: 1, domain: "money", level: 2 },
+  weekdays: { type: "list", label: "Weekdays (0 = Sunday)", of: "number", domain: "money", level: 2 },
+  days: { type: "list", label: "Days of the month (-1 = the last)", of: "number", domain: "money", level: 2 },
+  months: { type: "list", label: "Months (yearly)", of: "number", domain: "money", level: 2 },
+  except: { type: "list", label: "Except holidays", of: "text", domain: "money", level: 3 },
+  roll: { type: "enum", label: "Off a business day", values: ["none", "before", "after"], default: "none", domain: "money", level: 3 },
+  at: { type: "text", label: "Time of day (HH:MM)", domain: "money", level: 2 },
+  once: { type: "text", label: "Once, at (YYYY-MM-DDTHH:MM)", domain: "money", level: 2 },
+  start: { type: "date", label: "Starts", domain: "money", level: 2 },
+  end: { type: "date", label: "Ends", domain: "money", level: 2 },
+  count: { type: "number", label: "Times at most", min: 1, domain: "money", level: 2 },
+  shortfall: { type: "enum", label: "When the money isn't there", values: [...FLOW_SHORTFALLS], default: "skip", domain: "money", level: 3 },
+  retry_days: { type: "number", label: "Retry after days", min: 1, domain: "money", level: 3 },
+  retries: { type: "number", label: "Retries", min: 0, domain: "money", level: 3 },
+  fallback: { type: "text", label: "Fallback (an account or a party)", domain: "money", level: 3 },
+  category: { type: "text", label: "Category", domain: "money", level: 2 },
+  link: { type: "ref", label: "Belongs to", domain: "money", level: 2 },
+  status: { type: "enum", label: "Status", values: [...FLOW_STATUSES], default: "active", domain: "money", level: 2 },
+  method: { type: "text", label: "Paid by (cash, card, checking, savings)", domain: "money", level: 3 }
+};
+var BUSINESS_FIELDS3 = {
+  owners: OWNERS,
+  places: { type: "list", label: "Places it trades at", of: "ref", domain: "money", level: 3 },
+  collects_sales_tax: { type: "bool", label: "Collects sales tax", domain: "money", level: 4 },
+  operating_account: { type: "ref", label: "Operating account", ref: "account", domain: "money", level: 3 },
+  industry: { type: "text", label: "Industry", domain: "money", level: 3 },
+  margin_pct: { type: "number", label: "Margin %", min: 0, max: 100, domain: "money", level: 4 },
+  structure: { type: "enum", label: "Structure", values: ["sole_proprietorship", "partnership", "llc", "s_corp", "c_corp"], domain: "money", level: 4 },
+  invoice_days: { type: "number", label: "Invoice terms (days)", min: 0, domain: "money", level: 3 },
+  late_fee_pct: { type: "number", label: "Late fee %", min: 0, domain: "money", level: 4 },
+  distribution_pct: { type: "number", label: "Profit paid out %", min: 0, max: 100, domain: "money", level: 4 },
+  distribution_every: { type: "enum", label: "Paid out every", values: ["month", "quarter", "year"], domain: "money", level: 4 }
+};
+var JOB_FIELDS = {
+  worker: { type: "ref", label: "Worker", ref: "person", domain: "money", level: 3 },
+  employer: { type: "text", label: "Employer (a business, or an outside employer)", domain: "money", level: 3 },
+  workplace: { type: "ref", label: "Workplace", domain: "money", level: 3 },
+  title: { type: "text", label: "Title", domain: "money", level: 3 },
+  occupation: { type: "text", label: "Occupation", domain: "money", level: 3, table: "economy.occupations" },
+  basis: { type: "enum", label: "Paid by", values: [...PAY_BASES], default: "hourly", domain: "money", level: 3 },
+  rate: { type: "money", label: "Rate (a year, an hour or a shift)", min: 0, domain: "money", level: 3 },
+  hours: { type: "enum", label: "Hours counted", values: ["scheduled", "attended", "contract"], domain: "money", level: 3 },
+  hours_per_week: { type: "number", label: "Hours a week", min: 0, domain: "money", level: 3 },
+  shifts_per_week: { type: "number", label: "Shifts a week", min: 0, domain: "money", level: 3 },
+  weeks_per_year: { type: "number", label: "Weeks a year", min: 0, max: 53, domain: "money", level: 3 },
+  commission_pct: { type: "number", label: "Commission %", min: 0, domain: "money", level: 3 },
+  tips_per_hour: { type: "money", label: "Tips an hour", min: 0, domain: "money", level: 3 },
+  contractor: { type: "bool", label: "Contractor (nothing withheld)", domain: "money", level: 4 },
+  season_from: { type: "text", label: "Season from (MM-DD)", domain: "money", level: 3 },
+  season_to: { type: "text", label: "Season to (MM-DD)", domain: "money", level: 3 },
+  pay_every: { type: "enum", label: "Paid", values: [...PAY_EVERY], default: "monthly", domain: "money", level: 3 },
+  pay_anchor: { type: "date", label: "First payday", domain: "money", level: 3 },
+  pay_days: { type: "list", label: "Paydays of the month", of: "number", domain: "money", level: 3 },
+  pay_weekday: { type: "number", label: "Payday weekday (0 = Sunday)", min: 0, max: 6, domain: "money", level: 3 },
+  pay_unit: { type: "enum", label: "Custom pay: every", values: ["day", "week", "month", "year"], domain: "money", level: 3 },
+  pay_interval: { type: "number", label: "Custom pay: every Nth", min: 1, domain: "money", level: 3 },
+  pay_weekdays: { type: "list", label: "Custom pay: weekdays", of: "number", domain: "money", level: 3 },
+  pay_months: { type: "list", label: "Custom pay: months", of: "number", domain: "money", level: 3 },
+  pay_except: { type: "list", label: "Custom pay: except holidays", of: "text", domain: "money", level: 3 },
+  pay_roll: { type: "enum", label: "Payday off a business day", values: ["none", "before", "after"], default: "before", domain: "money", level: 3 },
+  start: { type: "date", label: "Started", domain: "money", level: 3 },
+  end: { type: "date", label: "Ends", domain: "money", level: 3 },
+  deductions: { type: "list", label: "Deductions ({label, pretax, cents?, pct?, kind?, match_pct?, to?})", domain: "money", level: 4 },
+  splits: { type: "list", label: "Pay goes to ({to, cents?, pct?})", domain: "money", level: 3 },
+  status: { type: "enum", label: "Status", values: ["active", "leave", "ended"], default: "active", domain: "money", level: 3 },
+  shift_pattern: { type: "text", label: "Shift pattern", domain: "money", level: 3, table: "calendar.shifts" }
+};
+var HOLDING_FIELDS = {
+  account: { type: "ref", label: "Account", ref: "account", domain: "money", level: 4 },
+  owners: OWNERS,
+  asset: { type: "text", label: "Asset", domain: "money", level: 4 },
+  lots: { type: "list", label: "Lots ({qty, cost, at})", domain: "money", level: 4 },
+  route: { type: "text", label: "Distributions go to (an account, or reinvest)", domain: "money", level: 4 }
+};
+var PROPERTY_FIELDS2 = {
+  place: { type: "ref", label: "Place", domain: "money", level: 3 },
+  owners: OWNERS,
+  value: { type: "money", label: "Value", min: 0, domain: "money", level: 3 },
+  appreciation_pct: { type: "number", label: "Appreciation % a year", domain: "money", level: 4 },
+  purchase_price: { type: "money", label: "Purchase price", min: 0, domain: "money", level: 4 },
+  purchased: { type: "date", label: "Purchased", domain: "money", level: 4 },
+  mortgage: { type: "ref", label: "Mortgage", ref: "account", domain: "money", level: 3 },
+  tax_pct: { type: "number", label: "Property tax % a year", min: 0, domain: "money", level: 4 },
+  insurance: { type: "money", label: "Insurance a month", min: 0, domain: "money", level: 4 },
+  upkeep_pct: { type: "number", label: "Upkeep % a year", min: 0, domain: "money", level: 4 }
+};
+var INVOICE_FIELDS = {
+  business: { type: "ref", label: "Business", ref: "business", domain: "money", level: 3 },
+  customer: { type: "text", label: "Customer (a party, or an outside customer)", domain: "money", level: 3 },
+  cents: { type: "money", label: "Amount", min: 0, domain: "money", level: 3 },
+  memo: { type: "text", label: "For", domain: "money", level: 3 },
+  issued: { type: "date", label: "Issued", domain: "money", level: 3 },
+  due: { type: "date", label: "Due", domain: "money", level: 3 },
+  state: { type: "enum", label: "State", values: [...INVOICE_STATES], default: "open", domain: "money", level: 3 },
+  paid: { type: "money", label: "Paid", min: 0, domain: "money", level: 3 },
+  late_fee: { type: "money", label: "Late fee charged", min: 0, domain: "money", level: 4 },
+  fees: { type: "number", label: "Late fees charged", min: 0, locked: true, domain: "money", level: 4 },
+  days_late: { type: "number", label: "Days late", min: 0, domain: "money", level: 4 },
+  flow: { type: "text", label: "Paid by flow", domain: "money", level: 3 }
+};
+var BASE = {
+  account: { id: "account", label: "Account", pack: "economy", fields: ACCOUNT_FIELDS },
+  card: { id: "card", label: "Payment card", pack: "economy", fields: CARD_FIELDS },
+  flow: { id: "flow", label: "Money flow", pack: "economy", fields: FLOW_FIELDS },
+  trust: { id: "trust", label: "Trust", extends: "thing", pack: "economy", fields: { owners: OWNERS } },
+  business: { id: "business", label: "Business", extends: "thing", pack: "economy", fields: BUSINESS_FIELDS3 },
+  job: { id: "job", label: "Job", pack: "economy", fields: JOB_FIELDS },
+  holding: { id: "holding", label: "Holding", pack: "economy", fields: HOLDING_FIELDS },
+  property: { id: "property", label: "Property", extends: "thing", pack: "economy", fields: PROPERTY_FIELDS2 },
+  invoice: { id: "invoice", label: "Invoice", pack: "economy", fields: INVOICE_FIELDS }
+};
+function financeKinds(added) {
+  return Object.keys(BASE).map((id) => {
+    const base = BASE[id];
+    return { ...base, fields: { ...added[id] ?? {}, ...base.fields } };
+  });
 }
 
 // src/packs/economy/core/items.ts
@@ -11564,113 +18734,1017 @@ function catalogName(id, name) {
   return { heads, main: stem(last.at(-1) ?? ""), qualifiers, words };
 }
 
-// src/packs/economy/core/view.ts
-function shownCents(ctx, account, opened) {
-  return balance(ctx.state, account) + holdingsValue(ctx.state, account) + (opened ? 0 : Math.round(numOf(own(ctx.state.entities, account)?.fields.opening)));
+// src/packs/economy/core/cycle.ts
+var STATEMENT_MINUTE = 9 * 60 - 30;
+var DUE_MINUTE = 23 * 60 + 59;
+var INTEREST_MINUTE = 30;
+var LOAN_BILL_MINUTE = 1;
+function feature(ctx, account, f) {
+  return featureOn(accountLevel(ctx, account), f, toggles(ctx.world));
 }
-function buildMoneyView(ctx) {
-  const pov = ctx.world.pov;
-  const level = ctx.levelOf(pov, "money");
-  const cal = calendarOf(ctx.world);
-  const mine = accountsOf(ctx.state, pov);
-  const opened = mine.length === 0 || isMaterialized(ctx.state, pov, "money");
-  const cents = (account) => shownCents(ctx, account, opened);
-  const worth = mine.reduce((sum, account) => sum + cents(account), 0);
-  const band = level >= 1 ? mine.length > 0 ? wealthBand(worth) : wealthOf(ctx.state, pov) : null;
-  if (level === 0)
-    return { level, band: null, netWorthCents: null, cash: null, accounts: [], recent: [], upcoming: [] };
-  if (level === 1 || mine.length === 0)
-    return { level, band, netWorthCents: null, cash: band ? { band } : null, accounts: [], recent: [], upcoming: [] };
-  const firstChecking = mine.find((id) => accountType(ctx.state, id) === "checking");
-  const shown = level >= 3 ? mine : mine.filter((id) => accountType(ctx.state, id) === "cash" || id === firstChecking);
-  const statements = objOf(sliceOf(ctx.state, "economy").cards);
-  const accounts = shown.map((id) => {
-    const e = own(ctx.state.entities, id);
-    const kind = accountType(ctx.state, id) ?? "checking";
-    const a = { id, name: e?.name ?? id, kind, cents: cents(id) };
-    if (level >= 3 && kind === "card" && typeof e?.fields.limit === "number")
-      a.limitCents = e.fields.limit;
-    if (level >= 4 && typeof e?.fields.apr_pct === "number")
-      a.aprPct = e.fields.apr_pct;
-    const st = objOf(statements[id]);
-    if (level >= 4 && Object.keys(st).length > 0 && numOf(st.paid) < numOf(st.minimum))
-      a.due = { label: `Minimum due ${formatClock(cal, numOf(st.due)).split(",")[0] ?? ""}`, cents: numOf(st.minimum) - numOf(st.paid) };
-    return a;
-  });
-  const rawHistory = sliceOf(ctx.state, "economy").history;
-  const recent = recentLines(ctx, Array.isArray(rawHistory) ? rawHistory : [], new Set(shown), 10);
-  const upcoming = level >= 3 ? billsOf(ctx, pov).map(({ payee: _payee, ...bill }) => bill) : [];
-  return {
-    level,
-    band,
-    netWorthCents: worth,
-    cash: { cents: mine.filter((id) => accountType(ctx.state, id) === "cash").reduce((a, id) => a + cents(id), 0) },
-    accounts,
-    recent,
-    upcoming
-  };
+function creditHolders(ctx, account) {
+  return holdersOf(ctx.state, account).filter((h) => own(ctx.state.entities, h) && isParty(ctx, h) && ownerRoleCarriesCredit(ctx, account, h));
 }
-function recentLines(ctx, history, shown, max) {
-  const cal = calendarOf(ctx.world);
+function ownerRoleCarriesCredit(ctx, account, party) {
+  const e = own(ctx.state.entities, account);
+  const list = Array.isArray(e?.fields.owners) ? e.fields.owners : null;
+  if (!list)
+    return true;
+  return list.some((o) => typeof o === "object" && o !== null && !Array.isArray(o) && o.party === party && (o.role === "owner" || o.role === "joint" || o.role === undefined));
+}
+function nextMonthDay(cal, day, dom) {
+  for (let d = day + 1;d <= day + 62; d++) {
+    const date = dateAt(cal, clockAt(cal, d, 0));
+    const len = cal.system.monthLength(date.year, date.month);
+    if (date.day === Math.min(dom, len))
+      return d;
+  }
+  return day + 25;
+}
+function inSlot(at, from, to) {
+  return at > from && at <= to;
+}
+function monthlyAt(cal, from, to, dom, minute) {
   const out = [];
-  for (let i = history.length - 1;i >= 0 && out.length < max; i--) {
-    const h = objOf(history[i]);
-    const lines = Array.isArray(h.lines) ? h.lines.map((l) => objOf(l)) : [];
-    for (const l of lines) {
-      const account = strOf(l.account);
-      if (!shown.has(account))
-        continue;
-      out.push({ at: formatClock(cal, numOf(h.at)), memo: strOf(h.memo), cents: numOf(l.amount), account: own(ctx.state.entities, account)?.name ?? account });
-    }
+  for (let d = dateAt(cal, from).dayIndex;d <= dateAt(cal, to).dayIndex; d++) {
+    const date = dateAt(cal, clockAt(cal, d, 0));
+    if (date.day !== Math.min(dom, cal.system.monthLength(date.year, date.month)))
+      continue;
+    const at = clockAt(cal, d, minute);
+    if (inSlot(at, from, to))
+      out.push(at);
   }
   return out;
 }
-function billsOf(ctx, who) {
+var NEXT_STAGE = { current: "late", late: "30", "30": "60", "60": "90", "90": "120", "120": "collections", collections: "charged_off", charged_off: "charged_off" };
+function cycleTasks(ctx, from, to) {
   const cal = calendarOf(ctx.world);
-  const bills = own(ctx.state.entities, who)?.fields.bills;
-  if (!Array.isArray(bills))
-    return [];
-  return bills.map((raw) => {
-    const b = objOf(raw);
-    const every = strOf(b.every, "month");
-    const at = every === "week" ? `every ${typeof b.day === "string" ? b.day : weekdayName(cal, numOf(b.day, 1))}` : every === "year" ? `${monthName(cal, numOf(b.month, 1))} ${numOf(b.day, 1)}` : `day ${numOf(b.day, 1)}`;
-    const payee = strOf(b.payee);
-    return { at, label: strOf(b.label, "Bill"), cents: -Math.round(numOf(b.amountCents)), payee: own(ctx.state.entities, payee)?.name ?? payee };
-  });
+  const tasks = [];
+  for (const id of Object.keys(ctx.state.entities).sort()) {
+    const e = own(ctx.state.entities, id);
+    if (e?.kind !== "account")
+      continue;
+    const t = traitsOf(ctx, id);
+    if (!t || holdersOf(ctx.state, id).every((h) => !own(ctx.state.entities, h)))
+      continue;
+    const level = accountLevel(ctx, id);
+    if (level < 3)
+      continue;
+    const status = statusOf(ctx.state, id);
+    if (status === "closed" || status === "charged_off" || status === "paid_off" || status === "matured")
+      continue;
+    const p = productOf(ctx, id);
+    if (!p)
+      continue;
+    if (t.revolving && feature(ctx, id, "statements")) {
+      for (const at of monthlyAt(cal, from, to, p.statement_day, STATEMENT_MINUTE))
+        tasks.push({ at, rank: 1, key: `statement:${id}`, run: (run) => closeRevolving(run, id, at) });
+    }
+    if (t.installment) {
+      const dom = typeof e.fields.due_day === "number" ? e.fields.due_day : p.statement_day;
+      for (const at of monthlyAt(cal, from, to, dom, LOAN_BILL_MINUTE))
+        tasks.push({ at, rank: 1, key: `bill:${id}`, run: (run) => billInstallment(run, id, at) });
+    }
+    const cycle = cycleOf2(ctx.state, id);
+    if (cycle && (t.revolving || t.installment)) {
+      const dueDay = dateAt(cal, cycle.due).dayIndex;
+      const morning = clockAt(cal, dueDay, 9 * 60 + 30);
+      if (inSlot(morning, from, to) && strOf(e.fields.autopay, "none") === "none")
+        tasks.push({ at: morning, rank: 4, key: `remind:${id}`, run: (run) => remind(run, id) });
+      if (inSlot(cycle.due, from, to) && feature(ctx, id, "delinquency"))
+        tasks.push({ at: cycle.due, rank: 5, key: `due:${id}`, run: (run) => dueCheck(run, id, cycle.due) });
+    }
+    if (t.earns && feature(ctx, id, "interest") && (p.apy_pct > 0 || p.fees.maintenance > 0)) {
+      for (const at of monthlyAt(cal, from, to, 1, INTEREST_MINUTE))
+        tasks.push({ at, rank: 2, key: `interest:${id}`, run: (run) => monthEnd(run, id, at) });
+    } else if (t.transactional && feature(ctx, id, "fees") && p.fees.maintenance > 0) {
+      for (const at of monthlyAt(cal, from, to, 1, INTEREST_MINUTE))
+        tasks.push({ at, rank: 2, key: `interest:${id}`, run: (run) => monthEnd(run, id, at) });
+    }
+    const pending = journalOf(ctx.state, id).filter((j) => j.status === "pending" && typeof j.settles === "number" && j.settles <= to);
+    if (pending.length > 0) {
+      const upto = Math.max(...pending.map((j) => numOf(j.settles)));
+      tasks.push({ at: Math.max(from + 1, Math.min(to, upto)), rank: 0, key: `settle:${id}`, run: (run) => void run.emit([{ type: FINANCE_EVENTS.settle, data: { account: id, upto } }]) });
+    }
+  }
+  return tasks;
 }
-function buildPeopleMoney(ctx) {
+function money2(ctx, cents) {
+  return formatMoney(cents, ctx.world.currency);
+}
+function tell(run, account, cls, text, at) {
+  const holders = holdersOf(run.ctx.state, account).filter((h) => own(run.ctx.state.entities, h) && isParty(run.ctx, h));
+  run.emit(holders.map((h) => signal(cls, text, h, at)));
+}
+function bankLines(account, institution, cents) {
+  return [
+    { account, amount: -cents },
+    { account: bankSide(institution), amount: cents }
+  ];
+}
+function annualFeeDue(ctx, account, at) {
+  const opened = strOf(own(ctx.state.entities, account)?.fields.opened);
+  const month = /^\d{4}-(\d{2})/.exec(opened)?.[1];
+  return dateAt(calendarOf(ctx.world), at).month === (month ? Number(month) : 1);
+}
+function closeRevolving(run, account, at) {
+  const ctx = run.ctx;
+  const p = productOf(ctx, account);
+  if (!p)
+    return;
+  const prev = cycleOf2(ctx.state, account);
+  const name = labelOf(ctx, account);
+  const grace = !prev || prev.closing <= 0 || prev.paid >= prev.closing;
+  const apr = prev?.penalty && p.penalty_apr_pct > 0 ? p.penalty_apr_pct : p.apr_pct;
+  let interest = 0;
+  if (!grace && feature(ctx, account, "interest") && apr > 0) {
+    if (feature(ctx, account, "average_daily") && p.interest === "average_daily" && prev) {
+      const owedOnAverage = Math.max(0, -averageBalance(ctx.state, account, at));
+      const days = Math.max(1, (at - (accrualOf(ctx.state, account)?.from ?? prev.at)) / 1440);
+      interest = Math.round(owedOnAverage * apr * days / 100 / 365);
+    } else {
+      const carried = Math.max(0, (prev?.closing ?? 0) - (prev?.paid ?? 0));
+      interest = Math.round(carried * apr / 100 / 12);
+    }
+  }
+  if (interest > 0)
+    run.emit(asUnit(posting(bankLines(account, p.institution, interest), { memo: `${name} interest`, kind: "interest", category: "interest", at })));
+  let fees = 0;
+  if (feature(ctx, account, "fees") && p.fees.annual > 0 && annualFeeDue(ctx, account, at)) {
+    if (run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.annual), { memo: `${name} annual fee`, kind: "fee", category: "annual_fee", at }))).length > 0)
+      fees += p.fees.annual;
+  }
+  const spent = accrualOf(ctx.state, account)?.spent ?? 0;
+  if (p.rewards_pct > 0 && spent > 0) {
+    const rewards = Math.round(spent * p.rewards_pct / 100);
+    if (rewards > 0)
+      run.emit(asUnit(posting([{ account: bankSide(p.institution), amount: -rewards }, { account, amount: rewards }], { memo: `${name} rewards`, kind: "rewards", category: "rewards", at })));
+  }
+  const owed = Math.max(0, -balance(ctx.state, account));
+  const principal = Math.max(0, owed - interest - fees);
+  const pastDue = prev?.past_due ?? 0;
+  const regular = owed <= 0 ? 0 : Math.min(owed, Math.max(p.minimum.floor, Math.ceil(principal * p.minimum.pct / 100 + (p.minimum.plus_interest ? interest + fees : 0))));
+  const minimum = Math.min(owed, regular + pastDue);
   const cal = calendarOf(ctx.world);
-  const records = objOf(sliceOf(ctx.state, "economy").people);
+  const day = dateAt(cal, at).dayIndex;
+  const dueDom = numOf(own(ctx.state.entities, account)?.fields.due_day, NaN);
+  const due = clockAt(cal, Number.isFinite(dueDom) ? nextMonthDay(cal, day, dueDom) : day + p.due_days, DUE_MINUTE);
+  run.emit([{ type: FINANCE_EVENTS.statement, data: { account, closing: owed, interest, fees, minimum, due, apr, stage: prev?.stage ?? "current", grace, past_due: pastDue, lates: prev?.lates ?? 0, penalty: prev?.penalty === true, at, streak: prev?.streak ?? 0, ontime: prev?.ontime ?? 0, late30: prev?.late30 ?? 0, late60: prev?.late60 ?? 0, late90: prev?.late90 ?? 0 } }]);
+  if (owed > 0)
+    tell(run, account, "bill", `${name} statement: ${money2(ctx, owed)}${interest > 0 ? ` incl. ${money2(ctx, interest)} interest` : ""}; minimum ${money2(ctx, minimum)} due ${dateLabel(ctx, due)}.`, at);
+}
+function dateLabel(ctx, at) {
+  const cal = calendarOf(ctx.world);
+  const d = dateAt(cal, at);
+  return `${d.day} ${cal.system.monthNames[d.month - 1] ?? d.month}`;
+}
+function amortized(owed, rate, months) {
+  if (months <= 0)
+    return owed;
+  return rate > 0 ? owed * rate / (1 - Math.pow(1 + rate, -months)) : owed / months;
+}
+function billInstallment(run, account, at) {
+  const ctx = run.ctx;
+  const p = productOf(ctx, account);
+  const e = own(ctx.state.entities, account);
+  if (!p || !e)
+    return;
+  const prev = cycleOf2(ctx.state, account);
+  const owed = Math.max(0, -balance(ctx.state, account));
+  if (owed <= 0) {
+    run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "paid_off" } }, ...creditEntries(ctx, account, "paid_off", at)]);
+    return;
+  }
+  const authoredMonths = numOf(e.fields.months_left, numOf(e.fields.remaining_months, p.term_months ?? 0));
+  const months = Math.max(1, Math.round(prev?.months_left !== undefined ? prev.months_left : authoredMonths > 0 ? authoredMonths : 1));
+  const apr = prev?.penalty && p.penalty_apr_pct > 0 ? p.penalty_apr_pct : p.apr_pct;
+  const rate = feature(ctx, account, "interest") ? apr / 100 / 12 : 0;
+  const interest = Math.round(owed * rate);
+  const name = labelOf(ctx, account);
+  if (interest > 0)
+    run.emit(asUnit(posting(bankLines(account, p.institution, interest), { memo: `${name} interest`, kind: "interest", category: "interest", at })));
+  const total = owed + interest;
+  const payment = typeof e.fields.payment === "number" && e.fields.payment > 0 ? e.fields.payment : Math.round(amortized(owed, rate, months));
+  const due = months <= 1 ? total : Math.min(total, Math.round(payment));
+  const pastDue = prev?.past_due ?? 0;
+  const minimum = Math.min(total, due + pastDue);
+  const cal = calendarOf(ctx.world);
+  run.emit([{ type: FINANCE_EVENTS.statement, data: { account, closing: total, interest, fees: 0, minimum, due: clockAt(cal, dateAt(cal, at).dayIndex, DUE_MINUTE), apr, stage: prev?.stage ?? "current", grace: true, past_due: pastDue, lates: prev?.lates ?? 0, penalty: prev?.penalty === true, months_left: Math.max(0, months - 1), at, streak: prev?.streak ?? 0, ontime: prev?.ontime ?? 0, late30: prev?.late30 ?? 0, late60: prev?.late60 ?? 0, late90: prev?.late90 ?? 0 } }]);
+}
+function remind(run, account) {
+  const ctx = run.ctx;
+  const cycle = cycleOf2(ctx.state, account);
+  if (!cycle)
+    return;
+  const left = cycle.minimum - cycle.paid;
+  if (left > 0)
+    tell(run, account, "bill", `${labelOf(ctx, account)} payment of ${money2(ctx, left)} is due today.`, cycle.due - (DUE_MINUTE - (9 * 60 + 30)));
+}
+function creditEntries(ctx, account, kind, at, days) {
+  return creditHolders(ctx, account).map((person) => ({ type: FINANCE_EVENTS.credit, data: { person, kind, account, at, ...days !== undefined ? { days } : {} } }));
+}
+function dueCheck(run, account, at) {
+  const ctx = run.ctx;
+  const cycle = cycleOf2(ctx.state, account);
+  const p = productOf(ctx, account);
+  if (!cycle || !p || cycle.minimum <= 0)
+    return;
+  const name = labelOf(ctx, account);
+  if (cycle.paid >= cycle.minimum) {
+    const streak = (cycle.streak ?? 0) + 1;
+    const lifted = cycle.penalty && streak >= 6;
+    run.emit([{ type: FINANCE_EVENTS.delinquency, data: { account, stage: "current", past_due: 0, lates: streak >= 6 ? 0 : cycle.lates, penalty: cycle.penalty && !lifted, streak, ontime: (cycle.ontime ?? 0) + 1 } }]);
+    if (statusOf(ctx.state, account) === "frozen" && cycle.stage !== "current")
+      run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "open" } }]);
+    if (lifted)
+      tell(run, account, "bill", `${name}: six payments on time; the penalty rate is lifted.`, at);
+    return;
+  }
+  const short = cycle.minimum - cycle.paid;
+  const stage = NEXT_STAGE[cycle.stage];
+  let fee = 0;
+  if (feature(ctx, account, "fees") && stage !== "charged_off") {
+    const base = cycle.lates > 0 ? p.fees.late_repeat : p.fees.late_first;
+    fee = Math.min(base, cycle.minimum);
+    if (fee > 0)
+      run.emit(asUnit(posting(bankLines(account, p.institution, fee), { memo: `${name} late fee`, kind: "fee", category: "late_fee", at })));
+  }
+  const penalty = cycle.penalty || (stage === "60" || stage === "90" || stage === "120" || stage === "collections") && p.penalty_apr_pct > 0;
+  const counters = { late30: (cycle.late30 ?? 0) + (stage === "30" ? 1 : 0), late60: (cycle.late60 ?? 0) + (stage === "60" ? 1 : 0), late90: (cycle.late90 ?? 0) + (stage === "90" ? 1 : 0) };
+  run.emit([{ type: FINANCE_EVENTS.delinquency, data: { account, stage, past_due: short, lates: cycle.lates + 1, penalty, streak: 0, ontime: cycle.ontime ?? 0, ...counters } }]);
+  const days = { "30": 30, "60": 60, "90": 90 };
+  const reported = own(days, stage);
+  if (reported !== undefined)
+    run.emit(creditEntries(ctx, account, "late", at, reported));
+  if (stage === "90")
+    run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "frozen" } }]);
+  if (stage === "120")
+    run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "collections" } }, ...creditEntries(ctx, account, "collections", at)]);
+  if (stage === "charged_off")
+    run.emit([{ type: FINANCE_EVENTS.status, data: { account, status: "charged_off" } }, ...creditEntries(ctx, account, "charged_off", at)]);
+  const what = stage === "late" ? "missed" : stage === "120" ? "sent to collections" : stage === "charged_off" ? "charged off" : stage === "collections" ? "still in collections" : `${stage} days late`;
+  tell(run, account, "decline", `${name} payment of ${money2(ctx, short)} ${what}${fee > 0 ? `; a ${money2(ctx, fee)} late fee was charged` : ""}${penalty && !cycle.penalty ? `; the penalty rate of ${p.penalty_apr_pct}% applies` : ""}.`, at);
+}
+function monthEnd(run, account, at) {
+  const ctx = run.ctx;
+  const p = productOf(ctx, account);
+  if (!p)
+    return;
+  const name = labelOf(ctx, account);
+  const a = accrualOf(ctx.state, account);
+  const average = feature(ctx, account, "average_daily") && p.interest === "average_daily" ? averageBalance(ctx.state, account, at) : balance(ctx.state, account);
+  if (feature(ctx, account, "interest") && p.apy_pct > 0 && average > 0) {
+    const days = a && feature(ctx, account, "average_daily") ? Math.max(1, (at - a.from) / 1440) : 365 / 12;
+    const interest = Math.round(average * p.apy_pct * days / 100 / 365);
+    if (interest > 0)
+      run.emit(asUnit(posting([{ account: bankSide(p.institution), amount: -interest }, { account, amount: interest }], { memo: `${name} interest`, kind: "interest", category: "interest", at })));
+  }
+  if (feature(ctx, account, "fees") && p.fees.maintenance > 0 && Math.min(balance(ctx.state, account), average) < p.fees.maintenance_waive) {
+    run.emit(asUnit(posting(bankLines(account, p.institution, p.fees.maintenance), { memo: `${name} monthly fee`, kind: "fee", category: "maintenance", at })));
+  }
+  run.emit([{ type: FINANCE_EVENTS.accrue, data: { account, at } }]);
+}
+function statementState(cycle, now) {
+  if (cycle.paid >= cycle.closing)
+    return "paid";
+  if (cycle.paid >= cycle.minimum)
+    return "minimum";
+  return now > cycle.due || cycle.stage !== "current" ? "late" : "open";
+}
+
+// src/packs/economy/core/run.ts
+function scratchOf(state) {
+  return { ...state, entities: { ...state.entities }, accounts: { ...state.accounts }, packs: { ...state.packs, economy: structuredClone(state.packs.economy ?? {}) }, materialized: { ...state.materialized } };
+}
+
+class Run {
+  state;
+  ctx;
+  out = [];
+  copied = new Set(["economy"]);
+  ownEntities = new Set;
+  constructor(base) {
+    this.state = scratchOf(base.state);
+    this.ctx = base.registry.context(base.world, this.state);
+  }
+  touch(e) {
+    const entity = e.type === "set" || e.type === "add" ? e.entity : e.type === "link" || e.type === "unlink" ? e.from : null;
+    if (entity !== null && !this.ownEntities.has(entity)) {
+      const cur = own(this.state.entities, entity);
+      if (cur)
+        this.state.entities[entity] = { ...cur, fields: { ...cur.fields }, relations: [...cur.relations] };
+      this.ownEntities.add(entity);
+    }
+    const dot = e.type.indexOf(".");
+    const pack = dot > 0 ? e.type.slice(0, dot) : null;
+    if (pack !== null && !this.copied.has(pack)) {
+      const slice = own(this.state.packs, pack);
+      if (slice)
+        this.state.packs[pack] = structuredClone(slice);
+      this.copied.add(pack);
+    }
+  }
+  fits(unit) {
+    if (unit.length === 1)
+      return unit[0] !== undefined && validateEvent(this.ctx.registry, unit[0], this.ctx) === null;
+    const trial = { ...this.state, accounts: { ...this.state.accounts } };
+    const ctx = this.ctx.registry.context(this.ctx.world, trial);
+    for (const e of unit) {
+      if (validateEvent(this.ctx.registry, e, ctx))
+        return false;
+      if (e.type === "post")
+        for (const l of e.lines)
+          trial.accounts[l.account] = (own(trial.accounts, l.account) ?? 0) + l.amount;
+    }
+    return true;
+  }
+  emit(events) {
+    const list = noted(this.ctx, [...events]);
+    const applied = [];
+    for (const [from, to] of eventUnits(list)) {
+      const unit = list.slice(from, to);
+      if (!this.fits(unit))
+        continue;
+      for (const e of unit) {
+        this.touch(e);
+        applyEvent(this.ctx.registry, e, this.state, this.ctx);
+        applied.push(e);
+      }
+    }
+    this.out.push(...applied);
+    return applied;
+  }
+}
+
+// src/packs/economy/core/process.ts
+function parties(ctx) {
+  return Object.keys(ctx.state.entities).sort().filter((id) => isParty(ctx, id) && !isGone(ctx.state, id));
+}
+function openingBalances(entity, ctx, claimed) {
+  const s = ctx.state;
+  const closed = accountsOf(ctx, entity).filter((id) => !claimed?.has(id) && !isOpened(s, id, openerOf(s, id) === entity ? null : openerOf(s, id)));
+  for (const id of closed)
+    claimed?.add(id);
+  const lines = closed.filter((id) => typeof own(s.entities, id)?.fields.opening === "number" && numOf(own(s.entities, id)?.fields.opening) !== 0).map((id) => ({ account: id, amount: Math.round(numOf(own(s.entities, id)?.fields.opening)) }));
+  const out = [];
+  if (lines.length > 0) {
+    const total = lines.reduce((a, l) => a + l.amount, 0);
+    const all = total === 0 ? lines : [...lines, { account: external(entity), amount: -total }];
+    if (all.length >= 2)
+      out.push({ type: "post", lines: all, memo: "Opening balances" }, { type: FINANCE_EVENTS.txn, data: { memo: "Opening balance", kind: "opening", category: "opening", lines: lines.map((l) => ({ account: l.account, amount: l.amount })) } });
+  }
+  if (closed.length > 0)
+    out.push({ type: FINANCE_EVENTS.open, data: { accounts: closed } });
+  return out;
+}
+function openAccounts(ctx) {
+  const out = [];
+  const claimed = new Set;
+  for (const who of parties(ctx)) {
+    if (ctx.levelOf(who, "money") < 3 || isMaterialized(ctx.state, who, "money"))
+      continue;
+    const opening = openingEvent(ctx, who, claimed);
+    if (opening)
+      out.push(opening);
+  }
+  return out;
+}
+function openingEvent(ctx, who, claimed) {
+  const version = pinnedVersion(ctx.world, ctx.registry, "money");
+  if (typeof version !== "number")
+    return null;
+  const events = openingBalances(who, ctx, claimed);
+  return events.length > 0 ? { type: "materialize", entity: who, domain: "money", generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events } : null;
+}
+function moneyStep(hooks, slot, ctx, rng) {
+  const tasks = cycleTasks(ctx, slot.start, slot.end);
+  for (const flow of allFlows(hooks, ctx)) {
+    if (flow.status !== "active")
+      continue;
+    const level = flowLevel(ctx, flow);
+    if (!featureOn(level, "flows", toggles(ctx.world)))
+      continue;
+    const run = flowRunOf(ctx.state, flow.id);
+    if (run.ended)
+      continue;
+    for (const o of occurrences(ctx, flow.schedule, slot.start, slot.end, flow.start, flow.end))
+      tasks.push({ at: o.at, rank: 3, key: `flow:${flow.id}:${o.day}`, run: (r) => runOccurrence(hooks, r, flow, o.at, rng(`flow:${flow.id}:${o.at}`), false) });
+    if (run.retry && run.retry.at > slot.start && run.retry.at <= slot.end) {
+      const at = run.retry.at;
+      tasks.push({ at, rank: 3, key: `retry:${flow.id}`, run: (r) => runOccurrence(hooks, r, flow, at, rng(`flow:${flow.id}:${at}`), true) });
+    }
+  }
+  const scores = scoreInstants(ctx, slot.start, slot.end);
+  if (scores.length > 0) {
+    for (const person of parties(ctx)) {
+      if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, person)?.kind ?? "", "person") || !featureFor(ctx, person, "credit"))
+        continue;
+      for (const at of scores)
+        tasks.push({ at, rank: 6, key: `score:${person}`, run: (r) => hasCreditFile(r.ctx, person) ? void r.emit(monthlyScore(r.ctx, person, at)) : undefined });
+    }
+  }
+  if (tasks.length === 0)
+    return [];
+  tasks.sort((a, b) => a.at - b.at || a.rank - b.rank || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const run = new Run(ctx);
+  for (const t of tasks)
+    t.run(run);
+  return run.out;
+}
+function logUniform(rng, lo, hi) {
+  const a = Math.log(Math.max(1, lo));
+  const b = Math.log(Math.max(2, hi));
+  return Math.exp(a + (b - a) * rng.next());
+}
+function materializeMoney(entity, ctx, rng, version) {
+  const s = ctx.state;
+  const e = own(s.entities, entity);
+  const level = e ? ctx.levelOf(entity, "money") : 0;
+  if (!e || level < 1)
+    return [];
+  if (accountsOf(ctx, entity).length > 0)
+    return openingBalances(entity, ctx);
+  if (level < 2 || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    return [];
+  const ext = external(entity);
+  const band = bandByLabel(strOf(e.fields.wealth, "modest"));
+  const lo = Number.isFinite(band.min) ? Math.max(band.min, 0) : 0;
+  const hi = Number.isFinite(band.max) ? band.max - 1 : band.typical * 4;
+  const worth = Math.round(logUniform(rng, Math.max(lo, 500), Math.max(hi, 1000)));
+  const cash = Math.min(worth, Math.round(Math.min(50000, Math.max(2000, worth * (0.01 + rng.next() * 0.02)))));
+  const rest = worth - cash;
+  const checkingShare = worth < 2000000 ? 0.4 + rng.next() * 0.4 : 0.15 + rng.next() * 0.2;
+  const checking = Math.round(rest * checkingShare);
+  const savings = rest - checking;
+  const limit = Math.round(Math.min(2500000, Math.max(50000, band.typical * 0.3)) / 1e4) * 1e4;
+  const owed = Math.round(limit * rng.next() * 0.25);
+  const statementDay = 1 + rng.int(0, 27);
+  const wallet = Object.keys(s.entities).sort().find((id) => own(s.entities, id)?.fields.owner === entity && (own(s.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(s.entities, id)?.name ?? "")));
+  const id = (suffix) => `${entity}:${suffix}`;
+  const out = [];
+  if (version === 1) {
+    const mk = (suffix, name, fields, inWallet = false) => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owner: entity, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
+    for (const def of [mk("cash", "Cash", { type: "cash" }, true), mk("checking", "Checking", { type: "checking", institution: "Local bank" }), mk("savings", "Savings", { type: "savings", institution: "Local bank", apy_pct: 0.4 }), mk("card", "Credit card", { type: "card", limit, apr_pct: 22, statement_day: statementDay, due_days: 25, autopay: "minimum" })])
+      out.push({ type: "spawn", entity: def });
+  } else {
+    const owners = [{ party: entity, role: "owner" }];
+    const mk = (suffix, name, fields, inWallet = false) => ({ id: id(suffix), kind: "account", name, tier: "background", fields: { owners, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
+    const card = (suffix, name, account, network) => ({ id: id(suffix), kind: "card", name, tier: "background", fields: { account, holder: entity, network, state: "active" }, relations: [] });
+    for (const def of [
+      mk("cash", "Cash", { product: "cash" }, true),
+      mk("checking", "Checking", { product: "checking", institution: "Local bank" }),
+      mk("savings", "Savings", { product: "savings", institution: "Local bank" }),
+      mk("card", "Credit card", { product: "credit_card", institution: "Local bank", limit, statement_day: statementDay, autopay: "minimum", autopay_from: id("checking") }),
+      card("debit_card", "Debit card", id("checking"), "debit"),
+      card("credit_card", "Credit card", id("card"), "credit")
+    ])
+      out.push({ type: "spawn", entity: def });
+  }
+  const lines = [
+    { account: id("cash"), amount: cash },
+    { account: id("checking"), amount: checking },
+    { account: id("savings"), amount: savings },
+    { account: id("card"), amount: -owed }
+  ].filter((l) => l.amount !== 0);
+  const total = lines.reduce((a, l) => a + l.amount, 0);
+  if (lines.length > 0)
+    out.push({ type: "post", lines: [...lines, { account: ext, amount: -total }], memo: "Opening balances" });
+  out.push({ type: FINANCE_EVENTS.open, data: { accounts: [id("cash"), id("checking"), id("savings"), id("card")] } });
+  return out;
+}
+
+// src/packs/economy/core/worth.ts
+var GROUPS = [
+  { label: "Cash", test: (c) => CLASS_TRAITS[c].cash },
+  { label: "Bank accounts", test: (c) => CLASS_TRAITS[c].asset && !CLASS_TRAITS[c].cash && !CLASS_TRAITS[c].investment },
+  { label: "Investment accounts", test: (c) => CLASS_TRAITS[c].investment },
+  { label: "Cards and credit lines", test: (c) => CLASS_TRAITS[c].revolving },
+  { label: "Loans", test: (c) => CLASS_TRAITS[c].installment }
+];
+function netWorthParts(hooks, ctx, party, shown = (id) => balance(ctx.state, id)) {
+  const byGroup = new Map;
+  let assets = 0;
+  let liabilities = 0;
+  for (const id of accountsOf(ctx, party, "worth")) {
+    const cls = classOf2(ctx, id);
+    if (!cls)
+      continue;
+    const cents = Math.round(shown(id) * shareOf(ctx.state, id, party) / 100);
+    if (cents >= 0)
+      assets += cents;
+    else
+      liabilities -= cents;
+    const group = GROUPS.find((g) => g.test(cls))?.label ?? "Other";
+    byGroup.set(group, (byGroup.get(group) ?? 0) + cents);
+  }
+  const lines = GROUPS.map((g) => ({ label: g.label, cents: byGroup.get(g.label) ?? 0 })).filter((l) => l.cents !== 0);
+  for (const source of hooks.worth) {
+    const w = source(ctx, party);
+    assets += Math.max(0, w.assets);
+    liabilities += Math.max(0, w.liabilities);
+    lines.push(...w.lines);
+  }
+  return { net: assets - liabilities, assets, liabilities, lines };
+}
+function netWorth(hooks, ctx, party) {
+  return netWorthParts(hooks, ctx, party).net;
+}
+function wealthOf(hooks, ctx, party) {
+  return accountsOf(ctx, party).length > 0 ? wealthBand(netWorth(hooks, ctx, party)) : strOf(own(ctx.state.entities, party)?.fields.wealth, "modest");
+}
+function canAfford(hooks, ctx, party, cents, spendableNow) {
+  const level = ctx.levelOf(party, "money");
+  if (level === 0)
+    return true;
+  if (accountsOf(ctx, party).length === 0)
+    return notional(ctx.state, party) >= cents;
+  return level >= 2 ? spendableNow >= cents : netWorth(hooks, ctx, party) >= cents;
+}
+
+// src/packs/economy/core/summary.ts
+var DAY = 1440;
+function moneySummary(hooks, ctx, who) {
+  const level = ctx.levelOf(who, "money");
+  const band = level >= 1 ? wealthOf(hooks, ctx, who) : null;
+  if (level < 2 || accountsOf(ctx, who).length === 0)
+    return { lines: band ? [`Money: ${band}.`] : [], band, spendable: null, pressing: [] };
+  const money = (c) => formatMoney(c, ctx.world.currency);
+  const cal = calendarOf(ctx.world);
+  const day = (at) => formatClock(cal, at).split(",")[0] ?? "";
+  const shown = (id) => balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening)));
+  const lines = [];
+  const mine = accountsOf(ctx, who);
+  const cash = mine.filter((id) => classOf2(ctx, id) === "cash" && rightsOf(ctx.state, id, who)?.spend).reduce((a, id) => a + shown(id), 0);
+  const bank = mine.filter((id) => traitsOf(ctx, id)?.asset && !traitsOf(ctx, id)?.cash && rightsOf(ctx.state, id, who)?.spend && !traitsOf(ctx, id)?.locked);
+  const inBank = bank.reduce((a, id) => a + shown(id), 0);
+  lines.push(`You have ${money(cash)} in cash and ${money(inBank)} in the bank.`);
+  let spendable = cash + bank.reduce((a, id) => a + Math.max(0, availableOf(ctx, id) + overdraftRoom(ctx, id)), 0);
+  const pressing = [];
+  const now = ctx.state.clock;
+  for (const id of mine) {
+    const t = traitsOf(ctx, id);
+    if (!t?.liability || !rightsOf(ctx.state, id, who)?.worth)
+      continue;
+    const owed = Math.max(0, -shown(id));
+    const name = own(ctx.state.entities, id)?.name ?? id;
+    if (t.revolving && statusOf(ctx.state, id) === "open")
+      spendable += Math.max(0, Math.min(availableOf(ctx, id), 1e7));
+    if (owed <= 0)
+      continue;
+    const cycle = cycleOf2(ctx.state, id);
+    const left = cycle ? cycle.minimum - cycle.paid : 0;
+    let line = `${name} owes ${money(owed)}`;
+    if (cycle && left > 0) {
+      line += cycle.stage !== "current" ? `; ${money(left)} is past due` : `; ${money(left)} is due ${day(cycle.due)}`;
+      if (cycle.due - now <= 14 * DAY || cycle.stage !== "current")
+        pressing.push({ label: name, cents: left, at: day(cycle.due) });
+    }
+    if (statusOf(ctx.state, id) !== "open")
+      line += ` (${statusOf(ctx.state, id).replace(/_/g, " ")})`;
+    lines.push(`${line}.`);
+  }
+  if (featureFor(ctx, who, "flows")) {
+    const soon = [];
+    for (const f of allFlows(hooks, ctx)) {
+      if (f.status !== "active" || flowRunOf(ctx.state, f.id).ended)
+        continue;
+      const fromMine = f.from === who || own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, who)?.spend === true;
+      const toMine = f.to === who || own(ctx.state.entities, f.to)?.kind === "account" && rightsOf(ctx.state, f.to, who)?.worth === true;
+      if (fromMine === toMine)
+        continue;
+      const next = occurrences(ctx, f.schedule, now, now + 14 * DAY, f.start, f.end)[0];
+      if (!next)
+        continue;
+      const amount = "provider" in f.amount ? null : occurrenceAmount(hooks, ctx, f, next.at, createRng(`summary:${f.id}`), flowRunOf(ctx.state, f.id).deferred ?? 0);
+      const cents = amount && !("code" in amount) ? amount.cents : 0;
+      soon.push({ at: next.at, cents, out: fromMine, label: f.label, text: `${f.label}${cents > 0 ? ` (${money(cents)})` : ""} ${fromMine ? "is due" : "comes in"} ${day(next.at)}` });
+    }
+    soon.sort((a, b) => a.at - b.at);
+    for (const s of soon.slice(0, 5))
+      lines.push(`${s.text}.`);
+    for (const s of soon.filter((x) => x.out && x.cents > 0 && x.at - now <= 7 * DAY).slice(0, 3))
+      pressing.push({ label: s.label, cents: s.cents, at: day(s.at) });
+    const out7 = soon.filter((x) => x.out && x.at - now <= 7 * DAY).reduce((a, x) => a + x.cents, 0);
+    if (out7 > cash + inBank)
+      lines.push(`What's due this week is more than you have in cash and the bank.`);
+  }
+  for (const source of hooks.summaries)
+    lines.push(...source(ctx, who));
+  return { lines, band, spendable: Math.round(spendable), pressing };
+}
+
+// src/packs/economy/core/view.ts
+var DAY2 = 1440;
+function nameFor(ctx, viewer, id) {
+  const e = own(ctx.state.entities, id);
+  if (!e)
+    return id.replace(/_/g, " ");
+  if (viewer.pov !== null && id !== viewer.pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer.pov, id))
+    return "someone";
+  return e.name;
+}
+function when(ctx, at) {
+  return formatClock(calendarOf(ctx.world), at);
+}
+function day(ctx, at) {
+  return formatClock(calendarOf(ctx.world), at).split(",")[0] ?? "";
+}
+function partyKindOf(ctx, id) {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  for (const k of ["business", "trust", "household"])
+    if (kindIs(ctx.registry, ctx.world, kind, k))
+      return k;
+  return "person";
+}
+function shown2(ctx, account) {
+  const opened = isOpened(ctx.state, account, openerOf(ctx.state, account));
+  return balance(ctx.state, account) + (opened ? 0 : Math.round(numOf(own(ctx.state.entities, account)?.fields.opening)));
+}
+function shownAvailable(ctx, account) {
+  return availableOf(ctx, account) + shown2(ctx, account) - balance(ctx.state, account);
+}
+function journalLine(ctx, viewer, j) {
+  return { id: j.id, at: when(ctx, j.at), memo: j.memo, cents: j.cents, account: nameFor(ctx, viewer, j.account), accountId: j.account, kind: j.kind ?? null, category: j.category ?? null, counterparty: j.counterparty ?? null, card: j.card ? nameFor(ctx, viewer, j.card) : null, status: j.status };
+}
+function cardView(ctx, viewer, card) {
+  const e = own(ctx.state.entities, card);
+  const f = e?.fields ?? {};
+  const holder = strOf(f.holder);
+  const purchase = cardRoom(ctx, card, "purchase");
+  const atm = cardRoom(ctx, card, "atm");
+  const p = productOf(ctx, strOf(f.account));
+  const limitOf = (field) => typeof f[field] === "number" ? f[field] : p?.[field] ?? null;
+  const purchaseLimit = limitOf("daily_purchase_limit");
+  return {
+    id: card,
+    name: e?.name ?? card,
+    network: f.network === "credit" || f.network === "charge" ? f.network : "debit",
+    state: f.state === "frozen" || f.state === "lost" || f.state === "cancelled" ? f.state : "active",
+    holder: nameFor(ctx, viewer, holder),
+    holderId: holder,
+    account: strOf(f.account),
+    last4: typeof f.last4 === "string" ? f.last4 : null,
+    item: typeof f.item === "string" && f.item !== "" ? f.item : null,
+    dailyPurchaseLimit: Number.isFinite(purchase) ? purchaseLimit : null,
+    dailyAtmLimit: Number.isFinite(atm) ? limitOf("daily_atm_limit") : null,
+    spentToday: Number.isFinite(purchase) && purchaseLimit !== null ? Math.max(0, purchaseLimit - purchase) : 0
+  };
+}
+function money3(ctx, cents) {
+  return formatMoney(cents, ctx.world.currency);
+}
+function terms(ctx, account, detail) {
+  const p = productOf(ctx, account);
+  const t = traitsOf(ctx, account);
+  if (!p || !t)
+    return [];
+  const out = [];
+  if (t.liability) {
+    if (p.limit !== null)
+      out.push({ label: "Credit limit", value: money3(ctx, p.limit) });
+    else if (t.revolving)
+      out.push({ label: "Credit limit", value: "No preset limit" });
+    if (p.apr_pct > 0)
+      out.push({ label: "APR", value: `${p.apr_pct}%` });
+    if (detail && p.penalty_apr_pct > 0)
+      out.push({ label: "Penalty APR", value: `${p.penalty_apr_pct}% after 60 days late` });
+    if (t.revolving) {
+      out.push({ label: "Grace period", value: `${p.due_days} days, when the last statement was paid in full` });
+      out.push({ label: "Minimum payment", value: `${p.minimum.pct}% of the balance${p.minimum.plus_interest ? " plus interest and fees" : ""}, at least ${money3(ctx, p.minimum.floor)}` });
+      out.push({ label: "Statement day", value: String(p.statement_day) });
+    }
+    if (detail && p.fees.late_first > 0)
+      out.push({ label: "Late fee", value: `${money3(ctx, p.fees.late_first)}, then ${money3(ctx, p.fees.late_repeat)}` });
+    if (detail && p.fees.annual > 0)
+      out.push({ label: "Annual fee", value: money3(ctx, p.fees.annual) });
+    if (p.term_months !== null && t.installment)
+      out.push({ label: "Term", value: `${p.term_months} months` });
+  } else {
+    if (p.apy_pct > 0)
+      out.push({ label: "APY", value: `${p.apy_pct}%` });
+    if (t.transactional) {
+      out.push({ label: "Overdraft", value: p.overdraft === "fee" ? `Pays up to ${money3(ctx, p.overdraft_limit)} over, for ${money3(ctx, p.fees.overdraft)} an item` : p.overdraft === "linked" ? `Covered from ${own(ctx.state.entities, strOf(own(ctx.state.entities, account)?.fields.overdraft_link))?.name ?? "the linked account"}` : "Declined" });
+      if (detail && p.fees.maintenance > 0)
+        out.push({ label: "Monthly fee", value: `${money3(ctx, p.fees.maintenance)}, waived from ${money3(ctx, p.fees.maintenance_waive)}` });
+      if (detail && p.daily_purchase_limit !== null)
+        out.push({ label: "Debit card limits", value: `${money3(ctx, p.daily_purchase_limit)} a day in purchases, ${money3(ctx, p.daily_atm_limit ?? 0)} at machines` });
+      if (detail && p.fees.atm > 0)
+        out.push({ label: "Other banks' machines", value: money3(ctx, p.fees.atm) });
+    }
+    if (detail && p.hold_days > 0 && (t.transactional || t.pays))
+      out.push({ label: "Deposit holds", value: `${p.hold_days} days at a machine` });
+    if (p.term_months !== null)
+      out.push({ label: "Term", value: `${p.term_months} months` });
+  }
+  if (p.institution)
+    out.push({ label: "Institution", value: p.institution });
+  return out;
+}
+function statementView(ctx, raw) {
+  if (!raw)
+    return null;
+  return { at: day(ctx, raw.at), closing: raw.closing, interest: raw.interest, fees: raw.fees, minimum: raw.minimum, due: day(ctx, raw.due), paid: raw.paid, apr: raw.apr, stage: raw.stage, state: statementState(raw, ctx.state.clock) };
+}
+function pastStatements(ctx, account) {
+  const raw = own(objOf(sliceOf(ctx.state, "economy").statements), account);
+  return (Array.isArray(raw) ? raw : []).map((x) => objOf(x)).reverse().map((c) => ({ at: day(ctx, numOf(c.at)), closing: numOf(c.closing), interest: numOf(c.interest), fees: numOf(c.fees), minimum: numOf(c.minimum), due: day(ctx, numOf(c.due)), paid: numOf(c.paid), apr: numOf(c.apr), stage: strOf(c.stage, "current") ?? "current", state: numOf(c.paid) >= numOf(c.closing) ? "paid" : numOf(c.paid) >= numOf(c.minimum) ? "minimum" : "late" }));
+}
+function accountView(ctx, viewer, party, account, level, detail) {
+  const e = own(ctx.state.entities, account);
+  const cls = classOf2(ctx, account) ?? "checking";
+  const t = CLASS_TRAITS[cls];
+  const p = productOf(ctx, account);
+  const owners = ownersOf(ctx.state, account);
+  const shares = worthShares(owners);
+  const cycle = cycleOf2(ctx.state, account);
+  const journal = journalOf(ctx.state, account);
+  const cents = shown2(ctx, account);
+  const statements = level >= 4 || featureFor(ctx, party, "statements");
+  const autopayMode = strOf(e?.fields.autopay, "none");
+  const autopayFrom = strOf(e?.fields.autopay_from);
+  const securedBy = strOf(e?.fields.secured_by);
+  const due = cycle && cycle.minimum - cycle.paid > 0 && (t.liability || false) ? { label: t.installment ? "Payment due" : "Minimum due", cents: cycle.minimum - cycle.paid, at: day(ctx, cycle.due) } : null;
+  const role = owners.find((o) => o.party === party)?.role ?? null;
+  return {
+    id: account,
+    name: e?.name ?? account,
+    class: cls,
+    classLabel: t.label,
+    product: { id: p?.id ?? cls, label: p?.label ?? t.label },
+    institution: p?.institution || null,
+    status: statusOf(ctx.state, account),
+    cents,
+    available: level >= 2 ? t.liability ? p?.limit === null && cls === "charge_card" ? null : shownAvailable(ctx, account) : shownAvailable(ctx, account) + overdraftRoom(ctx, account) : null,
+    owners: owners.map((o) => ({ party: o.party, name: nameFor(ctx, viewer, o.party), role: o.role, share: Math.round((own(shares, o.party) ?? 0) * 100) / 100 })),
+    role,
+    limit: level >= 3 && t.liability ? p?.limit ?? null : null,
+    aprPct: level >= 4 && t.liability ? p?.apr_pct ?? null : null,
+    apyPct: level >= 4 && t.earns ? p?.apy_pct ?? null : null,
+    terms: level >= 3 ? terms(ctx, account, detail) : [],
+    autopay: level >= 3 && (t.revolving || t.installment) ? { mode: AUTOPAY_MODES.includes(autopayMode) ? autopayMode : "none", from: autopayFrom || null, fromName: autopayFrom ? nameFor(ctx, viewer, autopayFrom) : null, cents: autopayMode === "fixed" ? numOf(e?.fields.autopay_cents) : null } : null,
+    due: statements ? due : null,
+    statements: statements && (t.revolving || t.installment) ? [statementView(ctx, cycle), ...pastStatements(ctx, account)].filter((s) => s !== null) : [],
+    cards: level >= 3 ? cardsOn(ctx.state, account).map((c) => cardView(ctx, viewer, c)) : [],
+    pending: detail ? journal.filter((j) => j.status === "pending").reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    holds: detail ? holdsOn(ctx.state, account).map((h) => ({ id: h.id, cents: h.cents, until: day(ctx, h.until), kind: h.kind, memo: h.memo })) : [],
+    transactions: level >= 2 ? journal.slice(-(level >= 4 ? 40 : 20)).reverse().map((j) => journalLine(ctx, viewer, j)) : [],
+    securedBy: securedBy !== "" && own(ctx.state.entities, securedBy) ? { id: securedBy, name: nameFor(ctx, viewer, securedBy) } : null,
+    loan: t.installment && level >= 3 ? { payment: typeof e?.fields.payment === "number" ? e.fields.payment : cycle?.minimum ?? 0, monthsLeft: cycle?.months_left ?? numOf(e?.fields.months_left, numOf(e?.fields.remaining_months, p?.term_months ?? 0)), payoff: Math.max(0, -cents) } : null
+  };
+}
+function scheduleWords(ctx, f) {
+  const cal = calendarOf(ctx.world);
+  const s = f.schedule;
+  if (s.once !== undefined && s.once !== "")
+    return `once, ${typeof s.once === "number" ? day(ctx, s.once) : s.once.replace("T", " ")}`;
+  const n = s.interval && s.interval > 1 ? s.interval : 1;
+  const ord = (d) => d < 0 ? "the last day" : `the ${d}${d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 && d !== 12 ? "nd" : d % 10 === 3 && d !== 13 ? "rd" : "th"}`;
+  switch (s.every) {
+    case "day":
+      return n > 1 ? `every ${n} days` : "daily";
+    case "week":
+      return `every ${n > 1 ? `${n} weeks on ` : ""}${(s.weekdays ?? []).map((w) => weekdayName(cal, w)).join(", ") || "week"}`;
+    case "month":
+      return `${n > 1 ? `every ${n} months` : "monthly"} on ${(s.days ?? [1]).map(ord).join(" and ")}`;
+    case "year":
+      return `yearly, ${(s.months ?? [1]).map((m) => monthName(cal, m)).join(", ")} ${(s.days ?? [1]).join(", ")}`;
+    default:
+      return "";
+  }
+}
+function amountWords(ctx, viewer, f) {
+  const a = f.amount;
+  if ("fixed" in a)
+    return money3(ctx, a.fixed);
+  if ("formula" in a)
+    return "worked out each time";
+  if ("table" in a)
+    return "from the price tables";
+  if ("range" in a)
+    return `${money3(ctx, a.range.min)} to ${money3(ctx, a.range.max)}`;
+  if ("percent" in a)
+    return `${a.percent}% of ${a.of ? nameFor(ctx, viewer, a.of) : "the balance"}`;
+  if ("due" in a)
+    return a.due === "minimum" ? "the minimum due" : a.due === "statement" ? "the statement balance" : "the whole balance";
+  return "worked out each time";
+}
+function flowTouches(ctx, f, party) {
+  const sides = [f.from, f.to, ...(f.splits ?? []).map((s) => s.to), ...(f.shares ?? []).flatMap((s) => [s.party, s.from ?? ""])];
+  return sides.some((id) => id === party || own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.sees === true);
+}
+function nextOf(ctx, f, horizon) {
+  const from = ctx.state.clock;
+  const retry = flowRunOf(ctx.state, f.id).retry;
+  const first = occurrences(ctx, f.schedule, from, from + horizon, f.start, f.end)[0];
+  const candidates = [first?.at, retry?.at].filter((x) => typeof x === "number" && x > from);
+  return candidates.length > 0 ? Math.min(...candidates) : null;
+}
+function flowView(hooks, ctx, viewer, party, f) {
+  const run = flowRunOf(ctx.state, f.id);
+  const next = run.ended || f.status !== "active" ? null : nextOf(ctx, f, 400 * DAY2);
+  let cents = null;
+  if (!("provider" in f.amount) && next !== null) {
+    const a = occurrenceAmount(hooks, ctx, f, next, createRng(`view:${f.id}`), run.deferred ?? 0);
+    cents = a && !("code" in a) ? a.cents : null;
+  }
+  const fromSide = own(ctx.state.entities, f.from);
+  const payerHolds = fromSide?.kind === "account" ? rightsOf(ctx.state, f.from, party)?.manage === true : f.from === party;
+  return {
+    id: f.id,
+    label: f.label,
+    kind: f.kind,
+    from: own(ctx.state.entities, f.from) ? nameFor(ctx, viewer, f.from) : f.from.replace(/_/g, " "),
+    to: own(ctx.state.entities, f.to) ? nameFor(ctx, viewer, f.to) : f.to.replace(/_/g, " "),
+    amount: amountWords(ctx, viewer, f),
+    cents,
+    schedule: scheduleWords(ctx, f),
+    next: next === null ? null : when(ctx, next),
+    shortfall: f.shortfall,
+    status: run.ended || f.schedule.once !== undefined && run.done > 0 && own(ctx.state.entities, f.id)?.kind === "flow" ? "ended" : f.status,
+    category: f.category ?? null,
+    link: f.link && own(ctx.state.entities, f.link) ? { id: f.link, name: nameFor(ctx, viewer, f.link) } : null,
+    editable: f.source === "entity" && payerHolds,
+    source: f.source,
+    done: run.done,
+    missed: run.missed,
+    deferred: run.deferred ?? 0,
+    spec: f
+  };
+}
+function signedFor(ctx, f, party, cents) {
+  const mine = (id) => id === party || own(ctx.state.entities, id)?.kind === "account" && rightsOf(ctx.state, id, party)?.worth === true;
+  if (mine(f.from) && !mine(f.to))
+    return -cents;
+  if (!mine(f.from) && mine(f.to))
+    return cents;
+  return 0;
+}
+function householdOf(ctx, party) {
+  if (kindIs(ctx.registry, ctx.world, own(ctx.state.entities, party)?.kind ?? "", "household"))
+    return party;
+  const rel = own(ctx.state.entities, party)?.relations.find((r) => r.type === MEMBER_OF && kindIs(ctx.registry, ctx.world, own(ctx.state.entities, r.to)?.kind ?? "", "household"));
+  return rel?.to ?? null;
+}
+function householdView(hooks, ctx, viewer, household, flows) {
+  const members = membersOf(ctx.registry, ctx.world, ctx.state, household);
+  const splitAmongMembers = (f) => (f.shares ?? []).length > 0 && (f.shares ?? []).every((s) => members.includes(s.party));
+  const fromHouseholdAccount = (f) => own(ctx.state.entities, f.from)?.kind === "account" && rightsOf(ctx.state, f.from, household) !== null;
+  const shared = flows.filter((f) => f.from === household || splitAmongMembers(f) || fromHouseholdAccount(f));
+  const monthlyOf = (f) => {
+    const a = f.amount;
+    const each = "fixed" in a ? a.fixed : 0;
+    const per = f.schedule.every === "week" ? 52 / 12 : f.schedule.every === "day" ? 365 / 12 : f.schedule.every === "year" ? 1 / 12 : 1;
+    return Math.round(each * per / Math.max(1, f.schedule.interval ?? 1));
+  };
+  const total = shared.reduce((a, f) => a + monthlyOf(f), 0);
+  const parts = members.map((m) => ({ id: m, name: nameFor(ctx, viewer, m), cents: shared.reduce((a, f) => a + Math.round(monthlyOf(f) * (f.shares?.find((s) => s.party === m)?.pct ?? (f.shares && f.shares.length > 0 ? 0 : 100 / Math.max(1, members.length))) / 100), 0) }));
+  return {
+    id: household,
+    name: nameFor(ctx, viewer, household),
+    members: members.map((m) => {
+      const rel = own(ctx.state.entities, m)?.relations.find((r) => r.type === MEMBER_OF && r.to === household);
+      const part = parts.find((p) => p.id === m)?.cents ?? 0;
+      return { id: m, name: nameFor(ctx, viewer, m), role: strOf(rel?.fields?.role), share: total > 0 ? Math.round(part * 1000 / total) / 10 : Math.round(1000 / Math.max(1, members.length)) / 10 };
+    }),
+    accounts: accountsOf(ctx, household).concat(members.length > 1 ? accountsOf(ctx, members[0] ?? household).filter((id) => members.every((m) => rightsOf(ctx.state, id, m) !== null)) : []).filter((id, i, all) => all.indexOf(id) === i),
+    flows: shared.map((f) => flowView(hooks, ctx, viewer, household, f)),
+    monthly: { total, parts }
+  };
+}
+function buildFinanceView(hooks, ctx, party, player) {
+  const viewer = { pov: player ? ctx.world.pov : null };
+  const e = own(ctx.state.entities, party);
+  const level = ctx.levelOf(party, "money");
+  const tog = toggles(ctx.world);
+  const detail = level >= 4 || Object.values(tog).some((v) => v === true);
+  const features = FINANCE_FEATURES.filter((f) => featureFor(ctx, party, f));
+  const mine = accountsOf(ctx, party);
+  const empty = { party, name: e?.name ?? party, partyKind: partyKindOf(ctx, party), level, detail, features, band: null, opened: true, cash: null, overview: null, accounts: [], cards: [], flows: [], jobs: [], businesses: [], investments: null, properties: [], credit: null, household: null, recent: [], notes: [], payPrefs: [] };
+  if (level === 0)
+    return empty;
+  const worth = netWorthParts(hooks, ctx, party, (id) => shown2(ctx, id));
+  const band = mine.length > 0 ? wealthBand(worth.net) : strOf(e?.fields.wealth, "modest");
+  const opened = mine.every((id) => isOpened(ctx.state, id, openerOf(ctx.state, id)));
+  if (level === 1 || mine.length === 0)
+    return { ...empty, band, cash: { band }, opened };
+  const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
+  const shownAccounts = level >= 3 ? mine : mine.filter((id) => classOf2(ctx, id) === "cash" || id === firstTransactional);
+  const accounts = shownAccounts.map((id) => accountView(ctx, viewer, party, id, level, detail));
+  const cash = mine.filter((id) => classOf2(ctx, id) === "cash" && rightsOf(ctx.state, id, party)?.spend).reduce((a, id) => a + shown2(ctx, id), 0);
+  const flows = level >= 3 && featureFor(ctx, party, "flows") ? allFlows(hooks, ctx).filter((f) => flowTouches(ctx, f, party)) : [];
+  const flowViews = flows.map((f) => flowView(hooks, ctx, viewer, party, f));
+  const now = ctx.state.clock;
+  const upcoming = [];
+  for (const f of flows) {
+    const v = flowViews.find((x) => x.id === f.id);
+    const next = f.status === "active" && !flowRunOf(ctx.state, f.id).ended ? nextOf(ctx, f, 31 * DAY2) : null;
+    if (next === null || !v)
+      continue;
+    const cents = v.cents === null ? 0 : signedFor(ctx, f, party, v.cents);
+    upcoming.push({ at: when(ctx, next), clock: next, label: f.label, cents, flow: f.id, account: own(ctx.state.entities, f.from)?.kind === "account" ? f.from : null });
+  }
+  for (const a of accounts) {
+    const cycle = cycleOf2(ctx.state, a.id);
+    if (a.due && cycle && cycle.due > now && cycle.due <= now + 31 * DAY2 && !upcoming.some((u) => u.flow === `autopay:${a.id}`))
+      upcoming.push({ at: when(ctx, cycle.due), clock: cycle.due, label: `${a.name} ${a.due.label.toLowerCase()}`, cents: -a.due.cents, flow: null, account: a.id });
+  }
+  const alerts = [];
+  for (const a of accounts) {
+    if (a.status !== "open")
+      alerts.push({ tone: "neg", text: `${a.name} is ${a.status.replace(/_/g, " ")}.`, account: a.id });
+    const cycle = cycleOf2(ctx.state, a.id);
+    if (cycle && cycle.stage !== "current")
+      alerts.push({ tone: "neg", text: `${a.name} is ${cycle.stage === "late" ? "past due" : `${cycle.stage} days past due`}.`, account: a.id });
+    else if (a.due && cycle && cycle.due > now && cycle.due - now <= 3 * DAY2)
+      alerts.push({ tone: "warn", text: `${a.name}: ${money3(ctx, a.due.cents)} due ${a.due.at}.`, account: a.id });
+    if (!CLASS_TRAITS[a.class].liability && a.cents < 0)
+      alerts.push({ tone: "neg", text: `${a.name} is overdrawn by ${money3(ctx, -a.cents)}.`, account: a.id });
+    for (const c of a.cards)
+      if (c.state !== "active")
+        alerts.push({ tone: "warn", text: `${c.name} is ${c.state}.`, account: a.id });
+  }
+  for (const v of flowViews)
+    if (v.missed > 0 && v.status === "active" && (flowRunOf(ctx.state, v.id).last ?? -Infinity) > now - 31 * DAY2)
+      alerts.push({ tone: "warn", text: `${v.label} was missed.`, flow: v.id });
+  const since = now - 30 * DAY2;
+  let pastIn = 0;
+  let pastOut = 0;
+  const byCategory = new Map;
+  for (const id of shownAccounts) {
+    for (const j of journalOf(ctx.state, id)) {
+      if (j.at <= since || j.category === "transfer" || j.kind === "opening")
+        continue;
+      if (j.cents > 0)
+        pastIn += j.cents;
+      else
+        pastOut -= j.cents;
+      byCategory.set(j.category ?? "other", (byCategory.get(j.category ?? "other") ?? 0) + j.cents);
+    }
+  }
+  const nextIn = upcoming.filter((u) => u.cents > 0).reduce((a, u) => a + u.cents, 0);
+  const nextOut = upcoming.filter((u) => u.cents < 0).reduce((a, u) => a - u.cents, 0);
+  const overview = {
+    netWorth: worth.net,
+    assets: worth.assets,
+    liabilities: worth.liabilities,
+    breakdown: worth.lines,
+    cashFlow: level >= 3 ? { period: "the last 30 days", in: pastIn, out: pastOut, byCategory: [...byCategory].map(([category, cents]) => ({ category, cents })).sort((a, b) => a.cents - b.cents), nextIn, nextOut } : null,
+    upcoming: level >= 3 ? upcoming.sort((a, b) => a.clock - b.clock).slice(0, 20) : [],
+    alerts: level >= 3 ? alerts : []
+  };
+  const recent = shownAccounts.flatMap((id) => journalOf(ctx.state, id)).sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1)).slice(0, 10).map((j) => journalLine(ctx, viewer, j));
+  const notesRaw = own(objOf(sliceOf(ctx.state, "economy").notes), party);
+  const notes = player ? [] : (Array.isArray(notesRaw) ? notesRaw : []).slice(-NOTES_CAP).map((n) => objOf(n)).reverse().map((n) => ({ at: when(ctx, numOf(n.at)), text: strOf(n.text) }));
+  const household = householdOf(ctx, party);
+  const view = {
+    ...empty,
+    band,
+    opened,
+    cash: { cents: cash },
+    overview,
+    accounts,
+    cards: accounts.flatMap((a) => a.cards),
+    flows: flowViews,
+    credit: partyKindOf(ctx, party) === "person" && (level >= 4 || featureFor(ctx, party, "credit")) ? creditReport(ctx, party) : null,
+    household: level >= 3 && household ? householdView(hooks, ctx, viewer, household, allFlows(hooks, ctx)) : null,
+    recent,
+    notes,
+    payPrefs: level >= 3 && partyKindOf(ctx, party) === "person" ? tiersOf(ctx, party) : []
+  };
+  for (const section of hooks.views) {
+    const extra = section(ctx, party, view);
+    if (extra.jobs)
+      view.jobs.push(...extra.jobs);
+    if (extra.businesses)
+      view.businesses.push(...extra.businesses);
+    if (extra.investments)
+      view.investments = extra.investments;
+    if (extra.properties)
+      view.properties.push(...extra.properties);
+    if (extra.upcoming && view.overview)
+      view.overview.upcoming = [...view.overview.upcoming, ...extra.upcoming].sort((a, b) => a.clock - b.clock).slice(0, 20);
+    if (extra.alerts && view.overview)
+      view.overview.alerts.push(...extra.alerts);
+  }
+  return view;
+}
+function buildMoneyView(hooks, ctx) {
+  return buildFinanceView(hooks, ctx, ctx.world.pov, true);
+}
+function buildPeopleMoney(hooks, ctx) {
   const out = [];
   for (const id of Object.keys(ctx.state.entities)) {
+    if (id === ctx.world.pov || !isParty(ctx, id))
+      continue;
     const e = own(ctx.state.entities, id);
-    if (!e || id === ctx.world.pov || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
+    if (!e || ctx.levelOf(id, "money") === 0)
       continue;
-    const level = ctx.levelOf(id, "money");
-    if (level === 0)
+    if (partyKindOf(ctx, id) !== "person" && accountsOf(ctx, id).length === 0 && ownersIn(e.fields).length === 0 && partyKindOf(ctx, id) !== "household")
       continue;
-    const mine = accountsOf(ctx.state, id);
-    const opened = mine.length === 0 || isMaterialized(ctx.state, id, "money");
-    const cents = (account) => shownCents(ctx, account, opened);
-    const worth = mine.reduce((sum, account) => sum + cents(account), 0);
-    const firstChecking = mine.find((account) => accountType(ctx.state, account) === "checking");
-    const shown = level >= 3 ? mine : level === 2 ? mine.filter((account) => accountType(ctx.state, account) === "cash" || account === firstChecking) : [];
-    const record = objOf(own(records, id));
-    const notes = Array.isArray(record.notes) ? record.notes.map((n) => objOf(n)) : [];
-    out.push({
-      entity: id,
-      name: e.name,
-      level,
-      band: mine.length > 0 ? wealthBand(worth) : wealthOf(ctx.state, id),
-      netWorthCents: level >= 2 && mine.length > 0 ? worth : null,
-      opened,
-      accounts: shown.map((account) => ({ id: account, name: own(ctx.state.entities, account)?.name ?? account, kind: accountType(ctx.state, account) ?? "checking", cents: cents(account) })),
-      bills: level >= 3 ? billsOf(ctx, id) : [],
-      recent: recentLines(ctx, Array.isArray(record.history) ? record.history : [], new Set(shown), 8),
-      notes: notes.reverse().map((n) => ({ at: formatClock(cal, numOf(n.at)), text: strOf(n.text) }))
-    });
+    out.push(buildFinanceView(hooks, ctx, id, false));
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return own(ctx.state.entities, ctx.world.pov) ? [buildFinanceView(hooks, ctx, ctx.world.pov, false), ...out] : out;
 }
 // src/packs/economy/core/tables/modern-us/catalog.json
 var catalog_default = {
@@ -12073,7 +20147,7 @@ var finance_default = {
   id: "economy.finance",
   pack: "economy",
   schema: "lre-table/economy.finance/v1",
-  revision: "3b9bb93f4490fbf6c397c7b8ba94b946",
+  revision: "5ebb654a8d4458877b86f5100af5c4b6",
   label: "Finance parameters",
   source: { dataPack: "modern-us", file: "us/finance.json", sourceSchema: "lre-data-src/us/finance/v1", reflectsPeriod: "2025-2026 (rates as of late 2025; Fed funds target 3.50-3.75% after the Dec 2025 cut)", approximate: true, basis: "Rounded typical consumer-finance parameters recalled from Federal Reserve G.19 and H.15, FDIC national rates, Freddie Mac PMMS, Bankrate / Edmunds surveys, CFPB, KFF Employer Health Benefits Survey 2025, Vanguard How America Saves 2025, IRS Rev. Proc. 2024-40 and IRS notices for 2025/2026; not queried live. Treat as plausible defaults." },
   columns: {
@@ -12085,9 +20159,9 @@ var finance_default = {
     credit_card: { title: "Credit cards", values: { apr_pct: { min: 15, typical: 22, max: 29.99, note: "Fed G.19 average on accounts assessed interest is ~22%; new-offer averages ~24%; best-credit cards 15-18%, subprime 28-30%." }, intro_apr_offers: { apr_pct: 0, months_typical: 15, balance_transfer_fee_pct: { min: 3, typical: 5, max: 5 } }, penalty_apr_pct: 29.99, grace_period_days: { min: 21, typical: 25, note: "No interest if the previous balance is paid in full; none on cash advances." }, minimum_payment: { formula: "min(statement_balance + interest + fees, max(floor_cents, ceil(statement_balance * principal_pct / 100 + interest_this_cycle + fees_this_cycle)))", variants: [{ issuer_style: "1% of balance plus interest and fees", principal_pct: 1, floor_cents: 3500, prevalence: "most large issuers" }, { issuer_style: "2% of balance, no extra interest add-on", principal_pct: 2, floor_cents: 2500, prevalence: "some retail and credit-union cards" }, { issuer_style: "2.5-3% of balance", principal_pct: 3, floor_cents: 2500, prevalence: "some bank cards" }], default: { principal_pct: 1, floor_cents: 3500, includes_interest_and_fees: true }, interest_per_cycle: "balance * apr_pct / 100 / 12 (monthly periodic rate; issuers use average daily balance with daily rate = apr/365)" }, late_fee_cents: { first: 3200, repeat: 4300, note: "Reg Z safe-harbor amounts for 2025 ($32 first, $43 repeat); the CFPB $8 cap was vacated in April 2025. Issuers commonly charge $30-$41." }, returned_payment_fee_cents: { typical: 3200 }, cash_advance_fee: { pct: 5, minimum_cents: 1000, apr_pct_typical: 27, note: "No grace period; interest starts the same day." }, foreign_transaction_fee_pct: { typical: 3, min: 0, note: "Many travel cards charge none." }, annual_fee_cents: { none_common: 0, rewards_typical: 9500, premium_typical: 69500 }, credit_limit_cents: { starter: 50000, typical: 1e6, good_credit: 1500000 }, credit_score: { us_average_fico: 715, bands: { poor: [300, 579], fair: [580, 669], good: [670, 739], very_good: [740, 799], exceptional: [800, 850] } } } },
     deposit_accounts: { title: "Deposit accounts", values: { savings_apy_pct: { regular_national_average: { min: 0.01, typical: 0.4, max: 0.6, note: "FDIC national rate ~0.4%." }, high_yield: { min: 3, typical: 3.8, max: 4.5, note: "Online banks; floating with the Fed funds rate." } }, money_market_apy_pct: { typical: 3.5, min: 0.5, max: 4.3 }, cd_12_month_apy_pct: { typical: 4, min: 1.5, max: 4.5 }, checking_apy_pct: { typical: 0.07, max: 4, note: "Most checking accounts pay near zero; a few reward accounts pay 3-4% up to a balance cap." }, fdic_insurance_limit_cents: 25000000, checking_fees_cents: { monthly_maintenance: { none_common: 0, min: 0, typical: 500, max: 1500, note: "Often waived with direct deposit or a minimum balance ($1,000-$1,500)." }, minimum_balance_to_waive_cents: { typical: 150000 }, atm_out_of_network_total: { typical: 473, note: "Bankrate-style average ~$4.73 (operator surcharge plus bank fee)." }, overdraft: { typical: 2700, max: 3500, note: "Average ~$27; many banks have cut or eliminated overdraft fees; cap per day typical 3 charges." }, nsf_returned_item: { typical: 1700, note: "Many banks charge nothing." }, wire_domestic_outgoing: { typical: 2500 }, wire_international_outgoing: { typical: 4500 }, paper_statement: { typical: 300 }, cashier_check: { typical: 1000 }, stop_payment: { typical: 3000 }, debit_card_replacement: { typical: 0, rush_typical: 2500 } } } },
     loans: { title: "Loans", values: { auto: { apr_pct_new: { min: 5, typical: 7, max: 15 }, apr_pct_used: { min: 7, typical: 11, max: 21 }, apr_by_credit_tier_new_pct: { super_prime_781_850: 5.2, prime_661_780: 6.9, nonprime_601_660: 9.8, subprime_501_600: 13.2, deep_subprime_300_500: 15.8 }, apr_by_credit_tier_used_pct: { super_prime_781_850: 7, prime_661_780: 9.4, nonprime_601_660: 13.5, subprime_501_600: 18.5, deep_subprime_300_500: 21.3 }, term_months: { min: 36, typical: 68, max: 84 }, down_payment_pct_typical: 12, amount_financed_cents: { new_typical: 4200000, used_typical: 2600000 }, payment_formula: "payment = P * r / (1 - (1 + r)^-n), r = apr_pct/100/12, n = term_months" }, mortgage: { apr_pct_30yr_fixed: { min: 5.8, typical: 6.4, max: 8.5, note: "Freddie Mac PMMS 30-year averaged about 6.3-6.9% through 2025; borrowers with lower credit pay more." }, apr_pct_15yr_fixed: { min: 5, typical: 5.6, max: 7.5 }, term_months: { typical: 360, alternatives: [180, 240] }, down_payment_pct: { first_time_typical: 9, repeat_typical: 20, minimum_conventional: 3, minimum_fha: 3.5 }, pmi_pct_per_year: { min: 0.3, typical: 0.7, max: 1.5, note: "Applies when down payment is under 20%." }, closing_costs_pct_of_price: { min: 2, typical: 3, max: 5 }, median_existing_home_price_cents: 41000000, property_tax_pct_of_value_per_year: { min: 0.3, typical: 1, max: 2.2, note: "Effective rate; varies by state and county." }, homeowners_insurance_cents_per_month: { min: 12000, typical: 20000, max: 40000, note: "Higher in hurricane, hail and wildfire areas." } }, personal: { apr_pct: { min: 6.5, typical: 12.3, max: 35.99, note: "Fed G.19 24-month personal loan average ~12%; online lenders 7-36%." }, origination_fee_pct: { min: 0, typical: 5, max: 10 }, term_months: { min: 12, typical: 36, max: 84 }, amount_cents: { min: 1e5, typical: 800000, max: 5000000 } }, student_federal_2025_26: { undergraduate_direct_pct: 6.39, graduate_unsubsidized_pct: 7.94, parent_plus_and_grad_plus_pct: 8.94, term_months_standard: 120, origination_fee_pct: 1.057 }, payday: { fee_per_100_cents_two_weeks: 1500, apr_pct_equivalent: 391, note: "High-cost; usually avoided; included for debt-trap scenarios." }, buy_now_pay_later: { apr_pct: { min: 0, typical: 0, max: 36 }, installments_typical: 4, interval_weeks: 2 } } },
-    investing: { title: "Investing (index return model, GBM recipe, bonds, cash)", values: { broad_us_equity_index: { description: "Total-return broad US stock index (S&P 500 style) for seeded price paths; use geometric Brownian motion with these parameters.", annual_return_arithmetic_pct: 11, annual_return_geometric_pct: 9.8, annual_volatility_pct: 16, monthly_mean_pct: 0.88, monthly_volatility_pct: 4.62, daily_volatility_pct: 1, drawdown_typical_pct: { correction: -10, bear: -20, severe: -35 }, dividend_yield_pct: 1.3, long_run_basis: "1926-2024 nominal total return ~10% geometric, ~12% arithmetic, ~19% volatility; modern-era (post-1990) volatility ~15-17%; the typical 5-year-ahead expectation is lower, ~6-8% nominal.", gbm_note: "S(t+dt) = S(t) * exp((mu - sigma^2/2) dt + sigma sqrt(dt) Z) with mu=0.11, sigma=0.16 per year; use a seeded RNG." }, bonds_aggregate: { annual_return_pct: 4.5, annual_volatility_pct: 6, yield_to_maturity_pct: 4.4 }, cash: { annual_return_pct: 3.8, annual_volatility_pct: 0.5 }, real_estate_home_price_appreciation_pct: { typical: 4, volatility_pct: 5 }, retirement_account_limits_cents: { k401_employee_deferral_2025: 2350000, k401_catch_up_age_50_2025: 750000, k401_super_catch_up_age_60_63_2025: 1125000, ira_contribution_2025: 700000, hsa_self_only_2025: 430000, hsa_family_2025: 855000, k401_employee_deferral_2026: 2450000, ira_contribution_2026: 750000, note: "IRS limits for 2025; 2026 values as announced in IRS Notice 2025-67 (401(k) $24,500, catch-up $8,000, IRA $7,500).", k401_catch_up_age_50_2026: 800000 } } },
+    investing: { title: "Investing (index return model, GBM recipe, bonds, cash)", values: { broad_us_equity_index: { description: "Total-return broad US stock index (S&P 500 style) for seeded price paths; use geometric Brownian motion with these parameters.", annual_return_arithmetic_pct: 11, annual_return_geometric_pct: 9.8, annual_volatility_pct: 16, monthly_mean_pct: 0.88, monthly_volatility_pct: 4.62, daily_volatility_pct: 1, drawdown_typical_pct: { correction: -10, bear: -20, severe: -35 }, dividend_yield_pct: 1.3, long_run_basis: "1926-2024 nominal total return ~10% geometric, ~12% arithmetic, ~19% volatility; modern-era (post-1990) volatility ~15-17%; the typical 5-year-ahead expectation is lower, ~6-8% nominal.", gbm_note: "S(t+dt) = S(t) * exp((mu - sigma^2/2) dt + sigma sqrt(dt) Z) with mu=0.11, sigma=0.16 per year; use a seeded RNG." }, bonds_aggregate: { annual_return_pct: 4.5, annual_volatility_pct: 6, yield_to_maturity_pct: 4.4 }, cash: { annual_return_pct: 3.8, annual_volatility_pct: 0.5 }, crypto: { description: "A large digital currency (bitcoin-like) for seeded price paths; it trades every day of the year and pays nothing.", annual_return_arithmetic_pct: 20, annual_volatility_pct: 65, dividend_yield_pct: 0, basis: "Realised volatility of the largest digital currencies ran about 50-80% a year through 2020-2025; their long-run return is far less certain than equities', so a modest drift is used." }, real_estate_home_price_appreciation_pct: { typical: 4, volatility_pct: 5 }, asset_classes: { note: "How each class of holding follows the rows above: its recipe (`model`), what it differs by, how closely it moves with its market (0-1) and how often it pays a year. An asset's own figures override its class.", security: { model: "broad_us_equity_index", annual_volatility_pct: 28, correlation: 0.6, pays_per_year: 4, note: "A single large company's stock: the index's return with about 1.75 times its swings." }, fund: { model: "broad_us_equity_index", correlation: 0.95, pays_per_year: 4 }, bond: { model: "bonds_aggregate", correlation: 0.9, pays_per_year: 12, note: "A bond fund pays monthly; a single bond with a face value and maturity pays its coupon twice a year." }, crypto: { model: "crypto", correlation: 0.8, pays_per_year: 0, trades_daily: true }, property: { model: "real_estate_home_price_appreciation_pct", correlation: 0.7 } }, retirement_account_limits_cents: { k401_employee_deferral_2025: 2350000, k401_catch_up_age_50_2025: 750000, k401_super_catch_up_age_60_63_2025: 1125000, ira_contribution_2025: 700000, hsa_self_only_2025: 430000, hsa_family_2025: 855000, k401_employee_deferral_2026: 2450000, ira_contribution_2026: 750000, note: "IRS limits for 2025; 2026 values as announced in IRS Notice 2025-67 (401(k) $24,500, catch-up $8,000, IRA $7,500).", k401_catch_up_age_50_2026: 800000 } } },
     payroll_deductions_other_than_tax: { title: "Payroll deductions other than tax", values: { health_insurance_employee_share_cents_per_month: { single: { min: 0, typical: 12000, max: 30000, note: "KFF 2025: average worker contribution ~$1,440/yr (about 16% of a ~$9,300 premium) for single coverage." }, family: { min: 20000, typical: 57000, max: 110000, note: "KFF 2025: average worker contribution ~$6,850/yr (~26% of a ~$27,000 premium)." } }, health_deductible_cents: { single_typical: 170000, family_typical: 350000, note: "Annual deductible; KFF average single deductible ~ $1,800 in 2025." }, out_of_pocket_max_cents_2025: { single_aca_limit: 920000, family_aca_limit: 1840000 }, dental_cents_per_month: { single: { min: 1000, typical: 2000, max: 4500 }, family: { min: 3000, typical: 6000, max: 12000 } }, vision_cents_per_month: { single: { min: 300, typical: 800, max: 1500 } }, retirement_401k: { default_auto_enroll_deferral_pct: 3, typical_employee_deferral_pct: 7.7, employer_match_typical: { formula: "50% of the first 6% of pay (3% of pay)", average_match_pct_of_pay: 4.6, vesting_years_typical: 3 }, participation_rate_when_offered_pct: 85, note: "Vanguard How America Saves 2025: average deferral ~7.7% (12% total with employer); most common auto-enroll default 3-4%." }, hsa_fsa: { fsa_health_limit_cents_2025: 330000, pre_tax: true }, life_and_disability_cents_per_month: { basic_life_employer_paid: 0, supplemental_typical: 1000, short_term_disability_typical: 1500 }, union_dues_pct_of_pay_typical: 1.2, commuter_benefit_pre_tax_cents_per_month_limit_2025: 32500, garnishment: { child_support_max_pct_of_disposable: 50, creditor_max_pct_of_disposable: 25, note: "Federal CCPA limits; not applied by default." } } },
-    taxes_federal: { title: "Federal tax", values: { tax_year: 2025, standard_deduction_cents: { single: 1575000, married_filing_jointly: 3150000, head_of_household: 2362500, note: "Amounts after the July 2025 legislation (OBBBA): $15,750 / $31,500 / $23,625." }, brackets_single: [{ from_cents: 0, to_cents: 1192500, rate_pct: 10 }, { from_cents: 1192500, to_cents: 4847500, rate_pct: 12 }, { from_cents: 4847500, to_cents: 10335000, rate_pct: 22 }, { from_cents: 10335000, to_cents: 19730000, rate_pct: 24 }, { from_cents: 19730000, to_cents: 25052500, rate_pct: 32 }, { from_cents: 25052500, to_cents: 62635000, rate_pct: 35 }, { from_cents: 62635000, to_cents: null, rate_pct: 37 }], brackets_married_filing_jointly: [{ from_cents: 0, to_cents: 2385000, rate_pct: 10 }, { from_cents: 2385000, to_cents: 9695000, rate_pct: 12 }, { from_cents: 9695000, to_cents: 20670000, rate_pct: 22 }, { from_cents: 20670000, to_cents: 39460000, rate_pct: 24 }, { from_cents: 39460000, to_cents: 50105000, rate_pct: 32 }, { from_cents: 50105000, to_cents: 75160000, rate_pct: 35 }, { from_cents: 75160000, to_cents: null, rate_pct: 37 }], fica: { social_security_employee_pct: 6.2, social_security_wage_base_cents_2025: 17610000, social_security_wage_base_cents_2026: 18450000, medicare_employee_pct: 1.45, additional_medicare_pct_over_200k_single: 0.9, self_employment_pct: 15.3, note: "Employer pays a matching 7.65%." }, child_tax_credit_cents_2025: 220000, earned_income_credit_max_cents_2025_one_child: 432800, capital_gains_long_term_pct: { bands: [0, 15, 20] }, irs_standard_mileage_cents_per_mile_2025: 70, effective_withholding_note: "occupations.json withholding_rate_pct was computed from these parameters." } }
+    taxes_federal: { title: "Federal tax", values: { tax_year: 2025, standard_deduction_cents: { single: 1575000, married_filing_jointly: 3150000, head_of_household: 2362500, note: "Amounts after the July 2025 legislation (OBBBA): $15,750 / $31,500 / $23,625." }, brackets_single: [{ from_cents: 0, to_cents: 1192500, rate_pct: 10 }, { from_cents: 1192500, to_cents: 4847500, rate_pct: 12 }, { from_cents: 4847500, to_cents: 10335000, rate_pct: 22 }, { from_cents: 10335000, to_cents: 19730000, rate_pct: 24 }, { from_cents: 19730000, to_cents: 25052500, rate_pct: 32 }, { from_cents: 25052500, to_cents: 62635000, rate_pct: 35 }, { from_cents: 62635000, to_cents: null, rate_pct: 37 }], brackets_married_filing_jointly: [{ from_cents: 0, to_cents: 2385000, rate_pct: 10 }, { from_cents: 2385000, to_cents: 9695000, rate_pct: 12 }, { from_cents: 9695000, to_cents: 20670000, rate_pct: 22 }, { from_cents: 20670000, to_cents: 39460000, rate_pct: 24 }, { from_cents: 39460000, to_cents: 50105000, rate_pct: 32 }, { from_cents: 50105000, to_cents: 75160000, rate_pct: 35 }, { from_cents: 75160000, to_cents: null, rate_pct: 37 }], fica: { social_security_employee_pct: 6.2, social_security_wage_base_cents_2025: 17610000, social_security_wage_base_cents_2026: 18450000, medicare_employee_pct: 1.45, additional_medicare_pct_over_200k_single: 0.9, self_employment_pct: 15.3, note: "Employer pays a matching 7.65%." }, child_tax_credit_cents_2025: 220000, earned_income_credit_max_cents_2025_one_child: 432800, capital_gains_long_term_pct: { bands: [0, 15, 20], thresholds_single_cents: [4835000, 53340000], thresholds_married_filing_jointly_cents: [9670000, 60005000], thresholds_head_of_household_cents: [6475000, 56670000], note: "2025 taxable-income thresholds at which the 15% and 20% rates begin (IRS Rev. Proc. 2024-40); long gains and qualified dividends stack on top of ordinary income." }, net_investment_income_tax: { pct: 3.8, threshold_single_cents: 20000000, threshold_married_filing_jointly_cents: 25000000, threshold_head_of_household_cents: 20000000, note: "On the lesser of net investment income and modified AGI over the threshold; the thresholds are not indexed." }, capital_loss_limit_cents: 300000, home_sale_exclusion_cents: { single: 25000000, married_filing_jointly: 50000000, head_of_household: 25000000, note: "Gain excluded on selling a main home owned and lived in for two of the last five years (IRC section 121)." }, irs_standard_mileage_cents_per_mile_2025: 70, effective_withholding_note: "occupations.json withholding_rate_pct was computed from these parameters." } }
   }
 };
 // src/packs/economy/core/tables/modern-us/occupations.json
@@ -12186,9 +20260,9 @@ var regions_default = {
   id: "economy.regions",
   pack: "economy",
   schema: "lre-table/economy.regions/v1",
-  revision: "7b976468a95de1684425c537d183bb54",
+  revision: "fafcd12b6d121345b255511b6a51c80a",
   label: "Regions (US states, DC and the national baseline)",
-  source: { dataPack: "modern-us", file: "us/regions.json", sourceSchema: "lre-data-src/us/regions/v1", reflectsPeriod: "2025-2026 (point-in-time, mid-2025 to early-2026 values)", approximate: true, basis: { summary: "Rounded, approximate state-level figures compiled from well-known public statistics as recalled; not queried live. Intended as plausible defaults, not as authoritative statistics.", state_income_tax_effective_pct: "Approximate effective state income tax as a percent of gross wages for a single filer earning about $60,000 (a middle-income band), after the state standard deduction/exemptions; derived from published 2025 state brackets (Tax Foundation / state revenue departments). Rounded to 0.1. Excludes local income taxes (see local_income_tax_pct_typical) and payroll-type state levies such as CA SDI.", sales_tax_combined_avg_pct: "Tax Foundation 2025 combined state plus population-weighted average local sales tax rate; rounded to 0.01. Hawaii and Alaska values are approximations of the GET / local-only rate.", cost_of_living_multiplier: "US = 1.00. Approximate from BEA Regional Price Parities (all items, 2022-2023 vintage) smoothed to 2025; rounded to 0.01.", median_rent_cents_per_month: "Approximate asking-rent medians for 1BR and 2BR units, a blend of Zumper, Apartment List and HUD FY2025 Fair Market Rent state patterns, rounded to $10. 1BR is the anchor; 2BR is derived as 1BR times a regional ratio (Northeast 1.22, Midwest 1.27, South 1.27, West 1.24; DC uses South) rounded to $10. Statewide medians hide large metro-vs-rural spread.", residential_electricity_cents_per_kwh: "EIA Electric Power Monthly, average residential retail price by state, 2024 annual / 2025 year-to-date, rounded to 0.5 cent. Decimal value in cents (not dollars) per kWh. US average is about 17 cents.", minimum_wage_cents_per_hour: "Effective statutory floor in 2025 for non-tipped adult workers: the higher of the state rate and the federal $7.25. Where rates vary by locality or employer size (NY, OR, MN) the statewide/largest-area figure is used." } },
+  source: { dataPack: "modern-us", file: "us/regions.json", sourceSchema: "lre-data-src/us/regions/v1", reflectsPeriod: "2025-2026 (point-in-time, mid-2025 to early-2026 values)", approximate: true, basis: { summary: "Rounded, approximate state-level figures compiled from well-known public statistics as recalled; not queried live. Intended as plausible defaults, not as authoritative statistics.", state_income_tax_effective_pct: "Approximate effective state income tax as a percent of gross wages for a single filer earning about $60,000 (a middle-income band), after the state standard deduction/exemptions; derived from published 2025 state brackets (Tax Foundation / state revenue departments). Rounded to 0.1. Excludes local income taxes (see local_income_tax_pct_typical) and payroll-type state levies such as CA SDI.", sales_tax_combined_avg_pct: "Tax Foundation 2025 combined state plus population-weighted average local sales tax rate; rounded to 0.01. Hawaii and Alaska values are approximations of the GET / local-only rate.", property_tax_effective_pct: "Approximate effective property tax on owner-occupied homes: median real-estate taxes paid as a percent of median home value (US Census ACS 1-year estimates, as compiled by the Tax Foundation), rounded to 0.01.", cost_of_living_multiplier: "US = 1.00. Approximate from BEA Regional Price Parities (all items, 2022-2023 vintage) smoothed to 2025; rounded to 0.01.", median_rent_cents_per_month: "Approximate asking-rent medians for 1BR and 2BR units, a blend of Zumper, Apartment List and HUD FY2025 Fair Market Rent state patterns, rounded to $10. 1BR is the anchor; 2BR is derived as 1BR times a regional ratio (Northeast 1.22, Midwest 1.27, South 1.27, West 1.24; DC uses South) rounded to $10. Statewide medians hide large metro-vs-rural spread.", residential_electricity_cents_per_kwh: "EIA Electric Power Monthly, average residential retail price by state, 2024 annual / 2025 year-to-date, rounded to 0.5 cent. Decimal value in cents (not dollars) per kWh. US average is about 17 cents.", minimum_wage_cents_per_hour: "Effective statutory floor in 2025 for non-tipped adult workers: the higher of the state rate and the federal $7.25. Where rates vary by locality or employer size (NY, OR, MN) the statewide/largest-area figure is used." } },
   columns: {
     name: { type: "text" },
     abbr: { type: "text" },
@@ -12200,6 +20274,7 @@ var regions_default = {
     state_income_tax_effective_pct: { type: "number", unit: "pct", doc: "Single filer at about $60,000, after the state standard deduction; excludes local and payroll levies.", optional: true },
     local_income_tax_pct_typical: { type: "number", unit: "pct", optional: true },
     sales_tax_combined_avg_pct: { type: "number", unit: "pct", doc: "State plus average local rate." },
+    property_tax_effective_pct: { type: "number", unit: "pct", doc: "Effective property tax on owner-occupied homes, a year, percent of value.", optional: true },
     cost_of_living_multiplier: { type: "number", unit: "multiplier", doc: "US = 1.00. Applied by the economy pack at pricing time, never baked into rows." },
     median_rent_1br_cents_per_month: { type: "int", unit: "cents_per_month" },
     median_rent_2br_cents_per_month: { type: "int", unit: "cents_per_month" },
@@ -12208,79 +20283,63 @@ var regions_default = {
     notes: { type: "text", optional: true }
   },
   rows: {
-    al: { name: "Alabama", abbr: "AL", scope: "state", census_region: "South", census_division: "East South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.6, local_income_tax_pct_typical: 0.1, sales_tax_combined_avg_pct: 9.46, cost_of_living_multiplier: 0.9, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 725 },
-    ak: { name: "Alaska", abbr: "AK", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["America/Anchorage", "America/Adak"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 1.82, cost_of_living_multiplier: 1.03, median_rent_1br_cents_per_month: 123000, median_rent_2br_cents_per_month: 153000, residential_electricity_cents_per_kwh: 25, minimum_wage_cents_per_h: 1191, notes: "Aleutian Islands west of 169.5W use America/Adak (Hawaii-Aleutian time). No state income or state sales tax; many boroughs levy local sales tax." },
-    az: { name: "Arizona", abbr: "AZ", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Phoenix"], observes_dst: false, state_income_tax_effective_pct: 1.9, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.38, cost_of_living_multiplier: 1.01, median_rent_1br_cents_per_month: 138000, median_rent_2br_cents_per_month: 171000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1470, notes: "Does not observe daylight saving time, except the Navajo Nation, which does." },
-    ar: { name: "Arkansas", abbr: "AR", scope: "state", census_region: "South", census_division: "West South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.2, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 9.46, cost_of_living_multiplier: 0.89, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 1100 },
-    ca: { name: "California", abbr: "CA", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["America/Los_Angeles"], observes_dst: true, state_income_tax_effective_pct: 2.9, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.82, cost_of_living_multiplier: 1.12, median_rent_1br_cents_per_month: 195000, median_rent_2br_cents_per_month: 242000, residential_electricity_cents_per_kwh: 31, minimum_wage_cents_per_h: 1650 },
-    co: { name: "Colorado", abbr: "CO", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 3.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.78, cost_of_living_multiplier: 1.04, median_rent_1br_cents_per_month: 155000, median_rent_2br_cents_per_month: 192000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1481 },
-    ct: { name: "Connecticut", abbr: "CT", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.6, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.35, cost_of_living_multiplier: 1.05, median_rent_1br_cents_per_month: 160000, median_rent_2br_cents_per_month: 195000, residential_electricity_cents_per_kwh: 29.5, minimum_wage_cents_per_h: 1635 },
-    de: { name: "Delaware", abbr: "DE", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 0, cost_of_living_multiplier: 0.99, median_rent_1br_cents_per_month: 140000, median_rent_2br_cents_per_month: 178000, residential_electricity_cents_per_kwh: 16.5, minimum_wage_cents_per_h: 1500, notes: "No sales tax; gross-receipts tax is paid by businesses." },
-    dc: { name: "District of Columbia", abbr: "DC", scope: "district", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6, cost_of_living_multiplier: 1.11, median_rent_1br_cents_per_month: 215000, median_rent_2br_cents_per_month: 273000, residential_electricity_cents_per_kwh: 18.5, minimum_wage_cents_per_h: 1795, notes: "District of Columbia is not a state; included as a 51st jurisdiction." },
-    fl: { name: "Florida", abbr: "FL", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York", "America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.02, cost_of_living_multiplier: 1.02, median_rent_1br_cents_per_month: 170000, median_rent_2br_cents_per_month: 216000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1400, notes: "Western panhandle (west of the Apalachicola River) is Central time." },
-    ga: { name: "Georgia", abbr: "GA", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.2, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.42, cost_of_living_multiplier: 0.97, median_rent_1br_cents_per_month: 142000, median_rent_2br_cents_per_month: 180000, residential_electricity_cents_per_kwh: 14, minimum_wage_cents_per_h: 725 },
-    hi: { name: "Hawaii", abbr: "HI", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["Pacific/Honolulu"], observes_dst: false, state_income_tax_effective_pct: 6.2, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 4.5, cost_of_living_multiplier: 1.1, median_rent_1br_cents_per_month: 190000, median_rent_2br_cents_per_month: 236000, residential_electricity_cents_per_kwh: 41, minimum_wage_cents_per_h: 1400, notes: "Does not observe daylight saving time. Sales-type tax is the General Excise Tax (about 4.0-4.7%)." },
-    id: { name: "Idaho", abbr: "ID", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Boise", "America/Los_Angeles"], observes_dst: true, state_income_tax_effective_pct: 4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.03, cost_of_living_multiplier: 0.97, median_rent_1br_cents_per_month: 125000, median_rent_2br_cents_per_month: 155000, residential_electricity_cents_per_kwh: 11, minimum_wage_cents_per_h: 725, notes: "Northern panhandle (north of the Salmon River) is Pacific time; the rest is Mountain." },
-    il: { name: "Illinois", abbr: "IL", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 4.7, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.86, cost_of_living_multiplier: 0.99, median_rent_1br_cents_per_month: 135000, median_rent_2br_cents_per_month: 171000, residential_electricity_cents_per_kwh: 16, minimum_wage_cents_per_h: 1500 },
-    in: { name: "Indiana", abbr: "IN", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/Indiana/Indianapolis", "America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3, local_income_tax_pct_typical: 1.6, sales_tax_combined_avg_pct: 7, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 105000, median_rent_2br_cents_per_month: 133000, residential_electricity_cents_per_kwh: 15.5, minimum_wage_cents_per_h: 725, notes: "Most of the state is Eastern; the northwest and southwest corners are Central. County income tax is extra (see local_income_tax_pct_typical)." },
-    ia: { name: "Iowa", abbr: "IA", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.94, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 95000, median_rent_2br_cents_per_month: 121000, residential_electricity_cents_per_kwh: 13.5, minimum_wage_cents_per_h: 725 },
-    ks: { name: "Kansas", abbr: "KS", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 3.7, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.69, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 95000, median_rent_2br_cents_per_month: 121000, residential_electricity_cents_per_kwh: 14, minimum_wage_cents_per_h: 725, notes: "Four far-western counties are Mountain time." },
-    ky: { name: "Kentucky", abbr: "KY", scope: "state", census_region: "South", census_division: "East South Central", time_zones: ["America/New_York", "America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.8, local_income_tax_pct_typical: 0.8, sales_tax_combined_avg_pct: 6, cost_of_living_multiplier: 0.9, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 13.5, minimum_wage_cents_per_h: 725, notes: "Roughly the western half is Central; the eastern half is Eastern." },
-    la: { name: "Louisiana", abbr: "LA", scope: "state", census_region: "South", census_division: "West South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 2.4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 10.11, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 13, minimum_wage_cents_per_h: 725 },
-    me: { name: "Maine", abbr: "ME", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.6, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 5.5, cost_of_living_multiplier: 1, median_rent_1br_cents_per_month: 130000, median_rent_2br_cents_per_month: 159000, residential_electricity_cents_per_kwh: 26, minimum_wage_cents_per_h: 1465 },
-    md: { name: "Maryland", abbr: "MD", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.2, local_income_tax_pct_typical: 3, sales_tax_combined_avg_pct: 6, cost_of_living_multiplier: 1.05, median_rent_1br_cents_per_month: 155000, median_rent_2br_cents_per_month: 197000, residential_electricity_cents_per_kwh: 18.5, minimum_wage_cents_per_h: 1500, notes: "County income tax (2.25-3.2%) is extra." },
-    ma: { name: "Massachusetts", abbr: "MA", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.6, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.25, cost_of_living_multiplier: 1.08, median_rent_1br_cents_per_month: 230000, median_rent_2br_cents_per_month: 281000, residential_electricity_cents_per_kwh: 30, minimum_wage_cents_per_h: 1500 },
-    mi: { name: "Michigan", abbr: "MI", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/New_York", "America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.9, local_income_tax_pct_typical: 0.2, sales_tax_combined_avg_pct: 6, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 110000, median_rent_2br_cents_per_month: 140000, residential_electricity_cents_per_kwh: 19.5, minimum_wage_cents_per_h: 1248, notes: "Four Upper Peninsula counties bordering Wisconsin are Central." },
-    mn: { name: "Minnesota", abbr: "MN", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 4.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.49, cost_of_living_multiplier: 0.99, median_rent_1br_cents_per_month: 125000, median_rent_2br_cents_per_month: 159000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 1113 },
-    ms: { name: "Mississippi", abbr: "MS", scope: "state", census_region: "South", census_division: "East South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.1, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.06, cost_of_living_multiplier: 0.88, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 14, minimum_wage_cents_per_h: 725 },
-    mo: { name: "Missouri", abbr: "MO", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.1, local_income_tax_pct_typical: 0.2, sales_tax_combined_avg_pct: 8.4, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 1375 },
-    mt: { name: "Montana", abbr: "MT", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 4.7, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 0, cost_of_living_multiplier: 0.98, median_rent_1br_cents_per_month: 115000, median_rent_2br_cents_per_month: 143000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 1085, notes: "No general sales tax; resort-area local taxes exist." },
-    ne: { name: "Nebraska", abbr: "NE", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 3.8, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.97, cost_of_living_multiplier: 0.93, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 12, minimum_wage_cents_per_h: 1500, notes: "The western panhandle is Mountain time." },
-    nv: { name: "Nevada", abbr: "NV", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Los_Angeles", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.24, cost_of_living_multiplier: 0.99, median_rent_1br_cents_per_month: 140000, median_rent_2br_cents_per_month: 174000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1200, notes: "West Wendover uses Mountain time." },
-    nh: { name: "New Hampshire", abbr: "NH", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 0, cost_of_living_multiplier: 1.05, median_rent_1br_cents_per_month: 160000, median_rent_2br_cents_per_month: 195000, residential_electricity_cents_per_kwh: 26.5, minimum_wage_cents_per_h: 725, notes: "No tax on wages; the interest and dividends tax was repealed effective 2025. No sales tax." },
-    nj: { name: "New Jersey", abbr: "NJ", scope: "state", census_region: "Northeast", census_division: "Middle Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 2.9, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.6, cost_of_living_multiplier: 1.09, median_rent_1br_cents_per_month: 190000, median_rent_2br_cents_per_month: 232000, residential_electricity_cents_per_kwh: 18.5, minimum_wage_cents_per_h: 1549 },
-    nm: { name: "New Mexico", abbr: "NM", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 3.2, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.62, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 105000, median_rent_2br_cents_per_month: 130000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 1200 },
-    ny: { name: "New York", abbr: "NY", scope: "state", census_region: "Northeast", census_division: "Middle Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.5, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.54, cost_of_living_multiplier: 1.08, median_rent_1br_cents_per_month: 220000, median_rent_2br_cents_per_month: 268000, residential_electricity_cents_per_kwh: 25, minimum_wage_cents_per_h: 1650, notes: "Excludes New York City resident income tax (roughly 3-4% more) and the MCTMT." },
-    nc: { name: "North Carolina", abbr: "NC", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.99, cost_of_living_multiplier: 0.97, median_rent_1br_cents_per_month: 135000, median_rent_2br_cents_per_month: 171000, residential_electricity_cents_per_kwh: 14, minimum_wage_cents_per_h: 725 },
-    nd: { name: "North Dakota", abbr: "ND", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0.1, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.04, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 11.5, minimum_wage_cents_per_h: 725, notes: "The southwest corner is Mountain time. Effective income tax is near zero for the middle band (large 0% bracket)." },
-    oh: { name: "Ohio", abbr: "OH", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 1.4, local_income_tax_pct_typical: 1.5, sales_tax_combined_avg_pct: 7.24, cost_of_living_multiplier: 0.93, median_rent_1br_cents_per_month: 110000, median_rent_2br_cents_per_month: 140000, residential_electricity_cents_per_kwh: 16.5, minimum_wage_cents_per_h: 1070, notes: "Municipal income taxes (about 1-2.5%) apply in most cities and are extra." },
-    ok: { name: "Oklahoma", abbr: "OK", scope: "state", census_region: "South", census_division: "West South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.5, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 9.14, cost_of_living_multiplier: 0.89, median_rent_1br_cents_per_month: 95000, median_rent_2br_cents_per_month: 121000, residential_electricity_cents_per_kwh: 13, minimum_wage_cents_per_h: 725 },
-    or: { name: "Oregon", abbr: "OR", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["America/Los_Angeles", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 6.5, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 0, cost_of_living_multiplier: 1.04, median_rent_1br_cents_per_month: 150000, median_rent_2br_cents_per_month: 186000, residential_electricity_cents_per_kwh: 13.5, minimum_wage_cents_per_h: 1505, notes: "Most of Malheur County is Mountain time. No state sales tax; effective income tax is among the highest for a middle band." },
-    pa: { name: "Pennsylvania", abbr: "PA", scope: "state", census_region: "Northeast", census_division: "Middle Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.1, local_income_tax_pct_typical: 1, sales_tax_combined_avg_pct: 6.34, cost_of_living_multiplier: 0.97, median_rent_1br_cents_per_month: 125000, median_rent_2br_cents_per_month: 152000, residential_electricity_cents_per_kwh: 18, minimum_wage_cents_per_h: 725, notes: "Local earned-income tax (about 1% typical, Philadelphia 3.75%) is extra." },
-    ri: { name: "Rhode Island", abbr: "RI", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.1, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7, cost_of_living_multiplier: 1.03, median_rent_1br_cents_per_month: 165000, median_rent_2br_cents_per_month: 201000, residential_electricity_cents_per_kwh: 31, minimum_wage_cents_per_h: 1500 },
-    sc: { name: "South Carolina", abbr: "SC", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.6, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.44, cost_of_living_multiplier: 0.96, median_rent_1br_cents_per_month: 120000, median_rent_2br_cents_per_month: 152000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 725 },
-    sd: { name: "South Dakota", abbr: "SD", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.11, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 13, minimum_wage_cents_per_h: 1150, notes: "The western half (west of the Missouri River, mostly) is Mountain time." },
-    tn: { name: "Tennessee", abbr: "TN", scope: "state", census_region: "South", census_division: "East South Central", time_zones: ["America/Chicago", "America/New_York"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 9.61, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 130000, median_rent_2br_cents_per_month: 165000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 725, notes: "East Tennessee is Eastern time; the rest is Central. No wage income tax." },
-    tx: { name: "Texas", abbr: "TX", scope: "state", census_region: "South", census_division: "West South Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.19, cost_of_living_multiplier: 0.98, median_rent_1br_cents_per_month: 125000, median_rent_2br_cents_per_month: 159000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 725, notes: "El Paso and Hudspeth counties are Mountain time." },
-    ut: { name: "Utah", abbr: "UT", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.25, cost_of_living_multiplier: 1, median_rent_1br_cents_per_month: 130000, median_rent_2br_cents_per_month: 161000, residential_electricity_cents_per_kwh: 11.5, minimum_wage_cents_per_h: 725 },
-    vt: { name: "Vermont", abbr: "VT", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.39, cost_of_living_multiplier: 1, median_rent_1br_cents_per_month: 145000, median_rent_2br_cents_per_month: 177000, residential_electricity_cents_per_kwh: 23, minimum_wage_cents_per_h: 1401 },
-    va: { name: "Virginia", abbr: "VA", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 5.75, cost_of_living_multiplier: 1.02, median_rent_1br_cents_per_month: 145000, median_rent_2br_cents_per_month: 184000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1241 },
-    wa: { name: "Washington", abbr: "WA", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["America/Los_Angeles"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 9.43, cost_of_living_multiplier: 1.07, median_rent_1br_cents_per_month: 170000, median_rent_2br_cents_per_month: 211000, residential_electricity_cents_per_kwh: 11.5, minimum_wage_cents_per_h: 1666, notes: "No wage income tax. Capital-gains excise tax applies only to large gains." },
-    wv: { name: "West Virginia", abbr: "WV", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.57, cost_of_living_multiplier: 0.9, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 875 },
-    wi: { name: "Wisconsin", abbr: "WI", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.5, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 5.7, cost_of_living_multiplier: 0.94, median_rent_1br_cents_per_month: 110000, median_rent_2br_cents_per_month: 140000, residential_electricity_cents_per_kwh: 16, minimum_wage_cents_per_h: 725 },
-    wy: { name: "Wyoming", abbr: "WY", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 5.36, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 95000, median_rent_2br_cents_per_month: 118000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 725 },
-    us: { name: "United States", abbr: "US", scope: "national", sales_tax_combined_avg_pct: 7, cost_of_living_multiplier: 1, median_rent_1br_cents_per_month: 135000, median_rent_2br_cents_per_month: 165000, residential_electricity_cents_per_kwh: 17, minimum_wage_cents_per_h: 725 }
+    al: { name: "Alabama", abbr: "AL", scope: "state", census_region: "South", census_division: "East South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.6, local_income_tax_pct_typical: 0.1, sales_tax_combined_avg_pct: 9.46, property_tax_effective_pct: 0.38, cost_of_living_multiplier: 0.9, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 725 },
+    ak: { name: "Alaska", abbr: "AK", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["America/Anchorage", "America/Adak"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 1.82, property_tax_effective_pct: 1, cost_of_living_multiplier: 1.03, median_rent_1br_cents_per_month: 123000, median_rent_2br_cents_per_month: 153000, residential_electricity_cents_per_kwh: 25, minimum_wage_cents_per_h: 1191, notes: "Aleutian Islands west of 169.5W use America/Adak (Hawaii-Aleutian time). No state income or state sales tax; many boroughs levy local sales tax." },
+    az: { name: "Arizona", abbr: "AZ", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Phoenix"], observes_dst: false, state_income_tax_effective_pct: 1.9, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.38, property_tax_effective_pct: 0.52, cost_of_living_multiplier: 1.01, median_rent_1br_cents_per_month: 138000, median_rent_2br_cents_per_month: 171000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1470, notes: "Does not observe daylight saving time, except the Navajo Nation, which does." },
+    ar: { name: "Arkansas", abbr: "AR", scope: "state", census_region: "South", census_division: "West South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.2, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 9.46, property_tax_effective_pct: 0.57, cost_of_living_multiplier: 0.89, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 1100 },
+    ca: { name: "California", abbr: "CA", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["America/Los_Angeles"], observes_dst: true, state_income_tax_effective_pct: 2.9, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.82, property_tax_effective_pct: 0.71, cost_of_living_multiplier: 1.12, median_rent_1br_cents_per_month: 195000, median_rent_2br_cents_per_month: 242000, residential_electricity_cents_per_kwh: 31, minimum_wage_cents_per_h: 1650 },
+    co: { name: "Colorado", abbr: "CO", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 3.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.78, property_tax_effective_pct: 0.49, cost_of_living_multiplier: 1.04, median_rent_1br_cents_per_month: 155000, median_rent_2br_cents_per_month: 192000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1481 },
+    ct: { name: "Connecticut", abbr: "CT", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.6, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.35, property_tax_effective_pct: 1.48, cost_of_living_multiplier: 1.05, median_rent_1br_cents_per_month: 160000, median_rent_2br_cents_per_month: 195000, residential_electricity_cents_per_kwh: 29.5, minimum_wage_cents_per_h: 1635 },
+    de: { name: "Delaware", abbr: "DE", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 0, property_tax_effective_pct: 0.55, cost_of_living_multiplier: 0.99, median_rent_1br_cents_per_month: 140000, median_rent_2br_cents_per_month: 178000, residential_electricity_cents_per_kwh: 16.5, minimum_wage_cents_per_h: 1500, notes: "No sales tax; gross-receipts tax is paid by businesses." },
+    dc: { name: "District of Columbia", abbr: "DC", scope: "district", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6, property_tax_effective_pct: 0.57, cost_of_living_multiplier: 1.11, median_rent_1br_cents_per_month: 215000, median_rent_2br_cents_per_month: 273000, residential_electricity_cents_per_kwh: 18.5, minimum_wage_cents_per_h: 1795, notes: "District of Columbia is not a state; included as a 51st jurisdiction." },
+    fl: { name: "Florida", abbr: "FL", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York", "America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.02, property_tax_effective_pct: 0.79, cost_of_living_multiplier: 1.02, median_rent_1br_cents_per_month: 170000, median_rent_2br_cents_per_month: 216000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1400, notes: "Western panhandle (west of the Apalachicola River) is Central time." },
+    ga: { name: "Georgia", abbr: "GA", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.2, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.42, property_tax_effective_pct: 0.83, cost_of_living_multiplier: 0.97, median_rent_1br_cents_per_month: 142000, median_rent_2br_cents_per_month: 180000, residential_electricity_cents_per_kwh: 14, minimum_wage_cents_per_h: 725 },
+    hi: { name: "Hawaii", abbr: "HI", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["Pacific/Honolulu"], observes_dst: false, state_income_tax_effective_pct: 6.2, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 4.5, property_tax_effective_pct: 0.27, cost_of_living_multiplier: 1.1, median_rent_1br_cents_per_month: 190000, median_rent_2br_cents_per_month: 236000, residential_electricity_cents_per_kwh: 41, minimum_wage_cents_per_h: 1400, notes: "Does not observe daylight saving time. Sales-type tax is the General Excise Tax (about 4.0-4.7%)." },
+    id: { name: "Idaho", abbr: "ID", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Boise", "America/Los_Angeles"], observes_dst: true, state_income_tax_effective_pct: 4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.03, property_tax_effective_pct: 0.54, cost_of_living_multiplier: 0.97, median_rent_1br_cents_per_month: 125000, median_rent_2br_cents_per_month: 155000, residential_electricity_cents_per_kwh: 11, minimum_wage_cents_per_h: 725, notes: "Northern panhandle (north of the Salmon River) is Pacific time; the rest is Mountain." },
+    il: { name: "Illinois", abbr: "IL", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 4.7, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.86, property_tax_effective_pct: 1.95, cost_of_living_multiplier: 0.99, median_rent_1br_cents_per_month: 135000, median_rent_2br_cents_per_month: 171000, residential_electricity_cents_per_kwh: 16, minimum_wage_cents_per_h: 1500 },
+    in: { name: "Indiana", abbr: "IN", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/Indiana/Indianapolis", "America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3, local_income_tax_pct_typical: 1.6, sales_tax_combined_avg_pct: 7, property_tax_effective_pct: 0.77, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 105000, median_rent_2br_cents_per_month: 133000, residential_electricity_cents_per_kwh: 15.5, minimum_wage_cents_per_h: 725, notes: "Most of the state is Eastern; the northwest and southwest corners are Central. County income tax is extra (see local_income_tax_pct_typical)." },
+    ia: { name: "Iowa", abbr: "IA", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.94, property_tax_effective_pct: 1.37, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 95000, median_rent_2br_cents_per_month: 121000, residential_electricity_cents_per_kwh: 13.5, minimum_wage_cents_per_h: 725 },
+    ks: { name: "Kansas", abbr: "KS", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 3.7, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.69, property_tax_effective_pct: 1.29, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 95000, median_rent_2br_cents_per_month: 121000, residential_electricity_cents_per_kwh: 14, minimum_wage_cents_per_h: 725, notes: "Four far-western counties are Mountain time." },
+    ky: { name: "Kentucky", abbr: "KY", scope: "state", census_region: "South", census_division: "East South Central", time_zones: ["America/New_York", "America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.8, local_income_tax_pct_typical: 0.8, sales_tax_combined_avg_pct: 6, property_tax_effective_pct: 0.75, cost_of_living_multiplier: 0.9, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 13.5, minimum_wage_cents_per_h: 725, notes: "Roughly the western half is Central; the eastern half is Eastern." },
+    la: { name: "Louisiana", abbr: "LA", scope: "state", census_region: "South", census_division: "West South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 2.4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 10.11, property_tax_effective_pct: 0.51, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 13, minimum_wage_cents_per_h: 725 },
+    me: { name: "Maine", abbr: "ME", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.6, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 5.5, property_tax_effective_pct: 1.1, cost_of_living_multiplier: 1, median_rent_1br_cents_per_month: 130000, median_rent_2br_cents_per_month: 159000, residential_electricity_cents_per_kwh: 26, minimum_wage_cents_per_h: 1465 },
+    md: { name: "Maryland", abbr: "MD", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.2, local_income_tax_pct_typical: 3, sales_tax_combined_avg_pct: 6, property_tax_effective_pct: 0.99, cost_of_living_multiplier: 1.05, median_rent_1br_cents_per_month: 155000, median_rent_2br_cents_per_month: 197000, residential_electricity_cents_per_kwh: 18.5, minimum_wage_cents_per_h: 1500, notes: "County income tax (2.25-3.2%) is extra." },
+    ma: { name: "Massachusetts", abbr: "MA", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.6, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.25, property_tax_effective_pct: 1.04, cost_of_living_multiplier: 1.08, median_rent_1br_cents_per_month: 230000, median_rent_2br_cents_per_month: 281000, residential_electricity_cents_per_kwh: 30, minimum_wage_cents_per_h: 1500 },
+    mi: { name: "Michigan", abbr: "MI", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/New_York", "America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.9, local_income_tax_pct_typical: 0.2, sales_tax_combined_avg_pct: 6, property_tax_effective_pct: 1.25, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 110000, median_rent_2br_cents_per_month: 140000, residential_electricity_cents_per_kwh: 19.5, minimum_wage_cents_per_h: 1248, notes: "Four Upper Peninsula counties bordering Wisconsin are Central." },
+    mn: { name: "Minnesota", abbr: "MN", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 4.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.49, property_tax_effective_pct: 1.02, cost_of_living_multiplier: 0.99, median_rent_1br_cents_per_month: 125000, median_rent_2br_cents_per_month: 159000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 1113 },
+    ms: { name: "Mississippi", abbr: "MS", scope: "state", census_region: "South", census_division: "East South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.1, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.06, property_tax_effective_pct: 0.67, cost_of_living_multiplier: 0.88, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 14, minimum_wage_cents_per_h: 725 },
+    mo: { name: "Missouri", abbr: "MO", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.1, local_income_tax_pct_typical: 0.2, sales_tax_combined_avg_pct: 8.4, property_tax_effective_pct: 0.88, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 1375 },
+    mt: { name: "Montana", abbr: "MT", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 4.7, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 0, property_tax_effective_pct: 0.68, cost_of_living_multiplier: 0.98, median_rent_1br_cents_per_month: 115000, median_rent_2br_cents_per_month: 143000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 1085, notes: "No general sales tax; resort-area local taxes exist." },
+    ne: { name: "Nebraska", abbr: "NE", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 3.8, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.97, property_tax_effective_pct: 1.5, cost_of_living_multiplier: 0.93, median_rent_1br_cents_per_month: 1e5, median_rent_2br_cents_per_month: 127000, residential_electricity_cents_per_kwh: 12, minimum_wage_cents_per_h: 1500, notes: "The western panhandle is Mountain time." },
+    nv: { name: "Nevada", abbr: "NV", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Los_Angeles", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.24, property_tax_effective_pct: 0.49, cost_of_living_multiplier: 0.99, median_rent_1br_cents_per_month: 140000, median_rent_2br_cents_per_month: 174000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1200, notes: "West Wendover uses Mountain time." },
+    nh: { name: "New Hampshire", abbr: "NH", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 0, property_tax_effective_pct: 1.61, cost_of_living_multiplier: 1.05, median_rent_1br_cents_per_month: 160000, median_rent_2br_cents_per_month: 195000, residential_electricity_cents_per_kwh: 26.5, minimum_wage_cents_per_h: 725, notes: "No tax on wages; the interest and dividends tax was repealed effective 2025. No sales tax." },
+    nj: { name: "New Jersey", abbr: "NJ", scope: "state", census_region: "Northeast", census_division: "Middle Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 2.9, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.6, property_tax_effective_pct: 2.08, cost_of_living_multiplier: 1.09, median_rent_1br_cents_per_month: 190000, median_rent_2br_cents_per_month: 232000, residential_electricity_cents_per_kwh: 18.5, minimum_wage_cents_per_h: 1549 },
+    nm: { name: "New Mexico", abbr: "NM", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 3.2, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.62, property_tax_effective_pct: 0.67, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 105000, median_rent_2br_cents_per_month: 130000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 1200 },
+    ny: { name: "New York", abbr: "NY", scope: "state", census_region: "Northeast", census_division: "Middle Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.5, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.54, property_tax_effective_pct: 1.42, cost_of_living_multiplier: 1.08, median_rent_1br_cents_per_month: 220000, median_rent_2br_cents_per_month: 268000, residential_electricity_cents_per_kwh: 25, minimum_wage_cents_per_h: 1650, notes: "Excludes New York City resident income tax (roughly 3-4% more) and the MCTMT." },
+    nc: { name: "North Carolina", abbr: "NC", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.99, property_tax_effective_pct: 0.7, cost_of_living_multiplier: 0.97, median_rent_1br_cents_per_month: 135000, median_rent_2br_cents_per_month: 171000, residential_electricity_cents_per_kwh: 14, minimum_wage_cents_per_h: 725 },
+    nd: { name: "North Dakota", abbr: "ND", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0.1, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.04, property_tax_effective_pct: 0.92, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 11.5, minimum_wage_cents_per_h: 725, notes: "The southwest corner is Mountain time. Effective income tax is near zero for the middle band (large 0% bracket)." },
+    oh: { name: "Ohio", abbr: "OH", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 1.4, local_income_tax_pct_typical: 1.5, sales_tax_combined_avg_pct: 7.24, property_tax_effective_pct: 1.36, cost_of_living_multiplier: 0.93, median_rent_1br_cents_per_month: 110000, median_rent_2br_cents_per_month: 140000, residential_electricity_cents_per_kwh: 16.5, minimum_wage_cents_per_h: 1070, notes: "Municipal income taxes (about 1-2.5%) apply in most cities and are extra." },
+    ok: { name: "Oklahoma", abbr: "OK", scope: "state", census_region: "South", census_division: "West South Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.5, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 9.14, property_tax_effective_pct: 0.82, cost_of_living_multiplier: 0.89, median_rent_1br_cents_per_month: 95000, median_rent_2br_cents_per_month: 121000, residential_electricity_cents_per_kwh: 13, minimum_wage_cents_per_h: 725 },
+    or: { name: "Oregon", abbr: "OR", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["America/Los_Angeles", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 6.5, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 0, property_tax_effective_pct: 0.85, cost_of_living_multiplier: 1.04, median_rent_1br_cents_per_month: 150000, median_rent_2br_cents_per_month: 186000, residential_electricity_cents_per_kwh: 13.5, minimum_wage_cents_per_h: 1505, notes: "Most of Malheur County is Mountain time. No state sales tax; effective income tax is among the highest for a middle band." },
+    pa: { name: "Pennsylvania", abbr: "PA", scope: "state", census_region: "Northeast", census_division: "Middle Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.1, local_income_tax_pct_typical: 1, sales_tax_combined_avg_pct: 6.34, property_tax_effective_pct: 1.35, cost_of_living_multiplier: 0.97, median_rent_1br_cents_per_month: 125000, median_rent_2br_cents_per_month: 152000, residential_electricity_cents_per_kwh: 18, minimum_wage_cents_per_h: 725, notes: "Local earned-income tax (about 1% typical, Philadelphia 3.75%) is extra." },
+    ri: { name: "Rhode Island", abbr: "RI", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.1, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7, property_tax_effective_pct: 1.27, cost_of_living_multiplier: 1.03, median_rent_1br_cents_per_month: 165000, median_rent_2br_cents_per_month: 201000, residential_electricity_cents_per_kwh: 31, minimum_wage_cents_per_h: 1500 },
+    sc: { name: "South Carolina", abbr: "SC", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.6, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.44, property_tax_effective_pct: 0.51, cost_of_living_multiplier: 0.96, median_rent_1br_cents_per_month: 120000, median_rent_2br_cents_per_month: 152000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 725 },
+    sd: { name: "South Dakota", abbr: "SD", scope: "state", census_region: "Midwest", census_division: "West North Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.11, property_tax_effective_pct: 1.07, cost_of_living_multiplier: 0.92, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 13, minimum_wage_cents_per_h: 1150, notes: "The western half (west of the Missouri River, mostly) is Mountain time." },
+    tn: { name: "Tennessee", abbr: "TN", scope: "state", census_region: "South", census_division: "East South Central", time_zones: ["America/Chicago", "America/New_York"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 9.61, property_tax_effective_pct: 0.56, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 130000, median_rent_2br_cents_per_month: 165000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 725, notes: "East Tennessee is Eastern time; the rest is Central. No wage income tax." },
+    tx: { name: "Texas", abbr: "TX", scope: "state", census_region: "South", census_division: "West South Central", time_zones: ["America/Chicago", "America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 8.19, property_tax_effective_pct: 1.47, cost_of_living_multiplier: 0.98, median_rent_1br_cents_per_month: 125000, median_rent_2br_cents_per_month: 159000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 725, notes: "El Paso and Hudspeth counties are Mountain time." },
+    ut: { name: "Utah", abbr: "UT", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 7.25, property_tax_effective_pct: 0.52, cost_of_living_multiplier: 1, median_rent_1br_cents_per_month: 130000, median_rent_2br_cents_per_month: 161000, residential_electricity_cents_per_kwh: 11.5, minimum_wage_cents_per_h: 725 },
+    vt: { name: "Vermont", abbr: "VT", scope: "state", census_region: "Northeast", census_division: "New England", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.3, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.39, property_tax_effective_pct: 1.61, cost_of_living_multiplier: 1, median_rent_1br_cents_per_month: 145000, median_rent_2br_cents_per_month: 177000, residential_electricity_cents_per_kwh: 23, minimum_wage_cents_per_h: 1401 },
+    va: { name: "Virginia", abbr: "VA", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 4.4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 5.75, property_tax_effective_pct: 0.8, cost_of_living_multiplier: 1.02, median_rent_1br_cents_per_month: 145000, median_rent_2br_cents_per_month: 184000, residential_electricity_cents_per_kwh: 14.5, minimum_wage_cents_per_h: 1241 },
+    wa: { name: "Washington", abbr: "WA", scope: "state", census_region: "West", census_division: "Pacific", time_zones: ["America/Los_Angeles"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 9.43, property_tax_effective_pct: 0.84, cost_of_living_multiplier: 1.07, median_rent_1br_cents_per_month: 170000, median_rent_2br_cents_per_month: 211000, residential_electricity_cents_per_kwh: 11.5, minimum_wage_cents_per_h: 1666, notes: "No wage income tax. Capital-gains excise tax applies only to large gains." },
+    wv: { name: "West Virginia", abbr: "WV", scope: "state", census_region: "South", census_division: "South Atlantic", time_zones: ["America/New_York"], observes_dst: true, state_income_tax_effective_pct: 3.4, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 6.57, property_tax_effective_pct: 0.53, cost_of_living_multiplier: 0.9, median_rent_1br_cents_per_month: 90000, median_rent_2br_cents_per_month: 114000, residential_electricity_cents_per_kwh: 15, minimum_wage_cents_per_h: 875 },
+    wi: { name: "Wisconsin", abbr: "WI", scope: "state", census_region: "Midwest", census_division: "East North Central", time_zones: ["America/Chicago"], observes_dst: true, state_income_tax_effective_pct: 3.5, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 5.7, property_tax_effective_pct: 1.51, cost_of_living_multiplier: 0.94, median_rent_1br_cents_per_month: 110000, median_rent_2br_cents_per_month: 140000, residential_electricity_cents_per_kwh: 16, minimum_wage_cents_per_h: 725 },
+    wy: { name: "Wyoming", abbr: "WY", scope: "state", census_region: "West", census_division: "Mountain", time_zones: ["America/Denver"], observes_dst: true, state_income_tax_effective_pct: 0, local_income_tax_pct_typical: 0, sales_tax_combined_avg_pct: 5.36, property_tax_effective_pct: 0.55, cost_of_living_multiplier: 0.95, median_rent_1br_cents_per_month: 95000, median_rent_2br_cents_per_month: 118000, residential_electricity_cents_per_kwh: 12.5, minimum_wage_cents_per_h: 725 },
+    us: { name: "United States", abbr: "US", scope: "national", sales_tax_combined_avg_pct: 7, property_tax_effective_pct: 0.9, cost_of_living_multiplier: 1, median_rent_1br_cents_per_month: 135000, median_rent_2br_cents_per_month: 165000, residential_electricity_cents_per_kwh: 17, minimum_wage_cents_per_h: 725 }
   }
 };
 
 // src/packs/economy/core/index.ts
 var TABLES2 = [catalog_default, categories_default, occupations_default, regions_default, finance_default];
-var PAY_METHODS = ["auto", "cash", "card", "checking", "savings"];
-function payMethodOf(text) {
-  const t = text.trim().toLowerCase();
-  const exact = PAY_METHODS.find((m) => m === t);
-  if (exact)
-    return exact;
-  if (/\b(debit|checking|check|bank)\b/.test(t))
-    return "checking";
-  if (/\bsavings?\b/.test(t))
-    return "savings";
-  if (/\b(credit|card|visa|mastercard|amex)\b/.test(t))
-    return "card";
-  if (/\b(cash|wallet|coins?)\b/.test(t))
-    return "cash";
-  return "auto";
-}
 function transferCents(p) {
   return Math.round(typeof p.cents === "number" ? p.cents : typeof p.amount === "number" ? p.amount : NaN);
 }
@@ -12307,20 +20366,17 @@ function placeTrade(ctx, place) {
   const tags = Array.isArray(p?.fields.tags) ? p.fields.tags.filter((x) => typeof x === "string") : [];
   return { categories: [...new Set(sells.length > 0 ? sells : tags.flatMap((t) => own(TAG_CATEGORIES, t) ?? []))], sells, tags };
 }
-function offersAt(ctx, who) {
-  return offersAtPlace(ctx, placeOfEntity(ctx.state, who));
-}
 function offersAtPlace(ctx, place) {
   if (!place || !own(ctx.world.places, place))
     return [];
   const { categories, sells } = placeTrade(ctx, place);
-  const catalog = ctx.tables.get("economy.catalog")?.rows ?? {};
+  const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
   const out = [];
   for (const category of categories) {
-    for (const id of Object.keys(catalog).sort()) {
+    for (const id of Object.keys(rows).sort()) {
       if (out.length >= OFFER_CAP)
         return out;
-      const row = catalog[id];
+      const row = rows[id];
       if (!row || strOf(row.category) !== category && !sells.includes(id))
         continue;
       const price = priceOf(ctx, { catalog: id, place });
@@ -12357,866 +20413,16 @@ function matchCatalog(ctx, text, place, category = "") {
 }
 function boughtRef(ctx, name) {
   const named = (table) => Object.entries(ctx.tables.get(table)?.rows ?? {}).find(([id, row]) => strOf(row?.name, id) === name)?.[0];
-  const catalog = named("economy.catalog");
-  if (catalog)
-    return { catalog };
+  const row = named("economy.catalog");
+  if (row)
+    return { catalog: row };
   const category = named("economy.categories");
   return category ? { category } : null;
-}
-function loseWith(ctx, item, thief) {
-  const s = ctx.state;
-  if (!own(s.entities, item))
-    return reject5("missing_entity", `no ${labelOf(ctx, item)}`);
-  if (thief && !own(s.entities, thief))
-    return reject5("missing_entity", `no ${labelOf(ctx, thief)}`);
-  const out = [];
-  for (const id of Object.keys(s.entities).sort()) {
-    const cents = balance(s, id);
-    if (accountType(s, id) !== "cash" || cents <= 0 || !containersOf(s, id).includes(item))
-      continue;
-    const memo = thief ? `Stolen with ${own(s.entities, item)?.name ?? item}` : `Lost with ${own(s.entities, item)?.name ?? item}`;
-    const dest = thief ? payeeSide(ctx, { payee: thief }, cents) : { account: external("lost"), extra: [] };
-    const lines = [
-      { account: id, amount: -cents },
-      { account: dest.account, amount: cents }
-    ];
-    out.push(...asUnit([{ type: "post", lines, memo }, ...dest.extra, txn(memo, lines)]));
-  }
-  return out;
-}
-var ACCOUNT = {
-  id: "account",
-  label: "Account",
-  pack: "economy",
-  fields: {
-    owner: { type: "ref", label: "Owner", domain: "money", level: 2 },
-    type: { type: "enum", label: "Type", values: ["cash", "checking", "savings", "card", "loan", "brokerage"], domain: "money", level: 2 },
-    institution: { type: "text", label: "Institution", domain: "money", level: 3 },
-    opening: { type: "money", label: "Opening balance", locked: true },
-    limit: { type: "money", label: "Credit limit", min: 0, domain: "money", level: 3 },
-    autopay: { type: "text", label: "Autopay", default: "none", domain: "money", level: 3 },
-    statement_day: { type: "number", label: "Statement day", min: 1, max: 28, default: 1, domain: "money", level: 4 },
-    due_day: { type: "number", label: "Due day of month", min: 1, max: 31, domain: "money", level: 4 },
-    remaining_months: { type: "number", label: "Months left (loans)", min: 0, domain: "money", level: 4 },
-    apr_pct: { type: "number", label: "APR %", min: 0, domain: "money", level: 4 },
-    apy_pct: { type: "number", label: "APY %", min: 0, domain: "money", level: 4 },
-    min_pct: { type: "number", label: "Minimum payment % of balance", default: 1, domain: "money", level: 4 },
-    min_floor: { type: "money", label: "Minimum payment floor", default: 3500, domain: "money", level: 4 },
-    payment: { type: "money", label: "Loan payment", domain: "money", level: 4 },
-    symbol: { type: "text", label: "Holding", default: DEFAULT_SYMBOL, domain: "money", level: 4 },
-    units: { type: "number", label: "Units held", min: 0, domain: "money", level: 4, locked: true }
-  }
-};
-var BUSINESS = {
-  id: "business",
-  label: "Business",
-  extends: "thing",
-  pack: "economy",
-  fields: {}
-};
-function reject5(code, reason) {
-  return { code, reason };
-}
-function isRejection2(v) {
-  return !Array.isArray(v);
-}
-function hasLedger(state, who) {
-  return accountsOf(state, who).length > 0;
-}
-function ofType(state, who, t) {
-  return accountsOf(state, who).filter((id) => accountType(state, id) === t);
-}
-function available(state, account) {
-  const b = balance(state, account);
-  return accountType(state, account) === "card" ? numOf(own(state.entities, account)?.fields.limit) + b : b;
-}
-var BANK_SIDE = `${EXTERNAL_ACCOUNT_PREFIX}bank:`;
-function postGuard(ctx, lines) {
-  const s = ctx.state;
-  if (lines.some((l) => l.amount > 0 && l.account.startsWith(BANK_SIDE)))
-    return null;
-  for (const l of lines) {
-    if (l.amount >= 0)
-      continue;
-    const t = accountType(s, l.account);
-    const owner = strOf(own(s.entities, l.account)?.fields.owner);
-    if (!t || t === "loan" || t === "brokerage" || !own(s.entities, owner) || ctx.levelOf(owner, "money") < 2)
-      continue;
-    if (lines.some((x) => x.account === external(owner)))
-      continue;
-    if (available(s, l.account) + l.amount < 0) {
-      const name = labelOf(ctx, l.account);
-      return reject5("declined", t === "card" ? `${name} has no room for ${formatMoney(-l.amount, ctx.world.currency)}` : `${name} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
-    }
-  }
-  return null;
-}
-function containersOf(state, id) {
-  const out = [];
-  let cur = id;
-  for (let guard = 0;guard < 16; guard++) {
-    const to = own(state.entities, cur)?.relations.find((r) => r.type === "in")?.to;
-    if (!to || out.includes(to))
-      break;
-    out.push(to);
-    cur = to;
-  }
-  return out;
-}
-function onOwner(state, account) {
-  const chain = containersOf(state, account);
-  return chain.length === 0 || chain.includes(strOf(own(state.entities, account)?.fields.owner));
-}
-function depositOf(state, who, except) {
-  const ok = (id) => id !== except;
-  return ofType(state, who, "checking").find(ok) ?? ofType(state, who, "cash").find(ok) ?? accountsOf(state, who).find((id) => ok(id) && accountType(state, id) !== "card" && accountType(state, id) !== "loan");
-}
-var PAYING_TYPES = ["cash", "checking", "savings", "card"];
-function pickSource(ctx, payer, cents, method, level, source, except) {
-  const s = ctx.state;
-  if (source && own(s.entities, source)?.fields.owner === payer && PAYING_TYPES.includes(accountType(s, source))) {
-    if (level < 2 || available(s, source) >= cents)
-      return source;
-    return reject5("declined", `${labelOf(ctx, source)} can't cover ${formatMoney(cents, ctx.world.currency)}`);
-  }
-  const order = method === "cash" ? ["cash"] : method === "card" ? ["card"] : method === "checking" ? ["checking"] : method === "savings" ? ["savings"] : method === "account" ? ["checking", "card", "savings"] : level >= 2 ? ["cash", "checking", "card"] : ["cash", "checking", "card", "savings"];
-  const candidates = order.flatMap((t) => ofType(s, payer, t)).filter((id) => id !== except && (accountType(s, id) !== "cash" || onOwner(s, id)));
-  for (const id of candidates)
-    if (available(s, id) >= cents)
-      return id;
-  if (level < 2) {
-    const fallback = ofType(s, payer, "checking").find((id) => id !== except) ?? candidates[0] ?? accountsOf(s, payer).find((id) => id !== except);
-    if (fallback)
-      return fallback;
-  }
-  const name = own(s.entities, payer)?.name ?? payer;
-  return reject5("declined", method === "card" ? `${name}'s card was declined` : `${name} doesn't have ${formatMoney(cents, ctx.world.currency)} available`);
-}
-function l1Move(state, who, delta) {
-  const a = anchorOf(state, who);
-  const after = notional(state, who) + delta;
-  const band = wealthBand(after);
-  const explicit = objOf(own(objOf(sliceOf(state, "economy").anchors), who)).band === a.band;
-  const out = [];
-  if (!explicit || band !== a.band)
-    out.push({ type: "economy.anchor", data: { entity: who, band, typical: a.typical, base: a.base } });
-  if (band !== strOf(own(state.entities, who)?.fields.wealth, "modest"))
-    out.push({ type: "set", entity: who, field: "wealth", value: band });
-  return out;
-}
-function payeeSide(ctx, opts, cents) {
-  const payee = opts.payee;
-  if (payee && own(ctx.state.entities, payee)) {
-    if (hasLedger(ctx.state, payee) && ctx.levelOf(payee, "money") >= 1) {
-      const named = opts.deposit && own(ctx.state.entities, opts.deposit)?.fields.owner === payee ? opts.deposit : undefined;
-      const deposit = named ?? depositOf(ctx.state, payee);
-      if (deposit)
-        return { account: deposit, extra: [] };
-    }
-    const extra = ctx.levelOf(payee, "money") >= 1 && !hasLedger(ctx.state, payee) ? l1Move(ctx.state, payee, cents) : [];
-    return { account: external(payee), extra };
-  }
-  return { account: external(opts.counterparty ?? "market"), extra: [] };
-}
-function txn(memo, lines, narrated) {
-  const mine = lines.filter((l) => !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX));
-  return { type: "economy.txn", data: { memo, lines: mine.map((l) => ({ account: l.account, amount: l.amount })), ...narrated ? { narrated: narrated.cents, limited: narrated.limited } : {} } };
-}
-function asUnit(events) {
-  if (events.length < 2)
-    return events;
-  const group = `pay:${hashParts(JSON.stringify(events)).slice(0, 10)}`;
-  return events.map((e) => ({ ...e, group }));
-}
-var charge = (ctx, payer, rawCents, memo, opts = {}) => {
-  if (!own(ctx.state.entities, payer))
-    return reject5("missing_entity", `no payer ${labelOf(ctx, payer)}`);
-  const cents = Math.round(rawCents);
-  if (!(cents > 0))
-    return [];
-  const level = ctx.levelOf(payer, "money");
-  if (level === 0)
-    return [];
-  const out = [];
-  let source;
-  if (hasLedger(ctx.state, payer)) {
-    const picked = pickSource(ctx, payer, cents, opts.method, level, opts.source);
-    if (typeof picked !== "string")
-      return picked;
-    source = picked;
-  } else {
-    if (notional(ctx.state, payer) < cents)
-      return reject5("declined", `${labelOf(ctx, payer)} can't afford ${formatMoney(cents, ctx.world.currency)}`);
-    source = external(payer);
-    out.push(...l1Move(ctx.state, payer, -cents));
-  }
-  const dest = payeeSide(ctx, opts, cents);
-  const lines = [
-    { account: source, amount: -cents },
-    { account: dest.account, amount: cents }
-  ];
-  return asUnit([{ type: "post", lines, memo }, ...out, ...dest.extra, txn(memo, lines, opts.narrated)]);
-};
-var setCash = (ctx, holder, cents) => {
-  const s = ctx.state;
-  const cash = ofType(s, holder, "cash");
-  const [first, ...rest] = [...cash.filter((id) => onOwner(s, id)), ...cash.filter((id) => !onOwner(s, id))];
-  if (!first)
-    return null;
-  const target = Math.round(cents);
-  if (!Number.isSafeInteger(target) || target < 0)
-    return reject5("bad_amount", "cash can't be less than nothing");
-  let left = target - cash.reduce((a, id) => a + balance(s, id), 0);
-  if (left === 0)
-    return [];
-  const lines = left > 0 ? [{ account: first, amount: left }] : [];
-  for (const id of [first, ...rest]) {
-    if (left >= 0)
-      break;
-    const take = Math.min(-left, Math.max(0, balance(s, id)));
-    if (take > 0)
-      lines.push({ account: id, amount: -take });
-    left += take;
-  }
-  lines.push({ account: CORRECTION_ACCOUNT, amount: -lines.reduce((a, l) => a + l.amount, 0) });
-  return asUnit([{ type: "post", lines, memo: "Correction" }, txn("Correction", lines)]);
-};
-var reprice = (ctx, events, cents) => {
-  const post = events.find((e) => e.type === "post" && e.memo.startsWith("Bought "));
-  const paid = post?.lines.find((l) => l.amount < 0);
-  const got = post?.lines.find((l) => l.amount > 0);
-  if (!post || !paid || !got || post.lines.length !== 2)
-    return reject5("not_a_purchase", "there's no purchase to reprice");
-  const total = Math.round(cents);
-  if (!Number.isSafeInteger(total) || total <= 0)
-    return reject5("bad_amount", "the amount must be positive");
-  const diff = total - got.amount;
-  if (diff === 0)
-    return [];
-  const memo = `${post.memo}: price corrected`;
-  const lines = [
-    { account: paid.account, amount: -diff },
-    { account: got.account, amount: diff }
-  ];
-  return asUnit([{ type: "post", lines, memo }, txn(memo, lines)]);
-};
-function transferParty(ctx, id) {
-  const s = ctx.state;
-  const e = own(s.entities, id);
-  if (!e)
-    return reject5("missing_entity", `no ${labelOf(ctx, id)}`);
-  if (kindIs(ctx.registry, ctx.world, e.kind, "person"))
-    return { holder: id };
-  const holder = strOf(e.fields.owner);
-  if (PAYING_TYPES.includes(accountType(s, id)) && kindIs(ctx.registry, ctx.world, own(s.entities, holder)?.kind ?? "", "person"))
-    return { holder, account: id };
-  return reject5("bad_party", `${labelOf(ctx, id)} isn't a person or a person's own cash, checking, savings or card account`);
-}
-function transfer(ctx, from, to, cents, memo, method = "auto") {
-  const payer = transferParty(ctx, from);
-  if ("code" in payer)
-    return payer;
-  const payee = transferParty(ctx, to);
-  if ("code" in payee)
-    return payee;
-  const s = ctx.state;
-  const paying = method === "cash" ? "auto" : method;
-  const cash = method === "cash" ? ofType(s, payee.holder, "cash").find((id) => onOwner(s, id)) : undefined;
-  if (payer.holder !== payee.holder) {
-    const deposit = payee.account ?? cash;
-    return charge(ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, ...payer.account ? { source: payer.account } : {}, ...deposit ? { deposit } : {} });
-  }
-  if (!payer.account && !payee.account)
-    return reject5("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
-  const level = ctx.levelOf(payer.holder, "money");
-  if (level === 0)
-    return [];
-  const c = Math.round(cents);
-  const source = payer.account ?? pickSource(ctx, payer.holder, c, paying, level, undefined, payee.account);
-  if (typeof source !== "string")
-    return source;
-  const target = payee.account ?? (cash !== undefined && cash !== source ? cash : depositOf(s, payee.holder, source));
-  if (!target || target === source)
-    return reject5("bad_party", `${labelOf(ctx, source)} can't pay itself`);
-  return move(ctx, source, target, c, memo);
-}
-function move(ctx, from, to, cents, memo) {
-  const s = ctx.state;
-  if (!own(s.entities, from) || !own(s.entities, to))
-    return reject5("missing_account", "both accounts must exist");
-  const owner = strOf(own(s.entities, from)?.fields.owner);
-  if (owner === "" || owner !== own(s.entities, to)?.fields.owner)
-    return reject5("not_owner", "both accounts must belong to the same owner");
-  const c = Math.round(cents);
-  if (!(c > 0))
-    return reject5("bad_amount", "the amount must be positive");
-  if (ctx.levelOf(owner, "money") >= 2 && available(s, from) < c)
-    return reject5("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c, ctx.world.currency)}`);
-  const lines = [
-    { account: from, amount: -c },
-    { account: to, amount: c }
-  ];
-  const out = [{ type: "post", lines, memo }];
-  if (accountType(s, to) === "card")
-    out.push({ type: "economy.card_paid", data: { account: to, cents: c } });
-  out.push(txn(memo, lines));
-  return asUnit(out);
-}
-function str3(e, k) {
-  return typeof e.data[k] === "string" ? e.data[k] : "";
-}
-var HISTORY = 40;
-var PERSON_HISTORY = 12;
-var PERSON_NOTES = 6;
-function personRecord(state, who) {
-  const people = sliceRecord(state, "economy", "people");
-  const cur = objOf(own(people, who));
-  const rec = { history: Array.isArray(cur.history) ? cur.history : [], notes: Array.isArray(cur.notes) ? cur.notes : [] };
-  people[who] = rec;
-  return rec;
-}
-var EVENTS = [
-  {
-    type: "economy.anchor",
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "entity")) && typeof e.data.typical === "number" && typeof e.data.base === "number" ? null : reject5("bad_event", "anchor needs entity, typical and base"),
-    apply: (e, state) => {
-      sliceRecord(state, "economy", "anchors")[str3(e, "entity")] = { band: str3(e, "band"), typical: numOf(e.data.typical), base: numOf(e.data.base) };
-    },
-    describe: (e) => `${str3(e, "entity")} is ${str3(e, "band")}`,
-    coarsen: { key: (e) => str3(e, "entity"), merge: (_a, b) => b }
-  },
-  {
-    type: "economy.txn",
-    validate: () => null,
-    apply: (e, state, ctx) => {
-      const lines = Array.isArray(e.data.lines) ? e.data.lines : [];
-      const entry = { at: state.clock, memo: str3(e, "memo"), lines };
-      const holders = [...new Set(lines.map((l) => strOf(own(state.entities, strOf(objOf(l).account))?.fields.owner)))].filter((who) => who !== "" && own(state.entities, who));
-      const pov = ctx.world.pov;
-      if (holders.length === 0 || holders.includes(pov)) {
-        const s = mutableSlice(state, "economy");
-        s.history = [...Array.isArray(s.history) ? s.history.slice(-(HISTORY - 1)) : [], entry];
-      }
-      for (const who of holders) {
-        if (who === pov)
-          continue;
-        const rec = personRecord(state, who);
-        rec.history = [...rec.history.slice(-(PERSON_HISTORY - 1)), entry];
-      }
-    },
-    describe: (e) => str3(e, "memo")
-  },
-  {
-    type: "economy.note",
-    validate: (e, ctx) => own(ctx.state.entities, str3(e, "entity")) && str3(e, "text") !== "" ? null : reject5("bad_event", "a money note needs a person and its text"),
-    apply: (e, state) => {
-      const rec = personRecord(state, str3(e, "entity"));
-      rec.notes = [...rec.notes.slice(-(PERSON_NOTES - 1)), { at: state.clock, class: str3(e, "class"), text: str3(e, "text") }];
-    },
-    describe: (e) => str3(e, "text")
-  },
-  {
-    type: "economy.modifier",
-    validate: (e) => str3(e, "id") !== "" && (e.data.mult === undefined || typeof e.data.mult === "number" && e.data.mult > 0) ? null : reject5("bad_event", "a price modifier needs an id and a positive multiplier"),
-    apply: (e, state) => {
-      const mods = sliceRecord(state, "economy", "modifiers");
-      if (typeof e.data.mult !== "number")
-        delete mods[str3(e, "id")];
-      else
-        mods[str3(e, "id")] = { scope: strOf(e.data.scope, "all"), place: strOf(e.data.place), mult: e.data.mult, ...typeof e.data.until === "number" ? { until: e.data.until } : {} };
-    },
-    describe: (e) => typeof e.data.mult === "number" ? `Prices \xD7${e.data.mult}` : "Prices back to normal"
-  },
-  {
-    type: "economy.statement",
-    validate: (e, ctx) => accountType(ctx.state, str3(e, "account")) === "card" ? null : reject5("bad_event", "statements are for cards"),
-    apply: (e, state) => {
-      sliceRecord(state, "economy", "cards")[str3(e, "account")] = { closing: numOf(e.data.closing), interest: numOf(e.data.interest), minimum: numOf(e.data.minimum), due: numOf(e.data.due), paid: 0, at: state.clock };
-    },
-    describe: (e, ctx) => `Statement: ${formatMoney(numOf(e.data.closing), ctx.world.currency)}, minimum ${formatMoney(numOf(e.data.minimum), ctx.world.currency)}`
-  },
-  {
-    type: "economy.card_paid",
-    validate: (e, ctx) => accountType(ctx.state, str3(e, "account")) === "card" ? null : reject5("bad_event", "card payments are for cards"),
-    apply: (e, state) => {
-      const cards = sliceRecord(state, "economy", "cards");
-      const cur = objOf(cards[str3(e, "account")]);
-      if (Object.keys(cur).length > 0)
-        cards[str3(e, "account")] = { ...cur, paid: numOf(cur.paid) + numOf(e.data.cents) };
-    },
-    describe: (e, ctx) => `Card payment ${formatMoney(numOf(e.data.cents), ctx.world.currency)}`
-  },
-  {
-    type: "economy.price",
-    validate: (e) => typeof e.data.price === "number" && e.data.price > 0 && str3(e, "symbol") !== "" ? null : reject5("bad_event", "price needs a symbol and a positive price"),
-    apply: (e, state) => {
-      sliceRecord(state, "economy", "prices")[str3(e, "symbol")] = numOf(e.data.price);
-    },
-    describe: (e) => `${str3(e, "symbol")} at ${numOf(e.data.price).toFixed(2)}`
-  },
-  { type: "economy.decline", validate: () => null, apply: () => {
-    return;
-  }, describe: (e) => `Declined: ${str3(e, "memo")}` }
-];
-function nineOclock(ctx, slot) {
-  const cal = calendarOf(ctx.world);
-  for (const day of [dateAt(cal, slot.start).dayIndex, dateAt(cal, slot.start).dayIndex + 1]) {
-    const at = clockAt(cal, day, 540);
-    if (at >= slot.start && at < slot.end)
-      return { day, date: dateAt(cal, at) };
-  }
-  return null;
-}
-function lastDayOfMonth(ctx, day) {
-  const cal = calendarOf(ctx.world);
-  return dateAt(cal, clockAt(cal, day + 1, 0)).day === 1;
-}
-var PERIODS = { weekly: 52, weekly_gig: 52, biweekly: 26, semimonthly: 24, monthly: 12 };
-function weekdayIndex(ctx, v, fallback) {
-  if (typeof v === "number")
-    return v;
-  if (typeof v !== "string")
-    return fallback;
-  const cal = calendarOf(ctx.world);
-  const lower = v.toLowerCase();
-  for (let i = 0;i < 14; i++) {
-    const name = weekdayName(cal, i).toLowerCase();
-    if (name === lower || name.length >= 2 && lower.startsWith(name))
-      return i;
-  }
-  return fallback;
-}
-function isPayday(ctx, frequency, day, date, weekday) {
-  const cal = calendarOf(ctx.world);
-  switch (frequency) {
-    case "weekly":
-    case "weekly_gig":
-      return date.weekday === weekday;
-    case "biweekly":
-      return date.weekday === weekday && Math.floor((cal.epochAbs + day) / 7) % 2 === 0;
-    case "semimonthly":
-      return date.day === 15 || lastDayOfMonth(ctx, day);
-    case "monthly":
-      return lastDayOfMonth(ctx, day);
-    default:
-      return false;
-  }
-}
-function nextMonthDay(ctx, from, dom) {
-  const cal = calendarOf(ctx.world);
-  for (let d = from + 1;d <= from + 62; d++) {
-    const date = dateAt(cal, clockAt(cal, d, 0));
-    if (date.day === dom || date.day < dom && lastDayOfMonth(ctx, d))
-      return d;
-  }
-  return from + 25;
-}
-function autopayOf(s, raw, owner, fallback) {
-  const m = /^\s*(minimum|full|none)?\s*(?:from\s+(\S+))?\s*$/i.exec(typeof raw === "string" ? raw : "");
-  const named = m?.[2];
-  const word = m?.[1]?.toLowerCase();
-  const mode = word === "minimum" || word === "full" || word === "none" ? word : named ? "full" : fallback;
-  const from = named && own(s.entities, named) ? named : ofType(s, owner, "checking")[0] ?? null;
-  return { mode, from };
-}
-function signal(cls, text, who) {
-  return { type: ENGINE_EVENTS.signal, data: { class: cls, text, entity: who, visibility: "known_by" } };
-}
-function noted(ctx, events) {
-  const pov = ctx.world.pov;
-  return events.flatMap((e) => {
-    if (!("data" in e))
-      return [e];
-    if (e.type === "economy.txn")
-      return Array.isArray(e.data.lines) && e.data.lines.some((l) => own(ctx.state.entities, strOf(objOf(l).account))) ? [e] : [];
-    if (e.type === ENGINE_EVENTS.signal && typeof e.data.entity === "string" && e.data.entity !== pov)
-      return hasLedger(ctx.state, e.data.entity) ? [{ type: "economy.note", data: { entity: e.data.entity, class: strOf(e.data.class), text: strOf(e.data.text), visibility: "secret" } }] : [];
-    if (e.type === "economy.decline" && e.data.payer !== pov)
-      return [];
-    return [e];
-  });
-}
-function runningBooks(base) {
-  const state = { ...base.state, accounts: { ...base.state.accounts } };
-  let current = base;
-  return {
-    ctx: () => current,
-    post(events) {
-      const posts = events.filter((e) => e.type === "post");
-      if (posts.length === 0)
-        return;
-      for (const e of posts)
-        for (const l of e.lines)
-          state.accounts[l.account] = (own(state.accounts, l.account) ?? 0) + l.amount;
-      current = base.registry.context(base.world, state);
-    }
-  };
-}
-function people(ctx) {
-  return Object.keys(ctx.state.entities).sort().filter((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "person") && !isGone(ctx.state, id));
-}
-function openAccounts(slot, ctx) {
-  if (!nineOclock(ctx, slot))
-    return [];
-  const version = pinnedVersion(ctx.world, ctx.registry, "money");
-  if (typeof version !== "number")
-    return [];
-  const out = [];
-  for (const who of people(ctx)) {
-    if (ctx.levelOf(who, "money") < 3 || isMaterialized(ctx.state, who, "money"))
-      continue;
-    const events = openingBalances(who, ctx);
-    if (events.length > 0)
-      out.push({ type: "materialize", entity: who, domain: "money", generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events });
-  }
-  return out;
-}
-function payroll(slot, ctx) {
-  const at = nineOclock(ctx, slot);
-  if (!at)
-    return [];
-  const out = [];
-  for (const who of people(ctx)) {
-    const level = ctx.levelOf(who, "money");
-    if (level < 3)
-      continue;
-    const e = own(ctx.state.entities, who);
-    if (!e)
-      continue;
-    const occ = rowOf(ctx, "economy.occupations", strOf(e.fields.occupation));
-    const hourly = numOf(e.fields.hourly_cents);
-    const annual = numOf(e.fields.salary_cents, numOf(e.fields.annual_income_cents, numOf(occ?.typical_earnings_cents_per_year)));
-    if (hourly <= 0 && annual <= 0)
-      continue;
-    const frequency = strOf(e.fields.pay_frequency, strOf(occ?.pay_frequency, "monthly"));
-    const periods = own(PERIODS, frequency);
-    if (!periods || !isPayday(ctx, frequency, at.day, at.date, weekdayIndex(ctx, e.fields.payday, 5)))
-      continue;
-    const gross = Math.round(hourly > 0 ? hourly * numOf(e.fields.hours_per_week, 40) * (52 / periods) : annual / periods);
-    if (gross <= 0)
-      continue;
-    const w = withholding(ctx, who);
-    const federal = Math.round(gross * w.federalPct / 100);
-    const state = Math.round(gross * w.statePct / 100);
-    const net = gross - federal - state;
-    const employer = external(typeof e.fields.employer === "string" ? `employer:${e.fields.employer}` : `employer:${strOf(e.fields.occupation)}`);
-    const target = strOf(e.fields.deposit_to);
-    const deposit = (target && own(ctx.state.entities, target)?.fields.owner === who && accountType(ctx.state, target) ? target : undefined) ?? ofType(ctx.state, who, "checking")[0] ?? ofType(ctx.state, who, "cash")[0];
-    const into = deposit ?? external(who);
-    const lines = level >= 4 ? [
-      { account: employer, amount: -gross },
-      { account: into, amount: net },
-      { account: external("tax:federal"), amount: federal },
-      { account: external("tax:state"), amount: state }
-    ].filter((l) => l.amount !== 0) : [
-      { account: employer, amount: -net },
-      { account: into, amount: net }
-    ];
-    const money = (c) => formatMoney(c, ctx.world.currency);
-    const memo = level >= 4 ? `Payroll: ${money(gross)} gross, ${money(federal + state)} withheld` : "Payroll";
-    out.push(...asUnit([{ type: "post", lines, memo }, ...deposit ? [] : l1Move(ctx.state, who, net), txn(memo, lines)]));
-    out.push(signal("bill", `Payday: ${money(net)} net${level >= 4 ? ` (${money(gross)} gross)` : ""}.`, who));
-  }
-  return out;
-}
-function paysAutopayLoan(state, who, b) {
-  return ofType(state, who, "loan").some((loan) => {
-    const f = own(state.entities, loan)?.fields;
-    if (!f || strOf(f.autopay) === "")
-      return false;
-    if (strOf(b.to) === loan)
-      return true;
-    return strOf(b.payee) !== "" && strOf(b.payee) === strOf(f.institution) && Math.round(numOf(b.amountCents)) === Math.round(numOf(f.payment));
-  });
-}
-function bills(slot, ctx) {
-  const at = nineOclock(ctx, slot);
-  if (!at)
-    return [];
-  const out = [];
-  const books = runningBooks(ctx);
-  for (const who of people(ctx)) {
-    if (ctx.levelOf(who, "money") < 3)
-      continue;
-    const list = own(ctx.state.entities, who)?.fields.bills;
-    if (!Array.isArray(list))
-      continue;
-    for (const raw of list) {
-      const b = objOf(raw);
-      const every = strOf(b.every, "month");
-      let due;
-      if (every === "week")
-        due = at.date.weekday === weekdayIndex(ctx, b.day, 1);
-      else {
-        const day = numOf(b.day, 1);
-        const onDay = at.date.day === day || day > 28 && lastDayOfMonth(ctx, at.day) && at.date.day < day;
-        due = every === "year" ? onDay && at.date.month === numOf(b.month, 1) : onDay;
-      }
-      if (!due || paysAutopayLoan(ctx.state, who, b))
-        continue;
-      const label = strOf(b.label, "Bill");
-      const cents = Math.round(numOf(b.amountCents));
-      const from = strOf(b.from);
-      const payee = strOf(b.payee);
-      const held = own(ctx.state.entities, payee);
-      const to = held && (kindIs(ctx.registry, ctx.world, held.kind, "person") || hasLedger(ctx.state, payee)) ? { payee } : { counterparty: payee || label.toLowerCase().replace(/\W+/g, "_") };
-      const paid = charge(books.ctx(), who, cents, label, { ...to, ...from ? { source: from } : { method: "account" } });
-      if (isRejection2(paid))
-        out.push({ type: "economy.decline", data: { payer: who, cents, memo: label, reason: paid.reason } }, signal("decline", `${label} (${formatMoney(cents, ctx.world.currency)}) was declined.`, who));
-      else {
-        books.post(paid);
-        out.push(...paid, signal("bill", `${label}: ${formatMoney(cents, ctx.world.currency)} paid.`, who));
-      }
-    }
-  }
-  return out;
-}
-var LIVING_COSTS = {
-  broke: { basket: "basket_person_thrifty", times: 1 },
-  poor: { basket: "basket_person_thrifty", times: 1.5 },
-  modest: { basket: "basket_person_moderate", times: 2 },
-  comfortable: { basket: "basket_person_moderate", times: 3 },
-  rich: { basket: "basket_person_liberal", times: 4 },
-  wealthy: { basket: "basket_person_liberal", times: 8 }
-};
-function livingCost(ctx, band) {
-  const authored = objOf(objOf(ctx.world.packs.economy?.config).livingCosts);
-  if (Object.keys(authored).length > 0) {
-    const weekly = numOf(own(authored, band));
-    return weekly > 0 ? Math.round(weekly) : null;
-  }
-  const def = own(LIVING_COSTS, band);
-  const basket = def ? priceOf(ctx, { catalog: def.basket, place: null }) : null;
-  return def && basket ? Math.round(basket.cents * def.times) : null;
-}
-function living(slot, ctx) {
-  const at = nineOclock(ctx, slot);
-  if (!at || at.date.weekday !== 1)
-    return [];
-  const out = [];
-  for (const who of people(ctx)) {
-    if (who === ctx.world.pov || ctx.levelOf(who, "money") < 3 || !hasLedger(ctx.state, who))
-      continue;
-    const cents = livingCost(ctx, wealthOf(ctx.state, who));
-    if (cents === null)
-      continue;
-    const paid = charge(ctx, who, cents, "Living costs", {});
-    if (isRejection2(paid))
-      out.push(signal("decline", `Living costs (${formatMoney(cents, ctx.world.currency)}) were declined.`, who));
-    else
-      out.push(...paid);
-  }
-  return out;
-}
-function cards(slot, ctx) {
-  const at = nineOclock(ctx, slot);
-  if (!at)
-    return [];
-  const out = [];
-  const s = ctx.state;
-  const statements = objOf(sliceOf(s, "economy").cards);
-  for (const card of Object.keys(s.entities).sort()) {
-    if (accountType(s, card) !== "card")
-      continue;
-    const e = own(s.entities, card);
-    const owner = strOf(e?.fields.owner);
-    if (!e || !own(s.entities, owner))
-      continue;
-    const level = ctx.levelOf(owner, "money");
-    if (level < 3)
-      continue;
-    const owed = -balance(s, card);
-    const prev = objOf(statements[card]);
-    const ap = autopayOf(s, e.fields.autopay, owner, "none");
-    const autopay = ap.mode;
-    const checking = ap.from ?? undefined;
-    if (at.date.day === numOf(e.fields.statement_day, 1)) {
-      if (level >= 4) {
-        const carried = Object.keys(prev).length === 0 ? owed > 0 : numOf(prev.paid) < numOf(prev.closing);
-        const interest = carried && owed > 0 ? Math.round(owed * numOf(e.fields.apr_pct) / 100 / 12) : 0;
-        if (interest > 0) {
-          const lines = [
-            { account: card, amount: -interest },
-            { account: external(`bank:${strOf(e.fields.institution, "card")}`), amount: interest }
-          ];
-          out.push(...asUnit([{ type: "post", lines, memo: `${e.name} interest` }, txn(`${e.name} interest`, lines)]));
-        }
-        const closing = owed + interest;
-        if (closing > 0) {
-          const minimum = Math.min(closing, Math.max(numOf(e.fields.min_floor, 3500), Math.ceil(owed * numOf(e.fields.min_pct, 1) / 100 + interest)));
-          const due = clockAt(calendarOf(ctx.world), typeof e.fields.due_day === "number" ? nextMonthDay(ctx, at.day, e.fields.due_day) : at.day + 25, 540);
-          out.push({ type: "economy.statement", data: { account: card, closing, interest, minimum, due } });
-          const money = (c) => formatMoney(c, ctx.world.currency);
-          out.push(signal("bill", `${e.name} statement: ${money(closing)}${interest > 0 ? ` incl. ${money(interest)} interest` : ""}; minimum ${money(minimum)}.`, owner));
-        }
-      } else if (autopay !== "none" && owed > 0 && checking) {
-        const paid = move(ctx, checking, card, owed, `${e.name} autopay`);
-        if (isRejection2(paid))
-          out.push(signal("decline", `${e.name} autopay was declined.`, owner));
-        else
-          out.push(...paid);
-      }
-    }
-    if (level >= 4 && Object.keys(prev).length > 0) {
-      const dueDay = dateAt(calendarOf(ctx.world), numOf(prev.due)).dayIndex;
-      if (dueDay === at.day) {
-        const left = numOf(prev.closing) - numOf(prev.paid);
-        const minimumLeft = numOf(prev.minimum) - numOf(prev.paid);
-        const amount = autopay === "full" ? left : autopay === "minimum" ? minimumLeft : 0;
-        if (amount > 0 && checking) {
-          const paid = move(ctx, checking, card, amount, `${e.name} autopay`);
-          if (isRejection2(paid))
-            out.push(signal("decline", `${e.name} autopay of ${formatMoney(amount, ctx.world.currency)} was declined.`, owner));
-          else
-            out.push(...paid);
-        } else if (minimumLeft > 0)
-          out.push(signal("bill", `${e.name} minimum payment of ${formatMoney(minimumLeft, ctx.world.currency)} is due today.`, owner));
-      }
-    }
-  }
-  return out;
-}
-function banking(slot, ctx) {
-  const at = nineOclock(ctx, slot);
-  if (!at)
-    return [];
-  const out = [];
-  const s = ctx.state;
-  for (const id of Object.keys(s.entities).sort()) {
-    const t = accountType(s, id);
-    const e = own(s.entities, id);
-    const owner = strOf(e?.fields.owner);
-    if (!e || !t || !own(s.entities, owner) || ctx.levelOf(owner, "money") < 4)
-      continue;
-    if (t === "savings" && at.date.day === 1) {
-      const interest = Math.round(balance(s, id) * numOf(e.fields.apy_pct) / 100 / 12);
-      if (interest > 0) {
-        const lines = [
-          { account: external(`bank:${strOf(e.fields.institution, "bank")}`), amount: -interest },
-          { account: id, amount: interest }
-        ];
-        out.push(...asUnit([{ type: "post", lines, memo: `${e.name} interest` }, txn(`${e.name} interest`, lines)]));
-      }
-    }
-    if (t === "loan" && at.date.day === numOf(e.fields.due_day, numOf(e.fields.statement_day, 1))) {
-      const owed = -balance(s, id);
-      if (owed <= 0)
-        continue;
-      const bank = external(`bank:${strOf(e.fields.institution, "lender")}`);
-      const rate = numOf(e.fields.apr_pct) / 100 / 12;
-      const interest = Math.round(owed * rate);
-      const months = numOf(e.fields.remaining_months);
-      const amortized = months > 0 ? rate > 0 ? owed * rate / (1 - Math.pow(1 + rate, -months)) : owed / months : 0;
-      const payment = Math.min(owed + interest, Math.round(numOf(e.fields.payment, amortized)));
-      if (interest > 0) {
-        const lines = [
-          { account: id, amount: -interest },
-          { account: bank, amount: interest }
-        ];
-        out.push(...asUnit([{ type: "post", lines, memo: `${e.name} interest` }, txn(`${e.name} interest`, lines)]));
-      }
-      const ap = autopayOf(s, e.fields.autopay, owner, "full");
-      const checking = ap.mode === "none" ? undefined : ap.from ?? undefined;
-      if (payment > 0 && ap.mode === "none")
-        out.push(signal("bill", `${e.name} payment of ${formatMoney(payment, ctx.world.currency)} is due today.`, owner));
-      if (payment > 0 && checking) {
-        if (available(s, checking) < payment)
-          out.push(signal("decline", `${e.name} payment of ${formatMoney(payment, ctx.world.currency)} bounced.`, owner));
-        else {
-          const lines = [
-            { account: checking, amount: -payment },
-            { account: id, amount: payment }
-          ];
-          out.push(...asUnit([{ type: "post", lines, memo: `${e.name} payment` }, txn(`${e.name} payment`, lines)]), signal("bill", `${e.name} payment: ${formatMoney(payment, ctx.world.currency)}.`, owner));
-        }
-      }
-    }
-  }
-  return out;
-}
-function markets(slot, ctx, rng) {
-  const at = nineOclock(ctx, slot);
-  if (!at || at.date.weekday === 0 || at.date.weekday === 6)
-    return [];
-  const symbols = new Set;
-  for (const id of Object.keys(ctx.state.entities))
-    if (accountType(ctx.state, id) === "brokerage")
-      symbols.add(strOf(own(ctx.state.entities, id)?.fields.symbol, DEFAULT_SYMBOL));
-  const recipe = objOf(own(objOf(ctx.tables.get("economy.finance")?.rows.investing?.values), DEFAULT_SYMBOL));
-  const mu = numOf(recipe.annual_return_arithmetic_pct, 11) / 100;
-  const sigma = numOf(recipe.annual_volatility_pct, 16) / 100;
-  const dt = 1 / 252;
-  const out = [];
-  for (const symbol of [...symbols].sort()) {
-    const g = rng(`symbol:${symbol}`);
-    const u1 = Math.max(Number.MIN_VALUE, g.next());
-    const u2 = g.next();
-    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-    const price = priceOfSymbol(ctx.state, symbol) * Math.exp((mu - sigma * sigma / 2) * dt + sigma * Math.sqrt(dt) * z);
-    out.push({ type: "economy.price", data: { symbol, price: Math.round(price * 1e4) / 1e4 } });
-  }
-  return out;
-}
-var PHYSICAL = new Set(["groceries_staples", "clothing", "electronics", "tools_hardware", "household_goods", "personal_care", "gifts", "alcohol", "medical"]);
-function logUniform(rng, lo, hi) {
-  const a = Math.log(Math.max(1, lo));
-  const b = Math.log(Math.max(2, hi));
-  return Math.exp(a + (b - a) * rng.next());
-}
-function openingBalances(entity, ctx) {
-  const s = ctx.state;
-  const lines = accountsOf(s, entity).filter((id) => typeof own(s.entities, id)?.fields.opening === "number" && numOf(own(s.entities, id)?.fields.opening) !== 0).map((id) => ({ account: id, amount: Math.round(numOf(own(s.entities, id)?.fields.opening)) }));
-  if (lines.length === 0)
-    return [];
-  const total = lines.reduce((a, l) => a + l.amount, 0);
-  const all = total === 0 ? lines : [...lines, { account: external(entity), amount: -total }];
-  return all.length < 2 ? [] : [{ type: "post", lines: all, memo: "Opening balances" }];
-}
-function materializeMoney(entity, ctx, rng) {
-  const s = ctx.state;
-  const e = own(s.entities, entity);
-  const level = e ? ctx.levelOf(entity, "money") : 0;
-  if (!e || level < 1)
-    return [];
-  if (accountsOf(s, entity).length > 0)
-    return openingBalances(entity, ctx);
-  if (level < 2 || !kindIs(ctx.registry, ctx.world, e.kind, "person"))
-    return [];
-  const ext = external(entity);
-  const band = bandByLabel(wealthOf(s, entity));
-  const lo = Number.isFinite(band.min) ? Math.max(band.min, 0) : 0;
-  const hi = Number.isFinite(band.max) ? band.max - 1 : band.typical * 4;
-  const worth = Math.round(logUniform(rng, Math.max(lo, 500), Math.max(hi, 1000)));
-  const cash = Math.min(worth, Math.round(Math.min(50000, Math.max(2000, worth * (0.01 + rng.next() * 0.02)))));
-  const rest = worth - cash;
-  const checkingShare = worth < 2000000 ? 0.4 + rng.next() * 0.4 : 0.15 + rng.next() * 0.2;
-  const checking = Math.round(rest * checkingShare);
-  const savings = rest - checking;
-  const limit = Math.round(Math.min(2500000, Math.max(50000, band.typical * 0.3)) / 1e4) * 1e4;
-  const owed = Math.round(limit * rng.next() * 0.25);
-  const wallet = Object.keys(s.entities).sort().find((id) => own(s.entities, id)?.fields.owner === entity && (own(s.entities, id)?.fields.catalog === "wallet" || /wallet|purse/i.test(own(s.entities, id)?.name ?? "")));
-  const mk = (suffix, name, fields, inWallet = false) => ({ id: `${entity}:${suffix}`, kind: "account", name, tier: "background", fields: { owner: entity, ...fields }, relations: inWallet && wallet ? [{ type: "in", to: wallet }] : [] });
-  const accounts = [
-    mk("cash", "Cash", { type: "cash" }, true),
-    mk("checking", "Checking", { type: "checking", institution: "Local bank" }),
-    mk("savings", "Savings", { type: "savings", institution: "Local bank", apy_pct: 0.4 }),
-    mk("card", "Credit card", { type: "card", limit, apr_pct: 22, statement_day: 1 + rng.int(0, 27), due_days: 25, autopay: "minimum" })
-  ];
-  const out = accounts.map((entityDef) => ({ type: "spawn", entity: entityDef }));
-  const lines = [
-    { account: `${entity}:cash`, amount: cash },
-    { account: `${entity}:checking`, amount: checking },
-    { account: `${entity}:savings`, amount: savings },
-    { account: `${entity}:card`, amount: -owed }
-  ].filter((l) => l.amount !== 0);
-  const total = lines.reduce((a, l) => a + l.amount, 0);
-  if (lines.length > 0)
-    out.push({ type: "post", lines: [...lines, { account: ext, amount: -total }], memo: "Opening balances" });
-  return out;
 }
 function amountOf(v) {
   return typeof v === "number" ? Math.round(v) : NaN;
 }
+var PHYSICAL = new Set(["groceries_staples", "clothing", "electronics", "tools_hardware", "household_goods", "personal_care", "gifts", "alcohol", "medical"]);
 function quote(ctx, args, payer, qty) {
   const place = placeOfEntity(ctx.state, payer);
   const named = strOf(args.item);
@@ -13240,6 +20446,465 @@ function quote(ctx, args, payer, qty) {
   const banded = category !== "" ? priceOf(ctx, { category, qty, place }, ctx.rng) : null;
   return banded ? { price: banded, row: null } : null;
 }
+function emptyHooks() {
+  return { fields: {}, flows: [], amounts: {}, worth: [], sales: [], views: [], summaries: [] };
+}
+function partyKindOf2(ctx, id) {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  if (!kind || !isParty(ctx, id))
+    return null;
+  for (const k of ["business", "trust", "household"])
+    if (kindIs(ctx.registry, ctx.world, kind, k))
+      return k;
+  return "person";
+}
+function makeApi(hooks) {
+  return {
+    classOf: (books, account) => classOf2(books, account),
+    traitsOf: (books, account) => traitsOf(books, account),
+    ownersOf: (state, entity) => ownersOf(state, entity),
+    shareOf: (state, entity, party) => shareOf(state, entity, party),
+    accountsOf: (books, party, right) => accountsOf(books, party, right ?? "sees"),
+    balance: (state, account) => balance(state, account),
+    available: (ctx, account) => availableOf(ctx, account) + overdraftRoom(ctx, account),
+    product: (ctx, account) => productOf(ctx, account),
+    depositAccount: (ctx, party, except) => depositAccount(ctx, party, except),
+    partyKind: (ctx, id) => partyKindOf2(ctx, id),
+    feature: (ctx, party, feature) => featureFor(ctx, party, feature),
+    outside: (id) => external(id),
+    pay: (ctx, p) => payWith(hooks, ctx, p),
+    post: (ctx, lines, meta) => postWith(ctx, lines, meta),
+    note: (ctx, who, cls, text) => [signal(cls, text, who, ctx.state.clock)],
+    money: (ctx, cents) => formatMoney(cents, ctx.world.currency),
+    split: (cents, splits, rest) => splitAmount(cents, splits, rest),
+    occurrences: (ctx, schedule, from, to, start) => occurrences(ctx, schedule, from, to, start).map((o) => o.at),
+    businessDay: (ctx, day, roll) => businessDay(calendarOf(ctx.world), day, roll),
+    flows: (ctx) => allFlows(hooks, ctx),
+    openAccount: (ctx, spec) => openAccount(ctx, spec),
+    securedBy: (state, asset) => Object.keys(state.entities).filter((id) => own(state.entities, id)?.kind === "account" && own(state.entities, id)?.fields.secured_by === asset).sort(),
+    netWorth: (ctx, party) => netWorth(hooks, ctx, party)
+  };
+}
+function payWith(hooks, ctx, p) {
+  const from = own(ctx.state.entities, p.from);
+  if (!from)
+    return reject8("missing_entity", `no ${labelOf(ctx, p.from)}`);
+  const account = from.kind === "account" ? p.from : undefined;
+  const payer = account ? holdersOf(ctx.state, account).find((h) => canSpend(ctx.state, account, h)) : p.from;
+  if (!payer)
+    return reject8("not_owner", `no one can pay from ${labelOf(ctx, p.from)}`);
+  const to = own(ctx.state.entities, p.to);
+  const opts = { method: p.method ?? (account ? "auto" : "account"), ...account ? { source: account } : {}, ...p.kind ? { kind: p.kind } : {}, ...p.category ? { category: p.category } : {}, ...p.flow ? { flow: p.flow } : {} };
+  if (to?.kind === "account") {
+    const holder = holdersOf(ctx.state, p.to)[0];
+    if (holder === payer)
+      return move(ctx, account ?? depositAccount(ctx, payer) ?? "", p.to, p.cents, p.memo, { cap: true });
+    return charge(hooks, ctx, payer, p.cents, p.memo, { ...opts, ...holder ? { payee: holder } : {}, deposit: p.to });
+  }
+  if (to && isParty(ctx, p.to))
+    return charge(hooks, ctx, payer, p.cents, p.memo, { ...opts, payee: p.to, ...p.deposit ? { deposit: p.deposit } : {} });
+  return charge(hooks, ctx, payer, p.cents, p.memo, { ...opts, counterparty: p.counterparty ?? p.to });
+}
+function postWith(ctx, lines, meta) {
+  const clean = lines.filter((l) => l.amount !== 0);
+  if (clean.length < 2 || clean.reduce((a, l) => a + l.amount, 0) !== 0)
+    return reject8("unbalanced", `${meta.memo} doesn't balance`);
+  if (!meta.unchecked) {
+    const refused = postGuard(ctx, clean);
+    if (refused)
+      return refused;
+  }
+  const bands = [];
+  for (const l of clean) {
+    const party = l.account.startsWith("economy.external:") ? l.account.slice("economy.external:".length) : "";
+    if (party !== "" && own(ctx.state.entities, party) && !hasLedger(ctx, party) && ctx.levelOf(party, "money") >= 1)
+      bands.push(...l1Move(ctx.state, party, l.amount));
+  }
+  return asUnit([...posting(clean, { memo: meta.memo, ...meta.kind ? { kind: meta.kind } : {}, ...meta.category ? { category: meta.category } : {}, ...meta.counterparty ? { counterparty: meta.counterparty } : {}, ...meta.flow ? { flow: meta.flow } : {} }), ...bands]);
+}
+function spendableNow(ctx, who) {
+  let total = 0;
+  for (const id of accountsOf(ctx, who, "spend")) {
+    const t = traitsOf(ctx, id);
+    if (!t?.pays || t.locked)
+      continue;
+    total += Math.max(0, availableOf(ctx, id) + overdraftRoom(ctx, id));
+  }
+  return Math.min(total, Number.MAX_SAFE_INTEGER);
+}
+function purchaser(p, ctx) {
+  const named = strOf(p.payer);
+  const said = { ...typeof p.method === "string" ? { method: p.method } : {}, ...typeof p.from === "string" ? { from: p.from } : {} };
+  if (named === "")
+    return { payer: ctx.world.pov, ...said };
+  const e = own(ctx.state.entities, named);
+  if (e?.kind === "account" || e?.kind === "card") {
+    const holder = e.kind === "card" ? strOf(e.fields.holder) : holdersOf(ctx.state, named).find((h) => canSpend(ctx.state, named, h)) ?? "";
+    if (holder !== "" && own(ctx.state.entities, holder))
+      return { payer: holder, method: said.method ?? "auto", from: said.from ?? named };
+  }
+  if (!e)
+    return payMethodOf(named) !== "auto" ? { payer: ctx.world.pov, method: said.method ?? named, ...said.from ? { from: said.from } : {} } : { payer: named, ...said };
+  const owner = strOf(e.fields.owner);
+  if (!isParty(ctx, named) && owner !== "" && own(ctx.state.entities, owner)) {
+    return { payer: owner, method: said.method ?? payMethodOf(`${e.name} ${named.replace(/_/g, " ")}`), ...said.from ? { from: said.from } : {} };
+  }
+  return { payer: named, ...said };
+}
+var ID_SHAPED = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+function registerRest(r, hooks) {
+  const chargeService = (ctx, payer, cents, memo, opts) => charge(hooks, ctx, payer, cents, memo, opts);
+  r.service("economy.charge", chargeService);
+  r.service("economy.transfer", (ctx, from, to, cents, memo, method) => transfer(hooks, ctx, from, to, cents, memo, method));
+  r.service("economy.lose", loseWith);
+  r.service("economy.set_cash", setCash);
+  r.service("economy.reprice", reprice);
+  r.service("economy.adjust", (ctx, account, cents) => {
+    if (own(ctx.state.entities, account)?.kind !== "account")
+      return reject8("not_account", `${labelOf(ctx, account)} isn't an account`);
+    if (!Number.isSafeInteger(cents) || cents === 0)
+      return reject8("bad_amount", "an adjustment is a whole amount other than nothing");
+    const lines = [
+      { account, amount: cents },
+      { account: CORRECTION_ACCOUNT, amount: -cents }
+    ];
+    const opener = openerOf(ctx.state, account);
+    const opening = opener !== null && !isOpened(ctx.state, account, opener) ? openingEvent(ctx, opener) : null;
+    return asUnit([...opening ? [opening] : [], ...posting(lines, { memo: "Correction", kind: "adjustment", category: "correction" })]);
+  });
+  r.service("economy.reopen", (ctx, account, cents) => {
+    const opener = ownersOf(ctx.state, account)[0]?.party ?? "";
+    if (own(ctx.state.entities, account)?.kind !== "account" || !own(ctx.state.entities, opener) || !isMaterialized(ctx.state, opener, "money") || !Number.isSafeInteger(cents) || cents === 0)
+      return [];
+    const lines = [
+      { account, amount: cents },
+      { account: external(opener), amount: -cents }
+    ];
+    return posting(lines, { memo: "Opening balance changed", kind: "adjustment", category: "opening" });
+  });
+  r.query("wealth", (ctx, who) => wealthOf(hooks, ctx, who));
+  r.query("can_afford", (ctx, who, cents) => canAfford(hooks, ctx, who, cents, spendableNow(ctx, who)));
+  r.query("economy.net_worth", (ctx, who) => hasLedger(ctx, who) ? netWorth(hooks, ctx, who) : null);
+  r.query("economy.price", (ctx, ref, rng) => priceOf(ctx, ref, rng));
+  r.query("economy.bought_band", (ctx, name, qty, who) => {
+    const ref = boughtRef(ctx, name);
+    const price = ref ? priceOf(ctx, { ...ref, place: placeOfEntity(ctx.state, who) }) : null;
+    return price ? { min: price.band.min * qty, max: price.band.max * qty } : null;
+  });
+  r.query("economy.offers", (ctx, who) => offersAtPlace(ctx, placeOfEntity(ctx.state, who)));
+  r.query("economy.item_choices", (ctx, text, who) => {
+    const place = placeOfEntity(ctx.state, who);
+    const item = itemName(text);
+    const said = new Set(item ? [...item.words, ...item.trailing?.words ?? []] : []);
+    const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
+    const near = Object.keys(rows).sort().map((id) => ({ id, shared: [...catalogName(id, strOf(rows[id]?.name, id)).words].filter((w) => said.has(w)).length })).filter((x) => x.shared > 0).sort((a, b) => b.shared - a.shared).slice(0, 6);
+    const out = [];
+    for (const { id } of near) {
+      const price = priceOf(ctx, { catalog: id, place });
+      if (price)
+        out.push({ item: id, name: price.name, cents: price.unitCents, category: price.category });
+    }
+    for (const offer of offersAtPlace(ctx, place))
+      if (!out.some((o) => o.item === offer.item))
+        out.push(offer);
+    return out.slice(0, 12);
+  });
+  r.query("economy.people_money", (ctx) => buildPeopleMoney(hooks, ctx));
+  r.query("economy.finance", (ctx, party, player) => buildFinanceView(hooks, ctx, party, player));
+  r.query("economy.summary", (ctx, who) => moneySummary(hooks, ctx, who));
+  r.query("economy.holders", (ctx, entity) => holdersOf(ctx.state, entity));
+  r.guard({ type: "post", validate: (e, ctx) => e.type === "post" ? postGuard(ctx, e.lines) : null });
+  r.formula("wealth", (ctx, who) => wealthOf(hooks, ctx, String(who ?? ctx.world.pov)));
+  r.formula("can_afford", (ctx, who, cents) => ctx.query("can_afford")(ctx, String(who ?? ctx.world.pov), Number(cents ?? 0)));
+  r.formula("net_worth", (ctx, who) => netWorth(hooks, ctx, String(who ?? ctx.world.pov)));
+  r.formula("balance", (ctx, account) => balance(ctx.state, String(account ?? "")));
+  r.formula("price", (ctx, item) => priceOf(ctx, { catalog: String(item ?? "") })?.cents ?? priceOf(ctx, { category: String(item ?? "") })?.cents ?? 0);
+  r.formula("holds", (ctx, who, thing) => heldBy(ctx.state.entities, String(thing ?? ""), String(who ?? ctx.world.pov)));
+  r.formula("spends", (ctx, who, account) => canSpend(ctx.state, String(account ?? ""), String(who ?? ctx.world.pov)));
+  r.formula("is_credit", (ctx, account) => traitsOf(ctx, String(account ?? ""))?.liability === true);
+  r.formula("money_feature", (ctx, feature, who) => FINANCE_FEATURES.includes(String(feature)) && featureFor(ctx, String(who ?? ctx.world.pov), String(feature)));
+  r.formula("credit_score", (ctx, who) => currentScore(ctx, String(who ?? ctx.world.pov)) ?? 0);
+  registerEffects(r, hooks);
+  registerActions(r);
+  r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (_slot, ctx) => openAccounts(ctx) });
+  r.process({ id: "economy.money", domain: "money", minLevel: 2, step: (slot, ctx, rng) => moneyStep(hooks, slot, ctx, rng) });
+  r.materializer({ domain: "money", version: 2, versions: [1, 2], materialize: (entity, ctx, rng, version) => materializeMoney(entity, ctx, rng, version) });
+  r.renderer({
+    slot: "money",
+    render(ctx) {
+      const pov = ctx.world.pov;
+      const level = ctx.levelOf(pov, "money");
+      if (level === 0)
+        return [];
+      if (level === 1 || !hasLedger(ctx, pov))
+        return [`Money: ${wealthOf(hooks, ctx, pov)}.`];
+      const mine = accountsOf(ctx, pov);
+      const firstTransactional = mine.find((id) => traitsOf(ctx, id)?.transactional);
+      const shown = mine.filter((id) => level >= 3 || classOf2(ctx, id) === "cash" || id === firstTransactional);
+      const parts = shown.map((id) => {
+        const b = balance(ctx.state, id);
+        const name = own(ctx.state.entities, id)?.name ?? id;
+        return traitsOf(ctx, id)?.liability ? `${name} owes ${formatMoney(-b, ctx.world.currency)}` : `${name} ${formatMoney(b, ctx.world.currency)}`;
+      });
+      return parts.length > 0 ? [`Money: ${parts.join("; ")}.`] : [];
+    }
+  });
+  r.view({ panel: "economy.money", build: (ctx) => buildMoneyView(hooks, ctx) });
+  r.proposal({
+    type: "purchase",
+    boundField: "money",
+    validate(p, ctx) {
+      const { payer } = purchaser(p, ctx);
+      if (!own(ctx.state.entities, payer))
+        return reject8("missing_entity", `no payer ${labelOf(ctx, payer)}`);
+      if (!isParty(ctx, payer))
+        return reject8("bad_payer", "a payer must be an account holder");
+      const item = strOf(p.item);
+      const category = strOf(p.category);
+      if (item === "" && category === "")
+        return reject8("bad_proposal", "a purchase needs an item or a category");
+      const priced = typeof p.price === "number" && p.price > 0 || typeof p.playerPrice === "number" && p.playerPrice > 0 || !!rowOf(ctx, "economy.categories", category) || item !== "" && (!!rowOf(ctx, "economy.catalog", item) || !!rowOf(ctx, "economy.categories", item) || matchCatalog(ctx, item, placeOfEntity(ctx.state, payer), category) !== null);
+      return priced ? null : reject8("unpriced", `no catalog item or category ${item || category}, and no price`);
+    },
+    toEffects: (p, ctx) => {
+      const { payer, from, method } = purchaser(p, ctx);
+      const set = typeof p.playerPrice === "number" && p.playerPrice > 0 ? p.playerPrice : undefined;
+      const price = set ?? (typeof p.price === "number" ? p.price : undefined);
+      return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...price !== undefined ? { price } : {}, ...set !== undefined ? { exact: true } : {}, ...method !== undefined ? { method } : {}, ...from !== undefined ? { from } : {} } }];
+    }
+  });
+  r.proposal({
+    type: "transfer",
+    boundField: "money",
+    validate(p, ctx) {
+      if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to)))
+        return reject8("missing_entity", "a transfer needs a payer and a payee");
+      const payer = transferParty(ctx, strOf(p.from), "from");
+      if ("code" in payer)
+        return payer;
+      const payee = transferParty(ctx, strOf(p.to), "to");
+      if ("code" in payee)
+        return payee;
+      const cents = transferCents(p);
+      return Number.isFinite(cents) && cents > 0 ? null : reject8("bad_amount", "a transfer needs a positive amount");
+    },
+    toEffects: (p) => [{ type: "economy.transfer", args: { from: strOf(p.from), to: strOf(p.to), cents: transferCents(p), memo: strOf(p.memo, "Payment"), ...typeof p.method === "string" ? { method: p.method } : {} } }]
+  });
+  r.lint({
+    code: "economy.accounts",
+    check(world) {
+      const issues = [];
+      const isPartyDef = (id) => {
+        const e = own(world.entities, id);
+        return !!e && e.kind !== "account" && e.kind !== "card" && e.kind !== "flow";
+      };
+      const products = objOf(objOf(world.packs.economy?.config).products);
+      for (const e of Object.values(world.entities)) {
+        if (e.kind !== "account")
+          continue;
+        const owners = ownersIn(e.fields);
+        if (owners.length === 0)
+          issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name} has no owners.`, path: `entities.${e.id}.fields.owners` });
+        for (const [i, o] of owners.entries())
+          if (!isPartyDef(o.party))
+            issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name}'s owner "${o.party}" isn't someone in the world.`, path: `entities.${e.id}.fields.owners.${i}` });
+        if (Array.isArray(e.fields.owners)) {
+          for (const [i, o] of e.fields.owners.entries())
+            if (!isOwnerRole(objOf(o).role))
+              issues.push({ severity: "warning", code: "economy.accounts", message: `Account ${e.name}'s owner ${i + 1} has no role the engine knows; it reads as owner.`, path: `entities.${e.id}.fields.owners.${i}.role` });
+        }
+        const product = strOf(e.fields.product);
+        if (product !== "" && !own(products, product) && !isAccountClass(product))
+          issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name} names a product "${product}" that's neither the world's nor a class.`, path: `entities.${e.id}.fields.product` });
+        if (product === "" && strOf(e.fields.type) === "")
+          issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name} has no product.`, path: `entities.${e.id}.fields.product` });
+        for (const field of ["autopay_from", "overdraft_link", "secured_by"]) {
+          const v = strOf(e.fields[field]);
+          if (v !== "" && !own(world.entities, v))
+            issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name}'s ${field.replace(/_/g, " ")} names "${v}", which isn't in the world.`, path: `entities.${e.id}.fields.${field}` });
+        }
+      }
+      for (const [id, p] of Object.entries(products))
+        if (!isAccountClass(objOf(p).class))
+          issues.push({ severity: "error", code: "economy.accounts", message: `Product ${id} has no class the engine knows.`, path: `packs.economy.config.products.${id}.class` });
+      for (const key of Object.keys(objOf(objOf(world.packs.economy?.config).features)))
+        if (!(key in FEATURE_DEFS))
+          issues.push({ severity: "warning", code: "economy.accounts", message: `There's no money feature "${key}"; the toggle does nothing.`, path: `packs.economy.config.features.${key}` });
+      for (const e of Object.values(world.entities)) {
+        if (e.kind === "card") {
+          const account = own(world.entities, strOf(e.fields.account));
+          if (!account || account.kind !== "account")
+            issues.push({ severity: "error", code: "economy.accounts", message: `Card ${e.name} isn't on an account.`, path: `entities.${e.id}.fields.account` });
+          else if (!ownersIn(account.fields).some((o) => o.party === strOf(e.fields.holder)))
+            issues.push({ severity: "error", code: "economy.accounts", message: `Card ${e.name}'s holder doesn't hold ${account.name}.`, path: `entities.${e.id}.fields.holder` });
+          const item = strOf(e.fields.item);
+          if (item !== "" && !own(world.entities, item))
+            issues.push({ severity: "error", code: "economy.accounts", message: `Card ${e.name}'s gear card "${item}" isn't in the world.`, path: `entities.${e.id}.fields.item` });
+        }
+        if (e.kind === "flow") {
+          for (const side of ["from", "to"])
+            if (strOf(e.fields[side]) === "")
+              issues.push({ severity: "error", code: "economy.accounts", message: `Flow ${e.name} has no "${side}".`, path: `entities.${e.id}.fields.${side}` });
+          for (const side of ["from", "to"]) {
+            const v = strOf(e.fields[side]);
+            if (ID_SHAPED.test(v) && !own(world.entities, v))
+              issues.push({ severity: "warning", code: "economy.accounts", message: `Flow ${e.name}'s ${side} "${v}" names no entity; it's read as an outside party by that name.`, path: `entities.${e.id}.fields.${side}` });
+          }
+          const amount = ["amount_cents", "amount_formula", "amount_table", "amount_min", "amount_pct", "amount_due"].some((k) => e.fields[k] !== undefined && e.fields[k] !== "");
+          if (!amount)
+            issues.push({ severity: "error", code: "economy.accounts", message: `Flow ${e.name} has no amount.`, path: `entities.${e.id}.fields.amount_cents` });
+          if ((e.fields.every === undefined || e.fields.every === "") && (e.fields.once === undefined || e.fields.once === ""))
+            issues.push({ severity: "error", code: "economy.accounts", message: `Flow ${e.name} has no schedule: give it "every" or "once".`, path: `entities.${e.id}.fields.every` });
+          const link = strOf(e.fields.link);
+          if (link !== "" && !own(world.entities, link))
+            issues.push({ severity: "error", code: "economy.accounts", message: `Flow ${e.name} belongs to "${link}", which isn't in the world.`, path: `entities.${e.id}.fields.link` });
+        }
+        if (e.kind === "job") {
+          const employer = strOf(e.fields.employer);
+          if (ID_SHAPED.test(employer) && !own(world.entities, employer) && !own(world.places, employer))
+            issues.push({ severity: "warning", code: "economy.accounts", message: `Job ${e.name}'s employer "${employer}" names no one and no place; it's read as an outside employer by that name.`, path: `entities.${e.id}.fields.employer` });
+        }
+      }
+      return issues;
+    }
+  });
+  r.lint({
+    code: "economy.unpriced_cap",
+    check(world) {
+      const cap = world.packs.economy?.config.unpricedCap;
+      if (cap === undefined || typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)
+        return [];
+      const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedUnpricedCap(world), world.currency)}`;
+      return [{ severity: "warning", code: "economy.unpriced_cap", message: `The narrated-price cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; narrated prices are capped at ${fallback}.`, path: "packs.economy.config.unpricedCap" }];
+    }
+  });
+}
+function actor(ctx, args, key = "who") {
+  return strOf(args[key]) || ctx.world.pov;
+}
+function registerEffects(r, hooks) {
+  r.effect({
+    type: "economy.buy",
+    args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?", "cashback?"],
+    resolve(args, ctx) {
+      const payer = strOf(args.payer) || ctx.world.pov;
+      const qty = typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
+      const priced = quote(ctx, args, payer, qty);
+      if (!priced)
+        return reject8("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
+      const { price, row } = priced;
+      const name = strOf(args.name) || price.name;
+      const said = payMethodOf(strOf(args.method));
+      const paid = charge(hooks, ctx, payer, price.cents, `Bought ${name}${qty > 1 ? ` \xD7${qty}` : ""}`, { method: said, category: price.category, kind: "purchase", sale: { place: placeOfEntity(ctx.state, payer), item: row ?? name }, ...priced.narrated ? { narrated: priced.narrated } : {}, ...typeof args.payee === "string" ? { payee: args.payee } : {}, ...strOf(args.from) !== "" ? { source: strOf(args.from) } : {}, ...typeof args.cashback === "number" && args.cashback > 0 ? { cashback: args.cashback } : {} });
+      if (isRejection5(paid))
+        return paid;
+      const out = [...paid];
+      const spawn = PHYSICAL.has(price.category) && args.keep !== false ? optionalService(ctx, "gear.spawn") : null;
+      if (spawn && ctx.levelOf(payer, "gear") >= 1) {
+        const made = spawn(ctx, { name, owner: payer, holder: payer, ...row ? { catalog: row } : {}, category: price.category, qty, salt: `buy:${ctx.rng.seed}` });
+        if (Array.isArray(made))
+          out.push(...made);
+      }
+      return out;
+    }
+  });
+  r.effect({ type: "economy.transfer", args: ["to", "cents", "from?", "memo?", "method?"], resolve: (a, ctx) => transfer(hooks, ctx, strOf(a.from) || ctx.world.pov, strOf(a.to), amountOf(a.cents), strOf(a.memo, "Payment"), typeof a.method === "string" ? payMethodOf(a.method) : "auto") });
+  r.effect({ type: "economy.move", args: ["from", "to", "cents", "memo?"], resolve: (a, ctx) => move(ctx, strOf(a.from), strOf(a.to), amountOf(a.cents), strOf(a.memo, "Transfer")) });
+  r.effect({
+    type: "economy.price_modifier",
+    args: ["percent", "scope?", "place?", "minutes?", "id?", "clear?"],
+    resolve(a, ctx) {
+      const scope = strOf(a.scope, "all");
+      const place = strOf(a.place);
+      if (place !== "" && !own(ctx.world.places, place))
+        return reject8("missing_place", `no place ${labelOf(ctx, place)}`);
+      const id = strOf(a.id) || `${place || "*"}:${scope}`;
+      const percent = numOf(a.percent);
+      if (a.clear === true || percent === 0)
+        return [{ type: "economy.modifier", data: { id } }];
+      if (percent <= -100)
+        return reject8("bad_amount", "a price modifier can't make things free");
+      const minutes = numOf(a.minutes);
+      return [{ type: "economy.modifier", data: { id, scope, place, mult: Math.round((1 + percent / 100) * 1e4) / 1e4, ...minutes > 0 ? { until: ctx.state.clock + Math.round(minutes) } : {} } }];
+    }
+  });
+  r.effect({ type: "economy.lose", args: ["item", "thief?"], resolve: (a, ctx) => loseWith(ctx, strOf(a.item), strOf(a.thief) || undefined) });
+  r.effect({
+    type: "economy.pay_card",
+    args: ["card", "from?", "cents?"],
+    resolve(a, ctx) {
+      const card = strOf(a.card);
+      if (!traitsOf(ctx, card)?.liability)
+        return reject8("not_a_liability", `${labelOf(ctx, card)} isn't a card or a loan`);
+      const holder = holdersOf(ctx.state, card).find((h) => own(ctx.state.entities, h)) ?? "";
+      const from = strOf(a.from) || depositAccount(ctx, holder, card) || "";
+      const owed = Math.max(0, -balance(ctx.state, card));
+      const cents = typeof a.cents === "number" && a.cents > 0 ? Math.round(a.cents) : owed;
+      return move(ctx, from, card, cents, `${own(ctx.state.entities, card)?.name ?? "Card"} payment`);
+    }
+  });
+  r.effect({ type: "economy.withdraw", args: ["account", "cents", "who?"], resolve: (a, ctx) => withdraw(ctx, actor(ctx, a), strOf(a.account), amountOf(a.cents)) });
+  r.effect({ type: "economy.deposit", args: ["account", "cents", "who?"], resolve: (a, ctx) => deposit(ctx, actor(ctx, a), strOf(a.account), amountOf(a.cents)) });
+  r.effect({ type: "economy.card_state", args: ["card", "state", "who?"], resolve: (a, ctx) => setCardState(ctx, actor(ctx, a), strOf(a.card), strOf(a.state)) });
+  r.effect({ type: "economy.card_replace", args: ["card", "who?"], resolve: (a, ctx) => replaceCard(ctx, actor(ctx, a), strOf(a.card)) });
+  r.effect({ type: "economy.set_autopay", args: ["account", "mode", "from?", "cents?", "who?"], resolve: (a, ctx) => setAutopay(ctx, actor(ctx, a), strOf(a.account), strOf(a.mode), strOf(a.from), numOf(a.cents)) });
+  const FLOW_ARGS = ["label?", "kind?", "from?", "to?", "amount?", "every?", "interval?", "weekday?", "day?", "month?", "at?", "once?", "start?", "end?", "count?", "shortfall?", "retry_days?", "retries?", "fallback?", "roll?", "category?", "who?"];
+  r.effect({ type: "economy.flow_create", args: FLOW_ARGS, resolve: (a, ctx) => createFlow(ctx, actor(ctx, a), a) });
+  r.effect({ type: "economy.flow_update", args: ["flow", ...FLOW_ARGS], resolve: (a, ctx) => updateFlow(ctx, actor(ctx, a), strOf(a.flow), a) });
+  r.effect({ type: "economy.flow_status", args: ["flow", "status", "who?"], resolve: (a, ctx) => setFlowStatus(ctx, actor(ctx, a), strOf(a.flow), a.status === "paused" ? "paused" : a.status === "ended" ? "ended" : "active") });
+  r.effect({ type: "economy.apply_credit", args: ["product", "cents?", "term?", "secured_by?", "who?"], resolve: (a, ctx) => applyForCredit(ctx, actor(ctx, a), strOf(a.product), typeof a.cents === "number" && a.cents > 0 ? Math.round(a.cents) : undefined, typeof a.term === "number" && a.term > 0 ? Math.round(a.term) : undefined, strOf(a.secured_by) || undefined) });
+  r.effect({ type: "economy.set_pay_prefs", args: ["tiers", "who?"], resolve: (a, ctx) => setPayPrefs(ctx, actor(ctx, a), a.tiers) });
+  r.effect({ type: "economy.close_account", args: ["account"], resolve: (a, ctx) => closeAccount(ctx, strOf(a.account)) });
+  r.effect({ type: "economy.set_status", args: ["account", "status"], resolve: (a, ctx) => setStatus(ctx, strOf(a.account), strOf(a.status)) });
+  r.effect({ type: "economy.release_hold", args: ["account", "hold"], resolve: (a, ctx) => releaseHold(ctx, strOf(a.account), strOf(a.hold)) });
+}
+function registerActions(r) {
+  const phone = { duration: "2", observable: "checks their phone" };
+  r.action({ id: "buy", label: "Buy", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, debit or savings)" }, cashback: { type: "money", optional: true, label: "Cash back" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", cashback: "=params.cashback", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
+  r.action({ id: "pay", label: "Pay", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
+  r.action({ id: "move_money", label: "Transfer between accounts", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, from)", "holds(self, to)", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, lexicon: ["transfer", "move money", "put into savings"], ...phone });
+  r.action({ id: "pay_card", label: "Pay card or loan", pack: "economy", params: { card: { type: "ref", ref: "account" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, card)", "is_credit(card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", from: "=params.from", cents: "=amount > 0 ? amount : 0 - balance(card)" } }] }, lexicon: ["pay off the card", "pay the card", "pay my credit card", "make a loan payment"], ...phone });
+  r.action({ id: "withdraw_cash", label: "Withdraw cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["spends(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.withdraw", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["withdraw", "take out cash", "hit the atm", "get cash"], observable: "takes out cash" });
+  r.action({ id: "deposit_cash", label: "Deposit cash", pack: "economy", params: { account: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["holds(self, account)", "amount > 0", "level.money >= 2"], outcomes: { default: [{ type: "economy.deposit", args: { account: "account", cents: "=amount", who: "self" } }] }, duration: "3", lexicon: ["deposit", "pay in cash", "bank the cash"], observable: "pays cash into the bank" });
+  const card = { card: { type: "ref", ref: "card" } };
+  r.action({ id: "card_freeze", label: "Freeze card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "frozen", who: "self" } }] }, lexicon: ["freeze my card", "lock my card"], ...phone });
+  r.action({ id: "card_unfreeze", label: "Unfreeze card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "active", who: "self" } }] }, lexicon: ["unfreeze my card", "unlock my card"], ...phone });
+  r.action({ id: "card_report_lost", label: "Report card lost", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_state", args: { card: "card", state: "lost", who: "self" } }] }, lexicon: ["report my card lost", "my card was stolen", "cancel my card"], ...phone });
+  r.action({ id: "card_replace", label: "Replace card", pack: "economy", params: card, requires: ["holds(self, card)", "level.money >= 3"], outcomes: { default: [{ type: "economy.card_replace", args: { card: "card", who: "self" } }] }, lexicon: ["replace my card", "order a new card"], ...phone });
+  r.action({ id: "set_autopay", label: "Set autopay", pack: "economy", params: { account: { type: "ref", ref: "account" }, mode: { type: "text", label: "none, minimum, statement, full or fixed" }, from: { type: "ref", ref: "account", optional: true }, amount: { type: "money", optional: true } }, requires: ["holds(self, account)", "is_credit(account)", "level.money >= 3"], outcomes: { default: [{ type: "economy.set_autopay", args: { account: "account", mode: "=params.mode", from: "=params.from", cents: "=params.amount", who: "self" } }] }, lexicon: ["set up autopay", "turn on autopay", "turn off autopay"], ...phone });
+  const flowParams = {
+    label: { type: "text", optional: true },
+    kind: { type: "text", optional: true },
+    from: { type: "ref", ref: "account", optional: true },
+    to: { type: "text", optional: true, label: "To (an account, someone, or a payee's name)" },
+    amount: { type: "money", optional: true },
+    every: { type: "text", optional: true, label: "Every (day, week, month, year or once)" },
+    interval: { type: "number", optional: true },
+    weekday: { type: "number", optional: true },
+    day: { type: "number", optional: true },
+    month: { type: "number", optional: true },
+    at: { type: "text", optional: true },
+    once: { type: "text", optional: true },
+    start: { type: "text", optional: true },
+    end: { type: "text", optional: true },
+    count: { type: "number", optional: true },
+    shortfall: { type: "text", optional: true },
+    retry_days: { type: "number", optional: true },
+    retries: { type: "number", optional: true },
+    fallback: { type: "text", optional: true },
+    roll: { type: "text", optional: true },
+    category: { type: "text", optional: true }
+  };
+  const flowArgs = Object.fromEntries(Object.keys(flowParams).map((k) => [k, `=params.${k}`]));
+  r.action({ id: "flow_create", label: "Set up a standing payment", pack: "economy", params: flowParams, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_create", args: { ...flowArgs, who: "self" } }] }, lexicon: ["set up a standing order", "schedule a payment", "set up a recurring transfer"], ...phone });
+  r.action({ id: "flow_update", label: "Change a standing payment", pack: "economy", params: { flow: { type: "ref", ref: "flow" }, ...flowParams }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_update", args: { flow: "flow", ...flowArgs, who: "self" } }] }, lexicon: ["change the standing order", "change the recurring payment"], ...phone });
+  const flowOnly = { flow: { type: "ref", ref: "flow" } };
+  r.action({ id: "flow_pause", label: "Pause a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "paused", who: "self" } }] }, lexicon: ["pause the standing order"], ...phone });
+  r.action({ id: "flow_resume", label: "Resume a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "active", who: "self" } }] }, lexicon: ["resume the standing order"], ...phone });
+  r.action({ id: "flow_delete", label: "Cancel a standing payment", pack: "economy", params: flowOnly, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.flow_status", args: { flow: "flow", status: "ended", who: "self" } }] }, lexicon: ["cancel the standing order", "stop the recurring payment"], ...phone });
+  r.action({ id: "apply_credit", label: "Apply for credit", pack: "economy", params: { product: { type: "text", label: "Product (credit_card, line_of_credit, loan, or one of the world's)" }, amount: { type: "money", optional: true }, term: { type: "number", optional: true } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.apply_credit", args: { product: "=params.product", cents: "=params.amount", term: "=params.term", who: "self" } }] }, duration: "15", lexicon: ["apply for a credit card", "apply for a loan", "take out a loan"], observable: "fills in an application" });
+  r.action({ id: "set_pay_prefs", label: "Set how I pay", pack: "economy", params: { tiers: { type: "text", label: "Ways to pay, in order: a JSON list of {use, min?, max?, categories?, except?}" } }, requires: ["level.money >= 3"], outcomes: { default: [{ type: "economy.set_pay_prefs", args: { tiers: "=params.tiers", who: "self" } }] }, lexicon: ["i'd rather pay with"], ...phone });
+}
 var economyPack = {
   id: "economy",
   label: "Economy",
@@ -13249,284 +20914,36 @@ var economyPack = {
   register(r) {
     for (const t of TABLES2)
       r.table({ id: t.id, schema: t.schema, columns: t.columns, defaults: t });
-    r.kind(ACCOUNT);
-    r.kind(BUSINESS);
-    for (const def of EVENTS)
+    for (const def of EVENTS2)
       r.event(def);
-    r.service("economy.charge", charge);
-    r.service("economy.transfer", transfer);
-    r.service("economy.lose", loseWith);
-    r.service("economy.set_cash", setCash);
-    r.service("economy.reprice", reprice);
-    r.service("economy.adjust", (ctx, account, cents) => {
-      if (own(ctx.state.entities, account)?.kind !== "account")
-        return reject5("not_account", `${labelOf(ctx, account)} isn't an account`);
-      if (!Number.isSafeInteger(cents) || cents === 0)
-        return reject5("bad_amount", "an adjustment is a whole amount other than nothing");
-      const lines = [
-        { account, amount: cents },
-        { account: CORRECTION_ACCOUNT, amount: -cents }
-      ];
-      return asUnit([{ type: "post", lines, memo: "Correction" }, txn("Correction", lines)]);
-    });
-    r.service("economy.reopen", (ctx, account, cents) => {
-      const owner = strOf(own(ctx.state.entities, account)?.fields.owner);
-      if (own(ctx.state.entities, account)?.kind !== "account" || !own(ctx.state.entities, owner) || !isMaterialized(ctx.state, owner, "money") || !Number.isSafeInteger(cents) || cents === 0)
-        return [];
-      const lines = [
-        { account, amount: cents },
-        { account: external(owner), amount: -cents }
-      ];
-      return [{ type: "post", lines, memo: "Opening balance changed" }, txn("Opening balance changed", lines)];
-    });
-    r.query("wealth", (ctx, who) => wealthOf(ctx.state, who));
-    r.query("can_afford", (ctx, who, cents) => {
-      const level = ctx.levelOf(who, "money");
-      if (level === 0)
-        return true;
-      return hasLedger(ctx.state, who) ? level >= 2 ? spendable(ctx.state, who) >= cents : netWorth(ctx.state, who) >= cents : notional(ctx.state, who) >= cents;
-    });
-    r.query("economy.net_worth", (ctx, who) => hasLedger(ctx.state, who) ? netWorth(ctx.state, who) : null);
-    r.query("economy.price", (ctx, ref, rng) => priceOf(ctx, ref, rng));
-    r.query("economy.bought_band", (ctx, name, qty, who) => {
-      const ref = boughtRef(ctx, name);
-      const price = ref ? priceOf(ctx, { ...ref, place: placeOfEntity(ctx.state, who) }) : null;
-      return price ? { min: price.band.min * qty, max: price.band.max * qty } : null;
-    });
-    r.query("economy.offers", offersAt);
-    r.query("economy.item_choices", (ctx, text, who) => {
-      const place = placeOfEntity(ctx.state, who);
-      const item = itemName(text);
-      const said = new Set(item ? [...item.words, ...item.trailing?.words ?? []] : []);
-      const rows = ctx.tables.get("economy.catalog")?.rows ?? {};
-      const near = Object.keys(rows).sort().map((id) => ({ id, shared: [...catalogName(id, strOf(rows[id]?.name, id)).words].filter((w) => said.has(w)).length })).filter((r) => r.shared > 0).sort((a, b) => b.shared - a.shared).slice(0, 6);
-      const out = [];
-      for (const { id } of near) {
-        const price = priceOf(ctx, { catalog: id, place });
-        if (price)
-          out.push({ item: id, name: price.name, cents: price.unitCents, category: price.category });
-      }
-      for (const offer of offersAtPlace(ctx, place))
-        if (!out.some((o) => o.item === offer.item))
-          out.push(offer);
-      return out.slice(0, 12);
-    });
-    r.guard({ type: "post", validate: (e, ctx) => e.type === "post" ? postGuard(ctx, e.lines) : null });
-    r.formula("wealth", (ctx, who) => wealthOf(ctx.state, String(who ?? ctx.world.pov)));
-    r.formula("can_afford", (ctx, who, cents) => ctx.query("can_afford")(ctx, String(who ?? ctx.world.pov), Number(cents ?? 0)));
-    r.formula("net_worth", (ctx, who) => netWorth(ctx.state, String(who ?? ctx.world.pov)));
-    r.formula("balance", (ctx, account) => balance(ctx.state, String(account ?? "")));
-    r.formula("price", (ctx, item) => priceOf(ctx, { catalog: String(item ?? "") })?.cents ?? priceOf(ctx, { category: String(item ?? "") })?.cents ?? 0);
-    r.effect({
-      type: "economy.buy",
-      args: ["item?", "category?", "qty?", "price?", "exact?", "stated?", "name?", "payer?", "method?", "from?", "payee?", "keep?"],
-      resolve(args, ctx) {
-        const payer = strOf(args.payer) || ctx.world.pov;
-        const qty = typeof args.qty === "number" && args.qty > 0 ? args.qty : 1;
-        const priced = quote(ctx, args, payer, qty);
-        if (!priced)
-          return reject5("unpriced", `no price for ${labelOf(ctx, strOf(args.item) || strOf(args.category))}`);
-        const { price, row } = priced;
-        const name = strOf(args.name) || price.name;
-        const said = payMethodOf(strOf(args.method));
-        const has = (t) => ofType(ctx.state, payer, t).length > 0;
-        const method = said === "auto" || said === "account" || has(said) ? said : said === "card" && has("checking") ? "checking" : "auto";
-        const paid = charge(ctx, payer, price.cents, `Bought ${name}${qty > 1 ? ` \xD7${qty}` : ""}`, { method, category: price.category, ...priced.narrated ? { narrated: priced.narrated } : {}, ...typeof args.payee === "string" ? { payee: args.payee } : {}, ...strOf(args.from) !== "" ? { source: strOf(args.from) } : {} });
-        if (isRejection2(paid))
-          return paid;
-        const out = [...paid];
-        const spawn = PHYSICAL.has(price.category) && args.keep !== false ? optionalService(ctx, "gear.spawn") : null;
-        if (spawn && ctx.levelOf(payer, "gear") >= 1) {
-          const made = spawn(ctx, { name, owner: payer, holder: payer, ...row ? { catalog: row } : {}, category: price.category, qty, salt: `buy:${ctx.rng.seed}` });
-          if (Array.isArray(made))
-            out.push(...made);
-        }
-        return out;
-      }
-    });
-    r.effect({ type: "economy.transfer", args: ["to", "cents", "from?", "memo?", "method?"], resolve: (a, ctx) => transfer(ctx, strOf(a.from) || ctx.world.pov, strOf(a.to), amountOf(a.cents), strOf(a.memo, "Payment"), typeof a.method === "string" ? payMethodOf(a.method) : "auto") });
-    r.effect({ type: "economy.move", args: ["from", "to", "cents", "memo?"], resolve: (a, ctx) => move(ctx, strOf(a.from), strOf(a.to), amountOf(a.cents), strOf(a.memo, "Transfer")) });
-    r.effect({
-      type: "economy.price_modifier",
-      args: ["percent", "scope?", "place?", "minutes?", "id?", "clear?"],
-      resolve(a, ctx) {
-        const scope = strOf(a.scope, "all");
-        const place = strOf(a.place);
-        if (place !== "" && !own(ctx.world.places, place))
-          return reject5("missing_place", `no place ${labelOf(ctx, place)}`);
-        const id = strOf(a.id) || `${place || "*"}:${scope}`;
-        const percent = numOf(a.percent);
-        if (a.clear === true || percent === 0)
-          return [{ type: "economy.modifier", data: { id } }];
-        if (percent <= -100)
-          return reject5("bad_amount", "a price modifier can't make things free");
-        const minutes = numOf(a.minutes);
-        return [{ type: "economy.modifier", data: { id, scope, place, mult: Math.round((1 + percent / 100) * 1e4) / 1e4, ...minutes > 0 ? { until: ctx.state.clock + Math.round(minutes) } : {} } }];
-      }
-    });
-    r.effect({ type: "economy.lose", args: ["item", "thief?"], resolve: (a, ctx) => loseWith(ctx, strOf(a.item), strOf(a.thief) || undefined) });
-    r.effect({
-      type: "economy.pay_card",
-      args: ["card", "from?", "cents?"],
-      resolve(a, ctx) {
-        const card = strOf(a.card);
-        const kind = accountType(ctx.state, card);
-        if (kind !== "card" && kind !== "loan")
-          return reject5("not_a_liability", `${labelOf(ctx, card)} isn't a card or a loan`);
-        const owner = strOf(own(ctx.state.entities, card)?.fields.owner);
-        const from = strOf(a.from) || ofType(ctx.state, owner, "checking")[0] || "";
-        const cents = typeof a.cents === "number" ? Math.round(a.cents) : -balance(ctx.state, card);
-        return move(ctx, from, card, cents, `${own(ctx.state.entities, card)?.name ?? "Card"} payment`);
-      }
-    });
-    r.effect({
-      type: "economy.invest",
-      args: ["cents", "owner?", "sell?"],
-      resolve(a, ctx) {
-        const owner = strOf(a.owner) || ctx.world.pov;
-        const account = ofType(ctx.state, owner, "brokerage")[0];
-        const checking = ofType(ctx.state, owner, "checking")[0];
-        if (!account || !checking)
-          return reject5("no_account", "investing needs a brokerage and a checking account");
-        if (ctx.levelOf(owner, "money") < 4)
-          return reject5("level", "investments are tracked at Money level 4");
-        const cents = amountOf(a.cents);
-        if (!(cents > 0))
-          return reject5("bad_amount", "the amount must be positive");
-        const symbol = strOf(own(ctx.state.entities, account)?.fields.symbol, DEFAULT_SYMBOL);
-        const price = priceOfSymbol(ctx.state, symbol);
-        const units = numOf(own(ctx.state.entities, account)?.fields.units);
-        const sell = a.sell === true;
-        const delta = Math.round((sell ? -cents : cents) / 100 / price * 1e6) / 1e6;
-        if (sell && units + delta < -0.000000001)
-          return reject5("declined", "not enough holdings to sell");
-        if (!sell && available(ctx.state, checking) < cents)
-          return reject5("declined", "not enough in checking");
-        const lines = sell ? [
-          { account: `${MARKET}:${symbol}`, amount: -cents },
-          { account: checking, amount: cents }
-        ] : [
-          { account: checking, amount: -cents },
-          { account: `${MARKET}:${symbol}`, amount: cents }
-        ];
-        return asUnit([{ type: "post", lines, memo: sell ? `Sold ${symbol}` : `Bought ${symbol}` }, { type: "add", entity: account, field: "units", delta }, txn(sell ? "Sold investments" : "Invested", lines)]);
-      }
-    });
-    r.action({ id: "buy", label: "Buy", pack: "economy", params: { item: { type: "text", label: "Item or category" }, qty: { type: "number", optional: true }, price: { type: "money", optional: true, label: "Stated price" }, method: { type: "text", optional: true, label: "Paid with (cash, card, checking or savings)" } }, requires: ["level.money >= 1"], outcomes: { default: [{ type: "economy.buy", args: { payer: "self", item: "=item", qty: "=qty", price: "=price", method: "=params.method", stated: true } }] }, duration: "5", lexicon: ["buy", "purchase", "order", "pick up a"], observable: "pays for something" });
-    r.action({ id: "pay", label: "Pay", pack: "economy", params: { to: { type: "ref", ref: "person" }, amount: { type: "money" } }, requires: ["amount > 0", "can_afford(self, amount)"], outcomes: { default: [{ type: "economy.transfer", args: { from: "self", to: "to", cents: "=amount", memo: "Payment" } }] }, duration: "1", lexicon: ["pay", "give money", "send money", "venmo"], observable: "pays someone" });
-    r.action({ id: "move_money", label: "Transfer between accounts", pack: "economy", params: { from: { type: "ref", ref: "account" }, to: { type: "ref", ref: "account" }, amount: { type: "money" } }, requires: ["from.owner == self", "to.owner == self", "amount > 0"], outcomes: { default: [{ type: "economy.move", args: { from: "from", to: "to", cents: "=amount", memo: "Transfer" } }] }, duration: "2", lexicon: ["transfer", "move money", "put into savings"], observable: "checks their phone" });
-    r.action({ id: "pay_card", label: "Pay card", pack: "economy", params: { card: { type: "ref", ref: "account" }, amount: { type: "money", optional: true } }, requires: ["card.owner == self", "card.type == 'card' or card.type == 'loan'", "level.money >= 3"], outcomes: { default: [{ type: "economy.pay_card", args: { card: "card", cents: "=amount > 0 ? amount : 0 - balance(card)" } }] }, duration: "2", lexicon: ["pay off the card", "pay the card", "pay my credit card"], observable: "checks their phone" });
-    r.action({ id: "invest", label: "Invest", pack: "economy", params: { amount: { type: "money" } }, requires: ["level.money >= 4", "amount > 0"], outcomes: { default: [{ type: "economy.invest", args: { owner: "self", cents: "=amount" } }] }, duration: "2", lexicon: ["invest", "buy stocks", "buy shares"], observable: "checks their phone" });
-    r.action({ id: "sell_investments", label: "Sell investments", pack: "economy", params: { amount: { type: "money" } }, requires: ["level.money >= 4", "amount > 0"], outcomes: { default: [{ type: "economy.invest", args: { owner: "self", cents: "=amount", sell: true } }] }, duration: "2", lexicon: ["sell stocks", "sell shares", "cash out"], observable: "checks their phone" });
-    r.process({ id: "economy.accounts", domain: "money", minLevel: 3, step: (slot, ctx) => openAccounts(slot, ctx) });
-    r.process({ id: "economy.payroll", domain: "money", minLevel: 3, step: (slot, ctx) => noted(ctx, payroll(slot, ctx)) });
-    r.process({ id: "economy.bills", domain: "money", minLevel: 3, step: (slot, ctx) => noted(ctx, bills(slot, ctx)) });
-    r.process({ id: "economy.cards", domain: "money", minLevel: 3, step: (slot, ctx) => noted(ctx, cards(slot, ctx)) });
-    r.process({ id: "economy.banking", domain: "money", minLevel: 4, step: (slot, ctx) => noted(ctx, banking(slot, ctx)) });
-    r.process({ id: "economy.living", domain: "money", minLevel: 3, step: (slot, ctx) => noted(ctx, living(slot, ctx)) });
-    r.process({ id: "economy.markets", domain: "money", minLevel: 4, step: (slot, ctx, rng) => markets(slot, ctx, rng) });
-    r.materializer({ domain: "money", version: 1, materialize: materializeMoney });
-    r.renderer({
-      slot: "money",
-      render(ctx) {
-        const pov = ctx.world.pov;
-        const level = ctx.levelOf(pov, "money");
-        if (level === 0)
-          return [];
-        if (level === 1 || !hasLedger(ctx.state, pov))
-          return [`Money: ${wealthOf(ctx.state, pov)}.`];
-        const shown = accountsOf(ctx.state, pov).filter((id, i, all) => level >= 3 || accountType(ctx.state, id) === "cash" || id === all.find((x) => accountType(ctx.state, x) === "checking"));
-        const parts = shown.map((id) => {
-          const t = accountType(ctx.state, id);
-          const b = balance(ctx.state, id);
-          return t === "card" || t === "loan" ? `${own(ctx.state.entities, id)?.name ?? id} owes ${formatMoney(-b, ctx.world.currency)}` : `${own(ctx.state.entities, id)?.name ?? id} ${formatMoney(b, ctx.world.currency)}`;
-        });
-        return parts.length > 0 ? [`Money: ${parts.join("; ")}.`] : [];
-      }
-    });
-    r.view({ panel: "economy.money", build: (ctx) => buildMoneyView(ctx) });
-    r.query("economy.people_money", buildPeopleMoney);
-    const purchaser = (p, ctx) => {
-      const named = strOf(p.payer);
-      const said = { ...typeof p.method === "string" ? { method: p.method } : {}, ...typeof p.from === "string" ? { from: p.from } : {} };
-      if (named === "")
-        return { payer: ctx.world.pov, ...said };
-      const e = own(ctx.state.entities, named);
-      const holder = accountType(ctx.state, named) ? strOf(e?.fields.owner) : "";
-      if (holder !== "" && own(ctx.state.entities, holder))
-        return { payer: holder, method: said.method ?? "auto", from: said.from ?? named };
-      if (!e)
-        return payMethodOf(named) !== "auto" ? { payer: ctx.world.pov, method: said.method ?? named, ...said.from ? { from: said.from } : {} } : { payer: named, ...said };
-      const owner = strOf(e.fields.owner);
-      if (!kindIs(ctx.registry, ctx.world, e.kind, "person") && owner !== "" && own(ctx.state.entities, owner)) {
-        return { payer: owner, method: said.method ?? payMethodOf(`${e.name} ${named.replace(/_/g, " ")}`), ...said.from ? { from: said.from } : {} };
-      }
-      return { payer: named, ...said };
+    const hooks = emptyHooks();
+    const api = makeApi(hooks);
+    const registry = {
+      core: r,
+      api,
+      fields: (kind, fields) => {
+        hooks.fields[kind] = { ...hooks.fields[kind] ?? {}, ...fields };
+      },
+      flows: (source) => void hooks.flows.push(source),
+      amount: (id, provider) => {
+        if (own(hooks.amounts, id))
+          throw new Error(`amount provider ${id} is registered twice`);
+        hooks.amounts[id] = provider;
+      },
+      worth: (source) => void hooks.worth.push(source),
+      sale: (hook) => void hooks.sales.push(hook),
+      view: (section) => void hooks.views.push(section),
+      summary: (source) => void hooks.summaries.push(source)
     };
-    r.proposal({
-      type: "purchase",
-      boundField: "money",
-      validate(p, ctx) {
-        const { payer } = purchaser(p, ctx);
-        if (!own(ctx.state.entities, payer))
-          return reject5("missing_entity", `no payer ${labelOf(ctx, payer)}`);
-        if (!kindIs(ctx.registry, ctx.world, own(ctx.state.entities, payer)?.kind ?? "", "person"))
-          return reject5("bad_payer", "a payer must be an account holder");
-        const item = strOf(p.item);
-        const category = strOf(p.category);
-        if (item === "" && category === "")
-          return reject5("bad_proposal", "a purchase needs an item or a category");
-        const priced = typeof p.price === "number" && p.price > 0 || typeof p.playerPrice === "number" && p.playerPrice > 0 || !!rowOf(ctx, "economy.categories", category) || item !== "" && (!!rowOf(ctx, "economy.catalog", item) || !!rowOf(ctx, "economy.categories", item) || matchCatalog(ctx, item, placeOfEntity(ctx.state, payer), category) !== null);
-        return priced ? null : reject5("unpriced", `no catalog item or category ${item || category}, and no price`);
-      },
-      toEffects: (p, ctx) => {
-        const { payer, from, method } = purchaser(p, ctx);
-        const set = typeof p.playerPrice === "number" && p.playerPrice > 0 ? p.playerPrice : undefined;
-        const price = set ?? (typeof p.price === "number" ? p.price : undefined);
-        return [{ type: "economy.buy", args: { payer, item: strOf(p.item), category: strOf(p.category), name: strOf(p.name), qty: typeof p.qty === "number" ? p.qty : 1, ...price !== undefined ? { price } : {}, ...set !== undefined ? { exact: true } : {}, ...method !== undefined ? { method } : {}, ...from !== undefined ? { from } : {} } }];
-      }
+    registry.amount("economy.living", (ctx, flow) => {
+      const cents = livingCost(ctx, wealthOf(hooks, ctx, flow.from));
+      return cents === null ? null : { cents, memo: "Living costs", kind: "purchase", category: "living" };
     });
-    r.proposal({
-      type: "transfer",
-      boundField: "money",
-      validate(p, ctx) {
-        if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to)))
-          return reject5("missing_entity", "a transfer needs a payer and a payee");
-        for (const id of [strOf(p.from), strOf(p.to)]) {
-          const party = transferParty(ctx, id);
-          if ("code" in party)
-            return party;
-        }
-        const cents = transferCents(p);
-        return Number.isFinite(cents) && cents > 0 ? null : reject5("bad_amount", "a transfer needs a positive amount");
-      },
-      toEffects: (p) => [{ type: "economy.transfer", args: { from: strOf(p.from), to: strOf(p.to), cents: transferCents(p), memo: strOf(p.memo, "Payment"), ...typeof p.method === "string" ? { method: p.method } : {} } }]
-    });
-    r.lint({
-      code: "economy.accounts",
-      check(world) {
-        const issues = [];
-        for (const e of Object.values(world.entities)) {
-          if (e.kind !== "account")
-            continue;
-          if (typeof e.fields.owner !== "string" || !own(world.entities, e.fields.owner))
-            issues.push({ severity: "error", code: "economy.accounts", message: `Account ${e.name} has no owner.`, path: `entities.${e.id}.fields.owner` });
-          if (e.fields.type === "card" && typeof e.fields.limit !== "number")
-            issues.push({ severity: "warning", code: "economy.accounts", message: `Card ${e.name} has no credit limit; every charge on it will decline.`, path: `entities.${e.id}.fields.limit` });
-        }
-        return issues;
-      }
-    });
-    r.lint({
-      code: "economy.unpriced_cap",
-      check(world) {
-        const cap = world.packs.economy?.config.unpricedCap;
-        if (cap === undefined || typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)
-          return [];
-        const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedUnpricedCap(world), world.currency)}`;
-        return [{ severity: "warning", code: "economy.unpriced_cap", message: `The narrated-price cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; narrated prices are capped at ${fallback}.`, path: "packs.economy.config.unpricedCap" }];
-      }
-    });
+    for (const m of FINANCE_MODULES)
+      m.register(registry);
+    for (const k of financeKinds(hooks.fields))
+      r.kind(k);
+    registerRest(r, hooks);
   }
 };
 var core_default3 = economyPack;
@@ -14025,7 +21442,7 @@ var KIT = {
     piece_count: { type: "number", label: "Piece count", domain: "gear", level: 3 }
   }
 };
-function reject6(code, reason) {
+function reject9(code, reason) {
   return { code, reason };
 }
 var CASH_WORDS = { cash: null, money: null, buck: null, bucks: null, change: null, coin: null, coins: null, banknote: null, banknotes: null, twenties: null, fifties: null, fiver: 5, tenner: 10, twenty: 20, fifty: 50, hundred: 100 };
@@ -14068,21 +21485,21 @@ function detach(ctx, thing) {
 }
 var transfer2 = (ctx, item, to) => {
   if (!own(ctx.state.entities, item))
-    return reject6("missing_entity", `no item ${labelOf(ctx, item)}`);
+    return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
   if (!own(ctx.state.entities, to))
-    return reject6("missing_entity", `no holder ${labelOf(ctx, to)}`);
+    return reject9("missing_entity", `no holder ${labelOf(ctx, to)}`);
   const level = gearLevel(ctx, item, to);
   if (level === 0)
     return [];
   if (holderOf(ctx.state, item) === to)
     return [];
   if (item === to || isInside(ctx.state, to, item))
-    return reject6("cycle", "can't put something inside itself");
+    return reject9("cycle", "can't put something inside itself");
   const target = own(ctx.state.entities, to);
   if (level >= 2 && target && !kindIs(ctx.registry, ctx.world, target.kind, "person")) {
     const problem = fitProblem(ctx.state, item, to);
     if (problem)
-      return reject6("no_room", `${labelOf(ctx, item)} ${problem}`);
+      return reject9("no_room", `${labelOf(ctx, item)} ${problem}`);
   }
   const out = detach(ctx, item);
   if (typeof own(ctx.state.entities, item)?.fields.place === "string")
@@ -14093,9 +21510,9 @@ var transfer2 = (ctx, item, to) => {
 };
 var drop = (ctx, item, place) => {
   if (!own(ctx.state.entities, item))
-    return reject6("missing_entity", `no item ${labelOf(ctx, item)}`);
+    return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
   if (!own(ctx.world.places, place))
-    return reject6("missing_place", `no place ${labelOf(ctx, place)}`);
+    return reject9("missing_place", `no place ${labelOf(ctx, place)}`);
   if (gearLevel(ctx, item) === 0)
     return [];
   return [...detach(ctx, item), { type: "set", entity: item, field: "place", value: place }, ...optionalService(ctx, "space.lay")?.(ctx, item, place, holderOf(ctx.state, item)) ?? []];
@@ -14109,11 +21526,11 @@ function endLoans(ctx, thing) {
 var give = (ctx, item, from, to) => {
   const e = own(ctx.state.entities, item);
   if (!e)
-    return reject6("missing_entity", `no item ${labelOf(ctx, item)}`);
+    return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
   if (e.kind === "account")
-    return reject6("is_money", "cash changes hands as a transfer");
+    return reject9("is_money", "cash changes hands as a transfer");
   if (from !== to && !isInside(ctx.state, item, from) && e.fields.owner !== from)
-    return reject6("not_held", `${labelOf(ctx, from)} doesn't have ${e.name}`);
+    return reject9("not_held", `${labelOf(ctx, from)} doesn't have ${e.name}`);
   const moved = transfer2(ctx, item, to);
   if (!Array.isArray(moved))
     return moved;
@@ -14160,17 +21577,17 @@ var spawn = (ctx, spec) => {
 var takePiece = (ctx, kit, piece, to) => {
   const k = own(ctx.state.entities, kit);
   if (!k)
-    return reject6("missing_entity", `no kit ${labelOf(ctx, kit)}`);
+    return reject9("missing_entity", `no kit ${labelOf(ctx, kit)}`);
   const status = kitStatus(ctx, kit);
   const p = findPiece(ctx, kit, piece);
   if (!status || !p)
-    return reject6("no_piece", `${k.name} has no ${piece}`);
+    return reject9("no_piece", `${k.name} has no ${piece}`);
   const back = contentsOf(ctx.state, kit).find((id) => own(ctx.state.entities, id)?.fields.from_kit === kit && own(ctx.state.entities, id)?.fields.piece === p.name);
   if (back)
     return transfer2(ctx, back, to);
   const present = status.pieces.find((x) => x.name === p.name)?.present ?? 0;
   if (present <= 0)
-    return reject6("no_piece", `no ${p.name} left in ${k.name}`);
+    return reject9("no_piece", `no ${p.name} left in ${k.name}`);
   const taken = takenOf(ctx.state, kit);
   const spawned = spawn(ctx, { name: p.name, owner: typeof k.fields.owner === "string" ? k.fields.owner : null, holder: to, salt: `${kit}:${p.name}:${own(taken, p.name) ?? 0}` });
   if (!Array.isArray(spawned))
@@ -14186,11 +21603,11 @@ var takePiece = (ctx, kit, piece, to) => {
 var lend = (ctx, thing, to, until) => {
   const e = own(ctx.state.entities, thing);
   if (!e)
-    return reject6("missing_entity", `no ${labelOf(ctx, thing)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, thing)}`);
   if (!own(ctx.state.entities, to))
-    return reject6("missing_entity", `no ${labelOf(ctx, to)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, to)}`);
   if (!Number.isFinite(until) || until <= ctx.state.clock)
-    return reject6("bad_until", "a loan needs a future end");
+    return reject9("bad_until", "a loan needs a future end");
   const out = [];
   if (typeof e.fields.place !== "string" || holderOf(ctx.state, thing)) {
     const moved = transfer2(ctx, thing, to);
@@ -14206,7 +21623,7 @@ var lend = (ctx, thing, to, until) => {
 var retrieve = (ctx, thing) => {
   const e = own(ctx.state.entities, thing);
   if (!e)
-    return reject6("missing_entity", `no ${labelOf(ctx, thing)}`);
+    return reject9("missing_entity", `no ${labelOf(ctx, thing)}`);
   const out = [];
   for (const g of grants(ctx.state))
     if (g.thing === thing)
@@ -14226,16 +21643,16 @@ var retrieve = (ctx, thing) => {
 var wear = (ctx, item, wearer, slot) => {
   const e = own(ctx.state.entities, item);
   if (!e)
-    return reject6("missing_entity", `no item ${labelOf(ctx, item)}`);
+    return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
   if (ctx.levelOf(wearer, "gear") < 3)
-    return reject6("level", "slots are tracked from Gear level 3");
+    return reject9("level", "slots are tracked from Gear level 3");
   const s = slot ?? strOf(e.fields.slot);
   if (!s || s === "none")
-    return reject6("no_slot", `${e.name} isn't worn`);
+    return reject9("no_slot", `${e.name} isn't worn`);
   const rel = s === "hand_held" ? "equipped" : "worn_by";
   const occupied = Object.keys(ctx.state.entities).find((id) => id !== item && own(ctx.state.entities, id)?.relations.some((r) => r.type === rel && r.to === wearer && r.fields?.slot === s));
   if (occupied && s !== "pocket" && s !== "pocket_or_bag")
-    return reject6("slot_taken", `${labelOf(ctx, occupied)} is already in the ${s.replace(/_/g, " ")} slot`);
+    return reject9("slot_taken", `${labelOf(ctx, occupied)} is already in the ${s.replace(/_/g, " ")} slot`);
   const out = [];
   if (holderOf(ctx.state, item) !== wearer) {
     const moved = transfer2(ctx, item, wearer);
@@ -14293,7 +21710,7 @@ var gearPack = {
       const at = said !== "" ? clockOfPhrase(calendarOf(ctx.world), ctx.state.clock, said) : null;
       const until = at ?? numOf(a.until, NaN);
       if (said !== "" && at === null && !(until > ctx.state.clock))
-        return reject6("bad_until", `"${said}" names no time; say how many days or until when`);
+        return reject9("bad_until", `"${said}" names no time; say how many days or until when`);
       return lend(ctx, strOf(a.item), strOf(a.to), until);
     });
     wrap("gear.retrieve", ["item"], (a, ctx) => retrieve(ctx, strOf(a.item)));
@@ -14302,7 +21719,7 @@ var gearPack = {
       const item = strOf(a.item);
       const e = own(ctx.state.entities, item);
       if (!e)
-        return reject6("missing_entity", `no item ${labelOf(ctx, item)}`);
+        return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
       return e.relations.filter((x) => x.type === "worn_by" || x.type === "equipped").map((x) => ({ type: "unlink", rel: x.type, from: item, to: x.to }));
     });
     r.effect({
@@ -14313,14 +21730,14 @@ var gearPack = {
         const user = strOf(args.user) || ctx.world.pov;
         const e = own(ctx.state.entities, item);
         if (!e)
-          return reject6("missing_entity", `no item ${labelOf(ctx, item)}`);
+          return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
         const level = ctx.levelOf(user, "gear");
         const out = [];
         if (level >= 4) {
           if (e.fields.consumable === true || typeof e.fields.uses === "number") {
             const uses = numOf(e.fields.uses, 1);
             if (uses <= 0)
-              return reject6("used_up", `${e.name} is used up`);
+              return reject9("used_up", `${e.name} is used up`);
             out.push(bump(ctx.state, item, "uses", -1, uses));
           }
           const wearBy = ctx.rng.int(0, 2);
@@ -14339,9 +21756,9 @@ var gearPack = {
         const item = strOf(args.item);
         const e = own(ctx.state.entities, item);
         if (!e)
-          return reject6("missing_entity", `no ${labelOf(ctx, item)}`);
+          return reject9("missing_entity", `no ${labelOf(ctx, item)}`);
         if (e.fields.lost === true)
-          return reject6("already_lost", `${e.name} is already lost`);
+          return reject9("already_lost", `${e.name} is already lost`);
         const out = [];
         const lose = optionalService(ctx, "economy.lose");
         if (lose) {
@@ -14460,15 +21877,15 @@ var gearPack = {
         const item = strOf(p.item);
         const e = own(ctx.state.entities, item);
         if (!own(ctx.state.entities, strOf(p.to)))
-          return reject6("missing_entity", `no recipient ${labelOf(ctx, strOf(p.to))}`);
+          return reject9("missing_entity", `no recipient ${labelOf(ctx, strOf(p.to))}`);
         if (!e) {
           if (cashGift(item, ctx.world.currency))
-            return reject6("is_money", "a cash give is a transfer");
+            return reject9("is_money", "a cash give is a transfer");
           const from = strOf(p.from);
-          return item !== "" && from !== "" && from !== ctx.world.pov && own(ctx.state.entities, from) ? null : reject6("missing_entity", `no item ${labelOf(ctx, item)}`);
+          return item !== "" && from !== "" && from !== ctx.world.pov && own(ctx.state.entities, from) ? null : reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
         }
         if (e.kind === "account")
-          return reject6("is_money", "a cash give is a transfer");
+          return reject9("is_money", "a cash give is a transfer");
         return null;
       },
       toEffects: (p, ctx) => own(ctx.state.entities, strOf(p.item)) ? [{ type: "gear.give", args: { item: strOf(p.item), from: strOf(p.from), to: strOf(p.to) } }] : [{ type: "gear.receive", args: { name: strOf(p.item), from: strOf(p.from), to: strOf(p.to) } }]
@@ -14480,15 +21897,15 @@ var gearPack = {
         const item = strOf(p.item);
         const e = own(ctx.state.entities, item);
         if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "item"))
-          return reject6("missing_entity", `no item ${labelOf(ctx, item)}`);
+          return reject9("missing_entity", `no item ${labelOf(ctx, item)}`);
         const delta = p.delta;
         if (typeof delta !== "number" || !Number.isInteger(delta) || delta === 0)
-          return reject6("bad_proposal", "quantity needs a whole, non-zero delta");
+          return reject9("bad_proposal", "quantity needs a whole, non-zero delta");
         const who = strOf(p.entity);
         if (who !== "" && who !== e.fields.owner && !isInside(ctx.state, item, who))
-          return reject6("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
+          return reject9("not_holder", `${labelOf(ctx, who)} doesn't have ${e.name}`);
         const cap = Math.abs(fieldDef(ctx.registry, ctx.world, e.kind, "qty")?.bound?.maxDelta ?? QTY_MAX_DELTA);
-        return Math.abs(delta) > cap ? reject6("over_bound", `a reply can change a quantity by at most ${cap}`) : null;
+        return Math.abs(delta) > cap ? reject9("over_bound", `a reply can change a quantity by at most ${cap}`) : null;
       },
       toEffects: (p) => [{ type: "add", args: { entity: strOf(p.item), field: "qty", delta: numOf(p.delta) } }]
     });
@@ -14791,7 +22208,7 @@ function fuelProduct(ctx, vehicle) {
   const marine = domainOf(ctx, vehicle) === "marine";
   return { catalog: type === "diesel" ? marine ? "marine_diesel" : "diesel" : marine ? "marine_gasoline" : "gasoline_regular", unit: "gal", capacity: numOf(row?.tank_capacity_gal, 15) };
 }
-function reject7(code, reason) {
+function reject10(code, reason) {
   return { code, reason };
 }
 function charge2(ctx, payer, cents, memo, category, recurring = false) {
@@ -14800,11 +22217,7 @@ function charge2(ctx, payer, cents, memo, category, recurring = false) {
     return [];
   return svc(ctx, payer, cents, memo, { category, ...recurring ? { method: "account" } : {} });
 }
-function insuredByBill(ctx, owner) {
-  const bills = own(ctx.state.entities, owner)?.fields.bills;
-  return Array.isArray(bills) && bills.some((b) => /insurance/i.test(strOf(objOf(b).label)) && /auto|car|vehicle|truck|motor|boat|marine/i.test(strOf(objOf(b).label)));
-}
-function priceOf2(ctx, catalog, qty) {
+function priceOf3(ctx, catalog, qty) {
   const price = optionalQuery(ctx, "economy.price");
   const p = price ? price(ctx, { catalog, qty }) : null;
   const row = rowOf(ctx, "economy.catalog", catalog);
@@ -14866,15 +22279,15 @@ var vehiclesPack = {
         const driver = strOf(args.driver) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject7("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject10("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (e.fields.status === "broken")
-          return reject7("broken", `${e.name} has broken down`);
+          return reject10("broken", `${e.name} has broken down`);
         const from = placeOfEntity(ctx.state, v);
         const leg = from ? legFor(ctx, v, from, to) : null;
         if (!leg)
-          return reject7("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
+          return reject10("no_route", `no route for ${e.name} to ${labelOf(ctx, to)}`);
         if (!fuelOk(ctx, v, leg))
-          return reject7("no_fuel", `${e.name} doesn't have the fuel`);
+          return reject10("no_fuel", `${e.name} doesn't have the fuel`);
         const out = [...consume(ctx, v, leg, ctx.rng), { type: "set", entity: v, field: "place", value: to }];
         const riders = Array.isArray(args.riders) ? args.riders.filter((x) => typeof x === "string") : [];
         for (const p of [driver, ...riders]) {
@@ -14897,16 +22310,16 @@ var vehiclesPack = {
         const payer = strOf(args.payer) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject7("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject10("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         if (ownerLevel(ctx, v) < 2)
           return [];
         const fuel = numOf(e.fields.fuel_pct, 100);
         const wanted = Math.min(100 - fuel, numOf(args.pct, 100 - fuel));
         if (wanted <= 0)
-          return reject7("full", `${e.name} is full`);
+          return reject10("full", `${e.name} is full`);
         const product = fuelProduct(ctx, v);
         const qty = Math.round(wanted / 100 * product.capacity * 100) / 100;
-        const cents = priceOf2(ctx, product.catalog, qty);
+        const cents = priceOf3(ctx, product.catalog, qty);
         const paid = charge2(ctx, payer, cents, `Fuel for ${e.name} (${qty} ${product.unit})`, "fuel");
         if (!Array.isArray(paid))
           return paid;
@@ -14921,9 +22334,9 @@ var vehiclesPack = {
         const payer = strOf(args.payer) || ctx.world.pov;
         const e = own(ctx.state.entities, v);
         if (!e)
-          return reject7("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
+          return reject10("missing_entity", `no vehicle ${labelOf(ctx, v)}`);
         const repair = args.repair === true;
-        const cents = repair ? priceOf2(ctx, "tow_hookup", 1) + priceOf2(ctx, "diagnostic_fee", 1) + priceOf2(ctx, "brake_pads_axle", 1) : priceOf2(ctx, "oil_change_synthetic", 1);
+        const cents = repair ? priceOf3(ctx, "tow_hookup", 1) + priceOf3(ctx, "diagnostic_fee", 1) + priceOf3(ctx, "brake_pads_axle", 1) : priceOf3(ctx, "oil_change_synthetic", 1);
         const paid = charge2(ctx, payer, cents, `${repair ? "Repair" : "Service"}: ${e.name}`, "vehicle_services");
         if (!Array.isArray(paid))
           return paid;
@@ -14957,10 +22370,6 @@ var vehiclesPack = {
       minLevel: 4,
       step(slot, ctx) {
         const out = [];
-        const cal = calendarOf(ctx.world);
-        const start = dateAt(cal, slot.start);
-        const end = dateAt(cal, slot.end - 1);
-        const billing = start.day === 1 && start.minuteOfDay <= 540 && (end.dayIndex > start.dayIndex || end.minuteOfDay >= 540);
         for (const v of Object.keys(ctx.state.entities).sort()) {
           const e = own(ctx.state.entities, v);
           if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, v) < 4)
@@ -14970,18 +22379,22 @@ var vehiclesPack = {
             out.push({ type: "set", entity: v, field: "status", value: "needs_service" });
             out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} is due for service.`, entity: v } });
           }
-          const owner = typeof e.fields.owner === "string" ? e.fields.owner : null;
-          const premium = numOf(classRow(ctx, v)?.insurance_full_cents_per_month);
-          if (billing && owner && premium > 0 && !insuredByBill(ctx, owner)) {
-            const paid = charge2(ctx, owner, premium, `Insurance: ${e.name}`, "insurance", true);
-            if (Array.isArray(paid))
-              out.push(...paid, { type: ENGINE_EVENTS.signal, data: { class: "bill", text: `Insurance for ${e.name} paid.`, entity: owner, visibility: "known_by" } });
-            else
-              out.push({ type: ENGINE_EVENTS.signal, data: { class: "decline", text: `Insurance for ${e.name} was declined: ${paid.reason}`, entity: owner, visibility: "known_by" } });
-          }
         }
         return out;
       }
+    });
+    r.query("vehicles.insurance", (ctx) => {
+      const out = [];
+      for (const v of Object.keys(ctx.state.entities).sort()) {
+        const e = own(ctx.state.entities, v);
+        const owner = typeof e?.fields.owner === "string" ? e.fields.owner : null;
+        if (!e || !owner || !own(ctx.state.entities, owner) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, v) < 4)
+          continue;
+        const premium = Math.round(numOf(classRow(ctx, v)?.insurance_full_cents_per_month));
+        if (premium > 0)
+          out.push({ vehicle: v, owner, cents: premium, label: `Insurance: ${e.name}` });
+      }
+      return out;
     });
     r.materializer({
       domain: "vehicles",
@@ -15140,7 +22553,7 @@ function climateOf(ctx, region) {
 function climateSeason(climate, month) {
   return climate.seasons.find((s) => s.months.includes(month)) ?? climate.seasons[0] ?? null;
 }
-function regionOf(ctx, place) {
+function regionOf2(ctx, place) {
   let cur = place ?? undefined;
   for (let guard = 0;cur && guard < 32; guard++) {
     const r = own(ctx.world.places, cur)?.fields.region;
@@ -15151,7 +22564,7 @@ function regionOf(ctx, place) {
   return Object.keys(ctx.state.entities).sort().find((id) => kindIs(ctx.registry, ctx.world, own(ctx.state.entities, id)?.kind ?? "", "region")) ?? null;
 }
 function stateAt(ctx, place) {
-  const region = regionOf(ctx, place);
+  const region = regionOf2(ctx, place);
   if (!region)
     return null;
   const id = strOf(own(ctx.state.entities, region)?.fields.weather);
@@ -15161,7 +22574,7 @@ function buildWeatherView(ctx) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
   const season = seasonAt(ctx);
   const here = placeOfEntity(ctx.state, ctx.world.pov);
-  const region = regionOf(ctx, here);
+  const region = regionOf2(ctx, here);
   const e = region ? own(ctx.state.entities, region) : undefined;
   if (level <= 1 || !e)
     return { level, label: level === 0 ? "" : MOOD[season], region: e?.name ?? null, season, sky: null, tempC: null, closed: [] };
@@ -15173,7 +22586,7 @@ function buildWeatherView(ctx) {
 }
 function stepRegions(slot, ctx, rng) {
   const level = ctx.levelOf(ctx.world.pov, "weather");
-  const home = regionOf(ctx, placeOfEntity(ctx.state, ctx.world.pov));
+  const home = regionOf2(ctx, placeOfEntity(ctx.state, ctx.world.pov));
   const out = [];
   const cal = calendarOf(ctx.world);
   const month = dateAt(cal, slot.start).month;
@@ -15215,7 +22628,7 @@ function stepRegions(slot, ctx, rng) {
   }
   return out;
 }
-function reject8(code, reason) {
+function reject11(code, reason) {
   return { code, reason };
 }
 var weatherPack = {
@@ -15229,7 +22642,7 @@ var weatherPack = {
     r.query("weather.sky", (ctx, place) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2)
         return null;
-      const region = regionOf(ctx, place);
+      const region = regionOf2(ctx, place);
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather) || null : null;
     });
     r.query("weather.travel_factor", (ctx, place, mode) => ctx.levelOf(ctx.world.pov, "weather") < 4 ? 1 : own(stateAt(ctx, place)?.travel ?? {}, mode) ?? 1);
@@ -15244,13 +22657,13 @@ var weatherPack = {
     r.query("weather.fix", (ctx) => {
       if (ctx.levelOf(ctx.world.pov, "weather") < 2)
         return null;
-      const region = regionOf(ctx, placeOfEntity(ctx.state, ctx.world.pov));
+      const region = regionOf2(ctx, placeOfEntity(ctx.state, ctx.world.pov));
       if (!region)
         return null;
       return { entity: region, field: "weather", type: "text", value: strOf(own(ctx.state.entities, region)?.fields.weather, "clear"), options: climateOf(ctx, region).states.map((s) => ({ value: s.id, label: s.label })) };
     });
     r.formula("weather", (ctx, place) => {
-      const region = regionOf(ctx, typeof place === "string" && place !== "" ? place : placeOfEntity(ctx.state, ctx.world.pov));
+      const region = regionOf2(ctx, typeof place === "string" && place !== "" ? place : placeOfEntity(ctx.state, ctx.world.pov));
       return region ? strOf(own(ctx.state.entities, region)?.fields.weather, "clear") : "";
     });
     r.formula("season", (ctx) => seasonAt(ctx));
@@ -15259,12 +22672,12 @@ var weatherPack = {
       args: ["region", "state", "minutes?", "until?"],
       resolve(a, ctx) {
         const target = strOf(a.region);
-        const region = own(ctx.state.entities, target) ? target : regionOf(ctx, own(ctx.world.places, target) ? target : null);
+        const region = own(ctx.state.entities, target) ? target : regionOf2(ctx, own(ctx.world.places, target) ? target : null);
         if (!region)
-          return reject8("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+          return reject11("missing_region", `no weather region for ${labelOf(ctx, target)}`);
         const st = strOf(a.state);
         if (!climateOf(ctx, region).states.some((s) => s.id === st))
-          return reject8("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
+          return reject11("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
         const out = [{ type: "set", entity: region, field: "weather", value: st }];
         if (typeof a.minutes === "number" && a.minutes > 0)
           out.push({ type: "set", entity: region, field: "weather_hold", value: ctx.state.clock + Math.round(a.minutes) });
@@ -15278,16 +22691,16 @@ var weatherPack = {
       args: ["region", "state?"],
       resolve(a, ctx) {
         const target = strOf(a.region);
-        const region = own(ctx.state.entities, target) ? target : regionOf(ctx, own(ctx.world.places, target) ? target : null);
+        const region = own(ctx.state.entities, target) ? target : regionOf2(ctx, own(ctx.world.places, target) ? target : null);
         if (!region)
-          return reject8("missing_region", `no weather region for ${labelOf(ctx, target)}`);
+          return reject11("missing_region", `no weather region for ${labelOf(ctx, target)}`);
         const climate = climateOf(ctx, region);
         const season = climateSeason(climate, dateAt(calendarOf(ctx.world), ctx.state.clock).month);
         const calm = climate.states.filter((s) => s.closes.length === 0 && Object.keys(s.travel).length === 0).map((s) => s.id);
         const likeliest = Object.entries(season?.weights ?? {}).filter(([id]) => calm.includes(id)).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0]?.[0];
         const st = strOf(a.state) || likeliest || calm[0] || strOf(own(ctx.state.entities, region)?.fields.weather, "clear");
         if (!climate.states.some((s) => s.id === st))
-          return reject8("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
+          return reject11("bad_state", `no weather state ${st.replace(/_/g, " ")}`);
         return [
           { type: "set", entity: region, field: "weather", value: st },
           { type: "set", entity: region, field: "weather_hold", value: 0 },
@@ -15360,7 +22773,7 @@ var APPRAISALS = {
   threat: { warmth: -8, trust: -10, fear: 10 }
 };
 var DEFAULT_HALF_LIFE_DAYS = 30;
-var HISTORY2 = 8;
+var HISTORY = 8;
 var REGARD_CHANNEL_CAP = 10;
 function config(ctx) {
   return ctx.world.packs.relationships?.config ?? {};
@@ -15454,7 +22867,7 @@ function writeRegard(state, from, to, anchor, entry) {
   const prev = relationOf(state, from, to) ?? {};
   const fields = { ...prev, ...anchor };
   if (entry)
-    fields.history = [...Array.isArray(prev.history) ? prev.history.slice(-(HISTORY2 - 1)) : [], entry];
+    fields.history = [...Array.isArray(prev.history) ? prev.history.slice(-(HISTORY - 1)) : [], entry];
   entity.relations = entity.relations.filter((r) => !(r.type === "regard" && r.to === to));
   entity.relations.push({ type: "regard", to, fields });
 }
@@ -15529,7 +22942,7 @@ function groupRegard(ctx, group, to) {
     return 0;
   return Math.round(members.reduce((a, m) => a + regardValue(ctx, m, to), 0) / members.length * 10) / 10;
 }
-function reject9(code, reason) {
+function reject12(code, reason) {
   return { code, reason };
 }
 function voiceLine(ctx, who) {
@@ -15593,7 +23006,7 @@ var relationshipsPack = {
         const from = strOf(a.from);
         const to = strOf(a.to);
         if (!own(ctx.state.entities, from) || !own(ctx.state.entities, to))
-          return reject9("missing_entity", "regard needs two entities");
+          return reject12("missing_entity", "regard needs two entities");
         const delta = numOf(a.delta);
         const axis = strOf(a.axis);
         return appraise(ctx, from, to, axis ? { [axis]: delta } : Object.fromEntries(axesOf(ctx).map((x) => [x.id, delta])), strOf(a.why, "change"));
@@ -15628,11 +23041,11 @@ var relationshipsPack = {
       boundField: "number",
       validate(p, ctx) {
         if (!own(ctx.state.entities, strOf(p.from)) || !own(ctx.state.entities, strOf(p.to)))
-          return reject9("missing_entity", "regard needs two known people");
+          return reject12("missing_entity", "regard needs two known people");
         if (typeof p.delta !== "number" || p.delta === 0)
-          return reject9("bad_delta", "regard needs a non-zero delta");
+          return reject12("bad_delta", "regard needs a non-zero delta");
         if (typeof p.axis === "string" && !axesOf(ctx).some((a) => a.id === p.axis))
-          return reject9("bad_axis", `no regard axis ${p.axis}`);
+          return reject12("bad_axis", `no regard axis ${p.axis}`);
         return null;
       },
       toEffects: (p) => [{ type: "relationships.adjust", args: { from: strOf(p.from), to: strOf(p.to), ...typeof p.axis === "string" ? { axis: p.axis } : {}, delta: Math.max(-REGARD_CHANNEL_CAP, Math.min(REGARD_CHANNEL_CAP, numOf(p.delta))), why: strOf(p.why, "narrated") } }]
@@ -15715,8 +23128,8 @@ var MINDS_RANGES = {
   floor: [0, 5],
   periodDays: [0.1, 365]
 };
-var num3 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
-var whole3 = (v, range, fallback) => Math.round(num3(v, range, fallback));
+var num5 = (v, [lo, hi], fallback) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback;
+var whole3 = (v, range, fallback) => Math.round(num5(v, range, fallback));
 var obj = (v) => isRecord(v) ? v : {};
 function selectorOrNull(v) {
   if (!isRecord(v))
@@ -15762,8 +23175,8 @@ function memoryConfigOf(raw, base = DEFAULT_MINDS_MEMORY) {
     recall: { recent: whole3(recall.recent, MINDS_RANGES.show, base.recall.recent), relevant: whole3(recall.relevant, MINDS_RANGES.show, base.recall.relevant), tokens: whole3(recall.tokens, MINDS_RANGES.recallTokens, base.recall.tokens) },
     notes: { show: whole3(notes.show, MINDS_RANGES.show, base.notes.show), keep: whole3(notes.keep, MINDS_RANGES.keep, base.notes.keep) },
     commitments: { show: whole3(commitments.show, MINDS_RANGES.show, base.commitments.show) },
-    salience: { halfLifeDays: num3(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num3(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
-    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num3(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
+    salience: { halfLifeDays: num5(salience.halfLifeDays, MINDS_RANGES.halfLifeDays, base.salience.halfLifeDays), floor: num5(salience.floor, MINDS_RANGES.floor, base.salience.floor) },
+    consolidate: { enabled: typeof consolidate.enabled === "boolean" ? consolidate.enabled : base.consolidate.enabled, periodDays: num5(consolidate.periodDays, MINDS_RANGES.periodDays, base.consolidate.periodDays) }
   };
 }
 function worldMindsOf(world) {
@@ -15771,16 +23184,16 @@ function worldMindsOf(world) {
   const w = obj(raw.weights);
   const band = obj(w.band);
   const d = DEFAULT_FIDELITY_WEIGHTS;
-  const weight = (v, fallback) => num3(v, MINDS_RANGES.weight, fallback);
+  const weight = (v, fallback) => num5(v, MINDS_RANGES.weight, fallback);
   const roles = {};
   const rawRoles = isRecord(w.roles) ? w.roles : d.roles;
   for (const [value, points] of Object.entries(rawRoles))
     if (safeKey(value) && typeof points === "number" && Number.isFinite(points))
       roles[value] = weight(points, 0);
   const t = obj(raw.thresholds);
-  const far = num3(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
-  const near = Math.max(far, num3(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
-  const live = Math.max(near, num3(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
+  const far = num5(t.far, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.far);
+  const near = Math.max(far, num5(t.near, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.near));
+  const live = Math.max(near, num5(t.live, MINDS_RANGES.threshold, DEFAULT_FIDELITY_THRESHOLDS.live));
   return {
     secrecy: raw.secrecy === "full" ? "full" : "brief",
     weights: {
@@ -16681,7 +24094,7 @@ function stepTrips(slot, ctx) {
   }
   return out;
 }
-var EVENTS2 = [
+var EVENTS3 = [
   {
     type: "castlife.need",
     validate: (e, ctx) => own(ctx.state.entities, strOf(e.data.entity)) && own(NEEDS, strOf(e.data.need)) && typeof e.data.delta === "number" ? null : { code: "bad_event", reason: "need needs an entity, a known need and a delta" },
@@ -16895,7 +24308,7 @@ var castlifePack = {
   domain: "castlife",
   requires: ["space", "gear", "relationships"],
   register(r) {
-    for (const def of EVENTS2)
+    for (const def of EVENTS3)
       r.event(def);
     r.process({ id: "castlife.agents", domain: "castlife", minLevel: 3, scope: "agent", step: (slot, ctx, rng, agent) => agent ? stepAgent2(slot, ctx, rng, agent) : [], instants: planMoments, atInstant: atPlanMoment });
     r.process({ id: "castlife.trips", domain: "castlife", minLevel: 1, step: (slot, ctx) => stepTrips(slot, ctx) });
@@ -17191,7 +24604,7 @@ function buildSheetView(ctx) {
     sections: designed ?? [...stats.length > 0 ? [{ title: "Stats", rows: stats }] : [], ...derived.length > 0 ? [{ title: "Derived", rows: derived }] : []]
   };
 }
-function reject10(code, reason) {
+function reject13(code, reason) {
   return { code, reason };
 }
 var sheetsPack = {
@@ -17218,10 +24631,10 @@ var sheetsPack = {
         const who = strOf(a.who) || ctx.world.pov;
         const e = own(ctx.state.entities, who);
         if (!e)
-          return reject10("missing_entity", `no ${labelOf(ctx, who)}`);
+          return reject13("missing_entity", `no ${labelOf(ctx, who)}`);
         const id = strOf(a.condition).toLowerCase().replace(/\W+/g, "_");
         if (!id)
-          return reject10("bad_condition", "a condition needs a name");
+          return reject13("bad_condition", "a condition needs a name");
         const kept = (Array.isArray(e.fields.conditions) ? e.fields.conditions : []).filter((c) => objOf(c).id !== id && !(typeof objOf(c).until === "number" && numOf(objOf(c).until) <= ctx.state.clock));
         if (a.clear === true)
           return [{ type: "set", entity: who, field: "conditions", value: kept }];
@@ -17257,9 +24670,9 @@ var sheetsPack = {
       validate(p, ctx) {
         const who = strOf(p.who) || ctx.world.pov;
         if (!own(ctx.state.entities, who) || !kindIs(ctx.registry, ctx.world, own(ctx.state.entities, who)?.kind ?? "", "person"))
-          return reject10("missing_entity", "a condition needs a person");
+          return reject13("missing_entity", "a condition needs a person");
         if (strOf(p.condition) === "")
-          return reject10("bad_condition", "a condition needs a name");
+          return reject13("bad_condition", "a condition needs a name");
         return null;
       },
       toEffects: (p) => [{ type: "sheets.condition", args: { who: strOf(p.who), condition: strOf(p.condition), ...typeof p.minutes === "number" ? { minutes: p.minutes } : {}, ...p.clear === true ? { clear: true } : {} } }]
@@ -17335,7 +24748,7 @@ function leakyLabels(world) {
       check(`places.${p.id}.name`, p.name);
   return out;
 }
-function reject11(code, reason) {
+function reject14(code, reason) {
   return { code, reason };
 }
 function openPuzzle(ctx, ref) {
@@ -17380,19 +24793,19 @@ var storyPack = {
       const v = flagValue(ctx, String(name ?? ""));
       return typeof v === "number" || typeof v === "boolean" || typeof v === "string" ? v : v !== null;
     });
-    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => strOf(a.name) === "" ? reject11("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }] });
+    r.effect({ type: "story.flag", args: ["name", "value?"], resolve: (a) => strOf(a.name) === "" ? reject14("bad_flag", "a flag needs a name") : [{ type: "story.flag", data: { name: strOf(a.name), value: a.value ?? true } }] });
     r.effect({
       type: "story.answer",
       args: ["track", "answer", "decision?"],
       resolve(a, ctx) {
         const track = openPuzzle(ctx, strOf(a.track));
         if (!track)
-          return reject11("not_a_puzzle", `no open puzzle ${labelOf(ctx, strOf(a.track))}`);
+          return reject14("not_a_puzzle", `no open puzzle ${labelOf(ctx, strOf(a.track))}`);
         const decision = typeof a.decision === "number" ? a.decision : undefined;
         const check = checkAnswer(ctx.world, ctx.state, track, strOf(a.answer), decision);
         if (check.needsDecision)
-          return reject11("needs_decision", "this answer needs a judgement");
-        return check.event ? [check.event] : reject11("no_answer", "there is nothing to answer here");
+          return reject14("needs_decision", "this answer needs a judgement");
+        return check.event ? [check.event] : reject14("no_answer", "there is nothing to answer here");
       }
     });
     r.action({
@@ -17448,7 +24861,7 @@ function rulesOf(world) {
     return null;
   return c;
 }
-function numbers(v) {
+function numbers2(v) {
   const out = {};
   for (const [k, n] of Object.entries(objOf(v)))
     if (typeof n === "number" && Number.isFinite(n))
@@ -17463,7 +24876,7 @@ function encounterOf(state) {
   for (const f of raw.order) {
     if (!isRecord(f) || typeof f.id !== "string" || f.side !== "party" && f.side !== "foes")
       continue;
-    order.push({ id: f.id, side: f.side, init: numOf(f.init), down: f.down === true, left: numbers(f.left) });
+    order.push({ id: f.id, side: f.side, init: numOf(f.init), down: f.down === true, left: numbers2(f.left) });
   }
   const log = [];
   for (const e of Array.isArray(raw.log) ? raw.log : []) {
@@ -17472,7 +24885,7 @@ function encounterOf(state) {
     log.push({ round: numOf(e.round), actor: e.actor, action: strOf(e.action), target: typeof e.target === "string" ? e.target : null, outcome: typeof e.outcome === "string" ? e.outcome : null });
   }
   const calm = objOf(raw.calm);
-  return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };
+  return { id: raw.id, place: typeof raw.place === "string" ? raw.place : null, round: Math.max(1, numOf(raw.round, 1)), turn: Math.max(0, numOf(raw.turn)), order, log, calm: { hp: numbers2(calm.hp), rounds: Math.max(0, numOf(calm.rounds)), struck: calm.struck === true } };
 }
 function writeEncounter(state, enc) {
   const slice = mutableSlice(state, PACK4);
@@ -17546,7 +24959,7 @@ function fullEconomy(ctx, rules, id) {
       out[budget] = budgetCount(ctx, def, id);
   return out;
 }
-function costOf(action) {
+function costOf2(action) {
   const out = {};
   for (const [budget, n] of Object.entries(isRecord(action.combat?.cost) ? action.combat.cost : {}))
     if (typeof n === "number" && Number.isFinite(n) && n > 0)
@@ -17627,7 +25040,7 @@ function spendFor(ctx, actor, action) {
     return { code: "not_fighting", reason: you ? "you aren't in this fight" : `${labelOf(ctx, actor)} isn't in this fight` };
   if (!standing(ctx, enc, f))
     return { code: "down", reason: you ? "you are out of the fight" : `${labelOf(ctx, actor)} is out of the fight` };
-  const cost = costOf(action);
+  const cost = costOf2(action);
   if (enc.order[enc.turn]?.id !== actor && !offTurnCost(rules, cost))
     return { code: "not_your_turn", reason: you ? "it isn't your turn" : `it isn't ${labelOf(ctx, actor)}'s turn` };
   const short = Object.entries(cost).filter(([budget, n]) => (f.left[budget] ?? 0) < n).map(([budget]) => own(rules.economy, budget)?.label ?? budget);
@@ -17663,7 +25076,7 @@ function nextTurn(ctx, rules, enc) {
   }
   return null;
 }
-function nameFor(ctx, id) {
+function nameFor2(ctx, id) {
   if (id === ctx.world.pov)
     return "you";
   return canSeeEntity(ctx.registry, ctx.world, ctx.state, ctx.world.pov, id) ? labelOf(ctx, id) : "someone";
@@ -17730,7 +25143,7 @@ class FightLines {
   changes(ctx, before) {
     for (const [id, was] of before) {
       const now = hpOf(ctx, this.rules, id);
-      const who = nameFor(ctx, id);
+      const who = nameFor2(ctx, id);
       if (now === was || who === "someone")
         continue;
       const seen = hpSeen(ctx, this.rules, id);
@@ -17776,7 +25189,7 @@ function stalled(w, rules, rng, lines) {
   lines.push(`No one has attacked or been hurt in ${stalemateRounds(rules)} rounds: the fight peters out.`);
   return true;
 }
-function settle(w, rules, rng, lines) {
+function settle2(w, rules, rng, lines) {
   const enc = encounterOf(w.state);
   if (!enc || leave(w, rng.fork("left"), lines))
     return true;
@@ -17795,7 +25208,7 @@ function settle(w, rules, rng, lines) {
       effects.push({ type: "life", args: { entity: f.id, to: down ? life : ALIVE } });
     applyEffects(w.reg, w, effects, { bindings: { self: f.id }, rng: fall });
     asUnit2(w, from, fall.seed);
-    const who = nameFor(w.ctx, f.id);
+    const who = nameFor2(w.ctx, f.id);
     if (who !== "someone")
       lines.push(`${capital(who)} ${f.id === w.world.pov ? "are" : "is"} ${down ? "down" : "back up"}.`);
   }
@@ -17810,7 +25223,7 @@ function settle(w, rules, rng, lines) {
   return encounterOf(w.state) === null;
 }
 function actEvents(enc, actor, action, params, res) {
-  const acts = action.combat?.start !== true && (Object.keys(costOf(action)).length > 0 || Object.values(action.outcomes).some((list) => list.some((fx) => fx.type !== "combat.end_turn")));
+  const acts = action.combat?.start !== true && (Object.keys(costOf2(action)).length > 0 || Object.values(action.outcomes).some((list) => list.some((fx) => fx.type !== "combat.end_turn")));
   if (!acts)
     return [];
   const target = targetOf(action, params);
@@ -17851,7 +25264,7 @@ function fightOptions(reg, world, state, actor) {
   }
   return out;
 }
-function landing(o) {
+function landing2(o) {
   if (!o.odds.odds)
     return 1;
   let p = 0;
@@ -17867,7 +25280,7 @@ function greater(a, b) {
   return false;
 }
 function tacticFor(ctx, rules, enc, me, options) {
-  const costly = options.filter((o) => Object.keys(costOf(o.action)).length > 0);
+  const costly = options.filter((o) => Object.keys(costOf2(o.action)).length > 0);
   const max = hpMaxOf(ctx, rules, me.id);
   const low = rules.tactics?.lowHp !== undefined ? truthy2(readFor(ctx, rules.tactics.lowHp, { self: me.id }, false)) : max !== null && max > 0 && hpOf(ctx, rules, me.id) * 4 <= max;
   const foes = new Set(enc.order.filter((f) => f.side !== me.side).map((f) => f.id));
@@ -17881,7 +25294,7 @@ function tacticFor(ctx, rules, enc, me, options) {
     if (o.action.combat?.role !== "attack" || o.target === null || !foes.has(o.target))
       continue;
     const threat = Number(readFor(ctx, rules.tactics?.threat ?? `target.${rules.hp}`, { self: me.id, target: o.target }, 0));
-    const key = [Number.isFinite(threat) ? threat : 0, o.target === ctx.world.pov ? 1 : 0, -(rank.get(o.target) ?? 0), landing(o)];
+    const key = [Number.isFinite(threat) ? threat : 0, o.target === ctx.world.pov ? 1 : 0, -(rank.get(o.target) ?? 0), landing2(o)];
     if (!best || greater(key, best.key))
       best = { o, key };
   }
@@ -17902,7 +25315,7 @@ function act(w, rules, actor, chosen, rng, lines) {
   record2(w, recorded, rng.seed);
   asUnit2(w, from, rng.seed);
   if (recorded.length > 0)
-    lines.push(`${capital(nameFor(w.ctx, actor))}: ${chosen.action.label}${chosen.target ? ` \u2192 ${nameFor(w.ctx, chosen.target)}` : ""}${res.check && res.outcome ? ` (${res.outcome.replace(/_/g, " ")})` : ""}.`);
+    lines.push(`${capital(nameFor2(w.ctx, actor))}: ${chosen.action.label}${chosen.target ? ` \u2192 ${nameFor2(w.ctx, chosen.target)}` : ""}${res.check && res.outcome ? ` (${res.outcome.replace(/_/g, " ")})` : ""}.`);
   lines.changes(w.ctx, before);
   return true;
 }
@@ -17921,7 +25334,7 @@ function othersTurn(w, rules, rng, lines) {
     const chosen = (n === 0 && decided !== undefined ? options.find((o) => optionKey(o) === decided) : undefined) ?? tacticFor(w.ctx, rules, enc, f, options);
     if (!chosen || !act(w, rules, me.id, chosen, rng.fork(`act:${n}`), lines))
       break;
-    if (settle(w, rules, rng.fork(`settle:${n}`), lines))
+    if (settle2(w, rules, rng.fork(`settle:${n}`), lines))
       return;
   }
   const enc = encounterOf(w.state);
@@ -17953,7 +25366,7 @@ function startLine(ctx, e) {
   const names = order.flatMap((f) => {
     if (!isRecord(f) || typeof f.id !== "string")
       return [];
-    const name = nameFor(ctx, f.id);
+    const name = nameFor2(ctx, f.id);
     return [`${name}${name !== "someone" && typeof f.init === "number" ? ` ${f.init}` : ""}`];
   });
   return `A fight starts. Initiative: ${names.join(", ")}.`;
@@ -18000,11 +25413,11 @@ function openRound(w, rng) {
           asUnit2(w, start, rng.fork("act").seed);
         lines.changes(w.ctx, before);
       }
-      if (!settle(w, rules, rng.fork("settle"), lines) && action?.combat) {
+      if (!settle2(w, rules, rng.fork("settle"), lines) && action?.combat) {
         const now = encounterOf(w.state);
         const me = now ? fighterOf(now, w.world.pov) : undefined;
         const more = me ? combatActions(w.reg, w.world).some((a) => {
-          const cost = costOf(a);
+          const cost = costOf2(a);
           return a.combat?.start !== true && Object.keys(cost).length > 0 && !offTurnCost(rules, cost) && fits(cost, me.left);
         }) : false;
         if (now && me && now.order[now.turn]?.id === me.id && rules.endTurn !== "manual" && !more)
@@ -18143,14 +25556,14 @@ function buildEncounterView(ctx, opts = {}) {
 }
 
 // src/packs/combat/core/index.ts
-function reject12(code, reason) {
+function reject15(code, reason) {
   return { code, reason };
 }
 function current(e, ctx) {
   const enc = encounterOf(ctx.state);
   if (!enc)
-    return reject12("no_fight", "no fight is under way");
-  return enc.id === strOf(e.data.encounter) ? enc : reject12("other_fight", "that was another fight");
+    return reject15("no_fight", "no fight is under way");
+  return enc.id === strOf(e.data.encounter) ? enc : reject15("other_fight", "that was another fight");
 }
 function counts(v) {
   if (!isRecord(v))
@@ -18183,33 +25596,33 @@ function namedFoes(ctx, v, here) {
     return null;
   if (isRecord(v)) {
     const selector = knownBySelector(v);
-    return selector ? here.filter((id) => selectorMatches(ctx.registry, ctx.world, ctx.state, selector, id)) : reject12("bad_args", "the foes are ids or a selector");
+    return selector ? here.filter((id) => selectorMatches(ctx.registry, ctx.world, ctx.state, selector, id)) : reject15("bad_args", "the foes are ids or a selector");
   }
   const ids = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" && x !== "");
   const away = ids.find((id) => !here.includes(id));
-  return away !== undefined ? reject12("not_here", `${labelOf(ctx, away)} isn't here to fight`) : ids;
+  return away !== undefined ? reject15("not_here", `${labelOf(ctx, away)} isn't here to fight`) : ids;
 }
 function startFight(a, ctx) {
   const rules = rulesOf(ctx.world);
   if (!rules)
-    return reject12("no_combat", "this world has no combat");
+    return reject15("no_combat", "this world has no combat");
   if (encounterOf(ctx.state))
-    return reject12("in_fight", "a fight is already under way");
+    return reject15("in_fight", "a fight is already under way");
   const pov = ctx.world.pov;
   const place = placeOfEntity(ctx.state, pov);
   if (place === null)
-    return reject12("nowhere", "there's nowhere to fight");
+    return reject15("nowhere", "there's nowhere to fight");
   if (!canFight(ctx, rules, pov))
-    return reject12("cannot_fight", "you can't fight here");
+    return reject15("cannot_fight", "you can't fight here");
   const here = Object.keys(ctx.state.entities).sort().filter((id) => id !== pov && placeOfEntity(ctx.state, id) === place && canFight(ctx, rules, id));
   const named = namedFoes(ctx, a.foes, here);
   if (named !== null && !Array.isArray(named))
     return named;
   const foes = new Set(named ?? here.filter((id) => hostile(ctx, rules.sides?.hostile, id, pov)));
   if (foes.size === 0)
-    return reject12("no_foes", "there's no one to fight here");
+    return reject15("no_foes", "there's no one to fight here");
   if (foes.has(pov))
-    return reject12("bad_args", "you can't fight yourself");
+    return reject15("bad_args", "you can't fight yourself");
   const ally = (self, other) => rules.sides?.ally !== undefined && truthy2(readFor(ctx, rules.sides.ally, { self, other }, false));
   const party = new Set([pov, ...here.filter((id) => !foes.has(id) && ally(id, pov))]);
   const sworn = [...foes];
@@ -18218,7 +25631,7 @@ function startFight(a, ctx) {
       foes.add(id);
   const init = checkOf(ctx.world, rules.initiative);
   if (!init)
-    return reject12("no_initiative", "the initiative check is missing");
+    return reject15("no_initiative", "the initiative check is missing");
   const rolled = [];
   for (const id of [...party, ...[...foes].sort()]) {
     const ready = readyCheck(ctx.registry, ctx, init, { self: id, actor: id });
@@ -18241,19 +25654,19 @@ var events2 = [
     type: "combat.start",
     validate(e, ctx) {
       if (!rulesOf(ctx.world))
-        return reject12("no_combat", "this world has no combat");
+        return reject15("no_combat", "this world has no combat");
       if (encounterOf(ctx.state))
-        return reject12("in_fight", "a fight is already under way");
+        return reject15("in_fight", "a fight is already under way");
       const order = orderOf(e.data.order);
       if (strOf(e.data.encounter) === "" || !order)
-        return reject12("bad_event", "a fight needs an id and an initiative order");
+        return reject15("bad_event", "a fight needs an id and an initiative order");
       if (new Set(order.map((f) => f.id)).size !== order.length)
-        return reject12("bad_event", "someone is in the fight twice");
+        return reject15("bad_event", "someone is in the fight twice");
       const missing = order.find((f) => !own(ctx.state.entities, f.id));
       if (missing)
-        return reject12("missing_entity", `no ${labelOf(ctx, missing.id)}`);
+        return reject15("missing_entity", `no ${labelOf(ctx, missing.id)}`);
       if (order.find((f) => f.id === ctx.world.pov)?.side !== "party" || !order.some((f) => f.side === "foes"))
-        return reject12("bad_event", "a fight is the POV's side against foes");
+        return reject15("bad_event", "a fight is the POV's side against foes");
       return null;
     },
     apply(e, state, ctx) {
@@ -18273,15 +25686,15 @@ var events2 = [
       const round = e.data.round;
       const turn = e.data.turn;
       if (typeof round !== "number" || typeof turn !== "number" || !Number.isInteger(round) || !Number.isInteger(turn))
-        return reject12("bad_event", "a turn needs a round and a place in the order");
+        return reject15("bad_event", "a turn needs a round and a place in the order");
       if (enc.order[turn]?.id !== strOf(e.data.actor))
-        return reject12("bad_turn", "that isn't who goes there");
+        return reject15("bad_turn", "that isn't who goes there");
       if (round < enc.round || round === enc.round && turn <= enc.turn)
-        return reject12("bad_turn", "turns only move on");
+        return reject15("bad_turn", "turns only move on");
       const reset = objOf(e.data.reset);
       for (const [id, budgets] of Object.entries(reset))
         if (!fighterOf(enc, id) || !counts(budgets))
-          return reject12("bad_event", "a refill names a participant and its budgets");
+          return reject15("bad_event", "a refill names a participant and its budgets");
       return null;
     },
     apply(e, state, ctx) {
@@ -18315,12 +25728,12 @@ var events2 = [
       const f = fighterOf(enc, who);
       const cost = counts(e.data.cost);
       if (!rules || !f || !cost || Object.values(cost).some((n) => n <= 0))
-        return reject12("bad_event", "a spend needs a participant and what it spends");
+        return reject15("bad_event", "a spend needs a participant and what it spends");
       if (!standing(ctx, enc, f))
-        return reject12("down", `${labelOf(ctx, who)} is out of the fight`);
+        return reject15("down", `${labelOf(ctx, who)} is out of the fight`);
       if (enc.order[enc.turn]?.id !== who && !offTurnCost(rules, cost))
-        return reject12("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
-      return fits(cost, f.left) ? null : reject12("spent", `${labelOf(ctx, who)} has nothing like that left`);
+        return reject15("not_your_turn", `it isn't ${labelOf(ctx, who)}'s turn`);
+      return fits(cost, f.left) ? null : reject15("spent", `${labelOf(ctx, who)} has nothing like that left`);
     },
     apply(e, state) {
       const enc = encounterOf(state);
@@ -18336,7 +25749,7 @@ var events2 = [
       const enc = current(e, ctx);
       if ("code" in enc)
         return enc;
-      return fighterOf(enc, strOf(e.data.actor)) ? null : reject12("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
+      return fighterOf(enc, strOf(e.data.actor)) ? null : reject15("not_fighting", `${labelOf(ctx, strOf(e.data.actor))} isn't in this fight`);
     },
     apply(e, state, ctx) {
       const enc = encounterOf(state);
@@ -18358,8 +25771,8 @@ var events2 = [
       const rules = rulesOf(ctx.world);
       const who = strOf(e.data.entity);
       if (!rules || !fighterOf(enc, who) || typeof e.data.down !== "boolean")
-        return reject12("bad_event", "a fall names a participant");
-      return downHolds(ctx, rules, who) === e.data.down ? null : reject12("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
+        return reject15("bad_event", "a fall names a participant");
+      return downHolds(ctx, rules, who) === e.data.down ? null : reject15("not_down", e.data.down ? `${labelOf(ctx, who)} isn't down` : `${labelOf(ctx, who)} is still down`);
     },
     apply(e, state) {
       const enc = encounterOf(state);
@@ -18376,11 +25789,11 @@ var events2 = [
         return enc;
       const rules = rulesOf(ctx.world);
       if (e.data.reason === "over" && (!rules || !endHolds(ctx, rules, enc)))
-        return reject12("not_over", "the fight isn't over");
+        return reject15("not_over", "the fight isn't over");
       if (e.data.reason === "left" && !povLeft(ctx.state, ctx.world, enc))
-        return reject12("not_left", "you are still in the fight");
+        return reject15("not_left", "you are still in the fight");
       if (e.data.reason === "stalemate" && (!rules || !stalledHolds(ctx, rules, enc)))
-        return reject12("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
+        return reject15("not_stalemate", rules && stalemateRounds(rules) === 0 ? "this world's fights never peter out" : "someone has attacked or been hurt since");
       return null;
     },
     apply: (_e, state) => writeEncounter(state, null),
@@ -18388,7 +25801,7 @@ var events2 = [
   },
   {
     type: "combat.decision",
-    validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject12("bad_event", "a decision needs a key and a choice"),
+    validate: (e) => strOf(e.data.key) !== "" && strOf(e.data.choice) !== "" ? null : reject15("bad_event", "a decision needs a key and a choice"),
     apply: (e, state) => {
       sliceRecord(state, PACK4, "decisions")[strOf(e.data.key)] = strOf(e.data.choice);
     },
@@ -18416,7 +25829,7 @@ var combatPack = {
       resolve(a, ctx) {
         const enc = encounterOf(ctx.state);
         if (!enc)
-          return reject12("no_fight", "no fight is under way");
+          return reject15("no_fight", "no fight is under way");
         const winner = a.winner === "party" || a.winner === "foes" ? a.winner : winnerOf(ctx, enc);
         return [{ type: "combat.end", data: { encounter: enc.id, reason: "effect", winner, rounds: enc.round } }];
       }
@@ -18429,11 +25842,11 @@ var combatPack = {
         const enc = encounterOf(ctx.state);
         const who = strOf(a.who) || ctx.world.pov;
         if (!rules || !enc)
-          return reject12("no_fight", "no fight is under way");
+          return reject15("no_fight", "no fight is under way");
         if (enc.order[enc.turn]?.id !== who)
-          return reject12("not_your_turn", who === ctx.world.pov ? "it isn't your turn" : `it isn't ${labelOf(ctx, who)}'s turn`);
+          return reject15("not_your_turn", who === ctx.world.pov ? "it isn't your turn" : `it isn't ${labelOf(ctx, who)}'s turn`);
         const next = nextTurn(ctx, rules, enc);
-        return next ? [next] : reject12("no_one", "no one is left to take a turn");
+        return next ? [next] : reject15("no_one", "no one is left to take a turn");
       }
     });
     r.effect({ type: "combat.spend", args: ["who?", "cost"], resolve: (a, ctx) => spendFor(ctx, strOf(a.who) || ctx.world.pov, { combat: { cost: counts(a.cost) ?? {} } }) });
@@ -18595,7 +26008,7 @@ function openCommitments(c) {
 }
 
 // src/packs/minds/core/events.ts
-var str4 = (v) => typeof v === "string";
+var str13 = (v) => typeof v === "string";
 var finite2 = (v) => typeof v === "number" && Number.isFinite(v);
 var ids = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
 var texts = ids;
@@ -18608,13 +26021,13 @@ function isFidelity(v) {
 function isPlan(v) {
   if (!isRecord(v) || !isRecord(v.when))
     return false;
-  return str4(v.id) && v.id !== "" && str4(v.what) && typeof v.kind === "string" && PLAN_KINDS.includes(v.kind) && finite2(v.when.from) && finite2(v.when.to) && v.when.to >= v.when.from && (v.where === null || str4(v.where)) && ids(v.with) && finite2(v.priority) && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max && (v.status === "open" || v.status === "done" || v.status === "dropped") && finite2(v.made) && (v.source === "mind" || v.source === "memory" || v.source === "gm") && (v.closed === null || finite2(v.closed)) && (v.reason === null || str4(v.reason));
+  return str13(v.id) && v.id !== "" && str13(v.what) && typeof v.kind === "string" && PLAN_KINDS.includes(v.kind) && finite2(v.when.from) && finite2(v.when.to) && v.when.to >= v.when.from && (v.where === null || str13(v.where)) && ids(v.with) && finite2(v.priority) && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max && (v.status === "open" || v.status === "done" || v.status === "dropped") && finite2(v.made) && (v.source === "mind" || v.source === "memory" || v.source === "gm") && (v.closed === null || finite2(v.closed)) && (v.reason === null || str13(v.reason));
 }
 function isNote(v) {
-  return isRecord(v) && str4(v.id) && v.id !== "" && str4(v.text) && finite2(v.salience) && v.salience >= 0 && v.salience <= 5 && finite2(v.at);
+  return isRecord(v) && str13(v.id) && v.id !== "" && str13(v.text) && finite2(v.salience) && v.salience >= 0 && v.salience <= 5 && finite2(v.at);
 }
 function isCommitment(v) {
-  return isRecord(v) && str4(v.id) && v.id !== "" && typeof v.kind === "string" && COMMITMENT_KINDS.includes(v.kind) && ids(v.with) && str4(v.text) && (v.due === null || finite2(v.due)) && typeof v.status === "string" && COMMITMENT_STATUSES.includes(v.status) && finite2(v.made) && (v.closed === null || finite2(v.closed));
+  return isRecord(v) && str13(v.id) && v.id !== "" && typeof v.kind === "string" && COMMITMENT_KINDS.includes(v.kind) && ids(v.with) && str13(v.text) && (v.due === null || finite2(v.due)) && typeof v.status === "string" && COMMITMENT_STATUSES.includes(v.status) && finite2(v.made) && (v.closed === null || finite2(v.closed));
 }
 function planOf(v) {
   return { id: v.id, what: v.what, kind: v.kind, when: { from: v.when.from, to: v.when.to }, where: v.where, with: [...v.with], priority: v.priority, status: v.status, made: v.made, source: v.source, closed: v.closed, reason: v.reason };
@@ -18626,7 +26039,7 @@ function commitmentOf(v) {
   return { id: v.id, kind: v.kind, with: [...v.with], text: v.text, due: v.due, status: v.status, made: v.made, closed: v.closed };
 }
 function person(ctx, data) {
-  return str4(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
+  return str13(data.entity) && own(ctx.state.entities, data.entity) ? null : { code: "missing_entity", reason: "a minds event names someone who isn't in the world" };
 }
 function nameOf4(ctx, id) {
   return own(ctx.state.entities, id)?.name ?? id;
@@ -18644,11 +26057,11 @@ var round = {
 };
 function validMind(data) {
   const { at, place, level, moment, reason, monologue, depiction, intent, reactions, plans, mood, interrupt, withheld } = data;
-  if (!finite2(at) || !(place === null || str4(place)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str4(reason))
+  if (!finite2(at) || !(place === null || str13(place)) || !isFidelity(level) || moment !== "turn" && moment !== "beat" || !str13(reason))
     return bad("a mind needs its clock, place, level, moment and reason");
-  if (!str4(monologue) || !str4(depiction) || !str4(intent) || !texts(reactions) || !Array.isArray(plans) || !plans.every((p) => isPlan(p)))
+  if (!str13(monologue) || !str13(depiction) || !str13(intent) || !texts(reactions) || !Array.isArray(plans) || !plans.every((p) => isPlan(p)))
     return bad("a mind needs its monologue, depiction, intent, reactions and plans");
-  if (!(mood === null || str4(mood)) || !(interrupt === null || isRecord(interrupt) && str4(interrupt.reason)) || typeof withheld !== "boolean")
+  if (!(mood === null || str13(mood)) || !(interrupt === null || isRecord(interrupt) && str13(interrupt.reason)) || typeof withheld !== "boolean")
     return bad("a mind's mood, interrupt or withheld flag is malformed");
   return null;
 }
@@ -18657,7 +26070,7 @@ var mind = {
   validate: (e, ctx) => person(ctx, e.data) ?? validMind(e.data),
   apply: (e, state) => {
     const d = e.data;
-    if (!str4(d.entity))
+    if (!str13(d.entity))
       return;
     const s = writeSlice(state);
     const c = writeCharacter(state, d.entity);
@@ -18666,16 +26079,16 @@ var mind = {
       at: finite2(d.at) ? d.at : state.clock,
       round: s.round,
       level: isFidelity(d.level) ? d.level : "background",
-      place: str4(d.place) ? d.place : null,
+      place: str13(d.place) ? d.place : null,
       moment: d.moment === "beat" ? "beat" : "turn",
-      reason: str4(d.reason) ? d.reason : "",
-      monologue: str4(d.monologue) ? d.monologue : "",
-      depiction: str4(d.depiction) ? d.depiction : "",
-      intent: str4(d.intent) ? d.intent : "",
+      reason: str13(d.reason) ? d.reason : "",
+      monologue: str13(d.monologue) ? d.monologue : "",
+      depiction: str13(d.depiction) ? d.depiction : "",
+      intent: str13(d.intent) ? d.intent : "",
       reactions: texts(d.reactions) ? [...d.reactions] : [],
       plans: plans.map((p) => p.id),
-      mood: str4(d.mood) ? d.mood : null,
-      interrupt: isRecord(d.interrupt) && str4(d.interrupt.reason) ? d.interrupt.reason : null,
+      mood: str13(d.mood) ? d.mood : null,
+      interrupt: isRecord(d.interrupt) && str13(d.interrupt.reason) ? d.interrupt.reason : null,
       withheld: d.withheld === true
     };
     c.mind = record;
@@ -18683,15 +26096,15 @@ var mind = {
     for (const p of plans)
       putPlan(c, p);
   },
-  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s mind (${String(e.data.level)}): ${str4(e.data.intent) && e.data.intent !== "" ? e.data.intent : "no intent"}`
+  describe: (e, ctx, viewer) => viewer !== undefined ? "" : `${nameOf4(ctx, String(e.data.entity))}'s mind (${String(e.data.level)}): ${str13(e.data.intent) && e.data.intent !== "" ? e.data.intent : "no intent"}`
 };
 function validMemory(data) {
   const { at, notes, commitments, resolved, plans, told, summary } = data;
   if (!finite2(at) || !Array.isArray(notes) || !notes.every((n) => isNote(n)) || !Array.isArray(commitments) || !commitments.every((c) => isCommitment(c)))
     return bad("a memory needs its clock, notes and commitments");
-  if (!Array.isArray(resolved) || !resolved.every((r) => isRecord(r) && str4(r.id) && (r.status === "kept" || r.status === "broken" || r.status === "released")))
+  if (!Array.isArray(resolved) || !resolved.every((r) => isRecord(r) && str13(r.id) && (r.status === "kept" || r.status === "broken" || r.status === "released")))
     return bad("a memory's resolved commitments are malformed");
-  if (!Array.isArray(plans) || !plans.every((p) => isPlan(p)) || !Array.isArray(told) || !told.every((t) => isRecord(t) && ids(t.to) && str4(t.what)) || !(summary === null || str4(summary)))
+  if (!Array.isArray(plans) || !plans.every((p) => isPlan(p)) || !Array.isArray(told) || !told.every((t) => isRecord(t) && ids(t.to) && str13(t.what)) || !(summary === null || str13(summary)))
     return bad("a memory's plans, told or summary are malformed");
   return null;
 }
@@ -18700,7 +26113,7 @@ var memory = {
   validate: (e, ctx) => person(ctx, e.data) ?? validMemory(e.data),
   apply: (e, state) => {
     const d = e.data;
-    if (!str4(d.entity))
+    if (!str13(d.entity))
       return;
     const who = d.entity;
     const at = finite2(d.at) ? d.at : state.clock;
@@ -18712,7 +26125,7 @@ var memory = {
       if (isCommitment(x))
         putCommitment(c, commitmentOf(x));
     for (const r of Array.isArray(d.resolved) ? d.resolved : []) {
-      if (!isRecord(r) || !str4(r.id))
+      if (!isRecord(r) || !str13(r.id))
         continue;
       const open = c.commitments.find((x) => x.id === r.id && x.status === "open");
       if (open && (r.status === "kept" || r.status === "broken" || r.status === "released"))
@@ -18721,10 +26134,10 @@ var memory = {
     for (const p of Array.isArray(d.plans) ? d.plans : [])
       if (isPlan(p))
         putPlan(c, planOf(p));
-    if (str4(d.summary))
+    if (str13(d.summary))
       c.summary = d.summary;
     for (const t of Array.isArray(d.told) ? d.told : []) {
-      if (!isRecord(t) || !ids(t.to) || !str4(t.what))
+      if (!isRecord(t) || !ids(t.to) || !str13(t.what))
         continue;
       for (const to of t.to)
         if (to !== who && own(state.entities, to))
@@ -18741,14 +26154,14 @@ var memory = {
 };
 var presence = {
   type: MINDS_EVENTS.presence,
-  validate: (e) => finite2(e.data.at) && (e.data.msg === null || str4(e.data.msg)) && (e.data.place === null || str4(e.data.place)) && ids(e.data.who) && texts(e.data.saw) ? null : bad("a presence record needs its clock, message, place, who and what they saw"),
+  validate: (e) => finite2(e.data.at) && (e.data.msg === null || str13(e.data.msg)) && (e.data.place === null || str13(e.data.place)) && ids(e.data.who) && texts(e.data.saw) ? null : bad("a presence record needs its clock, message, place, who and what they saw"),
   apply: (e, state) => {
     const d = e.data;
     const at = finite2(d.at) ? d.at : state.clock;
-    const place = str4(d.place) ? d.place : null;
+    const place = str13(d.place) ? d.place : null;
     const who = ids(d.who) ? d.who.filter((id) => own(state.entities, id)) : [];
     const s = writeSlice(state);
-    s.presence.push({ msg: str4(d.msg) ? d.msg : null, at, place, who: [...who] });
+    s.presence.push({ msg: str13(d.msg) ? d.msg : null, at, place, who: [...who] });
     if (s.presence.length > MINDS_KEEP.presence)
       s.presence.splice(0, s.presence.length - MINDS_KEEP.presence);
     const saw = texts(d.saw) ? d.saw : [];
@@ -18765,7 +26178,7 @@ var planStatus = {
   type: MINDS_EVENTS.plan,
   validate: (e, ctx) => {
     const d = e.data;
-    if (!str4(d.plan) || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str4(d.reason)))
+    if (!str13(d.plan) || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str13(d.reason)))
       return bad("a plan's status needs the plan, a status, its clock and a reason or null");
     const missing = person(ctx, d);
     if (missing)
@@ -18779,7 +26192,7 @@ var planStatus = {
     if (!p || typeof d.status !== "string" || !PLAN_STATUSES.includes(d.status))
       return;
     const status = d.status;
-    putPlan(c, { ...p, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state.clock, reason: str4(d.reason) ? d.reason : null });
+    putPlan(c, { ...p, status, closed: status === "open" ? null : finite2(d.at) ? d.at : state.clock, reason: str13(d.reason) ? d.reason : null });
   },
   describe: (e, ctx, viewer) => {
     if (viewer !== undefined)
@@ -18797,7 +26210,7 @@ function editDef(type, key, valid, list, put, remove) {
       if (missing)
         return missing;
       const id = d[key];
-      if (!str4(id) || id === "")
+      if (!str13(id) || id === "")
         return bad(`a ${key} edit needs the ${key}'s id`);
       if (d.value === null)
         return list(readCharacter(ctx.state, String(d.entity))).some((x) => x.id === id) ? null : { code: `missing_${key}`, reason: `that ${key} isn't theirs any more` };
@@ -18839,7 +26252,7 @@ var commitmentStatus = {
   type: MINDS_EVENTS.commitment,
   validate: (e, ctx) => {
     const d = e.data;
-    if (!str4(d.commitment) || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str4(d.reason)))
+    if (!str13(d.commitment) || typeof d.status !== "string" || !COMMITMENT_STATUSES.includes(d.status) || !finite2(d.at) || !(d.reason === null || str13(d.reason)))
       return bad("a commitment's status needs the commitment, a status, its clock and a reason or null");
     const missing = person(ctx, d);
     if (missing)
@@ -18859,13 +26272,13 @@ var commitmentStatus = {
 };
 var consolidated = {
   type: MINDS_EVENTS.consolidated,
-  validate: (e, ctx) => person(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str4(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
+  validate: (e, ctx) => person(ctx, e.data) ?? (finite2(e.data.at) && ids(e.data.notes) && str13(e.data.summary) ? null : bad("a consolidation needs its clock, the notes folded and the summary")),
   apply: (e, state) => {
     const d = e.data;
     const c = writeCharacter(state, String(d.entity));
     const gone = new Set(ids(d.notes) ? d.notes : []);
     c.notes = c.notes.filter((n) => !gone.has(n.id));
-    if (str4(d.summary))
+    if (str13(d.summary))
       c.summary = d.summary;
     c.consolidated = finite2(d.at) ? d.at : state.clock;
   },
@@ -18889,7 +26302,7 @@ var refresh = {
 };
 var skip = {
   type: MINDS_EVENTS.skip,
-  validate: (e) => finite2(e.data.from) && finite2(e.data.to) && Array.isArray(e.data.beats) && e.data.beats.every((b) => isRecord(b) && finite2(b.at) && str4(b.reason) && (b.source === "scan" || b.source === "model")) ? null : bad("a skip's beats need their span and each beat's clock, reason and source"),
+  validate: (e) => finite2(e.data.from) && finite2(e.data.to) && Array.isArray(e.data.beats) && e.data.beats.every((b) => isRecord(b) && finite2(b.at) && str13(b.reason) && (b.source === "scan" || b.source === "model")) ? null : bad("a skip's beats need their span and each beat's clock, reason and source"),
   apply: () => {
     return;
   },
@@ -18901,7 +26314,7 @@ function mindsOn(ctx) {
 }
 
 // src/packs/minds/core/edit.ts
-function reject13(code, reason) {
+function reject16(code, reason) {
   return { code, reason };
 }
 function capText(text, max) {
@@ -18918,64 +26331,64 @@ function peopleIn(ctx, v) {
   if (v === undefined)
     return [];
   if (!Array.isArray(v) || !v.every((x) => typeof x === "string"))
-    return reject13("bad_value", "who it's with is a list of people");
+    return reject16("bad_value", "who it's with is a list of people");
   const ids = v;
   for (const id of ids)
     if (!own(ctx.state.entities, id))
-      return reject13("missing_entity", `there's no ${labelOf(ctx, id)}`);
+      return reject16("missing_entity", `there's no ${labelOf(ctx, id)}`);
   return [...new Set(ids)];
 }
 function noteFrom(ctx, who, id, v, before) {
   const body = text3(v.text, MIND_TEXT_CAPS.note) ?? before?.text ?? null;
   if (body === null)
-    return reject13("bad_value", "a note needs its text");
+    return reject16("bad_value", "a note needs its text");
   const salience = v.salience === undefined ? before?.salience ?? 3 : typeof v.salience === "number" && v.salience >= 1 && v.salience <= 5 ? v.salience : null;
   if (salience === null)
-    return reject13("bad_value", "a note's salience is 1 to 5");
+    return reject16("bad_value", "a note's salience is 1 to 5");
   return { id: id ?? `n_${hashParts("minds.gm.note", who, String(ctx.state.clock), body).slice(0, 10)}`, text: body, salience, at: before?.at ?? ctx.state.clock };
 }
 function commitmentFrom(ctx, who, id, v, before) {
   const body = text3(v.text, MIND_TEXT_CAPS.commitment) ?? before?.text ?? null;
   if (body === null)
-    return reject13("bad_value", "a commitment needs its text");
+    return reject16("bad_value", "a commitment needs its text");
   const kind = v.kind === undefined ? before?.kind ?? "other" : COMMITMENT_KINDS.includes(v.kind) ? v.kind : null;
   if (kind === null)
-    return reject13("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
+    return reject16("bad_value", `a commitment is one of ${COMMITMENT_KINDS.join(", ")}`);
   const status = v.status === undefined ? before?.status ?? "open" : COMMITMENT_STATUSES.includes(v.status) ? v.status : null;
   if (status === null)
-    return reject13("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
+    return reject16("bad_value", `a commitment's status is one of ${COMMITMENT_STATUSES.join(", ")}`);
   const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
   if (!Array.isArray(withList))
     return withList;
   const due = v.due === undefined ? before?.due ?? null : v.due === null ? null : minutes(v.due);
   if (v.due !== undefined && v.due !== null && due === null)
-    return reject13("bad_value", "a commitment's due time is game minutes");
+    return reject16("bad_value", "a commitment's due time is game minutes");
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   return { id: id ?? `c_${hashParts("minds.gm.commitment", who, String(ctx.state.clock), body).slice(0, 10)}`, kind, with: withList, text: body, due, status, made: before?.made ?? ctx.state.clock, closed };
 }
 function planFrom(ctx, who, id, v, before) {
   const what = text3(v.what, MIND_TEXT_CAPS.planWhat) ?? before?.what ?? null;
   if (what === null)
-    return reject13("bad_value", "a plan needs what it is");
+    return reject16("bad_value", "a plan needs what it is");
   const when = v.when === undefined ? before?.when ?? null : typeof v.when === "object" && v.when !== null && !Array.isArray(v.when) ? { from: minutes(v.when.from), to: minutes(v.when.to) } : null;
   if (!when || when.from === null || when.to === null || when.to < when.from)
-    return reject13("bad_value", "a plan needs when, from and to in game minutes, to not before from");
+    return reject16("bad_value", "a plan needs when, from and to in game minutes, to not before from");
   const kind = v.kind === undefined ? before?.kind ?? "other" : PLAN_KINDS.includes(v.kind) ? v.kind : null;
   if (kind === null)
-    return reject13("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
+    return reject16("bad_value", `a plan is one of ${PLAN_KINDS.join(", ")}`);
   const where = v.where === undefined ? before?.where ?? null : v.where === null ? null : typeof v.where === "string" && own(ctx.world.places, v.where) ? v.where : undefined;
   if (where === undefined)
-    return reject13("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
+    return reject16("missing_place", `there's no place ${typeof v.where === "string" ? labelOf(ctx, v.where) : "like that"}`);
   const withList = v.with === undefined ? before?.with ?? [] : peopleIn(ctx, v.with);
   if (!Array.isArray(withList))
     return withList;
   const priority = v.priority === undefined ? before?.priority ?? PLAN_PRIORITY.normal : typeof v.priority === "number" && v.priority >= PLAN_PRIORITY.min && v.priority <= PLAN_PRIORITY.max ? Math.round(v.priority) : null;
   if (priority === null)
-    return reject13("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
+    return reject16("bad_value", `a plan's priority is ${PLAN_PRIORITY.min} to ${PLAN_PRIORITY.max}`);
   const statuses = ["open", "done", "dropped"];
   const status = v.status === undefined ? before?.status ?? "open" : statuses.includes(v.status) ? v.status : null;
   if (status === null)
-    return reject13("bad_value", "a plan's status is open, done or dropped");
+    return reject16("bad_value", "a plan's status is open, done or dropped");
   const closed = status === "open" ? null : before && before.status !== "open" ? before.closed : ctx.state.clock;
   return {
     id: id ?? `p_${hashParts("minds.gm.plan", who, String(ctx.state.clock), what).slice(0, 10)}`,
@@ -18996,9 +26409,9 @@ function mindEdit(ctx, op) {
   const { world, state, registry } = ctx;
   const e = own(state.entities, op.entity);
   if (!e)
-    return reject13("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
+    return reject16("missing_entity", `there's no ${labelOf(ctx, op.entity)}`);
   if (op.entity === world.pov || !kindIs(registry, world, e.kind, "person"))
-    return reject13("no_mind", `${e.name} doesn't have a mind`);
+    return reject16("no_mind", `${e.name} doesn't have a mind`);
   if (op.op === "mind_pin")
     return [{ type: MINDS_EVENTS.pin, data: { entity: op.entity, level: op.level } }];
   if (op.op === "mind_refresh")
@@ -19008,26 +26421,26 @@ function mindEdit(ctx, op) {
   if (op.part === "note") {
     const before = op.id === null ? undefined : c.notes.find((n) => n.id === op.id);
     if (op.id !== null && !before)
-      return reject13("missing_note", `${e.name} has no such note`);
+      return reject16("missing_note", `${e.name} has no such note`);
     if (value === null)
-      return op.id === null ? reject13("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
+      return op.id === null ? reject16("bad_value", "say which note to delete") : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: op.id, value: null } }];
     const note = noteFrom(ctx, op.entity, op.id, value, before);
     return "code" in note ? note : [{ type: MINDS_EVENTS.noteEdit, data: { entity: op.entity, note: note.id, value: note } }];
   }
   if (op.part === "commitment") {
     const before = op.id === null ? undefined : c.commitments.find((x) => x.id === op.id);
     if (op.id !== null && !before)
-      return reject13("missing_commitment", `${e.name} has no such commitment`);
+      return reject16("missing_commitment", `${e.name} has no such commitment`);
     if (value === null)
-      return op.id === null ? reject13("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
+      return op.id === null ? reject16("bad_value", "say which commitment to delete") : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: op.id, value: null } }];
     const commitment = commitmentFrom(ctx, op.entity, op.id, value, before);
     return "code" in commitment ? commitment : [{ type: MINDS_EVENTS.commitmentEdit, data: { entity: op.entity, commitment: commitment.id, value: commitment } }];
   }
   const before = op.id === null ? undefined : c.plans.find((p) => p.id === op.id);
   if (op.id !== null && !before)
-    return reject13("missing_plan", `${e.name} has no such plan`);
+    return reject16("missing_plan", `${e.name} has no such plan`);
   if (value === null)
-    return op.id === null ? reject13("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
+    return op.id === null ? reject16("bad_value", "say which plan to delete") : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: op.id, value: null } }];
   const plan = planFrom(ctx, op.entity, op.id, value, before);
   return "code" in plan ? plan : [{ type: MINDS_EVENTS.planEdit, data: { entity: op.entity, plan: plan.id, value: plan } }];
 }
@@ -19519,7 +26932,7 @@ var fantasy_town_default = {
     minds: { version: 1, config: {} }
   },
   pins: {
-    generators: { money: 1, gear: 1, vehicles: 1 },
+    generators: { money: 2, gear: 1, vehicles: 1 },
     tables: {
       "calendar.dst": "2a5e1e3d531f68983caa2e2f2d02411b",
       "calendar.holidays": "35b4d12795742dc4d5b4b37e388ce776",
@@ -19529,9 +26942,9 @@ var fantasy_town_default = {
       "calendar.work": "790bee504417a877b2adc3b5d3c4368a",
       "economy.catalog": "090284118982be8b91fee509f8d4ed75",
       "economy.categories": "b58c6ce5c3336d8067722e4ada3bdb05",
-      "economy.finance": "3b9bb93f4490fbf6c397c7b8ba94b946",
+      "economy.finance": "5ebb654a8d4458877b86f5100af5c4b6",
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
-      "economy.regions": "7b976468a95de1684425c537d183bb54",
+      "economy.regions": "fafcd12b6d121345b255511b6a51c80a",
       "gear.containers": "4e7fd9162139319099076a44b908e7ef",
       "gear.items": "32f73961cc1d7ce1574dec1f46aaf278",
       "gear.kits": "3656a59a513f99da1adb635a53e9e208",
@@ -19653,8 +27066,7 @@ var fantasy_town_default = {
         brawn: 13,
         wits: 10,
         grace: 8,
-        heart: 11,
-        bills: [{ label: "Hearth tax", payee: "hollis_garrow", amountCents: 6, every: "month", day: 1, from: "acct_joss_purse" }]
+        heart: 11
       },
       relations: [
         { type: "regard", to: "marta_dunmore", fields: { warmth: 30, trust: 30, respect: 40, t: 0 } },
@@ -19682,8 +27094,7 @@ var fantasy_town_default = {
         brawn: 15,
         wits: 11,
         grace: 10,
-        heart: 10,
-        bills: [{ label: "Hearth tax", payee: "hollis_garrow", amountCents: 6, every: "month", day: 1, from: "acct_marta_purse" }]
+        heart: 10
       },
       relations: [
         { type: "regard", to: "joss_tamber", fields: { warmth: 30, trust: 30, respect: 25, t: 0 } },
@@ -19737,8 +27148,7 @@ var fantasy_town_default = {
         brawn: 6,
         wits: 13,
         grace: 11,
-        heart: 15,
-        bills: [{ label: "Hearth tax", payee: "hollis_garrow", amountCents: 4, every: "month", day: 1, from: "acct_wren_purse" }]
+        heart: 15
       },
       relations: [
         { type: "regard", to: "odo_kettleby", fields: { warmth: 35, trust: 20, respect: 15, t: 0 } },
@@ -19764,8 +27174,7 @@ var fantasy_town_default = {
         brawn: 10,
         wits: 10,
         grace: 8,
-        heart: 11,
-        bills: [{ label: "Market dues to the reeve", payee: "hollis_garrow", amountCents: 20, every: "month", day: 1, from: "acct_kettle_till" }]
+        heart: 11
       },
       relations: [
         { type: "regard", to: "wren_aldous", fields: { warmth: 55, trust: 25, respect: 20, t: 0 } },
@@ -20145,7 +27554,7 @@ var fantasy_town_default = {
       kind: "account",
       name: "Your coin purse",
       tier: "background",
-      fields: { owner: "pov", type: "cash", opening: 67 },
+      fields: { owners: [{ party: "pov", role: "owner" }], product: "cash", opening: 67 },
       relations: [{ type: "in", to: "pov_purse" }]
     },
     acct_hollis_strongbox: {
@@ -20153,7 +27562,7 @@ var fantasy_town_default = {
       kind: "account",
       name: "Town strongbox",
       tier: "background",
-      fields: { owner: "hollis_garrow", type: "cash", opening: 6170 },
+      fields: { owners: [{ party: "hollis_garrow", role: "owner" }], product: "cash", opening: 6170 },
       relations: [{ type: "in", to: "reeves_strongbox" }]
     },
     acct_kettle_till: {
@@ -20161,7 +27570,7 @@ var fantasy_town_default = {
       kind: "account",
       name: "The Kettle's till",
       tier: "background",
-      fields: { owner: "odo_kettleby", type: "cash", opening: 151 },
+      fields: { owners: [{ party: "odo_kettleby", role: "owner" }], product: "cash", opening: 151 },
       relations: []
     },
     acct_ferry_fares: {
@@ -20169,7 +27578,7 @@ var fantasy_town_default = {
       kind: "account",
       name: "Ferry fare box",
       tier: "background",
-      fields: { owner: "tamsin_reed", type: "cash", opening: 100 },
+      fields: { owners: [{ party: "tamsin_reed", role: "owner" }], product: "cash", opening: 100 },
       relations: []
     },
     acct_marta_purse: {
@@ -20177,7 +27586,7 @@ var fantasy_town_default = {
       kind: "account",
       name: "Marta's purse",
       tier: "background",
-      fields: { owner: "marta_dunmore", type: "cash", opening: 512 },
+      fields: { owners: [{ party: "marta_dunmore", role: "owner" }], product: "cash", opening: 512 },
       relations: []
     },
     acct_joss_purse: {
@@ -20185,7 +27594,7 @@ var fantasy_town_default = {
       kind: "account",
       name: "Joss's purse",
       tier: "background",
-      fields: { owner: "joss_tamber", type: "cash", opening: 83 },
+      fields: { owners: [{ party: "joss_tamber", role: "owner" }], product: "cash", opening: 83 },
       relations: []
     },
     acct_wren_purse: {
@@ -20193,7 +27602,75 @@ var fantasy_town_default = {
       kind: "account",
       name: "Wren's purse",
       tier: "background",
-      fields: { owner: "wren_aldous", type: "cash", opening: 149 },
+      fields: { owners: [{ party: "wren_aldous", role: "owner" }], product: "cash", opening: 149 },
+      relations: []
+    },
+    bill_kettle_market_dues: {
+      id: "bill_kettle_market_dues",
+      kind: "flow",
+      name: "Market dues to the reeve",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_kettle_till",
+        to: "hollis_garrow",
+        amount_cents: 20,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_marta_hearth_tax: {
+      id: "bill_marta_hearth_tax",
+      kind: "flow",
+      name: "Hearth tax",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_marta_purse",
+        to: "hollis_garrow",
+        amount_cents: 6,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_joss_hearth_tax: {
+      id: "bill_joss_hearth_tax",
+      kind: "flow",
+      name: "Hearth tax",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_joss_purse",
+        to: "hollis_garrow",
+        amount_cents: 6,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_wren_hearth_tax: {
+      id: "bill_wren_hearth_tax",
+      kind: "flow",
+      name: "Hearth tax",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_wren_purse",
+        to: "hollis_garrow",
+        amount_cents: 4,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
       relations: []
     },
     region_wend_vale: {
@@ -23936,7 +31413,7 @@ var fantasy_town_default = {
       id: "economy.regions",
       pack: "economy",
       schema: "lre-table/economy.regions/v1",
-      revision: "7b976468a95de1684425c537d183bb54",
+      revision: "fafcd12b6d121345b255511b6a51c80a",
       label: "Regions (US states, DC and the national baseline)",
       source: {
         dataPack: "modern-us",
@@ -23948,6 +31425,7 @@ var fantasy_town_default = {
           summary: "Rounded, approximate state-level figures compiled from well-known public statistics as recalled; not queried live. Intended as plausible defaults, not as authoritative statistics.",
           state_income_tax_effective_pct: "Approximate effective state income tax as a percent of gross wages for a single filer earning about $60,000 (a middle-income band), after the state standard deduction/exemptions; derived from published 2025 state brackets (Tax Foundation / state revenue departments). Rounded to 0.1. Excludes local income taxes (see local_income_tax_pct_typical) and payroll-type state levies such as CA SDI.",
           sales_tax_combined_avg_pct: "Tax Foundation 2025 combined state plus population-weighted average local sales tax rate; rounded to 0.01. Hawaii and Alaska values are approximations of the GET / local-only rate.",
+          property_tax_effective_pct: "Approximate effective property tax on owner-occupied homes: median real-estate taxes paid as a percent of median home value (US Census ACS 1-year estimates, as compiled by the Tax Foundation), rounded to 0.01.",
           cost_of_living_multiplier: "US = 1.00. Approximate from BEA Regional Price Parities (all items, 2022-2023 vintage) smoothed to 2025; rounded to 0.01.",
           median_rent_cents_per_month: "Approximate asking-rent medians for 1BR and 2BR units, a blend of Zumper, Apartment List and HUD FY2025 Fair Market Rent state patterns, rounded to $10. 1BR is the anchor; 2BR is derived as 1BR times a regional ratio (Northeast 1.22, Midwest 1.27, South 1.27, West 1.24; DC uses South) rounded to $10. Statewide medians hide large metro-vs-rural spread.",
           residential_electricity_cents_per_kwh: "EIA Electric Power Monthly, average residential retail price by state, 2024 annual / 2025 year-to-date, rounded to 0.5 cent. Decimal value in cents (not dollars) per kWh. US average is about 17 cents.",
@@ -23988,6 +31466,7 @@ var fantasy_town_default = {
         },
         local_income_tax_pct_typical: { type: "number", unit: "pct", optional: true },
         sales_tax_combined_avg_pct: { type: "number", unit: "pct", doc: "State plus average local rate." },
+        property_tax_effective_pct: { type: "number", unit: "pct", doc: "Effective property tax on owner-occupied homes, a year, percent of value.", optional: true },
         cost_of_living_multiplier: { type: "number", unit: "multiplier", doc: "US = 1.00. Applied by the economy pack at pricing time, never baked into rows." },
         median_rent_1br_cents_per_month: { type: "int", unit: "cents_per_month" },
         median_rent_2br_cents_per_month: { type: "int", unit: "cents_per_month" },
@@ -24007,6 +31486,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0.1,
           sales_tax_combined_avg_pct: 9.46,
+          property_tax_effective_pct: 0.38,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -24024,6 +31504,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 1.82,
+          property_tax_effective_pct: 1,
           cost_of_living_multiplier: 1.03,
           median_rent_1br_cents_per_month: 123000,
           median_rent_2br_cents_per_month: 153000,
@@ -24042,6 +31523,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 1.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.38,
+          property_tax_effective_pct: 0.52,
           cost_of_living_multiplier: 1.01,
           median_rent_1br_cents_per_month: 138000,
           median_rent_2br_cents_per_month: 171000,
@@ -24060,6 +31542,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.46,
+          property_tax_effective_pct: 0.57,
           cost_of_living_multiplier: 0.89,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -24077,6 +31560,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 2.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.82,
+          property_tax_effective_pct: 0.71,
           cost_of_living_multiplier: 1.12,
           median_rent_1br_cents_per_month: 195000,
           median_rent_2br_cents_per_month: 242000,
@@ -24094,6 +31578,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.78,
+          property_tax_effective_pct: 0.49,
           cost_of_living_multiplier: 1.04,
           median_rent_1br_cents_per_month: 155000,
           median_rent_2br_cents_per_month: 192000,
@@ -24111,6 +31596,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.35,
+          property_tax_effective_pct: 1.48,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 160000,
           median_rent_2br_cents_per_month: 195000,
@@ -24128,6 +31614,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.55,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 140000,
           median_rent_2br_cents_per_month: 178000,
@@ -24146,6 +31633,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.57,
           cost_of_living_multiplier: 1.11,
           median_rent_1br_cents_per_month: 215000,
           median_rent_2br_cents_per_month: 273000,
@@ -24164,6 +31652,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.02,
+          property_tax_effective_pct: 0.79,
           cost_of_living_multiplier: 1.02,
           median_rent_1br_cents_per_month: 170000,
           median_rent_2br_cents_per_month: 216000,
@@ -24182,6 +31671,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.42,
+          property_tax_effective_pct: 0.83,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 142000,
           median_rent_2br_cents_per_month: 180000,
@@ -24199,6 +31689,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 6.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 4.5,
+          property_tax_effective_pct: 0.27,
           cost_of_living_multiplier: 1.1,
           median_rent_1br_cents_per_month: 190000,
           median_rent_2br_cents_per_month: 236000,
@@ -24217,6 +31708,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.03,
+          property_tax_effective_pct: 0.54,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 155000,
@@ -24235,6 +31727,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.86,
+          property_tax_effective_pct: 1.95,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 171000,
@@ -24252,6 +31745,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3,
           local_income_tax_pct_typical: 1.6,
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 0.77,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 105000,
           median_rent_2br_cents_per_month: 133000,
@@ -24270,6 +31764,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.94,
+          property_tax_effective_pct: 1.37,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -24287,6 +31782,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.69,
+          property_tax_effective_pct: 1.29,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -24305,6 +31801,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.8,
           local_income_tax_pct_typical: 0.8,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.75,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -24323,6 +31820,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 2.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 10.11,
+          property_tax_effective_pct: 0.51,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -24340,6 +31838,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.5,
+          property_tax_effective_pct: 1.1,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 159000,
@@ -24357,6 +31856,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.2,
           local_income_tax_pct_typical: 3,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.99,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 155000,
           median_rent_2br_cents_per_month: 197000,
@@ -24375,6 +31875,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.25,
+          property_tax_effective_pct: 1.04,
           cost_of_living_multiplier: 1.08,
           median_rent_1br_cents_per_month: 230000,
           median_rent_2br_cents_per_month: 281000,
@@ -24392,6 +31893,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.9,
           local_income_tax_pct_typical: 0.2,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 1.25,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -24410,6 +31912,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.49,
+          property_tax_effective_pct: 1.02,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 159000,
@@ -24427,6 +31930,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.06,
+          property_tax_effective_pct: 0.67,
           cost_of_living_multiplier: 0.88,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -24444,6 +31948,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0.2,
           sales_tax_combined_avg_pct: 8.4,
+          property_tax_effective_pct: 0.88,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -24461,6 +31966,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.68,
           cost_of_living_multiplier: 0.98,
           median_rent_1br_cents_per_month: 115000,
           median_rent_2br_cents_per_month: 143000,
@@ -24479,6 +31985,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.8,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.97,
+          property_tax_effective_pct: 1.5,
           cost_of_living_multiplier: 0.93,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -24497,6 +32004,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.24,
+          property_tax_effective_pct: 0.49,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 140000,
           median_rent_2br_cents_per_month: 174000,
@@ -24515,6 +32023,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 1.61,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 160000,
           median_rent_2br_cents_per_month: 195000,
@@ -24533,6 +32042,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 2.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.6,
+          property_tax_effective_pct: 2.08,
           cost_of_living_multiplier: 1.09,
           median_rent_1br_cents_per_month: 190000,
           median_rent_2br_cents_per_month: 232000,
@@ -24550,6 +32060,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.62,
+          property_tax_effective_pct: 0.67,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 105000,
           median_rent_2br_cents_per_month: 130000,
@@ -24567,6 +32078,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.54,
+          property_tax_effective_pct: 1.42,
           cost_of_living_multiplier: 1.08,
           median_rent_1br_cents_per_month: 220000,
           median_rent_2br_cents_per_month: 268000,
@@ -24585,6 +32097,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.99,
+          property_tax_effective_pct: 0.7,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 171000,
@@ -24602,6 +32115,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.04,
+          property_tax_effective_pct: 0.92,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -24620,6 +32134,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 1.4,
           local_income_tax_pct_typical: 1.5,
           sales_tax_combined_avg_pct: 7.24,
+          property_tax_effective_pct: 1.36,
           cost_of_living_multiplier: 0.93,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -24638,6 +32153,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.14,
+          property_tax_effective_pct: 0.82,
           cost_of_living_multiplier: 0.89,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -24655,6 +32171,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 6.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.85,
           cost_of_living_multiplier: 1.04,
           median_rent_1br_cents_per_month: 150000,
           median_rent_2br_cents_per_month: 186000,
@@ -24673,6 +32190,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 1,
           sales_tax_combined_avg_pct: 6.34,
+          property_tax_effective_pct: 1.35,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 152000,
@@ -24691,6 +32209,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 1.27,
           cost_of_living_multiplier: 1.03,
           median_rent_1br_cents_per_month: 165000,
           median_rent_2br_cents_per_month: 201000,
@@ -24708,6 +32227,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.44,
+          property_tax_effective_pct: 0.51,
           cost_of_living_multiplier: 0.96,
           median_rent_1br_cents_per_month: 120000,
           median_rent_2br_cents_per_month: 152000,
@@ -24725,6 +32245,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.11,
+          property_tax_effective_pct: 1.07,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -24743,6 +32264,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.61,
+          property_tax_effective_pct: 0.56,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 165000,
@@ -24761,6 +32283,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.19,
+          property_tax_effective_pct: 1.47,
           cost_of_living_multiplier: 0.98,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 159000,
@@ -24779,6 +32302,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.25,
+          property_tax_effective_pct: 0.52,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 161000,
@@ -24796,6 +32320,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.39,
+          property_tax_effective_pct: 1.61,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 145000,
           median_rent_2br_cents_per_month: 177000,
@@ -24813,6 +32338,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 4.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.75,
+          property_tax_effective_pct: 0.8,
           cost_of_living_multiplier: 1.02,
           median_rent_1br_cents_per_month: 145000,
           median_rent_2br_cents_per_month: 184000,
@@ -24830,6 +32356,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.43,
+          property_tax_effective_pct: 0.84,
           cost_of_living_multiplier: 1.07,
           median_rent_1br_cents_per_month: 170000,
           median_rent_2br_cents_per_month: 211000,
@@ -24848,6 +32375,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.57,
+          property_tax_effective_pct: 0.53,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -24865,6 +32393,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 3.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.7,
+          property_tax_effective_pct: 1.51,
           cost_of_living_multiplier: 0.94,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -24882,6 +32411,7 @@ var fantasy_town_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.36,
+          property_tax_effective_pct: 0.55,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 118000,
@@ -24893,6 +32423,7 @@ var fantasy_town_default = {
           abbr: "US",
           scope: "national",
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 0.9,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 165000,
@@ -24905,7 +32436,7 @@ var fantasy_town_default = {
       id: "economy.finance",
       pack: "economy",
       schema: "lre-table/economy.finance/v1",
-      revision: "3b9bb93f4490fbf6c397c7b8ba94b946",
+      revision: "5ebb654a8d4458877b86f5100af5c4b6",
       label: "Finance parameters",
       source: {
         dataPack: "modern-us",
@@ -25073,7 +32604,33 @@ var fantasy_town_default = {
             },
             bonds_aggregate: { annual_return_pct: 4.5, annual_volatility_pct: 6, yield_to_maturity_pct: 4.4 },
             cash: { annual_return_pct: 3.8, annual_volatility_pct: 0.5 },
+            crypto: {
+              description: "A large digital currency (bitcoin-like) for seeded price paths; it trades every day of the year and pays nothing.",
+              annual_return_arithmetic_pct: 20,
+              annual_volatility_pct: 65,
+              dividend_yield_pct: 0,
+              basis: "Realised volatility of the largest digital currencies ran about 50-80% a year through 2020-2025; their long-run return is far less certain than equities', so a modest drift is used."
+            },
             real_estate_home_price_appreciation_pct: { typical: 4, volatility_pct: 5 },
+            asset_classes: {
+              note: "How each class of holding follows the rows above: its recipe (`model`), what it differs by, how closely it moves with its market (0-1) and how often it pays a year. An asset's own figures override its class.",
+              security: {
+                model: "broad_us_equity_index",
+                annual_volatility_pct: 28,
+                correlation: 0.6,
+                pays_per_year: 4,
+                note: "A single large company's stock: the index's return with about 1.75 times its swings."
+              },
+              fund: { model: "broad_us_equity_index", correlation: 0.95, pays_per_year: 4 },
+              bond: {
+                model: "bonds_aggregate",
+                correlation: 0.9,
+                pays_per_year: 12,
+                note: "A bond fund pays monthly; a single bond with a face value and maturity pays its coupon twice a year."
+              },
+              crypto: { model: "crypto", correlation: 0.8, pays_per_year: 0, trades_daily: true },
+              property: { model: "real_estate_home_price_appreciation_pct", correlation: 0.7 }
+            },
             retirement_account_limits_cents: {
               k401_employee_deferral_2025: 2350000,
               k401_catch_up_age_50_2025: 750000,
@@ -25162,7 +32719,27 @@ var fantasy_town_default = {
             },
             child_tax_credit_cents_2025: 220000,
             earned_income_credit_max_cents_2025_one_child: 432800,
-            capital_gains_long_term_pct: { bands: [0, 15, 20] },
+            capital_gains_long_term_pct: {
+              bands: [0, 15, 20],
+              thresholds_single_cents: [4835000, 53340000],
+              thresholds_married_filing_jointly_cents: [9670000, 60005000],
+              thresholds_head_of_household_cents: [6475000, 56670000],
+              note: "2025 taxable-income thresholds at which the 15% and 20% rates begin (IRS Rev. Proc. 2024-40); long gains and qualified dividends stack on top of ordinary income."
+            },
+            net_investment_income_tax: {
+              pct: 3.8,
+              threshold_single_cents: 20000000,
+              threshold_married_filing_jointly_cents: 25000000,
+              threshold_head_of_household_cents: 20000000,
+              note: "On the lesser of net investment income and modified AGI over the threshold; the thresholds are not indexed."
+            },
+            capital_loss_limit_cents: 300000,
+            home_sale_exclusion_cents: {
+              single: 25000000,
+              married_filing_jointly: 50000000,
+              head_of_household: 25000000,
+              note: "Gain excluded on selling a main home owned and lived in for two of the last five years (IRC section 121)."
+            },
             irs_standard_mileage_cents_per_mile_2025: 70,
             effective_withholding_note: "occupations.json withholding_rate_pct was computed from these parameters."
           }
@@ -26907,7 +34484,7 @@ var mystery_manor_default = {
     minds: { version: 1, config: {} }
   },
   pins: {
-    generators: { money: 1, gear: 1, vehicles: 1 },
+    generators: { money: 2, gear: 1, vehicles: 1 },
     tables: {
       "calendar.dst": "2a5e1e3d531f68983caa2e2f2d02411b",
       "calendar.holidays": "35b4d12795742dc4d5b4b37e388ce776",
@@ -26917,9 +34494,9 @@ var mystery_manor_default = {
       "calendar.work": "790bee504417a877b2adc3b5d3c4368a",
       "economy.catalog": "3e419fc1ebe145e22a0badcda3ec4a76",
       "economy.categories": "0e5202e0d1140576442d90298cdad64a",
-      "economy.finance": "3b9bb93f4490fbf6c397c7b8ba94b946",
+      "economy.finance": "5ebb654a8d4458877b86f5100af5c4b6",
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
-      "economy.regions": "7b976468a95de1684425c537d183bb54",
+      "economy.regions": "fafcd12b6d121345b255511b6a51c80a",
       "gear.containers": "4e7fd9162139319099076a44b908e7ef",
       "gear.items": "9ac229055bb3e68c136db8119ae02b1c",
       "gear.kits": "3656a59a513f99da1adb635a53e9e208",
@@ -27014,8 +34591,7 @@ var mystery_manor_default = {
         observation: 13,
         manner: 15,
         nerve: 13,
-        knowledge: 11,
-        bills: [{ label: "Housekeeping allowance", payee: "gideon_pell", amountCents: 1440, every: "week", day: 1 }]
+        knowledge: 11
       },
       relations: [
         { type: "regard", to: "sir_alaric", fields: { warmth: 55, trust: 60, respect: 50, fear: 0, t: 0 } },
@@ -27157,18 +34733,7 @@ var mystery_manor_default = {
         observation: 15,
         manner: 15,
         nerve: 11,
-        knowledge: 11,
-        bills: [
-          {
-            label: "Butcher, baker and grocer",
-            payee: "Saltreach tradesmen",
-            amountCents: 840,
-            every: "week",
-            day: 6,
-            from: "acct_household_petty"
-          },
-          { label: "Coal", payee: "Saltreach coal merchant", amountCents: 480, every: "month", day: 1, from: "acct_household_petty" }
-        ]
+        knowledge: 11
       },
       relations: [
         { type: "regard", to: "sir_alaric", fields: { warmth: 50, trust: 70, respect: 60, fear: 0, t: 0 } },
@@ -27517,7 +35082,7 @@ var mystery_manor_default = {
       kind: "account",
       name: "Your wallet",
       tier: "background",
-      fields: { owner: "pov", type: "cash", opening: 1050 },
+      fields: { owners: [{ party: "pov", role: "owner" }], product: "cash", opening: 1050 },
       relations: [{ type: "in", to: "pov_wallet" }]
     },
     acct_pov_bank: {
@@ -27525,7 +35090,7 @@ var mystery_manor_default = {
       kind: "account",
       name: "Your account at the Fenland & District Bank",
       tier: "background",
-      fields: { owner: "pov", type: "checking", opening: 9000 },
+      fields: { owners: [{ party: "pov", role: "owner" }], product: "checking", opening: 9000 },
       relations: []
     },
     acct_household_petty: {
@@ -27533,7 +35098,7 @@ var mystery_manor_default = {
       kind: "account",
       name: "Household petty cash",
       tier: "background",
-      fields: { owner: "gideon_pell", type: "cash", opening: 2916 },
+      fields: { owners: [{ party: "gideon_pell", role: "owner" }], product: "cash", opening: 2916 },
       relations: []
     },
     acct_rupert_bank: {
@@ -27541,7 +35106,7 @@ var mystery_manor_default = {
       kind: "account",
       name: "Captain Thorne's account",
       tier: "background",
-      fields: { owner: "rupert_thorne", type: "checking", opening: 0 },
+      fields: { owners: [{ party: "rupert_thorne", role: "owner" }], product: "checking", opening: 0 },
       relations: []
     },
     acct_rupert_debts: {
@@ -27550,15 +35115,66 @@ var mystery_manor_default = {
       name: "Captain Thorne's debts",
       tier: "background",
       fields: {
-        owner: "rupert_thorne",
-        type: "loan",
-        institution: "Fenland & District Bank",
+        owners: [{ party: "rupert_thorne", role: "owner" }],
+        product: "loan",
         opening: -74880,
+        institution: "Fenland & District Bank",
         apr_pct: 5,
         due_day: 1,
         autopay: "none",
-        remaining_months: 24,
-        payment: 3285
+        payment: 3285,
+        months_left: 24
+      },
+      relations: []
+    },
+    bill_housekeeping_allowance: {
+      id: "bill_housekeeping_allowance",
+      kind: "flow",
+      name: "Housekeeping allowance",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "lady_honoria",
+        to: "gideon_pell",
+        amount_cents: 1440,
+        shortfall: "skip",
+        status: "active",
+        every: "week",
+        weekdays: [1]
+      },
+      relations: []
+    },
+    bill_household_tradesmen: {
+      id: "bill_household_tradesmen",
+      kind: "flow",
+      name: "Butcher, baker and grocer",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_household_petty",
+        to: "Saltreach tradesmen",
+        amount_cents: 840,
+        shortfall: "skip",
+        status: "active",
+        every: "week",
+        weekdays: [6]
+      },
+      relations: []
+    },
+    bill_household_coal: {
+      id: "bill_household_coal",
+      kind: "flow",
+      name: "Coal",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_household_petty",
+        to: "Saltreach coal merchant",
+        amount_cents: 480,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
       },
       relations: []
     },
@@ -31562,7 +39178,7 @@ var mystery_manor_default = {
       id: "economy.regions",
       pack: "economy",
       schema: "lre-table/economy.regions/v1",
-      revision: "7b976468a95de1684425c537d183bb54",
+      revision: "fafcd12b6d121345b255511b6a51c80a",
       label: "Regions (US states, DC and the national baseline)",
       source: {
         dataPack: "modern-us",
@@ -31574,6 +39190,7 @@ var mystery_manor_default = {
           summary: "Rounded, approximate state-level figures compiled from well-known public statistics as recalled; not queried live. Intended as plausible defaults, not as authoritative statistics.",
           state_income_tax_effective_pct: "Approximate effective state income tax as a percent of gross wages for a single filer earning about $60,000 (a middle-income band), after the state standard deduction/exemptions; derived from published 2025 state brackets (Tax Foundation / state revenue departments). Rounded to 0.1. Excludes local income taxes (see local_income_tax_pct_typical) and payroll-type state levies such as CA SDI.",
           sales_tax_combined_avg_pct: "Tax Foundation 2025 combined state plus population-weighted average local sales tax rate; rounded to 0.01. Hawaii and Alaska values are approximations of the GET / local-only rate.",
+          property_tax_effective_pct: "Approximate effective property tax on owner-occupied homes: median real-estate taxes paid as a percent of median home value (US Census ACS 1-year estimates, as compiled by the Tax Foundation), rounded to 0.01.",
           cost_of_living_multiplier: "US = 1.00. Approximate from BEA Regional Price Parities (all items, 2022-2023 vintage) smoothed to 2025; rounded to 0.01.",
           median_rent_cents_per_month: "Approximate asking-rent medians for 1BR and 2BR units, a blend of Zumper, Apartment List and HUD FY2025 Fair Market Rent state patterns, rounded to $10. 1BR is the anchor; 2BR is derived as 1BR times a regional ratio (Northeast 1.22, Midwest 1.27, South 1.27, West 1.24; DC uses South) rounded to $10. Statewide medians hide large metro-vs-rural spread.",
           residential_electricity_cents_per_kwh: "EIA Electric Power Monthly, average residential retail price by state, 2024 annual / 2025 year-to-date, rounded to 0.5 cent. Decimal value in cents (not dollars) per kWh. US average is about 17 cents.",
@@ -31614,6 +39231,7 @@ var mystery_manor_default = {
         },
         local_income_tax_pct_typical: { type: "number", unit: "pct", optional: true },
         sales_tax_combined_avg_pct: { type: "number", unit: "pct", doc: "State plus average local rate." },
+        property_tax_effective_pct: { type: "number", unit: "pct", doc: "Effective property tax on owner-occupied homes, a year, percent of value.", optional: true },
         cost_of_living_multiplier: { type: "number", unit: "multiplier", doc: "US = 1.00. Applied by the economy pack at pricing time, never baked into rows." },
         median_rent_1br_cents_per_month: { type: "int", unit: "cents_per_month" },
         median_rent_2br_cents_per_month: { type: "int", unit: "cents_per_month" },
@@ -31633,6 +39251,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0.1,
           sales_tax_combined_avg_pct: 9.46,
+          property_tax_effective_pct: 0.38,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -31650,6 +39269,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 1.82,
+          property_tax_effective_pct: 1,
           cost_of_living_multiplier: 1.03,
           median_rent_1br_cents_per_month: 123000,
           median_rent_2br_cents_per_month: 153000,
@@ -31668,6 +39288,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 1.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.38,
+          property_tax_effective_pct: 0.52,
           cost_of_living_multiplier: 1.01,
           median_rent_1br_cents_per_month: 138000,
           median_rent_2br_cents_per_month: 171000,
@@ -31686,6 +39307,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.46,
+          property_tax_effective_pct: 0.57,
           cost_of_living_multiplier: 0.89,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -31703,6 +39325,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 2.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.82,
+          property_tax_effective_pct: 0.71,
           cost_of_living_multiplier: 1.12,
           median_rent_1br_cents_per_month: 195000,
           median_rent_2br_cents_per_month: 242000,
@@ -31720,6 +39343,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.78,
+          property_tax_effective_pct: 0.49,
           cost_of_living_multiplier: 1.04,
           median_rent_1br_cents_per_month: 155000,
           median_rent_2br_cents_per_month: 192000,
@@ -31737,6 +39361,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.35,
+          property_tax_effective_pct: 1.48,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 160000,
           median_rent_2br_cents_per_month: 195000,
@@ -31754,6 +39379,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.55,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 140000,
           median_rent_2br_cents_per_month: 178000,
@@ -31772,6 +39398,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.57,
           cost_of_living_multiplier: 1.11,
           median_rent_1br_cents_per_month: 215000,
           median_rent_2br_cents_per_month: 273000,
@@ -31790,6 +39417,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.02,
+          property_tax_effective_pct: 0.79,
           cost_of_living_multiplier: 1.02,
           median_rent_1br_cents_per_month: 170000,
           median_rent_2br_cents_per_month: 216000,
@@ -31808,6 +39436,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.42,
+          property_tax_effective_pct: 0.83,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 142000,
           median_rent_2br_cents_per_month: 180000,
@@ -31825,6 +39454,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 6.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 4.5,
+          property_tax_effective_pct: 0.27,
           cost_of_living_multiplier: 1.1,
           median_rent_1br_cents_per_month: 190000,
           median_rent_2br_cents_per_month: 236000,
@@ -31843,6 +39473,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.03,
+          property_tax_effective_pct: 0.54,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 155000,
@@ -31861,6 +39492,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.86,
+          property_tax_effective_pct: 1.95,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 171000,
@@ -31878,6 +39510,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3,
           local_income_tax_pct_typical: 1.6,
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 0.77,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 105000,
           median_rent_2br_cents_per_month: 133000,
@@ -31896,6 +39529,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.94,
+          property_tax_effective_pct: 1.37,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -31913,6 +39547,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.69,
+          property_tax_effective_pct: 1.29,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -31931,6 +39566,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.8,
           local_income_tax_pct_typical: 0.8,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.75,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -31949,6 +39585,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 2.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 10.11,
+          property_tax_effective_pct: 0.51,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -31966,6 +39603,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.5,
+          property_tax_effective_pct: 1.1,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 159000,
@@ -31983,6 +39621,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.2,
           local_income_tax_pct_typical: 3,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.99,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 155000,
           median_rent_2br_cents_per_month: 197000,
@@ -32001,6 +39640,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.25,
+          property_tax_effective_pct: 1.04,
           cost_of_living_multiplier: 1.08,
           median_rent_1br_cents_per_month: 230000,
           median_rent_2br_cents_per_month: 281000,
@@ -32018,6 +39658,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.9,
           local_income_tax_pct_typical: 0.2,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 1.25,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -32036,6 +39677,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.49,
+          property_tax_effective_pct: 1.02,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 159000,
@@ -32053,6 +39695,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.06,
+          property_tax_effective_pct: 0.67,
           cost_of_living_multiplier: 0.88,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -32070,6 +39713,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0.2,
           sales_tax_combined_avg_pct: 8.4,
+          property_tax_effective_pct: 0.88,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -32087,6 +39731,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.68,
           cost_of_living_multiplier: 0.98,
           median_rent_1br_cents_per_month: 115000,
           median_rent_2br_cents_per_month: 143000,
@@ -32105,6 +39750,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.8,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.97,
+          property_tax_effective_pct: 1.5,
           cost_of_living_multiplier: 0.93,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -32123,6 +39769,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.24,
+          property_tax_effective_pct: 0.49,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 140000,
           median_rent_2br_cents_per_month: 174000,
@@ -32141,6 +39788,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 1.61,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 160000,
           median_rent_2br_cents_per_month: 195000,
@@ -32159,6 +39807,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 2.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.6,
+          property_tax_effective_pct: 2.08,
           cost_of_living_multiplier: 1.09,
           median_rent_1br_cents_per_month: 190000,
           median_rent_2br_cents_per_month: 232000,
@@ -32176,6 +39825,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.62,
+          property_tax_effective_pct: 0.67,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 105000,
           median_rent_2br_cents_per_month: 130000,
@@ -32193,6 +39843,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.54,
+          property_tax_effective_pct: 1.42,
           cost_of_living_multiplier: 1.08,
           median_rent_1br_cents_per_month: 220000,
           median_rent_2br_cents_per_month: 268000,
@@ -32211,6 +39862,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.99,
+          property_tax_effective_pct: 0.7,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 171000,
@@ -32228,6 +39880,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.04,
+          property_tax_effective_pct: 0.92,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -32246,6 +39899,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 1.4,
           local_income_tax_pct_typical: 1.5,
           sales_tax_combined_avg_pct: 7.24,
+          property_tax_effective_pct: 1.36,
           cost_of_living_multiplier: 0.93,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -32264,6 +39918,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.14,
+          property_tax_effective_pct: 0.82,
           cost_of_living_multiplier: 0.89,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -32281,6 +39936,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 6.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.85,
           cost_of_living_multiplier: 1.04,
           median_rent_1br_cents_per_month: 150000,
           median_rent_2br_cents_per_month: 186000,
@@ -32299,6 +39955,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 1,
           sales_tax_combined_avg_pct: 6.34,
+          property_tax_effective_pct: 1.35,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 152000,
@@ -32317,6 +39974,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 1.27,
           cost_of_living_multiplier: 1.03,
           median_rent_1br_cents_per_month: 165000,
           median_rent_2br_cents_per_month: 201000,
@@ -32334,6 +39992,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.44,
+          property_tax_effective_pct: 0.51,
           cost_of_living_multiplier: 0.96,
           median_rent_1br_cents_per_month: 120000,
           median_rent_2br_cents_per_month: 152000,
@@ -32351,6 +40010,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.11,
+          property_tax_effective_pct: 1.07,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -32369,6 +40029,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.61,
+          property_tax_effective_pct: 0.56,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 165000,
@@ -32387,6 +40048,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.19,
+          property_tax_effective_pct: 1.47,
           cost_of_living_multiplier: 0.98,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 159000,
@@ -32405,6 +40067,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.25,
+          property_tax_effective_pct: 0.52,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 161000,
@@ -32422,6 +40085,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.39,
+          property_tax_effective_pct: 1.61,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 145000,
           median_rent_2br_cents_per_month: 177000,
@@ -32439,6 +40103,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 4.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.75,
+          property_tax_effective_pct: 0.8,
           cost_of_living_multiplier: 1.02,
           median_rent_1br_cents_per_month: 145000,
           median_rent_2br_cents_per_month: 184000,
@@ -32456,6 +40121,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.43,
+          property_tax_effective_pct: 0.84,
           cost_of_living_multiplier: 1.07,
           median_rent_1br_cents_per_month: 170000,
           median_rent_2br_cents_per_month: 211000,
@@ -32474,6 +40140,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.57,
+          property_tax_effective_pct: 0.53,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -32491,6 +40158,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 3.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.7,
+          property_tax_effective_pct: 1.51,
           cost_of_living_multiplier: 0.94,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -32508,6 +40176,7 @@ var mystery_manor_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.36,
+          property_tax_effective_pct: 0.55,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 118000,
@@ -32519,6 +40188,7 @@ var mystery_manor_default = {
           abbr: "US",
           scope: "national",
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 0.9,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 165000,
@@ -32531,7 +40201,7 @@ var mystery_manor_default = {
       id: "economy.finance",
       pack: "economy",
       schema: "lre-table/economy.finance/v1",
-      revision: "3b9bb93f4490fbf6c397c7b8ba94b946",
+      revision: "5ebb654a8d4458877b86f5100af5c4b6",
       label: "Finance parameters",
       source: {
         dataPack: "modern-us",
@@ -32699,7 +40369,33 @@ var mystery_manor_default = {
             },
             bonds_aggregate: { annual_return_pct: 4.5, annual_volatility_pct: 6, yield_to_maturity_pct: 4.4 },
             cash: { annual_return_pct: 3.8, annual_volatility_pct: 0.5 },
+            crypto: {
+              description: "A large digital currency (bitcoin-like) for seeded price paths; it trades every day of the year and pays nothing.",
+              annual_return_arithmetic_pct: 20,
+              annual_volatility_pct: 65,
+              dividend_yield_pct: 0,
+              basis: "Realised volatility of the largest digital currencies ran about 50-80% a year through 2020-2025; their long-run return is far less certain than equities', so a modest drift is used."
+            },
             real_estate_home_price_appreciation_pct: { typical: 4, volatility_pct: 5 },
+            asset_classes: {
+              note: "How each class of holding follows the rows above: its recipe (`model`), what it differs by, how closely it moves with its market (0-1) and how often it pays a year. An asset's own figures override its class.",
+              security: {
+                model: "broad_us_equity_index",
+                annual_volatility_pct: 28,
+                correlation: 0.6,
+                pays_per_year: 4,
+                note: "A single large company's stock: the index's return with about 1.75 times its swings."
+              },
+              fund: { model: "broad_us_equity_index", correlation: 0.95, pays_per_year: 4 },
+              bond: {
+                model: "bonds_aggregate",
+                correlation: 0.9,
+                pays_per_year: 12,
+                note: "A bond fund pays monthly; a single bond with a face value and maturity pays its coupon twice a year."
+              },
+              crypto: { model: "crypto", correlation: 0.8, pays_per_year: 0, trades_daily: true },
+              property: { model: "real_estate_home_price_appreciation_pct", correlation: 0.7 }
+            },
             retirement_account_limits_cents: {
               k401_employee_deferral_2025: 2350000,
               k401_catch_up_age_50_2025: 750000,
@@ -32788,7 +40484,27 @@ var mystery_manor_default = {
             },
             child_tax_credit_cents_2025: 220000,
             earned_income_credit_max_cents_2025_one_child: 432800,
-            capital_gains_long_term_pct: { bands: [0, 15, 20] },
+            capital_gains_long_term_pct: {
+              bands: [0, 15, 20],
+              thresholds_single_cents: [4835000, 53340000],
+              thresholds_married_filing_jointly_cents: [9670000, 60005000],
+              thresholds_head_of_household_cents: [6475000, 56670000],
+              note: "2025 taxable-income thresholds at which the 15% and 20% rates begin (IRS Rev. Proc. 2024-40); long gains and qualified dividends stack on top of ordinary income."
+            },
+            net_investment_income_tax: {
+              pct: 3.8,
+              threshold_single_cents: 20000000,
+              threshold_married_filing_jointly_cents: 25000000,
+              threshold_head_of_household_cents: 20000000,
+              note: "On the lesser of net investment income and modified AGI over the threshold; the thresholds are not indexed."
+            },
+            capital_loss_limit_cents: 300000,
+            home_sale_exclusion_cents: {
+              single: 25000000,
+              married_filing_jointly: 50000000,
+              head_of_household: 25000000,
+              note: "Gain excluded on selling a main home owned and lived in for two of the last five years (IRC section 121)."
+            },
             irs_standard_mileage_cents_per_mile_2025: 70,
             effective_withholding_note: "occupations.json withholding_rate_pct was computed from these parameters."
           }
@@ -34422,7 +42138,54 @@ var modern_slice_of_life_default = {
     engine: { version: 1, config: {} },
     calendar: { version: 1, config: {} },
     space: { version: 1, config: { closedRoutes: [] } },
-    economy: { version: 1, config: {} },
+    economy: {
+      version: 1,
+      config: {
+        region: "mi",
+        assets: {
+          broad_us_equity_index: {
+            label: "Broad US equity index fund",
+            symbol: "BUSX",
+            class: "fund",
+            price: 1e4,
+            model: "broad_us_equity_index",
+            yield_pct: 1.4,
+            pays_per_year: 4
+          },
+          glbd: {
+            label: "Global aggregate bond fund",
+            symbol: "GLBD",
+            class: "fund",
+            price: 5000,
+            annual_return_pct: 4,
+            annual_volatility_pct: 6,
+            yield_pct: 3.6,
+            pays_per_year: 12
+          },
+          lkfr: {
+            label: "Lakefront Freight",
+            symbol: "LKFR",
+            class: "security",
+            price: 4200,
+            annual_return_pct: 8,
+            annual_volatility_pct: 32,
+            yield_pct: 2.1,
+            pays_per_year: 4
+          },
+          tnote_2030: {
+            label: "US Treasury note, 4.25%, August 2030",
+            symbol: "T 4.25 08/30",
+            class: "bond",
+            face: 1e5,
+            coupon_pct: 4.25,
+            maturity: "2030-08-15",
+            price: 100400
+          },
+          btc: { label: "Bitcoin", symbol: "BTC", class: "crypto", price: 6500000 }
+        },
+        taxes: { exempt: ["groceries_staples", "groceries_baskets", "medical"] }
+      }
+    },
     gear: { version: 1, config: {} },
     vehicles: { version: 1, config: {} },
     weather: {
@@ -34550,7 +42313,7 @@ var modern_slice_of_life_default = {
     minds: { version: 1, config: {} }
   },
   pins: {
-    generators: { money: 1, gear: 1, vehicles: 1 },
+    generators: { money: 2, gear: 1, vehicles: 1 },
     tables: {
       "calendar.dst": "2a5e1e3d531f68983caa2e2f2d02411b",
       "calendar.holidays": "35b4d12795742dc4d5b4b37e388ce776",
@@ -34560,9 +42323,9 @@ var modern_slice_of_life_default = {
       "calendar.work": "790bee504417a877b2adc3b5d3c4368a",
       "economy.catalog": "a74cae4f11e729032d84c5e52a1af81b",
       "economy.categories": "14a229f6821b5bb6d6e0673a096f7cff",
-      "economy.finance": "3b9bb93f4490fbf6c397c7b8ba94b946",
+      "economy.finance": "5ebb654a8d4458877b86f5100af5c4b6",
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
-      "economy.regions": "7b976468a95de1684425c537d183bb54",
+      "economy.regions": "fafcd12b6d121345b255511b6a51c80a",
       "gear.containers": "4e7fd9162139319099076a44b908e7ef",
       "gear.items": "4f8d8bc56595d23d6a2563d72afb0a25",
       "gear.kits": "3656a59a513f99da1adb635a53e9e208",
@@ -34615,44 +42378,7 @@ var modern_slice_of_life_default = {
         region: "mi",
         occupation: "auto_mechanic",
         employer: "alder_automotive",
-        hourly_cents: 2350,
-        hours_per_week: 40,
-        pay_frequency: "weekly",
-        payday: "Friday",
-        deposit_to: "acct_pov_checking",
-        shift_pattern: "trades_day_7_330",
-        bills: [
-          { label: "Rent, Unit 2B", payee: "helen_kowalczyk", amountCents: 99500, every: "month", day: 1, from: "acct_pov_checking" },
-          { label: "Renters insurance", payee: "Harbor Mutual", amountCents: 1700, every: "month", day: 1, from: "acct_pov_card" },
-          { label: "Streaming video", payee: "StreamBox", amountCents: 1799, every: "month", day: 3, from: "acct_pov_card" },
-          { label: "Music streaming", payee: "TuneBox", amountCents: 1199, every: "month", day: 3, from: "acct_pov_card" },
-          {
-            label: "Auto insurance, full coverage",
-            payee: "Midlake Mutual",
-            amountCents: 22500,
-            every: "month",
-            day: 5,
-            from: "acct_pov_checking"
-          },
-          { label: "Home internet", payee: "Alder Broadband", amountCents: 6500, every: "month", day: 8, from: "acct_pov_card" },
-          {
-            label: "Auto loan payment",
-            payee: "Lakeshore Credit Union",
-            amountCents: 43631,
-            every: "month",
-            day: 10,
-            from: "acct_pov_checking"
-          },
-          { label: "Mobile phone", payee: "Northwind Mobile", amountCents: 5000, every: "month", day: 14, from: "acct_pov_card" },
-          {
-            label: "Electricity, 370 kWh",
-            payee: "Alder Light & Power",
-            amountCents: 7215,
-            every: "month",
-            day: 20,
-            from: "acct_pov_checking"
-          }
-        ]
+        shift_pattern: "trades_day_7_330"
       },
       relations: []
     },
@@ -34666,8 +42392,8 @@ var modern_slice_of_life_default = {
         role: "Owner of Alder Automotive",
         age: 52,
         traits: ["patient", "proud", "secretive about money"],
-        place: "port_alder",
-        home: "port_alder",
+        place: "birch_lane_12",
+        home: "birch_lane_12",
         activity: "idle",
         wealth: "comfortable",
         mechanics: 16,
@@ -34677,21 +42403,7 @@ var modern_slice_of_life_default = {
         charm: 13,
         fitness: 8,
         region: "mi",
-        employer: "alder_automotive",
-        pay_frequency: "monthly",
-        deposit_to: "acct_marcus_shop",
-        annual_income_cents: 8500000,
-        bills: [
-          { label: "Mortgage", payee: "Lakeshore Credit Union", amountCents: 162000, every: "month", day: 1, from: "acct_marcus_shop" },
-          {
-            label: "Shop electricity, 1,400 kWh",
-            payee: "Alder Light & Power",
-            amountCents: 27300,
-            every: "month",
-            day: 20,
-            from: "acct_marcus_shop"
-          }
-        ]
+        employer: "alder_automotive"
       },
       relations: [
         { type: "regard", to: "danny_okafor", fields: { warmth: 45, trust: 55, respect: 60, t: 0 } },
@@ -34725,16 +42437,7 @@ var modern_slice_of_life_default = {
         region: "mi",
         occupation: "auto_mechanic",
         employer: "alder_automotive",
-        hourly_cents: 2650,
-        hours_per_week: 40,
-        pay_frequency: "weekly",
-        payday: "Friday",
-        deposit_to: "acct_danny_checking",
-        shift_pattern: "trades_day_7_330",
-        bills: [
-          { label: "Rent, Unit 2A", payee: "helen_kowalczyk", amountCents: 97500, every: "month", day: 1, from: "acct_danny_checking" },
-          { label: "Mobile phone", payee: "Northwind Mobile", amountCents: 4500, every: "month", day: 14, from: "acct_danny_checking" }
-        ]
+        shift_pattern: "trades_day_7_330"
       },
       relations: [
         { type: "regard", to: "marcus_delgado", fields: { warmth: 45, trust: 55, respect: 60, t: 0 } },
@@ -34768,17 +42471,7 @@ var modern_slice_of_life_default = {
         region: "mi",
         occupation: "accountant",
         employer: "township_hall",
-        hourly_cents: 3800,
-        hours_per_week: 40,
-        pay_frequency: "semimonthly",
-        payday: "15th and the last day of the month",
-        deposit_to: "acct_priya_checking",
-        shift_pattern: "std_weekday_9_5",
-        bills: [
-          { label: "Rent", payee: "Lakeview Apartments", amountCents: 112500, every: "month", day: 1, from: "acct_priya_checking" },
-          { label: "Home internet", payee: "Alder Broadband", amountCents: 6500, every: "month", day: 8, from: "acct_priya_checking" },
-          { label: "Mobile phone", payee: "Northwind Mobile", amountCents: 5500, every: "month", day: 14, from: "acct_priya_checking" }
-        ]
+        shift_pattern: "std_weekday_9_5"
       },
       relations: [
         { type: "regard", to: "marcus_delgado", fields: { warmth: 25, trust: 30, respect: 35, t: 0 } },
@@ -34812,16 +42505,7 @@ var modern_slice_of_life_default = {
         region: "mi",
         occupation: "bartender",
         employer: "rusty_anchor",
-        hourly_cents: 1650,
-        hours_per_week: 32,
-        pay_frequency: "weekly",
-        payday: "Friday",
-        deposit_to: "acct_jess_checking",
-        shift_pattern: "bar_night",
-        bills: [
-          { label: "Household share, 1A", payee: "helen_kowalczyk", amountCents: 30000, every: "month", day: 1, from: "acct_jess_checking" },
-          { label: "Mobile phone", payee: "Northwind Mobile", amountCents: 3500, every: "month", day: 14, from: "acct_jess_checking" }
-        ]
+        shift_pattern: "bar_night"
       },
       relations: [
         { type: "regard", to: "helen_kowalczyk", fields: { warmth: 80, trust: 70, respect: 70, t: 0 } },
@@ -34829,7 +42513,8 @@ var modern_slice_of_life_default = {
         { type: "regard", to: "priya_nair", fields: { warmth: 40, trust: 40, respect: 30, t: 0 } },
         { type: "regard", to: "dale_whitcomb", fields: { warmth: 40, trust: 50, respect: 55, t: 0 } },
         { type: "regard", to: "maddie_kowalczyk", fields: { warmth: 85, trust: 75, respect: 55, t: 0 } },
-        { type: "regard", to: "pov", fields: { warmth: 15, trust: 10, respect: 10, t: 0 } }
+        { type: "regard", to: "pov", fields: { warmth: 15, trust: 10, respect: 10, t: 0 } },
+        { type: "member_of", to: "household_kowalczyk", fields: { role: "member" } }
       ]
     },
     maddie_kowalczyk: {
@@ -34858,7 +42543,8 @@ var modern_slice_of_life_default = {
         { type: "regard", to: "jess_kowalczyk", fields: { warmth: 85, trust: 80, respect: 60, t: 0 } },
         { type: "regard", to: "helen_kowalczyk", fields: { warmth: 80, trust: 75, respect: 70, t: 0 } },
         { type: "regard", to: "dale_whitcomb", fields: { warmth: 50, trust: 55, respect: 65, t: 0 } },
-        { type: "regard", to: "pov", fields: { warmth: 25, trust: 20, respect: 30, t: 0 } }
+        { type: "regard", to: "pov", fields: { warmth: 25, trust: 20, respect: 30, t: 0 } },
+        { type: "member_of", to: "household_kowalczyk", fields: { role: "member" } }
       ],
       agent: true
     },
@@ -34883,36 +42569,7 @@ var modern_slice_of_life_default = {
         charm: 10,
         fitness: 10,
         region: "mi",
-        employer: "alder_harbor_marina",
-        pay_frequency: "monthly",
-        deposit_to: "acct_dale_marina",
-        annual_income_cents: 6200000,
-        bills: [
-          {
-            label: "Township harbor fee",
-            payee: "Port Alder Township",
-            amountCents: 30000,
-            every: "month",
-            day: 1,
-            from: "acct_dale_marina"
-          },
-          {
-            label: "Marina liability insurance",
-            payee: "Midlake Mutual",
-            amountCents: 41000,
-            every: "month",
-            day: 5,
-            from: "acct_dale_marina"
-          },
-          {
-            label: "Marina electricity, 2,000 kWh",
-            payee: "Alder Light & Power",
-            amountCents: 39000,
-            every: "month",
-            day: 20,
-            from: "acct_dale_marina"
-          }
-        ]
+        employer: "alder_harbor_marina"
       },
       relations: [
         { type: "regard", to: "marcus_delgado", fields: { warmth: 35, trust: 40, respect: 40, t: 0 } },
@@ -34942,58 +42599,14 @@ var modern_slice_of_life_default = {
         cooking: 15,
         charm: 13,
         fitness: 6,
-        region: "mi",
-        pay_frequency: "monthly",
-        deposit_to: "acct_helen_checking",
-        annual_income_cents: 2340000,
-        bills: [
-          {
-            label: "Property tax, 114 Harbor Street",
-            payee: "Port Alder Township",
-            amountCents: 38000,
-            every: "month",
-            day: 1,
-            from: "acct_helen_checking"
-          },
-          {
-            label: "Building insurance, 114 Harbor Street",
-            payee: "Harbor Mutual",
-            amountCents: 18500,
-            every: "month",
-            day: 5,
-            from: "acct_helen_checking"
-          },
-          {
-            label: "Electricity, 1A and the stairs, 520 kWh",
-            payee: "Alder Light & Power",
-            amountCents: 10140,
-            every: "month",
-            day: 20,
-            from: "acct_helen_checking"
-          },
-          {
-            label: "Natural gas, building heat",
-            payee: "Lakeshore Gas",
-            amountCents: 11000,
-            every: "month",
-            day: 22,
-            from: "acct_helen_checking"
-          },
-          {
-            label: "Water and sewer, building",
-            payee: "Port Alder Township",
-            amountCents: 9500,
-            every: "month",
-            day: 25,
-            from: "acct_helen_checking"
-          }
-        ]
+        region: "mi"
       },
       relations: [
         { type: "regard", to: "jess_kowalczyk", fields: { warmth: 85, trust: 75, respect: 70, t: 0 } },
         { type: "regard", to: "maddie_kowalczyk", fields: { warmth: 85, trust: 75, respect: 65, t: 0 } },
         { type: "regard", to: "danny_okafor", fields: { warmth: 35, trust: 40, respect: 40, t: 0 } },
-        { type: "regard", to: "pov", fields: { warmth: 20, trust: 20, respect: 25, t: 0 } }
+        { type: "regard", to: "pov", fields: { warmth: 20, trust: 20, respect: 25, t: 0 } },
+        { type: "member_of", to: "household_kowalczyk", fields: { role: "head" } }
       ]
     },
     nora_whitfield: {
@@ -35019,24 +42632,7 @@ var modern_slice_of_life_default = {
         region: "mi",
         occupation: "registered_nurse",
         employer: "community_clinic",
-        hourly_cents: 4300,
-        hours_per_week: 36,
-        pay_frequency: "biweekly",
-        payday: "every other Friday",
-        deposit_to: "acct_nora_checking",
-        shift_pattern: "three_12h",
-        bills: [
-          { label: "Rent", payee: "Lakeview Apartments", amountCents: 98000, every: "month", day: 1, from: "acct_nora_checking" },
-          { label: "Mobile phone", payee: "Northwind Mobile", amountCents: 4000, every: "month", day: 14, from: "acct_nora_checking" },
-          {
-            label: "Electricity, 340 kWh",
-            payee: "Alder Light & Power",
-            amountCents: 6630,
-            every: "month",
-            day: 20,
-            from: "acct_nora_checking"
-          }
-        ]
+        shift_pattern: "three_12h"
       },
       relations: [
         { type: "regard", to: "priya_nair", fields: { warmth: 45, trust: 45, respect: 40, t: 0 } },
@@ -35061,16 +42657,7 @@ var modern_slice_of_life_default = {
         region: "mi",
         occupation: "police_officer",
         employer: "port_alder",
-        hourly_cents: 3650,
-        hours_per_week: 40,
-        pay_frequency: "biweekly",
-        payday: "every other Friday",
-        deposit_to: "acct_sam_checking",
-        shift_pattern: "shift_8h_rotating",
-        bills: [
-          { label: "Rent", payee: "Lakeview Apartments", amountCents: 104000, every: "month", day: 1, from: "acct_sam_checking" },
-          { label: "Mobile phone", payee: "Northwind Mobile", amountCents: 5000, every: "month", day: 14, from: "acct_sam_checking" }
-        ]
+        shift_pattern: "shift_8h_rotating"
       },
       relations: [
         { type: "regard", to: "marcus_delgado", fields: { warmth: 20, trust: 30, respect: 30, t: 0 } },
@@ -35522,7 +43109,13 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Your checking account",
       tier: "background",
-      fields: { owner: "pov", type: "checking", institution: "Lakeshore Credit Union", opening: 184217, apr_pct: 0.1 },
+      fields: {
+        owners: [{ party: "pov", role: "owner" }],
+        product: "checking",
+        opening: 184217,
+        institution: "Lakeshore Credit Union",
+        apy_pct: 0.1
+      },
       relations: []
     },
     acct_pov_savings: {
@@ -35530,7 +43123,13 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Your savings account",
       tier: "background",
-      fields: { owner: "pov", type: "savings", institution: "Lakeshore Credit Union", opening: 326000, apr_pct: 3.8 },
+      fields: {
+        owners: [{ party: "pov", role: "owner" }],
+        product: "savings",
+        opening: 326000,
+        institution: "Lakeshore Credit Union",
+        apy_pct: 3.8
+      },
       relations: []
     },
     acct_pov_brokerage: {
@@ -35538,7 +43137,7 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Your index-fund account",
       tier: "background",
-      fields: { owner: "pov", type: "brokerage", symbol: "broad_us_equity_index", units: 31.25, institution: "Great Lakes Bank", opening: 0 },
+      fields: { owners: [{ party: "pov", role: "owner" }], product: "brokerage", opening: 0, institution: "Great Lakes Bank" },
       relations: []
     },
     acct_pov_card: {
@@ -35547,15 +43146,16 @@ var modern_slice_of_life_default = {
       name: "Your credit card",
       tier: "background",
       fields: {
-        owner: "pov",
-        type: "card",
-        institution: "Great Lakes Bank",
+        owners: [{ party: "pov", role: "owner" }],
+        product: "credit_card",
         opening: -63840,
+        institution: "Great Lakes Bank",
         limit: 450000,
         apr_pct: 22,
         statement_day: 18,
         due_day: 13,
-        autopay: "minimum from acct_pov_checking"
+        autopay: "minimum",
+        autopay_from: "acct_pov_checking"
       },
       relations: []
     },
@@ -35565,15 +43165,16 @@ var modern_slice_of_life_default = {
       name: "Your auto loan",
       tier: "background",
       fields: {
-        owner: "pov",
-        type: "loan",
-        institution: "Lakeshore Credit Union",
+        owners: [{ party: "pov", role: "owner" }],
+        product: "loan",
         opening: -1740000,
+        institution: "Lakeshore Credit Union",
         apr_pct: 9.4,
         due_day: 10,
-        autopay: "from acct_pov_checking",
-        remaining_months: 48,
-        payment: 43631
+        autopay: "minimum",
+        autopay_from: "acct_pov_checking",
+        payment: 43631,
+        months_left: 48
       },
       relations: []
     },
@@ -35582,7 +43183,7 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Your wallet cash",
       tier: "background",
-      fields: { owner: "pov", type: "cash", opening: 8500 },
+      fields: { owners: [{ party: "pov", role: "owner" }], product: "cash", opening: 8500 },
       relations: [{ type: "in", to: "pov_wallet" }]
     },
     acct_marcus_shop: {
@@ -35590,7 +43191,12 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Alder Automotive operating account",
       tier: "background",
-      fields: { owner: "marcus_delgado", type: "checking", institution: "Great Lakes Bank", opening: 2340000 },
+      fields: {
+        owners: [{ party: "alder_automotive_co", role: "owner" }, { party: "marcus_delgado", role: "authorized_user" }],
+        product: "business_checking",
+        opening: 2340000,
+        institution: "Great Lakes Bank"
+      },
       relations: []
     },
     acct_danny_checking: {
@@ -35598,7 +43204,7 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Danny's checking",
       tier: "background",
-      fields: { owner: "danny_okafor", type: "checking", institution: "Lakeshore Credit Union", opening: 195000 },
+      fields: { owners: [{ party: "danny_okafor", role: "owner" }], product: "checking", opening: 195000, institution: "Lakeshore Credit Union" },
       relations: []
     },
     acct_priya_checking: {
@@ -35606,7 +43212,7 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Priya's checking",
       tier: "background",
-      fields: { owner: "priya_nair", type: "checking", institution: "Lakeshore Credit Union", opening: 412000 },
+      fields: { owners: [{ party: "priya_nair", role: "owner" }], product: "checking", opening: 412000, institution: "Lakeshore Credit Union" },
       relations: []
     },
     acct_jess_checking: {
@@ -35614,7 +43220,7 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Jess's checking",
       tier: "background",
-      fields: { owner: "jess_kowalczyk", type: "checking", institution: "Lakeshore Credit Union", opening: 61000 },
+      fields: { owners: [{ party: "jess_kowalczyk", role: "owner" }], product: "checking", opening: 61000, institution: "Lakeshore Credit Union" },
       relations: []
     },
     acct_dale_marina: {
@@ -35622,7 +43228,7 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Alder Harbor Marina account",
       tier: "background",
-      fields: { owner: "dale_whitcomb", type: "checking", institution: "Great Lakes Bank", opening: 1890000 },
+      fields: { owners: [{ party: "dale_whitcomb", role: "owner" }], product: "checking", opening: 1890000, institution: "Great Lakes Bank" },
       relations: []
     },
     acct_helen_checking: {
@@ -35630,7 +43236,7 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Helen's checking",
       tier: "background",
-      fields: { owner: "helen_kowalczyk", type: "checking", institution: "Lakeshore Credit Union", opening: 1235000 },
+      fields: { owners: [{ party: "helen_kowalczyk", role: "owner" }], product: "checking", opening: 1235000, institution: "Lakeshore Credit Union" },
       relations: []
     },
     acct_nora_checking: {
@@ -35638,7 +43244,7 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Nora's checking",
       tier: "background",
-      fields: { owner: "nora_whitfield", type: "checking", institution: "Lakeshore Credit Union", opening: 278000 },
+      fields: { owners: [{ party: "nora_whitfield", role: "owner" }], product: "checking", opening: 278000, institution: "Lakeshore Credit Union" },
       relations: []
     },
     acct_sam_checking: {
@@ -35646,7 +43252,969 @@ var modern_slice_of_life_default = {
       kind: "account",
       name: "Sam's checking",
       tier: "background",
-      fields: { owner: "sam_reyes", type: "checking", institution: "Lakeshore Credit Union", opening: 330000 },
+      fields: { owners: [{ party: "sam_reyes", role: "owner" }], product: "checking", opening: 330000, institution: "Lakeshore Credit Union" },
+      relations: []
+    },
+    acct_marcus_checking: {
+      id: "acct_marcus_checking",
+      kind: "account",
+      name: "Marcus's checking",
+      tier: "background",
+      fields: { owners: [{ party: "marcus_delgado", role: "owner" }], product: "checking", opening: 680000, institution: "Lakeshore Credit Union" },
+      relations: []
+    },
+    acct_alder_lift_loan: {
+      id: "acct_alder_lift_loan",
+      kind: "account",
+      name: "Lift loan",
+      tier: "background",
+      fields: {
+        owners: [{ party: "alder_automotive_co", role: "owner" }],
+        product: "loan",
+        opening: -3800000,
+        institution: "Great Lakes Bank",
+        apr_pct: 8.5,
+        due_day: 15,
+        autopay: "fixed",
+        autopay_from: "acct_marcus_shop",
+        autopay_cents: 119956,
+        payment: 119956,
+        term_months: 36,
+        months_left: 36
+      },
+      relations: []
+    },
+    acct_marcus_mortgage: {
+      id: "acct_marcus_mortgage",
+      kind: "account",
+      name: "Marcus's mortgage",
+      tier: "background",
+      fields: {
+        owners: [{ party: "marcus_delgado", role: "owner" }],
+        product: "mortgage",
+        opening: -18778000,
+        institution: "Lakeshore Credit Union",
+        apr_pct: 4.6,
+        due_day: 1,
+        autopay: "minimum",
+        autopay_from: "acct_marcus_checking",
+        payment: 114200,
+        months_left: 260,
+        secured_by: "prop_birch_lane_12"
+      },
+      relations: []
+    },
+    acct_priya_retirement: {
+      id: "acct_priya_retirement",
+      kind: "account",
+      name: "Priya's IRA",
+      tier: "background",
+      fields: { owners: [{ party: "priya_nair", role: "owner" }], product: "brokerage", opening: 120000, institution: "Harborview Investments" },
+      relations: []
+    },
+    acct_danny_coins: {
+      id: "acct_danny_coins",
+      kind: "account",
+      name: "Danny's coin exchange",
+      tier: "background",
+      fields: { owners: [{ party: "danny_okafor", role: "owner" }], product: "brokerage", opening: 4500, institution: "CoinHarbor" },
+      relations: []
+    },
+    acct_kowalczyk_household: {
+      id: "acct_kowalczyk_household",
+      kind: "account",
+      name: "Kowalczyk household account",
+      tier: "background",
+      fields: {
+        owners: [{ party: "helen_kowalczyk", role: "joint", share: 60 }, { party: "jess_kowalczyk", role: "joint", share: 40 }],
+        product: "checking",
+        opening: 185000,
+        institution: "Lakeshore Credit Union"
+      },
+      relations: []
+    },
+    acct_maddie_savings: {
+      id: "acct_maddie_savings",
+      kind: "account",
+      name: "Maddie's savings",
+      tier: "background",
+      fields: {
+        owners: [{ party: "helen_kowalczyk", role: "custodian" }, { party: "maddie_kowalczyk", role: "beneficiary" }],
+        product: "savings",
+        opening: 42000,
+        institution: "Lakeshore Credit Union"
+      },
+      relations: []
+    },
+    card_pov_debit: {
+      id: "card_pov_debit",
+      kind: "card",
+      name: "Debit card",
+      tier: "background",
+      fields: { account: "acct_pov_checking", holder: "pov", network: "debit", state: "active", item: "pov_debit_card", last4: "4417" },
+      relations: []
+    },
+    card_pov_credit: {
+      id: "card_pov_credit",
+      kind: "card",
+      name: "Credit card",
+      tier: "background",
+      fields: { account: "acct_pov_card", holder: "pov", network: "credit", state: "active", item: "pov_credit_card", last4: "9032" },
+      relations: []
+    },
+    bill_rent: {
+      id: "bill_rent",
+      kind: "flow",
+      name: "Rent, Unit 2B",
+      tier: "background",
+      fields: {
+        flow_kind: "rent",
+        from: "acct_pov_checking",
+        to: "helen_kowalczyk",
+        amount_cents: 99500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1],
+        link: "prop_harbor_114"
+      },
+      relations: []
+    },
+    bill_renters: {
+      id: "bill_renters",
+      kind: "flow",
+      name: "Renters insurance",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_pov_card",
+        to: "Harbor Mutual",
+        amount_cents: 1700,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_streaming: {
+      id: "bill_streaming",
+      kind: "flow",
+      name: "Streaming video",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_pov_card",
+        to: "StreamBox",
+        amount_cents: 1799,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [3]
+      },
+      relations: []
+    },
+    bill_music: {
+      id: "bill_music",
+      kind: "flow",
+      name: "Music streaming",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_pov_card",
+        to: "TuneBox",
+        amount_cents: 1199,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [3]
+      },
+      relations: []
+    },
+    bill_auto_insurance: {
+      id: "bill_auto_insurance",
+      kind: "flow",
+      name: "Auto insurance, full coverage",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_pov_checking",
+        to: "Midlake Mutual",
+        amount_cents: 22500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [5],
+        link: "pov_truck"
+      },
+      relations: []
+    },
+    bill_internet: {
+      id: "bill_internet",
+      kind: "flow",
+      name: "Home internet",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_pov_card",
+        to: "Alder Broadband",
+        amount_cents: 6500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [8]
+      },
+      relations: []
+    },
+    bill_phone: {
+      id: "bill_phone",
+      kind: "flow",
+      name: "Mobile phone",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_pov_card",
+        to: "Northwind Mobile",
+        amount_cents: 5000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [14]
+      },
+      relations: []
+    },
+    bill_electric: {
+      id: "bill_electric",
+      kind: "flow",
+      name: "Electricity, 370 kWh",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_pov_checking",
+        to: "Alder Light & Power",
+        amount_cents: 7215,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [20]
+      },
+      relations: []
+    },
+    bill_danny_rent: {
+      id: "bill_danny_rent",
+      kind: "flow",
+      name: "Rent, Unit 2A",
+      tier: "background",
+      fields: {
+        flow_kind: "rent",
+        from: "acct_danny_checking",
+        to: "helen_kowalczyk",
+        amount_cents: 97500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1],
+        link: "prop_harbor_114"
+      },
+      relations: []
+    },
+    bill_danny_phone: {
+      id: "bill_danny_phone",
+      kind: "flow",
+      name: "Mobile phone",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_danny_checking",
+        to: "Northwind Mobile",
+        amount_cents: 4500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [14]
+      },
+      relations: []
+    },
+    bill_helen_electric: {
+      id: "bill_helen_electric",
+      kind: "flow",
+      name: "Electricity, 1A and the stairs, 520 kWh",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_helen_checking",
+        to: "Alder Light & Power",
+        amount_cents: 10140,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [20]
+      },
+      relations: []
+    },
+    bill_helen_gas: {
+      id: "bill_helen_gas",
+      kind: "flow",
+      name: "Natural gas, building heat",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_helen_checking",
+        to: "Lakeshore Gas",
+        amount_cents: 11000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [22]
+      },
+      relations: []
+    },
+    bill_helen_water: {
+      id: "bill_helen_water",
+      kind: "flow",
+      name: "Water and sewer, building",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_helen_checking",
+        to: "Port Alder Township",
+        amount_cents: 9500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [25]
+      },
+      relations: []
+    },
+    bill_jess_household: {
+      id: "bill_jess_household",
+      kind: "flow",
+      name: "Household share, 1A",
+      tier: "background",
+      fields: {
+        flow_kind: "transfer",
+        from: "acct_jess_checking",
+        to: "acct_kowalczyk_household",
+        amount_cents: 30000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_jess_phone: {
+      id: "bill_jess_phone",
+      kind: "flow",
+      name: "Mobile phone",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_jess_checking",
+        to: "Northwind Mobile",
+        amount_cents: 3500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [14]
+      },
+      relations: []
+    },
+    bill_marcus_shop_electric: {
+      id: "bill_marcus_shop_electric",
+      kind: "flow",
+      name: "Shop electricity, 1,400 kWh",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_marcus_shop",
+        to: "Alder Light & Power",
+        amount_cents: 27300,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [20]
+      },
+      relations: []
+    },
+    bill_priya_rent: {
+      id: "bill_priya_rent",
+      kind: "flow",
+      name: "Rent",
+      tier: "background",
+      fields: {
+        flow_kind: "rent",
+        from: "acct_priya_checking",
+        to: "Lakeview Apartments",
+        amount_cents: 112500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_priya_internet: {
+      id: "bill_priya_internet",
+      kind: "flow",
+      name: "Home internet",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_priya_checking",
+        to: "Alder Broadband",
+        amount_cents: 6500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [8]
+      },
+      relations: []
+    },
+    bill_priya_phone: {
+      id: "bill_priya_phone",
+      kind: "flow",
+      name: "Mobile phone",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_priya_checking",
+        to: "Northwind Mobile",
+        amount_cents: 5500,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [14]
+      },
+      relations: []
+    },
+    bill_dale_harbor_fee: {
+      id: "bill_dale_harbor_fee",
+      kind: "flow",
+      name: "Township harbor fee",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_dale_marina",
+        to: "Port Alder Township",
+        amount_cents: 30000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_dale_insurance: {
+      id: "bill_dale_insurance",
+      kind: "flow",
+      name: "Marina liability insurance",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_dale_marina",
+        to: "Midlake Mutual",
+        amount_cents: 41000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [5]
+      },
+      relations: []
+    },
+    bill_dale_electric: {
+      id: "bill_dale_electric",
+      kind: "flow",
+      name: "Marina electricity, 2,000 kWh",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_dale_marina",
+        to: "Alder Light & Power",
+        amount_cents: 39000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [20]
+      },
+      relations: []
+    },
+    bill_nora_rent: {
+      id: "bill_nora_rent",
+      kind: "flow",
+      name: "Rent",
+      tier: "background",
+      fields: {
+        flow_kind: "rent",
+        from: "acct_nora_checking",
+        to: "Lakeview Apartments",
+        amount_cents: 98000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_nora_phone: {
+      id: "bill_nora_phone",
+      kind: "flow",
+      name: "Mobile phone",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_nora_checking",
+        to: "Northwind Mobile",
+        amount_cents: 4000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [14]
+      },
+      relations: []
+    },
+    bill_nora_electric: {
+      id: "bill_nora_electric",
+      kind: "flow",
+      name: "Electricity, 340 kWh",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_nora_checking",
+        to: "Alder Light & Power",
+        amount_cents: 6630,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [20]
+      },
+      relations: []
+    },
+    bill_sam_rent: {
+      id: "bill_sam_rent",
+      kind: "flow",
+      name: "Rent",
+      tier: "background",
+      fields: {
+        flow_kind: "rent",
+        from: "acct_sam_checking",
+        to: "Lakeview Apartments",
+        amount_cents: 104000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    bill_sam_phone: {
+      id: "bill_sam_phone",
+      kind: "flow",
+      name: "Mobile phone",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_sam_checking",
+        to: "Northwind Mobile",
+        amount_cents: 5000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [14]
+      },
+      relations: []
+    },
+    flow_shop_lease: {
+      id: "flow_shop_lease",
+      kind: "flow",
+      name: "Shop lease",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_marcus_shop",
+        to: "Harbor Realty",
+        amount_cents: 320000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1],
+        category: "rent"
+      },
+      relations: []
+    },
+    flow_owners_draw: {
+      id: "flow_owners_draw",
+      kind: "flow",
+      name: "Owner's draw",
+      tier: "background",
+      fields: {
+        flow_kind: "draw",
+        from: "acct_marcus_shop",
+        to: "acct_marcus_checking",
+        amount_cents: 600000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1],
+        category: "draw"
+      },
+      relations: []
+    },
+    flow_helen_pension: {
+      id: "flow_helen_pension",
+      kind: "flow",
+      name: "Pension",
+      tier: "background",
+      fields: {
+        flow_kind: "income",
+        from: "Michigan Public Pension",
+        to: "acct_helen_checking",
+        amount_cents: 195000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1],
+        category: "pension"
+      },
+      relations: []
+    },
+    flow_dale_takings: {
+      id: "flow_dale_takings",
+      kind: "flow",
+      name: "Marina takings",
+      tier: "background",
+      fields: {
+        flow_kind: "income",
+        from: "Marina customers",
+        to: "acct_dale_marina",
+        amount_cents: 516667,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [-1],
+        category: "sales"
+      },
+      relations: []
+    },
+    flow_pov_savings: {
+      id: "flow_pov_savings",
+      kind: "flow",
+      name: "Savings transfer",
+      tier: "background",
+      fields: {
+        flow_kind: "savings",
+        from: "acct_pov_checking",
+        to: "acct_pov_savings",
+        amount_cents: 15000,
+        shortfall: "retry",
+        status: "active",
+        every: "month",
+        days: [2],
+        retry_days: 3,
+        retries: 2,
+        category: "savings"
+      },
+      relations: []
+    },
+    flow_helen_household: {
+      id: "flow_helen_household",
+      kind: "flow",
+      name: "Household share",
+      tier: "background",
+      fields: {
+        flow_kind: "transfer",
+        from: "acct_helen_checking",
+        to: "acct_kowalczyk_household",
+        amount_cents: 45000,
+        shortfall: "skip",
+        status: "active",
+        every: "month",
+        days: [1]
+      },
+      relations: []
+    },
+    flow_kowalczyk_groceries: {
+      id: "flow_kowalczyk_groceries",
+      kind: "flow",
+      name: "Groceries",
+      tier: "background",
+      fields: {
+        flow_kind: "bill",
+        from: "acct_kowalczyk_household",
+        to: "Alder Market",
+        amount_cents: 15500,
+        shortfall: "skip",
+        status: "active",
+        every: "week",
+        weekdays: [6],
+        category: "groceries",
+        shares: [{ party: "helen_kowalczyk", pct: 60 }, { party: "jess_kowalczyk", pct: 40 }]
+      },
+      relations: []
+    },
+    job_pov_mechanic: {
+      id: "job_pov_mechanic",
+      kind: "job",
+      name: "Mechanic at Alder Automotive",
+      tier: "background",
+      fields: {
+        worker: "pov",
+        employer: "alder_automotive_co",
+        occupation: "auto_mechanic",
+        basis: "hourly",
+        rate: 2350,
+        status: "active",
+        workplace: "alder_automotive",
+        title: "Mechanic",
+        hours_per_week: 40,
+        pay_every: "weekly",
+        pay_weekday: 5,
+        splits: [{ to: "acct_pov_savings", pct: 10 }],
+        shift_pattern: "trades_day_7_330",
+        start: "2026-01-12"
+      },
+      relations: []
+    },
+    job_danny_mechanic: {
+      id: "job_danny_mechanic",
+      kind: "job",
+      name: "Danny's job at Alder Automotive",
+      tier: "background",
+      fields: {
+        worker: "danny_okafor",
+        employer: "alder_automotive_co",
+        occupation: "auto_mechanic",
+        basis: "hourly",
+        rate: 2650,
+        status: "active",
+        workplace: "alder_automotive",
+        title: "Mechanic",
+        hours_per_week: 40,
+        pay_every: "weekly",
+        pay_weekday: 5,
+        deductions: [{ label: "Dental", cents: 1800, pretax: true, kind: "health" }],
+        shift_pattern: "trades_day_7_330",
+        start: "2024-03-04"
+      },
+      relations: []
+    },
+    job_priya_nair: {
+      id: "job_priya_nair",
+      kind: "job",
+      name: "Priya Nair's work",
+      tier: "background",
+      fields: {
+        worker: "priya_nair",
+        employer: "township_hall",
+        occupation: "accountant",
+        basis: "hourly",
+        rate: 3800,
+        status: "active",
+        hours_per_week: 40,
+        pay_every: "semimonthly",
+        pay_days: [15, -1],
+        shift_pattern: "std_weekday_9_5"
+      },
+      relations: []
+    },
+    job_jess_kowalczyk: {
+      id: "job_jess_kowalczyk",
+      kind: "job",
+      name: "Jess Kowalczyk's work",
+      tier: "background",
+      fields: {
+        worker: "jess_kowalczyk",
+        employer: "rusty_anchor",
+        occupation: "bartender",
+        basis: "hourly",
+        rate: 1650,
+        status: "active",
+        hours_per_week: 32,
+        pay_every: "weekly",
+        pay_weekday: 5,
+        shift_pattern: "bar_night",
+        tipped: true
+      },
+      relations: []
+    },
+    job_nora_whitfield: {
+      id: "job_nora_whitfield",
+      kind: "job",
+      name: "Nora Whitfield's work",
+      tier: "background",
+      fields: {
+        worker: "nora_whitfield",
+        employer: "community_clinic",
+        occupation: "registered_nurse",
+        basis: "hourly",
+        rate: 4300,
+        status: "active",
+        hours_per_week: 36,
+        pay_every: "biweekly",
+        pay_weekday: 5,
+        shift_pattern: "three_12h"
+      },
+      relations: []
+    },
+    job_sam_reyes: {
+      id: "job_sam_reyes",
+      kind: "job",
+      name: "Sam Reyes's work",
+      tier: "background",
+      fields: {
+        worker: "sam_reyes",
+        employer: "port_alder",
+        occupation: "police_officer",
+        basis: "hourly",
+        rate: 3650,
+        status: "active",
+        hours_per_week: 40,
+        pay_every: "biweekly",
+        pay_weekday: 5,
+        shift_pattern: "shift_8h_rotating"
+      },
+      relations: []
+    },
+    household_kowalczyk: { id: "household_kowalczyk", kind: "household", name: "The Kowalczyks", tier: "background", fields: {}, relations: [] },
+    hold_pov_index: {
+      id: "hold_pov_index",
+      kind: "holding",
+      name: "Broad US equity index fund",
+      tier: "background",
+      fields: { account: "acct_pov_brokerage", asset: "broad_us_equity_index", lots: [{ qty: 31.25, cost: 312500, at: "2026-09-14" }] },
+      relations: []
+    },
+    alder_automotive_co: {
+      id: "alder_automotive_co",
+      kind: "business",
+      name: "Alder Automotive",
+      tier: "principal",
+      fields: {
+        place: "alder_automotive",
+        places: ["alder_automotive"],
+        owners: [{ party: "marcus_delgado", role: "owner", share: 100 }],
+        structure: "llc",
+        operating_account: "acct_marcus_shop",
+        industry: "auto repair",
+        margin_pct: 55,
+        collects_sales_tax: true,
+        daily_sales: 150000,
+        sales_spread_pct: 35,
+        trading_days: [1, 2, 3, 4, 5, 6],
+        invoice_days: 30,
+        late_fee_pct: 1.5
+      },
+      relations: []
+    },
+    inv_road_commission: {
+      id: "inv_road_commission",
+      kind: "invoice",
+      name: "Road Commission fleet service",
+      tier: "background",
+      fields: {
+        business: "alder_automotive_co",
+        customer: "Port Alder Road Commission",
+        cents: 245000,
+        memo: "Fleet service",
+        issued: "2026-09-01",
+        due: "2026-10-01",
+        state: "open"
+      },
+      relations: []
+    },
+    inv_dale_trailer: {
+      id: "inv_dale_trailer",
+      kind: "invoice",
+      name: "Dale's trailer brakes",
+      tier: "background",
+      fields: {
+        business: "alder_automotive_co",
+        customer: "dale_whitcomb",
+        cents: 85000,
+        memo: "Trailer brakes",
+        issued: "2026-08-03",
+        due: "2026-09-02",
+        state: "open"
+      },
+      relations: []
+    },
+    prop_birch_lane_12: {
+      id: "prop_birch_lane_12",
+      kind: "property",
+      name: "Marcus's house",
+      tier: "background",
+      fields: {
+        place: "birch_lane_12",
+        owners: [{ party: "marcus_delgado", role: "owner", share: 100 }],
+        value: 34000000,
+        appreciation_pct: 3.5,
+        purchase_price: 27850000,
+        purchased: "2018-06-15",
+        mortgage: "acct_marcus_mortgage",
+        tax_pct: 1.1,
+        upkeep_pct: 0.8
+      },
+      relations: []
+    },
+    prop_harbor_114: {
+      id: "prop_harbor_114",
+      kind: "property",
+      name: "114 Harbor Street",
+      tier: "background",
+      fields: {
+        place: "harbor_street_114",
+        owners: [{ party: "helen_kowalczyk", role: "owner", share: 100 }],
+        value: 52000000,
+        appreciation_pct: 3,
+        purchase_price: 9500000,
+        purchased: "1986-04-01",
+        tax_pct: 0.88,
+        insurance: 18500,
+        upkeep_pct: 0.6,
+        units: 3,
+        managed: true,
+        market_rent: 98000,
+        lease_months: 12,
+        vacancy_months: 1,
+        rent_to: "acct_helen_checking"
+      },
+      relations: []
+    },
+    hold_pov_lkfr: {
+      id: "hold_pov_lkfr",
+      kind: "holding",
+      name: "Lakefront Freight",
+      tier: "background",
+      fields: { account: "acct_pov_brokerage", asset: "lkfr", lots: [{ qty: 12, cost: 46800, at: "2025-03-10" }] },
+      relations: []
+    },
+    hold_priya_tnote: {
+      id: "hold_priya_tnote",
+      kind: "holding",
+      name: "Treasury note",
+      tier: "background",
+      fields: {
+        account: "acct_priya_retirement",
+        asset: "tnote_2030",
+        lots: [{ qty: 5, cost: 497500, at: "2025-08-20" }],
+        route: "acct_priya_checking"
+      },
+      relations: []
+    },
+    hold_priya_glbd: {
+      id: "hold_priya_glbd",
+      kind: "holding",
+      name: "Global bond fund",
+      tier: "background",
+      fields: { account: "acct_priya_retirement", asset: "glbd", lots: [{ qty: 80, cost: 392000, at: "2024-01-15" }], route: "reinvest" },
+      relations: []
+    },
+    hold_danny_btc: {
+      id: "hold_danny_btc",
+      kind: "holding",
+      name: "Bitcoin",
+      tier: "background",
+      fields: { account: "acct_danny_coins", asset: "btc", lots: [{ qty: 0.035, cost: 210000, at: "2024-11-02" }] },
       relations: []
     },
     region_lakeshore_county: {
@@ -35782,8 +44350,10 @@ var modern_slice_of_life_default = {
       id: "alder_market",
       name: "Alder Market",
       fields: {
-        description: "The town's only full grocery store, with a deli counter, a rack of local apples and a bulletin board covered in lost-cat flyers.",
-        tags: ["grocery"]
+        description: "The town's only full grocery store, with a deli counter, a rack of local apples and a bulletin board covered in lost-cat flyers. By the entrance, a Lakeshore Credit Union counter and an ATM that takes deposits.",
+        tags: ["grocery"],
+        atm: { bank: "Lakeshore Credit Union", fee: 0, limit: 80000, deposits: true },
+        branch: { bank: "Lakeshore Credit Union" }
       },
       parent: "port_alder",
       timeZone: "America/New_York",
@@ -35794,7 +44364,8 @@ var modern_slice_of_life_default = {
       name: "Shoreline Fuel",
       fields: {
         description: "A gas station and convenience store on the road out of town, with four pumps, a car wash and surprisingly good hot dogs.",
-        tags: ["fuel"]
+        tags: ["fuel"],
+        atm: { bank: "Great Lakes Bank", fee: 350, limit: 40000, deposits: false }
       },
       parent: "port_alder",
       timeZone: "America/New_York",
@@ -35842,6 +44413,18 @@ var modern_slice_of_life_default = {
       },
       parent: "port_alder",
       sceneType: "work"
+    },
+    birch_lane_12: {
+      id: "birch_lane_12",
+      name: "12 Birch Lane",
+      fields: {
+        description: "Marcus Delgado's two-storey clapboard house on a quiet lane above the harbor, with a detached garage he never parks in.",
+        tags: ["home"]
+      },
+      parent: "port_alder",
+      timeZone: "America/New_York",
+      sceneType: "downtime",
+      visibility: "secret"
     }
   },
   routes: {
@@ -35934,6 +44517,13 @@ var modern_slice_of_life_default = {
       from: "harbor_street_114",
       to: "lakeshore_school",
       modes: { walk: { minutes: 16, distanceKm: 1.2 }, road: { minutes: 5, distanceKm: 1.4 } },
+      bidirectional: true
+    },
+    rt_birch_lane_shop: {
+      id: "rt_birch_lane_shop",
+      from: "birch_lane_12",
+      to: "alder_automotive",
+      modes: { walk: { minutes: 12, distanceKm: 0.9 }, road: { minutes: 3, distanceKm: 1.1 } },
       bidirectional: true
     }
   },
@@ -40222,7 +48812,7 @@ var modern_slice_of_life_default = {
       id: "economy.regions",
       pack: "economy",
       schema: "lre-table/economy.regions/v1",
-      revision: "7b976468a95de1684425c537d183bb54",
+      revision: "fafcd12b6d121345b255511b6a51c80a",
       label: "Regions (US states, DC and the national baseline)",
       source: {
         dataPack: "modern-us",
@@ -40234,6 +48824,7 @@ var modern_slice_of_life_default = {
           summary: "Rounded, approximate state-level figures compiled from well-known public statistics as recalled; not queried live. Intended as plausible defaults, not as authoritative statistics.",
           state_income_tax_effective_pct: "Approximate effective state income tax as a percent of gross wages for a single filer earning about $60,000 (a middle-income band), after the state standard deduction/exemptions; derived from published 2025 state brackets (Tax Foundation / state revenue departments). Rounded to 0.1. Excludes local income taxes (see local_income_tax_pct_typical) and payroll-type state levies such as CA SDI.",
           sales_tax_combined_avg_pct: "Tax Foundation 2025 combined state plus population-weighted average local sales tax rate; rounded to 0.01. Hawaii and Alaska values are approximations of the GET / local-only rate.",
+          property_tax_effective_pct: "Approximate effective property tax on owner-occupied homes: median real-estate taxes paid as a percent of median home value (US Census ACS 1-year estimates, as compiled by the Tax Foundation), rounded to 0.01.",
           cost_of_living_multiplier: "US = 1.00. Approximate from BEA Regional Price Parities (all items, 2022-2023 vintage) smoothed to 2025; rounded to 0.01.",
           median_rent_cents_per_month: "Approximate asking-rent medians for 1BR and 2BR units, a blend of Zumper, Apartment List and HUD FY2025 Fair Market Rent state patterns, rounded to $10. 1BR is the anchor; 2BR is derived as 1BR times a regional ratio (Northeast 1.22, Midwest 1.27, South 1.27, West 1.24; DC uses South) rounded to $10. Statewide medians hide large metro-vs-rural spread.",
           residential_electricity_cents_per_kwh: "EIA Electric Power Monthly, average residential retail price by state, 2024 annual / 2025 year-to-date, rounded to 0.5 cent. Decimal value in cents (not dollars) per kWh. US average is about 17 cents.",
@@ -40274,6 +48865,7 @@ var modern_slice_of_life_default = {
         },
         local_income_tax_pct_typical: { type: "number", unit: "pct", optional: true },
         sales_tax_combined_avg_pct: { type: "number", unit: "pct", doc: "State plus average local rate." },
+        property_tax_effective_pct: { type: "number", unit: "pct", doc: "Effective property tax on owner-occupied homes, a year, percent of value.", optional: true },
         cost_of_living_multiplier: { type: "number", unit: "multiplier", doc: "US = 1.00. Applied by the economy pack at pricing time, never baked into rows." },
         median_rent_1br_cents_per_month: { type: "int", unit: "cents_per_month" },
         median_rent_2br_cents_per_month: { type: "int", unit: "cents_per_month" },
@@ -40293,6 +48885,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0.1,
           sales_tax_combined_avg_pct: 9.46,
+          property_tax_effective_pct: 0.38,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -40310,6 +48903,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 1.82,
+          property_tax_effective_pct: 1,
           cost_of_living_multiplier: 1.03,
           median_rent_1br_cents_per_month: 123000,
           median_rent_2br_cents_per_month: 153000,
@@ -40328,6 +48922,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 1.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.38,
+          property_tax_effective_pct: 0.52,
           cost_of_living_multiplier: 1.01,
           median_rent_1br_cents_per_month: 138000,
           median_rent_2br_cents_per_month: 171000,
@@ -40346,6 +48941,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.46,
+          property_tax_effective_pct: 0.57,
           cost_of_living_multiplier: 0.89,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -40363,6 +48959,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 2.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.82,
+          property_tax_effective_pct: 0.71,
           cost_of_living_multiplier: 1.12,
           median_rent_1br_cents_per_month: 195000,
           median_rent_2br_cents_per_month: 242000,
@@ -40380,6 +48977,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.78,
+          property_tax_effective_pct: 0.49,
           cost_of_living_multiplier: 1.04,
           median_rent_1br_cents_per_month: 155000,
           median_rent_2br_cents_per_month: 192000,
@@ -40397,6 +48995,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.35,
+          property_tax_effective_pct: 1.48,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 160000,
           median_rent_2br_cents_per_month: 195000,
@@ -40414,6 +49013,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.55,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 140000,
           median_rent_2br_cents_per_month: 178000,
@@ -40432,6 +49032,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.57,
           cost_of_living_multiplier: 1.11,
           median_rent_1br_cents_per_month: 215000,
           median_rent_2br_cents_per_month: 273000,
@@ -40450,6 +49051,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.02,
+          property_tax_effective_pct: 0.79,
           cost_of_living_multiplier: 1.02,
           median_rent_1br_cents_per_month: 170000,
           median_rent_2br_cents_per_month: 216000,
@@ -40468,6 +49070,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.42,
+          property_tax_effective_pct: 0.83,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 142000,
           median_rent_2br_cents_per_month: 180000,
@@ -40485,6 +49088,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 6.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 4.5,
+          property_tax_effective_pct: 0.27,
           cost_of_living_multiplier: 1.1,
           median_rent_1br_cents_per_month: 190000,
           median_rent_2br_cents_per_month: 236000,
@@ -40503,6 +49107,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.03,
+          property_tax_effective_pct: 0.54,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 155000,
@@ -40521,6 +49126,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.86,
+          property_tax_effective_pct: 1.95,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 171000,
@@ -40538,6 +49144,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3,
           local_income_tax_pct_typical: 1.6,
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 0.77,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 105000,
           median_rent_2br_cents_per_month: 133000,
@@ -40556,6 +49163,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.94,
+          property_tax_effective_pct: 1.37,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -40573,6 +49181,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.69,
+          property_tax_effective_pct: 1.29,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -40591,6 +49200,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.8,
           local_income_tax_pct_typical: 0.8,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.75,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -40609,6 +49219,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 2.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 10.11,
+          property_tax_effective_pct: 0.51,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -40626,6 +49237,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.5,
+          property_tax_effective_pct: 1.1,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 159000,
@@ -40643,6 +49255,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.2,
           local_income_tax_pct_typical: 3,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 0.99,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 155000,
           median_rent_2br_cents_per_month: 197000,
@@ -40661,6 +49274,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.25,
+          property_tax_effective_pct: 1.04,
           cost_of_living_multiplier: 1.08,
           median_rent_1br_cents_per_month: 230000,
           median_rent_2br_cents_per_month: 281000,
@@ -40678,6 +49292,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.9,
           local_income_tax_pct_typical: 0.2,
           sales_tax_combined_avg_pct: 6,
+          property_tax_effective_pct: 1.25,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -40696,6 +49311,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.49,
+          property_tax_effective_pct: 1.02,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 159000,
@@ -40713,6 +49329,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.06,
+          property_tax_effective_pct: 0.67,
           cost_of_living_multiplier: 0.88,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -40730,6 +49347,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0.2,
           sales_tax_combined_avg_pct: 8.4,
+          property_tax_effective_pct: 0.88,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -40747,6 +49365,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.7,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.68,
           cost_of_living_multiplier: 0.98,
           median_rent_1br_cents_per_month: 115000,
           median_rent_2br_cents_per_month: 143000,
@@ -40765,6 +49384,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.8,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.97,
+          property_tax_effective_pct: 1.5,
           cost_of_living_multiplier: 0.93,
           median_rent_1br_cents_per_month: 1e5,
           median_rent_2br_cents_per_month: 127000,
@@ -40783,6 +49403,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.24,
+          property_tax_effective_pct: 0.49,
           cost_of_living_multiplier: 0.99,
           median_rent_1br_cents_per_month: 140000,
           median_rent_2br_cents_per_month: 174000,
@@ -40801,6 +49422,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 1.61,
           cost_of_living_multiplier: 1.05,
           median_rent_1br_cents_per_month: 160000,
           median_rent_2br_cents_per_month: 195000,
@@ -40819,6 +49441,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 2.9,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.6,
+          property_tax_effective_pct: 2.08,
           cost_of_living_multiplier: 1.09,
           median_rent_1br_cents_per_month: 190000,
           median_rent_2br_cents_per_month: 232000,
@@ -40836,6 +49459,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.2,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.62,
+          property_tax_effective_pct: 0.67,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 105000,
           median_rent_2br_cents_per_month: 130000,
@@ -40853,6 +49477,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.54,
+          property_tax_effective_pct: 1.42,
           cost_of_living_multiplier: 1.08,
           median_rent_1br_cents_per_month: 220000,
           median_rent_2br_cents_per_month: 268000,
@@ -40871,6 +49496,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.99,
+          property_tax_effective_pct: 0.7,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 171000,
@@ -40888,6 +49514,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.04,
+          property_tax_effective_pct: 0.92,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -40906,6 +49533,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 1.4,
           local_income_tax_pct_typical: 1.5,
           sales_tax_combined_avg_pct: 7.24,
+          property_tax_effective_pct: 1.36,
           cost_of_living_multiplier: 0.93,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -40924,6 +49552,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.14,
+          property_tax_effective_pct: 0.82,
           cost_of_living_multiplier: 0.89,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 121000,
@@ -40941,6 +49570,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 6.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 0,
+          property_tax_effective_pct: 0.85,
           cost_of_living_multiplier: 1.04,
           median_rent_1br_cents_per_month: 150000,
           median_rent_2br_cents_per_month: 186000,
@@ -40959,6 +49589,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 1,
           sales_tax_combined_avg_pct: 6.34,
+          property_tax_effective_pct: 1.35,
           cost_of_living_multiplier: 0.97,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 152000,
@@ -40977,6 +49608,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.1,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 1.27,
           cost_of_living_multiplier: 1.03,
           median_rent_1br_cents_per_month: 165000,
           median_rent_2br_cents_per_month: 201000,
@@ -40994,6 +49626,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.6,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.44,
+          property_tax_effective_pct: 0.51,
           cost_of_living_multiplier: 0.96,
           median_rent_1br_cents_per_month: 120000,
           median_rent_2br_cents_per_month: 152000,
@@ -41011,6 +49644,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.11,
+          property_tax_effective_pct: 1.07,
           cost_of_living_multiplier: 0.92,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -41029,6 +49663,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.61,
+          property_tax_effective_pct: 0.56,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 165000,
@@ -41047,6 +49682,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 8.19,
+          property_tax_effective_pct: 1.47,
           cost_of_living_multiplier: 0.98,
           median_rent_1br_cents_per_month: 125000,
           median_rent_2br_cents_per_month: 159000,
@@ -41065,6 +49701,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 7.25,
+          property_tax_effective_pct: 0.52,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 130000,
           median_rent_2br_cents_per_month: 161000,
@@ -41082,6 +49719,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.3,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.39,
+          property_tax_effective_pct: 1.61,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 145000,
           median_rent_2br_cents_per_month: 177000,
@@ -41099,6 +49737,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 4.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.75,
+          property_tax_effective_pct: 0.8,
           cost_of_living_multiplier: 1.02,
           median_rent_1br_cents_per_month: 145000,
           median_rent_2br_cents_per_month: 184000,
@@ -41116,6 +49755,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 9.43,
+          property_tax_effective_pct: 0.84,
           cost_of_living_multiplier: 1.07,
           median_rent_1br_cents_per_month: 170000,
           median_rent_2br_cents_per_month: 211000,
@@ -41134,6 +49774,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.4,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 6.57,
+          property_tax_effective_pct: 0.53,
           cost_of_living_multiplier: 0.9,
           median_rent_1br_cents_per_month: 90000,
           median_rent_2br_cents_per_month: 114000,
@@ -41151,6 +49792,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 3.5,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.7,
+          property_tax_effective_pct: 1.51,
           cost_of_living_multiplier: 0.94,
           median_rent_1br_cents_per_month: 110000,
           median_rent_2br_cents_per_month: 140000,
@@ -41168,6 +49810,7 @@ var modern_slice_of_life_default = {
           state_income_tax_effective_pct: 0,
           local_income_tax_pct_typical: 0,
           sales_tax_combined_avg_pct: 5.36,
+          property_tax_effective_pct: 0.55,
           cost_of_living_multiplier: 0.95,
           median_rent_1br_cents_per_month: 95000,
           median_rent_2br_cents_per_month: 118000,
@@ -41179,6 +49822,7 @@ var modern_slice_of_life_default = {
           abbr: "US",
           scope: "national",
           sales_tax_combined_avg_pct: 7,
+          property_tax_effective_pct: 0.9,
           cost_of_living_multiplier: 1,
           median_rent_1br_cents_per_month: 135000,
           median_rent_2br_cents_per_month: 165000,
@@ -41191,7 +49835,7 @@ var modern_slice_of_life_default = {
       id: "economy.finance",
       pack: "economy",
       schema: "lre-table/economy.finance/v1",
-      revision: "3b9bb93f4490fbf6c397c7b8ba94b946",
+      revision: "5ebb654a8d4458877b86f5100af5c4b6",
       label: "Finance parameters",
       source: {
         dataPack: "modern-us",
@@ -41359,7 +50003,33 @@ var modern_slice_of_life_default = {
             },
             bonds_aggregate: { annual_return_pct: 4.5, annual_volatility_pct: 6, yield_to_maturity_pct: 4.4 },
             cash: { annual_return_pct: 3.8, annual_volatility_pct: 0.5 },
+            crypto: {
+              description: "A large digital currency (bitcoin-like) for seeded price paths; it trades every day of the year and pays nothing.",
+              annual_return_arithmetic_pct: 20,
+              annual_volatility_pct: 65,
+              dividend_yield_pct: 0,
+              basis: "Realised volatility of the largest digital currencies ran about 50-80% a year through 2020-2025; their long-run return is far less certain than equities', so a modest drift is used."
+            },
             real_estate_home_price_appreciation_pct: { typical: 4, volatility_pct: 5 },
+            asset_classes: {
+              note: "How each class of holding follows the rows above: its recipe (`model`), what it differs by, how closely it moves with its market (0-1) and how often it pays a year. An asset's own figures override its class.",
+              security: {
+                model: "broad_us_equity_index",
+                annual_volatility_pct: 28,
+                correlation: 0.6,
+                pays_per_year: 4,
+                note: "A single large company's stock: the index's return with about 1.75 times its swings."
+              },
+              fund: { model: "broad_us_equity_index", correlation: 0.95, pays_per_year: 4 },
+              bond: {
+                model: "bonds_aggregate",
+                correlation: 0.9,
+                pays_per_year: 12,
+                note: "A bond fund pays monthly; a single bond with a face value and maturity pays its coupon twice a year."
+              },
+              crypto: { model: "crypto", correlation: 0.8, pays_per_year: 0, trades_daily: true },
+              property: { model: "real_estate_home_price_appreciation_pct", correlation: 0.7 }
+            },
             retirement_account_limits_cents: {
               k401_employee_deferral_2025: 2350000,
               k401_catch_up_age_50_2025: 750000,
@@ -41448,7 +50118,27 @@ var modern_slice_of_life_default = {
             },
             child_tax_credit_cents_2025: 220000,
             earned_income_credit_max_cents_2025_one_child: 432800,
-            capital_gains_long_term_pct: { bands: [0, 15, 20] },
+            capital_gains_long_term_pct: {
+              bands: [0, 15, 20],
+              thresholds_single_cents: [4835000, 53340000],
+              thresholds_married_filing_jointly_cents: [9670000, 60005000],
+              thresholds_head_of_household_cents: [6475000, 56670000],
+              note: "2025 taxable-income thresholds at which the 15% and 20% rates begin (IRS Rev. Proc. 2024-40); long gains and qualified dividends stack on top of ordinary income."
+            },
+            net_investment_income_tax: {
+              pct: 3.8,
+              threshold_single_cents: 20000000,
+              threshold_married_filing_jointly_cents: 25000000,
+              threshold_head_of_household_cents: 20000000,
+              note: "On the lesser of net investment income and modified AGI over the threshold; the thresholds are not indexed."
+            },
+            capital_loss_limit_cents: 300000,
+            home_sale_exclusion_cents: {
+              single: 25000000,
+              married_filing_jointly: 50000000,
+              head_of_household: 25000000,
+              note: "Gain excluded on selling a main home owned and lived in for two of the last five years (IRC section 121)."
+            },
             irs_standard_mileage_cents_per_mile_2025: 70,
             effective_withholding_note: "occupations.json withholding_rate_pct was computed from these parameters."
           }
