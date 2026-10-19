@@ -727,7 +727,8 @@ export function convertTemplate(tpl: Template, env: ConvertEnv): WorldDoc {
   config("sheets", { stats: stats.map((s) => ({ id: s.id, label: s.label, min: 3, max: 18, default: 10 })), derived: tpl.sheets.derived });
   config("story", { flags: Object.fromEntries(tpl.flags.filter((f) => f.default !== false && f.default !== 0 && f.default !== "").map((f) => [f.id, f.default])) });
   config("space", { closedRoutes: tpl.routes.filter((r) => r.secret === true).map((r) => r.id) });
-  if (tpl.economy) config("economy", tpl.economy);
+  // People carry the template's region for income tax; sales tax at a place reads it from the economy config.
+  if (tpl.economy || tpl.region) config("economy", { ...(tpl.region ? { region: tpl.region } : {}), ...(tpl.economy ?? {}) });
 
   // Climate regions: the root place of each climate (and its appliesTo places) points at the region entity.
   const generators: Record<string, number> = {};
