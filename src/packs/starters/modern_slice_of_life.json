@@ -194,7 +194,7 @@
       "economy.categories": "14a229f6821b5bb6d6e0673a096f7cff",
       "economy.finance": "5ebb654a8d4458877b86f5100af5c4b6",
       "economy.occupations": "fe82950d08d32866585e8d92ca6c866a",
-      "economy.regions": "fafcd12b6d121345b255511b6a51c80a",
+      "economy.regions": "20738e97de7eef913a5f8b980afdcef0",
       "gear.containers": "4e7fd9162139319099076a44b908e7ef",
       "gear.items": "4f8d8bc56595d23d6a2563d72afb0a25",
       "gear.kits": "3656a59a513f99da1adb635a53e9e208",
@@ -6681,7 +6681,7 @@
       "id": "economy.regions",
       "pack": "economy",
       "schema": "lre-table/economy.regions/v1",
-      "revision": "fafcd12b6d121345b255511b6a51c80a",
+      "revision": "20738e97de7eef913a5f8b980afdcef0",
       "label": "Regions (US states, DC and the national baseline)",
       "source": {
         "dataPack": "modern-us",
@@ -6697,7 +6697,8 @@
           "cost_of_living_multiplier": "US = 1.00. Approximate from BEA Regional Price Parities (all items, 2022-2023 vintage) smoothed to 2025; rounded to 0.01.",
           "median_rent_cents_per_month": "Approximate asking-rent medians for 1BR and 2BR units, a blend of Zumper, Apartment List and HUD FY2025 Fair Market Rent state patterns, rounded to $10. 1BR is the anchor; 2BR is derived as 1BR times a regional ratio (Northeast 1.22, Midwest 1.27, South 1.27, West 1.24; DC uses South) rounded to $10. Statewide medians hide large metro-vs-rural spread.",
           "residential_electricity_cents_per_kwh": "EIA Electric Power Monthly, average residential retail price by state, 2024 annual / 2025 year-to-date, rounded to 0.5 cent. Decimal value in cents (not dollars) per kWh. US average is about 17 cents.",
-          "minimum_wage_cents_per_hour": "Effective statutory floor in 2025 for non-tipped adult workers: the higher of the state rate and the federal $7.25. Where rates vary by locality or employer size (NY, OR, MN) the statewide/largest-area figure is used."
+          "minimum_wage_cents_per_hour": "Effective statutory floor in 2025 for non-tipped adult workers: the higher of the state rate and the federal $7.25. Where rates vary by locality or employer size (NY, OR, MN) the statewide/largest-area figure is used.",
+          "tipped_minimum_wage_cents_per_hour": "Effective 2025 cash wage floor for tipped workers where the state sets one above the federal $2.13: Michigan's $4.74 (from 21 Feb 2025; $5.49 from 1 Jan 2026), Ohio's half of its minimum, and the full minimum in the states that allow no tip credit (AK, CA, MN, MT, NV, OR, WA). Absent where the federal floor applies, or where this table doesn't yet record the state's."
         }
       },
       "columns": {
@@ -6740,6 +6741,12 @@
         "median_rent_2br_cents_per_month": {"type": "int", "unit": "cents_per_month"},
         "residential_electricity_cents_per_kwh": {"type": "number", "unit": "cents_per_kwh", "doc": "Decimal cents."},
         "minimum_wage_cents_per_h": {"type": "int", "unit": "cents_per_h", "doc": "Effective 2025 floor, the higher of state and federal."},
+        "tipped_minimum_wage_cents_per_h": {
+          "type": "int",
+          "unit": "cents_per_h",
+          "doc": "Effective 2025 cash wage floor for tipped work where the state sets one above the federal floor; absent where the federal floor applies.",
+          "optional": true
+        },
         "notes": {"type": "text", "optional": true}
       },
       "rows": {
@@ -6778,6 +6785,7 @@
           "median_rent_2br_cents_per_month": 153000,
           "residential_electricity_cents_per_kwh": 25,
           "minimum_wage_cents_per_h": 1191,
+          "tipped_minimum_wage_cents_per_h": 1191,
           "notes": "Aleutian Islands west of 169.5W use America/Adak (Hawaii-Aleutian time). No state income or state sales tax; many boroughs levy local sales tax."
         },
         "az": {
@@ -6833,7 +6841,8 @@
           "median_rent_1br_cents_per_month": 195000,
           "median_rent_2br_cents_per_month": 242000,
           "residential_electricity_cents_per_kwh": 31,
-          "minimum_wage_cents_per_h": 1650
+          "minimum_wage_cents_per_h": 1650,
+          "tipped_minimum_wage_cents_per_h": 1650
         },
         "co": {
           "name": "Colorado",
@@ -7167,6 +7176,7 @@
           "median_rent_2br_cents_per_month": 140000,
           "residential_electricity_cents_per_kwh": 19.5,
           "minimum_wage_cents_per_h": 1248,
+          "tipped_minimum_wage_cents_per_h": 474,
           "notes": "Four Upper Peninsula counties bordering Wisconsin are Central."
         },
         "mn": {
@@ -7185,7 +7195,8 @@
           "median_rent_1br_cents_per_month": 125000,
           "median_rent_2br_cents_per_month": 159000,
           "residential_electricity_cents_per_kwh": 15,
-          "minimum_wage_cents_per_h": 1113
+          "minimum_wage_cents_per_h": 1113,
+          "tipped_minimum_wage_cents_per_h": 1113
         },
         "ms": {
           "name": "Mississippi",
@@ -7240,6 +7251,7 @@
           "median_rent_2br_cents_per_month": 143000,
           "residential_electricity_cents_per_kwh": 12.5,
           "minimum_wage_cents_per_h": 1085,
+          "tipped_minimum_wage_cents_per_h": 1085,
           "notes": "No general sales tax; resort-area local taxes exist."
         },
         "ne": {
@@ -7278,6 +7290,7 @@
           "median_rent_2br_cents_per_month": 174000,
           "residential_electricity_cents_per_kwh": 14.5,
           "minimum_wage_cents_per_h": 1200,
+          "tipped_minimum_wage_cents_per_h": 1200,
           "notes": "West Wendover uses Mountain time."
         },
         "nh": {
@@ -7408,6 +7421,7 @@
           "median_rent_2br_cents_per_month": 140000,
           "residential_electricity_cents_per_kwh": 16.5,
           "minimum_wage_cents_per_h": 1070,
+          "tipped_minimum_wage_cents_per_h": 535,
           "notes": "Municipal income taxes (about 1-2.5%) apply in most cities and are extra."
         },
         "ok": {
@@ -7445,6 +7459,7 @@
           "median_rent_2br_cents_per_month": 186000,
           "residential_electricity_cents_per_kwh": 13.5,
           "minimum_wage_cents_per_h": 1505,
+          "tipped_minimum_wage_cents_per_h": 1505,
           "notes": "Most of Malheur County is Mountain time. No state sales tax; effective income tax is among the highest for a middle band."
         },
         "pa": {
@@ -7630,6 +7645,7 @@
           "median_rent_2br_cents_per_month": 211000,
           "residential_electricity_cents_per_kwh": 11.5,
           "minimum_wage_cents_per_h": 1666,
+          "tipped_minimum_wage_cents_per_h": 1666,
           "notes": "No wage income tax. Capital-gains excise tax applies only to large gains."
         },
         "wv": {
