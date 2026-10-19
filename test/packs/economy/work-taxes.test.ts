@@ -2,7 +2,9 @@
 // estimated tax on income nobody withholds from.
 
 import { describe, expect, test } from "bun:test";
-import { entity, ext, lapse, line, paid, paychecks, posts, setup } from "./work-world";
+import { investmentTax } from "../../../src/packs/economy/core/gains";
+import { incomeIn } from "../../../src/packs/economy/core/records";
+import { act, entity, ext, lapse, line, paid, paychecks, posts, setup } from "./work-world";
 
 const DAY = 1440;
 
@@ -41,5 +43,19 @@ describe("work taxes: withholding and estimated tax", () => {
   test("a person's estimated tax goes to the federal tax account their withholding goes to", () => {
     const [estimate] = posts(courier(), /^Estimated tax/);
     expect(line(estimate!, ext("tax:federal"))).toBe(-line(estimate!, "rosa_checking"));
+  });
+});
+
+describe("work taxes: business income", () => {
+  test("a C corporation's payout is a dividend its owner's investment tax covers", () => {
+    const { w } = setup((wd) => {
+      wd.entities.you!.fields.place = "cafe";
+      wd.entities.daybreak!.fields.structure = "c_corp";
+    });
+    expect(act(w, "economy.buy", { payer: "you", item: "latte_16oz", method: "debit" }).rejected).toEqual([]);
+    expect(act(w, "economy.distribute", { business: "daybreak", by: "maya" }).rejected).toEqual([]);
+    const [payout] = posts(w, /^Profit distribution/);
+    expect(incomeIn(w.state, "maya", 2026)).toMatchObject({ dividend: line(payout!, "maya_checking"), profit: 0 });
+    expect(investmentTax(w.ctx, "maya", 2026).cents).toBeGreaterThan(0);
   });
 });
