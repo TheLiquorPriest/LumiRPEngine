@@ -18,7 +18,7 @@ import type { Rng } from "../../../engine/rng";
 import { isGone, kindIs, scopeEnv } from "../../../engine/scope";
 import type { FinanceHooks, FlowPosting } from "./module";
 import { cycleOf, flowRunOf, reject } from "./journal";
-import { accountsOf, availableOf, balance, classOf, external, hasLedger, holdersOf, priceOf, productOf, statusOf, traitsOf } from "./model";
+import { accountsOf, availableOf, balance, canSpend, classOf, external, hasLedger, holdersOf, priceOf, productOf, statusOf, traitsOf } from "./model";
 import { accountLevel, asUnit, charge, chooseSource, depositAccount, isParty, isRejection, overdraftRoom, payeeSide, posting, signal, toggles, type PayMethod } from "./pay";
 import type { Run } from "./run";
 
@@ -571,12 +571,13 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
       break;
     }
     case "fallback": {
-      if (flow.fallback && !own_lines) {
-        const paid = payFrom(hooks, ctx, flow, flow.fallback, cents, at, true, amount.posting);
+      const fallback = fallbackOf(ctx, flow);
+      if (fallback && !own_lines) {
+        const paid = payFrom(hooks, ctx, flow, fallback, cents, at, true, amount.posting);
         if (!("code" in paid) && run.emit(paid.events).length > 0) {
           const next: FlowRunState = { done: before.done + 1, missed: before.missed, ended: ended(before.done + 1, before.missed) };
           run.emit([runEvent(flow, at, "fallback", cents, next)]);
-          if (who) run.emit([signal("bill", `${flow.label}: ${money(cents)} paid from ${labelOf(ctx, flow.fallback)}.`, who, at)]);
+          if (who) run.emit([signal("bill", `${flow.label}: ${money(cents)} paid from ${labelOf(ctx, fallback)}.`, who, at)]);
           return;
         }
       }
@@ -600,6 +601,20 @@ export function runOccurrence(hooks: FinanceHooks, run: Run, flow: Flow, at: num
 function flowIsIncome(ctx: ReadContext, flow: Flow, who: EntityId): boolean {
   const from = sideOf(ctx, flow.from);
   return !(("account" in from && from.party === who) || ("party" in from && !("account" in from) && from.party === who));
+}
+
+/**
+ * The account (or party) a flow falls back on, when it's the payer's own: the payer itself, or an
+ * account one of the payer's holders may spend from. An outside name or someone else's account is
+ * never drawn on, so a fallback can't pay with money nobody has.
+ */
+function fallbackOf(ctx: ReadContext, flow: Flow): string | null {
+  const fallback = flow.fallback;
+  if (!fallback) return null;
+  const from = sideOf(ctx, flow.from);
+  const payers = "account" in from ? holdersOf(ctx.state, from.account).filter((h) => canSpend(ctx.state, from.account, h)) : "party" in from ? [from.party] : [];
+  if (payers.includes(fallback)) return fallback;
+  return own(ctx.state.entities, fallback)?.kind === "account" && payers.some((p) => canSpend(ctx.state, fallback, p)) ? fallback : null;
 }
 
 /** What a party has to pay with now: their spendable accounts' availability. */

@@ -252,6 +252,17 @@ function mayPayFrom(ctx: ReadContext, who: EntityId, from: string): boolean {
   return from === who || canSpend(ctx.state, from, who);
 }
 
+/**
+ * A flow's fallback, when it names one: the party itself or an account it may pay from, like the
+ * flow's own payer. An outside name would pay from money nobody has, and someone else's account
+ * isn't theirs to draw on.
+ */
+function fallbackProblem(ctx: ReadContext, who: EntityId, fields: JsonObject): Rejection | null {
+  const fallback = strOf(fields.fallback);
+  if (fallback === "" || mayPayFrom(ctx, who, fallback)) return null;
+  return reject("not_owner", own(ctx.state.entities, fallback) ? `${labelOf(ctx, who)} can't fall back on ${labelOf(ctx, fallback)}` : `a fallback is an account of ${labelOf(ctx, who)}'s, not "${fallback}"`);
+}
+
 export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string, JsonValue>): LedgerEvent[] | Rejection {
   const made = flowFields(args);
   if ("code" in made) return made;
@@ -260,6 +271,8 @@ export function createFlow(ctx: ReadContext, who: EntityId, args: Record<string,
   const to = strOf(f.to);
   if (from === "" || to === "" || typeof f.amount_cents !== "number" || !(f.amount_cents > 0)) return reject("bad_flow", "a flow needs who pays, who is paid and an amount");
   if (!mayPayFrom(ctx, who, from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, from)}`);
+  const fallback = fallbackProblem(ctx, who, f);
+  if (fallback) return fallback;
   if (f.once === undefined && f.every === undefined) return reject("bad_flow", "a flow needs a schedule");
   const label = made.label ?? `Payment to ${labelOf(ctx, to)}`;
   const toMine = own(ctx.state.entities, to)?.kind === "account" && rightsOf(ctx.state, to, who) !== null;
@@ -276,6 +289,8 @@ export function updateFlow(ctx: ReadContext, who: EntityId, flow: EntityId, args
   const made = flowFields(args);
   if ("code" in made) return made;
   if (typeof made.fields.from === "string" && !mayPayFrom(ctx, who, made.fields.from)) return reject("not_owner", `${labelOf(ctx, who)} can't pay from ${labelOf(ctx, made.fields.from)}`);
+  const fallback = fallbackProblem(ctx, who, made.fields);
+  if (fallback) return fallback;
   const out: LedgerEvent[] = Object.entries(made.fields).map(([field, value]): LedgerEvent => ({ type: "set", entity: flow, field, value }));
   return out;
 }
