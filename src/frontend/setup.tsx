@@ -1,22 +1,23 @@
 // Frontend entry (ARCHITECTURE §2): wires the protocol client, the UI registry, the drawer tab,
-// the HUD pill, message chips (DOM decorators), input-bar palette actions and the float
-// overlays. It renders `StateView` only and sends protocol requests; it computes no world state.
+// the HUD (the phone's status line above the message input, else the floating pill), message chips
+// (DOM decorators), input-bar palette actions and the float overlays. It renders `StateView` only
+// and sends protocol requests; it computes no world state.
 
 import { render } from "preact";
 import type { SpindleFloatWidgetHandle, SpindleFrontendContext } from "lumiverse-spindle-types";
 import type { App, Draft, Toast, UiState } from "./app";
-import { AppContext, makeRequest } from "./app";
+import { AppContext, initialUi, makeRequest, SHOW_IDS_KEY } from "./app";
 import { trackJobs } from "./build/jobs";
 import { recheckDraft, trackDraft } from "./build/draft";
 import { MessageChips, messageIdFromScope } from "./chips";
 import { Toasts } from "./components";
 import { Drawer } from "./drawer";
 import { createHost } from "./host";
-import { Hud } from "./hud";
+import { Hud, StatusLine } from "./hud";
 import type { HudSize } from "./hud";
 import { createOverlays } from "./overlays";
 import { HudFloat } from "./hud-float";
-import { hudCentreX } from "./layout";
+import { hudCentreX, isMobile } from "./layout";
 import type { OverlaySet } from "./overlays";
 import { UI_PACKS } from "./packs";
 import { ProtocolClient } from "./protocol-client";
@@ -61,7 +62,25 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   window.addEventListener(STATE_REQUEST_EVENT, announceAgain);
   cleanups.push(() => window.removeEventListener(STATE_REQUEST_EVENT, announceAgain));
 
-  const ui = createStore<UiState>({ section: "play", playPanel: null, build: { view: "worlds" }, mapInDrawer: false, overlay: null, studioOffer: 0 });
+  // Show ids is a choice for this device (contract §6.7): read once here, written back when it changes.
+  let showIds = false;
+  try {
+    showIds = localStorage.getItem(SHOW_IDS_KEY) === "true";
+  } catch {
+    // Storage can be blocked (a private window, a sandboxed frame): ids stay hidden.
+  }
+  const ui = createStore<UiState>(initialUi(showIds));
+  cleanups.push(
+    ui.subscribe((state) => {
+      if (state.showIds === showIds) return;
+      showIds = state.showIds;
+      try {
+        localStorage.setItem(SHOW_IDS_KEY, String(showIds));
+      } catch {
+        // Where storage is blocked the choice holds for this session only.
+      }
+    }),
+  );
   const toasts = createStore<Toast[]>([]);
   let toastId = 0;
   const toast = (text: string, tone: Toast["tone"] = "info") => {
@@ -89,6 +108,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       closeMap: () => overlays?.close("map"),
       openPalette: (tab) => overlays?.open("palette", tab) ?? Promise.resolve(),
       closePalette: () => overlays?.close("palette"),
+      openWorld: () => overlays?.open("world") ?? Promise.resolve(),
+      closeWorld: () => overlays?.close("world"),
     },
   };
   overlays = createOverlays(app, host);
@@ -128,13 +149,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   });
   // LumiRPEngine Studio has a world waiting (DESIGN §15): open Build's world list, where it's reviewed before anything installs.
   const reviewOffer = () => {
-    ui.update((state) => ({ ...state, section: "build", build: { view: "worlds" }, studioOffer: state.studioOffer + 1 }));
+    ui.update((state) => ({ ...state, mode: "build", build: { view: "worlds" }, studioOffer: state.studioOffer + 1 }));
     tab.activate();
   };
   window.addEventListener(STUDIO_OFFER_EVENT, reviewOffer);
   cleanups.push(() => window.removeEventListener(STUDIO_OFFER_EVENT, reviewOffer));
 
-  // ------------------------------------------------------------ HUD pill
+  // ------------------------------------------------------------ HUD pill and status line
+  // How many status lines are mounted above a message input. On a phone the status line does the
+  // pill's job (D-UI3); a host without that mount keeps the pill.
+  const statusLines = createStore(0);
   const hud = new HudFloat<SpindleFloatWidgetHandle>({
     viewport: () => host.viewport.get(),
     create(rect) {
@@ -192,7 +216,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   const follow = () => {
     const view = client.getState().view;
     const world = view !== null && view.status !== "not_world";
-    if (world && view.hud) hud.ensure().setVisible(true);
+    if (world && view.hud && (!isMobile(host.viewport.get()) || statusLines.get() === 0)) hud.ensure().setVisible(true);
     else hud.get()?.setVisible(false);
     actions.setEnabled(world && view.palette !== null);
     timelapse.setEnabled(world && view.palette?.timelapse != null);
@@ -201,12 +225,37 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     mapAction.setEnabled(world && view.panels["space.map"] !== undefined);
   };
   cleanups.push(client.subscribe(follow));
-  // Crossing the phone breakpoint moves the pill to that layout's saved geometry.
+  // Crossing the phone breakpoint moves the pill to that layout's saved geometry, and hands its job
+  // to the status line or back.
   cleanups.push(
     host.viewport.subscribe(() => {
-      if (hud.relayout()) follow();
+      hud.relayout();
+      follow();
     }),
   );
+  cleanups.push(
+    host.ui.registerDomDecorator({
+      mount: "chat_composer_above",
+      render(root) {
+        render(
+          <AppContext.Provider value={app}>
+            <div class="lre">
+              <StatusLine />
+            </div>
+          </AppContext.Provider>,
+          root,
+        );
+        statusLines.update((count) => count + 1);
+        return () => {
+          render(null, root);
+          statusLines.update((count) => count - 1);
+        };
+      },
+    }),
+  );
+  // Subscribed after the decorator, so teardown stops following before the status lines unmount.
+  cleanups.push(statusLines.subscribe(follow));
+  follow();
 
   // ------------------------------------------------------------ chips and chat toasts
   cleanups.push(
@@ -259,6 +308,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     if (chatId === client.getState().chatId && client.getState().status !== "closed") return;
     app.overlays.closeMap();
     app.overlays.closePalette();
+    app.overlays.closeWorld();
     void client.open(chatId);
   };
   if (ctx.state) {

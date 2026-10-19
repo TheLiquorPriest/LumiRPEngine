@@ -1,16 +1,27 @@
-// Float overlays: the fullscreen map and the palette bottom sheet, each a chromeless float widget
-// (`ui_panels`), opened through the OverlayController so the drawer closes first on mobile.
+// Float overlays (contract §4.8): the map, the palette and the World sheet, each a chromeless float
+// widget (`ui_panels`) opened through the OverlayController, so the drawer closes first on mobile.
+// One shows at a time. On a phone a bottom sheet spans the width less what the host's chat heads
+// cover of it, followed while it shows. Closing an overlay hands focus back to what opened it.
 
 import { render } from "preact";
 import type { SpindleFloatWidgetHandle } from "lumiverse-spindle-types";
-import type { App, PaletteTab } from "./app";
-import { AppContext, useApp, useView } from "./app";
-import { Empty, Toasts } from "./components";
+import type { App, PaletteTab, UiState } from "./app";
+import { AppContext, playAt, useApp, useView } from "./app";
+import { watchChatHeads } from "./chat-heads";
+import { Empty, IconButton, Toasts } from "./components";
 import type { Host } from "./host";
-import { mapFloatRect, sheetRect } from "./layout";
+import { WorldSheet } from "./hud";
+import { Icon } from "./icons";
+import type { Rect } from "./layout";
+import { isMobile, mapFloatRect, sheetRect } from "./layout";
 import type { FloatSurface } from "./overlay-controller";
 import { OverlayController } from "./overlay-controller";
 import { PaletteSheet } from "./palette";
+
+export type OverlayKind = NonNullable<UiState["overlay"]>;
+
+/** The palette's share of the viewport's height. */
+const PALETTE_HEIGHT = 0.62;
 
 function MapFrame(props: { fullscreen: boolean; onToggleFullscreen(): void; onClose(): void }) {
   const app = useApp();
@@ -18,29 +29,31 @@ function MapFrame(props: { fullscreen: boolean; onToggleFullscreen(): void; onCl
   const panel = app.catalog.panels.find((p) => p.id === "space.map");
   return (
     <div
-      class={props.fullscreen ? "lre lre-overlay-root lre-map full" : "lre lre-overlay-root lre-map"}
+      class={props.fullscreen ? "lre lre-overlay-root lre-chat-mapframe full" : "lre lre-overlay-root lre-chat-mapframe"}
       data-lre-overlay="map"
       role="dialog"
       aria-label="World map"
       tabIndex={-1}
-      style={{ position: "relative" }}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         event.stopPropagation();
         props.onClose();
       }}
     >
-      {view && panel ? <panel.component chatId={view.chatId} view={view.panels["space.map"] ?? null} state={view} send={app.send} /> : <Empty>No map for this chat.</Empty>}
-      <div class="bar">
-        <span class="title">
-          <span aria-hidden="true">🗺</span> {view?.hud?.place?.name ?? "Map"}
+      {view && panel ? (
+        <panel.component chatId={view.chatId} view={view.panels["space.map"] ?? null} state={view} send={app.send} />
+      ) : (
+        <Empty icon="map" title="No map">
+          This chat has no map.
+        </Empty>
+      )}
+      <div class="lre-chat-mapbar">
+        <span class="lre-chat-mapbar-title">
+          <Icon name="map" size={16} />
+          <span>{view?.hud?.place?.name ?? "Map"}</span>
         </span>
-        <button type="button" class="lre-btn" aria-label={props.fullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={props.onToggleFullscreen} data-lre-btn="fullscreen">
-          <span aria-hidden="true">{props.fullscreen ? "⤡" : "⤢"}</span>
-        </button>
-        <button type="button" class="lre-btn" aria-label="Close map" onClick={props.onClose}>
-          ✕
-        </button>
+        <IconButton icon={props.fullscreen ? "shrink" : "expand"} label={props.fullscreen ? "Exit fullscreen" : "Fullscreen"} variant="secondary" onClick={props.onToggleFullscreen} />
+        <IconButton icon="close" label="Close map" variant="secondary" onClick={props.onClose} />
       </div>
       <Toasts surface="map" />
     </div>
@@ -50,11 +63,15 @@ function MapFrame(props: { fullscreen: boolean; onToggleFullscreen(): void; onCl
 /** A lazily created float widget rendering one Preact tree. */
 class WidgetSurface implements FloatSurface {
   private widget: SpindleFloatWidgetHandle | null = null;
+  /** What had focus when the overlay opened; closing it hands focus back (contract §5.7). */
+  private opener: HTMLElement | null = null;
 
   constructor(
     private readonly create: () => SpindleFloatWidgetHandle,
     private readonly paint: (widget: SpindleFloatWidgetHandle, fullscreen: boolean) => void,
     private readonly onVisible: (visible: boolean) => void,
+    /** Sizes and moves a sheet's widget for the viewport and the chat heads as they are now. */
+    private readonly place: ((widget: SpindleFloatWidgetHandle) => void) | null = null,
   ) {}
 
   show(fullscreen: boolean): void {
@@ -64,8 +81,11 @@ class WidgetSurface implements FloatSurface {
       this.widget.root.style.height = "100%";
     }
     const widget = this.widget;
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && !widget.root.contains(focused)) this.opener = focused;
     widget.setVisible(true);
     if (typeof widget.setFullscreen === "function" && widget.isFullscreen() !== fullscreen) widget.setFullscreen(fullscreen);
+    this.place?.(widget);
     this.paint(widget, fullscreen);
     // Focus moves into the overlay so its Escape handler and tab order reach the player.
     widget.root.querySelector<HTMLElement>('[role="dialog"]')?.focus();
@@ -74,13 +94,23 @@ class WidgetSurface implements FloatSurface {
 
   hide(): void {
     if (!this.widget) return;
+    const focused = document.activeElement;
+    // Hiding drops focus held inside the overlay; it goes back to the opener when that is still on the page.
+    const inside = focused instanceof Node && this.widget.root.contains(focused);
     if (typeof this.widget.setFullscreen === "function" && this.widget.isFullscreen()) this.widget.setFullscreen(false);
     this.widget.setVisible(false);
     this.onVisible(false);
+    if (inside && this.opener?.isConnected) this.opener.focus();
+    this.opener = null;
   }
 
   isVisible(): boolean {
     return this.widget?.isVisible() ?? false;
+  }
+
+  /** Re-places a showing sheet: the chat heads moved, or its content changed height. */
+  relayout(): void {
+    if (this.widget && this.widget.isVisible()) this.place?.(this.widget);
   }
 
   toggleFullscreen(): void {
@@ -100,15 +130,50 @@ class WidgetSurface implements FloatSurface {
 }
 
 export interface OverlaySet {
-  open(kind: "map" | "palette", tab?: PaletteTab): Promise<void>;
-  close(kind: "map" | "palette"): void;
+  open(kind: OverlayKind, tab?: PaletteTab): Promise<void>;
+  close(kind: OverlayKind): void;
   destroy(): void;
 }
 
 export function createOverlays(app: App, host: Host): OverlaySet {
   let paletteTab: PaletteTab = "actions";
-  const setOverlay = (kind: "map" | "palette", visible: boolean) =>
-    app.ui.update((ui) => ({ ...ui, overlay: visible ? kind : ui.overlay === kind ? null : ui.overlay }));
+  /** The World sheet's height as its content last measured it; a first guess until then. */
+  let worldHeight = 0;
+  const setOverlay = (kind: OverlayKind, visible: boolean) => app.ui.update((ui) => ({ ...ui, overlay: visible ? kind : ui.overlay === kind ? null : ui.overlay }));
+
+  // The chat heads are watched only while a sheet shows on a phone: elsewhere they change nothing.
+  let heads: { get(): Rect[]; stop(): void } | null = null;
+  const sheetHeads = (): Rect[] => {
+    if (!isMobile(host.viewport.get())) return [];
+    if (!heads) {
+      // In the host's layout pixels, as the viewport is read; the rendered rect where the host has no geometry API.
+      const geometry = host.ui.geometry;
+      const watch = watchChatHeads(geometry ? (el) => geometry.layoutElementRect(el) : undefined);
+      const off = watch.subscribe(() => {
+        palette.relayout();
+        world.relayout();
+      });
+      heads = {
+        get: watch.get,
+        stop() {
+          off();
+          watch.dispose();
+        },
+      };
+    }
+    return heads.get();
+  };
+  const sheetShown = (kind: OverlayKind, visible: boolean) => {
+    setOverlay(kind, visible);
+    if (visible || palette.isVisible() || world.isVisible()) return;
+    heads?.stop();
+    heads = null;
+  };
+  const placeSheet = (widget: SpindleFloatWidgetHandle, height: number) => {
+    const rect = sheetRect(host.viewport.get(), height, sheetHeads());
+    widget.setSize(rect.width, rect.height);
+    widget.moveTo(rect.x, rect.y);
+  };
 
   const map: WidgetSurface = new WidgetSurface(
     () => {
@@ -127,25 +192,51 @@ export function createOverlays(app: App, host: Host): OverlaySet {
 
   const palette: WidgetSurface = new WidgetSurface(
     () => {
-      const rect = sheetRect(host.viewport.get(), 0.62);
+      const vp = host.viewport.get();
+      const rect = sheetRect(vp, vp.height * PALETTE_HEIGHT);
       return host.ui.createFloatWidget({ width: rect.width, height: rect.height, initialPosition: { x: rect.x, y: rect.y }, chromeless: true, tooltip: "LumiRPEngine actions", mobileClamp: false });
     },
-    (widget) => {
-      const vp = host.viewport.get();
-      const rect = sheetRect(vp, 0.62);
-      widget.setSize(rect.width, rect.height);
-      widget.moveTo(rect.x, rect.y);
+    (widget) =>
       render(
         <AppContext.Provider value={app}>
-          <div class="lre-overlay-root" data-lre-overlay="palette">
-            <PaletteSheet key={`${paletteTab}:${Date.now()}`} tab={paletteTab} desk={rect.width < vp.width} onClose={() => paletteControl.close()} />
+          <div class="lre lre-overlay-root" data-lre-overlay="palette">
+            <PaletteSheet key={`${paletteTab}:${Date.now()}`} tab={paletteTab} desk={!isMobile(host.viewport.get())} onClose={() => paletteControl.close()} />
             <Toasts surface="palette" />
           </div>
         </AppContext.Provider>,
         widget.root,
-      );
+      ),
+    (visible) => sheetShown("palette", visible),
+    (widget) => placeSheet(widget, host.viewport.get().height * PALETTE_HEIGHT),
+  );
+
+  const world: WidgetSurface = new WidgetSurface(
+    () => {
+      const vp = host.viewport.get();
+      const rect = sheetRect(vp, vp.height / 2);
+      return host.ui.createFloatWidget({ width: rect.width, height: rect.height, initialPosition: { x: rect.x, y: rect.y }, chromeless: true, tooltip: "LumiRPEngine world", mobileClamp: false });
     },
-    (visible) => setOverlay("palette", visible),
+    (widget) =>
+      render(
+        <AppContext.Provider value={app}>
+          <div class="lre lre-overlay-root" data-lre-overlay="world">
+            <WorldSheet
+              key={Date.now()}
+              desk={!isMobile(host.viewport.get())}
+              onClose={() => worldControl.close()}
+              onHeight={(height) => {
+                if (height === worldHeight) return;
+                worldHeight = height;
+                world.relayout();
+              }}
+            />
+            <Toasts surface="world" />
+          </div>
+        </AppContext.Provider>,
+        widget.root,
+      ),
+    (visible) => sheetShown("world", visible),
+    (widget) => placeSheet(widget, worldHeight > 0 ? worldHeight : host.viewport.get().height / 2),
   );
 
   const closeDrawer = async (): Promise<boolean> => {
@@ -157,7 +248,7 @@ export function createOverlays(app: App, host: Host): OverlaySet {
     drawerOpen: () => host.drawer.get().open,
     closeDrawer,
     surface: map,
-    inDrawer: () => app.ui.update((ui) => ({ ...ui, section: "play", playPanel: "space.map", mapInDrawer: true })),
+    inDrawer: () => app.ui.update((ui) => playAt(ui, "places", "space.map")),
   });
   const paletteControl = new OverlayController({
     viewport: () => host.viewport.get(),
@@ -166,25 +257,32 @@ export function createOverlays(app: App, host: Host): OverlaySet {
     surface: { show: () => palette.show(false), hide: () => palette.hide(), isVisible: () => palette.isVisible() },
     inDrawer: () => app.toast("Close the drawer to use the action sheet.", "error"),
   });
+  const worldControl = new OverlayController({
+    viewport: () => host.viewport.get(),
+    drawerOpen: () => host.drawer.get().open,
+    closeDrawer,
+    surface: { show: () => world.show(false), hide: () => world.hide(), isVisible: () => world.isVisible() },
+    // Play → Now shows the same details, with the same fixes, where the drawer can't close.
+    inDrawer: () => app.ui.update((ui) => playAt(ui, "now")),
+  });
+  const surfaces: Record<OverlayKind, WidgetSurface> = { map, palette, world };
+  const controls: Record<OverlayKind, OverlayController> = { map: mapControl, palette: paletteControl, world: worldControl };
 
   return {
     async open(kind, tab) {
-      if (kind === "palette") {
-        paletteTab = tab ?? "actions";
-        map.hide();
-        await paletteControl.open();
-      } else {
-        palette.hide();
-        await mapControl.open();
-      }
+      for (const other of ["map", "palette", "world"] as const) if (other !== kind) surfaces[other].hide();
+      if (kind === "palette") paletteTab = tab ?? "actions";
+      await controls[kind].open();
     },
     close(kind) {
-      if (kind === "map") mapControl.close();
-      else paletteControl.close();
+      controls[kind].close();
     },
     destroy() {
       map.destroy();
       palette.destroy();
+      world.destroy();
+      heads?.stop();
+      heads = null;
     },
   };
 }

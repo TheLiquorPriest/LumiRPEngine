@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { hudCentreX, hudFloatRect, hudMode, isMobile, mapFloatRect, overlayPlan, rightGutter, sheetRect } from "../../src/frontend/layout";
+import { hudCentreX, hudFloatRect, hudMode, isMobile, mapFloatRect, overlayPlan, sheetRect } from "../../src/frontend/layout";
 
 const vp = (width: number, coarse = false) => ({ width, height: 844, coarse });
 
@@ -29,19 +29,20 @@ describe("responsive rules", () => {
     expect(overlayPlan(vp(1280), true)).toEqual({ closeDrawer: false, fullscreen: false });
   });
 
-  test("the right gutter covers only the part of a panel under the chat heads, on mobile", () => {
-    expect(rightGutter({ x: 0, y: 0, width: 326, height: 800 }, vp(390))).toBe(0);
-    expect(rightGutter({ x: 0, y: 0, width: 360, height: 800 }, vp(390))).toBe(34);
-    expect(rightGutter({ x: 44, y: 0, width: 346, height: 800 }, vp(390))).toBe(64);
-    expect(rightGutter({ x: 0, y: 0, width: 1280, height: 800 }, vp(1280))).toBe(0);
-    // Measured mid-slide (partly off-screen): never more than the gutter.
-    expect(rightGutter({ x: 390, y: 0, width: 360, height: 800 }, vp(390))).toBe(64);
-    expect(rightGutter({ x: 200, y: 0, width: 360, height: 800 }, vp(390))).toBe(64);
+  test("on a phone a bottom sheet spans the width when no chat head covers it; on desktop it is a centred column", () => {
+    expect(sheetRect(vp(390), 506)).toEqual({ x: 0, y: 844 - 506, width: 390, height: 506 });
+    expect(sheetRect({ width: 1280, height: 800, coarse: false }, 480)).toEqual({ x: 420, y: 800 - 480 - 12, width: 440, height: 480 });
+    // Never taller than the viewport less 24 px.
+    expect(sheetRect(vp(390), 2000).height).toBe(820);
   });
 
-  test("the palette sheet sits left of the chat heads at the bottom on mobile and is a centered column on desktop", () => {
-    expect(sheetRect(vp(390), 0.6)).toEqual({ x: 0, y: 844 - 506, width: 390 - 64, height: 506 });
-    expect(sheetRect({ width: 1280, height: 800, coarse: false }, 0.6)).toEqual({ x: 420, y: 800 - 480 - 12, width: 440, height: 480 });
+  test("a chat head over a phone sheet narrows it by the overlap; a head above it, or on desktop, changes nothing", () => {
+    const right = { x: 330, y: 500, width: 52, height: 52 };
+    expect(sheetRect(vp(390), 506, [right])).toEqual({ x: 0, y: 338, width: 390 - 68, height: 506 });
+    const left = { x: 8, y: 700, width: 52, height: 52 };
+    expect(sheetRect(vp(390), 506, [left])).toEqual({ x: 68, y: 338, width: 390 - 68, height: 506 });
+    expect(sheetRect(vp(390), 506, [{ ...right, y: 120 }])).toEqual({ x: 0, y: 338, width: 390, height: 506 });
+    expect(sheetRect({ width: 1280, height: 800, coarse: false }, 480, [{ x: 1220, y: 500, width: 52, height: 52 }]).width).toBe(440);
   });
 
   test("the desktop map opens 480 × 520 at the top right, and phone and desktop save their geometry apart", () => {

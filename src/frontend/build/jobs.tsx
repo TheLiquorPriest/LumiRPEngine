@@ -4,8 +4,10 @@
 // terms and topics join the lookup table in one more write), then committed from the Build bar. The
 // backend keeps each job (`lre.job list`), so a reload or a restart shows the last run of each tool
 // again, and a job a restart cut off as interrupted, with its proposals so far and Run it again.
+// A job's page (redesign contract §4.6) leads with its status and results; Apply stays in reach in
+// a sticky bar while the review scrolls.
 
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useId, useMemo, useState } from "preact/hooks";
 import { hasOwn, isRecord } from "../../shared/json";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { addToLoreIndex, loreIndexJson, loreSourceOf } from "../../shared/lore";
@@ -14,12 +16,16 @@ import type { LoreIndex } from "../../shared/world";
 import type { App } from "../app";
 import { useApp } from "../app";
 import type { SegOption } from "../components";
-import { Card, Empty, JsonView, Row, Seg, useBusy } from "../components";
-import type { ProtocolClient } from "../protocol-client";
+import { Badge, Button, Disclosure, Empty, Field, IdText, JsonView, PageHeader, SaveBar, Section, Seg, useBusy, useShowIds } from "../components";
 import { strings } from "../decode";
+import { humanize } from "../format";
+import type { IconName } from "../icons";
+import { Icon } from "../icons";
+import type { ProtocolClient } from "../protocol-client";
 import type { Req } from "../requests";
 import { createStore, useSelect } from "../store";
-import { issueTarget } from "./check";
+import { IssueRow } from "./check";
+import { COLLECTION_INFO, itemLabel } from "./chrome";
 import { draftSend } from "./draft";
 
 export interface JobState {
@@ -74,12 +80,36 @@ export function proposalWrites(worldId: string, proposals: readonly JobProposal[
   return [...puts, { type: "lre.editor", worldId, base: null, op: "set", part: "loreIndex", value: loreIndexJson(merged) }];
 }
 
-const TITLE: Record<JobKind, string> = { import_lore: "Import from lore", refine: "Build / Refine with AI", describe_map: "Describe a map", playtest: "Playtest", check_world: "Check world", index_book: "Index a World Info book", index_text: "Index this text" };
+/** Each tool as Build's Tools list and the job's page name it: its title, what it does, its icon. */
+export const JOB_INFO: Readonly<Record<JobKind, { title: string; hint: string; icon: IconName }>> = {
+  import_lore: { title: "Import from lore", hint: "Turn lore-book entries into entities, places and facts", icon: "download" },
+  index_book: { title: "Index a World Info book", hint: "Lore entries, aliases, topics and lookup terms from one of your books", icon: "book" },
+  index_text: { title: "Index this text", hint: "Lore entries from text you paste; review each one", icon: "scroll" },
+  refine: { title: "Build / Refine with AI", hint: "Describe changes; review every proposal", icon: "sparkle" },
+  describe_map: { title: "Describe a map", hint: "Write a place's inside in your words; the AI draws it as a map to review", icon: "map" },
+  playtest: { title: "Playtest", hint: "Run scripted turns on the background lane", icon: "play" },
+  check_world: { title: "Check world", hint: "Simulate days on the background lane; report drops, failures and leaks", icon: "pulse" },
+};
+
 const CHECK_DAYS: readonly SegOption<number>[] = [1, 3, 7].map((days) => ({ value: days, label: `${days} day${days === 1 ? "" : "s"}` }));
-const STATUS_TONE: Record<JobState["status"], string> = { running: "accent", done: "pos", failed: "neg", cancelled: "", interrupted: "warn" };
+
+const STATUS: Record<JobState["status"], { label: string; tone: "accent" | "pos" | "neg" | "neutral" | "warn" }> = {
+  running: { label: "Running", tone: "accent" },
+  done: { label: "Done", tone: "pos" },
+  failed: { label: "Failed", tone: "neg" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+  interrupted: { label: "Interrupted", tone: "warn" },
+};
+
+/** A job's status in words. */
+export function JobStatusBadge(props: { status: JobState["status"] }) {
+  const status = STATUS[props.status];
+  return <Badge tone={status.tone}>{status.label}</Badge>;
+}
 
 function JobInput(props: { kind: JobKind; onStart(input: Record<string, string | number | string[]>): void; busy: boolean }) {
   const app = useApp();
+  const showIds = useShowIds();
   const [books, setBooks] = useState<{ id: string; name: string }[] | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [text, setText] = useState("");
@@ -87,126 +117,125 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
   const draft = useSelect(app.drafts, (d) => d);
   const [scope, setScope] = useState("");
   const [mapId, setMapId] = useState("");
+  const textId = useId();
+  const placeId = useId();
+  const mapIdId = useId();
   useEffect(() => {
     if (props.kind === "import_lore" || props.kind === "index_book") void app.host.worldBooks().then(setBooks, () => setBooks([]));
   }, [props.kind]);
   if (props.kind === "index_book") {
     return (
       <div class="lre-stack">
-        <span class="lre-small lre-muted">Pick one of your World Info books. Each entry with text becomes a lore entry to review, with aliases, topics, links and lookup terms, and keeps the book's own text; entries already in the world's lore are skipped. Nothing changes until you apply.</span>
+        <p class="lre-build-note">Pick one of your World Info books. Each entry with text becomes a lore entry to review, with aliases, topics, links and lookup terms, and keeps the book's own text; entries already in the world's lore are skipped. Nothing changes until you apply.</p>
         {books === null ? (
-          <Empty>Loading books…</Empty>
+          <Empty icon="hourglass">Loading books…</Empty>
         ) : books.length === 0 ? (
-          <Empty>No World Info books.</Empty>
+          <Empty icon="book">No World Info books.</Empty>
         ) : (
-          <div class="lre-list" role="radiogroup" aria-label="World Info book">
+          <div class="lre-build-picks" role="radiogroup" aria-label="World Info book">
             {books.map((book) => (
-              <label key={book.id} class="lre-item">
-                <span class="lre-check">
-                  <input type="radio" name="lre-index-book" checked={picked[0] === book.id} onChange={() => setPicked([book.id])} />
-                </span>
-                <span class="grow">{book.name}</span>
+              <label key={book.id} class="lre-build-pick">
+                <input type="radio" name="lre-index-book" checked={picked[0] === book.id} onChange={() => setPicked([book.id])} />
+                <span>{book.name}</span>
               </label>
             ))}
           </div>
         )}
-        <button type="button" class="lre-btn primary" disabled={picked.length === 0 || props.busy} onClick={() => props.onStart({ bookId: picked[0] ?? "" })}>
+        <Button variant="primary" block disabled={picked.length === 0 || props.busy} onClick={() => props.onStart({ bookId: picked[0] ?? "" })}>
           Index the book
-        </button>
+        </Button>
       </div>
     );
   }
   if (props.kind === "index_text") {
     return (
       <div class="lre-stack">
-        <label class="lre-field">
-          <span class="label">Text to index</span>
-          <textarea class="lre-input" rows={8} style={{ fontFamily: "inherit" }} placeholder="Paste a setting document, a town history, character notes…" value={text} onInput={(event) => setText(event.currentTarget.value)} />
-        </label>
-        <span class="lre-small lre-muted">The helper splits it into lore entries in the text's own words, with aliases, topics, links and lookup terms. Each is marked as written by the AI, and counts as reviewed once you apply it. Nothing changes until you apply.</span>
-        <button type="button" class="lre-btn primary" disabled={!text.trim() || props.busy} onClick={() => props.onStart({ text: text.trim() })}>
+        <Field label="Text to index" for={textId} help="The helper splits it into lore entries in the text's own words, with aliases, topics, links and lookup terms. Each is marked as written by the AI, and counts as reviewed once you apply it. Nothing changes until you apply.">
+          <textarea id={textId} class="lre-input lre-build-prose" rows={8} placeholder="Paste a setting document, a town history, character notes…" value={text} onInput={(event) => setText(event.currentTarget.value)} />
+        </Field>
+        <Button variant="primary" block disabled={!text.trim() || props.busy} onClick={() => props.onStart({ text: text.trim() })}>
           Index the text
-        </button>
+        </Button>
       </div>
     );
   }
   if (props.kind === "import_lore") {
     return (
       <div class="lre-stack">
-        <span class="lre-small lre-muted">Choose lore books. Every entry becomes a reviewable proposal; nothing changes until you apply it.</span>
+        <p class="lre-build-note">Choose lore books. Every entry becomes a reviewable proposal; nothing changes until you apply it.</p>
         {books === null ? (
-          <Empty>Loading lore books…</Empty>
+          <Empty icon="hourglass">Loading lore books…</Empty>
         ) : books.length === 0 ? (
-          <Empty>No lore books.</Empty>
+          <Empty icon="book">No lore books.</Empty>
         ) : (
-          <div class="lre-list">
+          <div class="lre-build-picks" role="group" aria-label="Lore books">
             {books.map((book) => (
-              <label key={book.id} class="lre-item">
-                <span class="lre-check">
-                  <input type="checkbox" checked={picked.includes(book.id)} onChange={() => setPicked(picked.includes(book.id) ? picked.filter((id) => id !== book.id) : [...picked, book.id])} />
-                </span>
-                <span class="grow">{book.name}</span>
+              <label key={book.id} class="lre-build-pick">
+                <input type="checkbox" checked={picked.includes(book.id)} onChange={() => setPicked(picked.includes(book.id) ? picked.filter((id) => id !== book.id) : [...picked, book.id])} />
+                <span>{book.name}</span>
               </label>
             ))}
           </div>
         )}
-        <button type="button" class="lre-btn primary" disabled={picked.length === 0 || props.busy} onClick={() => props.onStart({ bookIds: picked })}>
+        <Button variant="primary" block disabled={picked.length === 0 || props.busy} onClick={() => props.onStart({ bookIds: picked })}>
           Import {picked.length > 0 ? `${picked.length} book${picked.length === 1 ? "" : "s"}` : ""}
-        </button>
+        </Button>
       </div>
     );
   }
   if (props.kind === "describe_map") {
     const places = draft ? Object.values(draft.doc.places).sort((a, b) => a.name.localeCompare(b.name)) : [];
     const chosen = scope || draft?.doc.start.place || "";
+    // The map's id is the backend's to derive unless the author names one (D-UI6): an Advanced field.
+    const mapIdField = (
+      <Field label="Map id" for={mapIdId} help={`Left empty, it's ${chosen}_map.`}>
+        <input id={mapIdId} class="lre-input lre-build-mono" placeholder={`${chosen}_map`} value={mapId} autoComplete="off" spellcheck={false} onInput={(event) => setMapId(event.currentTarget.value.replace(/[^\w-]/g, "_"))} />
+      </Field>
+    );
     return (
       <div class="lre-stack">
-        <span class="lre-small lre-muted">Describe a place's inside in your own words: rooms and how they connect, or a town's places and the walks between them. The AI draws it as an lre-map-v1 map; you see it as a proposal with its preview before it goes into the draft.</span>
-        <label class="lre-field">
-          <span class="label">The place to draw</span>
-          <select class="lre-input" value={chosen} onChange={(event) => setScope(event.currentTarget.value)}>
+        <p class="lre-build-note">Describe a place's inside in your own words: rooms and how they connect, or a town's places and the walks between them. The AI draws it as an lre-map-v1 map; you see it as a proposal with its preview before it goes into the draft.</p>
+        <Field label="The place to draw" for={placeId}>
+          <select id={placeId} class="lre-input" value={chosen} onChange={(event) => setScope(event.currentTarget.value)}>
             {places.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name} ({p.id})
+                {showIds ? `${p.name} (${p.id})` : p.name}
               </option>
             ))}
           </select>
-        </label>
-        <label class="lre-field">
-          <span class="label">Map id</span>
-          <input class="lre-input" placeholder={`${chosen}_map`} value={mapId} onInput={(event) => setMapId(event.currentTarget.value.replace(/[^\w-]/g, "_"))} />
-        </label>
-        <label class="lre-field">
-          <span class="label">Describe it</span>
-          <textarea class="lre-input" rows={6} style={{ fontFamily: "inherit" }} placeholder="A narrow farmhouse: the front door opens into a hall, with the parlour on the left and the kitchen at the back; a door from the kitchen to the scullery…" value={text} onInput={(event) => setText(event.currentTarget.value)} />
-        </label>
-        <button type="button" class="lre-btn primary" disabled={!text.trim() || !chosen || props.busy} onClick={() => props.onStart({ scope: chosen, prose: text.trim(), ...(mapId.trim() ? { mapId: mapId.trim() } : {}) })}>
+        </Field>
+        <Field label="Describe it" for={textId}>
+          <textarea id={textId} class="lre-input lre-build-prose" rows={6} placeholder="A narrow farmhouse: the front door opens into a hall, with the parlour on the left and the kitchen at the back; a door from the kitchen to the scullery…" value={text} onInput={(event) => setText(event.currentTarget.value)} />
+        </Field>
+        {showIds ? mapIdField : <Disclosure summary="Advanced">{mapIdField}</Disclosure>}
+        <Button variant="primary" block disabled={!text.trim() || !chosen || props.busy} onClick={() => props.onStart({ scope: chosen, prose: text.trim(), ...(mapId.trim() ? { mapId: mapId.trim() } : {}) })}>
           Draw the map
-        </button>
+        </Button>
       </div>
     );
   }
   if (props.kind === "refine") {
     return (
       <div class="lre-stack">
-        <label class="lre-field">
-          <span class="label">What should change?</span>
-          <textarea class="lre-input" rows={4} style={{ fontFamily: "inherit" }} placeholder="Add a night-shift nurse who knows Dev; give the diner a weekly schedule…" value={text} onInput={(event) => setText(event.currentTarget.value)} />
-        </label>
-        <button type="button" class="lre-btn primary" disabled={!text.trim() || props.busy} onClick={() => props.onStart({ instructions: text.trim() })}>
+        <Field label="What should change?" for={textId}>
+          <textarea id={textId} class="lre-input lre-build-prose" rows={4} placeholder="Add a night-shift nurse who knows Dev; give the diner a weekly schedule…" value={text} onInput={(event) => setText(event.currentTarget.value)} />
+        </Field>
+        <Button variant="primary" block disabled={!text.trim() || props.busy} onClick={() => props.onStart({ instructions: text.trim() })}>
           Propose changes
-        </button>
+        </Button>
       </div>
     );
   }
   if (props.kind === "check_world") {
     return (
       <div class="lre-stack">
-        <span class="lre-small lre-muted">Runs the world forward one day per turn with no player input and reports what happened, dropped events, failures and leaks. Nothing is saved.</span>
-        <Seg label="Days" value={days} options={CHECK_DAYS} onChange={(next) => setDays(next)} />
-        <button type="button" class="lre-btn primary" disabled={props.busy} onClick={() => props.onStart({ days })}>
+        <p class="lre-build-note">Runs the world forward one day per turn with no player input and reports what happened, dropped events, failures and leaks. Nothing is saved.</p>
+        <Field label="Days">
+          <Seg label="Days" value={days} options={CHECK_DAYS} onChange={(next) => setDays(next)} />
+        </Field>
+        <Button variant="primary" block disabled={props.busy} onClick={() => props.onStart({ days })}>
           Run check
-        </button>
+        </Button>
       </div>
     );
   }
@@ -217,13 +246,12 @@ function JobInput(props: { kind: JobKind; onStart(input: Record<string, string |
     .slice(0, 50);
   return (
     <div class="lre-stack">
-      <label class="lre-field">
-        <span class="label">Player turns (one per line, up to 50)</span>
-        <textarea class="lre-input" rows={5} style={{ fontFamily: "inherit" }} placeholder={"I walk to the diner.\nI order a coffee.\nI ask Rosie about the night shift."} value={text} onInput={(event) => setText(event.currentTarget.value)} />
-      </label>
-      <button type="button" class="lre-btn primary" disabled={script.length === 0 || props.busy} onClick={() => props.onStart({ turns: script })}>
+      <Field label="Player turns (one per line, up to 50)" for={textId}>
+        <textarea id={textId} class="lre-input lre-build-prose" rows={5} placeholder={"I walk to the diner.\nI order a coffee.\nI ask Rosie about the night shift."} value={text} onInput={(event) => setText(event.currentTarget.value)} />
+      </Field>
+      <Button variant="primary" block disabled={script.length === 0 || props.busy} onClick={() => props.onStart({ turns: script })}>
         Run playtest{script.length > 0 ? ` (${script.length} turn${script.length === 1 ? "" : "s"})` : ""}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -260,7 +288,7 @@ export function startTicked(proposals: readonly JobProposal[]): Set<string> {
   return new Set(proposals.filter((p) => p.confidence >= 0.7 && !strings(isRecord(p.value) ? p.value.assumed : undefined).includes("kind")).map((p) => p.id));
 }
 
-/** A lore proposal in the review: its title, where it came from, its aliases, topics and links, and the lookup terms it adds. */
+/** A lore proposal's lines in the review: where it came from, its aliases, topics and links, and the lookup terms it adds. */
 function LoreProposalLines(props: { p: JobProposal; bookNames: Readonly<Record<string, string>>; names: Readonly<Record<string, string>> }) {
   const value = isRecord(props.p.value) ? props.p.value : {};
   const source = loreSourceOf(value.source);
@@ -274,22 +302,17 @@ function LoreProposalLines(props: { p: JobProposal; bookNames: Readonly<Record<s
   ];
   return (
     <>
-      <span style={{ display: "block", fontWeight: 600 }}>{typeof value.title === "string" ? value.title : props.p.key}</span>
-      <span class="lre-small" style={{ display: "block" }} data-lre-proposal-from>
+      <span class="lre-build-proposal-line" data-lre-proposal-from>
         {source.kind === "book" ? `From ${hasOwn(props.bookNames, source.bookId) ? props.bookNames[source.bookId] : source.bookId}: ${entry}` : "From the pasted text, in the AI's words"}
       </span>
       {lists
         .filter(([, items]) => items.length > 0)
         .map(([label, items]) => (
-          <span key={label} class="lre-small lre-muted" style={{ display: "block" }}>
+          <span key={label} class="lre-build-proposal-line lre-muted">
             {label}: {items.join(", ")}
           </span>
         ))}
-      {props.p.note ? (
-        <span class="lre-small lre-warn" style={{ display: "block" }}>
-          {props.p.note}
-        </span>
-      ) : null}
+      {props.p.note ? <span class="lre-build-proposal-line lre-warn">{props.p.note}</span> : null}
     </>
   );
 }
@@ -318,101 +341,172 @@ function ProposalReview(props: { app: App; worldId: string; proposals: JobPropos
     else next.add(id);
     setAccepted(next);
   };
+  const groups = proposalGroups(props.proposals);
   return (
-    <Card title="Proposals" aside={<span class="lre-badge">{accepted.size} / {props.proposals.length}</span>}>
-      <div class="lre-inline" style={{ marginBottom: "8px" }}>
-        <button type="button" class="lre-btn small" onClick={() => setAccepted(new Set(props.proposals.map((p) => p.id)))}>
-          Select all
-        </button>
-        <button type="button" class="lre-btn small" onClick={() => setAccepted(new Set())}>
-          None
-        </button>
-      </div>
-      {proposalGroups(props.proposals).map((group) => (
-        <div key={group.pack} data-lre-proposal-pack={group.pack} style={{ marginTop: "6px" }}>
-          <div class="lre-spread">
-            <span class="lre-small lre-muted" style={{ textTransform: "uppercase", letterSpacing: ".06em" }}>{group.pack}</span>
-            <span class="lre-small lre-muted">
-              {group.proposals.filter((p) => accepted.has(p.id)).length} / {group.proposals.length}
-            </span>
-          </div>
-          {group.proposals.map((p) => {
-            const value = isRecord(p.value) ? p.value : {};
-            const from = [...new Set(strings(value.sources).map((link) => link.split("/")[0] ?? link))].map((id) => bookNames[id] ?? id);
-            const assumed = strings(value.assumed);
-            const tableFields = assumed.filter((f) => f !== "kind");
-            // A pack draws what it can of a proposed value (a map as Play will show it).
-            const Preview = props.app.catalog.previews.get(p.collection);
-            return (
-              <div key={p.id} class="lre-lint" data-lre-proposal={p.id}>
-                <label class="lre-check">
-                  <input type="checkbox" aria-label={`Accept ${p.collection}.${p.key}`} checked={accepted.has(p.id)} onChange={() => toggle(p.id)} />
-                </label>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span class="lre-spread">
-                    <code>
-                      {p.collection}.{p.key}
-                    </code>
-                    <span class={p.confidence >= 0.8 ? "lre-badge pos" : p.confidence >= 0.5 ? "lre-badge warn" : "lre-badge neg"}>{Math.round(p.confidence * 100)}%</span>
-                  </span>
-                  {p.collection === "lore" ? (
-                    <LoreProposalLines p={p} bookNames={bookNames} names={names} />
-                  ) : (
-                    <>
-                      {/* A linked proposal's source is an entry id; "From lore" names its book instead. */}
-                      {from.length === 0 || p.note ? (
-                        <span class="lre-small lre-muted" style={{ display: "block" }}>
-                          {[from.length === 0 ? p.source : null, p.note].filter((part) => part).join(" — ")}
-                        </span>
-                      ) : null}
-                      {from.length > 0 ? (
-                        <span class="lre-small" style={{ display: "block" }} data-lre-proposal-from>
-                          From lore: {from.join(", ")}
-                        </span>
-                      ) : null}
-                      {assumed.includes("kind") ? (
-                        <span class="lre-small lre-warn" style={{ display: "block" }} data-lre-proposal-assumed-kind>
-                          Assumed kind: {String(value.kind)} (the lore named none)
-                        </span>
-                      ) : null}
-                      {tableFields.length > 0 ? (
-                        <span class="lre-small lre-warn" style={{ display: "block" }} data-lre-proposal-assumed>
-                          Assumed from a table: {tableFields.join(", ")}
-                        </span>
-                      ) : null}
-                    </>
-                  )}
-                  <button type="button" class="lre-btn small ghost" aria-expanded={open === p.id} onClick={() => setOpen(open === p.id ? null : p.id)}>
-                    {open === p.id ? "Hide value" : "Show value"}
-                  </button>
-                  {open === p.id ? <JsonView value={shownValue(p, bookNames)} /> : null}
-                  {Preview && draft ? <Preview world={draft.doc} collection={p.collection} id={p.key} value={p.value} /> : null}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      ))}
-      <button
-        type="button"
-        class="lre-btn primary block"
-        style={{ marginTop: "8px" }}
-        disabled={accepted.size === 0 || busy || applied}
-        onClick={() =>
-          run(async () => {
-            let ok = 0;
-            for (const write of proposalWrites(props.worldId, props.proposals, accepted, props.app.drafts.get()?.doc.loreIndex)) {
-              const message = await send(write);
-              if (message.type === "lre.result" && write.op === "put") ok += 1;
-            }
-            props.app.toast(`Applied ${ok} of ${accepted.size} to the draft. Commit when ready.`, ok === accepted.size ? "info" : "error");
-            setApplied(true);
-          })
+    <>
+      <Section
+        title="Proposals"
+        aside={
+          <span class="lre-build-count">
+            {accepted.size} of {props.proposals.length} ticked
+          </span>
         }
       >
-        {applied ? "Applied to the draft" : `Apply ${accepted.size} to the draft`}
-      </button>
-    </Card>
+        <div class="lre-build-actions">
+          <Button size="sm" icon="check" onClick={() => setAccepted(new Set(props.proposals.map((p) => p.id)))}>
+            Select all
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setAccepted(new Set())}>
+            None
+          </Button>
+        </div>
+        {groups.map((group) => (
+          <div key={group.pack} class="lre-build-group" data-lre-proposal-pack={group.pack}>
+            {/* One pack's proposals need no heading of their own. */}
+            {groups.length > 1 ? (
+              <div class="lre-build-group-head">
+                <span>{humanize(group.pack)}</span>
+                <span class="lre-build-count">
+                  {group.proposals.filter((p) => accepted.has(p.id)).length} of {group.proposals.length}
+                </span>
+              </div>
+            ) : null}
+            <div role="list">
+              {group.proposals.map((p) => {
+                const value = isRecord(p.value) ? p.value : {};
+                const from = [...new Set(strings(value.sources).map((link) => link.split("/")[0] ?? link))].map((id) => bookNames[id] ?? id);
+                const assumed = strings(value.assumed);
+                const tableFields = assumed.filter((f) => f !== "kind");
+                const noun = COLLECTION_INFO[p.collection].noun;
+                const title = itemLabel(p.collection, p.key, p.value);
+                const sure = Math.round(p.confidence * 100);
+                // A pack draws what it can of a proposed value (a map as Play will show it).
+                const Preview = props.app.catalog.previews.get(p.collection);
+                return (
+                  <div key={p.id} class="lre-build-proposal" role="listitem" data-lre-proposal={p.id}>
+                    <label class="lre-check">
+                      <input type="checkbox" aria-label={`Accept ${noun} “${title}”`} checked={accepted.has(p.id)} onChange={() => toggle(p.id)} />
+                    </label>
+                    <div class="lre-build-proposal-body">
+                      <div class="lre-build-proposal-head">
+                        <span class="lre-build-proposal-title">{title}</span>
+                        <Badge tone={p.confidence >= 0.8 ? "pos" : p.confidence >= 0.5 ? "warn" : "neg"}>
+                          {sure}%<span class="lre-sr"> sure</span>
+                        </Badge>
+                      </div>
+                      <span class="lre-build-proposal-line lre-muted">{humanize(noun)}</span>
+                      <IdText id={`${p.collection}.${p.key}`} />
+                      {p.collection === "lore" ? (
+                        <LoreProposalLines p={p} bookNames={bookNames} names={names} />
+                      ) : (
+                        <>
+                          {/* A linked proposal's source is an entry id; "From lore" names its book instead. */}
+                          {from.length === 0 || p.note ? <span class="lre-build-proposal-line lre-muted">{[from.length === 0 ? p.source : null, p.note].filter((part) => part).join(" — ")}</span> : null}
+                          {from.length > 0 ? (
+                            <span class="lre-build-proposal-line" data-lre-proposal-from>
+                              From lore: {from.join(", ")}
+                            </span>
+                          ) : null}
+                          {assumed.includes("kind") ? (
+                            <span class="lre-build-proposal-line lre-warn" data-lre-proposal-assumed-kind>
+                              <Icon name="alert" size={16} />
+                              Assumed kind: {String(value.kind)} (the lore named none)
+                            </span>
+                          ) : null}
+                          {tableFields.length > 0 ? (
+                            <span class="lre-build-proposal-line lre-warn" data-lre-proposal-assumed>
+                              <Icon name="alert" size={16} />
+                              Assumed from a table: {tableFields.join(", ")}
+                            </span>
+                          ) : null}
+                        </>
+                      )}
+                      <button type="button" class="lre-btn small ghost lre-build-reveal" aria-expanded={open === p.id} onClick={() => setOpen(open === p.id ? null : p.id)}>
+                        <Icon name={open === p.id ? "chevron-up" : "chevron-down"} size={16} />
+                        {open === p.id ? "Hide value" : "Show value"}
+                      </button>
+                      {open === p.id ? (
+                        <div class="lre-build-json">
+                          <JsonView value={shownValue(p, bookNames)} />
+                        </div>
+                      ) : null}
+                      {Preview && draft ? <Preview world={draft.doc} collection={p.collection} id={p.key} value={p.value} /> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </Section>
+      <SaveBar>
+        <Button
+          variant="primary"
+          block
+          icon={applied ? "check" : undefined}
+          disabled={accepted.size === 0 || applied}
+          busy={busy}
+          onClick={() =>
+            run(async () => {
+              let ok = 0;
+              for (const write of proposalWrites(props.worldId, props.proposals, accepted, props.app.drafts.get()?.doc.loreIndex)) {
+                const message = await send(write);
+                if (message.type === "lre.result" && write.op === "put") ok += 1;
+              }
+              props.app.toast(`Applied ${ok} of ${accepted.size} to the draft. Commit when ready.`, ok === accepted.size ? "info" : "error");
+              setApplied(true);
+            })
+          }
+        >
+          {applied ? "Applied to the draft" : `Apply ${accepted.size} to the draft`}
+        </Button>
+      </SaveBar>
+    </>
+  );
+}
+
+/** A playtest's transcript, or what Check world saw day by day, then the issues the run found. */
+function RunReport(props: { kind: JobKind; worldId: string; report: Extract<JobResult, { turns: unknown }> }) {
+  const app = useApp();
+  const doc = useSelect(app.drafts, (d) => (d?.worldId === props.worldId ? d.doc : undefined));
+  const lint = props.report.lint;
+  return (
+    <>
+      <Section title={props.kind === "playtest" ? "Transcript" : "Day by day"}>
+        <ol class="lre-build-turns">
+          {props.report.turns.map((turn, i) => (
+            <li key={i} class="lre-build-turn">
+              {props.kind === "playtest" ? (
+                <span class="lre-build-turn-you">
+                  <span class="lre-build-turn-who">You</span> {turn.user}
+                </span>
+              ) : (
+                <strong class="lre-build-turn-label">{turn.user}</strong>
+              )}
+              <span class="lre-build-turn-reply">{turn.reply}</span>
+              {turn.notes.length > 0 ? (
+                <ul class="lre-build-notes">
+                  {turn.notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      </Section>
+      <Section title="Issues found" aside={<Badge tone={lint.length > 0 ? "warn" : "neutral"}>{lint.length}</Badge>} flush>
+        {lint.length === 0 ? (
+          <Empty icon="check">None.</Empty>
+        ) : (
+          <div class="lre-build-issues" role="list">
+            {lint.map((issue, i) => (
+              <IssueRow key={i} issue={issue} worldId={props.worldId} doc={doc} />
+            ))}
+          </div>
+        )}
+      </Section>
+    </>
   );
 }
 
@@ -438,88 +532,60 @@ export function JobView(props: { worldId: string; kind: JobKind }) {
     });
   // A running import keeps its proposals so far for a restart; they are reviewed once it ends.
   const result = job?.status === "running" ? undefined : job?.result;
+  const info = JOB_INFO[props.kind];
+  const input = <JobInput kind={props.kind} onStart={start} busy={busy} />;
   return (
-    <div class="lre-stack" data-lre-job={props.kind}>
-      <div class="lre-h2">{TITLE[props.kind]}</div>
-      {!job || job.status !== "running" ? (
-        <Card title={job ? "Run again" : "Start"}>
-          <JobInput kind={props.kind} onStart={start} busy={busy} />
-        </Card>
-      ) : null}
+    <div class="lre-build-page" data-lre-job={props.kind}>
+      <PageHeader title={info.title} subtitle={info.hint} />
+      {!job ? <Section title="Start">{input}</Section> : null}
       {job ? (
-        <Card title="Status" aside={<span class={`lre-badge ${STATUS_TONE[job.status]}`}>{job.status}</span>}>
-          <div class="lre-progress" role="progressbar" aria-label={`${TITLE[props.kind]} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(job.progress * 100)}>
+        <Section title="Status" aside={<JobStatusBadge status={job.status} />}>
+          <div class="lre-progress" role="progressbar" aria-label={`${info.title} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(job.progress * 100)}>
             <span style={{ width: `${Math.round(job.progress * 100)}%` }} />
           </div>
-          {job.message ? <div class="lre-small lre-muted" style={{ marginTop: "6px" }}>{job.message}</div> : null}
-          {job.status === "running" ? (
-            <button
-              type="button"
-              class="lre-btn small"
-              style={{ marginTop: "8px" }}
-              disabled={busy}
-              onClick={() =>
-                run(async () => {
-                  await app.request({ type: "lre.job", op: "cancel", jobId: job.jobId });
-                })
-              }
-            >
-              Cancel
-            </button>
-          ) : (
-            <div class="lre-inline" style={{ marginTop: "8px" }}>
-              {job.status === "interrupted" && job.input ? (
-                <button type="button" class="lre-btn small primary" disabled={busy} onClick={() => job.input && start(job.input)}>
-                  Run it again
-                </button>
-              ) : null}
-              <button
-                type="button"
-                class="lre-btn small ghost"
-                disabled={busy}
+          {job.message ? <p class="lre-build-note">{job.message}</p> : null}
+          <div class="lre-build-actions">
+            {job.status === "running" ? (
+              <Button
+                size="sm"
+                busy={busy}
                 onClick={() =>
                   run(async () => {
-                    if (!(await app.request({ type: "lre.job", op: "dismiss", jobId: job.jobId }))) return;
-                    jobStore.update((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k !== key)));
+                    await app.request({ type: "lre.job", op: "cancel", jobId: job.jobId });
                   })
                 }
               >
-                Dismiss
-              </button>
-            </div>
-          )}
-        </Card>
-      ) : null}
-      {result && "proposals" in result ? result.proposals.length === 0 ? <Empty>No proposals.</Empty> : <ProposalReview key={job?.jobId} app={app} worldId={props.worldId} proposals={result.proposals} /> : null}
-      {result && "turns" in result ? (
-        <>
-          <Card title="Transcript">
-            {result.turns.map((turn, i) => (
-              <div key={i} class="lre-stack" style={{ padding: "8px 0", borderBottom: "1px solid rgba(127,127,127,.15)" }}>
-                <span>
-                  <strong>You:</strong> {turn.user}
-                </span>
-                <span style={{ whiteSpace: "pre-wrap" }}>{turn.reply}</span>
-                {turn.notes.map((note) => (
-                  <span key={note} class="lre-small lre-muted">
-                    • {note}
-                  </span>
-                ))}
-              </div>
-            ))}
-          </Card>
-          <Card title="Issues found" aside={<span class="lre-badge">{result.lint.length}</span>}>
-            {result.lint.length === 0 ? (
-              <Empty>None.</Empty>
+                Cancel
+              </Button>
             ) : (
-              result.lint.map((issue, i) => {
-                const target = issueTarget(issue.path);
-                return <Row key={i} k={issue.message} sub={issue.path} v={target ? <button type="button" class="lre-btn small" onClick={() => app.ui.update((ui) => ({ ...ui, build: { view: "item", worldId: props.worldId, collection: target.collection, id: target.id } }))}>Open</button> : undefined} />;
-              })
+              <>
+                {job.status === "interrupted" && job.input ? (
+                  <Button size="sm" variant="primary" icon="refresh" disabled={busy} onClick={() => job.input && start(job.input)}>
+                    Run it again
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      if (!(await app.request({ type: "lre.job", op: "dismiss", jobId: job.jobId }))) return;
+                      jobStore.update((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k !== key)));
+                    })
+                  }
+                >
+                  Dismiss
+                </Button>
+              </>
             )}
-          </Card>
-        </>
+          </div>
+          {/* Its results lead the page; another run, with new input, is a tap away. */}
+          {job.status !== "running" ? <Disclosure summary="Run again with new input">{input}</Disclosure> : null}
+        </Section>
       ) : null}
+      {result && "proposals" in result ? result.proposals.length === 0 ? <Empty icon="checklist">No proposals.</Empty> : <ProposalReview key={job?.jobId} app={app} worldId={props.worldId} proposals={result.proposals} /> : null}
+      {result && "turns" in result ? <RunReport kind={props.kind} worldId={props.worldId} report={result} /> : null}
     </div>
   );
 }

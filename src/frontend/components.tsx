@@ -1,14 +1,18 @@
-// Shared UI atoms. Host components (range slider, switch, number stepper, select, model picker)
-// are mounted through `ctx.components` into a div Preact never renders children into; their
-// latest callbacks are read through refs so the host mount is created once.
+// Shared UI atoms (contract §6.2). Host components (range slider, switch, number stepper, select,
+// model picker) are mounted through `ctx.components` into a div Preact never renders children
+// into; their latest callbacks are read through refs so the host mount is created once. Every atom
+// meets the accessibility floor (contract §5.7): 40 px targets (44 in the bottom bar), labelled icon
+// buttons, the shared focus ring.
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { JsonValue } from "../shared/json";
 import { isRecord } from "../shared/json";
 import type { OutcomeOdds } from "../shared/state-view";
-import { useApp } from "./app";
+import { useApp, useUi } from "./app";
 import { formatOdds } from "./format";
+import type { IconName } from "./icons";
+import { Icon } from "./icons";
 import { useSelect } from "./store";
 
 export interface SegOption<T extends string | number> {
@@ -123,25 +127,49 @@ export function Row(props: { k: ComponentChildren; v?: ComponentChildren; sub?: 
   );
 }
 
-export function Empty(props: { children: ComponentChildren }) {
-  return <div class="lre-empty">{props.children}</div>;
+/** A note where content would be: an optional icon, a title, a line of help and an action. */
+export function Empty(props: { icon?: IconName; title?: ComponentChildren; action?: ComponentChildren; children?: ComponentChildren }) {
+  return (
+    <div class="lre-empty">
+      {props.icon ? (
+        <span class="lre-empty-icon">
+          <Icon name={props.icon} />
+        </span>
+      ) : null}
+      {props.title !== undefined ? <div class="lre-empty-title">{props.title}</div> : null}
+      {props.children}
+      {props.action !== undefined ? <div class="lre-empty-action">{props.action}</div> : null}
+    </div>
+  );
 }
 
-const ODDS_COLORS = ["#7fe0a0", "#7c6cff", "#f2c46b", "#ff8a8a", "#6bc5f2", "#c58af2"];
+/**
+ * The series each outcome is painted in: the engine's default outcomes (a DC's `success` and
+ * `failure`) take the success and danger series, so no bar paints a failure green; other outcomes
+ * take the remaining series in order.
+ */
+export function oddsSeries(odds: readonly OutcomeOdds[]): number[] {
+  let other = 0;
+  return odds.map((o) => OUTCOME_SERIES[o.outcome.toLowerCase()] ?? OTHER_SERIES[other++ % OTHER_SERIES.length] ?? 6);
+}
 
-/** Exact outcome odds as a stacked bar with a legend. */
+const OUTCOME_SERIES: Partial<Record<string, number>> = { success: 1, failure: 4, fail: 4 };
+const OTHER_SERIES = [2, 3, 5, 6] as const;
+
+/** Exact outcome odds as a stacked bar with a legend, coloured by what each outcome means. */
 export function OddsBar(props: { odds: readonly OutcomeOdds[] }) {
+  const series = oddsSeries(props.odds);
   return (
     <div>
       <div class="lre-odds" role="img" aria-label={props.odds.map((o) => `${o.outcome} ${formatOdds(o.p)}`).join(", ")}>
         {props.odds.map((o, i) => (
-          <span key={o.outcome} style={{ width: `${Math.max(0, o.p) * 100}%`, background: ODDS_COLORS[i % ODDS_COLORS.length] }} />
+          <span key={o.outcome} style={{ width: `${Math.max(0, o.p) * 100}%`, background: `var(--lre-series-${series[i]})` }} />
         ))}
       </div>
       <div class="lre-odds-legend">
         {props.odds.map((o, i) => (
           <span key={o.outcome}>
-            <i style={{ background: ODDS_COLORS[i % ODDS_COLORS.length] }} />
+            <i style={{ background: `var(--lre-series-${series[i]})` }} />
             {o.outcome} {formatOdds(o.p)}
           </span>
         ))}
@@ -188,7 +216,7 @@ export function JsonView(props: { value: JsonValue | unknown; depth?: number }) 
   return <span>{String(value)}</span>;
 }
 
-export type ToastSurface = "map" | "palette" | "drawer" | "chat";
+export type ToastSurface = "map" | "palette" | "world" | "drawer" | "chat";
 
 /**
  * Toasts render on the topmost visible surface only: an open overlay, else the open drawer, else
@@ -206,10 +234,9 @@ export function Toasts(props: { surface: ToastSurface }) {
     <div class={props.surface === "chat" ? "lre lre-toasts inline" : "lre lre-toasts"} aria-live="polite" data-lre-toasts={props.surface}>
       {list.map((toast) => (
         <div key={toast.id} class={toast.tone === "error" ? "lre-toast error" : "lre-toast"} role={toast.tone === "error" ? "alert" : "status"}>
+          <Icon name={toast.tone === "error" ? "alert" : "info"} size={16} />
           <span style={{ flex: 1 }}>{toast.text}</span>
-          <button type="button" class="lre-btn ghost small" aria-label="Dismiss" onClick={() => toasts.update((all) => all.filter((entry) => entry.id !== toast.id))}>
-            ✕
-          </button>
+          <IconButton icon="close" label="Dismiss" onClick={() => toasts.update((all) => all.filter((entry) => entry.id !== toast.id))} />
         </div>
       ))}
     </div>
@@ -236,6 +263,237 @@ export function useBusy(): [boolean, (run: () => Promise<unknown>) => void] {
       });
     },
   ];
+}
+
+// ---------------------------------------------------------------- redesign atoms (contract §6.2)
+
+/** A button on the shared look: 40 px tall at least, an optional icon either side. `label` names it when its text alone doesn't. */
+export function Button(props: { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "md" | "sm"; icon?: IconName; iconAfter?: IconName; block?: boolean; disabled?: boolean; busy?: boolean; label?: string; title?: string; type?: "button" | "submit"; onClick?(event: MouseEvent): void; children?: ComponentChildren }) {
+  const variant = props.variant ?? "secondary";
+  const iconSize = props.size === "sm" ? 16 : 20;
+  const classes = ["lre-btn", variant === "secondary" ? null : variant, props.size === "sm" ? "small" : null, props.block ? "block" : null].filter((c) => c !== null).join(" ");
+  return (
+    <button type={props.type ?? "button"} class={classes} disabled={props.disabled || props.busy} aria-busy={props.busy || undefined} aria-label={props.label} title={props.title} onClick={props.onClick}>
+      {props.icon ? <Icon name={props.icon} size={iconSize} /> : null}
+      {props.children}
+      {props.iconAfter ? <Icon name={props.iconAfter} size={iconSize} /> : null}
+    </button>
+  );
+}
+
+/** A 40 px icon-only button, named by `label` (also its tooltip); `pressed` makes it a toggle. */
+export function IconButton(props: { icon: IconName; label: string; variant?: "ghost" | "secondary" | "primary"; pressed?: boolean; disabled?: boolean; onClick(): void }) {
+  return (
+    <button type="button" class={`lre-iconbtn ${props.variant ?? "ghost"}`} aria-label={props.label} title={props.label} aria-pressed={props.pressed} disabled={props.disabled} onClick={() => props.onClick()}>
+      <Icon name={props.icon} />
+    </button>
+  );
+}
+
+/** A titled group: a quiet section label above a card. `flush` drops the card's padding, for a List of rows. */
+export function Section(props: { title?: ComponentChildren; aside?: ComponentChildren; flush?: boolean; children: ComponentChildren }) {
+  return (
+    <section class={props.flush ? "lre-section flush" : "lre-section"}>
+      {props.title !== undefined || props.aside !== undefined ? (
+        <div class="lre-section-head">
+          {props.title !== undefined ? <h3 class="lre-section-title">{props.title}</h3> : <span />}
+          {props.aside}
+        </div>
+      ) : null}
+      <div class="lre-section-body">{props.children}</div>
+    </section>
+  );
+}
+
+/** Grouped rows divided by hairlines; inside a `Section flush` they make a list card. */
+export function List(props: { children: ComponentChildren }) {
+  return (
+    <div class="lre-rowlist" role="list">
+      {props.children}
+    </div>
+  );
+}
+
+/** One row of a List, 44 px tall at least: a button when it has `onClick`. With `id`, the id shows under the title while Show ids is on. */
+export function ListRow(props: { title: ComponentChildren; subtitle?: ComponentChildren; icon?: IconName; leading?: ComponentChildren; value?: ComponentChildren; valueTone?: "pos" | "neg" | "warn" | "muted"; badge?: ComponentChildren; chevron?: boolean; current?: boolean; disabled?: boolean; id?: string; onClick?(): void }) {
+  const lead = props.leading ?? (props.icon ? <Icon name={props.icon} /> : null);
+  const inner = (
+    <>
+      {lead !== null ? <span class="lre-listrow-lead">{lead}</span> : null}
+      <span class="lre-listrow-content">
+        <span class="lre-listrow-text">
+          <span class="lre-listrow-title">{props.title}</span>
+          {props.subtitle !== undefined ? <span class="lre-listrow-sub">{props.subtitle}</span> : null}
+          {props.id !== undefined ? <IdText id={props.id} /> : null}
+        </span>
+        {props.badge}
+        {props.value !== undefined ? <span class={props.valueTone ? `lre-listrow-value lre-${props.valueTone}` : "lre-listrow-value"}>{props.value}</span> : null}
+        {props.chevron ? <Icon name="chevron-right" size={16} class="lre-listrow-chev" /> : null}
+      </span>
+    </>
+  );
+  const onClick = props.onClick;
+  return (
+    <div class="lre-listrow" role="listitem">
+      {onClick ? (
+        <button type="button" class="lre-listrow-hit" aria-current={props.current || undefined} disabled={props.disabled} onClick={() => onClick()}>
+          {inner}
+        </button>
+      ) : (
+        <div class="lre-listrow-hit" aria-current={props.current || undefined} aria-disabled={props.disabled || undefined}>
+          {inner}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A labelled figure: the value large, in tabular numbers. */
+export function Stat(props: { label: string; value: ComponentChildren; sub?: ComponentChildren; tone?: "pos" | "neg" | "warn" }) {
+  return (
+    <div class="lre-stat">
+      <span class="lre-stat-label">{props.label}</span>
+      <span class={props.tone ? `lre-stat-value lre-${props.tone}` : "lre-stat-value"}>{props.value}</span>
+      {props.sub !== undefined ? <span class="lre-stat-sub">{props.sub}</span> : null}
+    </div>
+  );
+}
+
+/** A labelled bar for a value in a range (fuel, health, a need), with its value in words for assistive tech. */
+export function Meter(props: { label: string; value: number; max: number; min?: number; tone?: "accent" | "pos" | "neg" | "warn"; showValue?: boolean }) {
+  const min = props.min ?? 0;
+  const span = props.max - min;
+  const share = span > 0 ? Math.min(1, Math.max(0, (props.value - min) / span)) : 0;
+  return (
+    <div class={`lre-gauge ${props.tone ?? "accent"}`} role="meter" aria-label={props.label} aria-valuemin={min} aria-valuemax={props.max} aria-valuenow={props.value}>
+      <div class="lre-gauge-head" aria-hidden="true">
+        <span class="lre-gauge-label">{props.label}</span>
+        {props.showValue ? (
+          <span class="lre-gauge-value">
+            {props.value} / {props.max}
+          </span>
+        ) : null}
+      </div>
+      <div class="lre-gauge-track">
+        <span style={{ width: `${share * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
+export function Badge(props: { tone?: "neutral" | "accent" | "pos" | "neg" | "warn" | "gm"; children: ComponentChildren }) {
+  return <span class={props.tone && props.tone !== "neutral" ? `lre-badge ${props.tone}` : "lre-badge"}>{props.children}</span>;
+}
+
+/** Each tone's icon, so a banner never says what it means by colour alone (contract §5.4). */
+const BANNER_ICON: Record<"info" | "warn" | "neg" | "gm", IconName> = { info: "info", warn: "alert", neg: "alert", gm: "eye" };
+
+/** A status message across the content: an icon, a title, the details and actions. */
+export function Banner(props: { tone: "info" | "warn" | "neg" | "gm"; icon?: IconName; title?: ComponentChildren; actions?: ComponentChildren; children?: ComponentChildren }) {
+  return (
+    <div class={`lre-banner ${props.tone}`} role="status">
+      <div class="lre-banner-main">
+        <Icon name={props.icon ?? BANNER_ICON[props.tone]} class="lre-banner-icon" />
+        <div class="lre-banner-text">
+          {props.title !== undefined ? <strong class="lre-banner-title">{props.title}</strong> : null}
+          {props.children !== undefined ? <div class="lre-banner-body">{props.children}</div> : null}
+        </div>
+      </div>
+      {props.actions !== undefined ? <div class="lre-banner-actions">{props.actions}</div> : null}
+    </div>
+  );
+}
+
+/** Details on request: a native disclosure, so keyboard and screen readers work as they expect. */
+export function Disclosure(props: { summary: ComponentChildren; defaultOpen?: boolean; children: ComponentChildren }) {
+  return (
+    <details class="lre-disclosure" open={props.defaultOpen}>
+      <summary>
+        <span class="lre-disclosure-label">{props.summary}</span>
+        <Icon name="chevron-down" size={16} />
+      </summary>
+      <div class="lre-disclosure-body">{props.children}</div>
+    </details>
+  );
+}
+
+/** A labelled control with optional help and an error; `for` ties the label to the control's id. */
+export function Field(props: { label: ComponentChildren; help?: ComponentChildren; error?: string | null; for?: string; children: ComponentChildren }) {
+  return (
+    <div class="lre-field">
+      {props.for !== undefined ? <label for={props.for}>{props.label}</label> : <span class="label">{props.label}</span>}
+      {props.children}
+      {props.help !== undefined ? <span class="lre-field-help">{props.help}</span> : null}
+      {props.error ? (
+        <span class="lre-field-error">
+          <Icon name="alert" size={16} />
+          {props.error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** A person's initials in a neutral circle; decorative, as the name shows beside it. */
+export function Avatar(props: { name: string; size?: number }) {
+  const size = props.size ?? 32;
+  const initials = props.name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => /[\p{L}\p{N}]/u.exec(word)?.[0] ?? "")
+    .join("")
+    .toUpperCase();
+  return (
+    <span class="lre-avatar" aria-hidden="true" style={{ width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.4)}px` }}>
+      {initials}
+    </span>
+  );
+}
+
+/** A page's title row: Back, the title and subtitle, and actions. */
+export function PageHeader(props: { title: ComponentChildren; subtitle?: ComponentChildren; onBack?(): void; backLabel?: string; actions?: ComponentChildren }) {
+  const onBack = props.onBack;
+  return (
+    <div class="lre-page-header">
+      {onBack ? <IconButton icon="chevron-left" label={props.backLabel ? `Back to ${props.backLabel}` : "Back"} onClick={() => onBack()} /> : null}
+      <div class="lre-page-titles">
+        <h2 class="lre-page-title">{props.title}</h2>
+        {props.subtitle !== undefined ? <div class="lre-page-sub">{props.subtitle}</div> : null}
+      </div>
+      {props.actions !== undefined ? <div class="lre-page-actions">{props.actions}</div> : null}
+    </div>
+  );
+}
+
+/** Bottom-bar navigation: icon and label per item, 44 px tall, the current one marked `aria-current="page"`; a dot marks one that has something pending. */
+export function BottomNav<T extends string>(props: { label: string; items: readonly { id: T; label: string; icon: IconName; dot?: boolean }[]; value: T; onChange(id: T): void; tone?: "accent" | "gm" }) {
+  return (
+    <nav class="lre-bottomnav" aria-label={props.label} data-tone={props.tone ?? "accent"}>
+      {props.items.map((item) => (
+        <button key={item.id} type="button" aria-current={item.id === props.value ? "page" : undefined} onClick={() => props.onChange(item.id)}>
+          <Icon name={item.icon} />
+          <span class="lre-bottomnav-label">{item.label}</span>
+          {item.dot ? <span class="lre-dot" role="img" aria-label="pending" /> : null}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/** Actions kept in reach at the bottom of a long form while it scrolls. */
+export function SaveBar(props: { children: ComponentChildren }) {
+  return <div class="lre-savebar">{props.children}</div>;
+}
+
+/** Whether ids show beside names (Settings → Display → Show ids). */
+export function useShowIds(): boolean {
+  return useUi((ui) => ui.showIds);
+}
+
+/** An id in small mono type, shown only while Show ids is on. */
+export function IdText(props: { id: string }) {
+  return useShowIds() ? <code class="lre-id">{props.id}</code> : null;
 }
 
 // ---------------------------------------------------------------- host components
@@ -366,7 +624,7 @@ export function NumberStepper(props: { value: number | null; min?: number; max?:
   );
 }
 
-export function HostSelect(props: { value: string; options: readonly { value: string; label: string; sublabel?: string }[]; placeholder?: string; label: string; onChange(value: string): void }) {
+export function HostSelect(props: { value: string; options: readonly { value: string; label: string; sublabel?: string }[]; placeholder?: string; label: string; disabled?: boolean; onChange(value: string): void }) {
   const { host } = useApp();
   const slot = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props);
@@ -379,7 +637,9 @@ export function HostSelect(props: { value: string; options: readonly { value: st
       value: props.value,
       options: props.options.map((option) => ({ ...option })),
       placeholder: props.placeholder,
-      triggerLabel: props.label,
+      // `ariaLabel` names the trigger; `triggerLabel` would replace the picked value's text on the host.
+      ariaLabel: props.label,
+      disabled: props.disabled,
       onChange: (value) => callbacks.current.onChange(value),
     });
     return () => {
@@ -388,8 +648,8 @@ export function HostSelect(props: { value: string; options: readonly { value: st
     };
   }, []);
   useEffect(() => {
-    handle.current?.update({ value: props.value, options: props.options.map((option) => ({ ...option })) });
-  }, [props.value, props.options]);
+    handle.current?.update({ value: props.value, options: props.options.map((option) => ({ ...option })), disabled: props.disabled });
+  }, [props.value, props.options, props.disabled]);
   return (
     <div class="lre-field">
       <span class="label">{props.label}</span>

@@ -6,7 +6,7 @@ import type { JournalLine } from "../../../shared/finance";
 import { formatMoney, type WorldCurrency } from "../../../shared/world";
 import { Empty, Row } from "../../../frontend/components";
 import { humanize } from "../../../frontend/format";
-import { FieldRow } from "../../../frontend/play/gm";
+import { FieldRow } from "../../../frontend/gm/entity";
 import type { GmControls } from "./hub";
 import { AmountField } from "./forms";
 import { amountOf } from "./requests";

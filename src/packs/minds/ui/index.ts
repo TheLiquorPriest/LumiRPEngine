@@ -7,7 +7,7 @@ import { GmMindsSection } from "./gm";
 const minds: UiPackDef = {
   id: "minds",
   register(r) {
-    r.gm({ id: "minds.gm", label: "Minds", order: 20, component: GmMindsSection });
+    r.gm({ id: "minds.gm", label: "Minds", icon: "sparkle", order: 20, component: GmMindsSection });
   },
 };
 

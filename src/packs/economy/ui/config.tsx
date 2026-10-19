@@ -1,9 +1,10 @@
 // Build → Packs → economy: the economy pack's own config fields, above its config as JSON. The
 // narrated-price cap (DESIGN §9.5) is the most a narrated price charges for something no catalog
-// row prices, in the world's minor units; left empty, the engine derives it from the tables. The
-// region prices living and taxes for whoever names none; living costs are a week's spending per
-// wealth band. The Custom toggles (DESIGN §25) switch a money feature on or off at the levels its
-// floor allows; products are the world's own account products; assets are what holdings hold (§27).
+// row prices, typed as the world's currency writes it and stored in whole minor units; left empty,
+// the engine derives it from the tables. The region prices living and taxes for whoever names none;
+// living costs are a week's spending per wealth band. The Custom toggles (DESIGN §25) switch a money
+// feature on or off at the levels its floor allows; products are the world's own account products;
+// assets are what holdings hold (§27).
 
 import type { JsonObject, JsonValue } from "../../../shared/json";
 import { isRecord } from "../../../shared/json";
@@ -197,7 +198,7 @@ export function EconomyConfig(props: PackConfigProps) {
           currency={currency}
           min={1}
           optional
-          placeholder={formatMoneyInput(derived, currency, "minor")}
+          placeholder={formatMoneyInput(derived, currency)}
           hint={`Empty uses ${formatMoney(derived, currency)}, the highest price band in the catalog and categories. A price the player states is never capped.`}
           issues={lintAt(props.lint, "packs.economy.config.unpricedCap")}
           onChange={(value) => props.onChange(value === undefined ? rest : { ...rest, unpricedCap: value })}

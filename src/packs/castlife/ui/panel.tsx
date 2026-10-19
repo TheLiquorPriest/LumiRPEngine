@@ -1,21 +1,23 @@
-// Play → Cast (DESIGN §12): everyone the POV knows and anyone here. Someone here shows what they
-// are doing, today's timeline and their next commitment; someone away shows where and when the POV
-// last saw them. Also agendas the POV knows about and regard (one band per pair at Relationships 1,
-// axes above). People present in the scene come first. The list can be grouped by a classification facet players
-// can see, by group membership or by tier, and filtered by those facets' values (nested values
-// included) and by groups: within one kind of chip any will do, across kinds all must hold, as in a
-// selector. The POV's own groups, with its role in each, head the panel. Hidden facets and tags
-// never reach this view.
+// Play → People (DESIGN §12, contract §4.2): everyone the POV knows and anyone here, people here
+// first. Each row shows who they are, what they're doing or where and when the POV last saw them,
+// and how they regard the POV; tapping one opens their person sheet (person.tsx) with today's
+// plan, regard per axis, agendas, groups and classes. The list can be grouped by a classification
+// facet players can see, by group membership or by tier, and filtered by those facets' values
+// (nested values included) and by groups: within one kind of chip any will do, across kinds all
+// must hold, as in a selector; both sit in a disclosure. The POV's own groups, with its role in
+// each, close the panel. Hidden facets and tags never reach this view.
 
 import { useState } from "preact/hooks";
 import { withinValue } from "../../../shared/classes";
 import { isRecord } from "../../../shared/json";
-import { Card, Empty, JsonView, Row } from "../../../frontend/components";
+import { pushSheet, useApp } from "../../../frontend/app";
+import { Avatar, Badge, Button, Disclosure, Empty, Field, JsonView, List, ListRow, Section } from "../../../frontend/components";
 import { list, oneOf, optNum, optStr, str, strings } from "../../../frontend/decode";
+import { Icon } from "../../../frontend/icons";
 import type { PanelProps } from "../../../frontend/registry";
 
-const SLOT_KINDS = ["work", "sleep", "free", "travel", "other"] as const;
-type SlotKind = (typeof SLOT_KINDS)[number];
+export const SLOT_KINDS = ["work", "sleep", "free", "travel", "other"] as const;
+export type SlotKind = (typeof SLOT_KINDS)[number];
 
 export interface CastPerson {
   id: string;
@@ -126,7 +128,7 @@ export function passes(person: CastPerson, filters: CastFilters, facets: readonl
 /** "none", "tier", "groups" or `facet:<id>`. */
 export type GroupBy = string;
 
-/** People in sections, in the facet's, the groups' or the tiers' order; someone in several groups or values appears in each; empty sections are left out. */
+/** People in sections, in the facet's, the groups' or the tiers' order, else here first and then the rest; someone in several groups or values appears in each; empty sections are left out. */
 export function castSections(view: CastView, people: readonly CastPerson[], by: GroupBy): { key: string; label: string; people: CastPerson[] }[] {
   const ordered = [...people].sort((a, b) => Number(b.here) - Number(a.here));
   const sections = (keys: { key: string; label: string }[], of: (p: CastPerson) => string[], none: string): { key: string; label: string; people: CastPerson[] }[] => {
@@ -144,68 +146,23 @@ export function castSections(view: CastView, people: readonly CastPerson[], by: 
     };
     return sections(facet.values.map((v) => ({ key: v.id, label: label(v.id) })), (p) => p.classes[facet.id] ?? [], `No ${facet.label.toLowerCase()}`);
   }
-  return [{ key: "", label: "", people: ordered }];
-}
-
-/** `HH:MM` → minutes after midnight; unparsable times sort to 0. */
-function clockMinutes(text: string): number {
-  const match = /^(\d{1,2}):(\d{2})/.exec(text);
-  return match ? Number(match[1]) * 60 + Number(match[2]) : 0;
-}
-
-/** Today's plan as a strip, with each block's reasons (why the planner chose it) one tap away. */
-function Timeline(props: { slots: CastPerson["timeline"] }) {
-  const [why, setWhy] = useState(false);
-  const spans = props.slots.map((slot) => {
-    const start = clockMinutes(slot.start);
-    const endRaw = clockMinutes(slot.end);
-    const end = endRaw <= start ? 1440 : endRaw;
-    return { ...slot, width: ((end - start) / 1440) * 100 };
-  });
-  return (
-    <div>
-      <div class="lre-timeline" role="img" aria-label={props.slots.map((s) => `${s.start}–${s.end} ${s.label}`).join(", ")}>
-        {spans.map((s, i) => (
-          <span key={i} class={`lre-tl-${s.kind}`} style={{ width: `${s.width}%` }} title={`${s.start}–${s.end} ${s.label}`} />
-        ))}
-      </div>
-      <div class="lre-sched-axis" aria-hidden="true">
-        <span>00</span>
-        <span>06</span>
-        <span>12</span>
-        <span>18</span>
-        <span>24</span>
-      </div>
-      {props.slots.some((s) => s.reasons.length > 0) ? (
-        <button type="button" class="lre-btn small ghost" aria-expanded={why} onClick={() => setWhy(!why)}>
-          {why ? "Hide reasons" : "Why this plan?"}
-        </button>
-      ) : null}
-      {why
-        ? props.slots.map((s, i) => (
-            <div key={i} class="lre-small" data-lre-plan-block>
-              <span class="lre-num">
-                {s.start}–{s.end}
-              </span>{" "}
-              {s.label}
-              {s.reasons.length > 0 ? <span class="lre-muted"> · {s.reasons.join(", ")}</span> : null}
-            </div>
-          ))
-        : null}
-    </div>
-  );
+  return [
+    { key: "here", label: "Here", people: ordered.filter((p) => p.here) },
+    { key: "known", label: "People you know", people: ordered.filter((p) => !p.here) },
+  ].filter((s) => s.people.length > 0);
 }
 
 /** One row of filter chips; a chip is pressed while it filters. */
 function Chips(props: { label: string; options: readonly { id: string; label: string }[]; on: readonly string[]; onChange(next: string[]): void }) {
   if (props.options.length === 0) return null;
   return (
-    <div class="lre-inline" role="group" aria-label={props.label}>
-      <span class="lre-small lre-muted">{props.label}</span>
+    <div class="lre-world-chips" role="group" aria-label={props.label}>
+      <span class="lre-world-chips-label">{props.label}</span>
       {props.options.map((o) => {
         const pressed = props.on.includes(o.id);
         return (
-          <button key={o.id} type="button" class={pressed ? "lre-btn small primary" : "lre-btn small"} aria-pressed={pressed} onClick={() => props.onChange(pressed ? props.on.filter((x) => x !== o.id) : [...props.on, o.id])}>
+          <button key={o.id} type="button" class="lre-world-chip" aria-pressed={pressed} onClick={() => props.onChange(pressed ? props.on.filter((x) => x !== o.id) : [...props.on, o.id])}>
+            {pressed ? <Icon name="check" size={16} /> : null}
             {o.label}
           </button>
         );
@@ -214,86 +171,114 @@ function Chips(props: { label: string; options: readonly { id: string; label: st
   );
 }
 
+/** What a person is up to as the POV knows it: what they're doing here, or where and when it last saw them. */
+export function whereabouts(p: CastPerson): string | undefined {
+  if (p.here) return p.activity;
+  if (p.lastSeen) return `Last seen ${p.lastSeen.at}${p.lastSeen.place ? ` at ${p.lastSeen.place}` : ""}`;
+  return p.place;
+}
+
 export function CastPanel(props: PanelProps) {
+  const app = useApp();
   const [by, setBy] = useState<GroupBy>("none");
   const [filters, setFilters] = useState<CastFilters>(NO_FILTERS);
   const view = decodeCastView(props.view);
-  if (props.view === null || props.view === undefined) return <Empty>No cast yet.</Empty>;
+  if (props.view === null || props.view === undefined) return <Empty icon="users">No cast yet.</Empty>;
   if (!view) return <JsonView value={props.view} />;
-  if (view.people.length === 0 && view.mine.length === 0) return <Empty>You don't know anyone yet.</Empty>;
+  if (view.people.length === 0 && view.mine.length === 0) return <Empty icon="users">You don't know anyone yet.</Empty>;
   const shown = view.people.filter((p) => passes(p, filters, view.facets));
-  const filtering = Object.values(filters.classes).some((v) => v.length > 0) || filters.groups.length > 0;
+  const active = Object.values(filters.classes).reduce((n, v) => n + v.length, 0) + filters.groups.length;
   const held = (facet: CastFacet): { id: string; label: string }[] => {
     // A value anyone holds, and the broader values it nests under (a broader chip takes the nested ones too).
     const tree = parentsOf(facet);
     return facet.values.filter((v) => view.people.some((p) => (p.classes[facet.id] ?? []).some((x) => withinValue(tree, x, v.id)))).map((v) => ({ id: v.id, label: v.label }));
   };
-  const card = (p: CastPerson) => {
+  const row = (p: CastPerson) => {
     const pending = props.state.pending.some((mark) => mark.entity === p.id);
+    const regard = p.regard[0];
+    // Grouped by here, the section says who is here; grouped otherwise, the row does.
+    const badges = [
+      p.life ? <Badge key="life" tone="neg">{p.life}</Badge> : null,
+      p.here && by !== "none" ? <Badge key="here" tone="pos">here</Badge> : null,
+      pending ? <Badge key="pending" tone="warn">pending</Badge> : null,
+      regard ? (
+        <Badge key="regard">
+          <Icon name="heart" size={12} label={regard.axis ? `${regard.axis}:` : "Regard:"} />
+          {regard.band}
+        </Badge>
+      ) : null,
+    ].filter((b) => b !== null);
     return (
-      <Card key={p.id} title={p.name} aside={<span class="lre-inline">{p.life ? <span class="lre-badge neg">{p.life}</span> : null}{p.here ? <span class="lre-badge pos">here</span> : null}{pending ? <span class="lre-badge warn">pending</span> : null}</span>}>
-        <div class="lre-muted lre-small">{[p.role, p.activity, p.place].filter((part) => part).join(" · ")}</div>
-        {p.timeline.length > 0 ? <Timeline slots={p.timeline} /> : null}
-        {p.regard.map((r) => (
-          <Row key={r.axis} k={r.axis} v={r.value !== undefined ? `${r.band} (${r.value})` : r.band} />
-        ))}
-        {p.agenda.map((a) => (
-          <Row key={a.label} k={a.label} v={a.stage} sub="agenda" />
-        ))}
-        {p.next ? <Row k="Next" v={p.next.at} sub={p.next.label} /> : null}
-        {p.lastSeen ? <Row k="Last seen" v={p.lastSeen.at} sub={p.lastSeen.place} /> : null}
-      </Card>
+      <ListRow
+        key={p.id}
+        id={p.id}
+        leading={<Avatar name={p.name} size={36} />}
+        title={p.name}
+        subtitle={[p.role, whereabouts(p)].filter((part) => part).join(" · ") || undefined}
+        badge={badges.length > 0 ? <span class="lre-world-badges">{badges}</span> : undefined}
+        chevron
+        onClick={() => app.ui.update((ui) => pushSheet(ui, { kind: "person", id: p.id }))}
+      />
     );
   };
   return (
-    <div class="lre-stack" data-lre-panel="castlife.cast">
-      {view.mine.length > 0 ? (
-        <Card title="Your groups">
-          {view.mine.map((g) => (
-            <Row key={g.id} k={g.name} v={g.role ?? "member"} sub={[g.kind, g.since ? `since ${g.since}` : ""].filter((part) => part).join(" · ")} />
-          ))}
-        </Card>
-      ) : null}
+    <div class="lre-stack lre-world" data-lre-panel="castlife.cast">
       {view.people.length > 0 ? (
-        <>
-          <label class="lre-field">
-            <span class="label">Group by</span>
-            <select class="lre-input" value={by} onChange={(event) => setBy(event.currentTarget.value)}>
-              <option value="none">None</option>
-              {view.facets.map((f) => (
-                <option key={f.id} value={`facet:${f.id}`}>
-                  {f.label}
-                </option>
-              ))}
-              {view.groups.length > 0 ? <option value="groups">Groups</option> : null}
-              <option value="tier">Tier</option>
-            </select>
-          </label>
-          <div class="lre-stack" data-lre-cast-filters>
+        <div class="lre-world-filters" data-lre-cast-filters>
+          <Disclosure
+            summary={
+              <span class="lre-world-filters-summary">
+                <Icon name="filter" size={16} />
+                Filter and group
+                {active > 0 ? (
+                  <Badge tone="accent">
+                    {shown.length} of {view.people.length}
+                  </Badge>
+                ) : null}
+              </span>
+            }
+          >
+            <Field label="Group by" for="lre-cast-group-by">
+              <select id="lre-cast-group-by" class="lre-input" value={by} onChange={(event) => setBy(event.currentTarget.value)}>
+                <option value="none">Here, then everyone else</option>
+                {view.facets.map((f) => (
+                  <option key={f.id} value={`facet:${f.id}`}>
+                    {f.label}
+                  </option>
+                ))}
+                {view.groups.length > 0 ? <option value="groups">Groups</option> : null}
+                <option value="tier">Tier</option>
+              </select>
+            </Field>
             {view.facets.map((f) => (
               <Chips key={f.id} label={f.label} options={held(f)} on={filters.classes[f.id] ?? []} onChange={(on) => setFilters({ ...filters, classes: { ...filters.classes, [f.id]: on } })} />
             ))}
             <Chips label="Groups" options={view.groups.map((g) => ({ id: g.id, label: g.name }))} on={filters.groups} onChange={(groups) => setFilters({ ...filters, groups })} />
-            {filtering ? (
-              <button type="button" class="lre-btn small ghost" onClick={() => setFilters(NO_FILTERS)}>
+            {active > 0 ? (
+              <Button variant="ghost" size="sm" icon="close" onClick={() => setFilters(NO_FILTERS)}>
                 Clear filters ({shown.length} of {view.people.length} shown)
-              </button>
+              </Button>
             ) : null}
-          </div>
-        </>
+          </Disclosure>
+        </div>
       ) : null}
-      {shown.length === 0 && view.people.length > 0 ? <Empty>No one matches these filters.</Empty> : null}
+      {shown.length === 0 && view.people.length > 0 ? <Empty icon="filter">No one matches these filters.</Empty> : null}
       {castSections(view, shown, by).map((s) => (
-        <section key={s.key || "rest"} class="lre-stack" data-lre-cast-section={s.key}>
-          {s.label ? (
-            <div class="lre-h">
-              <span>{s.label}</span>
-              <span class="lre-badge">{s.people.length}</span>
-            </div>
-          ) : null}
-          {s.people.map(card)}
-        </section>
+        <div key={s.key || "rest"} data-lre-cast-section={s.key}>
+          <Section title={s.label || undefined} aside={s.label ? <Badge>{s.people.length}</Badge> : undefined} flush>
+            <List>{s.people.map(row)}</List>
+          </Section>
+        </div>
       ))}
+      {view.mine.length > 0 ? (
+        <Section title="Your groups" flush>
+          <List>
+            {view.mine.map((g) => (
+              <ListRow key={g.id} id={g.id} icon="users" title={g.name} subtitle={[g.kind, g.since ? `since ${g.since}` : ""].filter((part) => part).join(" · ") || undefined} value={g.role ?? "member"} />
+            ))}
+          </List>
+        </Section>
+      ) : null}
     </div>
   );
 }

@@ -1,14 +1,16 @@
-// Calendar & time UI: the Calendar panel (clock, upcoming, time controls) and the schedule
-// editor (the schedule/timeline special widget).
+// Calendar & time UI: the Calendar panel (clock, coming up, Pause/Resume and Timelapse), its glance
+// on Now (the next commitments), and the schedule editor (the schedule/timeline special widget).
 
 import type { UiPackDef } from "../../../frontend/registry";
 import { ScheduleEditor } from "./schedule-editor";
-import { CalendarPanel } from "./panel";
+import { CalendarGlance, CalendarPanel } from "./panel";
 
 const calendar: UiPackDef = {
   id: "calendar",
   register(r) {
-    r.panel({ id: "calendar.calendar", label: "Calendar", order: 70, component: CalendarPanel });
+    // Story's sub-tabs run Quests, Journal, Calendar (contract §9.5).
+    r.panel({ id: "calendar.calendar", label: "Calendar", order: 95, home: "story", component: CalendarPanel });
+    r.glance({ id: "calendar.next", order: 50, panel: "calendar.calendar", component: CalendarGlance });
     r.editor({ collection: "schedules", label: "Schedules", component: ScheduleEditor });
   },
 };

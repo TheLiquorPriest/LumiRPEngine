@@ -4,7 +4,7 @@
 
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
-import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LoreDrift, ResultBodies } from "../../src/shared/protocol";
+import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LoreDrift, PresetCard, ResultBodies } from "../../src/shared/protocol";
 import { AGENT_API } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
 import type { GmView, StateView } from "../../src/shared/state-view";
@@ -21,6 +21,7 @@ import { formulaFunctions } from "../../src/engine/scope";
 import { ALL_PACKS } from "../../src/packs/index";
 import { applyProfile, profileChoices, profileOf } from "../../src/shared/profiles/index";
 import { modernSheetFixture } from "./profile-fixture";
+import { STARTER_INFO } from "../../src/packs/starters/info";
 
 // The real registry, so Build's formula functions and the Sheet Designer preview are the engine's own.
 const REGISTRY = createRegistry(ALL_PACKS);
@@ -91,6 +92,20 @@ export class MockBackend {
   private readonly beforeEdit = new Map<string, GmView>();
   /** Kept jobs (`lre.job list`): an import a restart cut off after its first chunk. */
   private kept: JobSummary[] = [{ jobId: "job-kept", kind: "import_lore", worldId: WORLDS[0]?.id ?? "", status: "interrupted", progress: 0.5, message: "Interrupted by a restart. The 2 proposal(s) it made before it stopped are below; run it again for the rest.", result: { proposals: PROPOSALS.slice(0, 2) }, input: { bookIds: ["book-1"] }, at: Date.now() - 600_000 }];
+  /** The active preset as the backend reads it: one section outlet placed, one unknown, and guidance blocks in each state. */
+  private presetCard: PresetCard = {
+    preset: { id: "preset-main", name: "Maple's preset" },
+    outlets: [
+      { outlet: "lre_scene", label: "Scene" },
+      { outlet: "lre_extra", label: null },
+    ],
+    blocks: [
+      { target: "narrator", name: "RPEngine · narrator", state: "read" },
+      { target: "brief", name: "RPEngine · brief", state: "empty" },
+      { target: "extract", name: "RPEngine · extract", state: "missing" },
+      { target: "interpret", name: "RPEngine · interpret", state: "enabled" },
+    ],
+  };
   readonly log: FrontendToBackend[] = [];
 
   constructor(private readonly emit: Emit, private readonly options: MockOptions) {}
@@ -421,8 +436,14 @@ export class MockBackend {
                 { severity: "info", path: "sections.scene", code: "section_size", message: "Scene section averages 142 tokens (budget 600)." },
               ],
             });
-          case "create":
-            return this.result(reqId, "lre.world", { world: { ...structuredClone(this.world), id: "w-new", name: message.name } });
+          case "templates":
+            return this.result(reqId, "lre.world", { templates: STARTER_INFO.map((info) => ({ ...info })) });
+          case "create": {
+            // The preview models one world: the created one becomes it, so Build opens under the new name.
+            this.world = { ...structuredClone(this.world), id: "w-new", name: message.name };
+            this.draft = structuredClone(this.world);
+            return this.result(reqId, "lre.world", { world: structuredClone(this.world) });
+          }
           case "commit":
             this.world = structuredClone(this.draft);
             return this.result(reqId, "lre.world", { revision: `r${Date.now().toString(16)}`, lint: [] });
@@ -525,6 +546,11 @@ export class MockBackend {
         const content = "Rosie's opens at six and closes at two since the new lunch place opened. The booths by the window go first; the counter is for regulars.";
         const drift: Record<string, LoreDrift> = this.draft.lore.rosies_diner?.source?.kind === "book" && this.draft.lore.rosies_diner.source.hash === "stale" ? { rosies_diner: { status: "changed", content, hash: "fresh" } } : {};
         return this.result(reqId, "lre.lore", { drift: message.id === undefined || message.id === "rosies_diner" ? drift : {} });
+      }
+      case "lre.preset": {
+        // As the backend does: Add creates the missing guidance blocks (empty, switched off); every op answers with the card.
+        if (message.op === "add") this.presetCard = { ...this.presetCard, blocks: this.presetCard.blocks.map((block) => (block.state === "missing" ? { ...block, state: "empty" } : block)) };
+        return this.result(reqId, "lre.preset", { card: structuredClone(this.presetCard) });
       }
     }
   }

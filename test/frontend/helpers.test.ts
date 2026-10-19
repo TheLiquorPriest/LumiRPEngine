@@ -142,10 +142,19 @@ describe("Build kind pickers", () => {
   const world = baseWorld({ kinds: { crate: { id: "crate", label: "Crate", extends: "container", fields: { label: { type: "text" } } } } });
   const doc = { ...world, kinds: { container, ...world.kinds } };
 
-  test("pack kinds are pickable and labelled with their pack; world kinds stay plain", () => {
+  test("pickers name kinds, not ids; a pack's kind says its pack on the second line", () => {
     const options = refOptions(doc, "kinds");
-    expect(options).toContainEqual({ value: "container", label: "Container (container, gear pack)" });
-    expect(options).toContainEqual({ value: "crate", label: "Crate (crate)" });
+    expect(options).toContainEqual({ value: "container", label: "Container", sublabel: "gear pack" });
+    expect(options).toContainEqual({ value: "crate", label: "Crate" });
+  });
+
+  test("items sharing a name are told apart by their ids", () => {
+    const guard = (id: string) => ({ id, kind: "person", name: "Guard", tier: "background", fields: {}, relations: [] });
+    const twins = baseWorld({ entities: { guard_1: guard("guard_1"), guard_2: guard("guard_2") } });
+    expect(refOptions(twins, "entities").filter((o) => o.label === "Guard")).toEqual([
+      { value: "guard_1", label: "Guard", sublabel: "guard_1" },
+      { value: "guard_2", label: "Guard", sublabel: "guard_2" },
+    ]);
   });
 
   test("a world kind extending a pack kind shows the pack's fields", () => {
@@ -154,7 +163,7 @@ describe("Build kind pickers", () => {
 
   test("a cue's lore picker names each entry by its title", () => {
     const lore = baseWorld({ lore: { toledo: { id: "toledo", title: "The Toledo years", content: "Before Riverton.", keys: [], links: [], secret: true, gate: "false" } } });
-    expect(refOptions(lore, "lore")).toEqual([{ value: "toledo", label: "The Toledo years (toledo)" }]);
+    expect(refOptions(lore, "lore")).toEqual([{ value: "toledo", label: "The Toledo years" }]);
   });
 });
 
@@ -177,8 +186,8 @@ describe("time settings patches", () => {
 
 describe("Play panels", () => {
   const Empty = () => null;
-  const panel = (id: string, order: number): PanelDef => ({ id, label: id, order, component: Empty });
-  const catalog: UiCatalog = { panels: [panel("core.scene", 10), panel("economy.money", 30), panel("core.journal", 90), panel("gear.gear", 50)], editors: new Map(), configs: new Map(), chips: new Map(), previews: new Map(), gmSections: [], fields: [], placeFields: [], packs: [] };
+  const panel = (id: string, order: number): PanelDef => ({ id, label: id, order, home: "now", component: Empty });
+  const catalog: UiCatalog = { panels: [panel("core.scene", 10), panel("economy.money", 30), panel("core.journal", 90), panel("gear.gear", 50)], editors: new Map(), configs: new Map(), chips: new Map(), previews: new Map(), gmSections: [], fields: [], placeFields: [], sheets: new Map(), glances: [], packs: [] };
 
   test("core panels always show; a pack panel shows once its view is in the state", () => {
     const view = { panels: { "economy.money": { level: 1 } } } as unknown as StateView;

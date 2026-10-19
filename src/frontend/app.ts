@@ -1,11 +1,12 @@
 // The frontend's app object: the protocol client, the UI registry catalog, local UI state, host
 // capabilities and overlay control, shared with every Preact tree (drawer, HUD, chips, sheets,
-// map) through one context.
+// map) through one context. UI state follows the redesign's IA (contract §4, §6.3): a mode, Play's
+// destination with its sub-tabs and sheet stack, GM's gate, Build's route and Settings' page.
 
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type { SpindleComponentsHelper } from "lumiverse-spindle-types";
-import type { ChatId, PanelId, RevisionId, WorldId } from "../shared/ids";
+import type { ChatId, MessageId, PanelId, RevisionId, WorldId } from "../shared/ids";
 import type { JobKind, LintIssue, ResultBodies, WorldCollection, WorldPart } from "../shared/protocol";
 import type { StateView } from "../shared/state-view";
 import type { KindDef, RelationTypeDef, WorldDoc } from "../shared/world";
@@ -16,7 +17,40 @@ import type { Readable, Store } from "./store";
 import { useSelect } from "./store";
 import type { UiCatalog } from "./ui-registry";
 
-export type Section = "play" | "build" | "settings";
+export type Mode = "play" | "gm" | "build" | "settings";
+
+/** Play's bottom-bar destinations (contract §4.2). */
+export type Dest = "now" | "me" | "people" | "places" | "story";
+
+/** Where a panel lives: a Play destination, or GM mode. */
+export type PanelHome = Dest | "gm";
+
+export type SheetKind = "person" | "place" | "item" | "account" | "quest";
+
+/** A detail sheet opened over a Play destination (contract §4.3). */
+export interface SheetRoute {
+  kind: SheetKind;
+  id: string;
+}
+
+export interface PlayState {
+  dest: Dest;
+  /** The sub-tab chosen in each destination, kept for the session. */
+  tab: Partial<Record<Dest, PanelId>>;
+  /** Sheets open over the destination; the last one shows. */
+  stack: SheetRoute[];
+}
+
+/** GM mode's sections: the engine's own, and each pack's tab by its registered id, which holds a dot (`economy.money`). */
+export type GmSection = "world" | "places" | "story" | "chat" | `${string}.${string}`;
+
+export interface GmState {
+  /** The truth shows only once the gate is opened; leaving GM mode closes it again (contract §4.5). */
+  revealed: boolean;
+  section: GmSection;
+}
+
+export type SettingsPage = "home" | "model" | "steps" | "minds" | "realism" | "checks" | "time" | "extraction" | "swipes" | "preset" | "display" | "caveats";
 
 export type BuildRoute =
   | { view: "worlds" }
@@ -28,15 +62,47 @@ export type BuildRoute =
   | { view: "job"; worldId: WorldId; kind: JobKind };
 
 export interface UiState {
-  section: Section;
-  playPanel: PanelId | null;
+  mode: Mode;
+  play: PlayState;
+  gm: GmState;
   build: BuildRoute;
-  /** The map renders in the drawer when the drawer could not be closed (DESIGN §12 fallback). */
-  mapInDrawer: boolean;
+  settings: { page: SettingsPage };
   /** The float overlay that is open; one at a time. */
-  overlay: "map" | "palette" | null;
+  overlay: "map" | "palette" | "world" | null;
   /** Bumped each time LumiRPEngine Studio says an offer is waiting (DESIGN §15), so Build reviews it. */
   studioOffer: number;
+  /** Ids show beside names everywhere (Settings → Display); kept on this device under SHOW_IDS_KEY. */
+  showIds: boolean;
+}
+
+/** The localStorage key Show ids is kept under (contract §6.7). */
+export const SHOW_IDS_KEY = "lre:ui:show-ids";
+
+/** The UI state a session starts with. */
+export function initialUi(showIds: boolean): UiState {
+  return { mode: "play", play: { dest: "now", tab: {}, stack: [] }, gm: { revealed: false, section: "world" }, build: { view: "worlds" }, settings: { page: "home" }, overlay: null, studioOffer: 0, showIds };
+}
+
+/** Play at a destination, on one of its panels when given. Navigating starts with no sheet open (contract §4.3). */
+export function playAt(ui: UiState, dest: Dest, panel?: PanelId): UiState {
+  return { ...ui, mode: "play", play: { dest, tab: panel === undefined ? ui.play.tab : { ...ui.play.tab, [dest]: panel }, stack: [] } };
+}
+
+/** A panel shown where it lives (contract §4.2): its Play destination on its tab, or GM mode for a GM panel. */
+export function showPanel(ui: UiState, catalog: UiCatalog, panel: PanelId): UiState {
+  const home = catalog.panels.find((def) => def.id === panel)?.home;
+  if (home === undefined) return ui;
+  return home === "gm" ? { ...ui, mode: "gm" } : playAt(ui, home, panel);
+}
+
+/** A sheet opened over the current Play destination. */
+export function pushSheet(ui: UiState, route: SheetRoute): UiState {
+  return { ...ui, mode: "play", play: { ...ui.play, stack: [...ui.play.stack, route] } };
+}
+
+/** Back one level: the sheet under the top one, or the destination itself. */
+export function popSheet(ui: UiState): UiState {
+  return ui.play.stack.length === 0 ? ui : { ...ui, play: { ...ui.play, stack: ui.play.stack.slice(0, -1) } };
 }
 
 export type PaletteTab = "actions" | "combat" | "buy" | "pay" | "transfer" | "drive" | "lend" | "timelapse";
@@ -62,6 +128,8 @@ export interface HostBridge {
   activeChat(): ChatId | null;
   /** Runs the host's Regenerate (`command:action-regenerate`, gated by `generation`); false when unavailable. */
   regenerate(): Promise<boolean>;
+  /** Scrolls a reply into view in the chat; false when it isn't mounted (scrolled out of a virtual list, another chat). */
+  revealMessage(messageId: MessageId): boolean;
 }
 
 /** The world being edited in Build: the draft the backend returned and the revision it started from. */
@@ -88,6 +156,9 @@ export interface Overlays {
   closeMap(): void;
   openPalette(tab?: PaletteTab): Promise<void>;
   closePalette(): void;
+  /** The World sheet (contract §4.8): time, place, scene, weather and cash with ✎ fixes, the call meter, the clock toggle, Map and Actions. */
+  openWorld(): Promise<void>;
+  closeWorld(): void;
 }
 
 export interface App {

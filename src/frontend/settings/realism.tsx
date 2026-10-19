@@ -1,9 +1,10 @@
-// Settings → Realism (DESIGN §9.1): presets, per-domain levels on the host range slider and band
-// caps for new chats, which fill in what a world's own realism leaves out (or replace it, with "Use
-// my settings" on); and "This chat": promote or demote a domain on the running chat through a
-// `resolve` marker, after a migration preview of what freezes, promotes or materializes (§9.2).
+// Realism (DESIGN §9.1). For new chats (Settings → Realism): presets, per-domain levels on the host
+// range slider and band caps, which fill in what a world's own realism leaves out (or replace it,
+// with "Use my settings" on). For this chat (GM → This chat → Realism): promote or demote a domain
+// on the running chat through a `resolve` marker, after a migration preview of what freezes,
+// promotes or materializes (§9.2).
 
-import { useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { JsonObject } from "../../shared/json";
 import { BANDS, DOMAINS } from "../../shared/ids";
 import type { Band, DomainId, Level, RealismPresetId } from "../../shared/ids";
@@ -13,8 +14,11 @@ import type { RealismSettings } from "../../shared/settings";
 import type { ControlsView } from "../../shared/state-view";
 import { BAND_LABEL } from "../../shared/tiers";
 import { useApp } from "../app";
-import { Empty, HostSlider, HostSwitch, Seg, useBusy } from "../components";
+import { Banner, Button, Empty, HostSlider, HostSwitch, Seg, useBusy } from "../components";
+import type { IconName } from "../icons";
+import { Icon } from "../icons";
 import { resolveMarker } from "../requests";
+import { revealInScroller } from "../scroll";
 
 export const DOMAIN_LABEL: Record<DomainId, string> = {
   money: "Money",
@@ -65,10 +69,10 @@ function LevelSlider(props: { domain: DomainId; value: Level; floor?: Level; dis
   const value = asLevel(Math.max(props.value, floor));
   const shown = asLevel(drag ?? value);
   return (
-    <div class="lre-field" style={{ marginBottom: "4px" }} data-lre-domain={props.domain} role="group" aria-label={`${DOMAIN_LABEL[props.domain]} level`}>
-      <div class="lre-spread">
-        <span>{DOMAIN_LABEL[props.domain]}</span>
-        <span class={shown === 0 ? "lre-dim" : "lre-muted"} data-lre-level-label>
+    <div class="lre-gm-level-slider" data-lre-domain={props.domain} role="group" aria-label={`${DOMAIN_LABEL[props.domain]} level`}>
+      <div class="lre-gm-level-head">
+        <span class="lre-gm-level-domain">{DOMAIN_LABEL[props.domain]}</span>
+        <span class={shown === 0 ? "lre-gm-level-value lre-dim" : "lre-gm-level-value"} data-lre-level-label>
           {shown} · {LEVEL_LABEL[shown]}
           {floor > 0 ? <span class="lre-dim"> · ruleset floor {floor}</span> : null}
         </span>
@@ -95,9 +99,7 @@ export function OverrideWorldSwitch(props: { checked: boolean; busy: boolean; pa
   return (
     <div class="lre-field" data-lre-override-world>
       <HostSwitch label="Use my settings instead of a world's defaults for new chats" checked={props.checked} disabled={props.busy} onChange={(checked) => props.patch({ overrideWorldDefaults: checked })} />
-      <span class="lre-small lre-muted">
-        {props.checked ? "New chats start from these realism and time settings, whatever their world sets." : "New chats start from their world's own realism and time defaults; these settings fill in only what a world leaves out."}
-      </span>
+      <span class="lre-field-help">{props.checked ? "New chats start from these realism and time settings, whatever their world sets." : "New chats start from their world's own realism and time defaults; these settings fill in only what a world leaves out."}</span>
     </div>
   );
 }
@@ -108,36 +110,32 @@ export function RealismSeed(props: { realism: RealismSettings; overrideWorld: bo
     <div class="lre-stack">
       <OverrideWorldSwitch checked={props.overrideWorld} busy={props.busy} patch={props.patch} />
       <Seg<RealismPresetId> label="Realism preset" value={realism.preset} options={PRESETS} disabled={props.busy} onChange={(preset) => props.patch({ realism: { preset } })} />
-      <p class="lre-small lre-muted" style={{ margin: 0 }}>
-        Story is the default; any change makes it Custom.
-      </p>
+      <p class="lre-gm-note">Story is the default; any change makes it Custom.</p>
       {DOMAINS.map((domain) => (
         <LevelSlider key={domain} domain={domain} value={realism.levels[domain]} disabled={props.busy} onCommit={(level) => props.patch({ realism: { preset: "custom", levels: { [domain]: level } } })} />
       ))}
-      <div class="lre-h">Band caps</div>
-      <p class="lre-small lre-muted" style={{ margin: 0 }}>
-        A world's tiers each belong to a band; a band's cap limits how deeply its people are simulated. Your own character is never capped.
-      </p>
-      <div class="lre-tier-wrap">
-        <div class="lre-tier-grid" role="table" aria-label="Band caps" lang="en">
+      <div class="lre-gm-subtitle">Band caps</div>
+      <p class="lre-gm-note">A world's tiers each belong to a band; a band's cap limits how deeply its people are simulated. Your own character is never capped.</p>
+      <div class="lre-gm-caps-wrap">
+        <div class="lre-gm-caps" role="table" aria-label="Band caps" lang="en">
           {/* Rows use display:contents so the cells stay on the CSS grid while the table roles stay valid. */}
-          <div role="row" style={{ display: "contents" }}>
+          <div role="row" class="lre-gm-caps-row">
             <span role="columnheader">
               <span class="lre-sr">Domain</span>
             </span>
             {BANDS.map((band) => (
-              <span key={band} class="lre-muted" role="columnheader">
+              <span key={band} class="lre-gm-caps-band" role="columnheader">
                 {BAND_LABEL[band]}
               </span>
             ))}
           </div>
           {DOMAINS.map((domain) => (
-            <div key={domain} role="row" style={{ display: "contents" }}>
+            <div key={domain} role="row" class="lre-gm-caps-row">
               <span role="rowheader">{DOMAIN_LABEL[domain]}</span>
               {BANDS.map((band) => {
                 const cap = realism.tierCaps[band]?.[domain];
                 return (
-                  <span key={band} role="cell" style={{ display: "contents" }}>
+                  <span key={band} role="cell" class="lre-gm-caps-cell">
                     <select
                       class="lre-input"
                       aria-label={`${DOMAIN_LABEL[domain]} cap for ${BAND_LABEL[band]}`}
@@ -175,7 +173,12 @@ interface PendingChange {
   preview: MarkerPreview | null;
 }
 
-const TONE_ICON: Record<MarkerPreview["lines"][number]["tone"], string> = { freeze: "❄", promote: "⬆", materialize: "✦", info: "ℹ" };
+const TONE_ICON: Record<MarkerPreview["lines"][number]["tone"], { icon: IconName; label: string }> = {
+  freeze: { icon: "pause", label: "Freezes" },
+  promote: { icon: "chevron-up", label: "Rises" },
+  materialize: { icon: "sparkle", label: "Gains detail" },
+  info: { icon: "info", label: "Note" },
+};
 
 /** Promote or demote a domain on the running chat, with the migration preview first. */
 export function RealismThisChat(props: { chatId: string; controls: ControlsView | null }) {
@@ -183,7 +186,16 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
   const [scope, setScope] = useState<ScopeChoice>("all");
   const [pending, setPending] = useState<PendingChange | null>(null);
   const [busy, run] = useBusy();
-  if (!props.controls) return <Empty>Open a world chat to change its realism.</Empty>;
+  // The preview opens above the sliders, out of sight after a change further down: bring it into
+  // view, and its Apply into reach once the preview's request has settled (Apply is disabled until then).
+  const preview = useRef<HTMLDivElement>(null);
+  const previewing = pending !== null;
+  useEffect(() => {
+    if (!previewing || busy) return;
+    revealInScroller(preview.current, "center");
+    preview.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+  }, [previewing, busy]);
+  if (!props.controls) return <Empty icon="sliders">Open a world chat to change its realism.</Empty>;
   const realism = props.controls.realism;
   const floorOf = (domain: DomainId): Level => realism.floors[domain] ?? 0;
   // The level in force: the chat's (or the band's cap), never below the ruleset's floor.
@@ -209,51 +221,57 @@ export function RealismThisChat(props: { chatId: string; controls: ControlsView 
   const tiersNote = scope === "all" ? "" : reached.length === 0 ? `No tier in this world belongs to ${BAND_LABEL[scope]}. ` : reached.length === 1 && reached[0] === BAND_LABEL[scope] ? "" : `Tiers in this band: ${reached.join(", ")}. `;
   return (
     <div class="lre-stack" data-lre-realism="chat">
-      <Seg<ScopeChoice>
-        label="Applies to"
-        value={scope}
-        options={[{ value: "all", label: "Everyone" }, ...BANDS.map((band) => ({ value: band, label: BAND_LABEL[band] }))]}
-        onChange={(next) => setScope(next)}
-      />
+      <p class="lre-gm-note">How deeply each part of the world is simulated in this chat. A change shows what it does first, and applies from the next turn.</p>
+      <div class="lre-field">
+        <span class="label">Applies to</span>
+        <Seg<ScopeChoice> label="Applies to" value={scope} options={[{ value: "all", label: "Everyone" }, ...BANDS.map((band) => ({ value: band, label: BAND_LABEL[band] }))]} onChange={(next) => setScope(next)} />
+      </div>
       {scope !== "all" ? (
-        <p class="lre-small lre-muted" style={{ margin: 0 }} data-lre-band-tiers>
+        <p class="lre-gm-note" data-lre-band-tiers>
           {tiersNote}Your own character is never capped.
         </p>
       ) : null}
       {floors ? (
-        <p class="lre-small lre-muted" style={{ margin: 0 }} data-lre-floors>
+        <p class="lre-gm-note" data-lre-floors>
           {floors} Those sliders start there: the engine never plays a domain below its floor.
         </p>
       ) : null}
       {pending ? (
-        <div class="lre-banner info" data-lre-migration-preview>
-          <strong>
-            {DOMAIN_LABEL[pending.domain]}: {LEVEL_LABEL[levelFor(pending.domain)]} → {LEVEL_LABEL[pending.to]}
-          </strong>
-          {pending.preview && pending.preview.lines.length > 0 ? (
-            pending.preview.lines.map((line, i) => (
-              <div key={i} class="lre-row">
-                <span class="k">
-                  <span aria-hidden="true">{TONE_ICON[line.tone]}</span> {line.text}
-                </span>
-              </div>
-            ))
-          ) : (
-            <span class="lre-muted">Nothing freezes, rises or gains detail.</span>
-          )}
-          <div class="lre-inline">
-            <button type="button" class="lre-btn primary" disabled={busy} onClick={apply}>
-              Apply to this chat
-            </button>
-            <button type="button" class="lre-btn ghost" disabled={busy} onClick={() => setPending(null)}>
-              Cancel
-            </button>
-          </div>
+        <div ref={preview} data-lre-migration-preview>
+          <Banner
+            tone="info"
+            title={`${DOMAIN_LABEL[pending.domain]}: ${LEVEL_LABEL[levelFor(pending.domain)]} → ${LEVEL_LABEL[pending.to]}`}
+            actions={
+              <>
+                <Button variant="primary" busy={busy} onClick={apply}>
+                  Apply to this chat
+                </Button>
+                <Button variant="ghost" disabled={busy} onClick={() => setPending(null)}>
+                  Cancel
+                </Button>
+              </>
+            }
+          >
+            {pending.preview && pending.preview.lines.length > 0 ? (
+              <ul class="lre-gm-preview-lines">
+                {pending.preview.lines.map((line, i) => (
+                  <li key={i}>
+                    <Icon name={TONE_ICON[line.tone].icon} size={16} label={TONE_ICON[line.tone].label} />
+                    <span>{line.text}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              "Nothing freezes, rises or gains detail."
+            )}
+          </Banner>
         </div>
       ) : null}
-      {DOMAINS.map((domain) => (
-        <LevelSlider key={`${scope}:${domain}`} domain={domain} value={levelFor(domain)} floor={floorOf(domain)} disabled={busy || pending !== null} onCommit={(to) => (to === levelFor(domain) ? undefined : ask(domain, to))} />
-      ))}
+      <div class="lre-gm-sliders">
+        {DOMAINS.map((domain) => (
+          <LevelSlider key={`${scope}:${domain}`} domain={domain} value={levelFor(domain)} floor={floorOf(domain)} disabled={busy || pending !== null} onCommit={(to) => (to === levelFor(domain) ? undefined : ask(domain, to))} />
+        ))}
+      </div>
     </div>
   );
 }

@@ -9,6 +9,8 @@ import { PROTOCOL_VERSION } from "../../shared/protocol";
 import type { ErrorMessage } from "../../shared/protocol";
 import type { App } from "../app";
 import { useApp } from "../app";
+import { Button } from "../components";
+import { Icon } from "../icons";
 import { createStore, useSelect } from "../store";
 
 /** A form holding edits over a change made elsewhere. */
@@ -108,19 +110,27 @@ export async function confirmOverwrite(app: Pick<App, "host">): Promise<boolean>
 /** What a save the user declined answers, in place of the backend. */
 export const NOT_SAVED: ErrorMessage = { lre: PROTOCOL_VERSION, type: "lre.error", reqId: null, code: "conflict", message: "Not saved: the change made elsewhere is kept." };
 
-/** Build's bar notice while a form holds edits over a change made elsewhere. */
+/**
+ * Build's notice while a form holds edits over a change made elsewhere. It sits in the sticky world
+ * bar, so Load theirs and Keep mine stay in reach however far the form has scrolled.
+ */
 export function ChangedElsewhere() {
   const forms = useSelect(heldForms, (all) => all);
   if (forms.length === 0) return null;
   return (
-    <div class="lre-banner warn" data-lre-changed-elsewhere>
-      This item changed elsewhere while you were editing it.{" "}
-      <button type="button" class="lre-btn small" onClick={() => forms.forEach((f) => f.loadTheirs())}>
-        Load theirs
-      </button>{" "}
-      <button type="button" class="lre-btn small ghost" onClick={() => forms.forEach((f) => f.keepMine())}>
-        Keep mine
-      </button>
+    <div class="lre-build-conflict" role="status" data-lre-changed-elsewhere>
+      <span class="lre-build-conflict-text">
+        <Icon name="alert" size={16} />
+        <span>This item changed elsewhere while you were editing it.</span>
+      </span>
+      <span class="lre-build-actions">
+        <Button size="sm" onClick={() => forms.forEach((f) => f.loadTheirs())}>
+          Load theirs
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => forms.forEach((f) => f.keepMine())}>
+          Keep mine
+        </Button>
+      </span>
     </div>
   );
 }

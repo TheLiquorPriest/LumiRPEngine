@@ -1,9 +1,14 @@
-// Chips under each message (DESIGN §11, §12), rendered by a DOM decorator on `message_body_after`.
-// A pack can override a kind's rendering through `UiRegistry.chip`; everything else uses the
-// default chip, whose buttons send exactly the request `chipRequest` builds. An action that asks for
-// a value first (an amount, a catalog item) opens a small form in the chip.
+// Chips under each reply (DESIGN §11, §12; contract §4.8), rendered by a DOM decorator on
+// `message_body_after`: one quiet receipt line for what the turn did (its `done` chips), a card for
+// each decision the player owes, and compact offers. Nothing is dropped: the receipt opens to the full
+// list, where every chip shows with its own buttons. A pack can override a kind's rendering through
+// `UiRegistry.chip`; its component replaces the default wherever that chip shows. Buttons send exactly
+// the request `chipIntent` builds; an action that asks for a value first (an amount, a catalog item)
+// opens a small form in the chip.
 
-import { useState } from "preact/hooks";
+import type { ComponentChildren, ComponentType } from "preact";
+import { Fragment } from "preact";
+import { useId, useState } from "preact/hooks";
 import type { ChatId, MessageId } from "../shared/ids";
 import type { JsonObject } from "../shared/json";
 import type { KeepLine } from "../shared/ledger";
@@ -11,37 +16,62 @@ import { formatMoneyInput, parseMoneyInput } from "../shared/money";
 import type { Chip, ChipAction, ChipInput, ChipKind } from "../shared/state-view";
 import { DEFAULT_CURRENCY, type WorldCurrency } from "../shared/world";
 import { useApp, useView } from "./app";
-import { useBusy } from "./components";
+import { chipRole, chipTone } from "./chip-roles";
+import { Badge, Button, Field, useBusy } from "./components";
+import type { IconName } from "./icons";
+import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 import type { ChipProps } from "./registry";
 import { chipIntent, convertRequest } from "./requests";
 
-const CHIP_ICON: Record<ChipKind, string> = {
-  change: "✦",
-  elapsed: "⏱",
-  roll: "🎲",
-  price: "💳",
-  confirm: "❓",
-  decline: "⛔",
-  undo: "↺",
-  retry_read: "↻",
-  not_action: "💬",
-  swipe_option: "⇄",
-  overdue: "⏰",
-  timelapse_offer: "⏩",
-  continue_timelapse: "⏩",
-  keep_report: "⚑",
-  reread: "👁",
-  retry: "↻",
-  degraded: "⚠",
-  pending: "⋯",
-  mode_change: "⚙",
-  choice: "➜",
-  contradiction: "≠",
-  read_failed: "⚠",
-  fix: "✎",
-  refused: "⚠",
+const CHIP_ICON: Record<ChipKind, IconName> = {
+  change: "check",
+  elapsed: "clock",
+  roll: "dice",
+  price: "card",
+  confirm: "help",
+  decline: "alert",
+  undo: "undo",
+  retry_read: "refresh",
+  not_action: "message",
+  swipe_option: "refresh",
+  overdue: "calendar",
+  timelapse_offer: "fast-forward",
+  continue_timelapse: "fast-forward",
+  keep_report: "flag",
+  reread: "eye",
+  retry: "refresh",
+  degraded: "alert",
+  pending: "hourglass",
+  mode_change: "gear",
+  choice: "send",
+  contradiction: "info",
+  read_failed: "alert",
+  fix: "edit",
+  refused: "alert",
 };
+
+/** Icons for the actions players reach for most; every button keeps its words. */
+const ACTION_ICON: Partial<Record<string, IconName>> = { undo: "undo", regenerate: "refresh", rerun: "refresh", send: "send", timelapse: "fast-forward" };
+
+/**
+ * The receipt's order (contract §4.8): what went wrong first, so it never hides behind "n more";
+ * then time, money, the roll, the changes and how the message was read.
+ */
+const RECEIPT_ORDER: readonly ChipKind[] = ["decline", "degraded", "pending", "elapsed", "price", "undo", "roll", "change", "not_action", "fix", "mode_change"];
+
+/** Segments the receipt line shows before "n more". */
+const RECEIPT_SEGMENTS = 3;
+
+/** A reply's `done` chips in receipt order, the few the line shows, and how many more its full list holds. */
+export function receiptLine(done: readonly Chip[]): { sorted: Chip[]; shown: Chip[]; more: number } {
+  const rank = (chip: Chip) => {
+    const at = RECEIPT_ORDER.indexOf(chip.kind);
+    return at < 0 ? RECEIPT_ORDER.length : at;
+  };
+  const sorted = [...done].sort((a, b) => rank(a) - rank(b));
+  return { sorted, shown: sorted.slice(0, RECEIPT_SEGMENTS), more: Math.max(0, sorted.length - RECEIPT_SEGMENTS) };
+}
 
 /** Matches the decorator scope `message:<id>:…` (dom-decorator-service scope templates). */
 export function messageIdFromScope(scope: string): MessageId | null {
@@ -55,14 +85,64 @@ export function MessageChips(props: { messageId: MessageId }) {
   if (!view || view.status === "not_world") return null;
   const chips = view.chips.filter((chip) => chip.messageId === props.messageId);
   if (chips.length === 0) return null;
+  // A pack's rendering for a kind replaces the default wherever that chip shows.
+  const show = (chip: Chip, fallback: ComponentType<ChipProps>) => {
+    const Chosen = app.catalog.chips.get(chip.kind) ?? fallback;
+    return <Chosen key={chip.id} chip={chip} chatId={view.chatId} send={app.send} />;
+  };
+  const done = chips.filter((chip) => chipRole(chip) === "done");
+  const offers = chips.filter((chip) => chipRole(chip) === "offer");
   return (
     <div class="lre-chips" data-lre-chips={props.messageId}>
-      {chips.map((chip) => {
-        const Custom = app.catalog.chips.get(chip.kind);
-        if (Custom) return <Custom key={chip.id} chip={chip} chatId={view.chatId} send={app.send} />;
-        if (chip.kind === "keep_report") return <KeepReportChip key={chip.id} chip={chip} chatId={view.chatId} send={app.send} />;
-        return <DefaultChip key={chip.id} chip={chip} chatId={view.chatId} send={app.send} />;
-      })}
+      {done.length > 0 ? <Receipt chips={done} show={(chip) => show(chip, DefaultChip)} /> : null}
+      {chips.filter((chip) => chipRole(chip) === "decision").map((chip) => show(chip, chip.kind === "keep_report" ? KeepReportChip : DecisionCard))}
+      {offers.length > 0 ? <div class="lre-chat-offers">{offers.map((chip) => show(chip, OfferChip))}</div> : null}
+    </div>
+  );
+}
+
+/** One quiet line for what the turn did; a tap opens the full list, each chip with its own buttons. */
+function Receipt(props: { chips: readonly Chip[]; show(chip: Chip): ComponentChildren }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const { sorted, shown, more } = receiptLine(props.chips);
+  return (
+    <div class="lre-chat-receipt">
+      <button type="button" class="lre-chat-receipt-line" aria-expanded={open} aria-controls={open ? listId : undefined} onClick={() => setOpen(!open)}>
+        <span class="lre-sr">What this turn did: </span>
+        <span class="lre-chat-segs">
+          {shown.map((chip, index) => {
+            const tone = chipTone(chip);
+            return (
+              <Fragment key={chip.id}>
+                {index > 0 ? (
+                  <span class="lre-chat-dot" aria-hidden="true">
+                    ·
+                  </span>
+                ) : null}
+                <span class="lre-chat-seg" data-tone={tone}>
+                  {tone === "neutral" ? null : <Icon name="alert" size={14} />}
+                  <span class="lre-chat-seg-text">{chip.kind === "not_action" ? "Read as an action" : chip.label}</span>
+                </span>
+              </Fragment>
+            );
+          })}
+          {more > 0 ? (
+            <>
+              <span class="lre-chat-dot" aria-hidden="true">
+                ·
+              </span>
+              <span class="lre-chat-seg more">{more} more</span>
+            </>
+          ) : null}
+        </span>
+        <Icon name={open ? "chevron-up" : "chevron-down"} size={16} class="lre-chat-chev" />
+      </button>
+      {open ? (
+        <div id={listId} class="lre-chat-receipt-list">
+          {sorted.map((chip) => props.show(chip))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -88,6 +168,42 @@ function useChipAction(chip: Chip, chatId: ChatId): [boolean, (choice: string, p
   ];
 }
 
+interface ChipControls {
+  busy: boolean;
+  /** The action whose form is open. */
+  asking: string | null;
+  press(action: ChipAction): void;
+  /** The open action's form, or null. */
+  form: ComponentChildren;
+}
+
+/** A chip's actions as the player presses them: one that asks for a value opens its form first, any other sends at once. */
+function useChipControls(chip: Chip, chatId: ChatId): ChipControls {
+  const view = useView();
+  const [busy, choose] = useChipAction(chip, chatId);
+  const [asking, setAsking] = useState<string | null>(null);
+  const open = chip.actions.find((action) => action.id === asking);
+  return {
+    busy,
+    asking,
+    press: (action) => (action.input ? setAsking(asking === action.id ? null : action.id) : choose(action.id)),
+    form: open?.input ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null,
+  };
+}
+
+/** One chip action as a button; one that opens a form says whether it is open. */
+function ActionButton(props: { action: ChipAction; controls: ChipControls; pill?: boolean }) {
+  const { action, controls } = props;
+  const icon = ACTION_ICON[action.id];
+  const style = action.style === "primary" ? " primary" : action.style === "danger" ? " danger" : "";
+  return (
+    <button type="button" class={props.pill ? `lre-chat-pill${style}` : `lre-btn small${style}`} disabled={controls.busy} aria-expanded={action.input ? controls.asking === action.id : undefined} onClick={() => controls.press(action)}>
+      {icon ? <Icon name={icon} size={16} /> : null}
+      {action.label}
+    </button>
+  );
+}
+
 /** The small form an action with an input opens: an amount in the world's currency, or one of its options; Apply sends it as the chip's payload. */
 function ChipInputForm(props: { action: ChipAction; input: ChipInput; currency: WorldCurrency; busy: boolean; onSend(payload: JsonObject): void; onCancel(): void }) {
   const { input } = props;
@@ -97,7 +213,7 @@ function ChipInputForm(props: { action: ChipAction; input: ChipInput; currency: 
   const ok = input.type === "money" ? cents !== null && cents > 0 : picked !== "";
   return (
     <form
-      class="lre-chip-form"
+      class="lre-chat-form"
       data-lre-chip-input={props.action.id}
       onSubmit={(event) => {
         event.preventDefault();
@@ -107,47 +223,132 @@ function ChipInputForm(props: { action: ChipAction; input: ChipInput; currency: 
         if (event.key === "Escape") props.onCancel();
       }}
     >
-      {input.type === "money" ? (
-        <MoneyInput currency={props.currency} value={text} onInput={setText} label={input.label} invalid={text.trim() !== "" && !ok} autoFocus />
-      ) : (
-        <select class="lre-input" aria-label={input.label} value={picked} onChange={(event) => setPicked(event.currentTarget.value)}>
-          {input.options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      )}
-      <button type="submit" class="primary" disabled={props.busy || !ok}>
-        Apply
-      </button>
-      <button type="button" disabled={props.busy} onClick={props.onCancel}>
-        Cancel
-      </button>
+      <Field label={input.label}>
+        {input.type === "money" ? (
+          <MoneyInput currency={props.currency} value={text} onInput={setText} label={input.label} invalid={text.trim() !== "" && !ok} autoFocus />
+        ) : (
+          <select class="lre-input" aria-label={input.label} value={picked} onChange={(event) => setPicked(event.currentTarget.value)}>
+            {input.options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      <div class="lre-chat-actions">
+        <Button type="submit" variant="primary" size="sm" icon="check" disabled={props.busy || !ok}>
+          Apply
+        </Button>
+        <Button variant="ghost" size="sm" disabled={props.busy} onClick={props.onCancel}>
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }
 
+/** A chip in full, as the receipt's list shows it: its icon, label and detail, its buttons and any open form. */
 export function DefaultChip(props: ChipProps) {
   const { chip } = props;
-  const view = useView();
-  const [busy, choose] = useChipAction(chip, props.chatId);
-  const [asking, setAsking] = useState<string | null>(null);
-  const info = chip.actions.length === 0;
-  const open = chip.actions.find((action) => action.id === asking);
+  const controls = useChipControls(chip, props.chatId);
   return (
-    <div class={`lre-chip${info ? " info" : ""}${busy ? " busy" : ""}`} data-kind={chip.kind} title={chip.detail}>
-      <span class="lab">
-        <span aria-hidden="true">{CHIP_ICON[chip.kind]} </span>
+    <div class={controls.busy ? "lre-chip busy" : "lre-chip"} data-kind={chip.kind} data-tone={chipTone(chip)}>
+      <div class="lre-chip-row">
+        <Icon name={CHIP_ICON[chip.kind]} size={16} class="lre-chip-icon" />
+        <div class="lre-chip-text">
+          <span class="lre-chip-label">{chip.label}</span>
+          {chip.detail ? <span class="lre-chip-detail">{chip.detail}</span> : null}
+        </div>
+        {chip.actions.length > 0 ? (
+          <div class="lre-chat-actions">
+            {chip.actions.map((action) => (
+              <ActionButton key={action.id} action={action} controls={controls} />
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {controls.form}
+    </div>
+  );
+}
+
+/** A decision the player owes (contract §4.8): a card with its question, detail and answers, marked when the next send lapses it. */
+function DecisionCard(props: ChipProps) {
+  const { chip } = props;
+  const controls = useChipControls(chip, props.chatId);
+  return (
+    <div class={controls.busy ? "lre-chat-decision busy" : "lre-chat-decision"} data-kind={chip.kind} data-tone={chipTone(chip) === "neg" ? "neg" : "warn"} role="group" aria-label={chip.label}>
+      {chip.expires === "next_send" ? (
+        <span class="lre-chat-due">
+          <Icon name="send" size={14} />
+          Answer before you send
+        </span>
+      ) : null}
+      <div class="lre-chat-decision-head">
+        <Icon name={CHIP_ICON[chip.kind]} class="lre-chat-decision-icon" />
+        <div class="lre-chat-decision-text">
+          <strong class="lre-chat-decision-label">{chip.label}</strong>
+          {chip.detail ? <span class="lre-chat-decision-detail">{chip.detail}</span> : null}
+        </div>
+      </div>
+      {chip.actions.length > 0 ? (
+        <div class="lre-chat-actions">
+          {chip.actions.map((action) => (
+            <ActionButton key={action.id} action={action} controls={controls} />
+          ))}
+        </div>
+      ) : null}
+      {controls.form}
+    </div>
+  );
+}
+
+/**
+ * An offer (contract §4.8) as compact pills: one action makes the whole pill its button ("Send: the
+ * suggestion"), several sit as pills after the offer's label ("Swipe as… Re-narrate · Re-run"). The
+ * detail follows in quiet text, so a touch screen loses none of it.
+ */
+function OfferChip(props: ChipProps) {
+  const { chip } = props;
+  const controls = useChipControls(chip, props.chatId);
+  const detailId = useId();
+  const only = chip.actions.length === 1 ? chip.actions[0] : undefined;
+  const detail = chip.detail ? (
+    <span id={detailId} class="lre-chat-offer-detail">
+      {chip.detail}
+    </span>
+  ) : null;
+  if (only)
+    return (
+      <div class={controls.busy ? "lre-chat-offer busy" : "lre-chat-offer"} data-kind={chip.kind}>
+        <button
+          type="button"
+          class={only.style === "primary" ? "lre-chat-pill primary" : "lre-chat-pill"}
+          aria-describedby={detail ? detailId : undefined}
+          aria-expanded={only.input ? controls.asking === only.id : undefined}
+          disabled={controls.busy}
+          onClick={() => controls.press(only)}
+        >
+          <Icon name={CHIP_ICON[chip.kind]} size={16} />
+          <strong>{only.label}:</strong>
+          <span class="lre-chat-pill-text">{chip.label}</span>
+        </button>
+        {detail}
+        {controls.form}
+      </div>
+    );
+  return (
+    <div class={controls.busy ? "lre-chat-offer busy" : "lre-chat-offer"} data-kind={chip.kind} role="group" aria-label={chip.label} aria-describedby={detail ? detailId : undefined}>
+      <span class="lre-chat-offer-lead">
+        <Icon name={CHIP_ICON[chip.kind]} size={16} />
         {chip.label}
-        {chip.detail ? <span class="det"> · {chip.detail}</span> : null}
       </span>
       {chip.actions.map((action) => (
-        <button key={action.id} type="button" class={action.style} disabled={busy} aria-expanded={action.input ? asking === action.id : undefined} onClick={() => (action.input ? setAsking(asking === action.id ? null : action.id) : choose(action.id))}>
-          {action.label}
-        </button>
+        <ActionButton key={action.id} action={action} controls={controls} pill />
       ))}
-      {open?.input ? <ChipInputForm key={open.id} action={open} input={open.input} currency={view?.currency ?? DEFAULT_CURRENCY} busy={busy} onSend={(payload) => choose(open.id, payload)} onCancel={() => setAsking(null)} /> : null}
+      {detail}
+      {controls.form}
     </div>
   );
 }
@@ -174,7 +375,7 @@ export function keepRows(lines: readonly KeepLine[]): { line: KeepLine; count: n
   return rows.map(({ line, count }) => ({ line, count }));
 }
 
-/** The Keep report (DESIGN §4.3): convert per entry, Keep, and one-tap Discard. */
+/** The Keep report (DESIGN §4.3), its own decision card: convert per entry, Keep, and one-tap Discard. */
 export function KeepReportChip(props: ChipProps) {
   const app = useApp();
   const view = useView();
@@ -183,51 +384,57 @@ export function KeepReportChip(props: ChipProps) {
   const [converting, runConvert] = useBusy();
   const lines = keepRows(view?.keepReport ?? []);
   return (
-    <div class="lre-keep" data-kind="keep_report">
-      <div class="lre-spread">
-        <strong>
-          <span aria-hidden="true">{CHIP_ICON.keep_report}</span> {chip.label}
-        </strong>
-        <span class="lre-badge warn">{lines.length} entr{lines.length === 1 ? "y" : "ies"}</span>
+    <div class="lre-chat-decision lre-chat-keep" data-kind="keep_report" data-tone="warn" role="group" aria-label={chip.label}>
+      <div class="lre-chat-decision-head">
+        <Icon name={CHIP_ICON.keep_report} class="lre-chat-decision-icon" />
+        <div class="lre-chat-decision-text">
+          <strong class="lre-chat-decision-label">{chip.label}</strong>
+          {chip.detail ? <span class="lre-chat-decision-detail">{chip.detail}</span> : null}
+        </div>
+        <Badge tone="warn">
+          {lines.length} entr{lines.length === 1 ? "y" : "ies"}
+        </Badge>
       </div>
-      {chip.detail ? <div class="lre-small lre-muted">{chip.detail}</div> : null}
-      {lines.map(({ line, count }) => {
-        const convert = convertRequest(line, props.chatId);
-        const key = "marker" in line.ref ? `${line.messageId}:m${line.ref.marker}` : `${line.messageId}:${line.ref.in}:${"seq" in line.ref ? line.ref.seq : 0}:${line.ref.index}`;
-        return (
-          <div class="lre-row" key={key}>
-            <span class="k">
-              {line.text}
-              <span class="sub">
-                {KEEP_STATUS[line.status]}
-                {count > 1 ? ` · ${count} linked changes` : ""}
-              </span>
-            </span>
-            {convert && line.status !== "converted" ? (
-              <button
-                type="button"
-                class="lre-btn small"
-                disabled={converting}
-                onClick={() =>
-                  runConvert(async () => {
-                    await app.request(convert);
-                  })
-                }
-              >
-                Convert
-              </button>
-            ) : null}
-          </div>
-        );
-      })}
-      <div class="lre-inline" style={{ marginTop: "6px" }}>
+      {lines.length > 0 ? (
+        <div class="lre-chat-keep-rows">
+          {lines.map(({ line, count }) => {
+            const convert = convertRequest(line, props.chatId);
+            const key = "marker" in line.ref ? `${line.messageId}:m${line.ref.marker}` : `${line.messageId}:${line.ref.in}:${"seq" in line.ref ? line.ref.seq : 0}:${line.ref.index}`;
+            return (
+              <div class="lre-chat-keep-row" key={key}>
+                <span class="lre-chat-keep-text">
+                  {line.text}
+                  <span class="lre-chat-keep-sub">
+                    {line.status === "converted" ? <Icon name="check" size={14} /> : null}
+                    {KEEP_STATUS[line.status]}
+                    {count > 1 ? ` · ${count} linked changes` : ""}
+                  </span>
+                </span>
+                {convert && line.status !== "converted" ? (
+                  <Button
+                    size="sm"
+                    disabled={converting}
+                    onClick={() =>
+                      runConvert(async () => {
+                        await app.request(convert);
+                      })
+                    }
+                  >
+                    Convert
+                  </Button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      <div class="lre-chat-actions">
         {chip.actions.map((action) => (
-          <button key={action.id} type="button" class={`lre-btn small ${action.id === "discard" ? "danger" : action.style ?? ""}`} disabled={busy} onClick={() => choose(action.id)}>
+          <Button key={action.id} size="sm" variant={action.id === "discard" ? "danger" : action.style === "primary" ? "primary" : "secondary"} disabled={busy} onClick={() => choose(action.id)}>
             {action.label}
-          </button>
+          </Button>
         ))}
       </div>
     </div>
   );
 }
-

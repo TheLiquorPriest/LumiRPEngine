@@ -1,13 +1,12 @@
-// Responsive layout rules (DESIGN §12). Pure, so the rules are tested without a browser.
+// Responsive layout rules (DESIGN §12, contract §4.8). Pure, so the rules are tested without a browser.
+
+import { headGutters } from "./chat-heads";
 
 /** The HUD pill collapses to time only below this layout width (DESIGN §12). */
 export const HUD_COLLAPSE_BELOW = 760;
 
 /** The host's mobile breakpoint (`MOBILE_VIEWPORT_BREAKPOINT`, `frontend/src/lib/mobile.ts`). */
 export const HOST_MOBILE_MAX = 600;
-
-/** Width the host's chat-head bubbles cover at the right edge of a narrow viewport (DESIGN §12). */
-export const CHAT_HEAD_GUTTER = 64;
 
 export interface Viewport {
   width: number;
@@ -51,22 +50,19 @@ export interface Rect {
 }
 
 /**
- * Right padding that keeps a panel's content clear of the chat-head bubbles: on mobile, whatever
- * part of the panel lies in the viewport's right gutter, never more than the gutter itself (a panel
- * measured mid-slide, partly off-screen, must not squeeze its content). Zero on desktop.
+ * A bottom sheet (the palette, the World sheet) `height` px tall, never taller than the viewport less
+ * 24 px. On mobile it spans the width less what the host's chat heads actually cover of it (D-UI7:
+ * they are usually absent, and anywhere when present); on desktop it is a centred 440 px column.
  */
-export function rightGutter(panel: Rect, viewport: Viewport): number {
-  if (!isMobile(viewport)) return 0;
-  const right = Math.min(panel.x + panel.width, viewport.width);
-  return Math.min(CHAT_HEAD_GUTTER, Math.max(0, Math.ceil(right - (viewport.width - CHAT_HEAD_GUTTER))));
-}
-
-/** The palette bottom sheet: on mobile the full width left of the chat-head gutter, a centered 440 px column on desktop. */
-export function sheetRect(viewport: Viewport, heightFraction: number): Rect {
-  const height = Math.round(Math.min(viewport.height * heightFraction, viewport.height - 24));
-  if (isMobile(viewport)) return { x: 0, y: viewport.height - height, width: viewport.width - CHAT_HEAD_GUTTER, height };
-  const width = Math.min(440, viewport.width - 24);
-  return { x: Math.round((viewport.width - width) / 2), y: viewport.height - height - 12, width, height };
+export function sheetRect(viewport: Viewport, height: number, heads: readonly Rect[] = []): Rect {
+  const tall = Math.round(Math.min(height, viewport.height - 24));
+  if (!isMobile(viewport)) {
+    const width = Math.min(440, viewport.width - 24);
+    return { x: Math.round((viewport.width - width) / 2), y: viewport.height - tall - 12, width, height: tall };
+  }
+  const full: Rect = { x: 0, y: viewport.height - tall, width: viewport.width, height: tall };
+  const gutters = headGutters(full, heads);
+  return { x: gutters.left, y: full.y, width: full.width - gutters.left - gutters.right, height: tall };
 }
 
 /**

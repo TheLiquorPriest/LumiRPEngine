@@ -1,16 +1,16 @@
-// Play → Calendar (DESIGN §12): the clock and today, what's coming, Pause/Resume and Timelapse,
-// and this chat's time controls as `time` markers on the running chat (DESIGN §9.2).
+// Play → Story → Calendar (DESIGN §12): the clock and today, today's holidays, what's coming up,
+// Pause/Resume and Timelapse. This chat's time controls (scene ticks, scale, interrupts…) live in
+// GM → This chat (contract §4.7, §9.6); a pointer leads there. The calendar's glance on Now gives
+// the POV's next two commitments.
 
 import { isRecord } from "../../../shared/json";
-import type { StateView } from "../../../shared/state-view";
 import { useApp } from "../../../frontend/app";
-import { Card, Empty, Row, useBusy } from "../../../frontend/components";
+import { Badge, Button, Empty, List, ListRow, Section, Stat, useBusy } from "../../../frontend/components";
 import { list, str, strings } from "../../../frontend/decode";
 import { clockText } from "../../../frontend/hud";
+import { GlanceCard } from "../../../frontend/play/glance";
 import type { PanelProps } from "../../../frontend/registry";
 import { timeMarker } from "../../../frontend/requests";
-import { TimeControlsEditor } from "../../../frontend/time-controls";
-import type { TimeValues } from "../../../frontend/time-controls";
 
 import type { CalendarView } from "../core/view";
 
@@ -26,68 +26,79 @@ export function decodeCalendarView(value: unknown): CalendarView | null {
   };
 }
 
-function controlValues(state: StateView): TimeValues | null {
-  const time = state.controls?.time;
-  if (!time) return null;
-  return { sceneTicks: time.sceneTicks, scale: time.scale, interrupts: time.interrupts, speedThrough: time.speedThrough, montage: time.montage, unitCap: time.unitCap };
-}
-
 export function CalendarPanel(props: PanelProps) {
   const app = useApp();
   const { state } = props;
   const calendar = decodeCalendarView(props.view);
   const [busy, run] = useBusy();
   const hud = state.hud;
-  const values = controlValues(state);
   const paused = state.controls?.time.paused ?? hud?.clock.paused ?? false;
+  const day = calendar ? `${calendar.weekday} ${calendar.date}`.trim() : "";
   return (
-    <div class="lre-stack" data-lre-panel="calendar.calendar">
-      <Card title="Clock" aside={paused ? <span class="lre-badge warn">Paused</span> : null}>
-        {hud ? <Row k={<span class="lre-num" style={{ fontSize: "18px", fontWeight: 600 }}>{clockText(hud)}</span>} v={calendar?.dayPart || hud.clock.dayPart} /> : null}
-        {calendar ? <Row k={`${calendar.weekday} ${calendar.date}`.trim() || "—"} v={calendar.holidays.join(", ") || undefined} /> : null}
-        <div class="lre-inline" style={{ marginTop: "8px" }}>
-          <button
-            type="button"
-            class="lre-btn"
-            disabled={busy}
-            onClick={() =>
-              run(async () => {
-                await app.request(timeMarker(props.chatId, "pause", { all: true }, !paused));
-              })
-            }
-          >
-            <span aria-hidden="true">{paused ? "▶" : "⏸"}</span> {paused ? "Resume clock" : "Pause clock"}
-          </button>
-          {state.palette?.timelapse ? (
-            <button type="button" class="lre-btn primary" onClick={() => void app.overlays.openPalette("timelapse")}>
-              <span aria-hidden="true">⏩</span> Timelapse…
-            </button>
+    <div class="lre-stack lre-world" data-lre-panel="calendar.calendar">
+      <Section title="Today" aside={paused ? <Badge tone="warn">Paused</Badge> : null}>
+        <div class="lre-stack">
+          <div class="lre-world-clock">
+            {hud ? <Stat label={calendar?.dayPart || hud.clock.dayPart || "Time"} value={clockText(hud)} sub={day || undefined} /> : <Stat label="Date" value={day || "—"} sub={calendar?.dayPart || undefined} />}
+          </div>
+          {calendar && calendar.holidays.length > 0 ? (
+            <div class="lre-world-badges start">
+              {calendar.holidays.map((h) => (
+                <Badge key={h} tone="accent">
+                  {h}
+                </Badge>
+              ))}
+            </div>
           ) : null}
+          <div class="lre-inline">
+            <Button
+              icon={paused ? "play" : "pause"}
+              busy={busy}
+              onClick={() =>
+                run(async () => {
+                  await app.request(timeMarker(props.chatId, "pause", { all: true }, !paused));
+                })
+              }
+            >
+              {paused ? "Resume clock" : "Pause clock"}
+            </Button>
+            {state.palette?.timelapse ? (
+              <Button variant="primary" icon="fast-forward" onClick={() => void app.overlays.openPalette("timelapse")}>
+                Timelapse…
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </Card>
-      <Card title="Coming up">
+      </Section>
+      <Section title="Coming up" flush>
         {!calendar || calendar.upcoming.length === 0 ? (
-          <Empty>Nothing scheduled.</Empty>
+          <Empty icon="calendar">Nothing scheduled.</Empty>
         ) : (
-          calendar.upcoming.map((u, i) => <Row key={`${u.at}:${i}`} k={u.label} sub={u.kind} v={u.at} />)
+          <List>
+            {calendar.upcoming.map((u, i) => (
+              <ListRow key={`${u.at}:${i}`} icon={u.kind === "holiday" ? "star" : "clock"} title={u.label} subtitle={u.kind === "holiday" ? "Holiday" : undefined} value={u.at} valueTone="muted" />
+            ))}
+          </List>
         )}
-      </Card>
-      <div class="lre-h">This chat's time controls</div>
-      {values ? (
-        <TimeControlsEditor
-          values={values}
-          currentSceneType={state.controls?.time.sceneType}
-          disabled={busy}
-          onChange={(change) =>
-            run(async () => {
-              const result = await app.request(timeMarker(props.chatId, change.control, change.scope, change.to));
-              if (result?.pending) app.toast("Saved — it applies when the reply finishes.", "info");
-            })
-          }
-        />
-      ) : (
-        <Empty>Time controls appear once the chat has started.</Empty>
-      )}
+      </Section>
+      <div class="lre-world-pointer">
+        <Button variant="ghost" size="sm" icon="sliders" iconAfter="chevron-right" onClick={() => app.ui.update((ui) => ({ ...ui, mode: "gm", gm: { ...ui.gm, section: "chat" } }))}>
+          This chat's time controls are in GM → This chat
+        </Button>
+      </div>
     </div>
+  );
+}
+
+/** Now's calendar glance: the POV's next two commitments, or nothing when none is coming up. */
+export function CalendarGlance(props: PanelProps) {
+  const next = (decodeCalendarView(props.view)?.upcoming ?? []).filter((u) => u.kind === "commitment").slice(0, 2);
+  if (next.length === 0) return null;
+  return (
+    <GlanceCard title="Coming up" panel="calendar.calendar">
+      {next.map((u, i) => (
+        <ListRow key={`${u.at}:${i}`} icon="clock" title={u.label} value={u.at} valueTone="muted" />
+      ))}
+    </GlanceCard>
   );
 }

@@ -1,10 +1,12 @@
-// Build → World → Ruleset (DESIGN §11, §13): how checks are decided (the adjudication policy), the
-// level floors, the progressions, the Sheet Designer and the Combat card, saved together as the
-// `ruleset` part. The designer previews the sheet live through `lre.world sheet`, on the POV as a
-// chat would start, with the ruleset as edited (saved or not). Keys this editor doesn't know are
-// kept as they are, so other ruleset parts survive a save. "Start from a profile…" applies a ready-made
-// ruleset to the draft in its own write (`profile-picker`), with the edits here saved or reverted first.
+// Build → World → Ruleset (DESIGN §11, §13; contract §4.6): the world's rules as parts, each opening
+// as its own page (a sheet): Start from a profile…, how checks are decided (the adjudication
+// policy), the level floors, the progressions, the Sheet Designer with its live preview, and the
+// Combat card, saved together as the `ruleset` part. The preview is `lre.world sheet` on the POV as
+// a chat would start, with the ruleset as edited (saved or not). Keys this editor doesn't know are
+// kept as they are, so other ruleset parts survive a save. A profile is applied to the draft in its
+// own write (`profile-picker`), with the edits here saved or reverted first.
 
+import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { presetAdjudication, readAdjudication } from "../../shared/adjudication";
 import type { JsonObject, JsonValue } from "../../shared/json";
@@ -12,21 +14,24 @@ import { hasOwn, isRecord } from "../../shared/json";
 import type { LintIssue } from "../../shared/protocol";
 import { profileOf } from "../../shared/profiles/index";
 import type { SheetSectionView } from "../../shared/state-view";
-import type { FieldDef, ProgressionDef, RulesetDef, SheetLayoutDef, SheetRowDef, SheetSectionDef, WorldDoc } from "../../shared/world";
+import type { AdjudicationPresetId, FieldDef, ProgressionDef, RulesetDef, SheetLayoutDef, SheetRowDef, SheetSectionDef, WorldDoc } from "../../shared/world";
 import { SheetSectionCards } from "../../packs/sheets/ui/panel";
 import { useApp } from "../app";
-import { AdjudicationForm } from "../adjudication-form";
-import { Card, Empty, HostSwitch, Seg, useBusy } from "../components";
 import type { Draft } from "../app";
+import { AdjudicationForm } from "../adjudication-form";
+import { Badge, Button, Empty, Field, HostSwitch, IconButton, IdText, List, ListRow, PageHeader, SaveBar, Section, Seg, useBusy } from "../components";
+import type { IconName } from "../icons";
 import { sheetPreviewRequest } from "../requests";
+import { DOMAIN_LABEL } from "../settings/realism";
 import { useSelect } from "../store";
 import { draftSend } from "./draft";
-import { useHeld } from "./held";
 import { ExprEditor } from "./expr-editor";
+import { AddPicker, FormGroup, FormSheet, Issues, ItemRow, RefPicker, type RefOption } from "./form-kit";
+import { useHeld } from "./held";
 import { ProfilePicker } from "./profile-picker";
-import { EFFECT, type FieldSpec } from "./schema";
+import { deriveId, EFFECT, type FieldSpec } from "./schema";
 import type { FormCtx } from "./schema-form";
-import { FieldInput, kindFields, lintAt, refOptions, worldIdentifiers } from "./schema-form";
+import { FieldInput, kindFields, refOptions, worldIdentifiers } from "./schema-form";
 
 export type RowKind = "field" | "formula" | "pool" | "progression";
 
@@ -75,8 +80,9 @@ export function sectionId(label: string, taken: readonly string[]): string {
   return id;
 }
 
+/** A field by its label (its id when it has none); a derived one says so. */
 function fieldLabel(id: string, def: FieldDef): string {
-  const name = def.label && def.label !== id ? `${def.label} (${id})` : id;
+  const name = def.label || id;
   return def.derived !== undefined ? `${name} · derived` : name;
 }
 
@@ -92,8 +98,8 @@ export function rowChoices(doc: WorldDoc, progression: Readonly<Record<string, P
     .sort((a, b) => a.label.localeCompare(b.label));
   const pools = Object.entries(defs)
     .filter(([, def]) => def.pool !== undefined)
-    .map(([id, def]) => ({ value: id, label: def.label && def.label !== id ? `${def.label} (${id})` : id }));
-  const progressions = Object.entries(progression).map(([id, p]) => ({ value: id, label: p.label && p.label !== id ? `${p.label} (${id})` : id }));
+    .map(([id, def]) => ({ value: id, label: def.label || id }));
+  const progressions = Object.entries(progression).map(([id, p]) => ({ value: id, label: p.label || id }));
   return { fields, pools, progressions };
 }
 
@@ -110,218 +116,217 @@ export function tidyRuleset(ruleset: RulesetDef): JsonObject {
   return out as JsonObject;
 }
 
-function Issues(props: { issues: readonly LintIssue[] }) {
-  return (
-    <>
-      {props.issues.map((issue) => (
-        <span key={`${issue.path}:${issue.code}:${issue.message}`} class={issue.severity === "error" ? "lre-small lre-neg" : "lre-small lre-warn"}>
-          {issue.message}
-        </span>
-      ))}
-    </>
-  );
+/**
+ * The fields a progression may keep XP or the level in: number fields the engine can set (not
+ * derived), of its kind with inherited ones, or of every kind when it names none.
+ */
+export function progressionFields(doc: WorldDoc, kind: string | undefined): Choice[] {
+  const out: Record<string, Choice> = {};
+  for (const k of kind ? [kind] : Object.keys(doc.kinds)) {
+    for (const [id, def] of Object.entries(kindFields(doc, k))) {
+      if (def.type === "number" && def.derived === undefined && !(id in out)) out[id] = { value: id, label: def.label || id };
+    }
+  }
+  return Object.values(out).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-/** A select over choices; a value no choice holds shows as missing rather than vanishing. */
-export function Picker(props: { label: string; value: string | undefined; choices: readonly Choice[]; none?: string; onChange(value: string | undefined): void }) {
-  const current = props.value ?? "";
-  const choices = current && !props.choices.some((c) => c.value === current) ? [...props.choices, { value: current, label: `${current} (missing)` }] : props.choices;
-  return (
-    <label class="lre-field">
-      <span class="label">{props.label}</span>
-      <select class="lre-input" value={current} onChange={(event) => props.onChange(event.currentTarget.value === "" ? undefined : event.currentTarget.value)}>
-        <option value="">{props.none ?? "— choose —"}</option>
-        {choices.map((c) => (
-          <option key={c.value} value={c.value}>
-            {c.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+/** Thresholds as typed ("0, 300, 900" or one per line): the numbers, or null while any part isn't one. */
+export function parseThresholds(text: string): number[] | null {
+  const parts = text.split(/[\s,;]+/).filter((part) => part !== "");
+  const numbers = parts.map(Number);
+  return numbers.every((n) => Number.isFinite(n)) ? numbers : null;
+}
+
+/** A data table column's numbers in row order, as the engine reads thresholds from it (`thresholdsOf`). */
+export function tableThresholds(doc: WorldDoc, ref: { table: string; column: string }): number[] {
+  const rows = hasOwn(doc.tables, ref.table) ? doc.tables[ref.table]?.rows : undefined;
+  if (!rows) return [];
+  const out: number[] = [];
+  for (const row of Object.values(rows)) {
+    const v = hasOwn(row, ref.column) ? row[ref.column] : undefined;
+    if (typeof v === "number" && Number.isFinite(v)) out.push(v);
+  }
+  return out;
 }
 
 const ROW_NOUN: Record<RowKind, string> = { field: "Field", formula: "Formula", pool: "Pool", progression: "Progression" };
 
-function RowEditor(props: { row: SheetRowDef; index: number; count: number; choices: RowChoices; identifiers: readonly string[]; functions: readonly string[]; lint: readonly LintIssue[]; path: string; onChange(row: SheetRowDef): void; onMove(delta: -1 | 1): void; onRemove(): void }) {
+/** What a row shows, by name: its label, else its field's, pool's or progression's name. */
+function rowTitle(row: SheetRowDef, choices: RowChoices): string {
+  const kind = rowKind(row);
+  if (row.label) return row.label;
+  if (kind === "formula") return "A formula without a label";
+  const list = kind === "pool" ? choices.pools : kind === "progression" ? choices.progressions : choices.fields;
+  const target = rowTarget(row);
+  return list.find((c) => c.value === target)?.label ?? (target || "Nothing picked");
+}
+
+/** One sheet row as a page: what it shows (a field, pool or progression of the POV, or a formula) and its label. */
+function RowSheet(props: { row: SheetRowDef; choices: RowChoices; identifiers: readonly string[]; functions: readonly string[]; doc: WorldDoc; lint: readonly LintIssue[]; path: string; onChange(row: SheetRowDef): void; onRemove(): void; onClose(): void }) {
   const { row } = props;
   const kind = rowKind(row);
-  const title = `${ROW_NOUN[kind]} ${kind === "formula" ? row.label || `row ${props.index + 1}` : rowTarget(row) || `row ${props.index + 1}`}`;
   const own = props.lint.filter((issue) => issue.path === props.path || issue.path === `${props.path}.label`);
-  const label = (
-    <label class="lre-field">
-      <span class="label">{kind === "formula" ? "Label" : "Label (optional)"}</span>
-      <input
-        class={kind === "formula" && !row.label?.trim() ? "lre-input invalid" : "lre-input"}
-        value={row.label ?? ""}
-        placeholder={kind === "formula" ? "Shown beside the result" : "The field's own label"}
-        onInput={(event) => {
-          const text = event.currentTarget.value;
-          if (kind === "formula") props.onChange({ ...row, label: text } as SheetRowDef);
-          else {
-            const next: Record<string, string> = { ...(row as Record<string, string>) };
-            if (text === "") delete next.label;
-            else next.label = text;
-            props.onChange(next as unknown as SheetRowDef);
-          }
-        }}
-      />
-    </label>
-  );
+  const setLabel = (text: string) => {
+    if (kind === "formula") props.onChange({ formula: rowTarget(row), label: text });
+    else {
+      const next: Record<string, string> = { [kind]: rowTarget(row) };
+      if (text !== "") next.label = text;
+      // A field, pool or progression row is its one key and an optional label.
+      props.onChange(next as unknown as SheetRowDef);
+    }
+  };
   return (
-    <div class="lre-card" style={{ padding: "6px 8px" }} data-lre-sheet-row={kind}>
-      <div class="lre-spread" style={{ flexWrap: "nowrap" }}>
-        <span class="lre-small lre-muted" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={title}>
-          {title}
-        </span>
-        <span class="lre-inline" style={{ flexWrap: "nowrap", flexShrink: 0, gap: "2px" }}>
-          <button type="button" class="lre-btn small ghost" aria-label={`Move ${title} up`} disabled={props.index === 0} onClick={() => props.onMove(-1)}>
-            ↑
-          </button>
-          <button type="button" class="lre-btn small ghost" aria-label={`Move ${title} down`} disabled={props.index === props.count - 1} onClick={() => props.onMove(1)}>
-            ↓
-          </button>
-          <button type="button" class="lre-btn small ghost" aria-label={`Remove ${title}`} onClick={props.onRemove}>
-            ✕
-          </button>
-        </span>
-      </div>
-      {kind === "formula" ? (
-        <>
-          {label}
-          <ExprEditor label="Formula (the POV is self)" value={rowTarget(row)} identifiers={props.identifiers} functions={props.functions} lint={lintAt(props.lint, `${props.path}.formula`)} onChange={(formula) => props.onChange({ formula, label: row.label ?? "" })} />
-        </>
-      ) : (
-        <>
-          <Picker
-            label={ROW_NOUN[kind]}
-            value={rowTarget(row)}
-            choices={kind === "pool" ? props.choices.pools : kind === "progression" ? props.choices.progressions : props.choices.fields}
-            onChange={(id) => {
-              const extra = row.label ? { label: row.label } : {};
-              props.onChange(kind === "pool" ? { pool: id ?? "", ...extra } : kind === "progression" ? { progression: id ?? "", ...extra } : { field: id ?? "", ...extra });
-            }}
-          />
-          {label}
-        </>
-      )}
+    <FormSheet title={rowTitle(row, props.choices)} subtitle={`${ROW_NOUN[kind]} row`} backLabel="Section" onClose={props.onClose}>
       <Issues issues={own} />
-    </div>
+      {kind === "formula" ? (
+        <ExprEditor label="Formula" hint="The POV is self." value={rowTarget(row)} identifiers={props.identifiers} functions={props.functions} doc={props.doc} lint={props.lint.filter((issue) => issue.path.startsWith(`${props.path}.formula`))} onChange={(formula) => props.onChange({ formula, label: row.label ?? "" })} />
+      ) : (
+        <RefPicker
+          label={ROW_NOUN[kind]}
+          value={rowTarget(row)}
+          options={kind === "pool" ? props.choices.pools : kind === "progression" ? props.choices.progressions : props.choices.fields}
+          onChange={(id) => {
+            const extra = row.label ? { label: row.label } : {};
+            props.onChange(kind === "pool" ? { pool: id, ...extra } : kind === "progression" ? { progression: id, ...extra } : { field: id, ...extra });
+          }}
+        />
+      )}
+      <Field label={kind === "formula" ? "Label" : "Label (optional)"} help={kind === "formula" ? "Shown beside the result." : "Leave it empty to use the field's own label."}>
+        <input class={kind === "formula" && !row.label?.trim() ? "lre-input invalid" : "lre-input"} value={row.label ?? ""} onInput={(event) => setLabel(event.currentTarget.value)} />
+      </Field>
+      <div class="lre-inline">
+        <Button variant="danger" icon="trash" onClick={props.onRemove}>
+          Remove row
+        </Button>
+      </div>
+    </FormSheet>
   );
 }
 
-/** "+ Add row" as one select: a field, pool or progression of the POV adds that row; Formula adds an empty one. */
-function AddRow(props: { choices: RowChoices; onAdd(row: SheetRowDef): void }) {
-  return (
-    <select
-      class="lre-input"
-      value=""
-      aria-label="Add a row"
-      onChange={(event) => {
-        const [kind, id] = event.currentTarget.value.split(":", 2);
-        event.currentTarget.value = "";
-        if (kind === "formula") props.onAdd({ formula: "", label: "" });
-        else if (id && kind === "field") props.onAdd({ field: id });
-        else if (id && kind === "pool") props.onAdd({ pool: id });
-        else if (id && kind === "progression") props.onAdd({ progression: id });
-      }}
-    >
-      <option value="">+ Add row…</option>
-      <option value="formula:">Formula with a label</option>
-      {props.choices.pools.length > 0 ? (
-        <optgroup label="Pools (a bar of current over max)">
-          {props.choices.pools.map((c) => (
-            <option key={c.value} value={`pool:${c.value}`}>
-              {c.label}
-            </option>
-          ))}
-        </optgroup>
-      ) : null}
-      {props.choices.progressions.length > 0 ? (
-        <optgroup label="Progressions (level and XP)">
-          {props.choices.progressions.map((c) => (
-            <option key={c.value} value={`progression:${c.value}`}>
-              {c.label}
-            </option>
-          ))}
-        </optgroup>
-      ) : null}
-      <optgroup label="Fields of the POV's kind">
-        {props.choices.fields.map((c) => (
-          <option key={c.value} value={`field:${c.value}`}>
-            {c.label}
-          </option>
-        ))}
-      </optgroup>
-    </select>
-  );
+/** The rows a section may add, as one picker: a formula, the POV's pools, progressions and fields. */
+function rowOptions(choices: RowChoices): RefOption[] {
+  return [
+    { value: "formula:", label: "A formula with a label" },
+    ...choices.pools.map((c) => ({ value: `pool:${c.value}`, label: c.label, sublabel: "Pool: a bar of current over max" })),
+    ...choices.progressions.map((c) => ({ value: `progression:${c.value}`, label: c.label, sublabel: "Progression: level and XP" })),
+    ...choices.fields.map((c) => ({ value: `field:${c.value}`, label: c.label, sublabel: "Field" })),
+  ];
 }
 
-/** The Sheet Designer: sections (add, rename, reorder, remove) of rows (add, reorder, remove). */
-function SheetDesigner(props: { sheet: SheetLayoutDef | undefined; choices: RowChoices; identifiers: readonly string[]; functions: readonly string[]; lint: readonly LintIssue[]; onChange(sheet: SheetLayoutDef): void }) {
+function rowOf(option: string): SheetRowDef | null {
+  const [kind, id] = option.split(":", 2);
+  if (kind === "formula") return { formula: "", label: "" };
+  if (!id) return null;
+  return kind === "pool" ? { pool: id } : kind === "progression" ? { progression: id } : kind === "field" ? { field: id } : null;
+}
+
+/** The Sheet Designer: sections (add, rename, reorder, remove) of rows (add, open, reorder, remove), with the preview under them. */
+function SheetDesigner(props: { sheet: SheetLayoutDef | undefined; choices: RowChoices; identifiers: readonly string[]; functions: readonly string[]; doc: WorldDoc; lint: readonly LintIssue[]; preview: { draft: Draft; ruleset: JsonObject }; onChange(sheet: SheetLayoutDef): void }) {
   const sections = Array.isArray(props.sheet?.sections) ? props.sheet.sections : [];
+  const [open, setOpen] = useState<{ section: number; row: number } | null>(null);
   const set = (next: SheetSectionDef[]) => props.onChange({ ...props.sheet, sections: next });
   const setSection = (index: number, section: SheetSectionDef) => set(sections.map((s, i) => (i === index ? section : s)));
+  const openSection = open ? sections[open.section] : undefined;
+  const openRow = open && openSection ? openSection.rows[open.row] : undefined;
   return (
     <div class="lre-stack" data-lre-sheet-designer>
-      {sections.length === 0 ? <span class="lre-muted">No sections yet: Play → You shows the Sheets pack's own sheet.</span> : null}
+      <span class="lre-small lre-muted">The sheet lays out Play → You for the POV: sections of rows, each a field, a pool, a progression or a formula.</span>
+      {sections.length === 0 ? <Empty icon="layers">No sections yet: Play → You shows the Sheets pack's own sheet.</Empty> : null}
       {sections.map((section, index) => {
         const rows = Array.isArray(section.rows) ? section.rows : [];
         const path = `ruleset.sheet.sections.${index}`;
         const name = section.label || section.id;
         return (
-          <div key={`${section.id}:${index}`} class="lre-card lre-stack" style={{ padding: "8px" }} data-lre-sheet-section={section.id}>
-            <div class="lre-spread">
-              <code class="lre-small">{section.id}</code>
+          <FormGroup
+            key={`${section.id}:${index}`}
+            title={name}
+            aside={
               <span class="lre-inline">
-                <button type="button" class="lre-btn small ghost" aria-label={`Move section ${name} up`} disabled={index === 0} onClick={() => set(moved(sections, index, -1))}>
-                  ↑
-                </button>
-                <button type="button" class="lre-btn small ghost" aria-label={`Move section ${name} down`} disabled={index === sections.length - 1} onClick={() => set(moved(sections, index, 1))}>
-                  ↓
-                </button>
-                <button type="button" class="lre-btn small danger" aria-label={`Remove section ${name}`} onClick={() => set(sections.filter((_, i) => i !== index))}>
-                  ✕
-                </button>
+                <IconButton icon="chevron-up" label={`Move section ${name} up`} disabled={index === 0} onClick={() => set(moved(sections, index, -1))} />
+                <IconButton icon="chevron-down" label={`Move section ${name} down`} disabled={index === sections.length - 1} onClick={() => set(moved(sections, index, 1))} />
+                <IconButton icon="trash" label={`Remove section ${name}`} onClick={() => set(sections.filter((_, i) => i !== index))} />
               </span>
-            </div>
-            <label class="lre-field">
-              <span class="label">Section title</span>
-              <input class={section.label.trim() ? "lre-input" : "lre-input invalid"} value={section.label} onInput={(event) => setSection(index, { ...section, label: event.currentTarget.value })} />
-            </label>
-            <Issues issues={props.lint.filter((issue) => issue.path === path || issue.path === `${path}.id` || issue.path === `${path}.label`)} />
-            {rows.map((row, r) => (
-              <RowEditor
-                key={r}
-                row={row}
-                index={r}
-                count={rows.length}
-                choices={props.choices}
-                identifiers={props.identifiers}
-                functions={props.functions}
-                lint={props.lint}
-                path={`${path}.rows.${r}`}
-                onChange={(next) => setSection(index, { ...section, rows: rows.map((x, i) => (i === r ? next : x)) })}
-                onMove={(delta) => setSection(index, { ...section, rows: moved(rows, r, delta) })}
-                onRemove={() => setSection(index, { ...section, rows: rows.filter((_, i) => i !== r) })}
+            }
+          >
+            <div class="lre-stack" data-lre-sheet-section={section.id}>
+              <Field label="Section title">
+                <input class={section.label.trim() ? "lre-input" : "lre-input invalid"} value={section.label} onInput={(event) => setSection(index, { ...section, label: event.currentTarget.value })} />
+              </Field>
+              <IdText id={section.id} />
+              <Issues issues={props.lint.filter((issue) => issue.path === path || issue.path === `${path}.id` || issue.path === `${path}.label`)} />
+              {rows.length > 0 ? (
+                <div class="lre-form-items">
+                  {rows.map((row, r) => {
+                    const issues = props.lint.filter((issue) => issue.path.startsWith(`${path}.rows.${r}`)).length;
+                    const kind = rowKind(row);
+                    return (
+                      <div key={r} data-lre-sheet-row={kind}>
+                        <ItemRow
+                          title={rowTitle(row, props.choices)}
+                          subtitle={kind === "formula" ? <span class="lre-ve-row-target">{rowTarget(row) || "no formula yet"}</span> : ROW_NOUN[kind]}
+                          badge={issues > 0 ? <Badge tone="warn">{issues}</Badge> : undefined}
+                          openLabel={`Edit the row ${rowTitle(row, props.choices)}`}
+                          onOpen={() => setOpen({ section: index, row: r })}
+                          actions={
+                            <>
+                              <IconButton icon="chevron-up" label={`Move ${rowTitle(row, props.choices)} up`} disabled={r === 0} onClick={() => setSection(index, { ...section, rows: moved(rows, r, -1) })} />
+                              <IconButton icon="chevron-down" label={`Move ${rowTitle(row, props.choices)} down`} disabled={r === rows.length - 1} onClick={() => setSection(index, { ...section, rows: moved(rows, r, 1) })} />
+                            </>
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <span class="lre-small lre-muted">No rows yet.</span>
+              )}
+              <AddPicker
+                label={`Add a row to ${name}`}
+                placeholder="+ Add a row…"
+                options={rowOptions(props.choices)}
+                onAdd={(option) => {
+                  const row = rowOf(option);
+                  if (!row) return;
+                  setSection(index, { ...section, rows: [...rows, row] });
+                  if ("formula" in row) setOpen({ section: index, row: rows.length });
+                }}
               />
-            ))}
-            <AddRow choices={props.choices} onAdd={(row) => setSection(index, { ...section, rows: [...rows, row] })} />
-          </div>
+            </div>
+          </FormGroup>
         );
       })}
-      <div>
-        <button
-          type="button"
-          class="lre-btn small"
+      <div class="lre-inline">
+        <Button
+          icon="plus"
           onClick={() => {
             const label = "New section";
             set([...sections, { id: sectionId(label, sections.map((s) => s.id)), label, rows: [] }]);
           }}
         >
-          + Add section
-        </button>
+          Section
+        </Button>
       </div>
+      <FormGroup title="Preview">
+        <SheetPreview draft={props.preview.draft} ruleset={props.preview.ruleset} />
+      </FormGroup>
+      {open && openSection && openRow ? (
+        <RowSheet
+          row={openRow}
+          choices={props.choices}
+          identifiers={props.identifiers}
+          functions={props.functions}
+          doc={props.doc}
+          lint={props.lint}
+          path={`ruleset.sheet.sections.${open.section}.rows.${open.row}`}
+          onChange={(next) => setSection(open.section, { ...openSection, rows: openSection.rows.map((x, i) => (i === open.row ? next : x)) })}
+          onRemove={() => {
+            setSection(open.section, { ...openSection, rows: openSection.rows.filter((_, i) => i !== open.row) });
+            setOpen(null);
+          }}
+          onClose={() => setOpen(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -354,43 +359,10 @@ function SheetPreview(props: { draft: Draft; ruleset: JsonObject }) {
   const pov = props.draft.doc.entities[props.draft.doc.pov]?.name ?? props.draft.doc.pov;
   return (
     <div class="lre-stack" data-lre-sheet-preview>
-      <span class="lre-small lre-muted">Preview: {pov}, as a new chat starts</span>
-      {failed ? <Empty>The preview isn't available right now.</Empty> : sheet === undefined ? <Empty>Building the preview…</Empty> : sheet === null ? <Empty>No designed sheet: Play → You shows the Sheets pack's own.</Empty> : <SheetSectionCards sections={sheet} />}
+      <span class="lre-small lre-muted">{pov}, as a new chat starts.</span>
+      {failed ? <Empty icon="alert">The preview isn't available right now.</Empty> : sheet === undefined ? <Empty icon="hourglass">Building the preview…</Empty> : sheet === null ? <Empty icon="layers">No designed sheet: Play → You shows the Sheets pack's own.</Empty> : <SheetSectionCards sections={sheet} />}
     </div>
   );
-}
-
-/**
- * The fields a progression may keep XP or the level in: number fields the engine can set (not
- * derived), of its kind with inherited ones, or of every kind when it names none.
- */
-export function progressionFields(doc: WorldDoc, kind: string | undefined): Choice[] {
-  const out: Record<string, Choice> = {};
-  for (const k of kind ? [kind] : Object.keys(doc.kinds)) {
-    for (const [id, def] of Object.entries(kindFields(doc, k))) {
-      if (def.type === "number" && def.derived === undefined && !(id in out)) out[id] = { value: id, label: def.label && def.label !== id ? `${def.label} (${id})` : id };
-    }
-  }
-  return Object.values(out).sort((a, b) => a.label.localeCompare(b.label));
-}
-
-/** Thresholds as typed ("0, 300, 900" or one per line): the numbers, or null while any part isn't one. */
-export function parseThresholds(text: string): number[] | null {
-  const parts = text.split(/[\s,;]+/).filter((part) => part !== "");
-  const numbers = parts.map(Number);
-  return numbers.every((n) => Number.isFinite(n)) ? numbers : null;
-}
-
-/** A data table column's numbers in row order, as the engine reads thresholds from it (`thresholdsOf`). */
-export function tableThresholds(doc: WorldDoc, ref: { table: string; column: string }): number[] {
-  const rows = hasOwn(doc.tables, ref.table) ? doc.tables[ref.table]?.rows : undefined;
-  if (!rows) return [];
-  const out: number[] = [];
-  for (const row of Object.values(rows)) {
-    const v = hasOwn(row, ref.column) ? row[ref.column] : undefined;
-    if (typeof v === "number" && Number.isFinite(v)) out.push(v);
-  }
-  return out;
 }
 
 function ThresholdList(props: { value: number[]; onChange(value: number[]): void }) {
@@ -400,8 +372,7 @@ function ThresholdList(props: { value: number[]; onChange(value: number[]): void
   }, [JSON.stringify(props.value)]);
   const parsed = parseThresholds(text);
   return (
-    <label class="lre-field">
-      <span class="label">XP each level needs, from level 1</span>
+    <Field label="XP each level needs, from level 1" help={parsed ? (parsed.length === 0 ? "No levels yet." : `${parsed.length} level${parsed.length === 1 ? "" : "s"}; level 1 at ${parsed[0]} XP.`) : undefined} error={parsed ? null : "Numbers only, separated by commas."}>
       <input
         class={parsed ? "lre-input" : "lre-input invalid"}
         inputMode="numeric"
@@ -413,14 +384,15 @@ function ThresholdList(props: { value: number[]; onChange(value: number[]): void
           if (next) props.onChange(next);
         }}
       />
-      {parsed ? <span class="lre-small lre-dim">{parsed.length === 0 ? "No levels yet." : `${parsed.length} level${parsed.length === 1 ? "" : "s"}; level 1 at ${parsed[0]} XP.`}</span> : <span class="lre-small lre-neg">Numbers only, separated by commas.</span>}
-    </label>
+    </Field>
   );
 }
 
-function ProgressionForm(props: { id: string; value: ProgressionDef; doc: WorldDoc; ctx: FormCtx; onChange(value: ProgressionDef): void }) {
+/** One progression as a page: its label and kind, the XP and level fields, the thresholds (a list or a table column), the top level and what each level does. */
+function ProgressionSheet(props: { id: string; value: ProgressionDef; doc: WorldDoc; ctx: FormCtx; onChange(value: ProgressionDef): void; onRemove(): void; onClose(): void }) {
   const { value, doc } = props;
   const path = `ruleset.progression.${props.id}`;
+  // ProgressionDef is plain JSON data; the cast only restates it as JSON for the schema fields.
   const json = value as unknown as JsonObject;
   const set = (key: keyof ProgressionDef, next: JsonValue | undefined) => {
     const out: Record<string, unknown> = { ...value };
@@ -449,83 +421,99 @@ function ProgressionForm(props: { id: string; value: ProgressionDef; doc: WorldD
   // onLevel effects read the entity as `self`, the level reached as `level` and the one before as `from`.
   const ctx: FormCtx = { ...props.ctx, path, identifiers: [...new Set([...props.ctx.identifiers, "level", "from"])].sort() };
   return (
-    <div class="lre-stack" data-lre-progression={props.id}>
-      <FieldInput spec={{ kind: "text", key: "label", label: "Label", hint: "The sheet and the Journal show it: “You reached Level 3.”" }} value={json.label} ctx={ctx} path={path} parent={json} onChange={(next) => set("label", typeof next === "string" ? next : "")} />
-      <Picker label="Applies to kind" value={value.kind} none="Any kind with both fields" choices={refOptions(doc, "kinds")} onChange={(next) => set("kind", next)} />
-      <Picker label="XP field" value={value.xpField} choices={fields} onChange={(next) => set("xpField", next ?? "")} />
-      <Picker label="Level field (the engine sets it)" value={value.levelField} choices={fields} onChange={(next) => set("levelField", next ?? "")} />
-      <div class="lre-field">
-        <span class="label">Thresholds from</span>
-        <Seg<"list" | "table">
-          label="Thresholds from"
-          value={fromTable ? "table" : "list"}
-          options={[
-            { value: "list", label: "A list" },
-            { value: "table", label: "A data table" },
-          ]}
-          onChange={switchTo}
-        />
+    <FormSheet title={value.label || props.id} subtitle="Progression" backLabel="Progression" onClose={props.onClose}>
+      <div class="lre-stack" data-lre-progression={props.id}>
+        <IdText id={props.id} />
+        <Issues issues={props.ctx.lint.filter((issue) => issue.path === path || issue.path === `${path}.xpField` || issue.path === `${path}.levelField` || issue.path.startsWith(`${path}.thresholds`))} />
+        <FieldInput spec={{ kind: "text", key: "label", label: "Label", hint: "The sheet and the Journal show it: “You reached Level 3.”" }} value={json.label} ctx={ctx} path={path} parent={json} onChange={(next) => set("label", typeof next === "string" ? next : "")} />
+        <RefPicker label="Applies to kind" value={value.kind ?? ""} none="Any kind with both fields" options={refOptions(doc, "kinds")} onChange={(next) => set("kind", next || undefined)} />
+        <RefPicker label="XP field" value={value.xpField} options={fields} onChange={(next) => set("xpField", next)} />
+        <RefPicker label="Level field (the engine sets it)" value={value.levelField} options={fields} onChange={(next) => set("levelField", next)} />
+        <Field label="Thresholds from">
+          <Seg<"list" | "table">
+            label="Thresholds from"
+            value={fromTable ? "table" : "list"}
+            options={[
+              { value: "list", label: "A list" },
+              { value: "table", label: "A data table" },
+            ]}
+            onChange={switchTo}
+          />
+        </Field>
+        {fromTable ? (
+          <>
+            <RefPicker label="Data table (rows in order, level 1 first)" value={table?.table ?? ""} options={refOptions(doc, "tables")} onChange={(next) => set("thresholds", { table: next, column: "" })} />
+            <RefPicker label="Column" value={table?.column ?? ""} options={columns} onChange={(next) => set("thresholds", { table: table?.table ?? "", column: next })} />
+          </>
+        ) : (
+          <ThresholdList value={Array.isArray(value.thresholds) ? value.thresholds : []} onChange={(next) => set("thresholds", next)} />
+        )}
+        <FieldInput spec={{ kind: "number", key: "maxLevel", label: "Top level", min: 1, step: 1, optional: true, hint: "XP beyond its threshold raises nothing" }} value={json.maxLevel} ctx={ctx} path={path} parent={json} onChange={(next) => set("maxLevel", next)} />
+        <FieldInput spec={{ kind: "list", key: "onLevel", label: "On each level gained", item: EFFECT, title: "type" }} value={json.onLevel} ctx={ctx} path={path} parent={json} onChange={(next) => set("onLevel", Array.isArray(next) && next.length > 0 ? next : undefined)} />
+        <div class="lre-inline">
+          <Button variant="danger" icon="trash" onClick={props.onRemove}>
+            Remove progression
+          </Button>
+        </div>
       </div>
-      {fromTable ? (
-        <>
-          <Picker label="Data table (rows in order, level 1 first)" value={table?.table || undefined} choices={refOptions(doc, "tables")} onChange={(next) => set("thresholds", { table: next ?? "", column: "" })} />
-          <Picker label="Column" value={table?.column || undefined} choices={columns} onChange={(next) => set("thresholds", { table: table?.table ?? "", column: next ?? "" })} />
-        </>
-      ) : (
-        <ThresholdList value={Array.isArray(value.thresholds) ? value.thresholds : []} onChange={(next) => set("thresholds", next)} />
-      )}
-      <FieldInput spec={{ kind: "number", key: "maxLevel", label: "Top level", min: 1, step: 1, optional: true, hint: "XP beyond its threshold raises nothing" }} value={json.maxLevel} ctx={ctx} path={path} parent={json} onChange={(next) => set("maxLevel", next)} />
-      <FieldInput spec={{ kind: "list", key: "onLevel", label: "On each level gained", item: EFFECT, title: "type" }} value={json.onLevel} ctx={ctx} path={path} parent={json} onChange={(next) => set("onLevel", Array.isArray(next) && next.length > 0 ? next : undefined)} />
-      <Issues issues={props.ctx.lint.filter((issue) => issue.path === path || issue.path === `${path}.xpField` || issue.path === `${path}.levelField` || issue.path.startsWith(`${path}.thresholds`))} />
-    </div>
+    </FormSheet>
   );
 }
 
-/** The progressions by id: add one, open one to edit it, remove one. */
+/** The progressions: open one to edit it, or add one by name. */
 function ProgressionEditor(props: { value: Record<string, ProgressionDef>; doc: WorldDoc; ctx: FormCtx; onChange(value: Record<string, ProgressionDef>): void }) {
   const [open, setOpen] = useState<string | null>(null);
-  const [newId, setNewId] = useState("");
-  const id = newId.trim();
+  const [name, setName] = useState("");
+  const id = deriveId(name || "progression", new Set(Object.keys(props.value)));
+  const prog = open !== null ? props.value[open] : undefined;
   return (
     <div class="lre-stack" data-lre-progressions>
-      {Object.keys(props.value).length === 0 ? <span class="lre-muted">No progressions: levels never change on their own.</span> : null}
-      {Object.entries(props.value).map(([key, prog]) => (
-        <div key={key} class="lre-card" style={{ padding: "6px 8px" }}>
-          <div class="lre-spread">
-            <button type="button" class="lre-btn small ghost" aria-expanded={open === key} onClick={() => setOpen(open === key ? null : key)}>
-              <span aria-hidden="true">{open === key ? "▾" : "▸"}</span> {prog.label || key} <code class="lre-dim">{key}</code>
-            </button>
-            <button
-              type="button"
-              class="lre-btn small ghost"
-              aria-label={`Remove progression ${prog.label || key}`}
-              onClick={() => {
-                const next = { ...props.value };
-                delete next[key];
-                props.onChange(next);
-              }}
-            >
-              ✕
-            </button>
-          </div>
-          {open === key ? <ProgressionForm id={key} value={prog} doc={props.doc} ctx={props.ctx} onChange={(next) => props.onChange({ ...props.value, [key]: next })} /> : null}
+      <span class="lre-small lre-muted">A progression raises a level as XP grows: after each change, an entity whose XP reached the next threshold goes up, and each level gained runs its effects.</span>
+      {Object.keys(props.value).length === 0 ? (
+        <span class="lre-small lre-muted">No progressions: levels never change on their own.</span>
+      ) : (
+        <div class="lre-form-items">
+          {Object.entries(props.value).map(([key, p]) => {
+            const issues = props.ctx.lint.filter((issue) => issue.path.startsWith(`ruleset.progression.${key}`)).length;
+            const levels = Array.isArray(p.thresholds) ? `${p.thresholds.length} level${p.thresholds.length === 1 ? "" : "s"}` : "levels from a data table";
+            return <ItemRow key={key} title={p.label || key} subtitle={`${levels}${p.xpField ? ` · XP in ${p.xpField}` : ""}`} badge={issues > 0 ? <Badge tone="warn">{issues}</Badge> : undefined} openLabel={`Edit the progression ${p.label || key}`} onOpen={() => setOpen(key)} />;
+          })}
         </div>
-      ))}
+      )}
       <form
-        class="lre-inline"
+        class="lre-form-add"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!id || id in props.value) return;
-          props.onChange({ ...props.value, [id]: { label: "Level", xpField: "", levelField: "", thresholds: [0] } });
+          if (!name.trim()) return;
+          props.onChange({ ...props.value, [id]: { label: name.trim(), xpField: "", levelField: "", thresholds: [0] } });
           setOpen(id);
-          setNewId("");
+          setName("");
         }}
       >
-        <input class="lre-input" style={{ flex: 1 }} placeholder="Progression id, e.g. character" aria-label="Progression id" value={newId} onInput={(event) => setNewId(event.currentTarget.value.replace(/\s+/g, "_"))} />
-        <button type="submit" class="lre-btn small" disabled={!id || id in props.value}>
-          + Add
-        </button>
+        <Field label="New progression">
+          <input class="lre-input" placeholder="Character level" value={name} onInput={(event) => setName(event.currentTarget.value)} />
+        </Field>
+        <Button type="submit" icon="plus" disabled={!name.trim()}>
+          Add
+        </Button>
       </form>
+      {open !== null && prog ? (
+        <ProgressionSheet
+          key={open}
+          id={open}
+          value={prog}
+          doc={props.doc}
+          ctx={props.ctx}
+          onChange={(next) => props.onChange({ ...props.value, [open]: next })}
+          onRemove={() => {
+            const next = { ...props.value };
+            delete next[open];
+            props.onChange(next);
+            setOpen(null);
+          }}
+          onClose={() => setOpen(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -569,6 +557,10 @@ const COMBAT: FieldSpec = {
   ],
 };
 
+type Part = "profile" | "checks" | "floors" | "progression" | "sheet" | "combat" | "json";
+
+const PRESET_LABEL: Record<AdjudicationPresetId, string> = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
+
 export function RulesetEditor() {
   const app = useApp();
   const draft = useSelect(app.drafts, (d) => d);
@@ -577,7 +569,7 @@ export function RulesetEditor() {
   const storedKey = JSON.stringify(stored);
   const [value, setValue] = useState<RulesetDef>(stored);
   const [busy, run] = useBusy();
-  const [picking, setPicking] = useState(false);
+  const [part, setPart] = useState<Part | null>(null);
   useHeld(value, setValue, stored, `${draft?.worldId ?? ""}/ruleset`, storedKey);
   // Pickers see the packs' kinds too (DESIGN §13); the world's own win.
   const formDoc = useMemo(() => (draft ? { ...draft.doc, kinds: { ...draft.packKinds, ...draft.doc.kinds }, relations: { ...draft.packRelations, ...draft.doc.relations } } : null), [draft?.doc, draft?.packKinds, draft?.packRelations]);
@@ -587,6 +579,7 @@ export function RulesetEditor() {
   const changed = JSON.stringify(tidy) !== JSON.stringify(tidyRuleset(stored));
   const progression = isRecord(value.progression) ? value.progression : {};
   const choices = rowChoices(formDoc, progression);
+  // RulesetDef is plain JSON data; the cast only restates it as JSON for the schema fields.
   const json = value as unknown as JsonObject;
   const update = (key: keyof RulesetDef, next: JsonValue | undefined) => {
     const out: Record<string, unknown> = { ...value };
@@ -595,63 +588,128 @@ export function RulesetEditor() {
     setValue(out as RulesetDef);
   };
   const ctx: FormCtx = { doc: formDoc, lint: draft.lint, path: "ruleset", identifiers, functions: draft.functions };
+  const lintOf = (prefix: string) => draft.lint.filter((issue) => issue.path === prefix || issue.path.startsWith(`${prefix}.`));
+  const checksLint = draft.lint.filter((issue) => issue.code.startsWith("adjudication") || issue.path.startsWith("ruleset.adjudication"));
+  const adjudication = value.adjudication === undefined ? null : readAdjudication(value.adjudication);
+  // The floors in the world's words, in the order Settings lists the domains.
+  const minLevels: Record<string, unknown> = isRecord(value.minLevels) ? value.minLevels : {};
+  const floors = Object.entries(DOMAIN_LABEL).flatMap(([domain, label]) => {
+    const level = minLevels[domain];
+    return typeof level === "number" && level > 0 ? [`${label} ${level}`] : [];
+  });
+  const sections = value.sheet?.sections ?? [];
+  const rows = sections.reduce((n, s) => n + (Array.isArray(s.rows) ? s.rows.length : 0), 0);
+  const combat = isRecord(value.combat) ? value.combat : null;
+  const saveBar = (
+    <SaveBar>
+      <Button
+        variant="primary"
+        disabled={!changed}
+        busy={busy}
+        onClick={() =>
+          run(async () => {
+            await send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "ruleset", value: tidy });
+          })
+        }
+      >
+        Save to draft
+      </Button>
+      <Button variant="ghost" disabled={!changed || busy} onClick={() => setValue(stored)}>
+        Revert
+      </Button>
+    </SaveBar>
+  );
+  const row = (id: Part, icon: IconName, title: string, subtitle: string, issues: readonly LintIssue[]) => (
+    <ListRow
+      icon={icon}
+      title={title}
+      subtitle={subtitle}
+      badge={issues.length > 0 ? <Badge tone={issues.some((i) => i.severity === "error") ? "neg" : "warn"}>{issues.length}</Badge> : undefined}
+      chevron
+      onClick={() => setPart(id)}
+    />
+  );
+  const sheet = (title: string, children: ComponentChildren) => (
+    <FormSheet title={title} backLabel="Ruleset" onClose={() => setPart(null)}>
+      {children}
+      {saveBar}
+    </FormSheet>
+  );
   return (
-    <div class="lre-stack" data-lre-editor="part:ruleset">
-      <div class="lre-spread">
-        <div class="lre-h2">Ruleset</div>
-        <button type="button" class="lre-btn" aria-expanded={picking} disabled={busy} onClick={() => setPicking(!picking)}>
-          Start from a profile…
-        </button>
-      </div>
-      {typeof value.profile === "string" ? <span class="lre-small lre-muted">Started from the {profileOf(value.profile)?.label ?? value.profile} profile.</span> : null}
-      {picking ? (
-        <Card title="Start from a profile">
-          <ProfilePicker draft={draft} blocked={changed ? "Save or revert your ruleset edits first: a profile is applied to the draft as it is stored." : null} onDone={() => setPicking(false)} />
-        </Card>
-      ) : null}
-      <Card title="How checks are decided">
-        <div class="lre-stack" data-lre-adjudication="world">
-          <HostSwitch label="This world sets how its checks are decided" checked={value.adjudication !== undefined} disabled={busy} onChange={(on) => update("adjudication", on ? (presetAdjudication("crunchy") as unknown as JsonObject) : undefined)} />
-          {value.adjudication === undefined ? (
-            <p class="lre-small lre-muted" style={{ margin: 0 }}>
-              Not set: every check rolls and the roll settles it, unless a player's own settings decide otherwise for their new chats.
-            </p>
-          ) : (
-            <AdjudicationForm value={readAdjudication(value.adjudication) ?? presetAdjudication("crunchy")} disabled={busy} onChange={(next) => update("adjudication", next as unknown as JsonObject)} />
-          )}
-          <Issues issues={draft.lint.filter((i) => i.code.startsWith("adjudication"))} />
-        </div>
-      </Card>
-      <FieldInput spec={{ kind: "levels", key: "minLevels", label: "Level floors (the lowest level this ruleset plays each domain at)" }} value={json.minLevels} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("minLevels", next)} />
-      <Card title="Progression">
-        <ProgressionEditor value={progression} doc={formDoc} ctx={ctx} onChange={(next) => setValue({ ...value, progression: next })} />
-      </Card>
-      <Card title="Sheet Designer">
-        <SheetDesigner sheet={value.sheet} choices={choices} identifiers={identifiers} functions={draft.functions} lint={draft.lint} onChange={(sheet) => setValue({ ...value, sheet })} />
-      </Card>
-      <Card title="Combat">
-        <FieldInput spec={COMBAT} value={json.combat} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("combat", next)} />
-      </Card>
-      <Card title="Sheet preview">
-        <SheetPreview draft={draft} ruleset={tidy} />
-      </Card>
-      <div class="lre-savebar">
-        <button
-          type="button"
-          class="lre-btn primary"
-          disabled={!changed || busy}
-          onClick={() =>
-            run(async () => {
-              await send({ type: "lre.editor", worldId: draft.worldId, base: draft.base, op: "set", part: "ruleset", value: tidy });
-            })
-          }
-        >
-          Save to draft
-        </button>
-        <button type="button" class="lre-btn ghost" disabled={!changed || busy} onClick={() => setValue(stored)}>
-          Revert
-        </button>
-      </div>
+    <div class="lre-build-page" data-lre-editor="part:ruleset">
+      <PageHeader title="Ruleset" subtitle={typeof value.profile === "string" ? `Started from the ${profileOf(value.profile)?.label ?? value.profile} profile` : "How this world's rules play"} />
+      <Section flush>
+        <List>
+          {row("profile", "wand", "Start from a profile…", changed ? "Save or revert your edits first" : "A ready-made ruleset: Modern, Classic, Fifth or Custom", [])}
+          {row("checks", "dice", "How checks are decided", adjudication ? PRESET_LABEL[adjudication.preset] : value.adjudication !== undefined ? "Set, but not readable: open it" : "Not set: every check rolls", checksLint)}
+          {row("floors", "sliders", "Level floors", floors.length > 0 ? floors.join(", ") : "None", lintOf("ruleset.minLevels"))}
+          {row("progression", "star", "Progression", Object.keys(progression).length > 0 ? Object.values(progression).map((p) => p.label).join(", ") : "None: levels never change on their own", lintOf("ruleset.progression"))}
+          {row("sheet", "layers", "Sheet Designer", sections.length > 0 ? `${sections.length} section${sections.length === 1 ? "" : "s"}, ${rows} row${rows === 1 ? "" : "s"}` : "Not designed: the Sheets pack's own sheet", lintOf("ruleset.sheet"))}
+          {row("combat", "sword", "Combat", combat ? "On: fights use its initiative, budgets and HP" : "Off: this world has no fights", lintOf("ruleset.combat"))}
+          {row("json", "code", "JSON (Advanced)", "The whole ruleset as the world file keeps it", [])}
+        </List>
+      </Section>
+      {part === "profile"
+        ? sheet("Start from a profile", <ProfilePicker draft={draft} blocked={changed ? "Save or revert your ruleset edits first: a profile is applied to the draft as it is stored." : null} onDone={() => setPart(null)} />)
+        : null}
+      {part === "checks"
+        ? sheet(
+            "How checks are decided",
+            <div class="lre-stack" data-lre-adjudication="world">
+              <HostSwitch label="This world sets how its checks are decided" checked={value.adjudication !== undefined} disabled={busy} onChange={(on) => update("adjudication", on ? (presetAdjudication("crunchy") as unknown as JsonObject) : undefined)} />
+              {value.adjudication === undefined ? (
+                <p class="lre-small lre-muted" style={{ margin: 0 }}>
+                  Not set: every check rolls and the roll settles it, unless a player's own settings decide otherwise for their new chats.
+                </p>
+              ) : (
+                <AdjudicationForm value={adjudication ?? presetAdjudication("crunchy")} disabled={busy} onChange={(next) => update("adjudication", next as unknown as JsonObject)} />
+              )}
+              <Issues issues={checksLint} />
+            </div>,
+          )
+        : null}
+      {part === "floors"
+        ? sheet(
+            "Level floors",
+            <>
+              <span class="lre-small lre-muted">The lowest level this ruleset plays each domain at, whatever a chat's realism says: stat modifiers, for one, count only from Sheets 3.</span>
+              <FieldInput spec={{ kind: "levels", key: "minLevels", label: "Level floors" }} value={json.minLevels} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("minLevels", next)} />
+            </>,
+          )
+        : null}
+      {part === "progression" ? sheet("Progression", <ProgressionEditor value={progression} doc={formDoc} ctx={ctx} onChange={(next) => setValue({ ...value, progression: next })} />) : null}
+      {part === "sheet"
+        ? sheet(
+            "Sheet Designer",
+            <SheetDesigner sheet={value.sheet} choices={choices} identifiers={identifiers} functions={draft.functions} doc={formDoc} lint={draft.lint} preview={{ draft, ruleset: tidy }} onChange={(next) => setValue({ ...value, sheet: next })} />,
+          )
+        : null}
+      {part === "combat"
+        ? sheet(
+            "Combat",
+            <>
+              <span class="lre-small lre-muted">Combat is data over the checks, pools and conditions the world has: leave it out and this world has no fights.</span>
+              <FieldInput spec={COMBAT} value={json.combat} ctx={ctx} path="ruleset" parent={json} onChange={(next) => update("combat", next)} />
+            </>,
+          )
+        : null}
+      {part === "json"
+        ? sheet(
+            "Ruleset as JSON",
+            <FieldInput
+              spec={{ kind: "json", key: "", label: "The ruleset", hint: "Every part, its unknown keys included. A change applies when you leave the box; parts left empty save as no part." }}
+              value={json}
+              ctx={{ ...ctx, lint: [] }}
+              path="ruleset"
+              parent={{}}
+              onChange={(next) => {
+                // A ruleset is any JSON object: the backend reads each part for itself and lints what it can't.
+                if (isRecord(next)) setValue(next as unknown as RulesetDef);
+              }}
+            />,
+          )
+        : null}
+      {saveBar}
     </div>
   );
 }
