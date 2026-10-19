@@ -6,6 +6,7 @@ import { DOMAINS, INTERRUPT_CLASSES } from "../../src/shared/ids";
 import type { DomainId, InterruptClass, InterruptPolicy } from "../../src/shared/ids";
 import type { JsonValue } from "../../src/shared/json";
 import type { ExtractionModeView, UpgradePreview } from "../../src/shared/protocol";
+import type { StudioOffer } from "../../src/shared/studio-bridge";
 import type { ExtractionType, UserSettings } from "../../src/shared/settings";
 import { defaultMindsSettings } from "../../src/shared/minds";
 import type { GmEntity, GmField, GmView, StateView } from "../../src/shared/state-view";
@@ -19,6 +20,9 @@ import { ALL_PACKS, STARTER_WORLDS } from "../../src/packs/index";
 import { buildMapView } from "../../src/packs/space/core/view";
 
 const interrupts = Object.fromEntries(INTERRUPT_CLASSES.map((cls) => [cls, ["invitation", "decline", "incident", "quest", "arrival"].includes(cls) ? "stop" : cls === "bill" ? "note" : "ignore"])) as Record<InterruptClass, InterruptPolicy>;
+
+/** The purchase `c-decline` declined at Rosie's: more than the Visa's room ($787.45), which Pay another way takes from savings. */
+export const DECLINED_PURCHASE = { name: "Catering order", cents: 85000 };
 
 export function stateFixture(chatId: string): StateView {
   return {
@@ -56,7 +60,8 @@ export function stateFixture(chatId: string): StateView {
       { id: "c-confirm", kind: "confirm", messageId: "m2", label: "Dev gives you his car keys?", actions: [{ id: "confirm", label: "Yes", style: "primary" }, { id: "reject", label: "No" }], expires: "next_send" },
       { id: "c-mode", kind: "mode_change", messageId: "m2", label: "Purchases now apply automatically", detail: "28 of 30 kept on DeepSeek", actions: [{ id: "undo", label: "Undo" }], expires: "never" },
       { id: "c-swipe", kind: "swipe_option", messageId: "m2", label: "Swipe:", actions: [{ id: "renarrate", label: "Re-narrate" }, { id: "rerun", label: "Re-run" }], expires: "next_send" },
-      { id: "c-decline", kind: "decline", messageId: "m4", label: "Card declined: Visa over limit", detail: "$1,200 limit", actions: [], expires: "never" },
+      // As the engine words a payment it declines (DESIGN §9.5): "with my card" over the Visa's room, with Pay another way.
+      { id: "c-decline", kind: "decline", messageId: "m4", label: `Couldn't pay for ${DECLINED_PURCHASE.name}`, detail: "Sam Rivera's card was declined. It stays unowned, and the next reply is told so.", actions: [{ id: "other", label: "Pay another way", style: "primary" }, { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send" },
       { id: "c-unpriced", kind: "decline", messageId: "m4", label: "Didn't apply: Buy a used bike", detail: "no price for a used bike. Nothing changed, and the next reply is told so.", actions: [{ id: "price", label: "Set price", style: "primary", input: { type: "money", label: "Price of a used bike" } }, { id: "item", label: "Pick item", input: { type: "choice", label: "Priced as", options: [{ value: "bike_used", label: "Used bike · $120.00" }, { value: "bike_new", label: "New bike · $450.00" }] } }, { id: "remove", label: "Remove it" }, { id: "accept", label: "Accept" }], expires: "next_send" },
       { id: "c-undo", kind: "undo", messageId: "m4", label: "Paid Dev $20", actions: [{ id: "undo", label: "Undo" }], expires: "next_send" },
       { id: "c-tl", kind: "timelapse_offer", messageId: "m4", label: "Sleep until 07:00?", detail: "8 h 20 min", actions: [{ id: "start", label: "Timelapse", style: "primary" }], expires: "next_send" },
@@ -905,6 +910,41 @@ export function worldFixture(): WorldDoc {
     },
     start: { place: "apartment", at: "2026-10-19T07:00" },
   });
+}
+
+/** What LumiRPEngine Studio has waiting in the preview (`?studio=`): nothing, a new world, a revision of Maple Falls (one taken before its head moved), or a world with an error. */
+export type StudioCase = "none" | "new" | "revision" | "moved" | "errors";
+
+/** Lore the Studio wrote with host macros in it, which Build lists for review before playing. */
+const STUDIO_LORE: WorldDoc["lore"] = {
+  foghorn: { id: "foghorn", title: "The foghorn", content: "{{user}} hears the foghorn from the breakwater before dawn; locals set their watches by it.", keys: ["foghorn"], links: [] },
+  harbor_weather: { id: "harbor_weather", title: "Harbor weather", content: "Mornings on the lake start in {{random::fog,drizzle,a hard wind}} more often than not.", keys: ["weather", "fog"], links: [] },
+};
+
+/** The Studio's offer for a case, as its offer endpoint holds it (`StudioOffer`); null when nothing is waiting. */
+export function studioOfferFixture(kind: StudioCase, chatId: string): StudioOffer | null {
+  if (kind === "none") return null;
+  const createdAt = Date.UTC(2026, 9, 19, 11, 20);
+  if (kind === "revision" || kind === "moved") {
+    const doc = worldFixture();
+    doc.lore = { ...doc.lore, ...structuredClone(STUDIO_LORE) };
+    doc.entities.npc_hale = { id: "npc_hale", kind: "npc", name: "Mrs. Hale", tier: "supporting", fields: { mood: "calm" }, relations: [] };
+    // The Studio fixed what the preview's Maple Falls gets wrong: Rosie goes home to a real place, and Dev's boat isn't named.
+    doc.places.rosie_house = { id: "rosie_house", name: "Rosie's house", parent: "maple", sceneType: "downtime", fields: {} };
+    const shift = doc.schedules.rosie_shift;
+    if (shift) shift.slots = shift.slots.map((slot) => (slot.value === "home" ? { ...slot, value: "rosie_house" } : slot));
+    const dev = doc.entities.npc_dev;
+    if (dev) dev.relations = dev.relations.filter((r) => r.to !== "boat1");
+    const maple = WORLDS[0] as WorldIndex;
+    return { offerId: `offer-${kind}`, doc: doc as unknown as JsonValue, mode: "revision", worldId: maple.id, baseRevision: kind === "moved" ? (maple.revisions[1] ?? maple.head) : maple.head, createdAt };
+  }
+  const make = STARTER_WORLDS.modern_slice_of_life;
+  if (!make) return null;
+  const doc = migrateWorld(make("w-studio", "Harbor Lights"));
+  doc.lore = { ...doc.lore, ...structuredClone(STUDIO_LORE) };
+  // A kind the Studio's draft named but never defined: an error, so the offer can't install as it is.
+  if (kind === "errors") doc.entities.ghost = { id: "ghost", kind: "spectre", name: "The lighthouse ghost", tier: "background", fields: {}, relations: [] };
+  return { offerId: `offer-${kind}`, doc: doc as unknown as JsonValue, mode: "new", attachChatId: chatId, createdAt };
 }
 
 export function settingsFixture(): UserSettings {
