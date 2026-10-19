@@ -329,8 +329,8 @@ function lateInvoices(slot: SlotInfo, ctx: ReadContext, api: FinanceApi): Ledger
     if (inv.state !== "late") out.push({ type: "set", entity: inv.id, field: "state", value: "late" });
     if (fees > inv.fees) out.push({ type: "set", entity: inv.id, field: "fees", value: fees }, ...(fee > 0 ? [{ type: "set" as const, entity: inv.id, field: "late_fee", value: inv.late_fee + fee }] : []));
     const amount = api.money(ctx, inv.left + fee);
-    if (inv.party) out.push(...api.note(ctx, inv.party, "bill", `${inv.memo} from ${labelOf(ctx, inv.business)} is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} due.`));
-    for (const o of api.ownersOf(ctx.state, inv.business)) if (o.role === "owner" || o.role === "joint") out.push(...api.note(ctx, o.party, "bill", `${inv.memo}, billed to ${inv.party ? labelOf(ctx, inv.party) : inv.customer}, is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} owed.`));
+    if (inv.party) out.push(...api.note(ctx, inv.party, "bill", `${inv.memo} from ${shownName(ctx, inv.party, inv.business, "a business")} is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} due.`));
+    for (const o of api.ownersOf(ctx.state, inv.business)) if (o.role === "owner" || o.role === "joint") out.push(...api.note(ctx, o.party, "bill", `${inv.memo}, billed to ${inv.party ? shownName(ctx, o.party, inv.party, "a customer") : inv.customer}, is ${daysLate} day${daysLate === 1 ? "" : "s"} late: ${amount} owed.`));
   }
   return out;
 }

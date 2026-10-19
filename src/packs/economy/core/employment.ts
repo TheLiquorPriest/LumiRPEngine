@@ -29,7 +29,7 @@ import type { WorldState } from "../../../engine/state";
 import { minutesBetween } from "../../../engine/world-state";
 import { addToBooks, monthOf, operatingAccount } from "./books";
 import type { FinanceApi, FinanceRegistry, FlowPosting } from "./module";
-import { payTaxes, taxTotal, type PayTaxes } from "./taxes";
+import { addPay, payTaxes, taxTotal, yearPay, type PayTaxes } from "./taxes";
 
 export const JOB_KIND = "job";
 
@@ -445,12 +445,6 @@ function payRecord(state: Readonly<WorldState>, job: EntityId): JsonObject {
   return objOf(own(payrollSlice(state), job));
 }
 
-/** A worker's FICA wages so far in a calendar year. */
-function ytdFica(state: Readonly<WorldState>, worker: EntityId, year: number): number {
-  const y = objOf(own(objOf(sliceOf(state, "economy").ytd), worker));
-  return y.year === year ? numOf(y.fica) : 0;
-}
-
 // ---------------------------------------------------------------- paychecks
 
 export interface Paycheck {
@@ -472,6 +466,8 @@ export interface Paycheck {
   employerFica: number;
   /** The pay Social Security and Medicare counted (0 when none was withheld). */
   ficaWages: number;
+  /** Pay taken before income tax (pre-tax deductions). */
+  pretax: number;
   lines: PostingLine[];
 }
 
@@ -486,7 +482,7 @@ function ownsAccount(api: FinanceApi, state: Readonly<WorldState>, party: Entity
 
 /** A paycheck that pays nothing but moves the job's record on: a pay period on leave, or with no work in it. */
 function emptyCheck(job: Job, from: number, to: number, work: Work): Paycheck {
-  return { job: job.id, worker: job.worker, from, to, work, gross: 0, parts: { pay: 0, tips: 0, commission: 0 }, taxes: { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 }, deductions: [], net: 0, routed: [], match: 0, employerFica: 0, ficaWages: 0, lines: [] };
+  return { job: job.id, worker: job.worker, from, to, work, gross: 0, parts: { pay: 0, tips: 0, commission: 0 }, taxes: { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 }, deductions: [], net: 0, routed: [], match: 0, employerFica: 0, ficaWages: 0, pretax: 0, lines: [] };
 }
 
 /**
@@ -551,7 +547,7 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   }
   const brackets = api.feature(ctx, job.worker, "tax_brackets");
   const year = dateAt(cal, at).year;
-  const taxes = api.feature(ctx, job.worker, "withholding") ? payTaxes(ctx, job.worker, { gross, pretax, periods: periodsPerYear(ctx, api, job), ytdFica: ytdFica(ctx.state, job.worker, year), brackets, selfEmployed: job.contractor, ficaExempt: job.ficaExempt }) : { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
+  const taxes = api.feature(ctx, job.worker, "withholding") ? payTaxes(ctx, job.worker, { gross, pretax, periods: periodsPerYear(ctx, api, job), ytdFica: yearPay(ctx.state, job.worker, year).fica, brackets, selfEmployed: job.contractor, ficaExempt: job.ficaExempt }) : { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
   // Withholding never takes more than deductions leave; what it can't take comes off federal.
   taxes.federal = Math.max(0, taxes.federal - Math.max(0, taxTotal(taxes) - left));
   const net = left - taxTotal(taxes);
@@ -575,7 +571,7 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   add(api.outside("tax:state"), taxes.state);
   add(api.outside("tax:local"), taxes.local);
   const ficaWages = taxes.socialSecurity > 0 || taxes.medicare > 0 ? Math.max(0, gross - pretax.fica) : 0;
-  return { job: job.id, worker: job.worker, from: since, to: through, work, gross, parts: { pay, tips, commission }, taxes, deductions, net, routed, match, employerFica, ficaWages, lines: lines.filter((l) => l.amount !== 0) };
+  return { job: job.id, worker: job.worker, from: since, to: through, work, gross, parts: { pay, tips, commission }, taxes, deductions, net, routed, match, employerFica, ficaWages, pretax: pretax.income, lines: lines.filter((l) => l.amount !== 0) };
 }
 
 // ---------------------------------------------------------------- events
@@ -588,19 +584,10 @@ function reject(code: string, reason: string): Rejection {
   return { code, reason };
 }
 
-/** A quarter's key, `YYYY-Qn`, for estimated tax on pay nothing was withheld from. */
-export function quarterOf(world: ReadContext["world"], clock: number): string {
-  const d = dateAt(calendarOf(world), clock);
-  return `${d.year}-Q${Math.floor((d.month - 1) / 3) + 1}`;
-}
-
-/** Quarters of contract pay kept per worker: two years. */
-const QUARTERS_KEPT = 8;
-
 /**
  * `economy.payslip`: a paycheck paid. It moves the job's record on (what it paid through; the
  * commission sales and timesheet built up since start again), adds to the worker's year of pay
- * (and a contractor's quarter, for estimated tax), keeps the paycheck for the dashboards, and books
+ * (and a contractor's month, for estimated tax), keeps the paycheck for the dashboards, and books
  * what it cost a business employer. Its posting travels beside it in one unit.
  */
 export const PAYSLIP: EventTypeDef<PackEvent> = {
@@ -611,18 +598,7 @@ export const PAYSLIP: EventTypeDef<PackEvent> = {
     const gross = numOf(e.data.gross);
     sliceRecord(state, "economy", "payroll")[job] = { through: numOf(e.data.through), last: { at: state.clock, gross, taxes: numOf(e.data.taxes), deductions: numOf(e.data.deductions), net: numOf(e.data.net), minutes: numOf(e.data.minutes), shifts: numOf(e.data.shifts) } };
     if (gross === 0) return;
-    const worker = str(e, "worker");
-    const ytd = sliceRecord(state, "economy", "ytd");
-    const year = numOf(e.data.year);
-    const cur = objOf(own(ytd, worker));
-    const same = cur.year === year;
-    const quarters: JsonObject = { ...objOf(cur.quarters) };
-    if (e.data.contract === true) {
-      const q = quarterOf(ctx.world, state.clock);
-      quarters[q] = numOf(quarters[q]) + gross;
-      for (const old of Object.keys(quarters).sort().slice(0, Math.max(0, Object.keys(quarters).length - QUARTERS_KEPT))) delete quarters[old];
-    }
-    ytd[worker] = { year, gross: (same ? numOf(cur.gross) : 0) + gross, fica: (same ? numOf(cur.fica) : 0) + numOf(e.data.fica), withheld: (same ? numOf(cur.withheld) : 0) + numOf(e.data.taxes), quarters };
+    addPay(state, str(e, "worker"), numOf(e.data.year), numOf(e.data.month), { gross, fica: numOf(e.data.fica), withheld: numOf(e.data.taxes), pretax: numOf(e.data.pretax), contract: e.data.contract === true });
     const business = str(e, "business");
     if (business !== "") addToBooks(state, business, monthOf(ctx.world, state.clock), { payroll: numOf(e.data.cost) });
   },
@@ -689,7 +665,9 @@ function payslipEvent(ctx: ReadContext, job: Job, check: Paycheck, at: number): 
       minutes: check.work.minutes,
       shifts: check.work.shifts,
       year: dateAt(calendarOf(ctx.world), at).year,
+      month: dateAt(calendarOf(ctx.world), at).month,
       fica: check.ficaWages,
+      pretax: check.pretax,
       ...(job.contractor ? { contract: true } : {}),
       ...(job.business ? { business: job.business, cost: check.gross + check.match + check.employerFica } : {}),
     },
