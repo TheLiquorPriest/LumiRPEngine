@@ -43,7 +43,7 @@ import { canSeeEntity, canSeePlace, findLeaks, namesAny, playerTrack, povPlace, 
 import { openPuzzle } from "../packs/story/core/index";
 import { REGARD_CHANNEL_CAP } from "../packs/relationships/core/index";
 import { Working } from "../engine/working";
-import type { PresetCard } from "../shared/protocol";
+import type { PresetCard, TemplateInfo } from "../shared/protocol";
 import { type BookEntries, DEFAULT_SECTIONS, EngineBook, loreOfEntry, placementOf, renderSection, sectionsOf, sectionTokens } from "./book";
 import { ChatPrefs } from "./chat-prefs";
 import { ChipStore, idAfterSwipeDelete, type StoredChip } from "./chips";
@@ -72,6 +72,8 @@ export interface RuntimeOptions {
   pipeline: EnginePipeline;
   /** World templates by id (Modern US starter and friends). */
   templates?: Record<string, (id: string, name: string) => WorldDoc>;
+  /** What each template is (`lre.world templates`); a template without an entry here isn't listed. */
+  templateInfo?: readonly TemplateInfo[];
 }
 
 /** The connection key D4 learning counts under when a step runs on the user's active connection. */
@@ -106,7 +108,8 @@ const TURN_ONLY_SLOTS: Readonly<Record<string, true>> = { outcome: true, montage
  */
 const TOKEN_COUNT_CAP = 4;
 
-function readRun(meta: JsonObject): ChatRun | null {
+/** The chat's run as its metadata holds it (DESIGN §4.1), or null for a chat that plays no world. */
+export function readRun(meta: JsonObject): ChatRun | null {
   const raw = meta[LEDGER_NAMESPACE];
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.worldId !== "string" || typeof raw.revision !== "string" || typeof raw.runSeed !== "string") return null;
   return { v: 1, worldId: raw.worldId, revision: raw.revision, runSeed: raw.runSeed, startedAt: typeof raw.startedAt === "number" ? raw.startedAt : 0 };
@@ -461,6 +464,7 @@ export class Runtime implements TurnHooks {
   /** What LumiRPEngine Studio may read, and its offers (DESIGN §15). */
   readonly studio: StudioBridge;
   readonly templates: Record<string, (id: string, name: string) => WorldDoc>;
+  readonly templateInfo: readonly TemplateInfo[];
   private readonly pipeline: EnginePipeline;
   /** Runs by `user \0 chat`. */
   private readonly runs = new Map<string, ChatRun | null>();
@@ -499,6 +503,7 @@ export class Runtime implements TurnHooks {
     this.registry = createRegistry(options.packs);
     this.pipeline = options.pipeline;
     this.templates = options.templates ?? {};
+    this.templateInfo = options.templateInfo ?? [];
     this.worlds = new WorldStore(this.host, this.registry);
     // The context handler waits as long as the users' before-the-reply wall clocks need.
     this.settings = new SettingsStore(this.host, (userId, settings) => this.ledger.preReplyBudget(userId, settings.modelUse.budgets.pre.ms));
@@ -552,6 +557,20 @@ export class Runtime implements TurnHooks {
     const run = readRun(await this.host.chats.chatMetadata(chatId, userId));
     lruSet(this.runs, key, run, 512);
     return run;
+  }
+
+  /**
+   * The world revision a chat plays at now, after any Upgrade: its fold's, as its view shows it.
+   * Null when its ledger can't open or fold (its world or a revision it needs is gone).
+   */
+  async revisionInPlay(chatId: ChatId, userId: UserId): Promise<RevisionId | null> {
+    try {
+      const core = await this.ledger.core(chatId, userId);
+      return core ? core.fold(toChain(await this.host.chats.messages(chatId, userId))).state.revision : null;
+    } catch (error) {
+      this.host.log("warn", `[LumiRPEngine] chat ${chatId}: its revision couldn't be read (${error instanceof Error ? error.message : String(error)})`, userId);
+      return null;
+    }
   }
 
   /** After attaching or upgrading a chat: drop cached state so it resolves afresh. */

@@ -27,6 +27,13 @@ export interface HostMessage {
   metadata: JsonObject;
 }
 
+/** A chat of the user's as the chat list has it: its name and its whole metadata bag (every extension's). */
+export interface HostChat {
+  id: ChatId;
+  name: string;
+  metadata: JsonObject;
+}
+
 // ---------------------------------------------------------------- events
 
 export interface GenerationStartedEvent {
@@ -353,6 +360,8 @@ export interface HostPort {
     appendUserMessage(chatId: ChatId, content: string, metadata: JsonObject, triggerGeneration: boolean, userId: UserId): Promise<MessageId>;
     /** The chat the user has open, if any (`chats.getActive`). */
     active(userId: UserId): Promise<ChatId | null>;
+    /** Every chat of the user's, most recently updated first (`chats.list`, paged through). */
+    list(userId: UserId): Promise<HostChat[]>;
   };
   storage: {
     read(path: string, userId: UserId): Promise<string | null>;

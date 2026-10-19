@@ -51,3 +51,5 @@ export function defaultTables(packs: readonly PackDef[] = ALL_PACKS): Record<str
 
 /** Starter worlds by template id: `(id, name) → WorldDoc`, converted from `data-src/templates` by ops' converter. */
 export { STARTER_WORLDS } from "./starters/index";
+/** What each starter world is: its template id, name and a short summary (`lre.world templates`). */
+export { STARTER_INFO } from "./starters/info";

@@ -1161,6 +1161,17 @@ export interface StudioState {
   inbound: string[];
 }
 
+/** How one revision became a world's head (DESIGN §23). */
+export interface RevisionNote {
+  revision: string;
+  /** When it became head, in ms since the epoch. */
+  at: number;
+  /** What made it head: a new world, a commit from Build or from an outside agent, an import, or a Studio install. */
+  source: "create" | "build" | "agent" | "import" | "studio";
+  /** The note given with the commit, if any (at most 200 characters). */
+  note?: string;
+}
+
 /** `userStorage/worlds/<worldId>/index.json`. */
 export interface WorldIndex {
   id: WorldId;
@@ -1168,4 +1179,6 @@ export interface WorldIndex {
   head: string;
   loreBookId: string | null;
   revisions: string[];
+  /** Oldest first, one note per time a revision became head; worlds made before it was kept have none. */
+  history?: RevisionNote[];
 }

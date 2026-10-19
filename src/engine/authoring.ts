@@ -93,6 +93,53 @@ export function isWorldDoc(v: unknown): v is WorldDoc {
   return isRecord(v) && v.format === WORLD_FORMAT && typeof v.id === "string" && isRecord(v.entities) && isRecord(v.places) && typeof v.pov === "string";
 }
 
+/** Collections every document has, each an object keyed by id. */
+const COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"] as const;
+/** Collections documents written before them lack; `migrateWorld` adds them (empty, or the default tiers), so they're checked only when present. */
+const LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"] as const;
+/** Parts every document has. */
+const PARTS = ["pins", "calendar", "realism", "time", "start"] as const;
+/**
+ * Parts a document may leave out: `migrateWorld` fills the currency (Modern US) and the lore lookup
+ * table (empty), and a world without a ruleset or map settings plays by the defaults.
+ */
+const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings"] as const;
+
+/**
+ * Shape checks for an untrusted document, before `migrateWorld` and `lintWorld` read it: every
+ * collection an object of objects, every part an object, the scalar parts of the right kind. The
+ * published schema (`schemas/lre-world-v1.schema.json`) checks everything inside them.
+ */
+export function shapeIssues(doc: unknown): LintIssue[] {
+  const issues: LintIssue[] = [];
+  const err = (path: string, message: string): void => {
+    issues.push({ severity: "error", path, code: "shape", message });
+  };
+  if (!isRecord(doc)) return [{ severity: "error", path: "", code: "shape", message: "not a JSON object" }];
+  const collection = (key: string): void => {
+    const value = doc[key];
+    if (!isRecord(value)) return err(key, `${key} must be an object`);
+    for (const [id, item] of Object.entries(value)) if (!isRecord(item)) err(`${key}.${id}`, `each of ${key} must be an object`);
+  };
+  if (doc.format !== WORLD_FORMAT) err("format", `format must be ${WORLD_FORMAT}`);
+  if (typeof doc.id !== "string" || doc.id === "") err("id", "the world needs an id");
+  if (typeof doc.name !== "string") err("name", "the world needs a name");
+  if (doc.engineVersion !== undefined && typeof doc.engineVersion !== "string") err("engineVersion", "engineVersion must be text");
+  if (typeof doc.pov !== "string") err("pov", "the world needs a POV entity id");
+  for (const key of COLLECTIONS) collection(key);
+  for (const key of LATER_COLLECTIONS) if (doc[key] !== undefined) collection(key);
+  for (const key of PARTS) if (!isRecord(doc[key])) err(key, `${key} must be an object`);
+  for (const key of OPTIONAL_PARTS) if (doc[key] !== undefined && !isRecord(doc[key])) err(key, `${key} must be an object`);
+  if (!Array.isArray(doc.suppressed)) err("suppressed", "suppressed must be a list");
+  if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll") err("seedMode", "seedMode must be fresh or same_roll");
+  if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", "lenientPricing must be true or false");
+  if (doc.spawnTier !== undefined && typeof doc.spawnTier !== "string") err("spawnTier", "spawnTier must be a tier id");
+  if (doc.spawnCap !== undefined && typeof doc.spawnCap !== "number") err("spawnCap", "spawnCap must be a number");
+  // The world's own life states, when it has any: an object of objects, as a collection is.
+  if (doc.lifeStates !== undefined) collection("lifeStates");
+  return issues;
+}
+
 function isCurrency(v: unknown): v is WorldCurrency {
   return isRecord(v) && typeof v.code === "string" && typeof v.symbol === "string" && typeof v.minorUnit === "string" && typeof v.decimals === "number" && typeof v.format === "string";
 }

@@ -15,6 +15,13 @@ import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, MapD
 
 export const PROTOCOL_VERSION = 1;
 
+/**
+ * The level of the requests outside clients rely on (DESIGN §23): editor `version`, `patch` and
+ * `restore`, commit notes and history, `templates`, `chats` and `lre.draft.changed`. `lre.hello`
+ * answers with it; a build without them answers without it.
+ */
+export const AGENT_API = 1;
+
 interface Envelope<T extends string> {
   lre: typeof PROTOCOL_VERSION;
   type: T;
@@ -51,6 +58,8 @@ export interface HelloRequest extends Request<"lre.hello"> {
   chatId: ChatId | null;
   /** The active Loom preset as the frontend's state has it (`loom.activePresetId`); absent when it can't say. */
   presetId?: string | null;
+  /** An outside client (the `lumirpengine` CLI or MCP server, DESIGN §23) names itself: its commits are labelled `agent`, and the log says who connected. */
+  client?: { name: string; version: string };
 }
 
 export interface ResyncRequest extends Request<"lre.state.resync"> {
@@ -324,24 +333,42 @@ export type WorldCollection =
  */
 export type WorldPart = "calendar" | "realism" | "time" | "meta" | "tiers" | "ruleset" | "loreIndex";
 
+/** One RFC 6902 operation, its paths RFC 6901 JSON Pointers into the whole world document. */
+export type JsonPatchOp =
+  | { op: "add"; path: string; value: JsonValue }
+  | { op: "remove"; path: string }
+  | { op: "replace"; path: string; value: JsonValue }
+  | { op: "move"; from: string; path: string }
+  | { op: "copy"; from: string; path: string }
+  | { op: "test"; path: string; value: JsonValue };
+
 /**
  * Build-draft operations. `get` returns the stored draft (or a fresh copy of the head when there is
  * none) so a reload or a second device resumes it; its `base` is ignored. `discard` drops the draft.
  * `profile` applies a ruleset profile to the draft in one write (`shared/profiles`), each
- * conflicting item kept or taken by its path in `choices` (kept when unnamed).
+ * conflicting item kept or taken by its path in `choices` (kept when unnamed). `patch` applies
+ * RFC 6902 operations to the whole draft, all of them or none. `restore` makes the draft a copy of
+ * one of the world's revisions, which a commit then makes head again (DESIGN §23).
+ *
+ * `version`, when sent, is the draft's write count the client last saw: a write is refused with
+ * `conflict` when the stored draft has moved on since. Every result carries the current count.
  */
-export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: RevisionId | null } & (
+export type EditorRequest = Request<"lre.editor"> & { worldId: WorldId; base: RevisionId | null; version?: number } & (
     | { op: "get" }
     | { op: "discard" }
     | { op: "put"; collection: WorldCollection; id: string; value: JsonValue }
     | { op: "remove"; collection: WorldCollection; id: string }
     | { op: "set"; part: WorldPart; value: JsonValue }
     | { op: "profile"; profile: string; choices: Record<string, "mine" | "profile"> }
+    | { op: "patch"; ops: JsonPatchOp[] }
+    | { op: "restore"; revision: RevisionId }
   );
 
 /**
  * World operations. `sheet` previews the Sheet Designer's layout: the draft world with `ruleset` in
  * place of its own, read on `entity` (the POV by default) as a new chat would start; nothing is saved.
+ * `commit`'s `note` goes into the world's history. `templates` lists the starter worlds `create`
+ * takes; `chats` lists the user's chats that play a world (one world's, with `worldId`).
  */
 export type WorldRequest = Request<"lre.world"> &
   (
@@ -349,14 +376,33 @@ export type WorldRequest = Request<"lre.world"> &
     | { op: "get"; worldId: WorldId; revision?: RevisionId }
     | { op: "create"; name: string; template: string | null }
     | { op: "delete"; worldId: WorldId }
-    | { op: "commit"; worldId: WorldId; base: RevisionId | null }
+    | { op: "commit"; worldId: WorldId; base: RevisionId | null; note?: string }
     | { op: "import"; file: JsonValue }
     | { op: "export"; worldId: WorldId; revision?: RevisionId }
     | { op: "lint"; worldId: WorldId }
     | { op: "attach"; worldId: WorldId; chatId: ChatId }
     | { op: "upgrade"; chatId: ChatId; to: RevisionId; merge?: UpgradePicks }
     | { op: "sheet"; worldId: WorldId; ruleset: JsonValue; entity?: EntityId }
+    | { op: "templates" }
+    | { op: "chats"; worldId?: WorldId }
   );
+
+/** A starter world `lre.world create` can start from. */
+export interface TemplateInfo {
+  id: string;
+  name: string;
+  /** One or two sentences on what it holds. */
+  summary: string;
+}
+
+/** A chat that plays a world, and whether it is behind the world's head. */
+export interface WorldChatInfo {
+  chatId: ChatId;
+  name: string;
+  worldId: WorldId;
+  revision: RevisionId;
+  behind: boolean;
+}
 
 /**
  * Lore curation (DESIGN §4.2). `drift`: the draft's entries indexed from a World Info book whose
@@ -476,7 +522,8 @@ export interface SettingsResult {
 
 /** Results per request type. */
 export interface ResultBodies {
-  "lre.hello": { accepted: true };
+  /** `agentApi`: the outside-client level this build speaks (`AGENT_API`). */
+  "lre.hello": { accepted: true; agentApi: number };
   "lre.state.resync": { accepted: true };
   "lre.action": { messageId: MessageId };
   "lre.chip": { applied: boolean; pending: boolean };
@@ -488,17 +535,17 @@ export interface ResultBodies {
   "lre.keep": { pending: boolean };
   "lre.settings.get": SettingsResult;
   "lre.settings.set": SettingsResult;
-  /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head. */
-  "lre.editor": { draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean };
+  /** `base`: the revision the draft started from (send it with the next edit); `stored`: whether a draft exists apart from the head; `version`: the stored draft's write count (0 when none is stored). */
+  "lre.editor": { draft: WorldDoc; lint: LintIssue[]; base: RevisionId | null; stored: boolean; version: number };
   /**
    * `get` also carries `packKinds` and `packRelations`: every kind (label, extends, fields) and
    * relation type the registered packs define, for Build's kind and relation pickers and typed
    * field forms (a world kind or relation type with the same id wins); and `functions`: every
    * function a formula may call outside an effect's arguments (the math built-ins, the engine's and
    * the packs' formulas), for the expression editor. `sheet` answers the `sheet` preview: the
-   * sections, or null when the ruleset designs no sheet.
+   * sections, or null when the ruleset designs no sheet. `templates` and `chats` answer their ops.
    */
-  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null };
+  "lre.world": { worlds?: WorldIndex[]; world?: WorldDoc; revision?: RevisionId; lint?: LintIssue[]; file?: JsonValue; packKinds?: Record<string, KindDef>; packRelations?: Record<string, RelationTypeDef>; functions?: string[]; sheet?: SheetSectionView[] | null; templates?: TemplateInfo[]; chats?: WorldChatInfo[] };
   "lre.ui": { done: true };
   "lre.map": { display?: MapDisplay; walk?: { minutes: number; disabled?: string } };
   /** `start`, `cancel` and `dismiss` name the job; `list` returns the world's kept jobs. */
@@ -538,4 +585,15 @@ export interface ErrorMessage extends Envelope<"lre.error"> {
   lint?: LintIssue[];
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate;
+/**
+ * A world's draft changed: written, discarded or committed (DESIGN §23). Sent to every session of
+ * the user, so a Build open on that world reloads a draft another window or an outside agent wrote.
+ */
+export interface DraftChanged extends Envelope<"lre.draft.changed"> {
+  worldId: WorldId;
+  /** The stored draft's write count now (0 when no draft is stored). */
+  version: number;
+  stored: boolean;
+}
+
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged;

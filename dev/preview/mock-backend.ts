@@ -5,6 +5,7 @@
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { isRecord } from "../../src/shared/json";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LoreDrift, ResultBodies } from "../../src/shared/protocol";
+import { AGENT_API } from "../../src/shared/protocol";
 import type { UserSettings } from "../../src/shared/settings";
 import type { GmView, StateView } from "../../src/shared/state-view";
 import type { WorldDoc } from "../../src/shared/world";
@@ -82,6 +83,8 @@ export class MockBackend {
   private settings: UserSettings = settingsFixture();
   private world: WorldDoc = worldFixture();
   private draft: WorldDoc = worldFixture();
+  /** The draft's write count, as the backend keeps it: 0 while the draft is the world. */
+  private draftVersion = 0;
   private jobs = 0;
   private gm: GmView = gmFixture();
   /** The GM view as it was before each GM edit, by the edit's Undo chip. */
@@ -223,7 +226,7 @@ export class MockBackend {
     switch (message.type) {
       case "lre.hello":
         if (message.chatId === null) {
-          this.result(reqId, "lre.hello", { accepted: true });
+          this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API });
           return;
         }
         this.view = this.options.scenario === "paused" ? pausedFixture(message.chatId) : this.options.scenario === "fresh" ? freshFixture(message.chatId) : stateFixture(message.chatId);
@@ -238,7 +241,7 @@ export class MockBackend {
         }
         // Play → You with the Modern profile's sheet, as the engine builds it.
         if (this.options.scenario === "sheet") this.view.panels["sheets.you"] = modernSheetFixture();
-        this.result(reqId, "lre.hello", { accepted: true });
+        this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API });
         setTimeout(() => this.snapshot(), 50);
         return;
       case "lre.state.resync":
@@ -454,9 +457,11 @@ export class MockBackend {
         // As the backend does on every write: the map's places, grid and routes follow it.
         this.draft = compileMaps(this.draft);
         const stored = JSON.stringify(this.draft) !== JSON.stringify(this.world);
+        if (!stored) this.draftVersion = 0;
+        else if (message.op !== "get") this.draftVersion++;
         const cap = this.draft.packs.economy?.config.unpricedCap;
         const capLint = cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0) ? [] : [{ severity: "warning" as const, path: "packs.economy.config.unpricedCap", code: "economy.unpriced_cap", message: "The narrated-price cap should be a whole number of cents above zero; narrated prices are capped at the default, $14.00." }];
-        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: WORLDS[0]?.head ?? null, stored, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }, ...capLint, ...mapLint(this.draft)] });
+        return this.result(reqId, "lre.editor", { draft: structuredClone(this.draft), base: WORLDS[0]?.head ?? null, stored, version: this.draftVersion, lint: [{ severity: "warning", path: "tracks.q_raise.stages.orphan", code: "unreachable_stage", message: "Stage “Old idea” can't be reached from the start." }, ...capLint, ...mapLint(this.draft)] });
       }
       case "lre.ui":
         this.options.closeDrawer();

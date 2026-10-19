@@ -15,6 +15,7 @@ import type {
   ContextHandlerInput,
   HostBookEntry,
   HostBookEntryInput,
+  HostChat,
   HostEventMap,
   HostEventName,
   HostGenerationType,
@@ -290,6 +291,17 @@ export function createSpindleHost(): HostPort {
       },
       async active(userId) {
         return (await spindle.chats.getActive(userId))?.id ?? null;
+      },
+      // The host caps a page at 200 and lists the newest first; a chat updated while the pages are
+      // read moves to the front, so one may come back twice.
+      async list(userId) {
+        const out = new Map<ChatId, HostChat>();
+        for (let offset = 0; offset < 100_000; offset += 200) {
+          const page = await spindle.chats.list({ limit: 200, offset, userId });
+          for (const chat of page.data) if (!out.has(chat.id)) out.set(chat.id, { id: chat.id, name: chat.name, metadata: toJsonObject(chat.metadata) });
+          if (page.data.length < 200 || offset + 200 >= page.total) break;
+        }
+        return [...out.values()];
       },
     },
     storage: {

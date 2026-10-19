@@ -42,6 +42,8 @@ export interface FakeMessage {
 
 export interface FakeChat {
   id: ChatId;
+  /** The chat's name as the chat list shows it. */
+  name: string;
   metadata: JsonObject;
   messages: FakeMessage[];
 }
@@ -86,6 +88,8 @@ export class FakeHost implements HostPort {
   readonly chatsById = new Map<ChatId, FakeChat>();
   readonly files = new Map<string, string>();
   readonly sent: BackendToFrontend[] = [];
+  /** Whom each message in `sent` went to: a user, and one session of theirs or (none named) every one. */
+  readonly sentTo: { userId: UserId | null; session?: string }[] = [];
   private readonly handlers = new Map<HostEventName, Set<Handler>>();
   private readonly frontendHandlers = new Set<(message: unknown, userId: UserId, sessionId?: string) => void>();
   private contextHandler: ((input: ContextHandlerInput, signal: AbortSignal) => Promise<void>) | null = null;
@@ -126,6 +130,8 @@ export class FakeHost implements HostPort {
     },
     appendUserMessage: async (chatId, content, metadata) => this.sendUser(chatId, content, metadata),
     active: async () => this.activeChat,
+    // The real host lists only its owner's chats.
+    list: async (userId) => (userId === this.userId ? [...this.chatsById.values()].reverse().map((c) => ({ id: c.id, name: c.name, metadata: structuredClone(c.metadata) })) : []),
   };
 
   /** The chat the user has open (`chats.getActive`). */
@@ -295,8 +301,9 @@ export class FakeHost implements HostPort {
   };
 
   frontend: HostPort["frontend"] = {
-    send: (message) => {
+    send: (message, userId, frontendSessionId) => {
       this.sent.push(message);
+      this.sentTo.push({ userId, ...(frontendSessionId !== undefined ? { session: frontendSessionId } : {}) });
     },
     onMessage: (handler) => {
       this.frontendHandlers.add(handler);
@@ -344,7 +351,7 @@ export class FakeHost implements HostPort {
 
   createChat(greeting?: string): ChatId {
     const id = `chat-${++this.nextId}`;
-    const chat: FakeChat = { id, metadata: {}, messages: [] };
+    const chat: FakeChat = { id, name: `Chat ${this.nextId}`, metadata: {}, messages: [] };
     this.chatsById.set(id, chat);
     if (greeting !== undefined) chat.messages.push({ id: this.newId("m"), isUser: false, name: "Narrator", swipes: [greeting], swipeId: 0, bag: {} });
     return id;
@@ -448,7 +455,7 @@ export class FakeHost implements HostPort {
     const c = this.chat(chatId);
     const index = c.messages.findIndex((m) => m.id === messageId);
     const id = `chat-${++this.nextId}`;
-    this.chatsById.set(id, { id, metadata: structuredClone(c.metadata), messages: c.messages.slice(0, index + 1).map((m) => ({ ...structuredClone(m), id: this.newId(m.isUser ? "u" : "m") })) });
+    this.chatsById.set(id, { id, name: `${c.name} (branch)`, metadata: structuredClone(c.metadata), messages: c.messages.slice(0, index + 1).map((m) => ({ ...structuredClone(m), id: this.newId(m.isUser ? "u" : "m") })) });
     return id;
   }
 

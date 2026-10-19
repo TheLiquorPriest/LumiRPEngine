@@ -15,13 +15,15 @@ import type { MapDoc, RulesetDef, StudioState, WorldDoc } from "./shared/world";
 import { ENGINE_VERSION, EXPORT_FORMAT, WORLD_FORMAT } from "./shared/world";
 import { channelId, chatsChannel, engineEndpoint, ENGINE_EXTENSION, offerEndpoint, readOffer, STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_EXTENSION, STUDIO_INBOUND, STUDIO_INSTALLED_EVENT, STUDIO_OFFER_EVENT, worldChannel, worldsChannel } from "./shared/studio-bridge";
 import type { StudioChats, StudioChatSummary, StudioInstalled, StudioOffer, StudioWorldEntry, StudioWorldList, StudioWorldRead } from "./shared/studio-bridge";
-import { blankWorld, checkWorldDay, isWorldDoc, lintWorld, migrateWorld, playtestStart, playtestTurn, previewSheet, type PlaytestTurn } from "./engine/authoring";
+import { blankWorld, checkWorldDay, isWorldDoc, lintWorld, migrateWorld, playtestStart, playtestTurn, previewSheet, shapeIssues, type PlaytestTurn } from "./engine/authoring";
 import { createRegistry, type Registry } from "./engine/registry-impl";
 import type { WorldState } from "./engine/state";
 import { planTurn, postTurn, timelapseIntent } from "./engine/turn";
 import { ALL_PACKS } from "./packs/index";
 
 export { checkSchema, ENGINE_VERSION, EXPORT_FORMAT, MAP_SCHEMA, pathText, WORLD_FORMAT };
+/** Shape checks for an untrusted document, before `migrate` and `lint` read it (the backend's patches are checked the same way). */
+export { shapeIssues as validate };
 export type { JsonPath, LintIssue, MapDoc, PlaytestTurn, RulesetDef, Schema, SchemaProblem, SheetSectionView, StudioState, WorldDoc };
 // The Studio bridge contract (docs/STUDIO.md "The Studio bridge"): endpoint names, payloads and window events.
 export { channelId, chatsChannel, engineEndpoint, ENGINE_EXTENSION, offerEndpoint, readOffer, STATE_EVENT, STATE_REQUEST_EVENT, STUDIO_EXTENSION, STUDIO_INBOUND, STUDIO_INSTALLED_EVENT, STUDIO_OFFER_EVENT, worldChannel, worldsChannel };
@@ -37,53 +39,6 @@ function registryOf(): Registry {
 }
 
 const pipeline = { plan: planTurn, post: postTurn };
-
-/** Collections every document has, each an object keyed by id. */
-const COLLECTIONS = ["packs", "kinds", "relations", "entities", "places", "routes", "grids", "rules", "actions", "checks", "schedules", "tracks", "tables", "sections", "steps"] as const;
-/** Collections documents written before them lack; `migrate` adds them (empty, or the default tiers), so they're checked only when present. */
-const LATER_COLLECTIONS = ["maps", "lore", "classifications", "tiers"] as const;
-/** Parts every document has. */
-const PARTS = ["pins", "calendar", "realism", "time", "start"] as const;
-/**
- * Parts a document may leave out: `migrate` fills the currency (Modern US) and the lore lookup
- * table (empty), and a world without a ruleset or map settings plays by the defaults.
- */
-const OPTIONAL_PARTS = ["currency", "loreIndex", "ruleset", "mapSettings"] as const;
-
-/**
- * Shape checks for an untrusted document, before `migrate` and `lint` read it: every collection an
- * object of objects, every part an object, the scalar parts of the right kind. The published
- * schema (`schemas/lre-world-v1.schema.json`) checks everything inside them.
- */
-export function validate(doc: unknown): LintIssue[] {
-  const issues: LintIssue[] = [];
-  const err = (path: string, message: string): void => {
-    issues.push({ severity: "error", path, code: "shape", message });
-  };
-  if (!isRecord(doc)) return [{ severity: "error", path: "", code: "shape", message: "not a JSON object" }];
-  const collection = (key: string): void => {
-    const value = doc[key];
-    if (!isRecord(value)) return err(key, `${key} must be an object`);
-    for (const [id, item] of Object.entries(value)) if (!isRecord(item)) err(`${key}.${id}`, `each of ${key} must be an object`);
-  };
-  if (doc.format !== WORLD_FORMAT) err("format", `format must be ${WORLD_FORMAT}`);
-  if (typeof doc.id !== "string" || doc.id === "") err("id", "the world needs an id");
-  if (typeof doc.name !== "string") err("name", "the world needs a name");
-  if (doc.engineVersion !== undefined && typeof doc.engineVersion !== "string") err("engineVersion", "engineVersion must be text");
-  if (typeof doc.pov !== "string") err("pov", "the world needs a POV entity id");
-  for (const key of COLLECTIONS) collection(key);
-  for (const key of LATER_COLLECTIONS) if (doc[key] !== undefined) collection(key);
-  for (const key of PARTS) if (!isRecord(doc[key])) err(key, `${key} must be an object`);
-  for (const key of OPTIONAL_PARTS) if (doc[key] !== undefined && !isRecord(doc[key])) err(key, `${key} must be an object`);
-  if (!Array.isArray(doc.suppressed)) err("suppressed", "suppressed must be a list");
-  if (doc.seedMode !== "fresh" && doc.seedMode !== "same_roll") err("seedMode", "seedMode must be fresh or same_roll");
-  if (typeof doc.lenientPricing !== "boolean") err("lenientPricing", "lenientPricing must be true or false");
-  if (doc.spawnTier !== undefined && typeof doc.spawnTier !== "string") err("spawnTier", "spawnTier must be a tier id");
-  if (doc.spawnCap !== undefined && typeof doc.spawnCap !== "number") err("spawnCap", "spawnCap must be a number");
-  // The world's own life states, when it has any: an object of objects, as a collection is.
-  if (doc.lifeStates !== undefined) collection("lifeStates");
-  return issues;
-}
 
 /** The Sheet Designer's preview: the world's designed sheet as an entity (the POV by default) starts with it; null without one. */
 export function sheetPreview(world: WorldDoc, entity?: string): SheetSectionView[] | null {
@@ -103,7 +58,7 @@ export function load(input: string | JsonValue): LoadResult {
     }
   }
   if (isRecord(value) && value.format === EXPORT_FORMAT) value = value.world;
-  const shape = validate(value);
+  const shape = shapeIssues(value);
   if (shape.length > 0 || !isWorldDoc(value)) return { ok: false, issues: shape };
   const world = migrateWorld(value);
   return { ok: true, world, issues: lint(world) };

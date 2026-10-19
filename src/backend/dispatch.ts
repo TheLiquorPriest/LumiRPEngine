@@ -16,8 +16,8 @@ import { parseEditOps, resolveEdit } from "../engine/edits";
 import { sheetRulesetProblem } from "../engine/ruleset";
 import { formulaFunctions } from "../engine/scope";
 import { neutralizeMacros } from "../shared/macros";
-import type { ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, StudioOfferView, UpgradePreview } from "../shared/protocol";
-import { PROTOCOL_VERSION } from "../shared/protocol";
+import type { DraftChanged, ErrorCode, FrontendToBackend, LintIssue, MarkerPreview, ResultBodies, StudioOfferView, UpgradePreview, WorldChatInfo } from "../shared/protocol";
+import { AGENT_API, PROTOCOL_VERSION } from "../shared/protocol";
 import { EXTRACTION_TYPES } from "../shared/settings";
 import type { TimelapseTarget } from "../shared/ledger";
 import { TIME_CONTROLS, validMarkerBody } from "../engine/events";
@@ -35,7 +35,7 @@ import type { StoredChip } from "./chips";
 import { toChain } from "./ledger-io";
 import { JobError, type JobRunner } from "./jobs";
 import { bookDrift, saveFromChat } from "./lore";
-import { ACTIVE_CONNECTION, declineNote, Runtime } from "./runtime";
+import { ACTIVE_CONNECTION, declineNote, readRun, Runtime } from "./runtime";
 import { recordOutcome, undoModeChange, type ModeChange } from "./settings-store";
 import { applyProposals, TIME_ADVANCE_CAP } from "./turn-model";
 import { upgradePreview } from "./upgrade-preview";
@@ -63,10 +63,18 @@ function isRequest(raw: unknown): raw is FrontendToBackend {
   return isRecord(raw) && raw.lre === PROTOCOL_VERSION && typeof raw.type === "string" && typeof raw.reqId === "string";
 }
 
+/** Notes that a request changed a world's draft, to the version and storedness it has now. */
+type DraftNoted = (worldId: WorldId, draft: { version: number; stored: boolean }) => void;
+
+/** Outside clients remembered by session: a CLI makes a session per connection, so old ones go. */
+const CLIENTS_CAP = 256;
+
 export class Dispatcher {
   private writeSeq = 0;
   /** Stored chip actions in flight per (user, chat): one at a time, so a double tap acts once. */
   private readonly chipLocks = new Map<string, Promise<void>>();
+  /** Sessions that said `lre.hello` with `client` (DESIGN §23), by `user \0 session`: their commits are `agent`'s. */
+  private readonly clients = new Map<string, { name: string; version: string }>();
 
   constructor(
     private readonly rt: Runtime,
@@ -87,17 +95,30 @@ export class Dispatcher {
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: "bad_request", message: `invalid ${unsafe}` }, userId, session);
       return;
     }
+    // The drafts the request changed, announced to every session of the user once it is answered,
+    // so the session that changed one has its result (and the draft's version) first (DESIGN §23).
+    const drafts = new Map<WorldId, DraftChanged>();
+    const announce = (): void => {
+      for (const push of drafts.values()) this.rt.host.frontend.send(push, userId);
+      drafts.clear();
+    };
     const reply = <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]): void => {
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.result", reqId: raw.reqId, request, body } as never, userId, session);
+      announce();
+    };
+    const noted: DraftNoted = (worldId, draft) => {
+      drafts.set(worldId, { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: draft.version, stored: draft.stored });
     };
     try {
       // The Studio bridge serves each user from their first request on (DESIGN §15).
       await this.rt.studio.serve(userId);
-      await this.route(raw, userId, session, reply);
+      await this.route(raw, userId, session, reply, noted);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
       if (e.code === "internal") this.rt.host.log("error", `[LumiRPEngine] ${raw.type}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: e.code, message: e.message, ...(e.lint ? { lint: e.lint } : {}) }, userId, session);
+      // A request that failed after it changed a draft (a commit whose book sync failed) still says so.
+      announce();
     }
   }
 
@@ -133,11 +154,14 @@ export class Dispatcher {
     return runSeed;
   }
 
-  private async route(r: FrontendToBackend, userId: UserId, session: string | undefined, reply: <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]) => void): Promise<void> {
+  private async route(r: FrontendToBackend, userId: UserId, session: string | undefined, reply: <K extends keyof ResultBodies>(request: K, body: ResultBodies[K]) => void, noted: DraftNoted): Promise<void> {
     switch (r.type) {
       case "lre.hello":
       case "lre.state.resync": {
-        reply(r.type, { accepted: true });
+        if (r.type === "lre.hello") {
+          reply("lre.hello", { accepted: true, agentApi: AGENT_API });
+          this.meet(userId, session, r.client);
+        } else reply("lre.state.resync", { accepted: true });
         // The frontend says which Loom preset is active: the preset prompts assemble with (DESIGN §6.8).
         if (r.type === "lre.hello" && r.presetId !== undefined) this.rt.presets.useLoom(userId, typeof r.presetId === "string" ? r.presetId : null);
         if (r.chatId) {
@@ -277,11 +301,13 @@ export class Dispatcher {
         return;
       }
       case "lre.editor": {
-        reply("lre.editor", await this.rt.worlds.edit(r, userId));
+        const result = await this.rt.worlds.edit(r, userId);
+        if (r.op !== "get") noted(r.worldId, result);
+        reply("lre.editor", result);
         return;
       }
       case "lre.world": {
-        reply("lre.world", await this.world(r, userId));
+        reply("lre.world", await this.world(r, userId, session, noted));
         return;
       }
       case "lre.ui": {
@@ -330,7 +356,9 @@ export class Dispatcher {
         if (r.op === "save") {
           const run = await this.rt.runOf(r.chatId, userId);
           if (!run) throw new RequestError("not_world_chat", "this chat is not attached to a world");
-          reply("lre.lore", await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, (await this.rt.settings.get(userId)).hideJsonBlocks, typeof r.text === "string" ? r.text : undefined));
+          const saved = await saveFromChat(this.rt.host, this.rt.worlds, r.chatId, run.worldId, userId, (await this.rt.settings.get(userId)).hideJsonBlocks, typeof r.text === "string" ? r.text : undefined);
+          noted(saved.worldId, saved);
+          reply("lre.lore", { worldId: saved.worldId, id: saved.id });
           return;
         }
         const world = await this.rt.worlds.working(r.worldId, userId);
@@ -363,7 +391,7 @@ export class Dispatcher {
       if (view.blocked !== null || world === null) throw new RequestError(view.errors > 0 ? "validation" : "conflict", view.blocked ?? `not an ${WORLD_FORMAT} document`, view.errors > 0 ? view.lint : undefined);
       if (view.headMoved && r.acceptMovedHead !== true) throw new RequestError("conflict", "The world changed in Build since LumiRPEngine Studio took it; review the offer again and confirm to install anyway.");
       const store = this.rt.worlds;
-      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId).then((created) => ({ ...created, lint: macroReview(created.world) }));
+      const done = offer.mode === "revision" && offer.worldId !== undefined ? await store.commitRevision(offer.worldId, world, userId) : await store.create(world.name, world, userId, "studio").then((created) => ({ ...created, lint: macroReview(created.world) }));
       // Marked before anything else can fail: the world is written, so the offer is installed.
       await this.rt.studio.markInstalled(userId, { offerId: offer.offerId, worldId: done.world.id, revision: done.revision });
       await this.syncBook(done.world.id, userId);
@@ -418,7 +446,7 @@ export class Dispatcher {
     return { view, world };
   }
 
-  private async world(r: Extract<FrontendToBackend, { type: "lre.world" }>, userId: UserId): Promise<ResultBodies["lre.world"]> {
+  private async world(r: Extract<FrontendToBackend, { type: "lre.world" }>, userId: UserId, session: string | undefined, noted: DraftNoted): Promise<ResultBodies["lre.world"]> {
     const store = this.rt.worlds;
     switch (r.op) {
       case "list":
@@ -438,7 +466,9 @@ export class Dispatcher {
         await this.rt.jsonHiding.removeWorld(r.worldId, userId).catch((error: unknown) => this.rt.host.log("warn", `[LumiRPEngine] world ${r.worldId}: its chats' JSON-hiding regex scripts weren't removed (${error instanceof Error ? error.message : String(error)})`, userId));
         return { worlds: await store.list(userId) };
       case "commit": {
-        const committed = await store.commit(r.worldId, r.base, userId);
+        // A session that said hello as an outside client commits as `agent` (DESIGN §23).
+        const committed = await store.commit(r.worldId, r.base, userId, { source: session !== undefined && this.clients.has(`${userId}\u0000${session}`) ? "agent" : "build", ...(r.note !== undefined ? { note: r.note } : {}) });
+        noted(r.worldId, { version: 0, stored: false });
         await this.syncBook(r.worldId, userId);
         return committed;
       }
@@ -493,7 +523,45 @@ export class Dispatcher {
         const entity = typeof r.entity === "string" && hasOwn(world.entities, r.entity) ? r.entity : world.pov;
         return { sheet: previewSheet(this.rt.registry, world, entity) };
       }
+      case "templates":
+        return { templates: this.rt.templateInfo.filter((t) => hasOwn(this.rt.templates, t.id)) };
+      case "chats": {
+        // The user's chats that play one of their worlds still there, each at the revision it plays now.
+        const worlds = new Map((await store.list(userId)).map((index) => [index.id, index]));
+        if (r.worldId !== undefined && !worlds.has(r.worldId)) throw new RequestError("not_found", `world ${r.worldId} not found`);
+        const chats: WorldChatInfo[] = [];
+        for (const chat of await this.rt.host.chats.list(userId)) {
+          const run = readRun(chat.metadata);
+          const index = run && (r.worldId === undefined || run.worldId === r.worldId) ? worlds.get(run.worldId) : undefined;
+          if (!run || !index) continue;
+          const revision = await this.rt.revisionInPlay(chat.id, userId);
+          if (revision !== null) chats.push({ chatId: chat.id, name: chat.name, worldId: run.worldId, revision, behind: revision !== index.head });
+        }
+        return { chats };
+      }
     }
+  }
+
+  /**
+   * A hello's `client` (DESIGN §23): an outside client names itself, so its session's commits are
+   * `agent`'s from now on and the user's diagnostics say who connected. A hello without one is a
+   * frontend's, so the session's commits are Build's.
+   */
+  private meet(userId: UserId, session: string | undefined, client: unknown): void {
+    const key = `${userId}\u0000${session ?? ""}`;
+    this.clients.delete(key);
+    if (!isRecord(client) || typeof client.name !== "string" || typeof client.version !== "string") return;
+    // Both go into a log line: control characters can't start another line, and each is bounded.
+    const shown = (text: string): string => text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80);
+    const named = { name: shown(client.name), version: shown(client.version) };
+    if (session !== undefined) {
+      this.clients.set(key, named);
+      for (const oldest of this.clients.keys()) {
+        if (this.clients.size <= CLIENTS_CAP) break;
+        this.clients.delete(oldest);
+      }
+    }
+    this.rt.host.log("info", `[LumiRPEngine] outside client connected: ${named.name} ${named.version}`, userId);
   }
 
   /** The world's engine-managed book follows its head revision: a slot entry per section, and no leftover lore copies (DESIGN §4.2). */
