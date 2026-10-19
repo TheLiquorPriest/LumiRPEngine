@@ -23,6 +23,7 @@ import type {
   SceneTypeId,
   WorldId,
 } from "./ids";
+import type { FinanceView } from "./finance";
 import type { JournalNote, KeepLine, TimelapseTarget } from "./ledger";
 import type { AdjudicationDef, FacetDef, FacetId, FacetValueId, FieldType, StepPurpose, WorldCurrency } from "./world";
 import type { LorePolicy } from "./settings";
@@ -355,37 +356,14 @@ export interface GmView {
   places: { id: PlaceId; name: string; visibility: string; parent: PlaceId | null }[];
   tracks: { id: string; label: string; kind: string; visibility: string; owner: string | null; stage: string; stages: { id: string; label: string; truth?: string }[] }[];
   relationTypes: { id: string; label: string; from: string; to: string; fields: { id: string; label: string; type: FieldType; min?: number; max?: number; values?: string[] }[] }[];
-  /** Everyone else's money (the economy pack's `economy.people_money`); empty without it. */
-  money: GmMoney[];
+  /** Every party's money, the POV first, each at their own Money level (the economy pack's `economy.people_money`); empty without it. */
+  money: FinanceView[];
   /** The fight under way as the GM sees it, everyone named and HP exact (the combat pack's `combat.gm`); null without one. Its shape is the Encounter card's. */
   encounter: JsonValue | null;
   /** The ✎ fixes and GM edits in force on this chat's path, newest first, worded in full. */
   edits: { messageId: string; seq: number; lines: string[] }[];
   /** Writes held during a reply that didn't apply when it finished, with the validator's reason. */
   refused: { id: string; reason: string }[];
-}
-
-/** One person's money in the GM view, at their own Money level (as the Money panel shows the POV's at the POV's). */
-export interface GmMoney {
-  entity: EntityId;
-  name: string;
-  level: number;
-  /** The wealth band; null at Money 0. */
-  band: string | null;
-  /** From Money 2, for someone who holds accounts. */
-  netWorthCents: number | null;
-  /**
-   * False while their authored accounts haven't been opened yet (no money process or view has needed
-   * them): the balances shown include the authored opening amounts that opening will post.
-   */
-  opened: boolean;
-  accounts: { id: EntityId; name: string; kind: string; cents: number }[];
-  /** Their recurring bills from Money 3: when, what, how much (negative) and who is paid. */
-  bills: { at: string; label: string; cents: number; payee: string }[];
-  /** Their latest history lines on the accounts shown, newest first. */
-  recent: { at: string; memo: string; cents: number; account: string }[];
-  /** Their latest payday, bill and decline notes, newest first. */
-  notes: { at: string; text: string }[];
 }
 
 /**

@@ -36,8 +36,9 @@ export function pinnedVersion(world: WorldDoc, reg: Registry, domain: DomainId):
   const def = reg.materializers.get(domain);
   if (!def) return { code: "no_materializer", reason: `no materializer for ${domain}` };
   const pin = world.pins.generators[domain];
-  if (pin !== undefined && pin !== def.version) return { code: "generator_pin", reason: `${domain} is pinned to generator v${pin}; this build has v${def.version}` };
-  return def.version;
+  const carried = def.versions ?? [def.version];
+  if (pin !== undefined && !carried.includes(pin)) return { code: "generator_pin", reason: `${domain} is pinned to generator v${pin}; this build has v${carried.join(", v")}` };
+  return pin ?? def.version;
 }
 
 function sample(reg: Registry, ctx: ReadContext, entity: EntityId, domain: DomainId, runSeed: string): MaterializeEvent | null {
@@ -45,7 +46,7 @@ function sample(reg: Registry, ctx: ReadContext, entity: EntityId, domain: Domai
   if (!def || !own(ctx.state.entities, entity)) return null;
   const version = pinnedVersion(ctx.world, reg, domain);
   if (typeof version !== "number") return null;
-  const events: LedgerEvent[] = def.materialize(entity, ctx, createRng(materializationSeed(runSeed, entity, domain)));
+  const events: LedgerEvent[] = def.materialize(entity, ctx, createRng(materializationSeed(runSeed, entity, domain)), version);
   if (events.length === 0) return null;
   return { type: "materialize", entity, domain, generatorVersion: version, tablesRevision: tablesRevision(ctx.world), events };
 }

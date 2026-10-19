@@ -12,9 +12,12 @@ import { createRng } from "../../src/engine/rng";
 import type { WorldState } from "../../src/engine/state";
 import { Working } from "../../src/engine/working";
 import { ALL_PACKS } from "../../src/packs/index";
-import { buildMoneyView } from "../../src/packs/economy/core/view";
+import type { ReadContext } from "../../src/engine/registry";
 import { modernUsWorld } from "./riverton";
 import { startState } from "./support";
+
+/** The POV's money as the Money panel shows it. */
+const moneyView = (ctx: ReadContext) => ctx.query("economy.finance")(ctx, ctx.world.pov, true);
 
 const reg = createRegistry(ALL_PACKS);
 const shop = `${EXTERNAL_ACCOUNT_PREFIX}shop`;
@@ -67,12 +70,12 @@ describe("posting guard and payment units (ledger 1.10)", () => {
     const branch = new Working(reg, w.world, before);
     const cash = branch.state.accounts.cash ?? 0;
     branch.apply({ type: "post", lines: [{ account: "cash", amount: -(cash - 100) }, { account: shop, amount: cash - 100 }], memo: "Spent elsewhere" });
-    const history = buildMoneyView(branch.ctx).recent.length;
+    const history = moneyView(branch.ctx).recent.length;
     const items = Object.keys(branch.state.entities).length;
     const applied = applyValidUnits(reg, events, branch.state, (s) => reg.context(branch.world, s));
     expect(applied.filter((e) => e.type !== "clock")).toEqual([]);
     expect(branch.state.accounts.cash).toBe(100);
-    expect(buildMoneyView(branch.ctx).recent.length).toBe(history);
+    expect(moneyView(branch.ctx).recent.length).toBe(history);
     expect(Object.keys(branch.state.entities).length).toBe(items);
   });
 });

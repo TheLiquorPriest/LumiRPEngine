@@ -7,7 +7,8 @@
 import { useEffect, useId, useState } from "preact/hooks";
 import type { JsonValue } from "../../shared/json";
 import type { EditOp } from "../../shared/protocol";
-import type { GmEntity, GmField, GmMoney, GmRelation, GmView } from "../../shared/state-view";
+import type { FinanceView } from "../../shared/finance";
+import type { GmEntity, GmField, GmRelation, GmView } from "../../shared/state-view";
 import { DEFAULT_CURRENCY, formatMoney, type WorldCurrency } from "../../shared/world";
 import { useApp } from "../app";
 import { Card, Empty, Row, Tabs, tabPanel, useBusy } from "../components";
@@ -509,21 +510,22 @@ function Entities(props: { editor: Editor }) {
   );
 }
 
-/** One person's money at their own Money level, with Add and Take on each account shown. */
-function PersonMoney(props: { money: GmMoney; editor: Editor }) {
+/** One party's money at their own Money level, with Add and Take on each account shown. */
+function PersonMoney(props: { money: FinanceView; editor: Editor }) {
   const { money: m, editor } = props;
   const [amount, setAmount] = useState("");
-  const valid = adjustOp(m.entity, amount, editor.currency, false) !== null;
+  const valid = adjustOp(m.party, amount, editor.currency, false) !== null;
+  const netWorth = m.overview?.netWorth ?? null;
   return (
     <Card title={`Money · ${m.name}`} aside={<span class="lre-badge">Money {m.level}</span>}>
       {m.band ? <Row k="Band" v={m.band} /> : null}
-      {m.netWorthCents !== null ? <Row k="Net worth" v={formatMoney(m.netWorthCents, editor.currency)} /> : null}
+      {netWorth !== null ? <Row k="Net worth" v={formatMoney(netWorth, editor.currency)} /> : null}
       {!m.opened ? <div class="lre-small lre-muted">Not opened yet: these are the opening balances it will start from.</div> : null}
       {m.accounts.map((a) => (
         <Row
           key={a.id}
           k={a.name}
-          sub={a.kind}
+          sub={a.classLabel}
           v={
             <span class="lre-inline">
               {formatMoney(a.cents, editor.currency)}
@@ -601,7 +603,7 @@ function Body(props: { editor: Editor }) {
               </Card>
             ))
           : null}
-        {section === "money" ? (gm.money.length === 0 ? <Empty>No one else's money is tracked.</Empty> : gm.money.map((m) => <PersonMoney key={m.entity} money={m} editor={editor} />)) : null}
+        {section === "money" ? (gm.money.length === 0 ? <Empty>No one else's money is tracked.</Empty> : gm.money.map((m) => <PersonMoney key={m.party} money={m} editor={editor} />)) : null}
         {section === "edits" ? (
           <Card title="Corrections in force">
             {gm.refused.map((r) => (

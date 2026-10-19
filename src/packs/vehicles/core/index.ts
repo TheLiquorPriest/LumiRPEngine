@@ -16,7 +16,6 @@ import type { EntityId, PlaceId, TravelMode } from "../../../shared/ids";
 import type { LedgerEvent } from "../../../shared/ledger";
 import type { DataTable, TableRow } from "../../../shared/tables";
 import type { KindDef } from "../../../shared/world";
-import { calendarOf, dateAt } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, objOf, optionalQuery, optionalService, own, rowOf, strOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
@@ -58,6 +57,8 @@ declare module "../../../engine/registry" {
     fuel_ok: (ctx: ReadContext, vehicle: EntityId, leg: Leg) => boolean;
     /** Drive, ride or sail options from a place for the POV's vehicles (the map panel). */
     "vehicles.travel_options": (ctx: ReadContext, from: PlaceId) => TravelOption[];
+    /** Each insured vehicle's monthly premium, its owner and its name: the economy pays it as a flow linked to the vehicle. */
+    "vehicles.insurance": (ctx: ReadContext) => { vehicle: EntityId; owner: EntityId; cents: number; label: string }[];
   }
 }
 
@@ -233,12 +234,6 @@ function charge(ctx: ReadContext, payer: EntityId, cents: number, memo: string, 
   return svc(ctx, payer, cents, memo, { category, ...(recurring ? { method: "account" as const } : {}) });
 }
 
-/** Whether an owner's authored bills already insure their vehicles (an "auto insurance" bill): then the class premium isn't charged too. */
-function insuredByBill(ctx: ReadContext, owner: EntityId): boolean {
-  const bills = own(ctx.state.entities, owner)?.fields.bills;
-  return Array.isArray(bills) && bills.some((b) => /insurance/i.test(strOf(objOf(b).label)) && /auto|car|vehicle|truck|motor|boat|marine/i.test(strOf(objOf(b).label)));
-}
-
 function priceOf(ctx: ReadContext, catalog: string, qty: number): number {
   const price = optionalQuery(ctx, "economy.price");
   const p = price ? price(ctx, { catalog, qty }) : null;
@@ -378,11 +373,6 @@ export const vehiclesPack: PackDef = {
       minLevel: 4,
       step(slot, ctx) {
         const out: LedgerEvent[] = [];
-        const cal = calendarOf(ctx.world);
-        const start = dateAt(cal, slot.start);
-        const end = dateAt(cal, slot.end - 1);
-        // Insurance bills on the 1st, in the slot holding 09:00 (the economy's billing convention).
-        const billing = start.day === 1 && start.minuteOfDay <= 540 && (end.dayIndex > start.dayIndex || end.minuteOfDay >= 540);
         for (const v of Object.keys(ctx.state.entities).sort()) {
           const e = own(ctx.state.entities, v);
           if (!e || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, v) < 4) continue;
@@ -391,16 +381,22 @@ export const vehiclesPack: PackDef = {
             out.push({ type: "set", entity: v, field: "status", value: "needs_service" });
             out.push({ type: ENGINE_EVENTS.note, data: { text: `${e.name} is due for service.`, entity: v } });
           }
-          const owner = typeof e.fields.owner === "string" ? e.fields.owner : null;
-          const premium = numOf(classRow(ctx, v)?.insurance_full_cents_per_month);
-          if (billing && owner && premium > 0 && !insuredByBill(ctx, owner)) {
-            const paid = charge(ctx, owner, premium, `Insurance: ${e.name}`, "insurance", true);
-            if (Array.isArray(paid)) out.push(...paid, { type: ENGINE_EVENTS.signal, data: { class: "bill", text: `Insurance for ${e.name} paid.`, entity: owner, visibility: "known_by" } });
-            else out.push({ type: ENGINE_EVENTS.signal, data: { class: "decline", text: `Insurance for ${e.name} was declined: ${paid.reason}`, entity: owner, visibility: "known_by" } });
-          }
         }
         return out;
       },
+    });
+    // Insurance (DESIGN §25.5): each vehicle's class premium a month, which the economy pays as a
+    // flow linked to the vehicle; a flow the author links to it insures it instead.
+    r.query("vehicles.insurance", (ctx) => {
+      const out: { vehicle: EntityId; owner: EntityId; cents: number; label: string }[] = [];
+      for (const v of Object.keys(ctx.state.entities).sort()) {
+        const e = own(ctx.state.entities, v);
+        const owner = typeof e?.fields.owner === "string" ? e.fields.owner : null;
+        if (!e || !owner || !own(ctx.state.entities, owner) || !kindIs(ctx.registry, ctx.world, e.kind, "vehicle") || ownerLevel(ctx, v) < 4) continue;
+        const premium = Math.round(numOf(classRow(ctx, v)?.insurance_full_cents_per_month));
+        if (premium > 0) out.push({ vehicle: v, owner, cents: premium, label: `Insurance: ${e.name}` });
+      }
+      return out;
     });
 
     r.materializer({

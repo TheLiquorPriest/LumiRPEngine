@@ -204,7 +204,7 @@ export interface FinanceHooks {
 }
 
 /** The kinds the foundation registers, whose fields modules may add to. */
-export type FinanceKind = "account" | "card" | "flow" | "trust" | "business" | "job" | "holding" | "property";
+export type FinanceKind = "account" | "card" | "flow" | "trust" | "business" | "job" | "holding" | "property" | "invoice";
 
 declare module "../../../engine/registry" {
   interface QueryMap {

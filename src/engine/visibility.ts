@@ -10,6 +10,7 @@
 import type { JsonValue } from "../shared/json";
 import { hasOwn, isRecord } from "../shared/json";
 import type { EntityId, PlaceId, StageId, TrackId, Visibility } from "../shared/ids";
+import { heldBy } from "../shared/finance";
 import type { LedgerEvent } from "../shared/ledger";
 import type { LoreEntryDef, PlaceDef, Selector, TrackDef, TrackKind, WorldDoc } from "../shared/world";
 import { objectiveLabel, objectiveWhen } from "../shared/world";
@@ -197,7 +198,7 @@ export function eventVisible(reg: Registry, world: WorldDoc, state: Readonly<Wor
       return !!t && visibilityOf(t.visibility) === "public";
     }
     case "post":
-      return e.lines.some((l) => own(state.entities, l.account)?.fields.owner === pov);
+      return e.lines.some((l) => heldBy(state.entities, l.account, pov));
     case "clock":
     case "timelapse":
       return true;

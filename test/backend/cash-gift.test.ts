@@ -8,8 +8,18 @@ import { dedupeProposals, inMinorUnits } from "../../src/backend/steps";
 import { declineNote } from "../../src/backend/runtime";
 import { toChain } from "../../src/backend/ledger-io";
 import { DEFAULT_CURRENCY } from "../../src/shared/world";
-import { netWorth } from "../../src/packs/economy/core/model";
+import { createRegistry } from "../../src/engine/registry-impl";
+import { ALL_PACKS } from "../../src/packs/index";
+import type { WorldDoc } from "../../src/shared/world";
+import type { WorldState } from "../../src/engine/state";
 import { Rig } from "../support/rig";
+
+const reg = createRegistry(ALL_PACKS);
+/** The POV's net worth as the economy reads it. */
+const worthAt = (world: WorldDoc, state: WorldState): number => {
+  const ctx = reg.context(world, state);
+  return ctx.query("economy.net_worth")(ctx, "pov") ?? 0;
+};
 
 const EXTRACT_MARK = "propose concrete state changes";
 
@@ -29,7 +39,7 @@ async function gift(proposals: JsonObject[], autoTransfer = true) {
   const world = core?.worldAt(state.revision);
   if (!world) throw new Error("no world");
   const prompt = rig.host.quietCalls.map((c) => c.messages[0]?.content ?? "").find((m) => m.includes(EXTRACT_MARK)) ?? "";
-  return { rig, chatId, state, world, prompt, worth: netWorth(state, "pov"), chipList: view.chips, chips: view.chips.map((c) => `${c.kind}: ${c.label}`), errors: rig.rt.ledger.errors };
+  return { rig, chatId, state, world, prompt, worth: worthAt(world, state), chipList: view.chips, chips: view.chips.map((c) => `${c.kind}: ${c.label}`), errors: rig.rt.ledger.errors };
 }
 
 describe("an NPC's cash gift", () => {
@@ -90,7 +100,7 @@ describe("an NPC's cash gift", () => {
     const core = await got.rig.rt.ledger.core(got.chatId, got.rig.host.userId);
     const after = core?.fold(toChain(await got.rig.host.chats.messages(got.chatId, got.rig.host.userId))).state;
     if (!after) throw new Error("no state");
-    expect(netWorth(after, "pov") - none.worth).toBe(2000);
+    expect(worthAt(none.world, after) - none.worth).toBe(2000);
     expect(got.rig.rt.ledger.errors).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { TravelOption } from "../../../src/packs/vehicles/core/index";
-import { balance, holdingsValue, priceOf } from "../../../src/packs/economy/core/model";
+import { balance, priceOf } from "../../../src/packs/economy/core/model";
 import { calendarOf, clockOfLocal } from "../../../src/engine/calendar";
 import { commitments } from "../../../src/packs/castlife/core/index";
 import { coreEventTypes, type EventTypes } from "../../../src/engine/events";
@@ -241,14 +241,14 @@ describe("Port Alder (modern_slice_of_life)", () => {
       const p = new Play("modern_slice_of_life");
       expect(p.state.entities[fund]?.fields.symbol).toBe("broad_us_equity_index");
       // Pins the converter's starting price (100 per unit) to the economy pack's default.
-      expect(holdingsValue(p.state, fund)).toBe(312500);
+      expect(balance(p.state, fund)).toBe(312500);
       expect(balance(p.state, fund)).toBe(0);
       const checking = balance(p.state, "acct_pov_checking");
       expect(p.act("invest", { amount: 50000 }).ok).toBe(true);
       expect(balance(p.state, "acct_pov_checking")).toBe(checking - 50000);
-      expect(holdingsValue(p.state, fund)).toBe(362500);
+      expect(balance(p.state, fund)).toBe(362500);
       p.lapse(14 * DAY);
-      return holdingsValue(p.state, fund);
+      return balance(p.state, fund);
     };
     const after = run();
     expect(after).not.toBe(362500);

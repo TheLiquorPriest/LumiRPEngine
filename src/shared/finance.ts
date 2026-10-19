@@ -1013,7 +1013,27 @@ export const FINANCE_EVENTS = {
   credit: "economy.credit",
   score: "economy.score",
   spend: "economy.spend",
+  open: "economy.open",
+  status: "economy.status",
+  accrue: "economy.accrue",
 } as const;
+
+/** `economy.open`: accounts whose opening balances have posted (a joint account opens once, with whichever holder's money opens first). */
+export interface OpenData {
+  accounts: EntityId[];
+}
+
+/** `economy.status`: an account's status set in play (frozen, collections, charged off, paid off, closed, open again). */
+export interface StatusData {
+  account: EntityId;
+  status: AccountStatus;
+}
+
+/** `economy.accrue`: an interest period ends for an account; its average daily balance starts again from `at`. */
+export interface AccrueData {
+  account: EntityId;
+  at: number;
+}
 
 /** `economy.txn`: a posting's journal lines (one per account in the world it touches) and what it was. */
 export interface TxnData {
@@ -1030,6 +1050,8 @@ export interface TxnData {
   /** A narrated price the charge doesn't match. */
   narrated?: number;
   limited?: "cap" | "band";
+  /** When it happened, when that isn't the time it folds (a flow at its own instant inside a slot). */
+  at?: number;
 }
 
 /**
@@ -1057,6 +1079,13 @@ export interface StatementData {
   lates?: number;
   penalty?: boolean;
   months_left?: number;
+  /** The statement's own instant (older ones close at the time they fold). */
+  at?: number;
+  streak?: number;
+  ontime?: number;
+  late30?: number;
+  late60?: number;
+  late90?: number;
 }
 
 /** `economy.card_paid`: a payment toward a credit account's statement. */

@@ -8,7 +8,6 @@ import type { Calendar } from "../../src/engine/calendar";
 import { compile } from "../../src/engine/expr";
 import type { PackDef } from "../../src/engine/registry";
 import type { Registry } from "../../src/engine/registry-impl";
-import { DEFAULT_SYMBOL } from "../../src/packs/economy/core/model";
 import { hashJson } from "../../src/shared/hash";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import type { DataTable, TableRow } from "../../src/shared/tables";
@@ -463,7 +462,7 @@ function accountEntity(a: TplAccount): EntityDef {
   const fields: Fields = { owner: a.owner, type };
   if (type === "brokerage") {
     // Holdings are units of the symbol; the economy pack prices a symbol at 100 until its first market step, and a test pins the match.
-    fields.symbol = a.symbol ?? DEFAULT_SYMBOL;
+    fields.symbol = a.symbol ?? "broad_us_equity_index";
     fields.units = (a.holdingsCents ?? 0) / 100 / STARTING_SYMBOL_PRICE;
   }
   put(fields, "institution", a.institution);

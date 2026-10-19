@@ -9,7 +9,6 @@ import { materializeAll, pinnedVersion, previewMaterialization } from "../../src
 import { REALISM_PRESETS } from "../../src/engine/realism";
 import { authorLines, playerLines } from "../../src/engine/player-events";
 import { createRegistry } from "../../src/engine/registry-impl";
-import type { PackDef } from "../../src/engine/registry";
 import { resolveAction } from "../../src/engine/resolve";
 import { createRng } from "../../src/engine/rng";
 import { ALL_NOTE } from "../../src/engine/simulate";
@@ -19,12 +18,15 @@ import { Working } from "../../src/engine/working";
 import { ALL_PACKS } from "../../src/packs/index";
 import economyPack from "../../src/packs/economy/core/index";
 import { buildCastView } from "../../src/packs/castlife/core/index";
-import { buildMoneyView } from "../../src/packs/economy/core/view";
+import type { PackDef, ReadContext } from "../../src/engine/registry";
 import { buildGearView } from "../../src/packs/gear/core/view";
 import { buildGarageView } from "../../src/packs/vehicles/core/view";
 import { modernUsWorld } from "../packs/riverton";
 import { fold, startState, trialBalance } from "../packs/support";
 import { reg } from "./harness";
+
+/** The POV's money as the Money panel shows it. */
+const moneyView = (ctx: ReadContext) => ctx.query("economy.finance")(ctx, ctx.world.pov, true);
 
 function setup(patch: (w: WorldDoc) => void = () => undefined): Working {
   const world = modernUsWorld("ex", "Riverton");
@@ -49,7 +51,7 @@ function slot(w: Working, name: string): string[] {
 }
 
 function account(w: Working, id: string): number | undefined {
-  return buildMoneyView(w.ctx).accounts.find((a) => a.id === id)?.cents;
+  return moneyView(w.ctx).accounts.find((a) => a.id === id)?.cents;
 }
 
 function until(w: Working, local: string): number {
@@ -64,7 +66,7 @@ describe("realism examples: money", () => {
     });
     const before = account(w, "checking") ?? 0;
     lapse(w, 7 * 1440);
-    const pay = buildMoneyView(w.ctx).recent.find((r) => r.memo.startsWith("Payroll"));
+    const pay = moneyView(w.ctx).recent.find((r) => r.memo.startsWith("Payroll"));
     expect(pay?.memo).toMatch(/gross, .* withheld/);
     expect(pay?.cents).toBeLessThan(94000);
     expect(pay?.cents).toBeGreaterThan(60000);
@@ -79,7 +81,7 @@ describe("realism examples: money", () => {
     const r = resolveAction(reg, w, { action: "move_money", params: { from: "checking", to: "savings", amount: 50000 } }, createRng("t"));
     expect(r.ok).toBe(true);
     expect([account(w, "checking"), account(w, "savings")]).toEqual([c - 50000, s + 50000]);
-    expect(buildMoneyView(w.ctx).recent.filter((t) => t.memo === "Transfer").map((t) => t.cents).sort((a, b) => a - b)).toEqual([-50000, 50000]);
+    expect(moneyView(w.ctx).recent.filter((t) => t.memo === "Transfer").map((t) => t.cents).sort((a, b) => a - b)).toEqual([-50000, 50000]);
   });
 
   test("an investment moves on a seeded price path: the same run seed gives the same value, another seed another", () => {
@@ -104,7 +106,7 @@ describe("realism examples: money", () => {
       wd.realism.levels.money = 4;
     });
     lapse(w4, until(w4, "2026-11-03T12:00"));
-    const card = buildMoneyView(w4.ctx).accounts.find((a) => a.id === "card");
+    const card = moneyView(w4.ctx).accounts.find((a) => a.id === "card");
     expect(card?.due?.label).toMatch(/^Minimum due/);
     expect(card?.cents).toBeLessThan(-38000);
     const w3 = setup((wd) => {
@@ -118,14 +120,14 @@ describe("realism examples: money", () => {
     const w = setup((wd) => {
       wd.realism.levels.gear = 3;
     });
-    expect(buildMoneyView(w.ctx).cash).toEqual({ cents: 8400 });
+    expect(moneyView(w.ctx).cash).toEqual({ cents: 8400 });
     effects(w, [{ type: "gear.drop", args: { item: "wallet", place: "apartment" } }, { type: "economy.lose", args: { item: "wallet" } }]);
-    expect(buildMoneyView(w.ctx).cash).toEqual({ cents: 0 });
+    expect(moneyView(w.ctx).cash).toEqual({ cents: 0 });
     expect(buildGearView(w.ctx).carried.some((i) => i.id === "wallet")).toBe(false);
     expect(trialBalance(w.state)).toBe(0);
     const t = setup();
     effects(t, [{ type: "economy.lose", args: { item: "wallet", thief: "rosa" } }]);
-    expect(buildMoneyView(t.ctx).recent.some((r) => r.memo === "Stolen with Wallet" && r.cents === -8400)).toBe(true);
+    expect(moneyView(t.ctx).recent.some((r) => r.memo === "Stolen with Wallet" && r.cents === -8400)).toBe(true);
   });
 
   test("a narrated off-catalog purchase is priced inside its category band; one the POV can't afford is declined after the fact", () => {
@@ -133,7 +135,7 @@ describe("realism examples: money", () => {
     const ch = reg.proposals.get("purchase");
     const fx = ch?.toEffects({ category: "electronics", name: "a used drone" }, w.ctx) ?? [];
     expect(applyEffects(reg, w, fx, { bindings: {}, rng: createRng("d") }).rejected).toEqual([]);
-    const bought = buildMoneyView(w.ctx).recent.find((r) => r.memo === "Bought a used drone");
+    const bought = moneyView(w.ctx).recent.find((r) => r.memo === "Bought a used drone");
     const band = w.ctx.query("economy.price")(w.ctx, { category: "electronics" })?.band;
     expect(-(bought?.cents ?? 0)).toBeGreaterThanOrEqual(band?.min ?? 0);
     expect(-(bought?.cents ?? 0)).toBeLessThanOrEqual(band?.max ?? 0);
@@ -142,10 +144,10 @@ describe("realism examples: money", () => {
       wd.entities.card!.fields.limit = 0;
       wd.entities.card!.fields.opening = 0;
     });
-    const before = hashJson(buildMoneyView(broke.ctx));
+    const before = hashJson(moneyView(broke.ctx));
     const declined = applyEffects(reg, broke, ch?.toEffects({ category: "electronics", name: "a new laptop" }, broke.ctx) ?? [], { bindings: {}, rng: createRng("x") });
     expect(declined.rejected[0]?.rejection.code).toBe("declined");
-    expect(hashJson(buildMoneyView(broke.ctx))).toBe(before);
+    expect(hashJson(moneyView(broke.ctx))).toBe(before);
   });
 
   test("after a 30-day timelapse the books balance and the Montage's money equals the record", () => {
@@ -217,7 +219,7 @@ describe("realism examples: vehicles", () => {
     expect(resolveAction(reg, w, { action: "refuel", params: { vehicle: "truck" } }, createRng("f")).ok).toBe(true);
     expect(buildGarageView(w.ctx).vehicles.find((v) => v.id === "truck")?.fuelPct).toBe(100);
     expect(resolveAction(reg, w, { action: "service_vehicle", params: { vehicle: "truck" } }, createRng("s")).ok).toBe(true);
-    const memos = buildMoneyView(w.ctx).recent.map((r) => r.memo);
+    const memos = moneyView(w.ctx).recent.map((r) => r.memo);
     expect(memos.some((m) => m.startsWith("Fuel for Pickup truck"))).toBe(true);
     expect(memos).toContain("Service: Pickup truck");
     expect(slot(w, "vehicles").join(" ")).toContain("fuel 100%");
@@ -406,7 +408,7 @@ describe("realism examples: mixed tiers and defaults", () => {
     story.realism = { preset: "story", ...structuredClone(REALISM_PRESETS.story) };
     const s = new Working(reg, story, startState(story));
     materializeAll(reg, s, story.pov, "run");
-    const money = buildMoneyView(s.ctx);
+    const money = moneyView(s.ctx);
     expect(money.level).toBe(story.realism.levels.money);
     if (money.level === 1 && money.band) expect(money.cash).toEqual({ band: money.band });
   });
@@ -421,14 +423,14 @@ describe("realism examples: materialization persistence", () => {
     const s0 = startState(world);
     const t1 = planTurn({ registry: reg, world, state: s0, runSeed: "r", seed: "t1", kind: "normal", userTexts: [""], intent: null });
     const s1 = fold(reg, world, s0, t1.events);
-    const shown = buildMoneyView(reg.context(world, s1)).accounts;
+    const shown = moneyView(reg.context(world, s1)).accounts;
     expect(shown.length).toBeGreaterThan(0);
     // Reload: the ledger folds to the same panel.
-    expect(buildMoneyView(reg.context(world, fold(reg, world, s0, t1.events))).accounts).toEqual(shown);
+    expect(moneyView(reg.context(world, fold(reg, world, s0, t1.events))).accounts).toEqual(shown);
     // Re-run of a later turn with a fresh seed: what turn 1 materialized doesn't change.
     for (const seed of ["t2-a", "t2-b"]) {
       const t2 = planTurn({ registry: reg, world, state: s1, runSeed: "r", seed, kind: "normal", userTexts: [""], intent: null });
-      expect(buildMoneyView(reg.context(world, fold(reg, world, s1, t2.events))).accounts.map((a) => [a.id, a.name, a.cents])).toEqual(shown.map((a) => [a.id, a.name, a.cents]));
+      expect(moneyView(reg.context(world, fold(reg, world, s1, t2.events))).accounts.map((a) => [a.id, a.name, a.cents])).toEqual(shown.map((a) => [a.id, a.name, a.cents]));
     }
     // Extension update: a build with economy generator v2 folds the same ledger to the same panel,
     // and never samples new detail for the world pinned to v1.
@@ -440,7 +442,7 @@ describe("realism examples: materialization persistence", () => {
       },
     };
     const updated = createRegistry(ALL_PACKS.map((p) => (p.id === "economy" ? v2 : p)));
-    expect(buildMoneyView(updated.context(world, fold(updated, world, s0, t1.events))).accounts).toEqual(shown);
+    expect(moneyView(updated.context(world, fold(updated, world, s0, t1.events))).accounts).toEqual(shown);
     expect(pinnedVersion(world, updated, "money")).toMatchObject({ code: "generator_pin" });
     expect(previewMaterialization(updated, world, s0, "you", "money", "r")).toEqual([]);
   });

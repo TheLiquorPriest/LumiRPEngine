@@ -1,0 +1,777 @@
+// Paying (DESIGN §25.3, §25.7, §25.8): who pays with what, and the postings it takes. A payer's
+// payment preferences choose the way (cash, a debit card, a credit card, an account), the account
+// pays within what it has (its credit, its holds, its overdraft policy), a card pays within its
+// state and daily limits, and the payee's side lands in their deposit account, a business that
+// sells there, or the outside economy. Every payment is one unit: its posting, its journal lines
+// and whatever goes with it (an overdraft transfer or fee, sales tax, the card's daily spending).
+
+import type { JsonObject } from "../../../shared/json";
+import type { EntityId } from "../../../shared/ids";
+import type { LedgerEvent, PostEvent, PostingLine } from "../../../shared/ledger";
+import { FINANCE_EVENTS, featureOn, type ClassTraits, type FinanceFeature, type PayTier, type TxnKind } from "../../../shared/finance";
+import { formatMoney } from "../../../shared/world";
+import { hashParts } from "../../../shared/hash";
+import { calendarOf, dateAt } from "../../../engine/calendar";
+import { ENGINE_EVENTS } from "../../../engine/engine-pack";
+import { EXTERNAL_ACCOUNT_PREFIX } from "../../../engine/events";
+import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
+import type { ReadContext, Rejection } from "../../../engine/registry";
+import { kindIs } from "../../../engine/scope";
+import type { WorldState } from "../../../engine/state";
+import type { FinanceHooks, SaleTerms } from "./module";
+import { isOpened, journalOf, reject, spendOf } from "./journal";
+import {
+  BANK_PREFIX,
+  CORRECTION_ACCOUNT,
+  accountsOf,
+  accountsWorth,
+  anchorOf,
+  availableOf,
+  balance,
+  bankSide,
+  canSpend,
+  cashOnHolder,
+  classOf,
+  external,
+  hasLedger,
+  holdersOf,
+  isLost,
+  notional,
+  openerOf,
+  ownersOf,
+  productOf,
+  rightsOf,
+  statusOf,
+  traitsOf,
+  wealthBand,
+  type TableBooks,
+} from "./model";
+
+/** How a payment is to be made: as the payer's preferences choose, or a way named in words. */
+export type PayMethod = "auto" | "cash" | "card" | "credit" | "debit" | "charge" | "checking" | "savings" | "account";
+
+const PAY_METHODS: readonly PayMethod[] = ["auto", "cash", "card", "credit", "debit", "charge", "checking", "savings", "account"];
+
+/**
+ * A payment method said in words ("pay with my card"): an exact method, else "debit"/"checking" →
+ * debit, "savings", "charge card" → charge, "credit"/"card" → credit, "cash"/"wallet" → cash;
+ * anything else is auto.
+ */
+export function payMethodOf(text: string): PayMethod {
+  const t = text.trim().toLowerCase();
+  const exact = PAY_METHODS.find((m) => m === t);
+  if (exact) return exact === "card" ? "credit" : exact === "checking" ? "debit" : exact;
+  if (/\b(debit|checking|check|bank)\b/.test(t)) return "debit";
+  if (/\bsavings?\b/.test(t)) return "savings";
+  if (/\bcharge card\b/.test(t)) return "charge";
+  if (/\b(credit|card|visa|mastercard|amex)\b/.test(t)) return "credit";
+  if (/\b(cash|wallet|coins?)\b/.test(t)) return "cash";
+  return "auto";
+}
+
+export interface ChargeOptions {
+  /** Who receives the money; omitted: the outside market (or `counterparty`). */
+  payee?: EntityId;
+  method?: PayMethod;
+  /** A specific account or card of the payer's to pay from; it declines when it can't cover the amount (level 2+). */
+  source?: EntityId;
+  /** An account of the payee's the money lands in. */
+  deposit?: EntityId;
+  /** External counterparty id when there is no payee entity (`employer`, `landlord`, …). */
+  counterparty?: string;
+  category?: string;
+  kind?: TxnKind;
+  flow?: string;
+  /** A narrated price the charge doesn't match, for the journal: capped at the world's `unpricedCap`, or clamped into the item's band. */
+  narrated?: { cents: number; limited: "cap" | "band" };
+  /** A purchase at a till: who sells there may be a business (the sale hooks), a card pays as a card, cash back is possible. */
+  sale?: { place: string | null; item: string };
+  /** Cash handed back on a debit purchase, into the payer's wallet. */
+  cashback?: number;
+  /** Let a transactional account go into overdraft as its policy allows (payments and flows do; transfers don't). */
+  overdraft?: boolean;
+  /** When it happens, when that isn't now (a flow at its own instant inside a slot). */
+  at?: number;
+}
+
+export type ChargeService = (ctx: ReadContext, payer: EntityId, cents: number, memo: string, opts?: ChargeOptions) => LedgerEvent[] | Rejection;
+
+export function isRejection(v: LedgerEvent[] | Rejection): v is Rejection {
+  return !Array.isArray(v);
+}
+
+// ---------------------------------------------------------------- levels and features
+
+export function toggles(world: ReadContext["world"]): JsonObject {
+  return objOf(objOf(world.packs.economy?.config).features);
+}
+
+export function featureFor(ctx: ReadContext, party: EntityId, feature: FinanceFeature): boolean {
+  return featureOn(ctx.levelOf(party, "money"), feature, toggles(ctx.world));
+}
+
+/** An account's Money level: the highest among the parties who can spend from it (else who hold it), 0 with none in the world. */
+export function accountLevel(ctx: ReadContext, account: EntityId): number {
+  const owners = ownersOf(ctx.state, account).filter((o) => own(ctx.state.entities, o.party));
+  const spenders = owners.filter((o) => rightsOf(ctx.state, account, o.party)?.spend);
+  return Math.max(0, ...(spenders.length > 0 ? spenders : owners).map((o) => ctx.levelOf(o.party, "money")));
+}
+
+export function accountFeature(ctx: ReadContext, account: EntityId, feature: FinanceFeature): boolean {
+  return featureOn(accountLevel(ctx, account), feature, toggles(ctx.world));
+}
+
+export function isParty(ctx: ReadContext, id: EntityId): boolean {
+  const kind = own(ctx.state.entities, id)?.kind ?? "";
+  return kind !== "" && ["person", "business", "trust", "household"].some((k) => kindIs(ctx.registry, ctx.world, kind, k));
+}
+
+// ---------------------------------------------------------------- cards
+
+/** The card entities on an account, by id. */
+export function cardsOn(state: Readonly<WorldState>, account: EntityId): EntityId[] {
+  return Object.keys(state.entities)
+    .filter((id) => own(state.entities, id)?.kind === "card" && own(state.entities, id)?.fields.account === account)
+    .sort();
+}
+
+/** Why a card can't pay for its holder now, or null when it can: frozen, lost, cancelled, its physical card lost, its account not open. */
+export function cardProblem(ctx: TableBooks, card: EntityId, holder: EntityId): string | null {
+  const e = own(ctx.state.entities, card);
+  if (!e || e.kind !== "card") return "isn't a card";
+  const name = e.name;
+  if (strOf(e.fields.holder) !== holder) return `${name} isn't theirs`;
+  const state = strOf(e.fields.state, "active");
+  if (state !== "active") return `${name} is ${state}`;
+  const item = strOf(e.fields.item);
+  if (item !== "" && own(ctx.state.entities, item) && isLost(ctx.state, item)) return `${name} is lost`;
+  const account = strOf(e.fields.account);
+  if (statusOf(ctx.state, account) !== "open") return `${own(ctx.state.entities, account)?.name ?? account} is ${statusOf(ctx.state, account).replace(/_/g, " ")}`;
+  return null;
+}
+
+// ---------------------------------------------------------------- choosing what pays
+
+interface Source {
+  account: EntityId;
+  card?: EntityId;
+  via: "cash" | "debit" | "credit" | "charge" | "account" | "savings";
+}
+
+/** Accounts a party can spend from that pay at all: open, of a class that pays. */
+function spendable(ctx: TableBooks, party: EntityId): EntityId[] {
+  return accountsOf(ctx, party, "spend").filter((id) => statusOf(ctx.state, id) === "open" && traitsOf(ctx, id)?.pays === true);
+}
+
+/** Card-carried classes: transactional accounts carry debit cards, credit and charge cards their own. */
+function cardSources(ctx: ReadContext, payer: EntityId, accounts: readonly EntityId[], via: Source["via"], till: boolean, problems: string[]): Source[] {
+  const out: Source[] = [];
+  const cards = featureFor(ctx, payer, "cards");
+  for (const account of accounts) {
+    const instruments = cardsOn(ctx.state, account);
+    if (!till || !cards || instruments.length === 0) {
+      // An account without cards (or a payment that isn't at a till) pays as the account.
+      out.push({ account, via });
+      continue;
+    }
+    for (const card of instruments) {
+      if (strOf(own(ctx.state.entities, card)?.fields.holder) !== payer) continue;
+      const problem = cardProblem(ctx, card, payer);
+      if (problem) problems.push(problem);
+      else out.push({ account, card, via });
+    }
+  }
+  return out;
+}
+
+function sourcesFor(ctx: ReadContext, payer: EntityId, use: string, till: boolean, problems: string[]): Source[] {
+  const mine = spendable(ctx, payer);
+  const where = (pred: (t: ClassTraits, cls: string) => boolean): EntityId[] =>
+    mine.filter((id) => {
+      const t = traitsOf(ctx, id);
+      return t !== null && pred(t, classOf(ctx, id) ?? "");
+    });
+  switch (use) {
+    case "cash":
+      return till ? where((t) => t.cash).filter((id) => cashOnHolder(ctx.state, id, payer)).map((account) => ({ account, via: "cash" })) : [];
+    case "debit":
+    case "checking":
+      return cardSources(ctx, payer, where((t) => t.transactional), till ? "debit" : "account", till, problems);
+    case "credit":
+    case "card":
+      return cardSources(ctx, payer, where((_t, c) => c === "credit_card" || (!till && c === "line_of_credit")), "credit", till, problems);
+    case "charge":
+      return cardSources(ctx, payer, where((_t, c) => c === "charge_card"), "charge", till, problems);
+    case "savings":
+      return where((_t, c) => c === "savings" || c === "money_market" || c === "trust").map((account) => ({ account, via: "savings" }));
+    default: {
+      const e = own(ctx.state.entities, use);
+      if (e?.kind === "card") {
+        const problem = cardProblem(ctx, use, payer);
+        if (problem) {
+          problems.push(problem);
+          return [];
+        }
+        const account = strOf(e.fields.account);
+        return mine.includes(account) ? [{ account, card: use, via: e.fields.network === "debit" ? "debit" : e.fields.network === "charge" ? "charge" : "credit" }] : [];
+      }
+      return mine.includes(use) ? [{ account: use, via: classOf(ctx, use) === "cash" ? "cash" : "account" }] : [];
+    }
+  }
+}
+
+/** The overdraft a transactional account allows on top of what it has: its policy's room, where overdrafts run. */
+export function overdraftRoom(ctx: ReadContext, account: EntityId): number {
+  const t = traitsOf(ctx, account);
+  if (!t?.transactional || !accountFeature(ctx, account, "overdraft")) return 0;
+  const p = productOf(ctx, account);
+  if (!p) return 0;
+  if (p.overdraft === "fee") return Math.max(0, p.overdraft_limit);
+  if (p.overdraft === "linked") {
+    const link = strOf(own(ctx.state.entities, account)?.fields.overdraft_link);
+    const holders = holdersOf(ctx.state, account);
+    return link !== "" && holders.some((h) => canSpend(ctx.state, link, h)) ? Math.max(0, availableOf(ctx, link)) : 0;
+  }
+  return 0;
+}
+
+/** What a card may still spend today on purchases, or at a machine; Infinity where daily limits don't run. */
+export function cardRoom(ctx: ReadContext, card: EntityId, what: "purchase" | "atm"): number {
+  const e = own(ctx.state.entities, card);
+  if (!e) return Infinity;
+  const account = strOf(e.fields.account);
+  if (!accountFeature(ctx, account, "daily_limits")) return Infinity;
+  const p = productOf(ctx, account);
+  const field = what === "purchase" ? "daily_purchase_limit" : "daily_atm_limit";
+  const limit = typeof e.fields[field] === "number" ? (e.fields[field] as number) : (p?.[field] ?? null);
+  if (limit === null) return Infinity;
+  const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+  const spent = spendOf(ctx.state, card, day)[what];
+  return Math.max(0, limit - spent);
+}
+
+function covers(ctx: ReadContext, s: Source, cents: number, overdraft: boolean): boolean {
+  if (s.card && cardRoom(ctx, s.card, "purchase") < cents) return false;
+  return availableOf(ctx, s.account) + (overdraft ? overdraftRoom(ctx, s.account) : 0) >= cents;
+}
+
+/** The ways a party pays by default: by their wealth and their manner (DESIGN §25.7). */
+export function defaultTiers(ctx: ReadContext, who: EntityId): PayTier[] {
+  const e = own(ctx.state.entities, who);
+  const band = hasLedger(ctx, who) ? wealthBand(shownWorth(ctx, who)) : strOf(e?.fields.wealth, "modest");
+  const traits = (Array.isArray(e?.fields.traits) ? e.fields.traits : []).map((t) => String(t).toLowerCase()).join(" ");
+  const careful = /\b(frugal|thrifty|careful|cautious|old-fashioned|old fashioned|prudent|stingy|saver)\b/.test(traits);
+  const loose = /\b(impulsive|reckless|spendthrift|flashy|extravagant|generous|lavish)\b/.test(traits);
+  if (kindIs(ctx.registry, ctx.world, e?.kind ?? "", "business")) return [{ use: "debit" }, { use: "credit" }];
+  if (loose) return [{ use: "credit" }, { use: "charge" }, { use: "debit" }, { use: "cash" }];
+  switch (band) {
+    case "broke":
+    case "poor":
+      return [{ use: "cash", max: careful ? 5000 : 2000 }, { use: "debit" }, { use: "credit" }];
+    case "modest":
+      return careful ? [{ use: "cash", max: 5000 }, { use: "debit" }, { use: "credit", min: 50_000 }] : [{ use: "cash", max: 1000 }, { use: "debit", max: 20_000 }, { use: "credit" }, { use: "debit" }];
+    case "comfortable":
+      return careful ? [{ use: "cash", max: 1000 }, { use: "debit" }, { use: "credit" }] : [{ use: "cash", max: 500 }, { use: "credit" }, { use: "debit" }];
+    default:
+      return [{ use: "charge" }, { use: "credit" }, { use: "debit" }];
+  }
+}
+
+/** A party's share of its accounts, an unopened account at the opening it will post. */
+export function shownWorth(ctx: TableBooks, who: EntityId): number {
+  return accountsWorth(ctx, who, (id) => balance(ctx.state, id) + (isOpened(ctx.state, id, openerOf(ctx.state, id)) ? 0 : Math.round(numOf(own(ctx.state.entities, id)?.fields.opening))));
+}
+
+/** A party's payment preferences: their own tiers when they set any, else the defaults. */
+export function tiersOf(ctx: ReadContext, who: EntityId): PayTier[] {
+  const raw = own(ctx.state.entities, who)?.fields.pay_prefs;
+  const own_: PayTier[] = [];
+  for (const t of Array.isArray(raw) ? raw : []) {
+    const o = objOf(t);
+    if (typeof o.use !== "string" || o.use === "") continue;
+    const list = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined);
+    own_.push({ use: o.use, ...(typeof o.min === "number" ? { min: o.min } : {}), ...(typeof o.max === "number" ? { max: o.max } : {}), ...(list(o.categories) ? { categories: list(o.categories) } : {}), ...(list(o.except) ? { except: list(o.except) } : {}) });
+  }
+  return own_.length > 0 ? own_ : defaultTiers(ctx, who);
+}
+
+function tierFits(t: PayTier, cents: number, category: string): boolean {
+  if (t.min !== undefined && cents < t.min) return false;
+  if (t.max !== undefined && cents > t.max) return false;
+  if (t.categories && t.categories.length > 0 && !t.categories.includes(category)) return false;
+  return !(t.except && t.except.includes(category));
+}
+
+export interface Picked {
+  account: EntityId;
+  card?: EntityId;
+  via: Source["via"];
+}
+
+/**
+ * What a payment comes from, or a decline (from level 2; level 1 overdraws instead). A named source
+ * (an account or a card of the payer's) pays when it can; a named loan or brokerage account falls
+ * back to the usual choice. A way named in words (a card, cash, savings) is tried first; otherwise
+ * the payer's preferences, tier by tier, then anything they can spend from that covers it.
+ */
+export function chooseSource(ctx: ReadContext, payer: EntityId, cents: number, opts: { method?: PayMethod; source?: EntityId; category?: string; except?: EntityId; till: boolean; overdraft: boolean }): Picked | Rejection {
+  const level = ctx.levelOf(payer, "money");
+  const problems: string[] = [];
+  const money = (c: number): string => formatMoney(c, ctx.world.currency);
+  const usable = (s: Source): boolean => s.account !== opts.except;
+  if (opts.source) {
+    const named = sourcesFor(ctx, payer, opts.source, opts.till, problems).filter(usable);
+    const first = named[0];
+    if (first) {
+      if (level < 2 || covers(ctx, first, cents, opts.overdraft)) return first;
+      return reject("declined", first.card ? `${labelOf(ctx, first.card)} was declined for ${money(cents)}` : `${labelOf(ctx, first.account)} can't cover ${money(cents)}`);
+    }
+    if (problems.length > 0) return reject("declined", `${problems[0]}`);
+  }
+  const method = opts.method ?? "auto";
+  const category = opts.category ?? "";
+  let uses: string[];
+  if (method === "account") uses = ["checking", "credit", "charge", "savings"];
+  else if (method === "auto") {
+    const tiers = level >= 2 && featureFor(ctx, payer, "payment_prefs") ? tiersOf(ctx, payer).filter((t) => tierFits(t, cents, category)).map((t) => t.use) : [];
+    uses = [...tiers, ...(level >= 2 ? ["cash", "debit", "credit", "charge"] : ["cash", "debit", "credit", "savings"])];
+  } else uses = method === "card" ? ["credit", "charge"] : method === "checking" ? ["debit"] : [method];
+  const tried = new Set<string>();
+  const candidates: Source[] = [];
+  for (const use of uses) {
+    for (const s of sourcesFor(ctx, payer, use, opts.till, problems).filter(usable)) {
+      const key = `${s.account}|${s.card ?? ""}`;
+      if (tried.has(key)) continue;
+      tried.add(key);
+      candidates.push(s);
+      if (covers(ctx, s, cents, opts.overdraft)) return s;
+    }
+  }
+  if (level < 2) {
+    const fallback = candidates[0] ?? spendable(ctx, payer).filter((id) => id !== opts.except).map((account): Source => ({ account, via: "account" }))[0];
+    if (fallback) return fallback;
+  }
+  const name = own(ctx.state.entities, payer)?.name ?? payer;
+  if (problems.length > 0 && (method !== "auto" || candidates.length === 0)) return reject("declined", problems[0] ?? `${name}'s card was declined`);
+  return reject("declined", method === "credit" || method === "card" || method === "charge" ? `${name}'s card was declined` : `${name} doesn't have ${money(cents)} available`);
+}
+
+// ---------------------------------------------------------------- deposits and the payee's side
+
+/** Where money paid to a party lands by default: a business's operating account, else their best open deposit account (never `except`). */
+export function depositAccount(ctx: TableBooks, party: EntityId, except?: EntityId): EntityId | null {
+  const operating = strOf(own(ctx.state.entities, party)?.fields.operating_account);
+  if (operating !== "" && operating !== except && rightsOf(ctx.state, operating, party)?.worth && statusOf(ctx.state, operating) === "open") return operating;
+  const ranked = accountsOf(ctx, party, "worth")
+    .filter((id) => id !== except && statusOf(ctx.state, id) === "open")
+    .map((id) => ({ id, rank: traitsOf(ctx, id)?.depositRank ?? null }))
+    .filter((x): x is { id: EntityId; rank: number } => x.rank !== null && !(traitsOf(ctx, x.id)?.cash === true && !cashOnHolder(ctx.state, x.id, party)));
+  ranked.sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id));
+  return ranked[0]?.id ?? null;
+}
+
+/** A party's carried cash account (the wallet), else any cash account of theirs. */
+export function cashAccount(ctx: TableBooks, party: EntityId): EntityId | null {
+  const cash = accountsOf(ctx, party, "spend").filter((id) => classOf(ctx, id) === "cash");
+  return cash.find((id) => cashOnHolder(ctx.state, id, party)) ?? cash[0] ?? null;
+}
+
+/** Level-1 band bookkeeping for a party without accounts whose outside account moves by `delta`. */
+export function l1Move(state: Readonly<WorldState>, who: EntityId, delta: number): LedgerEvent[] {
+  const a = anchorOf(state, who);
+  const after = notional(state, who) + delta;
+  const band = wealthBand(after);
+  const explicit = strOf(objOf(own(objOf(objOf(state.packs.economy).anchors), who)).band) === a.band;
+  const out: LedgerEvent[] = [];
+  if (!explicit || band !== a.band) out.push({ type: FINANCE_EVENTS.anchor, data: { entity: who, band, typical: a.typical, base: a.base } });
+  if (band !== strOf(own(state.entities, who)?.fields.wealth, "modest")) out.push({ type: "set", entity: who, field: "wealth", value: band });
+  return out;
+}
+
+/** Where money lands for a payee: the named deposit account it holds, else its default deposit account, else its outside account (level-1 band moves). */
+export function payeeSide(ctx: ReadContext, opts: Pick<ChargeOptions, "payee" | "deposit" | "counterparty">, cents: number): { account: string; extra: LedgerEvent[] } {
+  const payee = opts.payee;
+  if (payee && own(ctx.state.entities, payee)) {
+    if (hasLedger(ctx, payee) && ctx.levelOf(payee, "money") >= 1) {
+      const named = opts.deposit && rightsOf(ctx.state, opts.deposit, payee) && statusOf(ctx.state, opts.deposit) === "open" ? opts.deposit : undefined;
+      const deposit = named ?? depositAccount(ctx, payee);
+      if (deposit) return { account: deposit, extra: [] };
+    }
+    const extra = ctx.levelOf(payee, "money") >= 1 && !hasLedger(ctx, payee) ? l1Move(ctx.state, payee, cents) : [];
+    return { account: external(payee), extra };
+  }
+  return { account: external(opts.counterparty ?? "market"), extra: [] };
+}
+
+// ---------------------------------------------------------------- journal lines and units
+
+export interface TxnMeta {
+  memo: string;
+  kind?: TxnKind;
+  category?: string;
+  counterparty?: string;
+  card?: EntityId;
+  flow?: string;
+  pending?: number;
+  narrated?: ChargeOptions["narrated"];
+  at?: number;
+}
+
+/** A posting's journal lines: the lines on accounts in the world, and what the payment was. */
+export function txn(lines: readonly PostingLine[], meta: TxnMeta): LedgerEvent {
+  const mine = lines.filter((l) => !l.account.startsWith(EXTERNAL_ACCOUNT_PREFIX));
+  const data: JsonObject = { memo: meta.memo, lines: mine.map((l) => ({ account: l.account, amount: l.amount })) };
+  if (meta.kind) data.kind = meta.kind;
+  if (meta.category) data.category = meta.category;
+  if (meta.counterparty) data.counterparty = meta.counterparty;
+  if (meta.card) data.card = meta.card;
+  if (meta.flow) data.flow = meta.flow;
+  if (meta.pending !== undefined) {
+    data.status = "pending";
+    data.settles = meta.pending;
+  }
+  if (meta.narrated) {
+    data.narrated = meta.narrated.cents;
+    data.limited = meta.narrated.limited;
+  }
+  if (meta.at !== undefined) data.at = meta.at;
+  return { type: FINANCE_EVENTS.txn, data };
+}
+
+/** A posting and its journal lines. */
+export function posting(lines: PostingLine[], meta: TxnMeta): LedgerEvent[] {
+  return [{ type: "post", lines, memo: meta.memo }, txn(lines, meta)];
+}
+
+/**
+ * One payment as an atomic unit (ledger 1.10): its posting, its journal lines and any bookkeeping
+ * beside it share a group, so a rebased view that can't afford the posting drops all of them.
+ */
+export function asUnit(events: LedgerEvent[]): LedgerEvent[] {
+  if (events.length < 2) return events;
+  const group = `pay:${hashParts(JSON.stringify(events)).slice(0, 10)}`;
+  return events.map((e) => ({ ...e, group }));
+}
+
+/** Folds lines on the same account into one line each (a sale's tax landing with its price). */
+function merged(lines: readonly PostingLine[]): PostingLine[] {
+  const out: PostingLine[] = [];
+  for (const l of lines) {
+    if (l.amount === 0) continue;
+    const same = out.find((x) => x.account === l.account);
+    if (same) same.amount += l.amount;
+    else out.push({ ...l });
+  }
+  return out.filter((l) => l.amount !== 0);
+}
+
+/** Overdraft fees an account was charged today (at most three a day). */
+function overdraftFeesToday(ctx: ReadContext, account: EntityId): number {
+  const cal = calendarOf(ctx.world);
+  const today = dateAt(cal, ctx.state.clock).dayIndex;
+  return journalOf(ctx.state, account).filter((j) => j.kind === "fee" && j.category === "overdraft" && dateAt(cal, j.at).dayIndex === today).length;
+}
+
+/**
+ * What an account's overdraft policy adds to a payment that takes more than it has: a transfer from
+ * the linked account first, or the overdraft fee after.
+ */
+function overdraftEvents(ctx: ReadContext, account: EntityId, total: number, at: number): { before: LedgerEvent[]; after: LedgerEvent[] } {
+  const short = total - availableOf(ctx, account);
+  if (short <= 0 || overdraftRoom(ctx, account) <= 0) return { before: [], after: [] };
+  const p = productOf(ctx, account);
+  if (!p) return { before: [], after: [] };
+  if (p.overdraft === "linked") {
+    const link = strOf(own(ctx.state.entities, account)?.fields.overdraft_link);
+    const lines: PostingLine[] = [
+      { account: link, amount: -short },
+      { account, amount: short },
+    ];
+    return { before: posting(lines, { memo: `Overdraft transfer from ${labelOf(ctx, link)}`, kind: "transfer", category: "transfer", at }), after: [] };
+  }
+  const fee = accountFeature(ctx, account, "fees") && overdraftFeesToday(ctx, account) < 3 ? p.fees.overdraft : 0;
+  if (fee <= 0) return { before: [], after: [] };
+  const lines: PostingLine[] = [
+    { account, amount: -fee },
+    { account: bankSide(p.institution), amount: fee },
+  ];
+  return { before: [], after: posting(lines, { memo: "Overdraft fee", kind: "fee", category: "overdraft", at }) };
+}
+
+/** What a sale at a till brings with it: the first sale hook that names a seller or tax there. */
+function saleTermsOf(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, cents: number, category: string, sale: NonNullable<ChargeOptions["sale"]>): SaleTerms | null {
+  for (const hook of hooks.sales) {
+    const terms = hook(ctx, { payer, place: sale.place, category, cents, item: sale.item });
+    if (terms) return terms;
+  }
+  return null;
+}
+
+/** Pay `cents`: a no-op at level 0, a band check plus adjustment at 1, a posting (with declines) from 2. */
+export function charge(hooks: FinanceHooks, ctx: ReadContext, payer: EntityId, rawCents: number, memo: string, opts: ChargeOptions = {}): LedgerEvent[] | Rejection {
+  if (!own(ctx.state.entities, payer)) return reject("missing_entity", `no payer ${labelOf(ctx, payer)}`);
+  const cents = Math.round(rawCents);
+  if (!(cents > 0)) return [];
+  const level = ctx.levelOf(payer, "money");
+  if (level === 0) return [];
+  const at = opts.at ?? ctx.state.clock;
+  const terms = opts.sale ? saleTermsOf(hooks, ctx, payer, cents, opts.category ?? "", opts.sale) : null;
+  const tax = Math.max(0, Math.round(terms?.tax ?? 0));
+  const cashback = Math.max(0, Math.round(opts.cashback ?? 0));
+  const total = cents + tax + cashback;
+  const overdraft = opts.overdraft !== false;
+  const out: LedgerEvent[] = [];
+  let source: string;
+  let picked: Picked | null = null;
+  if (hasLedger(ctx, payer)) {
+    const p = chooseSource(ctx, payer, total, { method: opts.method, source: opts.source, category: opts.category, till: opts.sale !== undefined, overdraft });
+    if ("code" in p) return p;
+    picked = p;
+    source = p.account;
+    if (cashback > 0 && p.via !== "debit") return reject("no_cashback", "cash back comes only with a debit card");
+  } else {
+    if (cashback > 0) return reject("no_cashback", "cash back needs an account");
+    if (level >= 1 && notional(ctx.state, payer) < total) return reject("declined", `${labelOf(ctx, payer)} can't afford ${formatMoney(total, ctx.world.currency)}`);
+    source = external(payer);
+    out.push(...l1Move(ctx.state, payer, -total));
+  }
+  const dest = terms?.seller ? payeeSide(ctx, { payee: terms.seller, ...(terms.deposit ? { deposit: terms.deposit } : {}) }, cents) : payeeSide(ctx, opts, cents);
+  const wallet = cashback > 0 ? cashAccount(ctx, payer) : null;
+  if (cashback > 0 && !wallet) return reject("no_cashback", `${labelOf(ctx, payer)} has nowhere to carry cash`);
+  const lines = merged([
+    { account: source, amount: -total },
+    { account: dest.account, amount: cents },
+    ...(tax > 0 ? [{ account: terms?.taxAccount ?? dest.account, amount: tax }] : []),
+    ...(wallet ? [{ account: wallet, amount: cashback }] : []),
+  ]);
+  const od = picked && overdraft ? overdraftEvents(ctx, source, total, at) : { before: [], after: [] };
+  const holds = picked?.card !== undefined && featureFor(ctx, payer, "holds");
+  const counterparty = opts.payee ? labelOf(ctx, terms?.seller ?? opts.payee) : terms?.seller ? labelOf(ctx, terms.seller) : (opts.counterparty ?? undefined);
+  const meta: TxnMeta = { memo, kind: opts.kind ?? (opts.sale ? "purchase" : "payment"), ...(opts.category ? { category: opts.category } : {}), ...(counterparty ? { counterparty: counterparty.replace(/_/g, " ") } : {}), ...(picked?.card ? { card: picked.card } : {}), ...(opts.flow ? { flow: opts.flow } : {}), ...(holds ? { pending: at + 1440 } : {}), ...(opts.narrated ? { narrated: opts.narrated } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) };
+  const spend: LedgerEvent[] = [];
+  if (picked?.card && opts.sale && Number.isFinite(cardRoom(ctx, picked.card, "purchase"))) {
+    const day = dateAt(calendarOf(ctx.world), ctx.state.clock).dayIndex;
+    const s = spendOf(ctx.state, picked.card, day);
+    spend.push({ type: FINANCE_EVENTS.spend, data: { card: picked.card, day, purchase: s.purchase + cents + tax, atm: s.atm } });
+  }
+  return asUnit([...od.before, { type: "post", lines, memo }, ...out, ...dest.extra, txn(lines, meta), ...(terms?.extra ?? []), ...od.after, ...spend]);
+}
+
+// ---------------------------------------------------------------- moving money
+
+/** A party who can move money from one account to the other: spends from `from` and holds `to`. */
+export function moverOf(ctx: TableBooks, from: EntityId, to: EntityId): EntityId | null {
+  return holdersOf(ctx.state, from).find((p) => canSpend(ctx.state, from, p) && rightsOf(ctx.state, to, p) !== null) ?? null;
+}
+
+/**
+ * A posting between two accounts a party holds (a savings transfer, a card or loan payment). A
+ * payment to credit pays at most what it owes (`cap`, or refused as an overpayment); money in a CD
+ * or retirement account doesn't move out here.
+ */
+export function move(ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, opts: { cap?: boolean; flow?: string; at?: number; unchecked?: boolean } = {}): LedgerEvent[] | Rejection {
+  const s = ctx.state;
+  if (own(s.entities, from)?.kind !== "account" || own(s.entities, to)?.kind !== "account") return reject("missing_account", "both accounts must exist");
+  if (from === to) return reject("bad_party", `${labelOf(ctx, from)} can't pay itself`);
+  const party = moverOf(ctx, from, to);
+  if (!party) return reject("not_owner", "both accounts must belong to the same holder");
+  const fromTraits = traitsOf(ctx, from);
+  const toTraits = traitsOf(ctx, to);
+  if (!fromTraits || !toTraits) return reject("missing_account", "both accounts must exist");
+  if (fromTraits.locked) return reject("locked", `${labelOf(ctx, from)} can't be drawn on here`);
+  let c = Math.round(cents);
+  if (!(c > 0)) return reject("bad_amount", "the amount must be positive");
+  if (toTraits.liability) {
+    const owed = -balance(s, to);
+    if (owed <= 0) return reject("nothing_owed", `${labelOf(ctx, to)} owes nothing`);
+    if (c > owed) {
+      if (!opts.cap) return reject("overpay", `${labelOf(ctx, to)} owes only ${formatMoney(owed, ctx.world.currency)}`);
+      c = owed;
+    }
+  }
+  if (!opts.unchecked && ctx.levelOf(party, "money") >= 2 && availableOf(ctx, from) < c) return reject("declined", `${labelOf(ctx, from)} doesn't have ${formatMoney(c, ctx.world.currency)}`);
+  const lines: PostingLine[] = [
+    { account: from, amount: -c },
+    { account: to, amount: c },
+  ];
+  const out: LedgerEvent[] = [{ type: "post", lines, memo }];
+  if (toTraits.liability) out.push({ type: FINANCE_EVENTS.cardPaid, data: { account: to, cents: c } });
+  out.push(txn(lines, { memo, kind: toTraits.liability ? "payment" : "transfer", category: "transfer", ...(opts.flow ? { flow: opts.flow } : {}), ...(opts.at !== undefined ? { at: opts.at } : {}) }));
+  return asUnit(out);
+}
+
+/**
+ * A side of a transfer: a party, or an account a party holds, which stands for that holder paying
+ * from it (`from`, spending from it) or depositing into it (`to`). Anything else is refused.
+ */
+export function transferParty(ctx: ReadContext, id: EntityId, side: "from" | "to"): { holder: EntityId; account?: EntityId } | Rejection {
+  const e = own(ctx.state.entities, id);
+  if (!e) return reject("missing_entity", `no ${labelOf(ctx, id)}`);
+  if (isParty(ctx, id)) return { holder: id };
+  const t = traitsOf(ctx, id);
+  if (t && (side === "to" || t.pays)) {
+    const holders = holdersOf(ctx.state, id).filter((h) => own(ctx.state.entities, h) && isParty(ctx, h) && (side === "to" || canSpend(ctx.state, id, h)));
+    const holder = holders[0];
+    if (holder) return { holder, account: id };
+  }
+  return reject("bad_party", `${labelOf(ctx, id)} isn't someone, or an account someone can ${side === "from" ? "pay from" : "pay into"}`);
+}
+
+/**
+ * Money from one party to another, each at its own level. Two sides of one holder move money
+ * between two of their accounts. Cash handed over (`method` "cash") comes from the payer's carried
+ * cash when it covers, else the usual source, and lands in the payee's carried cash, else the usual
+ * deposit account.
+ */
+export function transfer(hooks: FinanceHooks, ctx: ReadContext, from: EntityId, to: EntityId, cents: number, memo: string, method: PayMethod = "auto"): LedgerEvent[] | Rejection {
+  const payer = transferParty(ctx, from, "from");
+  if ("code" in payer) return payer;
+  const payee = transferParty(ctx, to, "to");
+  if ("code" in payee) return payee;
+  const paying: PayMethod = method === "cash" ? "auto" : method;
+  const cash = method === "cash" ? (cashAccount(ctx, payee.holder) ?? undefined) : undefined;
+  const sameSide = payer.holder === payee.holder || (payee.account !== undefined && canSpend(ctx.state, payee.account, payer.holder) && rightsOf(ctx.state, payee.account, payer.holder)?.worth === true);
+  if (!sameSide) {
+    const deposit = payee.account ?? cash;
+    const source = payer.account ?? (method === "cash" ? (cashAccount(ctx, payer.holder) ?? undefined) : undefined);
+    const fromCash = method === "cash" && source !== undefined && availableOf(ctx, source) >= Math.round(cents) ? source : payer.account;
+    return charge(hooks, ctx, payer.holder, cents, memo, { payee: payee.holder, method: paying, kind: "transfer", ...(fromCash ? { source: fromCash } : {}), ...(deposit ? { deposit } : {}), overdraft: false });
+  }
+  if (!payer.account && !payee.account) return reject("bad_party", `${labelOf(ctx, from)} can't pay themselves`);
+  const level = ctx.levelOf(payer.holder, "money");
+  if (level === 0) return [];
+  const c = Math.round(cents);
+  let source = payer.account;
+  if (!source) {
+    const picked = chooseSource(ctx, payer.holder, c, { method: paying, ...(payee.account ? { except: payee.account } : {}), till: false, overdraft: false });
+    if ("code" in picked) return picked;
+    source = picked.account;
+  }
+  const target = payee.account ?? (cash !== undefined && cash !== source ? cash : (depositAccount(ctx, payee.holder, source) ?? undefined));
+  if (!target || target === source) return reject("bad_party", `${labelOf(ctx, source)} can't pay itself`);
+  return move(ctx, source, target, c, memo, { cap: true });
+}
+
+// ---------------------------------------------------------------- the funds guard
+
+/**
+ * Ledger 1.10: a posting folds only if the accounts it draws on can pay it (the fold-time twin of the
+ * choices above): an open account, within its balance less holds, its credit, or the overdraft its
+ * policy allows. What a bank posts itself (interest, fees) and what posts against a holder's own
+ * outside account (openings, level-1 moves) isn't checked.
+ */
+export function postGuard(ctx: ReadContext, lines: readonly PostingLine[]): Rejection | null {
+  const s = ctx.state;
+  if (lines.some((l) => l.amount > 0 && l.account.startsWith(BANK_PREFIX))) return null;
+  for (const l of lines) {
+    if (l.amount >= 0) continue;
+    const t = traitsOf(ctx, l.account);
+    if (!t || t.installment) continue;
+    const holders = holdersOf(s, l.account).filter((h) => own(s.entities, h));
+    if (holders.length === 0 || accountLevel(ctx, l.account) < 2) continue;
+    if (lines.some((x) => holders.some((h) => x.account === external(h)))) continue;
+    const name = labelOf(ctx, l.account);
+    const status = statusOf(s, l.account);
+    if (status !== "open") return reject("declined", `${name} is ${status.replace(/_/g, " ")}`);
+    if (availableOf(ctx, l.account) + overdraftRoom(ctx, l.account) + l.amount < 0) {
+      return reject("declined", t.liability ? `${name} has no room for ${formatMoney(-l.amount, ctx.world.currency)}` : `${name} can't cover ${formatMoney(-l.amount, ctx.world.currency)}`);
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- corrections
+
+/** The cash inside `item` goes with it: lost to the outside world, or stolen by `thief`. */
+export function loseWith(ctx: ReadContext, item: EntityId, thief?: EntityId): LedgerEvent[] | Rejection {
+  const s = ctx.state;
+  if (!own(s.entities, item)) return reject("missing_entity", `no ${labelOf(ctx, item)}`);
+  if (thief && !own(s.entities, thief)) return reject("missing_entity", `no ${labelOf(ctx, thief)}`);
+  const out: LedgerEvent[] = [];
+  for (const id of Object.keys(s.entities).sort()) {
+    const cents = balance(s, id);
+    if (classOf(ctx, id) !== "cash" || cents <= 0) continue;
+    let inside = false;
+    for (let cur: string | undefined = own(s.entities, id)?.relations.find((r) => r.type === "in")?.to, guard = 0; cur && guard < 16 && !inside; cur = own(s.entities, cur)?.relations.find((r) => r.type === "in")?.to, guard++) inside = cur === item;
+    if (!inside) continue;
+    const memo = thief ? `Stolen with ${own(s.entities, item)?.name ?? item}` : `Lost with ${own(s.entities, item)?.name ?? item}`;
+    const dest = thief ? payeeSide(ctx, { payee: thief }, cents) : { account: external("lost"), extra: [] };
+    const lines: PostingLine[] = [
+      { account: id, amount: -cents },
+      { account: dest.account, amount: cents },
+    ];
+    out.push(...asUnit([{ type: "post", lines, memo }, ...dest.extra, txn(lines, { memo, kind: "adjustment", category: "lost" })]));
+  }
+  return out;
+}
+
+/** A correction that makes `holder`'s cash come to `cents`; null when the holder has no cash account. */
+export function setCash(ctx: ReadContext, holder: EntityId, cents: number): LedgerEvent[] | Rejection | null {
+  const s = ctx.state;
+  const cash = accountsOf(ctx, holder, "spend").filter((id) => classOf(ctx, id) === "cash");
+  // Carried cash first (the wallet), then any other cash: what's added lands in the first, and what's
+  // taken empties them in turn, so no account goes below zero.
+  const [first, ...rest] = [...cash.filter((id) => cashOnHolder(s, id, holder)), ...cash.filter((id) => !cashOnHolder(s, id, holder))];
+  if (!first) return null;
+  const target = Math.round(cents);
+  if (!Number.isSafeInteger(target) || target < 0) return reject("bad_amount", "cash can't be less than nothing");
+  let left = target - cash.reduce((a, id) => a + balance(s, id), 0);
+  if (left === 0) return [];
+  const lines: PostingLine[] = left > 0 ? [{ account: first, amount: left }] : [];
+  for (const id of [first, ...rest]) {
+    if (left >= 0) break;
+    const take = Math.min(-left, Math.max(0, balance(s, id)));
+    if (take > 0) lines.push({ account: id, amount: -take });
+    left += take;
+  }
+  lines.push({ account: CORRECTION_ACCOUNT, amount: -lines.reduce((a, l) => a + l.amount, 0) });
+  return asUnit(posting(lines, { memo: "Correction", kind: "adjustment", category: "correction" }));
+}
+
+/**
+ * A purchase that applied, repriced to `cents` in all: the difference moves between the account that
+ * paid and the account that was paid. The purchase is its unit's posting with a purchase journal
+ * line, or (a purchase an older build recorded) its unit's one two-line posting.
+ */
+export function reprice(ctx: ReadContext, events: readonly LedgerEvent[], cents: number): LedgerEvent[] | Rejection {
+  const posts = events.filter((e): e is PostEvent => e.type === "post");
+  const purchase = events.find((e) => e.type === FINANCE_EVENTS.txn && "data" in e && e.data.kind === "purchase");
+  const memo = purchase && "data" in purchase ? strOf(purchase.data.memo) : undefined;
+  const post = (memo !== undefined ? posts.find((p) => p.memo === memo) : undefined) ?? (posts.length === 1 && posts[0]?.lines.length === 2 ? posts[0] : undefined);
+  const paid = post?.lines.find((l) => l.amount < 0);
+  const got = post ? [...post.lines].filter((l) => l.amount > 0).sort((a, b) => b.amount - a.amount)[0] : undefined;
+  if (!post || !paid || !got) return reject("not_a_purchase", "there's no purchase to reprice");
+  const total = Math.round(cents);
+  if (!Number.isSafeInteger(total) || total <= 0) return reject("bad_amount", "the amount must be positive");
+  const diff = total - got.amount;
+  if (diff === 0) return [];
+  const note = `${post.memo}: price corrected`;
+  const lines: PostingLine[] = [
+    { account: paid.account, amount: -diff },
+    { account: got.account, amount: diff },
+  ];
+  return asUnit(posting(lines, { memo: note, kind: diff > 0 ? "purchase" : "refund" }));
+}
+
+// ---------------------------------------------------------------- signals and notes
+
+export function signal(cls: "bill" | "decline", text: string, who: EntityId, at: number): LedgerEvent {
+  return { type: ENGINE_EVENTS.signal, data: { class: cls, text, entity: who, visibility: "known_by", at } };
+}
+
+/**
+ * What the money processes record. Every posting stays, and every journal line that touches an
+ * account in the world. Payday, bill and decline notes stay signals for the POV, where they can
+ * interrupt a timelapse and reach the Montage; for anyone else who holds accounts they become a
+ * secret `economy.note` in their own record. Someone whose money is a band alone keeps no lines
+ * or notes.
+ */
+export function noted(ctx: ReadContext, events: LedgerEvent[]): LedgerEvent[] {
+  const pov = ctx.world.pov;
+  return events.flatMap((e): LedgerEvent[] => {
+    if (!("data" in e)) return [e];
+    if (e.type === FINANCE_EVENTS.txn) return Array.isArray(e.data.lines) && e.data.lines.some((l) => own(ctx.state.entities, strOf(objOf(l).account))) ? [e] : [];
+    if (e.type === ENGINE_EVENTS.signal && typeof e.data.entity === "string" && e.data.entity !== pov) return hasLedger(ctx, e.data.entity) ? [{ type: FINANCE_EVENTS.note, data: { entity: e.data.entity, class: strOf(e.data.class), text: strOf(e.data.text), visibility: "secret", ...(typeof e.data.at === "number" ? { at: e.data.at } : {}) } }] : [];
+    return [e];
+  });
+}

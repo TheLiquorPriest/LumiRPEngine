@@ -8,6 +8,7 @@
 import type { JsonObject, JsonValue } from "../shared/json";
 import type { ActionId, EntityId } from "../shared/ids";
 import type { LedgerEvent } from "../shared/ledger";
+import { heldBy } from "../shared/finance";
 import type { ActionDef, CheckDef, EffectSpec, Expr, WorldDoc } from "../shared/world";
 import { tableRowKey } from "../shared/tables";
 import { plainRolling } from "../shared/adjudication";
@@ -345,7 +346,7 @@ export function paramCandidates(reg: Registry, world: WorldDoc, state: Readonly<
     if (!e || isGone(state, id)) continue;
     if (def.ref && !kindIs(reg, world, e.kind, def.ref)) continue;
     if (def.of && !selectorMatches(reg, world, state, def.of, id)) continue;
-    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && e.fields.owner !== actor) continue;
+    if (placeOfEntity(state, id) !== here && !e.relations.some((r) => r.to === actor) && !heldBy(state.entities, id, actor)) continue;
     if (!canSeeEntity(reg, world, state, actor, id)) continue;
     if (ctx && !filters.every((f) => truthy(evalExpr(f, scopeEnv({ reg, ctx, bindings: { self: actor, [param]: id } }), false)))) continue;
     out.push(id);
