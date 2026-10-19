@@ -311,7 +311,8 @@ export function commitTool(live: Live, args: Args, serialize: Serialize): Promis
     // Hazards against the head this commit replaced (revisions never change, so it can be read after).
     const previous = await live.revision(worldId, index.head).catch(() => null);
     const warnings = (body.lint ?? []).filter((i) => i.severity !== "error");
-    return { text: json({ worldId, name: index.name, revision: body.revision ?? null, note: note ?? null, warnings: lintSummary(warnings, 12), macroHazards: newHazards(previous, draft.draft) }) };
+    // The name is the committed draft's: a commit that renames the world reports the name it now has.
+    return { text: json({ worldId, name: draft.draft.name, revision: body.revision ?? null, note: note ?? null, warnings: lintSummary(warnings, 12), macroHazards: newHazards(previous, draft.draft) }) };
   });
 }
 

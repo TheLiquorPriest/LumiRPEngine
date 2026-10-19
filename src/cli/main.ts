@@ -104,6 +104,7 @@ const io: CliIO = {
   readFile: (path) => readFileSync(path, "utf8"),
   writeFile: (path, text) => writeFileSync(path, text),
   env: process.env,
+  stdoutIsTTY: Boolean(process.stdout.isTTY),
   ask,
   credentials: new CredentialStore(files, credentialsPath(process.env, process.platform, homedir())),
   http,

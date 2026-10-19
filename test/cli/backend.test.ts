@@ -75,13 +75,15 @@ test("edit, draft, commit, history, restore and diff against the real backend, w
   expect(failed.text).not.toContain("written since you read it");
   expect(await call("lre_draft", { worldId })).toMatchObject({ version: 1, name: "Harbor" });
 
-  await call("lre_edit", { worldId, ops: [{ op: "move", from: "/entities/mara/lifeKnowBy", path: "/entities/mara/tags" }], expectVersion: 1 });
+  await call("lre_edit", { worldId, ops: [{ op: "move", from: "/entities/mara/lifeKnowBy", path: "/entities/mara/tags" }, { op: "replace", path: "/name", value: "Mara's Harbor" }], expectVersion: 1 });
   const draft = await call("lre_draft", { worldId });
   expect(draft).toMatchObject({ stored: true, version: 2, base: first, head: first, headMoved: false, changes: { counts: { entities: { added: 1 } } } });
 
   const commit = await call("lre_commit", { worldId, note: "Add Mara" });
   const second = String(commit.revision);
   expect(second).not.toBe(first);
+  // A commit that renames the world reports the name it now has.
+  expect(commit.name).toBe("Mara's Harbor");
   const history = (await call("lre_history", { worldId })).history as { revision: string; source: string; note?: string }[];
   expect(history.map((h) => [h.revision, h.source, h.note ?? null])).toEqual([
     [first, "create", null],
@@ -93,7 +95,7 @@ test("edit, draft, commit, history, restore and diff against the real backend, w
   // A new draft counts on from the committed one's version.
   expect(Number(restored.version)).toBeGreaterThan(2);
   const diff = await call("lre_diff", { worldId, from: "head", to: "draft" });
-  expect(diff.changes).toEqual([expect.objectContaining({ key: "/entities/mara", kind: "removed" })]);
+  expect(diff.changes).toEqual([expect.objectContaining({ key: "/name", kind: "changed" }), expect.objectContaining({ key: "/entities/mara", kind: "removed" })]);
   expect(await call("lre_chats", { worldId })).toEqual({ chats: [] });
   await call("lre_discard", { worldId });
   expect((await call("lre_draft", { worldId })).stored).toBe(false);

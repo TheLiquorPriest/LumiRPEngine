@@ -92,6 +92,18 @@ describe("the lumirpengine entry", () => {
     const run = await cli(["--version"]);
     expect(run.out.trim()).toMatch(/^lumirpengine \d+\.\d+\.\d+ \(engine \d+\.\d+\.\d+, world format lre-world-v1, agent API \d+\)$/);
   });
+
+  test("a piped template prints the whole export file, which check then reads", async () => {
+    const run = await cli(["template", "mystery_manor"]);
+    expect(run.code).toBe(0);
+    const file = JSON.parse(run.out) as { format: string; world: { name: string } };
+    expect(file.format).toBe("lre-world-export-v1");
+    const path = join(home, "manor.json");
+    writeFileSync(path, run.out);
+    const check = await cli(["check", path]);
+    expect(check.code).toBe(0);
+    expect(JSON.parse(check.out)).toMatchObject({ ok: true, errors: 0, contents: { entities: 38 } });
+  });
 });
 
 describe("where sign-ins are kept", () => {

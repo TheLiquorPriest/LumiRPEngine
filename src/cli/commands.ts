@@ -22,6 +22,8 @@ export interface CliIO {
   readFile(path: string): string;
   writeFile(path: string, text: string): void;
   env: Readonly<Record<string, string | undefined>>;
+  /** Whether stdout is a terminal: piped or redirected, `template` and `export` print the whole file rather than an outline. */
+  stdoutIsTTY: boolean;
   /** Asks on the terminal (`hidden`: without echoing what is typed); null when there is no terminal. */
   ask(question: string, hidden: boolean): Promise<string | null>;
   credentials: CredentialStore;
@@ -275,8 +277,8 @@ async function logout(p: Parsed, io: CliIO): Promise<number> {
   return 0;
 }
 
-/** `template --out` and `export --out`: the whole file, written in one go. */
-async function writeOut(command: string, p: Parsed, io: CliIO, session: Session, out: string): Promise<number> {
+/** `template` and `export` as a whole file: written to `out` in one go, or printed when stdout is piped (`out` null). */
+async function writeOut(command: string, p: Parsed, io: CliIO, session: Session, out: string | null): Promise<number> {
   let file: JsonValue | null;
   let what: string;
   if (command === "template") {
@@ -296,7 +298,12 @@ async function writeOut(command: string, p: Parsed, io: CliIO, session: Session,
     file = await live.exportFile(worldId, revision);
     what = `“${index.name}” (${worldId}), revision ${revision}`;
   }
-  io.writeFile(out, `${JSON.stringify(file, null, 2)}\n`);
+  const text = `${JSON.stringify(file, null, 2)}\n`;
+  if (out === null) {
+    io.out(text);
+    return 0;
+  }
+  io.writeFile(out, text);
   io.out(`Wrote ${what} to ${out} as an export file (Import reads it).`);
   return 0;
 }
@@ -342,7 +349,9 @@ export async function run(argv: readonly string[], io: CliIO): Promise<RunResult
     if (stray.length > 0) throw new UsageError(`${command} doesn't take ${stray.join(", ")}. Usage: ${CLI_NAME} ${mirror.usage}`);
     if (p.positionals.length < mirror.needs) throw new UsageError(`Usage: ${CLI_NAME} ${mirror.usage}`);
     const out = one(p, "--out");
-    if (out !== undefined) return { code: await writeOut(command, p, io, session, out) };
+    // A redirect wants the file itself (`template <id> > world.json`); a terminal gets the outline and paging.
+    const whole = (command === "template" || command === "export") && !io.stdoutIsTTY && one(p, "--pointer") === undefined && one(p, "--offset") === undefined;
+    if (out !== undefined || whole) return { code: await writeOut(command, p, io, session, out ?? null) };
     const result = await callTool(mirror.tool, mirror.args(p, io), session.ctx);
     if (result.isError) io.err(result.text);
     else io.out(result.text);
