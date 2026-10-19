@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../../src/shared/json";
 import type { EntityDef, WorldDoc } from "../../../src/shared/world";
 import { lintWorld } from "../../../src/engine/authoring";
+import { calendarOf, dateAt } from "../../../src/engine/calendar";
 import { materializeAll } from "../../../src/engine/materialize";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
 import { resolveAction } from "../../../src/engine/resolve";
@@ -145,5 +146,37 @@ describe("a late payment counts toward what was past due", () => {
     pay(Number(dec?.minimum));
     lapse(w, 24); // past 28 Dec
     expect(dataOf(w, "economy.delinquency").map((d) => d.stage)).toEqual(["late", "current"]);
+  });
+});
+
+describe("a loan's autopay pays its bills, never before the first", () => {
+  test("a loan taken this morning isn't repaid by its own autopay; its first bill is paid at the minimum", () => {
+    const w = setup((world) => {
+      world.realism.levels.money = 3;
+    });
+    resolveAction(reg, w, { action: "apply_credit", params: { product: "loan", amount: 100_000 } }, createRng("loan"));
+    const loan = Object.keys(w.state.entities).find((id) => w.state.entities[id]?.kind === "account" && w.state.entities[id]?.fields.product === "loan");
+    if (!loan) throw new Error("no loan");
+    lapse(w, 1);
+    expect(w.state.accounts[loan]).toBe(-100_000);
+    lapse(w, 31);
+    const bills = dataOf(w, "economy.statement").filter((s) => s.account === loan);
+    const paid = flowRuns(w, `autopay:${loan}`).filter((r) => r.outcome === "paid");
+    expect(bills).toHaveLength(1);
+    expect(paid.map((r) => r.cents)).toEqual([bills[0]?.minimum]);
+  });
+
+  test("with no due day, autopay falls on the product's statement day, as the bill does", () => {
+    const w = setup((world) => {
+      world.packs.economy!.config.products = { fleet_loan: { class: "loan", label: "Fleet loan", statement_day: 20 } };
+      world.entities.fleet = entity("fleet", "account", { owners: [{ party: "you", role: "owner" }], product: "fleet_loan", opening: -60_000, apr_pct: 6, term_months: 6, months_left: 6, autopay: "minimum", autopay_from: "checking" });
+    });
+    lapse(w, 40);
+    const cal = calendarOf(w.world);
+    const days = (rows: JsonObject[]): number[] => rows.map((r) => dateAt(cal, Number(r.at)).day);
+    const bills = dataOf(w, "economy.statement").filter((s) => s.account === "fleet");
+    expect(bills.length).toBeGreaterThan(0);
+    expect(days(bills).every((d) => d === 20)).toBe(true);
+    expect(days(flowRuns(w, "autopay:fleet"))).toEqual(days(bills));
   });
 });
