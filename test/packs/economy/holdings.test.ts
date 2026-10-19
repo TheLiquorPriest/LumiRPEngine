@@ -442,6 +442,54 @@ describe("holdings: rent on a property owned with someone", () => {
     lapseTo(w, "2026-11-01T12:00");
     expect(rentPosts(w, start)).toEqual([split]);
   });
+
+  const lease = (to: string, splits: { to: string; pct: number }[]): EntityDef => ({
+    id: "lease_rosa",
+    kind: "flow",
+    name: "Lease: Rosa, the duplex",
+    tier: "background",
+    fields: { flow_kind: "rent", from: "rosa_checking", to, ...(splits.length > 0 ? { splits: splits as unknown as JsonObject[] } : {}), amount_cents: 100000, every: "month", days: [1], shortfall: "retry", retry_days: 5, retries: 2, category: "rent", link: "duplex", status: "active" },
+    relations: [],
+  });
+
+  test("bought whole, its lease pays the buyer all the rent: the sellers' split goes with them", () => {
+    const w = setup((world) => {
+      shared(world, { owners: [{ party: "jordan", role: "owner", share: 50 }, { party: "maya", role: "owner", share: 50 }], asking_price: 30_000_000 });
+      world.entities.maya_checking = account("maya_checking", "Maya's checking", "maya", "checking", 300_000);
+      world.entities.lease_rosa = lease("jordan_checking", [{ to: "maya_checking", pct: 50 }]);
+      world.entities.savings!.fields.opening = 35_000_000;
+    });
+    run(w, "economy.property_buy", { party: "you", property: "duplex", from: "savings" });
+    const start = w.events.length;
+    lapseTo(w, "2026-11-01T12:00");
+    expect(rentPosts(w, start)).toEqual([
+      [
+        { account: "checking", amount: 100000 },
+        { account: "rosa_checking", amount: -100000 },
+      ],
+    ]);
+  });
+
+  test("a co-owner's share sold to someone in the world takes their part of the rent with it", () => {
+    const w = setup((world) => {
+      shared(world, { owners: [{ party: "jordan", role: "owner", share: 60 }, { party: "you", role: "owner", share: 40 }] });
+      world.entities.maya_checking = account("maya_checking", "Maya's checking", "maya", "checking", 2_000_000);
+      world.entities.lease_rosa = lease("jordan_checking", [{ to: "checking", pct: 40 }]);
+    });
+    // Maya's checking opens before she pays from it.
+    const opening = openingEvent(w.ctx, "maya");
+    if (opening) w.apply(opening);
+    run(w, "economy.property_sell", { party: "you", property: "duplex", price: 1_000_000, buyer: "maya" });
+    const start = w.events.length;
+    lapseTo(w, "2026-11-01T12:00");
+    expect(rentPosts(w, start)).toEqual([
+      [
+        { account: "jordan_checking", amount: 60000 },
+        { account: "maya_checking", amount: 40000 },
+        { account: "rosa_checking", amount: -100000 },
+      ],
+    ]);
+  });
 });
 
 describe("holdings: what an outside buyer pays", () => {

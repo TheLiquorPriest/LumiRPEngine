@@ -89,14 +89,22 @@ function payingSide(owners: readonly Owner[], shares: Readonly<Record<EntityId, 
   return { from: first, shares: owners.map((o) => ({ party: o.party, pct: shares[o.party] ?? 0 })) };
 }
 
-/** Where a property's rent lands: its `rent_to`, else the first owner's deposit account, with the other owners' parts split off to theirs. */
-function rentSide(api: FinanceApi, ctx: ReadContext, id: EntityId, rentTo: string = strOf(fieldsOf(ctx.state, id).rent_to)): { to: string; splits?: FlowSplit[] } | null {
-  if (rentTo !== "" && own(ctx.state.entities, rentTo)?.kind === "account") return { to: rentTo };
-  const { owners, shares } = payers(api, ctx.state, id);
-  const deposits = owners.map((o) => ({ party: o.party, account: api.depositAccount(ctx, o.party) })).filter((d): d is { party: EntityId; account: EntityId } => d.account !== null);
+/** Where rent for owners lands: the first one's deposit account, with the other owners' parts (by share of its worth) split off to theirs. */
+function ownersSide(api: FinanceApi, ctx: ReadContext, owners: readonly Owner[]): { to: string; splits?: FlowSplit[] } | null {
+  const shares = worthShares(owners);
+  const deposits = owners
+    .filter((o) => (shares[o.party] ?? 0) > 0)
+    .map((o) => ({ party: o.party, account: api.depositAccount(ctx, o.party) }))
+    .filter((d): d is { party: EntityId; account: EntityId } => d.account !== null);
   const [first, ...rest] = deposits;
   if (!first) return null;
   return rest.length === 0 ? { to: first.account } : { to: first.account, splits: rest.map((d) => ({ to: d.account, pct: shares[d.party] ?? 0 })) };
+}
+
+/** Where a property's rent lands: its `rent_to`, else its owners' deposit accounts by share. */
+function rentSide(api: FinanceApi, ctx: ReadContext, id: EntityId, rentTo: string = strOf(fieldsOf(ctx.state, id).rent_to)): { to: string; splits?: FlowSplit[] } | null {
+  if (rentTo !== "" && own(ctx.state.entities, rentTo)?.kind === "account") return { to: rentTo };
+  return ownersSide(api, ctx, api.ownersOf(ctx.state, id));
 }
 
 /**
@@ -438,20 +446,44 @@ export function buyProperty(api: FinanceApi, ctx: EffectContext | ReadContext, x
     ...(asking !== undefined ? [{ type: "set" as const, entity: x.property, field: "asking_price", value: null }] : []),
     ...(strOf(e.fields.rent_to) !== "" ? [{ type: "set" as const, entity: x.property, field: "rent_to", value: null }] : []),
     acquisition(x.property, x.party, price),
-    ...moveLeases(api, ctx, x.property, owners.map((o) => o.party), x.party),
+    ...moveLeases(api, ctx, x.property, api.ownersOf(ctx.state, x.property).map((o) => o.party), [{ party: x.party, role: "owner", share: 100 }]),
   ]);
 }
 
-/** Leases follow their property to its new owner: rent the sellers took now lands in the buyer's deposit account (sold to nobody in the world, they end today). */
-function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, sellers: readonly EntityId[], buyer: EntityId | null): LedgerEvent[] {
+/** Whether a lease is still to run: active and not past its last day (it may not have started). */
+function notOver(l: { end: number | null; status: string }, at: number): boolean {
+  return l.status === "active" && (l.end === null || at < l.end);
+}
+
+/** Whether a lease pays the given owners: its payee is one of them, or an account one of them holds. */
+function paysOwners(api: FinanceApi, ctx: ReadContext, lease: EntityId, owners: readonly EntityId[]): boolean {
+  const to = strOf(fieldsOf(ctx.state, lease).to);
+  return owners.includes(to) || api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party));
+}
+
+/** What points a lease at a side of the owners: its payee, the owners' split, and (when split) an account for the tenant to pay it from. */
+function repoint(api: FinanceApi, ctx: ReadContext, lease: EntityId, side: { to: string; splits?: FlowSplit[] }): LedgerEvent[] {
+  const f = fieldsOf(ctx.state, lease);
   const out: LedgerEvent[] = [];
-  const deposit = buyer ? api.depositAccount(ctx, buyer) : null;
+  const splits: JsonValue = side.splits ? (side.splits as unknown as JsonValue) : null;
+  if (strOf(f.to) !== side.to) out.push({ type: "set", entity: lease, field: "to", value: side.to });
+  if (JSON.stringify(f.splits ?? null) !== JSON.stringify(splits)) out.push({ type: "set", entity: lease, field: "splits", value: splits });
+  // A lease a tenant pays as a person (authored so) pays the owners' split from their account.
+  const payer = strOf(f.from);
+  if (side.splits && rentPayer(api, ctx, payer) !== payer) out.push({ type: "set", entity: lease, field: "from", value: rentPayer(api, ctx, payer) });
+  return out;
+}
+
+/**
+ * Leases follow their property to its new owners: each that paid the old ones now pays the new ones'
+ * deposit accounts, split by their shares (sold to nobody in the world, they end today).
+ */
+function moveLeases(api: FinanceApi, ctx: ReadContext, property: EntityId, owners: readonly EntityId[], next: readonly Owner[]): LedgerEvent[] {
+  const out: LedgerEvent[] = [];
+  const side = ownersSide(api, ctx, next);
   for (const l of authoredLeases(ctx, property)) {
-    if (!inForce(l, ctx.state.clock)) continue;
-    const to = strOf(fieldsOf(ctx.state, l.id).to);
-    const sellerSide = sellers.includes(to) || sellers.some((s) => api.ownersOf(ctx.state, to).some((o) => o.party === s));
-    if (!sellerSide) continue;
-    out.push(deposit ? { type: "set", entity: l.id, field: "to", value: deposit } : { type: "set", entity: l.id, field: "end", value: dateText(ctx.world, ctx.state.clock) });
+    if (!notOver(l, ctx.state.clock) || !paysOwners(api, ctx, l.id, owners)) continue;
+    out.push(...(side ? repoint(api, ctx, l.id, side) : [{ type: "set" as const, entity: l.id, field: "end", value: dateText(ctx.world, ctx.state.clock) }]));
   }
   return out;
 }
@@ -466,18 +498,7 @@ export function routeRent(api: FinanceApi, ctx: ReadContext, property: EntityId,
   const side = rentSide(api, ctx, property, route);
   if (!side) return out;
   const owners = api.ownersOf(ctx.state, property).map((o) => o.party);
-  const splits: JsonValue = side.splits ? (side.splits as unknown as JsonValue) : null;
-  for (const l of authoredLeases(ctx, property)) {
-    if (l.status !== "active" || (l.end !== null && l.end <= ctx.state.clock)) continue;
-    const f = fieldsOf(ctx.state, l.id);
-    const to = strOf(f.to);
-    if (!owners.includes(to) && !api.ownersOf(ctx.state, to).some((o) => owners.includes(o.party))) continue;
-    if (to !== side.to) out.push({ type: "set", entity: l.id, field: "to", value: side.to });
-    if (JSON.stringify(f.splits ?? null) !== JSON.stringify(splits)) out.push({ type: "set", entity: l.id, field: "splits", value: splits });
-    // A lease a tenant pays as a person (authored so) pays the owners' split from their account.
-    const payer = strOf(f.from);
-    if (side.splits && rentPayer(api, ctx, payer) !== payer) out.push({ type: "set", entity: l.id, field: "from", value: rentPayer(api, ctx, payer) });
-  }
+  for (const l of authoredLeases(ctx, property)) if (notOver(l, ctx.state.clock) && paysOwners(api, ctx, l.id, owners)) out.push(...repoint(api, ctx, l.id, side));
   return unit(out);
 }
 
@@ -550,8 +571,9 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
     ...(x.buyer ? [acquisition(x.property, x.buyer, price)] : []),
     ...(sold && loans.length > 0 ? [{ type: "set" as const, entity: x.property, field: "mortgage", value: null }] : []),
     ...(num(e.fields.asking_price) !== undefined ? [{ type: "set" as const, entity: x.property, field: "asking_price", value: null }] : []),
-    ...(others.length === 0 && strOf(e.fields.rent_to) !== "" ? [{ type: "set" as const, entity: x.property, field: "rent_to", value: null }] : []),
-    ...(others.length === 0 ? moveLeases(api, ctx, x.property, [x.party], x.buyer ?? null) : []),
+    // The owners changed: their rent goes to them by share until one of them routes it again.
+    ...(strOf(e.fields.rent_to) !== "" ? [{ type: "set" as const, entity: x.property, field: "rent_to", value: null }] : []),
+    ...moveLeases(api, ctx, x.property, owners.map((o) => o.party), written),
   ]);
 }
 
