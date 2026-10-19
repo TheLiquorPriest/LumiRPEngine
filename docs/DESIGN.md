@@ -1229,7 +1229,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
 
 ### 24.5 A mind's call
 - **The context**, built only from what the character knows:
-  - their entity's fields and their Lumiverse character card when the world links one (`characterId`);
+  - their entity's fields (never a Lumiverse character card: the extension doesn't request `characters`, §3);
   - their summary, notes, commitments, plans, witness log and last mind;
   - the scene as they perceive it: who they can see, and how they stand toward each;
   - the occasion: clock, day part, holidays, weather;

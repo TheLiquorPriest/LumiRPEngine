@@ -15,7 +15,6 @@
     "presets",
     "regex_scripts",
     "decisions",
-    "characters",
     "ui_panels"
   ],
   "entry_backend": "dist/backend.js",

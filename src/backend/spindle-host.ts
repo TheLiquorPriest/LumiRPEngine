@@ -263,12 +263,6 @@ async function listScripts(options: { scope: "chat" | "global"; scopeId?: string
 export function createSpindleHost(): HostPort {
   const diagnostics = new DiagnosticsLog();
   return {
-    characters: {
-      async card(characterId, userId) {
-        const c = await spindle.characters.get(characterId, userId);
-        return c ? { name: c.name, description: c.description, personality: c.personality, scenario: c.scenario } : null;
-      },
-    },
     chats: {
       async messages(chatId) {
         const rows = await spindle.chat.getMessages(chatId);

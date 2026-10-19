@@ -1,5 +1,5 @@
 // What one character's mind is given (DESIGN §24.5): only what that character knows. Their own
-// entity and card, their summary, notes, commitments, plans, witness log and last mind; the scene as
+// entity, their summary, notes, commitments, plans, witness log and last mind; the scene as
 // they perceive it and the occasion; their own life (money in plain words, the day, their agendas,
 // their own secrets included); lore read as them; and recall by presence: the chat turns they were
 // there for, read through the host's chat, the latest and the ones that best match the moment. Never
@@ -19,7 +19,7 @@ import { canSeeEntity, knows } from "../engine/visibility";
 import { dayPlan } from "../packs/castlife/core/index";
 import { faded, openCommitments, openPlans, readCharacter, readSlice, salienceNow } from "../packs/minds/core/state";
 import { sectionTokens } from "./book";
-import type { HostCharacterCard, HostMessage } from "./host";
+import type { HostMessage } from "./host";
 import { readableReply } from "./json-hiding";
 
 /** Everything a mind's context is read from. */
@@ -33,7 +33,6 @@ export interface MindScope {
   messages: readonly HostMessage[];
   /** Replies' hidden JSON blocks stay out of recall, as they stay out of every read (DESIGN §6.7). */
   hideJson: boolean;
-  card: HostCharacterCard | null;
   moment: MindMoment;
   /** Tokens the lore read as them may take (the step's lore setting); 0 reads none. */
   loreTokens: number;
@@ -42,8 +41,7 @@ export interface MindScope {
 /** Fields a person's sheet holds that the context says elsewhere or that are the engine's own bookkeeping. */
 const SKIPPED_FIELDS: Readonly<Record<string, true>> = { place: true, x: true, y: true, gone: true, needs: true, holds: true, knownBy: true, appointments: true, trips: true, activity: true };
 
-/** The longest a card's part, a recalled turn's side, or the whole context may run, in characters. */
-const CARD_PART = 900;
+/** The longest a recalled turn's side, or the whole context, may run, in characters. */
 const RECALL_SIDE = 1600;
 const CONTEXT_MAX = 16_000;
 
@@ -214,7 +212,7 @@ function block(title: string, lines: readonly string[]): string {
 
 /** The user message of a `mind` call: everything the character knows that bears on the moment. */
 export function mindContext(scope: MindScope): string {
-  const { world, state, who, moment, card } = scope;
+  const { world, state, who, moment } = scope;
   const e = own(state.entities, who);
   const c = readCharacter(state, who);
   const place = placeOfEntity(state, who);
@@ -232,7 +230,6 @@ export function mindContext(scope: MindScope): string {
   const parts = [
     `You are ${e?.name ?? who}. ${occasion(scope, place)}`,
     block("Who you are", sheetLines(scope)),
-    card ? block("Your character card", [card.description, card.personality, card.scenario].filter((t) => t.trim() !== "").map((t) => clip(t, CARD_PART))) : "",
     c.summary !== "" ? block("Your story so far", [c.summary]) : "",
     block("Where you are", sceneLines(scope, place)),
     block("Your own life", lifeLines(scope, c)),
