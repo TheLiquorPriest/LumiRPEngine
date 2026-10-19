@@ -11,6 +11,7 @@ import type { Judgement } from "./adjudication";
 import type { Answers, Questions } from "./decide";
 import type { Registry } from "./registry-impl";
 import type { WorldState } from "./state";
+import type { SkipRecord } from "./time";
 
 export interface DecisionRequest {
   purpose: StepPurpose;
@@ -121,6 +122,8 @@ export interface TurnPlanInput {
   userTexts: string[];
   /** `interpret`'s answer when it ran and succeeded; null otherwise (engine-only, or not an action). */
   intent: InterpretOutput | null;
+  /** A timelapse intent's time skip as the pre phase ran it (DESIGN §24.7), replayed beat by beat; absent, a plain timelapse. */
+  skip?: SkipRecord | null;
 }
 
 /** Pre-reply events: resolution, elapsed time, simulation, timelapse and in-turn materialization, in fold order. */

@@ -15,9 +15,14 @@ export interface PlanOption {
   place?: string | null;
   /** Minutes; a block is cut short at the next commitment or the day's end. */
   duration: number;
-  /** A number, or a function of the start time (clock minutes). */
-  utility: number | ((start: number) => number);
+  /**
+   * A number, or a function of the start time (clock minutes) and the blocks laid so far that day,
+   * so a need can follow the plan itself: the meal already eaten, the rest already had.
+   */
+  utility: number | ((start: number, laid: readonly PlanBlock[]) => number);
   reasons: string[];
+  /** Reasons that hold only at the time it is chosen (a need pressing then), after `reasons`. */
+  because?: (start: number, laid: readonly PlanBlock[]) => string[];
   /** Absolute clock window in which the option may start. */
   window?: { from: number; to: number };
   /** May be chosen more than once a day. */
@@ -31,6 +36,8 @@ export interface FixedBlock {
   activity: string;
   place?: string | null;
   reason: string;
+  /** The block's option id in the plan; absent, `fixed:<label>` (a character's own plan names itself, DESIGN §24.8). */
+  option?: string;
 }
 
 export interface PlanBlock {
@@ -83,8 +90,8 @@ export const IDLE_OPTION = "idle";
 /** The longest idle stretch before options with time-dependent utility are looked at again. */
 const IDLE_STEP = 30;
 
-function utilityAt(o: PlanOption, t: number): number {
-  const u = typeof o.utility === "number" ? o.utility : o.utility(t);
+function utilityAt(o: PlanOption, t: number, laid: readonly PlanBlock[]): number {
+  const u = typeof o.utility === "number" ? o.utility : o.utility(t, laid);
   return Number.isFinite(u) ? u : 0;
 }
 
@@ -105,14 +112,14 @@ export function planDay(input: PlanInput): DayPlan {
     while (fi < fixed.length && (fixed[fi]?.end ?? 0) <= t) fi++;
     const f = fixed[fi];
     if (f && f.start <= t) {
-      blocks.push({ start: t, end: Math.min(f.end, input.end), option: `fixed:${f.label}`, label: f.label, activity: f.activity, place: f.place ?? null, utility: 0, reasons: [f.reason], fixed: true });
+      blocks.push({ start: t, end: Math.min(f.end, input.end), option: f.option ?? `fixed:${f.label}`, label: f.label, activity: f.activity, place: f.place ?? null, utility: 0, reasons: [f.reason], fixed: true });
       t = Math.min(f.end, input.end);
       continue;
     }
     const gapEnd = f ? Math.min(f.start, input.end) : input.end;
     const candidates = input.options
       .filter((o) => o.duration > 0 && (o.repeat || !used.has(o.id)) && (!o.window || (o.window.from <= t && t < o.window.to)))
-      .map((o) => ({ o, u: utilityAt(o, t) }))
+      .map((o) => ({ o, u: utilityAt(o, t, blocks) }))
       .sort((a, b) => b.u - a.u || a.o.id.localeCompare(b.o.id));
     const best = candidates[0];
     if (!best || best.u <= 0) {
@@ -151,7 +158,7 @@ export function planDay(input: PlanInput): DayPlan {
       ties.push({ key, at: t, options: tied.map((c) => ({ id: c.o.id, utility: c.u })), chosen: pick, via });
     }
     const end = Math.min(t + chosen.o.duration, gapEnd);
-    blocks.push({ start: t, end, option: chosen.o.id, label: chosen.o.label, activity: chosen.o.activity, place: chosen.o.place ?? null, utility: chosen.u, reasons: chosen.o.reasons, fixed: false });
+    blocks.push({ start: t, end, option: chosen.o.id, label: chosen.o.label, activity: chosen.o.activity, place: chosen.o.place ?? null, utility: chosen.u, reasons: [...chosen.o.reasons, ...(chosen.o.because?.(t, blocks) ?? [])], fixed: false });
     used.add(chosen.o.id);
     t = end;
   }

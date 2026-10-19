@@ -487,14 +487,24 @@ export class LedgerCore {
     j.pending[input.generationId] = pending;
   }
 
-  /** The context handler (DESIGN §5.1 step 2): plan the turn and store it. Continue, Impersonate and a turn under a pause get no plan; a dry run's is returned, never stored. */
-  plan(generationId: GenerationId, observed: readonly ChainMessage[], dryRun: boolean): LedgerEvent[] {
+  /**
+   * The state a turn is planned from (DESIGN §5.1 step 2): the fold before its target, the target's
+   * live markers, and before the chat's first record its starting markers. A time skip's pre phase
+   * reads it, so it reaches its beats in the state the plan will (DESIGN §24.7). Pure; null when the
+   * turn gets no plan.
+   */
+  planState(generationId: GenerationId, observed: readonly ChainMessage[]): { state: WorldState; world: WorldDoc } | null {
     const p = this.journal.pending[generationId];
-    if (!p || p.kind === "continue" || p.kind === "impersonate") return [];
+    const base = p && p.kind !== "continue" && p.kind !== "impersonate" ? this.planBase(p, observed) : null;
+    return base ? { state: base.state, world: base.world } : null;
+  }
+
+  /** What `plan` folds before it plans; null under a pause or without the world. */
+  private planBase(p: PendingTurn, observed: readonly ChainMessage[]) {
     const targetIndex = p.messageId ? observed.findIndex((m) => m.id === p.messageId) : -1;
     const prefix = targetIndex >= 0 ? observed.slice(0, targetIndex) : [...observed];
     // Under a pause nothing after it folds, so a turn there gets no plan and commits degraded.
-    if (this.pausedWithin(prefix)) return [];
+    if (this.pausedWithin(prefix)) return null;
     const out = this.fold(prefix);
     const state = structuredClone(out.state);
     const parentPath = out.messages.length > 0 ? (out.messages[out.messages.length - 1]?.path ?? ROOT_PATH) : ROOT_PATH;
@@ -513,7 +523,7 @@ export class LedgerCore {
       userMessages[m.id] = contentId(activeText(m));
     }
     const world = this.env.worlds(state.revision);
-    if (!world) return [];
+    if (!world) return null;
     let startMarkers: Marker[] = [];
     let seq = this.journal.seq;
     if (!this.journal.started) {
@@ -525,6 +535,16 @@ export class LedgerCore {
       });
       for (const mk of startMarkers) applyMarker(state, mk, this.env);
     }
+    return { prefix, out, state, parentPath, target, users, userMessages, world, startMarkers, seq };
+  }
+
+  /** The context handler (DESIGN §5.1 step 2): plan the turn and store it. Continue, Impersonate and a turn under a pause get no plan; a dry run's is returned, never stored. */
+  plan(generationId: GenerationId, observed: readonly ChainMessage[], dryRun: boolean): LedgerEvent[] {
+    const p = this.journal.pending[generationId];
+    if (!p || p.kind === "continue" || p.kind === "impersonate") return [];
+    const base = this.planBase(p, observed);
+    if (!base) return [];
+    const { prefix, out, state, parentPath, target, users, userMessages, world, startMarkers, seq } = base;
     if (p.kind === "renarrate" && target && !dryRun && this.planRenarrate(p, target, out.state, parentPath, world)) {
       Object.assign(p, {
         planned: true,

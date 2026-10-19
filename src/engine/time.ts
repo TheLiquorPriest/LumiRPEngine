@@ -250,11 +250,29 @@ export interface TimelapseOutcome {
   ok: true;
   result: AdvanceResult;
   summary: TimelapseEvent;
-  /** Minutes left to the target when the unit cap ended the segment. */
+  /** Minutes left to the target when the unit cap or the before-the-reply clock ended the segment. */
   remaining: number;
-  /** A Continue-timelapse chip when the cap ended the segment early. */
+  /** A Continue-timelapse chip when the cap or the before-the-reply clock ended the segment early. */
   chip: { kind: "continue_timelapse"; target: TimelapseTarget; remaining: number } | null;
   montage: Montage;
+  /** With a mind's stop (DESIGN §24.7): the character's name when the POV knows them; null words it as someone. */
+  mindName?: string | null;
+}
+
+/**
+ * What ends a time skip early besides what ends any timelapse (DESIGN §24.7): a character's mind
+ * at a beat asked to stop it, or the before-the-reply clock ran out. Both stop at a beat's time.
+ */
+export type SkipStop = { by: "mind"; at: number; entity: EntityId } | { by: "clock"; at: number };
+
+/**
+ * A time skip as its pre phase ran it (DESIGN §24.7): every beat it stopped at, in time order,
+ * with the events recorded there (the skip's beats at its start, the minds at each beat), and how
+ * it ended early, if it did. The plan replays it (`replaySkip`); no model is asked again.
+ */
+export interface SkipRecord {
+  beats: { at: number; events: LedgerEvent[] }[];
+  stop: SkipStop | null;
 }
 
 /** Overrides from an intent (`{interrupt: policy}`), ignoring unknown classes and policies. */
@@ -269,38 +287,140 @@ export function parseOverrides(v: JsonValue | undefined): Partial<Record<Interru
 }
 
 /**
+ * One timelapse segment, run in pieces (DESIGN §9.2, §24.7): `advanceTo` moves it to a beat,
+ * `apply` adds what was decided there, and `finish` closes the segment with its summary, Montage and
+ * chip. The pre phase drives one beat by beat while minds think; the plan replays the recorded beats
+ * through another, so both reach every beat in the same state. One piece to the target is a plain
+ * timelapse. The unit cap holds for the whole segment, and only its first slot runs whatever it.
+ */
+export class TimelapseRun {
+  readonly from: number;
+  /** The resolved target time. */
+  readonly to: number;
+  /** How the run ended before the target on its own (a `stop` interrupt, the cap, the stage), or null. */
+  ended: AdvanceResult["stop"] | null = null;
+  private readonly before: WorldState;
+  private readonly start: number;
+  private readonly cap: { agentDays: number; events: number };
+  private readonly result: AdvanceResult;
+
+  private constructor(
+    private readonly reg: Registry,
+    private readonly w: Working,
+    private readonly target: TimelapseTarget,
+    private readonly opts: TimelapseOptions,
+    private readonly resolved: ResolvedTarget,
+  ) {
+    this.before = structuredClone(w.state) as WorldState;
+    this.start = w.events.length;
+    this.from = w.state.clock;
+    this.to = resolved.to;
+    this.cap = clampUnitCap(opts.unitCap ?? w.state.time.unitCap);
+    this.result = { from: this.from, to: this.from, requested: resolved.to, slots: 0, stop: "target", stoppedBy: null, stops: [], notes: [], agentDays: 0, events: 0, rules: [], tracks: [] };
+  }
+
+  /** A run toward `target`, or why none can start (the clock is paused, the target doesn't resolve). */
+  static start(reg: Registry, w: Working, target: TimelapseTarget, opts: TimelapseOptions): TimelapseRun | Rejection {
+    if (clockPaused(w.world, w.state)) return { code: "paused", reason: "The clock is paused; resume it first." };
+    const resolved = resolveTarget(reg, w.world, w.state, target);
+    return "code" in resolved ? resolved : new TimelapseRun(reg, w, target, opts, resolved);
+  }
+
+  get clock(): number {
+    return this.w.state.clock;
+  }
+
+  /** Runs on to `at` (never past the target); false once the run has ended on its own, here or before. */
+  advanceTo(at: number): boolean {
+    if (this.ended !== null) return false;
+    const to = Math.min(at, this.to);
+    if (to <= this.w.state.clock) return true;
+    const used = { agentDays: this.result.agentDays, events: this.w.events.length - this.start };
+    if (this.result.slots > 0 && (used.agentDays >= this.cap.agentDays || used.events >= this.cap.events)) {
+      this.ended = this.result.stop = "cap";
+      return false;
+    }
+    const r = advance(this.reg, this.w, to, {
+      runSeed: this.opts.runSeed,
+      mode: "timelapse",
+      cause: "timelapse",
+      includePov: true,
+      ...(this.opts.overrides ? { interrupts: this.opts.overrides } : {}),
+      unitCap: { agentDays: this.cap.agentDays - used.agentDays, events: this.cap.events - used.events },
+      slotsBefore: this.result.slots,
+      ...(this.resolved.stopWhen ? { stopWhen: this.resolved.stopWhen } : {}),
+    });
+    const acc = this.result;
+    acc.slots += r.slots;
+    acc.agentDays += r.agentDays;
+    acc.stops.push(...r.stops);
+    acc.notes.push(...r.notes);
+    acc.rules.push(...r.rules);
+    acc.tracks.push(...r.tracks);
+    if (r.stop === "target") return true;
+    this.ended = acc.stop = r.stop;
+    acc.stoppedBy = r.stoppedBy;
+    return false;
+  }
+
+  /** Applies what was decided at the current clock (a beat's minds); returns what applied. */
+  apply(events: readonly LedgerEvent[]): LedgerEvent[] {
+    return this.w.applyAll(events);
+  }
+
+  /** Closes the segment: at the target unless it ended on its own, or here when a skip stops it. */
+  finish(stop: SkipStop | null): TimelapseOutcome {
+    if (stop === null) this.advanceTo(this.to);
+    const w = this.w;
+    // A mind's stop is an interrupt of the run; the clock's leaves the rest of the way for a Continue, as the cap does.
+    const result: AdvanceResult = { ...this.result, to: w.state.clock, events: w.events.length - this.start, ...(stop ? { stop: stop.by === "mind" ? "interrupt" : "cap" } : {}) };
+    const summary: TimelapseEvent = { type: "timelapse", from: this.from, to: result.to, target: this.target, stoppedBy: stop?.by === "mind" ? "mind" : result.stoppedBy, segment: this.opts.segment ?? 1, ...(stop?.by === "mind" ? { mind: stop.entity } : {}) };
+    w.apply(summary);
+    const remaining = result.stop === "cap" ? Math.max(0, this.to - result.to) : 0;
+    const montage = buildMontage(this.reg, w.world, this.before, w.state, w.events.slice(this.start), w.state.time.montage);
+    return {
+      ok: true,
+      result,
+      summary,
+      remaining,
+      chip: remaining > 0 ? { kind: "continue_timelapse", target: this.target.type === "duration" ? { type: "duration", minutes: remaining } : this.target, remaining } : null,
+      montage,
+      ...(stop?.by === "mind" ? { mindName: playerKnows(this.reg, w.world, w.state, w.world.pov, stop.entity) ? (own(w.state.entities, stop.entity)?.name ?? null) : null } : {}),
+    };
+  }
+}
+
+/**
  * Runs one timelapse segment into the working state: the interval slot by slot with process
  * seeds, every LOD1 agent and the POV's routine, stopping at the first `stop` interrupt (at its
  * slot's end), the target predicate or the unit cap (always at least one slot).
  */
 export function runTimelapse(reg: Registry, w: Working, target: TimelapseTarget, opts: TimelapseOptions): TimelapseOutcome | Rejection {
-  if (clockPaused(w.world, w.state)) return { code: "paused", reason: "The clock is paused; resume it first." };
-  const resolved = resolveTarget(reg, w.world, w.state, target);
-  if ("code" in resolved) return resolved;
-  const before = structuredClone(w.state) as WorldState;
-  const start = w.events.length;
-  const from = w.state.clock;
-  const result = advance(reg, w, resolved.to, {
-    runSeed: opts.runSeed,
-    mode: "timelapse",
-    cause: "timelapse",
-    includePov: true,
-    ...(opts.overrides ? { interrupts: opts.overrides } : {}),
-    unitCap: clampUnitCap(opts.unitCap ?? w.state.time.unitCap),
-    ...(resolved.stopWhen ? { stopWhen: resolved.stopWhen } : {}),
-  });
-  const summary: TimelapseEvent = { type: "timelapse", from, to: result.to, target, stoppedBy: result.stoppedBy, segment: opts.segment ?? 1 };
-  w.apply(summary);
-  const remaining = result.stop === "cap" ? resolved.to - result.to : 0;
-  const montage = buildMontage(reg, w.world, before, w.state, w.events.slice(start), w.state.time.montage);
-  return {
-    ok: true,
-    result,
-    summary,
-    remaining,
-    chip: result.stop === "cap" ? { kind: "continue_timelapse", target: target.type === "duration" ? { type: "duration", minutes: remaining } : target, remaining } : null,
-    montage,
-  };
+  const run = TimelapseRun.start(reg, w, target, opts);
+  return "code" in run ? run : run.finish(null);
+}
+
+/**
+ * A time skip replayed from its record (DESIGN §24.7): the same segment, stopping at each recorded
+ * beat to apply what was decided there, then on to the target, or stopped where the record says (at a
+ * beat whose minds gave nothing, too). A beat the run no longer reaches (it ended on its own first) and
+ * every beat after it are left out.
+ */
+export function replaySkip(reg: Registry, w: Working, target: TimelapseTarget, record: SkipRecord, opts: TimelapseOptions): TimelapseOutcome | Rejection {
+  const run = TimelapseRun.start(reg, w, target, opts);
+  if ("code" in run) return run;
+  const stopAt = record.stop?.at ?? Infinity;
+  for (const beat of record.beats) {
+    if (beat.at > stopAt) break;
+    run.advanceTo(beat.at);
+    if (run.clock !== beat.at) return run.finish(null);
+    run.apply(beat.events);
+  }
+  if (record.stop) {
+    run.advanceTo(record.stop.at);
+    if (run.clock === record.stop.at) return run.finish(record.stop);
+  }
+  return run.finish(null);
 }
 
 /** The smallest unit cap that still fits one slot for every LOD1 agent plus the POV (lint and Settings use it). */

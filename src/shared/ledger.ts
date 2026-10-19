@@ -139,13 +139,18 @@ export type TimelapseTarget =
   | { type: "stage"; track: TrackId; stage: StageId }
   | { type: "interrupt" };
 
+/** What ended a timelapse before its target (DESIGN §9.2): an interrupt class, or a character's mind at a time skip's beat (§24.7). */
+export type TimelapseStop = InterruptClass | "mind";
+
 /** Summary of a timelapse segment (DESIGN §9.2). */
 export interface TimelapseEvent extends EventBase {
   type: "timelapse";
   from: number;
   to: number;
   target: TimelapseTarget;
-  stoppedBy: InterruptClass | null;
+  stoppedBy: TimelapseStop | null;
+  /** Whose mind stopped it, with `stoppedBy: "mind"`. */
+  mind?: EntityId;
   segment: number;
 }
 

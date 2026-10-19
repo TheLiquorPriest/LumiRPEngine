@@ -21,7 +21,7 @@ import type { ClockEvent, LedgerEvent } from "../shared/ledger";
 import { calendarOf, MINUTES_PER_DAY, slotIndexAt, slotOf, slotsEnding, type Slot } from "./calendar";
 import { ENGINE_EVENTS, readEngineSlice, signalOf, type Signal } from "./engine-pack";
 import { EXTERNAL_ACCOUNT_PREFIX } from "./events";
-import type { ProcessDef, ReadContext, SlotInfo } from "./registry";
+import type { AgentInstant, ProcessDef, ReadContext, SlotInfo } from "./registry";
 import { rulesetFloor, type Registry } from "./registry-impl";
 import { createRng, type Rng } from "./rng";
 import { runRulesOnEvents, runRulesOnTick, type RuleFiring } from "./rules";
@@ -78,6 +78,11 @@ export interface AdvanceOptions {
   interrupts?: Partial<Record<InterruptClass, InterruptPolicy>>;
   /** Timelapse unit cap per segment; default `state.time.unitCap`. */
   unitCap?: { agentDays: number; events: number };
+  /**
+   * Slots the segment already ran in earlier calls (a time skip runs one segment in pieces, DESIGN
+   * §24.7): only a segment's first slot runs whatever the cap, so a later piece gets no free one.
+   */
+  slotsBefore?: number;
   /** A target predicate checked after each slot (a track reaching a stage). */
   stopWhen?: (w: Working) => boolean;
 }
@@ -184,11 +189,46 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   let cursors = new Map<EntityId, number>();
   let next = 0;
 
-  const applyInstants = (until: number): void => {
-    while (next < instants.length && (instants[next]?.at ?? Infinity) <= until) {
-      const inst = instants[next++] as ScheduleInstant;
-      clockTo(w, inst.at, cause, e);
-      e.emit(instantEvents(reg, w.ctx, inst, opts.runSeed, { povRoutine: timelapse }));
+  /**
+   * The agents' own moments inside a slot after the clock and up to `until` (`ProcessDef.instants`):
+   * for every agent stepped through the slot before (in a turn the LOD1 agents caught up, in a
+   * timelapse those it steps), in time order, then by agent and process.
+   */
+  const agentInstants = (slot: Slot, until: number): { at: number; agent: EntityId; def: ProcessDef; instant: AgentInstant }[] => {
+    const timed = reg.processes.filter((d) => d.scope === "agent" && d.instants);
+    if (timed.length === 0) return [];
+    const after = w.state.clock;
+    const who = timelapse ? stepping() : lod1Agents(w.world, w.state).filter((a) => a !== w.world.pov);
+    const info: SlotInfo = { start: slot.start, end: slot.end, index: slot.index };
+    const out: { at: number; agent: EntityId; def: ProcessDef; instant: AgentInstant }[] = [];
+    for (const agent of who) {
+      if ((cursors.get(agent) ?? agentCursor(w.world, w.state, agent)) < slot.index - 1) continue;
+      for (const def of timed) {
+        if (w.ctx.levelOf(agent, def.domain) < def.minLevel) continue;
+        for (const instant of def.instants?.(w.ctx, agent, info) ?? []) if (instant.at > after && instant.at <= until && instant.at > slot.start && instant.at < slot.end) out.push({ at: instant.at, agent, def, instant });
+      }
+    }
+    return out.sort((a, b) => a.at - b.at || a.agent.localeCompare(b.agent) || timed.indexOf(a.def) - timed.indexOf(b.def) || a.instant.key.localeCompare(b.instant.key));
+  };
+
+  /** Schedule edges up to `until`, with the agents' own moments in `slot` among them; an edge goes first at the same minute. */
+  const applyInstants = (until: number, slot: Slot): void => {
+    const timed = agentInstants(slot, until);
+    let t = 0;
+    for (;;) {
+      const edge = instants[next];
+      const edgeAt = edge && edge.at <= until ? edge.at : Infinity;
+      const moment = timed[t];
+      if (edgeAt === Infinity && !moment) break;
+      if (edge && edgeAt <= (moment?.at ?? Infinity)) {
+        next++;
+        clockTo(w, edgeAt, cause, e);
+        e.emit(instantEvents(reg, w.ctx, edge, opts.runSeed, { povRoutine: timelapse }));
+      } else if (moment) {
+        t++;
+        clockTo(w, moment.at, cause, e);
+        if (stillActs(w, moment.agent)) e.emit(moment.def.atInstant?.(w.ctx, moment.agent, moment.instant) ?? []);
+      }
     }
   };
 
@@ -212,16 +252,17 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
       cursors.delete(agent);
     }
     const slotDays = (agents.length * (slot.end - slot.start)) / MINUTES_PER_DAY;
-    if (timelapse && result.slots > 0 && result.agentDays + slotDays > cap.agentDays) {
+    const ranBefore = result.slots + (opts.slotsBefore ?? 0) > 0;
+    if (timelapse && ranBefore && result.agentDays + slotDays > cap.agentDays) {
       result.stop = "cap";
       break;
     }
-    const mark = timelapse && result.slots > 0 ? w.mark() : null;
+    const mark = timelapse && ranBefore ? w.mark() : null;
     const held = mark ? new Map(cursors) : null;
     const before = w.events.length;
     const rulesBefore = result.rules.length;
     const tracksBefore = result.tracks.length;
-    applyInstants(slot.end);
+    applyInstants(slot.end, slot);
     clockTo(w, slot.end, cause, e);
     const info: SlotInfo = { start: slot.start, end: slot.end, index: slot.index };
     for (const def of reg.processes) {
@@ -273,7 +314,7 @@ export function advance(reg: Registry, w: Working, to: number, opts: AdvanceOpti
   }
 
   if (result.stop === "target") {
-    applyInstants(to);
+    applyInstants(to, slotOf(cal, slotIndexAt(cal, to)));
     clockTo(w, to, cause, e);
   }
   for (const [agent, slot] of cursors) settle(agent, slot);

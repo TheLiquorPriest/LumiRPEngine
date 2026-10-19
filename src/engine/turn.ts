@@ -28,8 +28,8 @@ import { runRulesOnEvents, runRulesOnTick } from "./rules";
 import { acts } from "./life";
 import { isGone, placeOfEntity } from "./scope";
 import { advance, catchUp, coarsen, interruptPolicy } from "./simulate";
-import type { PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
-import { buildMontage, fightHoldsClock, IN_FIGHT, pauseBookkeeping, parseOverrides, parseTarget, runTimelapse, sceneKey, speedThrough, turnElapsed, type Montage, type TimelapseOutcome } from "./time";
+import type { InterpretOutput, PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
+import { buildMontage, fightHoldsClock, IN_FIGHT, pauseBookkeeping, parseOverrides, parseTarget, replaySkip, runTimelapse, sceneKey, speedThrough, turnElapsed, type Montage, type TimelapseOptions, type TimelapseOutcome } from "./time";
 import { stepTracks } from "./tracks";
 import { signalVisible } from "./visibility";
 import { Working } from "./working";
@@ -96,14 +96,29 @@ function queueStop(w: Working, res: Resolution, since: number, scene: string, sp
   return signalled ? "interruption" : null;
 }
 
+/**
+ * What every planned turn does first (DESIGN §5.1 step 2): a fresh pause is pinned to its scene, or
+ * a lifted one cleared, and the POV's representation materializes. A time skip's pre phase starts
+ * here too, so it reaches its beats in the state the plan will (DESIGN §24.7).
+ */
+export function turnStart(reg: Registry, w: Working, runSeed: string): void {
+  w.applyAll(pauseBookkeeping(w.world, w.state));
+  // The POV is always shown (HUD, panels): its representation materializes in its first planned turn.
+  materializeAll(reg, w, w.world.pov, runSeed);
+}
+
+/** A timelapse intent's target and run options, read alike by the plan and by a time skip's pre phase (DESIGN §24.7). */
+export function timelapseOptions(intent: InterpretOutput, runSeed: string): { target: TimelapseTarget | null; opts: TimelapseOptions } {
+  const seg = intent.params.segment;
+  return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 } };
+}
+
 export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const reg: Registry = input.registry;
   const w = new Working(reg, input.world, input.state);
   const rng = createRng(input.seed);
   const chips: TurnChip[] = [];
-  w.applyAll(pauseBookkeeping(w.world, w.state));
-  // The POV is always shown (HUD, panels): its representation materializes in its first planned turn.
-  materializeAll(reg, w, w.world.pov, input.runSeed);
+  turnStart(reg, w, input.runSeed);
   const from = w.state.clock;
   const intent = input.intent;
   const resolutions: Resolution[] = [];
@@ -112,14 +127,16 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const combat: string[] = [];
 
   if (intent?.action === TIMELAPSE_ACTION) {
-    const target = parseTarget(intent.params.target);
-    const seg = intent.params.segment;
+    const { target, opts } = timelapseOptions(intent, input.runSeed);
     // A fight's rounds take no clock time (DESIGN §11), so nothing skips ahead while the POV is in one.
+    // A time skip's pre phase recorded the minds at its beats: the plan replays them (DESIGN §24.7).
     const outcome = !target
       ? { code: "bad_target", reason: "no timelapse target" }
       : fightHoldsClock(w.ctx)
         ? { code: "in_fight", reason: IN_FIGHT }
-        : runTimelapse(reg, w, target, { runSeed: input.runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 });
+        : input.skip
+          ? replaySkip(reg, w, target, input.skip, opts)
+          : runTimelapse(reg, w, target, opts);
     if ("code" in outcome) w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
     else timelapse = outcome;
   } else {
