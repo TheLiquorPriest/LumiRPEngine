@@ -489,7 +489,7 @@ Each mind is recorded on the turn, so swipes and branches keep it: **Re-narrate*
 
 Every turn, and at each beat of a time skip, each character gets a focus score and a level from it:
 
-- **Live**: they think every turn, best score first, up to your Live limit. Only people at hand are Live: in your scene, close by, or named this turn. Anyone else is Near at most, however much of the story they carry.
+- **Live**: they think every turn, best score first, up to your Live limit. Only people at hand are Live: in your scene, or named this turn. Anyone else is Near at most, however much of the story they carry.
 - **Near**: they think again when something calls for it: they come into the scene, they are named, or their mind is old enough (the Near refresh).
 - **Far**: they think now and then, on the Far refresh period, and their plans shape their day.
 - **Background**: no mind; they follow their routine.

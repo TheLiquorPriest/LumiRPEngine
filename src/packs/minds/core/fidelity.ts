@@ -191,9 +191,11 @@ export function fidelityOf(ctx: ReadContext, texts: FidelityTexts, config: World
     const always = config.always !== null && selectorMatches(reg, world, state, config.always, id);
     const author: Fidelity | null = never ? "background" : always ? "live" : null;
     const t = config.thresholds;
-    // Live is for people at hand: someone elsewhere and unnamed this turn waits at Near however much
-    // story they carry, so a Live slot never goes to a sleeper across town while someone in the room has none.
-    const atHand = (here !== null && place === here) || closeBy(world, place, here) || namedIn(e.name, said);
+    // Live is for people at hand: in the POV's scene or named this turn. "Close by" only means under the
+    // same parent place, which in a town world is the whole town, so it can't qualify anyone; someone
+    // elsewhere waits at Near however much story they carry, and a Live slot never goes to a sleeper
+    // across town while someone in the room has none.
+    const atHand = (here !== null && place === here) || namedIn(e.name, said);
     const scored: Fidelity = score >= t.live ? (atHand ? "live" : "near") : score >= t.near ? "near" : score >= t.far ? "far" : "background";
     if (score >= t.live && !atHand) reasons.push({ label: "Not at hand, so Near at most", points: 0 });
     const level = gm ?? author ?? scored;
