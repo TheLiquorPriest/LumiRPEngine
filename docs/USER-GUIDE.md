@@ -776,6 +776,8 @@ You edit a world as a draft: the world bar in **Build** shows **unsaved draft** 
 
 A world has one draft, shared by every window and device you use. When something else changes the draft while Build has it open (another window, or an outside agent working through the `lumirpengine` CLI or its MCP server), Build reloads it and tells you: *This world's draft changed in another window, or an outside agent changed it; Build reloaded it.* Changes are made one at a time, so none is lost. A draft begun before the world got a newer revision can't be committed over it: discard it and start again from the latest revision.
 
+If you were editing an item when it changed elsewhere, Build keeps your edits: its bar says *This item changed elsewhere* and offers **Load theirs** (the other change, in the form) and **Keep mine**. Saving over the other change asks you first. A discard or a commit of a draft that changed while Build was asking you is refused, and Build reloads the draft so you can look again. Build also reads the draft again when it reconnects or you come back to the page, in case it missed a change.
+
 Each world keeps a **history** of how each of its revisions became the latest: created, committed in Build, committed by an outside agent (with the note it gave), imported, or installed from LumiRPEngine Studio. Worlds made before this was kept start their history at their next commit. The `lumirpengine` CLI and MCP server show the history, and they can put an earlier revision back into the draft for you to commit again.
 
 #### Upgrade
