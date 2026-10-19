@@ -33,3 +33,15 @@ describe("payroll: paydays", () => {
     expect(paid(w, "job_driver").map((d) => [d.minutes, d.gross])).toEqual([[2 * 40 * 60, 2 * 40 * 2000]]);
   });
 });
+
+describe("payroll: paychecks", () => {
+  test("taxes take no more than the deductions leave: a paycheck nearly all saved is paid, not refused", () => {
+    // $100 a week at the top level with $99 of it to a 401(k): FICA alone is $7.65 of the $1 left.
+    const { w } = setup((wd) => void (wd.entities.job_saver = entity("job_saver", "job", "Saver", { worker: "maya", employer: "Riverton books", title: "Saver", basis: "hourly", rate: 250, hours: "contract", hours_per_week: 40, weeks_per_year: 52, pay_every: "weekly", pay_weekday: 5, start: "2025-01-06", deductions: [{ label: "401(k)", cents: 9900, pretax: true, kind: "retirement" }] })));
+    lapse(w, 8 * DAY);
+    expect(paid(w, "job_saver").map((d) => [d.gross, d.deductions, d.taxes, d.net])).toEqual([
+      [10_000, 9900, 100, 0],
+      [10_000, 9900, 100, 0],
+    ]);
+  });
+});

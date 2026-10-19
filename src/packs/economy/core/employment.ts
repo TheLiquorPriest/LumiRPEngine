@@ -593,14 +593,21 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   const brackets = api.feature(ctx, job.worker, "tax_brackets");
   const year = dateAt(cal, at).year;
   const taxes = api.feature(ctx, job.worker, "withholding") ? payTaxes(ctx, job.worker, { gross, pretax, periods: periodsPerYear(ctx, api, job), ytdFica: yearPay(ctx.state, job.worker, year).fica, brackets, selfEmployed: job.contractor, ficaExempt: job.ficaExempt }) : { federal: 0, socialSecurity: 0, medicare: 0, state: 0, local: 0 };
-  // Withholding never takes more than deductions leave; what it can't take comes off federal.
-  taxes.federal = Math.max(0, taxes.federal - Math.max(0, taxTotal(taxes) - left));
+  // Withholding never takes more than the deductions leave: what it can't take comes off income tax
+  // first, then Medicare, then Social Security. The employer's share of FICA is its own, and whole.
+  const fica = taxes.socialSecurity + taxes.medicare;
+  let over = taxTotal(taxes) - left;
+  for (const k of ["federal", "local", "state", "medicare", "socialSecurity"] as const) {
+    const cut = Math.min(taxes[k], Math.max(0, over));
+    taxes[k] -= cut;
+    over -= cut;
+  }
   const net = left - taxTotal(taxes);
 
   const deposit = api.depositAccount(ctx, job.worker) ?? api.outside(job.worker);
   const routed = api.split(net, job.splits.filter((s) => ownsAccount(api, ctx.state, job.worker, s.to)), deposit).filter((r) => r.cents > 0);
   const match = matched.reduce((a, m) => a + m.cents, 0);
-  const employerFica = brackets && job.business !== null && !job.contractor && !job.ficaExempt ? taxes.socialSecurity + taxes.medicare : 0;
+  const employerFica = brackets && job.business !== null && !job.contractor && !job.ficaExempt ? fica : 0;
   const lines: PostingLine[] = [];
   const add = (account: string, amount: number): void => {
     if (amount === 0) return;
@@ -615,7 +622,7 @@ export function paycheckFor(ctx: ReadContext, api: FinanceApi, job: Job, at: num
   add(api.outside("tax:federal"), taxes.federal + taxes.socialSecurity + taxes.medicare + employerFica);
   add(api.outside("tax:state"), taxes.state);
   add(api.outside("tax:local"), taxes.local);
-  const ficaWages = taxes.socialSecurity > 0 || taxes.medicare > 0 ? Math.max(0, gross - pretax.fica) : 0;
+  const ficaWages = fica > 0 ? Math.max(0, gross - pretax.fica) : 0;
   return { job: job.id, worker: job.worker, from: since, to: through, work, gross, parts: { pay, tips, commission }, taxes, deductions, net, routed, match, employerFica, ficaWages, pretax: pretax.income, lines: lines.filter((l) => l.amount !== 0) };
 }
 
