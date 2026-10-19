@@ -23,6 +23,7 @@ import { labelOf, numOf, objOf, own, strOf } from "../../../engine/pack-kit";
 import type { EffectContext, ReadContext, Rejection, SlotInfo } from "../../../engine/registry";
 import type { Rng } from "../../../engine/rng";
 import type { WorldState } from "../../../engine/state";
+import { canSeeEntity, canSeePlace } from "../../../engine/visibility";
 import type { AmountProvider, FinanceApi, FinanceRegistry, FlowPosting } from "./module";
 import { addMonths, clockOfDate, dateText, instantIn, investingRows, reject } from "./assets";
 import { acquisition, disposal } from "./gains";
@@ -328,7 +329,7 @@ function managedFlow(api: FinanceApi, ctx: ReadContext, id: EntityId, l: Managed
 }
 
 /** A property's leases as its view lists them: each lease, then a vacant line for each unit without one. */
-function leaseViews(api: FinanceApi, ctx: ReadContext, id: EntityId): LeaseView[] {
+function leaseViews(api: FinanceApi, ctx: ReadContext, id: EntityId, viewer: EntityId): LeaseView[] {
   const now = ctx.state.clock;
   const units = Math.max(1, Math.round(numOf(fieldsOf(ctx.state, id).units, 1)));
   const out: LeaseView[] = [];
@@ -338,7 +339,7 @@ function leaseViews(api: FinanceApi, ctx: ReadContext, id: EntityId): LeaseView[
     if (live) let_++;
     // The tenant is whoever holds the account the rent is paid from.
     const tenant = own(ctx.state.entities, l.tenant)?.kind === "account" ? (api.ownersOf(ctx.state, l.tenant)[0]?.party ?? l.tenant) : l.tenant;
-    out.push({ flow: l.id, tenant: labelOf(ctx, tenant), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
+    out.push({ flow: l.id, tenant: shownName(ctx, viewer, tenant, "a tenant"), rent: l.rent, start: l.start === null ? null : dateText(ctx.world, l.start), end: l.end === null ? null : dateText(ctx.world, l.end - 1440), state: live ? "let" : l.end !== null && l.end <= now ? "ended" : "vacant" });
   }
   for (const l of managedLeases(ctx, id)) {
     const from = monthStart(ctx.world, l.from);
@@ -645,42 +646,58 @@ export function endLease(api: FinanceApi, ctx: ReadContext, party: EntityId, lea
 
 // ---------------------------------------------------------------- views and worth
 
-function ownerLines(api: FinanceApi, ctx: ReadContext, id: EntityId): OwnerLine[] {
-  const owners = api.ownersOf(ctx.state, id);
-  const shares = worthShares(owners);
-  return owners.map((o) => ({ party: o.party, name: labelOf(ctx, o.party), role: o.role, share: Math.round((shares[o.party] ?? 0) * 100) / 100 }));
+/** A name as `viewer` may read it: anyone the POV can't see reads as `fallback` (DESIGN §7); the GM's views of others name everyone. */
+function shownName(ctx: ReadContext, viewer: EntityId, id: string, fallback: string): string {
+  if (!own(ctx.state.entities, id)) return id;
+  return viewer === ctx.world.pov && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, id) ? fallback : labelOf(ctx, id);
 }
 
-/** A property as a party's dashboard draws it; its costs are the party's flows linked to it. */
+function ownerLines(api: FinanceApi, ctx: ReadContext, id: EntityId, viewer: EntityId): OwnerLine[] {
+  const owners = api.ownersOf(ctx.state, id);
+  const shares = worthShares(owners);
+  return owners.map((o) => {
+    const hidden = viewer === ctx.world.pov && own(ctx.state.entities, o.party) !== undefined && !canSeeEntity(ctx.registry, ctx.world, ctx.state, viewer, o.party);
+    // An owner the viewer can't see goes unnamed, and without their id.
+    return { party: hidden ? "" : o.party, name: hidden ? "an owner" : labelOf(ctx, o.party), role: o.role, share: Math.round((shares[o.party] ?? 0) * 100) / 100 };
+  });
+}
+
+/**
+ * A property as a party's dashboard draws it; its costs are the party's flows linked to it. One they
+ * don't own (listed for sale) shows what its listing would: its name, where it is, its value and its
+ * price, and nothing of its owners, mortgage or leases. A place the POV can't see goes unnamed.
+ */
 export function propertyView(api: FinanceApi, ctx: ReadContext, id: EntityId, party: EntityId, flows: readonly FlowView[]): PropertyView {
   const e = own(ctx.state.entities, id);
   const value = propertyValue(ctx.state, id);
+  const place = strOf(e?.fields.place);
+  const asking = num(e?.fields.asking_price);
+  const shownPlace = place === "" || (party === ctx.world.pov && !canSeePlace(ctx.registry, ctx.world, ctx.state, party, place)) ? null : (own(ctx.world.places, place)?.name ?? labelOf(ctx, place));
+  if (!api.ownersOf(ctx.state, id).some((o) => o.party === party)) return { id, name: e?.name ?? id, place: shownPlace, owners: [], share: 0, value, equity: 0, forSale: asking ?? null, mortgage: null, leases: [], costs: [], route: null };
   const loans = securedLoans(api, ctx.state, id);
   const loan = loans.find((l) => l.owed > 0);
   const owed = loans.reduce((a, l) => a + l.owed, 0);
-  const place = strOf(e?.fields.place);
-  const asking = num(e?.fields.asking_price);
   const rentTo = strOf(e?.fields.rent_to);
   return {
     id,
     name: e?.name ?? id,
-    place: place !== "" ? (own(ctx.world.places, place)?.name ?? labelOf(ctx, place)) : null,
-    owners: ownerLines(api, ctx, id),
+    place: shownPlace,
+    owners: ownerLines(api, ctx, id, party),
     share: api.shareOf(ctx.state, id, party),
     value,
     equity: value - owed,
     mortgage: loan ? { id: loan.loan, name: labelOf(ctx, loan.loan), owed, payment: num(fieldsOf(ctx.state, loan.loan).payment) ?? null, monthsLeft: num(fieldsOf(ctx.state, loan.loan).months_left) ?? null } : null,
-    leases: leaseViews(api, ctx, id),
+    leases: leaseViews(api, ctx, id, party),
     costs: flows.filter((f) => f.link?.id === id && f.kind !== "rent"),
     forSale: asking ?? null,
-    // Where its rent goes, for an owner: `rent_to` when it names an account, else the usual place.
-    route: api.ownersOf(ctx.state, id).some((o) => o.party === party) ? shownRoute(api, ctx, party, own(ctx.state.entities, rentTo)?.kind === "account" ? rentTo : null, false) : null,
+    // Where its rent goes: `rent_to` when it names an account, else the usual place.
+    route: shownRoute(api, ctx, party, own(ctx.state.entities, rentTo)?.kind === "account" ? rentTo : null, false),
   };
 }
 
-/** The properties a party sees: those it has a role on, and those for sale it doesn't own. */
+/** The properties a party sees: those it has a role on, and those for sale it doesn't own (for the POV, those it may see). */
 export function visibleProperties(api: FinanceApi, ctx: ReadContext, party: EntityId): EntityId[] {
-  return propertyIds(ctx.state).filter((id) => api.ownersOf(ctx.state, id).some((o) => o.party === party) || num(fieldsOf(ctx.state, id).asking_price) !== undefined);
+  return propertyIds(ctx.state).filter((id) => api.ownersOf(ctx.state, id).some((o) => o.party === party) || (num(fieldsOf(ctx.state, id).asking_price) !== undefined && (party !== ctx.world.pov || canSeeEntity(ctx.registry, ctx.world, ctx.state, party, id))));
 }
 
 /** A party's share of every property's value, a line each. */

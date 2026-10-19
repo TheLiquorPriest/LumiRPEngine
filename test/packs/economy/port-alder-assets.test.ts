@@ -88,4 +88,16 @@ describe("Port Alder's holdings and property", () => {
     expect(w.state.accounts.acct_marcus_mortgage).toBe(-18778000);
     expect(worth(w, "marcus_delgado")).toBe(before);
   });
+
+  test("listed for sale, Marcus's house shows the POV only what a listing would: never its secret address, its owner's mortgage or its leases", () => {
+    const w = portAlder();
+    w.apply({ type: "set", entity: "prop_birch_lane_12", field: "asking_price", value: 35_000_000 });
+    const view = w.ctx.query("economy.finance")(w.ctx, w.world.pov, true);
+    expect(view.properties.find((p) => p.id === "prop_birch_lane_12")).toEqual({ id: "prop_birch_lane_12", name: "Marcus's house", place: null, owners: [], share: 0, value: 34_000_000, equity: 0, forSale: 35_000_000, mortgage: null, leases: [], costs: [], route: null });
+    const text = JSON.stringify(view);
+    for (const hidden of ["Birch Lane", "Marcus's mortgage", "acct_marcus_mortgage"]) expect(text).not.toContain(hidden);
+    // Marcus's own view, as the GM sees it, still shows all of it.
+    const his = w.ctx.query("economy.finance")(w.ctx, "marcus_delgado", false).properties.find((p) => p.id === "prop_birch_lane_12");
+    expect([his?.place, his?.mortgage?.id, his?.owners.map((o) => o.name)]).toEqual(["12 Birch Lane", "acct_marcus_mortgage", ["Marcus Delgado"]]);
+  });
 });
