@@ -22,6 +22,7 @@ import { gainsIn, incomeIn } from "../../../src/packs/economy/core/records";
 import { blackScholes } from "../../../src/packs/economy/core/pricing";
 import { modernUsWorld } from "../riverton";
 import { fold, startState, trialBalance } from "../support";
+import { openingEvent } from "../../../src/packs/economy/core/process";
 
 const reg = createRegistry(ALL_PACKS);
 const ALL_NOTE = { invitation: "note", decline: "note", incident: "note", quest: "note", arrival: "note" } as const;
@@ -387,5 +388,17 @@ describe("holdings: property", () => {
     expect(refuse(w, "economy.property_sell", { party: "you", property: "duplex", price: 18_000_000 })).toBe("needs_buyer");
     expect(w.state.entities.duplex?.fields.owners).toEqual([{ party: "you", role: "owner", share: 60 }, { party: "jordan", role: "owner", share: 40 }]);
     expect(w.ctx.query("economy.net_worth")(w.ctx, "jordan")).toBe(jordan);
+  });
+
+  test("a co-owner who buys another's share holds both: 50 % and 30 % make 80 %, and the third owner's part stays as it was", () => {
+    const w = setup((world) => duplex(world, { owners: [{ party: "you", role: "owner", share: 30 }, { party: "jordan", role: "owner", share: 50 }, { party: "maya", role: "owner", share: 20 }] }));
+    const maya = w.ctx.query("economy.net_worth")(w.ctx, "maya");
+    // Jordan's checking opens before he pays from it.
+    const opening = openingEvent(w.ctx, "jordan");
+    if (opening) w.apply(opening);
+    run(w, "economy.property_sell", { party: "you", property: "duplex", price: 500_000, buyer: "jordan" });
+    expect(w.state.entities.duplex?.fields.owners).toEqual([{ party: "jordan", role: "owner", share: 80 }, { party: "maya", role: "owner", share: 20 }]);
+    expect(w.ctx.query("economy.net_worth")(w.ctx, "maya")).toBe(maya);
+    expect(trialBalance(w.state)).toBe(0);
   });
 });

@@ -517,11 +517,17 @@ export function sellProperty(api: FinanceApi, ctx: EffectContext | ReadContext, 
     if (isRejection(posted)) return posted;
     events.push(...posted);
   }
-  const others = owners.filter((o) => o.party !== x.party);
-  const next: Owner[] = x.buyer ? [...others, { party: x.buyer, role: mine.role === "owner" || mine.role === "joint" ? mine.role : "owner", share }] : others;
+  // Everyone's share written out, the seller's added to the buyer's (on top of any they held) and the
+  // rest's unchanged, as a stake sale writes them.
   const shares = worthShares(owners);
-  const written = next.map((o) => ({ party: o.party, role: o.role, share: Math.round((o.party === x.buyer ? share : (shares[o.party] ?? 0)) * 100) / 100 }));
-  const sold = next.length === 0 || (others.length === 0 && x.buyer !== undefined);
+  const written: Owner[] = [];
+  for (const o of owners) {
+    if (o.party === x.party) continue;
+    written.push({ party: o.party, role: o.role, share: Math.round(((shares[o.party] ?? 0) + (o.party === x.buyer ? share : 0)) * 10000) / 10000 });
+  }
+  if (x.buyer && !written.some((o) => o.party === x.buyer)) written.push({ party: x.buyer, role: mine.role === "owner" || mine.role === "joint" ? mine.role : "owner", share: Math.round(share * 10000) / 10000 });
+  const others = owners.filter((o) => o.party !== x.party);
+  const sold = written.length === 0 || (others.length === 0 && x.buyer !== undefined);
   return unit([
     ...events,
     disposal(x.property, x.party, 100, price, memo),
