@@ -2,7 +2,7 @@
 // party's money, with its schedule, what it does when the money isn't there and how it has run.
 // The player creates, edits, pauses, resumes and deletes the ones they may (in-world actions),
 // pays an invoice billed to them and gives notice on a lease they rent under; a flow a job, a
-// lease or a loan derives is changed at its source. The GM edits any flow's fields.
+// lease or a loan derives is changed at its source. The GM edits any flow's fields and its name.
 
 import { useState } from "preact/hooks";
 import { CLASS_TRAITS, FLOW_KINDS, FLOW_SHORTFALLS, type FinanceView, type Flow, type FlowView } from "../../../shared/finance";
@@ -80,7 +80,7 @@ export function FlowFormView(props: { view: FinanceView; controls: HubControls; 
         if (problem === null) void submit().then((ok) => ok && props.onDone());
       }}
     >
-      {controls.mode === "player" || !flow ? <TextField label="Name" value={form.label} onInput={(label) => set({ label })} placeholder="Rent, Savings, Allowance…" /> : null}
+      <TextField label="Name" value={form.label} onInput={(label) => set({ label })} placeholder="Rent, Savings, Allowance…" />
       <SelectField label="Kind" value={form.kind} options={FLOW_KINDS.map((k) => ({ value: k, label: humanize(k) }))} onChange={(v) => set({ kind: FLOW_KINDS.find((k) => k === v) ?? "transfer" })} />
       <SelectField label="From" value={form.from} empty="Choose" options={ends.from} onChange={(from) => set({ from })} />
       <SelectField

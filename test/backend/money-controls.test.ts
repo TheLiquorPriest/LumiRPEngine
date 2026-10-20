@@ -301,6 +301,20 @@ describe("Play → Money: each control plays as the player's turn", () => {
     expect(await chat.play(change)).toContain("done");
     expect((await chat.hub()).flows.find((f) => f.id === made.id)).toMatchObject({ schedule: "monthly on the 5th" });
   });
+
+  test("Edit renames a standing payment and empties its end and its count", async () => {
+    const chat = await MoneyChat.start();
+    await chat.play(flowCreateAction({ ...gymForm(CHECKING), end: "2027-06-30", count: 6 }, chat.currency));
+    const made = (await chat.hub()).flows.find((f) => f.label === "Harbor Gym");
+    if (!made?.spec) throw new Error("no Harbor Gym flow with its form");
+    expect([made.spec.end, made.spec.count]).toEqual(["2027-06-30", 6]);
+    const change = flowUpdateAction(made.spec, { ...flowFormOf(made.spec, chat.currency), label: "Gym", end: "", count: null }, chat.currency);
+    if (!change) throw new Error("no change");
+    expect(await chat.play(change)).toContain("done");
+    const after = (await chat.hub()).flows.find((f) => f.id === made.id);
+    expect(after?.label).toBe("Gym");
+    expect([after?.spec?.end, after?.spec?.count]).toEqual([undefined, undefined]);
+  });
 });
 
 describe("GM view → Money: each control is one edit", () => {
@@ -431,6 +445,18 @@ describe("GM view → Money: each control is one edit", () => {
     expect(made).toMatchObject({ schedule: "every 2 months on the 5th" });
     accepted(await chat.edit(flowEditOps(made.spec, { ...flowFormOf(made.spec, chat.currency), interval: 1 }, chat.currency)));
     expect((await chat.party(DANNY)).flows.find((f) => f.id === id)).toMatchObject({ schedule: "monthly on the 5th" });
+  });
+
+  test("the GM's edit renames a flow and empties its end and its count", async () => {
+    const chat = await MoneyChat.start();
+    const id = newIdFor("flow", "Harbor Gym", new Set((await chat.gm()).fields.keys()));
+    accepted(await chat.edit(flowSpawnOps(id, { ...gymForm(DANNY_CHECKING), end: "2027-06-30", count: 6 }, chat.currency)));
+    const made = (await chat.party(DANNY)).flows.find((f) => f.id === id);
+    if (!made?.spec) throw new Error("no Harbor Gym flow with its form");
+    accepted(await chat.edit(flowEditOps(made.spec, { ...flowFormOf(made.spec, chat.currency), label: "Gym", end: "", count: null }, chat.currency)));
+    const after = (await chat.party(DANNY)).flows.find((f) => f.id === id);
+    expect(after?.label).toBe("Gym");
+    expect([after?.spec?.end, after?.spec?.count]).toEqual([undefined, undefined]);
   });
 
   test("the GM adds someone to a household and takes them out; the POV's Money shows who shares their home", async () => {

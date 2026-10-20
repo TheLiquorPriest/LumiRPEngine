@@ -328,6 +328,14 @@ describe("the requests the controls send", () => {
     expect(flowEditOps(fortnightly, { ...form, interval: 1 }, USD)).toEqual([{ op: "set", entity: "flow_rent", field: "interval", value: 1 }]);
   });
 
+  test("an edit renames, and names the optional parts it empties; the GM's goes by its flow edit", () => {
+    const dated: Flow = { ...rent, schedule: { every: "week", weekdays: [5], at: "07:30" }, end: "2027-06-30", count: 12, category: "housing" };
+    const form = flowFormOf(dated, USD);
+    expect(flowUpdateAction(dated, { ...form, label: "Room rent" }, USD)?.params).toEqual({ flow: "flow_rent", label: "Room rent" });
+    expect(flowUpdateAction(dated, { ...form, at: "", end: "", count: null, category: "" }, USD)?.params).toEqual({ flow: "flow_rent", clear: "at,end,count,category" });
+    expect(flowEditOps(dated, { ...form, label: "Room rent", end: "", count: null }, USD)).toEqual([{ op: "effect", effect: "economy.flow_edit", args: { flow: "flow_rent", name: "Room rent", clear: "end,count" } }]);
+  });
+
   test("the GM's change sets the declared fields and empties what an old schedule shape held", () => {
     const form = flowFormOf(rent, USD);
     expect(flowEditOps(rent, { ...form, every: "month", day: 1 }, USD)).toEqual([
