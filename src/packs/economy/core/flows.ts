@@ -298,9 +298,15 @@ function foundationFlows(ctx: ReadContext): Flow[] {
     if (!featureOn(ctx.levelOf(id, "money"), "living_costs", toggles(ctx.world)) || !kindIs(ctx.registry, ctx.world, e.kind, "person")) continue;
     out.push({ id: `living:${id}`, label: "Living costs", kind: "living", from: id, to: "market", amount: { provider: "economy.living" }, schedule: { every: "week", weekdays: [1] }, shortfall: "partial", category: "living", status: "active", method: "auto", source: "living" });
   }
-  const insured = new Set(Object.values(s.entities).filter((e) => e.kind === "flow" && !isGone(s, strOf(e.fields.link)) && e.fields.status !== "ended").map((e) => strOf(e.fields.link)));
+  // An insurance flow insures: one linked to a vehicle insures it, one linked to nothing every vehicle its payer owns. A vehicle's other flows (its loan, its fuel) don't.
+  const cover = Object.keys(s.entities).flatMap((id) => {
+    const f = flowOfEntity(ctx, id);
+    return f && f.status !== "ended" && (f.kind === "premium" || f.category === "insurance") ? [f] : [];
+  });
+  const insured = new Set(cover.flatMap((f) => (f.link && !isGone(s, f.link) ? [f.link] : [])));
+  const payers = new Set(cover.filter((f) => !f.link).flatMap((f) => (own(s.entities, f.from)?.kind === "account" ? holdersOf(s, f.from) : [f.from])));
   for (const p of optionalQuery(ctx, "vehicles.insurance")?.(ctx) ?? []) {
-    if (insured.has(p.vehicle) || p.cents <= 0) continue;
+    if (insured.has(p.vehicle) || payers.has(p.owner) || p.cents <= 0) continue;
     out.push({ id: `insurance:${p.vehicle}`, label: p.label, kind: "premium", from: p.owner, to: "insurer", amount: { fixed: p.cents }, schedule: { every: "month", days: [1] }, shortfall: "skip", category: "insurance", link: p.vehicle, status: "active", method: "account", source: "vehicle" });
   }
   return out;

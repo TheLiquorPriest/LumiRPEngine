@@ -15,7 +15,7 @@ import type { EntityDef, WorldDoc } from "../shared/world";
 const AUTOPAY = /^\s*(minimum|statement|full)?\s*(?:from\s+(\S+))?\s*$/i;
 
 /** The payroll fields an older world kept on the person; the job carries them now. */
-const PAYROLL = ["hourly_cents", "hours_per_week", "pay_frequency", "payday", "deposit_to", "annual_income_cents"] as const;
+const PAYROLL = ["hourly_cents", "salary_cents", "annual_income_cents", "hours_per_week", "pay_frequency", "payday", "deposit_to"] as const;
 
 const WEEKDAYS: Readonly<Record<string, number>> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
 
@@ -24,12 +24,21 @@ function classOfLegacy(fields: Readonly<JsonObject>): AccountClass | null {
   return typeof t === "string" && hasOwn(LEGACY_TYPE_CLASS, t) ? (LEGACY_TYPE_CLASS[t] ?? null) : null;
 }
 
+/** Whether a kind is a person's, or extends one: the old payroll paid people, and only them. */
+function isPerson(doc: WorldDoc, kind: string): boolean {
+  let k: string | undefined = kind;
+  for (let depth = 0; k !== undefined && depth < 16; depth++) {
+    if (k === "person") return true;
+    k = doc.kinds[k]?.extends;
+  }
+  return false;
+}
+
 function isLegacy(doc: WorldDoc): boolean {
   return Object.values(doc.entities).some(
     (e) =>
       Array.isArray(e.fields.bills) ||
-      // A job keeps its own pay fields; only a person carrying them is the older shape.
-      (e.kind !== "job" && PAYROLL.some((k) => e.fields[k] !== undefined)) ||
+      (isPerson(doc, e.kind) && PAYROLL.some((k) => e.fields[k] !== undefined)) ||
       (e.kind === "account" && (typeof e.fields.owner === "string" || typeof e.fields.units === "number" || (typeof e.fields.type === "string" && e.fields.product === undefined) || e.fields.remaining_months !== undefined || (typeof e.fields.autopay === "string" && / from /i.test(` ${e.fields.autopay}`)))),
   );
 }
@@ -78,7 +87,27 @@ function freeId(doc: WorldDoc, taken: Set<string>, base: string): string {
   return id;
 }
 
-/** A party's old bills as flow entities; a lender's bill a loan's own autopay already pays is dropped. */
+/**
+ * A loan payment the loan's own autopay already makes, as the old bills read it: the bill names the
+ * loan (`to`), or its payee is the lender and its amount the loan's payment.
+ */
+function paidByLoanAutopay(loans: readonly EntityDef[], bill: JsonObject): boolean {
+  return loans.some((loan) => {
+    const f = loan.fields;
+    if (typeof f.autopay !== "string" || f.autopay === "" || f.autopay === "none") return false;
+    if (bill.to === loan.id) return true;
+    return typeof bill.payee === "string" && bill.payee !== "" && bill.payee === f.institution && typeof bill.amountCents === "number" && Math.round(bill.amountCents) === Math.round(typeof f.payment === "number" ? f.payment : Number.NaN);
+  });
+}
+
+/** The old premium check's reading of a bill's label: vehicle insurance of any kind. */
+const VEHICLE_INSURANCE = /auto|car|vehicle|truck|motor|boat|marine/i;
+
+/**
+ * A party's old bills as flow entities. A lender's bill a loan's own autopay already pays is
+ * dropped. A vehicle insurance bill becomes an insurance flow linked to nothing, which insures every
+ * vehicle its payer owns, as the old bill did.
+ */
 function billFlows(doc: WorldDoc, owner: EntityDef, taken: Set<string>): EntityDef[] {
   const bills = Array.isArray(owner.fields.bills) ? owner.fields.bills : [];
   const holds = (a: EntityDef): boolean => a.fields.owner === owner.id || (Array.isArray(a.fields.owners) && a.fields.owners.some((o) => isRecord(o) && o.party === owner.id));
@@ -86,46 +115,55 @@ function billFlows(doc: WorldDoc, owner: EntityDef, taken: Set<string>): EntityD
     const cls = a.kind === "account" ? classOfLegacy(a.fields) : null;
     return cls !== null && CLASS_TRAITS[cls].installment && holds(a);
   });
-  const vehicle = Object.values(doc.entities).find((v) => v.kind === "vehicle" && v.fields.owner === owner.id)?.id;
   const out: EntityDef[] = [];
   for (const raw of bills) {
-    if (!isRecord(raw)) continue;
+    if (!isRecord(raw) || paidByLoanAutopay(loans, raw)) continue;
     const label = typeof raw.label === "string" && raw.label !== "" ? raw.label : "Bill";
     const payee = typeof raw.payee === "string" ? raw.payee : "";
-    if (loans.some((l) => l.fields.institution === payee && l.fields.autopay !== undefined && l.fields.autopay !== "none")) continue;
     const fields: JsonObject = { flow_kind: "bill", from: typeof raw.from === "string" && raw.from !== "" ? raw.from : owner.id, to: payee, amount_cents: typeof raw.amountCents === "number" ? raw.amountCents : 0, shortfall: "skip", status: "active", every: typeof raw.every === "string" ? raw.every : "month" };
-    // An old weekly bill's `day` was its weekday; a monthly one's its day of the month.
+    // An old weekly bill's `day` was its weekday, by number or by name; a monthly one's its day of the month.
+    const weekday = typeof raw.day === "string" ? WEEKDAYS[raw.day.trim().toLowerCase()] : undefined;
     if (typeof raw.day === "number") fields[fields.every === "week" ? "weekdays" : "days"] = [raw.day];
+    else if (weekday !== undefined && fields.every === "week") fields.weekdays = [weekday];
     if (typeof raw.weekday === "number") fields.weekdays = [raw.weekday];
     if (typeof raw.month === "number") fields.months = [raw.month];
     for (const k of ["start", "end", "category"] as const) if (typeof raw[k] === "string") fields[k] = raw[k];
-    // The old premium check named car insurance by its label; such a bill belongs to the owner's vehicle.
-    if (vehicle && /insurance/i.test(label) && /auto|car|vehicle/i.test(label)) fields.link = vehicle;
+    if (/insurance/i.test(label) && VEHICLE_INSURANCE.test(label)) {
+      fields.flow_kind = "premium";
+      fields.category = "insurance";
+    }
     out.push({ id: freeId(doc, taken, `flow_${owner.id}_${slug(label)}`), kind: "flow", name: label, tier: "background", fields, relations: [] });
   }
   return out;
 }
 
-/** A person's old pay as a job: what they did, for whom, at what rate, how often, and where it went. */
+/**
+ * A person's old pay as a job: what they did, for whom, at what rate, how often, and where it went.
+ * As the old payroll read it, an hourly rate wins, then `salary_cents`, then `annual_income_cents`,
+ * else the occupation's typical pay; someone with a stated pay and no occupation is still paid.
+ */
 function jobOf(doc: WorldDoc, person: EntityDef, taken: Set<string>): EntityDef | null {
   const f = person.fields;
   const occupation = typeof f.occupation === "string" ? f.occupation : "";
-  if (occupation === "" || occupation === "retired") return null;
+  const hourly = typeof f.hourly_cents === "number" && f.hourly_cents > 0 ? f.hourly_cents : null;
+  const salary = typeof f.salary_cents === "number" ? f.salary_cents : typeof f.annual_income_cents === "number" ? f.annual_income_cents : null;
+  if (occupation === "retired" || (occupation === "" && hourly === null && salary === null)) return null;
   // Without an employer, the occupation in words: an outside employer by name (an id-shaped name lints as a misspelt reference).
-  const employer = typeof f.employer === "string" && f.employer !== "" ? f.employer : occupation.replace(/_/g, " ");
-  const job: JsonObject = { worker: person.id, employer, occupation, status: "active" };
-  if (typeof f.hourly_cents === "number") {
+  const employer = typeof f.employer === "string" && f.employer !== "" ? f.employer : occupation !== "" ? occupation.replace(/_/g, " ") : "Employer";
+  const job: JsonObject = { worker: person.id, employer, ...(occupation !== "" ? { occupation } : {}), status: "active" };
+  if (hourly !== null) {
     job.basis = "hourly";
-    job.rate = f.hourly_cents;
-  } else if (typeof f.annual_income_cents === "number") {
+    job.rate = hourly;
+  } else if (salary !== null) {
     job.basis = "salary";
-    job.rate = f.annual_income_cents;
+    job.rate = salary;
   }
   if (typeof f.hours_per_week === "number") job.hours_per_week = f.hours_per_week;
   const every = typeof f.pay_frequency === "string" ? f.pay_frequency : "";
   if ((PAY_EVERY as readonly string[]).includes(every)) job.pay_every = every;
+  // The payday's weekday by number, or by a name in it ("Friday", "every other Friday").
   const payday = typeof f.payday === "string" ? f.payday.toLowerCase() : "";
-  const weekday = Object.entries(WEEKDAYS).find(([name]) => payday.includes(name))?.[1];
+  const weekday = typeof f.payday === "number" ? f.payday : Object.entries(WEEKDAYS).find(([name]) => payday.includes(name))?.[1];
   if (weekday !== undefined) job.pay_weekday = weekday;
   if (every === "semimonthly") job.pay_days = [15, -1];
   else if (every === "monthly") job.pay_days = [-1];
@@ -151,9 +189,9 @@ function holdingOf(doc: WorldDoc, account: EntityDef, assets: JsonObject): Entit
   return { id: holdingId(account.id, symbol), kind: "holding", name: account.name, tier: "background", fields: { account: account.id, asset: symbol, lots: [{ qty: units, cost: Math.round(units * 10000), at: doc.start.at.slice(0, 10) }] }, relations: [] };
 }
 
-/** The world with its money in the foundation's shapes; the same document when nothing is older. */
+/** The world with its money in the foundation's shapes; the same document when nothing is older, or the world runs no economy (nothing then becomes a job or a flow). */
 export function migrateMoney(doc: WorldDoc): WorldDoc {
-  if (!isLegacy(doc)) return doc;
+  if (!doc.packs.economy || !isLegacy(doc)) return doc;
   const economy = doc.packs.economy;
   const assets: JsonObject = { ...(isRecord(economy?.config.assets) ? economy.config.assets : {}) };
   const entities: Record<string, EntityDef> = {};
@@ -170,14 +208,15 @@ export function migrateMoney(doc: WorldDoc): WorldDoc {
       next = { ...next, fields };
     }
     if (Array.isArray(e.fields.bills)) added.push(...billFlows(doc, e, taken));
-    if (e.kind !== "job" && !employed.has(id) && typeof e.fields.occupation === "string") {
+    const person = isPerson(doc, e.kind);
+    if (person && !employed.has(id) && (typeof e.fields.occupation === "string" || PAYROLL.some((k) => e.fields[k] !== undefined))) {
       const job = jobOf(doc, e, taken);
       if (job) added.push(job);
     }
-    if (Array.isArray(e.fields.bills) || (e.kind !== "job" && PAYROLL.some((k) => e.fields[k] !== undefined))) {
+    if (Array.isArray(e.fields.bills) || (person && PAYROLL.some((k) => e.fields[k] !== undefined))) {
       const fields: JsonObject = { ...next.fields };
       delete fields.bills;
-      for (const k of PAYROLL) delete fields[k];
+      if (person) for (const k of PAYROLL) delete fields[k];
       next = { ...next, fields };
     }
     entities[id] = next;

@@ -10,6 +10,7 @@ import { calendarOf, dateAt } from "../../../src/engine/calendar";
 import { applyEffects } from "../../../src/engine/effects";
 import { applyValidUnits } from "../../../src/engine/events";
 import { materializeAll } from "../../../src/engine/materialize";
+import { migrateMoney } from "../../../src/engine/money-migrate";
 import { optionalService } from "../../../src/engine/pack-kit";
 import { playerLines } from "../../../src/engine/player-events";
 import { createRegistry, type Registry } from "../../../src/engine/registry-impl";
@@ -612,5 +613,63 @@ describe("an account isn't closed with money still to come into it", () => {
     if ("code" in close) throw new Error(close.reason);
     w.applyAll(close);
     expect(statusOf(w.state, "rosa_checking")).toBe("closed");
+  });
+});
+
+describe("an older world's bills migrate as the old money read them", () => {
+  const legacy = (bills: JsonObject[], patch: (w: WorldDoc) => void = () => undefined): WorldDoc => {
+    const world = modernUsWorld("w", "Riverton");
+    world.entities.you!.fields.bills = bills;
+    patch(world);
+    return migrateMoney(world);
+  };
+  const flows = (world: WorldDoc): EntityDef[] => Object.values(world.entities).filter((e) => e.kind === "flow");
+
+  test("only a lender's bill the loan's autopay pays is dropped: one naming the loan, or the lender's for the payment", () => {
+    const world = legacy(
+      [
+        { label: "Car loan", payee: "Lakeside Bank", amountCents: 30_000, day: 5 },
+        { label: "Loan by name", payee: "Someone", amountCents: 12_345, day: 5, to: "auto_loan" },
+        { label: "Safe deposit box", payee: "Lakeside Bank", amountCents: 1_500, day: 5 },
+      ],
+      (w) => {
+        w.entities.auto_loan = { id: "auto_loan", kind: "account", name: "Auto loan", tier: "background", fields: { owner: "you", type: "loan", institution: "Lakeside Bank", payment: 30_000, opening: -900_000, autopay: "from checking" }, relations: [] };
+      },
+    );
+    expect(flows(world).map((f) => f.name)).toEqual(["Safe deposit box"]);
+  });
+
+  test("a weekly bill's weekday by name is kept, and a salary in salary_cents pays the job", () => {
+    const world = legacy([{ label: "Cleaner", payee: "Tidy Co", amountCents: 6_000, every: "week", day: "Friday" }], (w) => {
+      w.entities.rosa!.fields.salary_cents = 5_200_000;
+    });
+    expect(flows(world).map((f) => f.fields.weekdays)).toEqual([[5]]);
+    const job = Object.values(world.entities).find((e) => e.kind === "job" && e.fields.worker === "rosa");
+    expect([job?.fields.basis, job?.fields.rate]).toEqual(["salary", 5_200_000]);
+    expect(world.entities.rosa?.fields.salary_cents).toBeUndefined();
+  });
+
+  test("a world without the economy pack is left as it is", () => {
+    const world = modernUsWorld("w", "Riverton");
+    delete world.packs.economy;
+    world.entities.you!.fields.bills = [{ label: "Rent", payee: "Landlord", amountCents: 100_000, day: 1 }];
+    expect(migrateMoney(world)).toBe(world);
+  });
+
+  test("one vehicle insurance bill insures every vehicle its payer owns, and only an insurance flow insures", () => {
+    const world = legacy([{ label: "Auto insurance, full coverage", payee: "Harbor Mutual", amountCents: 18_000, day: 1 }], (w) => {
+      w.entities.atv = { id: "atv", kind: "vehicle", name: "ATV", tier: "background", fields: { owner: "you", class: "atv_utility", place: "garage" }, relations: [] };
+      w.entities.boat = { id: "boat", kind: "vehicle", name: "Boat", tier: "background", fields: { owner: "you", class: "bass_boat_outboard", place: "garage" }, relations: [] };
+    });
+    const w = new Working(reg, world, startState(world));
+    materializeAll(reg, w, world.pov, "run");
+    const premiums = (): string[] => w.ctx.query("economy.finance")(w.ctx, "you", false).flows.filter((f) => f.id.startsWith("insurance:")).map((f) => f.id);
+    expect(premiums()).toEqual([]);
+    expect(flows(world).map((f) => [f.fields.flow_kind, f.fields.category, "link" in f.fields])).toEqual([["premium", "insurance", false]]);
+    // A vehicle's loan payment linked to it doesn't insure it.
+    const other = setup((wd) => {
+      wd.entities.truck_loan = entity("truck_loan", "flow", { flow_kind: "loan_payment", from: "checking", to: "Lakeside Bank", amount_cents: 30_000, every: "month", days: [5], link: "truck", shortfall: "skip", status: "active" });
+    });
+    expect(other.ctx.query("economy.finance")(other.ctx, "you", false).flows.map((f) => f.id)).toContain("insurance:truck");
   });
 });

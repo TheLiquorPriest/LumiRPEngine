@@ -1355,7 +1355,7 @@ Installment accounts bill an amortized payment on their due day. `months_left` c
 
 ### 25.5 Flows
 
-Every scheduled movement of money is a flow: authored flow entities, and flows the foundation and its modules derive. The foundation's own are card and loan autopay, living costs and vehicle premiums. The modules' are payroll, owner's draws and invoices.
+Every scheduled movement of money is a flow: authored flow entities, and flows the foundation and its modules derive. The foundation's own are card and loan autopay, living costs and vehicle premiums. A vehicle's premium is derived only where no insurance flow (kind `premium` or category `insurance`) insures it: one linked to the vehicle, or one its owner pays that's linked to nothing. The modules' are payroll, owner's draws and invoices.
 
 A flow has:
 - a payer and a payee;
@@ -1418,12 +1418,12 @@ Each feature in `FEATURE_DEFS` has a floor (the lowest level it can run at) and 
 - an account's `owner` and `type` to its owners list and product, and `remaining_months` to `months_left`;
 - an autopay sentence ("minimum from acct_x") to a mode and the account it pays from;
 - a deposit account's `apr_pct` to its `apy_pct`;
-- a party's `bills` to flow entities, dropping a lender's bill that the loan's own autopay already pays, and linking a car insurance bill to the owner's vehicle;
-- a person's occupation and payroll fields to a job;
+- a party's `bills` to flow entities (a weekly bill's weekday given by name or number), dropping a lender's bill that the loan's own autopay already pays (one naming the loan, or the lender's for the loan's payment), and making a vehicle insurance bill an insurance flow that insures every vehicle its payer owns, as the old bill did;
+- a person's occupation and payroll fields to a job: an hourly rate first, then `salary_cents`, then `annual_income_cents`, else the occupation's pay;
 - an economy config that names no region to the POV's `region`, so sales tax at its places runs at the rate its people's income tax does;
 - a brokerage's units of a symbol to a holding of that asset (`<account>:<symbol>`, the id the holdings module's trades add to), with the symbol added to the world's assets.
 
-Only a world with the old shapes is migrated, so a migrated world has nothing left to migrate. The starter templates are written in the foundation's vocabulary (`data-src/templates/README.md`).
+Only a world with the economy pack and the old shapes is migrated, so a migrated world has nothing left to migrate, and a world without money gets no jobs or flows. The starter templates are written in the foundation's vocabulary (`data-src/templates/README.md`).
 
 ## 26. Work and business
 

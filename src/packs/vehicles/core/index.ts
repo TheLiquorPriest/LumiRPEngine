@@ -386,7 +386,8 @@ export const vehiclesPack: PackDef = {
       },
     });
     // Insurance (DESIGN §25.5): each vehicle's class premium a month, which the economy pays as a
-    // flow linked to the vehicle; a flow the author links to it insures it instead.
+    // flow linked to the vehicle; an insurance flow the author links to it, or one its owner pays
+    // that's linked to nothing, insures it instead.
     r.query("vehicles.insurance", (ctx) => {
       const out: { vehicle: EntityId; owner: EntityId; cents: number; label: string }[] = [];
       for (const v of Object.keys(ctx.state.entities).sort()) {
