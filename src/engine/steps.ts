@@ -4,6 +4,7 @@
 // engine-only. Prompts and schemas stay model-agnostic (D31). Producers land after the ledger gate.
 
 import type { JsonObject, JsonValue } from "../shared/json";
+import type { ClaimPlace } from "../shared/claims";
 import type { ActionId } from "../shared/ids";
 import type { GenerationKind, LedgerEvent } from "../shared/ledger";
 import type { StepPurpose, WorldDoc } from "../shared/world";
@@ -66,6 +67,27 @@ export interface InterpretInput {
 /** The most actions one message plays in a turn: the first and the queued ones after it (DESIGN §11). */
 export const ACTION_QUEUE_LIMIT = 5;
 
+/**
+ * A thing the player's typed action uses that the world doesn't have, made real for it (DESIGN
+ * §9.4 player claims): the plan makes it where the action expects it, marked `claimed`, just
+ * before the action plays, and the action's `param` takes it.
+ */
+export interface Claim {
+  param: string;
+  /** Its name, in the player's own words. */
+  name: string;
+  at: ClaimPlace;
+  /** Its kind: the param's. */
+  kind: string;
+  /** The economy catalog row that prices it, and that row's price category. */
+  catalog?: string;
+  category?: string;
+  /** Food or drink: cleared once handed over or used. */
+  consumable: boolean;
+  /** A gear item row it takes its weight, size and wear slot from. */
+  like?: string;
+}
+
 /** One of the input's actions after the first, as `interpret` read it: an engine action, its params, and its words. */
 export interface QueuedAction {
   action: ActionId;
@@ -74,6 +96,8 @@ export interface QueuedAction {
   text: string;
   /** The `judge` step's answer for its check, when the queue's check is this action's (DESIGN §11). */
   judgement?: Judgement;
+  /** The thing the player said they had that this action uses, made real before it plays (DESIGN §9.4). */
+  claim?: Claim;
 }
 
 export interface InterpretOutput {
@@ -88,6 +112,8 @@ export interface InterpretOutput {
   next?: string[];
   /** The `judge` step's answer for the action's check (DESIGN §11), recorded with the intent so a Re-run reads the same one. */
   judgement?: Judgement;
+  /** The thing the player said they had that the first action uses, made real before it plays (DESIGN §9.4). */
+  claim?: Claim;
 }
 
 /** `extract`: proposals read from a reply, bounded per channel (DESIGN §9.4). */

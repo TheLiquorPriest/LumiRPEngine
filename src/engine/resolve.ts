@@ -63,6 +63,12 @@ export interface Resolution {
   observable: string | null;
   /** How the adjudication policy decided the check; null without a check or under a plain-rolling policy. */
   adjudged: Adjudged | null;
+  /**
+   * The thing the player said they had, made real for this action as one of a turn's (DESIGN §9.4
+   * player claims; set by the plan): its entity and name, and what its Undo takes back: its making,
+   * the action's own events and the rules they fired.
+   */
+  claimed?: { entity: EntityId; name: string; events: LedgerEvent[] };
 }
 
 export function findAction(reg: Registry, world: WorldDoc, id: ActionId): ActionDef | undefined {

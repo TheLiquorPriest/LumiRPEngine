@@ -23,7 +23,7 @@ import { calendarOf, clockOfPhrase } from "../../../engine/calendar";
 import { ENGINE_EVENTS } from "../../../engine/engine-pack";
 import { bump, labelOf, numOf, optionalService, strOf, own, rowOf } from "../../../engine/pack-kit";
 import type { PackDef, ReadContext, Rejection } from "../../../engine/registry";
-import { fieldDef, kindIs, placeOfEntity } from "../../../engine/scope";
+import { fieldDef, GONE_FIELD, isGone, kindIs, placeOfEntity } from "../../../engine/scope";
 import { carriedBy, contentsOf, findPiece, fitProblem, grants, hasItem, holderOf, isInside, kitStatus, overdueFor, takenOf, weightOf, type Grant, type KitStatus } from "./model";
 import { buildGearView } from "./view";
 import containers from "./tables/modern-us/containers.json";
@@ -50,6 +50,23 @@ export interface GearSpawn {
   salt?: string;
 }
 
+/** A thing the player says they have, made real for their action (DESIGN §9.4 player claims). */
+export interface GearClaim {
+  name: string;
+  /** Who claims it: it is theirs, in their hands (`held`), or lies where they are (`here`). */
+  by: EntityId;
+  at: "held" | "here";
+  kind: string;
+  /** The economy catalog row that prices it, and its price category. */
+  catalog?: string;
+  category?: string;
+  consumable: boolean;
+  /** A gear item or container row it takes its weight, size and wear slot from. */
+  like?: string;
+  /** The turn's seed and the action's place in it: the id's source, never the name alone. */
+  salt: string;
+}
+
 type Events = LedgerEvent[] | Rejection;
 
 declare module "../../../engine/registry" {
@@ -58,6 +75,7 @@ declare module "../../../engine/registry" {
     "gear.drop": (ctx: ReadContext, item: EntityId, place: PlaceId) => LedgerEvent[] | Rejection;
     "gear.give": (ctx: ReadContext, item: EntityId, from: EntityId, to: EntityId) => LedgerEvent[] | Rejection;
     "gear.spawn": (ctx: ReadContext, spec: GearSpawn) => LedgerEvent[] | Rejection;
+    "gear.claim": (ctx: ReadContext, claim: GearClaim) => { entity: EntityId; events: LedgerEvent[] } | Rejection;
     "gear.take_piece": (ctx: ReadContext, kit: EntityId, piece: string, to: EntityId) => LedgerEvent[] | Rejection;
     "gear.lend": (ctx: ReadContext, thing: EntityId, to: EntityId, until: number) => LedgerEvent[] | Rejection;
     "gear.retrieve": (ctx: ReadContext, thing: EntityId) => LedgerEvent[] | Rejection;
@@ -217,7 +235,7 @@ const give = (ctx: ReadContext, item: EntityId, from: EntityId, to: EntityId): E
   if (!Array.isArray(moved)) return moved;
   const owner: LedgerEvent[] = e.fields.owner === from || e.fields.owner === undefined ? [{ type: "set", entity: item, field: "owner", value: to }] : [];
   const loansEnd = e.fields.owner === to || owner.length > 0;
-  return [...moved, ...owner, ...(loansEnd ? endLoans(ctx, item) : [])];
+  return [...moved, ...owner, ...(loansEnd ? endLoans(ctx, item) : []), ...usedUp(ctx, item, from !== to)];
 };
 
 /** A stable spawned-entity id from the spawn's inputs (services have no rng). */
@@ -246,6 +264,58 @@ const spawn = (ctx: ReadContext, spec: GearSpawn): Events => {
   const kind = spec.kind ?? (row && typeof row.capacity_l === "number" ? "container" : "item");
   const entity: EntityDef = { id, kind, name: spec.name, tier: "background", fields, relations };
   return [{ type: "spawn", entity }];
+};
+
+/**
+ * A claimed consumable is cleared once handed over or used up (DESIGN §9.4 player claims), at any
+ * gear level: it leaves the world as a GM's Remove leaves a thing (`gone`), its holder and owner
+ * kept, so what the gift or the use did stands and a rule that reads them still sees it.
+ */
+function usedUp(ctx: ReadContext, item: EntityId, done: boolean): LedgerEvent[] {
+  const e = own(ctx.state.entities, item);
+  return done && e?.fields.claimed === true && e.fields.consumable === true && e.fields[GONE_FIELD] !== true ? [{ type: "set", entity: item, field: GONE_FIELD, value: true }] : [];
+}
+
+/** A claimed thing's id: from the turn's seed, the action's place and the name, never the name alone, and never one the state has. */
+function claimId(ctx: ReadContext, c: GearClaim): EntityId {
+  for (let n = 0; ; n++) {
+    const id = `item:claim_${hashParts("lre.claim", c.salt, c.name, String(n)).slice(0, 12)}`;
+    if (!own(ctx.state.entities, id)) return id;
+  }
+}
+
+/**
+ * A thing the player says they have, as a new entity marked `claimed` (DESIGN §9.4 player claims):
+ * theirs and in their hands, or lying where they are. A thing of its catalog row (else its name)
+ * the claimer already holds stands for it: an earlier action of the turn made it (a Buy).
+ */
+const claim = (ctx: ReadContext, c: GearClaim): { entity: EntityId; events: LedgerEvent[] } | Rejection => {
+  if (!own(ctx.state.entities, c.by)) return reject("missing_entity", `no claimer ${labelOf(ctx, c.by)}`);
+  const name = c.name.trim();
+  if (c.at === "held") {
+    const held = carriedBy(ctx.state, c.by).find((id) => {
+      const e = own(ctx.state.entities, id);
+      return e !== undefined && !isGone(ctx.state, id) && (c.catalog ? e.fields.catalog === c.catalog : e.name.trim().toLowerCase() === name.toLowerCase());
+    });
+    if (held) return { entity: held, events: [] };
+  }
+  const place = placeOfEntity(ctx.state, c.by);
+  if (c.at === "here" && !place) return reject("no_place", `${labelOf(ctx, c.by)} is nowhere`);
+  const row = c.like ? (rowOf(ctx, "gear.items", c.like) ?? rowOf(ctx, "gear.containers", c.like)) : undefined;
+  const fields: JsonObject = { claimed: true };
+  if (c.at === "held") fields.owner = c.by;
+  else if (place) fields.place = place;
+  if (c.catalog) fields.catalog = c.catalog;
+  if (c.category) fields.category = c.category;
+  if (c.consumable) fields.consumable = true;
+  if (row) {
+    if (typeof row.weight_g === "number") fields.weight_g = row.weight_g;
+    if (typeof row.empty_weight_g === "number") fields.weight_g = row.empty_weight_g;
+    if (typeof row.volume_l === "number") fields.volume_l = row.volume_l;
+    if (typeof row.equip_slot === "string" && row.equip_slot !== "none") fields.slot = row.equip_slot;
+  }
+  const id = claimId(ctx, c);
+  return { entity: id, events: [{ type: "spawn", entity: { id, kind: c.kind, name, tier: "background", fields, relations: c.at === "held" ? [{ type: "in", to: c.by }] : [] } }] };
 };
 
 const takePiece = (ctx: ReadContext, kit: EntityId, piece: string, to: EntityId): Events => {
@@ -343,6 +413,7 @@ export const gearPack: PackDef = {
     r.service("gear.drop", drop);
     r.service("gear.give", give);
     r.service("gear.spawn", spawn);
+    r.service("gear.claim", claim);
     r.service("gear.take_piece", takePiece);
     r.service("gear.lend", lend);
     r.service("gear.retrieve", retrieve);
@@ -407,13 +478,15 @@ export const gearPack: PackDef = {
           const condition = numOf(e.fields.condition, 100);
           if (wearBy > 0 && condition > 0) out.push(bump(ctx.state, item, "condition", -Math.min(wearBy, condition), condition));
         }
+        // A claimed consumable is used up, at any gear level (DESIGN §9.4).
+        out.push(...usedUp(ctx, item, true));
         return out;
       },
     });
 
     // Things in cells (DESIGN §11): with the grid system on, taking or using one lying in a cell
     // needs you on or next to it (`reach`); off, `reach` is being at the same place.
-    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
+    r.action({ id: "take", label: "Take", description: "Pick up something that is here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "here" } }, requires: ["place(item) == here", "not carries(self, item)", "reach(self, item)"], outcomes: { default: [{ type: "gear.transfer", args: { item: "item", to: "self" } }] }, duration: "1", lexicon: ["take", "pick up", "grab"], observable: "picks something up" });
     // Losing something: it leaves its holder and the world (whereabouts unknown); cash inside goes with it.
     r.effect({
       type: "gear.lose",
@@ -437,15 +510,15 @@ export const gearPack: PackDef = {
       },
     });
     r.action({ id: "lose", label: "Lose something", description: "Something you own or carry is lost or gone, whereabouts unknown.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self or carries(self, item)", "item.lost != true"], outcomes: { default: [{ type: "gear.lose", args: { item: "item" } }] }, duration: "1", lexicon: ["lost my", "lose", "can't find my", "is gone", "is missing"], observable: "searches their pockets" });
-    r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
-    r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
+    r.action({ id: "drop", label: "Drop", description: "Put down something you carry, here.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.drop", args: { item: "item", place: "=here" } }] }, duration: "1", lexicon: ["drop", "put down", "leave"], observable: "puts something down" });
+    r.action({ id: "give", label: "Give", description: "Hand something you carry to someone here, for keeps.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" }, to: { type: "ref", ref: "person" } }, requires: ["carries(self, item)", "at(to, here)"], outcomes: { default: [{ type: "gear.give", args: { item: "item", from: "self", to: "to" } }] }, duration: "1", lexicon: ["give", "hand", "pass"], observable: "hands something over" });
     // Days or a said end, at least one: interpret fills whichever the player said ("until 7 tonight");
     // the palette always sends days.
     r.action({ id: "lend", label: "Lend", description: "Lend something of yours to someone, for some days or until a time.", pack: "gear", params: { item: { type: "ref", ref: "item" }, to: { type: "ref", ref: "person" }, days: { type: "number", optional: true }, until: { type: "text", optional: true, label: "Until (a time: 7 pm, tonight, tomorrow)" } }, requires: ["item.owner == self", "days > 0 or params.until != null", "at(to, here) or at(item, here)"], outcomes: { default: [{ type: "gear.lend", args: { item: "item", to: "to", until: "=days > 0 ? clock + days(days) : 0", said: "=params.until" } }] }, duration: "2", lexicon: ["lend", "loan", "let borrow"], observable: "lends something" });
     r.action({ id: "reclaim", label: "Take back", description: "Take back something of yours that you lent out.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["item.owner == self", "lent_out(item)"], outcomes: { default: [{ type: "gear.retrieve", args: { item: "item" } }] }, duration: "5", lexicon: ["take back", "get back", "reclaim"], observable: "takes something back" });
-    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
+    r.action({ id: "wear", label: "Wear or equip", description: "Put on or equip clothing, armor or gear.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (place(item) == here and reach(self, item))", "level.gear >= 3"], outcomes: { default: [{ type: "gear.wear", args: { item: "item", wearer: "self" } }] }, duration: "2", lexicon: ["wear", "put on", "equip"], observable: "puts something on" });
     r.action({ id: "remove", label: "Take off", description: "Take off something you wear or have equipped.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item)"], outcomes: { default: [{ type: "gear.remove", args: { item: "item" } }] }, duration: "2", lexicon: ["take off", "remove", "unequip"], observable: "takes something off" });
-    r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
+    r.action({ id: "use", label: "Use", description: "Use an item you carry or can reach.", pack: "gear", params: { item: { type: "ref", ref: "item", claim: "held" } }, requires: ["carries(self, item) or (on_grid(item) and reach(self, item))"], outcomes: { default: [{ type: "gear.use", args: { item: "item", user: "self" } }] }, duration: "5", lexicon: ["use", "apply"], observable: "uses something" });
     r.action({ id: "take_piece", label: "Take from a kit", description: "Take one piece, such as a tool or a part, out of a kit.", pack: "gear", params: { kit: { type: "ref", ref: "kit" }, piece: { type: "text" } }, requires: ["(place(kit) == here and reach(self, kit)) or carries(self, kit)", "level.gear >= 3"], outcomes: { default: [{ type: "gear.take_piece", args: { kit: "kit", piece: "=piece", to: "self" } }] }, duration: "1", lexicon: ["take the", "grab a", "get a"], observable: "takes a tool" });
 
     r.process({

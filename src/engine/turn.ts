@@ -28,7 +28,7 @@ import { runRulesOnEvents, runRulesOnTick } from "./rules";
 import { acts } from "./life";
 import { isGone, placeOfEntity } from "./scope";
 import { advance, catchUp, coarsen, interruptPolicy } from "./simulate";
-import type { InterpretOutput, PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
+import type { Claim, InterpretOutput, PostTurnInput, TurnPipeline, TurnPlan, TurnPlanInput } from "./steps";
 import { buildMontage, fightHoldsClock, IN_FIGHT, pauseBookkeeping, parseOverrides, parseTarget, replaySkip, runTimelapse, sceneKey, speedThrough, turnElapsed, type Montage, type TimelapseOptions, type TimelapseOutcome } from "./time";
 import { stepTracks } from "./tracks";
 import { signalVisible } from "./visibility";
@@ -73,6 +73,7 @@ interface TurnStep {
   action: ActionId;
   params: JsonObject;
   judgement: Judgement | null;
+  claim: Claim | null;
 }
 
 /**
@@ -113,6 +114,25 @@ export function timelapseOptions(intent: InterpretOutput, runSeed: string): { ta
   return { target: parseTarget(intent.params.target), opts: { runSeed, overrides: parseOverrides(intent.params.overrides), segment: typeof seg === "number" ? seg : 1 } };
 }
 
+/**
+ * Makes a claim real (DESIGN §9.4 player claims) through the gear pack's `gear.claim`, all or
+ * nothing: the entity the action takes, and how many events made it (none when the claimer already
+ * holds the thing, made by an earlier action of the turn). Null when it can't be made, and the
+ * action then fails as one naming nothing.
+ */
+function claimThing(w: Working, claim: Claim, salt: string): { entity: EntityId; events: number } | null {
+  const made = optionalService(w.ctx, "gear.claim")?.(w.ctx, { ...claim, by: w.world.pov, salt });
+  if (!made || !("entity" in made)) return null;
+  const before = w.mark();
+  for (const e of made.events) {
+    if (w.apply(e)) {
+      w.restore(before);
+      return null;
+    }
+  }
+  return { entity: made.entity, events: made.events.length };
+}
+
 export function planTurn(input: TurnPlanInput): EngineTurnPlan {
   const reg: Registry = input.registry;
   const w = new Working(reg, input.world, input.state);
@@ -140,7 +160,7 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
     if ("code" in outcome) w.apply({ type: ENGINE_EVENTS.note, data: { text: `Timelapse not run: ${outcome.reason}` } });
     else timelapse = outcome;
   } else {
-    const steps: TurnStep[] = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null }))] : [];
+    const steps: TurnStep[] = intent?.action ? [{ action: intent.action, params: intent.params, judgement: intent.judgement ?? null, claim: intent.claim ?? null }, ...(intent.queue ?? []).map((q) => ({ action: q.action, params: q.params, judgement: q.judgement ?? null, claim: q.claim ?? null }))] : [];
     // With no action the loop runs once all the same: a fight under way takes its turns, and the turn its tick.
     for (let i = 0; i < Math.max(1, steps.length); i++) {
       const step = steps[i] ?? null;
@@ -156,23 +176,33 @@ export function planTurn(input: TurnPlanInput): EngineTurnPlan {
       let resolution: Resolution | null = null;
       // The place and scene as the action's own effects leave them; any other change interrupts the queue.
       let scene = sceneKey(w.world, w.state);
+      let made: { entity: EntityId; name: string; events: number } | null = null;
+      let ruled = mark;
       if (step) {
-        resolution = resolveAction(reg, w, { action: step.action, params: step.params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
+        // A thing the player said they had comes into being where the action expects it, just
+        // before the action, which takes it (DESIGN §9.4 player claims).
+        const claimed = step.claim ? claimThing(w, step.claim, hashParts(seed, "claim")) : null;
+        if (claimed && step.claim) made = { entity: claimed.entity, name: step.claim.name, events: claimed.events };
+        const params = claimed && step.claim ? { ...step.params, [step.claim.param]: claimed.entity } : step.params;
+        resolution = resolveAction(reg, w, { action: step.action, params }, draws, { runSeed: input.runSeed, judgement: step.judgement });
         scene = sceneKey(w.world, w.state);
-        if (resolution.events.length > 0) runRulesOnEvents(reg, w, resolution.events, { seed });
+        // The rules see the claimed thing's making too, so a world rule can react to its mark.
+        const done = w.events.slice(mark, mark + (made?.events ?? 0) + resolution.events.length);
+        if (done.length > 0) runRulesOnEvents(reg, w, done, { seed });
+        ruled = w.events.length;
       }
       combat.push(...(fight?.after(resolution ? { resolution, params: step?.params ?? {} } : null) ?? []));
       if (resolution) {
         // A fight makes the POV's act one event group with its record and the rule events it fires,
         // after the act applied: the resolution carries the act as recorded, so an Undo of the action
-        // ("Not an action?") finds and takes all of it.
-        let end = mark + resolution.events.length;
+        // ("Not an action?") finds and takes all of it. A claimed thing's making leads its events.
+        let end = mark + (made?.events ?? 0) + resolution.events.length;
         const groups = new Set(w.events.slice(mark, end).flatMap((e) => (e.group !== undefined ? [e.group] : [])));
         for (; end < w.events.length; end++) {
           const group = w.events[end]?.group;
           if (group === undefined || !groups.has(group)) break;
         }
-        resolution = { ...resolution, events: w.events.slice(mark, end) };
+        resolution = { ...resolution, events: w.events.slice(mark, end), ...(made && made.events > 0 ? { claimed: { entity: made.entity, name: made.name, events: w.events.slice(mark, ruled) } } : {}) };
         resolutions.push(resolution);
       }
       // A fight's rounds are seconds long: a turn inside one already under way, that still is, moves no

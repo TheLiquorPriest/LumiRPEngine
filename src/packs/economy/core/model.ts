@@ -712,3 +712,26 @@ export function derivedUnpricedCap(world: WorldDoc): number {
   for (const table of ["economy.catalog", "economy.categories"]) for (const row of Object.values(world.tables[table]?.rows ?? {})) top = Math.max(top, bandOfJson(row.price_cents)?.max ?? 0);
   return top > 0 ? Math.round(top) : 500 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
 }
+
+/** Price categories of things eaten or drunk: a claimed one is used up once handed over or used (DESIGN §9.4 player claims). */
+export const FOOD_AND_DRINK: Readonly<Record<string, true>> = { groceries_staples: true, groceries_baskets: true, meals_out: true, coffee: true, alcohol: true };
+
+/**
+ * The most a thing the player says they have may cost before Make it real asks first, under a
+ * capped claims policy (DESIGN §9.4), in the world's minor units: the economy pack's `claimCap`
+ * when set, else `derivedClaimCap`.
+ */
+export function claimCap(world: WorldDoc): number {
+  const set = world.packs.economy?.config.claimCap;
+  return typeof set === "number" && Number.isFinite(set) && set > 0 ? Math.round(set) : derivedClaimCap(world);
+}
+
+/**
+ * The claim cap a world gets without one set: about the price of a meal, twice the typical price
+ * of its `meals_out` category (a counter meal's; a meal at a table costs about twice that), before
+ * regional scaling, else 25 major units. Port Alder's is $23.
+ */
+export function derivedClaimCap(world: WorldDoc): number {
+  const meal = bandOfJson(world.tables["economy.categories"]?.rows.meals_out?.price_cents)?.typical ?? 0;
+  return meal > 0 ? Math.round(meal * 2) : 25 * 10 ** Math.max(0, Math.min(6, Math.trunc(world.currency.decimals)));
+}
