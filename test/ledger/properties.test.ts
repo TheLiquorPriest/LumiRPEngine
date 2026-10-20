@@ -1,16 +1,18 @@
 // The ledger gate (DESIGN §14): generated operation sequences on the fake host, with the
-// reference fold as oracle and the ledger invariants checked after every operation.
+// reference fold as oracle and the ledger invariants checked after every operation. It runs at
+// release (`bun run test:release`, in shards); regressions.test.ts replays the failures on every run.
 //
-//   LRE_PROPERTY_RUNS   sequences per run (default 200)
-//   LRE_PROPERTY_OPS    longest sequence (default 60)
-//   LRE_PROPERTY_SEED   replay one seed
+//   LRE_PROPERTY_RUNS      sequences per run (default 200)
+//   LRE_PROPERTY_OPS       longest sequence (default 60)
+//   LRE_PROPERTY_SEED      replay one seed
+//   LRE_PROPERTY_COVERAGE  write the run's coverage counts to this file, for a run split into shards
 // Every failing seed is shrunk and must be added to test/ledger/regressions.json.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { writeFileSync } from "node:fs";
 import { Harness } from "../support/harness";
-import { noCoverage, runSequence, sequenceFor, shrink, type Coverage, type Op } from "../support/ops";
+import { coverageGaps, noCoverage, type Coverage } from "../support/coverage";
+import { runSequence, sequenceFor, shrink, type Op } from "../support/ops";
 
 const RUNS = Number(process.env.LRE_PROPERTY_RUNS ?? "200");
 const MAX_OPS = Number(process.env.LRE_PROPERTY_OPS ?? "60");
@@ -19,14 +21,8 @@ const ONE = process.env.LRE_PROPERTY_SEED;
 const BASE = process.env.LRE_PROPERTY_BASE ?? "lre-fixed";
 /** The first seed index (`LRE_PROPERTY_FROM`), so a long run can be split into shards that together cover `<base>-0…`. */
 const FROM = Number(process.env.LRE_PROPERTY_FROM ?? "0");
+const COVERAGE_FILE = process.env.LRE_PROPERTY_COVERAGE;
 
-interface Regression {
-  seed: string;
-  ops: Op[];
-  note: string;
-}
-
-const regressions = JSON.parse(readFileSync(join(import.meta.dir, "regressions.json"), "utf8")) as Regression[];
 const make = () => new Harness();
 
 async function failWith(seed: string, ops: Op[], error: string): Promise<never> {
@@ -35,10 +31,6 @@ async function failWith(seed: string, ops: Op[], error: string): Promise<never> 
 }
 
 describe("ledger property suite", () => {
-  test.each(regressions.map((r) => [r.seed, r] as const))("regression %s", async (_seed, r) => {
-    expect(await runSequence(make, r.ops)).toBeNull();
-  });
-
   test(
     `${ONE ? `seed ${ONE}` : `${RUNS} generated sequences`} hold every invariant`,
     async () => {
@@ -56,27 +48,10 @@ describe("ledger property suite", () => {
           if (second.join("\n") !== first.join("\n")) throw new Error(`seed ${seed} failed: L31: two runs of the same operations ended differently`);
         }
       }
-      // L40/L41 coverage: the generated runs do rebase a payment, and a grouped purchase, onto a branch
-      // that can't cover it (counted by this test's own runners; deterministic for the fixed base).
-      // L43 coverage: Re-runs do carry fixes forward, and drop ones that no longer apply.
-      if (!ONE && RUNS >= 100) expect(coverage.fundsDrops).toBeGreaterThan(0);
-      if (!ONE && RUNS >= 100) expect(coverage.groupDrops).toBeGreaterThan(0);
-      if (!ONE && RUNS >= 100) expect(coverage.carried).toBeGreaterThan(0);
-      if (!ONE && RUNS >= 100) expect(coverage.carryDrops).toBeGreaterThan(0);
-      // L46 coverage: a Re-run does carry a fix without the materialization its new swipe already made.
-      if (!ONE && RUNS >= 100) expect(coverage.stripped).toBeGreaterThan(0);
-      // L45 coverage: copies of an earlier build's chats do restore its starting markers to fold alike.
-      if (!ONE && RUNS >= 100) expect(coverage.earlierCopies).toBeGreaterThan(0);
-      // L5 coverage: turns are checked on the chain they were planned on after a deletion moved a swipe it holds.
-      if (!ONE && RUNS >= 100) expect(coverage.shiftedPlans).toBeGreaterThan(0);
-      // Fights start, act, pass the turn and end (on any view, swipes and rebases included).
-      for (const k of ["start", "act", "turn", "end"] as const) if (!ONE && RUNS >= 100) expect(coverage.fights[k]).toBeGreaterThan(0);
-      // Life changes and tellings land in planned turns (through the engine's `life` effect and a rule),
-      // and queued turns play several actions and stop at a check, a failure and an interruption.
-      for (const k of ["life", "told"] as const) if (!ONE && RUNS >= 100) expect(coverage.lives[k]).toBeGreaterThan(0);
-      for (const k of ["queued", "check", "failure", "interruption"] as const) if (!ONE && RUNS >= 100) expect(coverage.queues[k]).toBeGreaterThan(0);
-      // Minds' records fold on every view: Dev's minds before the plan, presence and memory after the reply, and GM minds controls.
-      for (const k of ["mind", "memory", "presence", "fix"] as const) if (!ONE && RUNS >= 40) expect(coverage.minds[k]).toBeGreaterThan(0);
+      // A shard's counts are added up with the other shards' and held to the whole run's coverage.
+      if (COVERAGE_FILE && !ONE) writeFileSync(COVERAGE_FILE, JSON.stringify({ base: BASE, from: FROM, runs: RUNS, coverage }));
+      // Coverage the runs must reach (counted by this test's own runners; deterministic for the fixed base).
+      if (!ONE) expect(coverageGaps(coverage, RUNS)).toEqual([]);
     },
     24 * 60 * 60 * 1000,
   );
