@@ -6,6 +6,7 @@
 import { BUILD_CSS } from "./styles/build";
 import { CHAT_CSS } from "./styles/chat";
 import { COMPONENTS_CSS } from "./styles/components";
+import { DIAGNOSTICS_CSS } from "./styles/diagnostics";
 import { FORMS_CSS } from "./styles/forms";
 import { GM_CSS } from "./styles/gm";
 import { MINDS_CSS } from "./styles/minds";
@@ -18,4 +19,4 @@ import { SHELL_CSS } from "./styles/shell";
 import { TOKENS_CSS } from "./styles/tokens";
 import { VISUAL_EDITORS_CSS } from "./styles/visual-editors";
 
-export const CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, VISUAL_EDITORS_CSS].join("\n");
+export const CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join("\n");

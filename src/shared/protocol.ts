@@ -11,6 +11,7 @@ import type { MindEditOp } from "./minds";
 import type { ActionId, BoundMode, ChatId, ChipId, DomainId, EntityId, FieldId, KindId, Level, MessageId, PanelId, PlaceId, RelationTypeId, RevisionId, StageId, TierId, TrackId, WorldId } from "./ids";
 import type { EntityUpgradePick, EventRef, PathHash, ResolveScope, TimeControl, TimeScope, UpgradeAspect, UpgradePicks } from "./ledger";
 import type { ExtractionType, UserSettings } from "./settings";
+import type { Activity, DiagRecord } from "./diagnostics";
 import type { GmView, SheetSectionView, StateView } from "./state-view";
 import type { AdjudicationDef, FacetId, FacetValueId, KindDef, LifeStateId, MapDisplay, RelationTypeDef, RevisionNote, WorldDoc, WorldIndex } from "./world";
 
@@ -482,6 +483,12 @@ export interface StudioOfferView {
  */
 export type PresetRequest = Request<"lre.preset"> & ({ op: "get" | "add" } | { op: "active"; presetId: string | null });
 
+/**
+ * Diagnostics (DESIGN §6.9), GM-level like `lre.gm`: answered on request, never pushed. `get` reads
+ * the chat's records, `clear` forgets them, `dismiss` clears a failure from the activity line.
+ */
+export type DiagRequest = Request<"lre.diag"> & { chatId: ChatId; op: "get" | "clear" | "dismiss" };
+
 /** What the active preset says to LumiRPEngine: the section outlets its enabled blocks hold (with the section each places, null when none has that name) and each guidance block's state. */
 export interface PresetCard {
   preset: { id: string; name: string } | null;
@@ -509,7 +516,8 @@ export type FrontendToBackend =
   | JobRequest
   | LoreRequest
   | StudioRequest
-  | PresetRequest;
+  | PresetRequest
+  | DiagRequest;
 
 // ---------------------------------------------------------------- responses (backend → frontend)
 
@@ -578,6 +586,8 @@ export interface ResultBodies {
    */
   "lre.studio": { offer?: StudioOfferView | null; message?: string; installed?: { offerId: string; mode: "new" | "revision"; worldId: WorldId; name: string; revision: RevisionId; attachChatId: ChatId | null }; lint?: LintIssue[] };
   "lre.preset": { card: PresetCard };
+  /** `get`: the chat's records, oldest first, and its activity line now. */
+  "lre.diag": { records: DiagRecord[]; activity: Activity | null };
 }
 
 export type ResultMessage = {
@@ -619,4 +629,10 @@ export interface DraftChanged extends Envelope<"lre.draft.changed"> {
   base: RevisionId | null;
 }
 
-export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged;
+/** What the engine is doing for a chat now (the HUD's and the drawer's in-flight line), or null when idle. Player-safe: a step's label, never a name. */
+export interface ActivityPush extends Envelope<"lre.activity"> {
+  chatId: ChatId;
+  activity: Activity | null;
+}
+
+export type BackendToFrontend = StateSnapshot | StateDelta | ResultMessage | ErrorMessage | JobUpdate | DraftChanged | ActivityPush;

@@ -43,6 +43,7 @@ export class Rig {
       await this.rt.push.settle();
       await this.rt.inspector.settle();
       await this.rt.meter.settle();
+      await this.rt.diag.settle();
     };
   }
 

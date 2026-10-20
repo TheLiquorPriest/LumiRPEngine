@@ -5,6 +5,7 @@
 // notifications are coalesced, so a burst of deltas renders once.
 
 import { isRecord } from "../shared/json";
+import type { Activity } from "../shared/diagnostics";
 import type { ChatId } from "../shared/ids";
 import { PROTOCOL_VERSION } from "../shared/protocol";
 import type { DeltaOp, DraftChanged, ErrorCode, ErrorMessage, FrontendToBackend, JobUpdate, ResultBodies, ResultMessage } from "../shared/protocol";
@@ -34,6 +35,10 @@ export interface ClientOptions {
 
 export type SyncStatus = "closed" | "syncing" | "live" | "resyncing";
 
+function isActivity(value: unknown): value is Activity {
+  return isRecord(value) && typeof value.chatId === "string" && (value.state === "running" || value.state === "failed") && typeof value.label === "string" && typeof value.since === "number" && (value.turn === null || typeof value.turn === "string");
+}
+
 export interface SyncState {
   chatId: ChatId | null;
   rev: number | null;
@@ -41,6 +46,8 @@ export interface SyncState {
   status: SyncStatus;
   /** Deltas discarded and resyncs sent since `open`, for diagnostics. */
   resyncs: number;
+  /** What the engine is doing for the chat now, or what failed last (`lre.activity`); null when idle. */
+  activity: Activity | null;
 }
 
 interface Pending {
@@ -70,6 +77,7 @@ const REQUEST_TYPES: Record<keyof ResultBodies, true> = {
   "lre.lore": true,
   "lre.studio": true,
   "lre.preset": true,
+  "lre.diag": true,
 };
 
 function isRequestType(value: unknown): value is keyof ResultBodies {
@@ -97,7 +105,7 @@ export class ProtocolClient {
   private readonly newReqId: () => string;
   private readonly schedule: (fn: () => void) => void;
   private readonly timers: Timers;
-  private state: SyncState = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0 };
+  private state: SyncState = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null };
   private notifyQueued = false;
   private disposed = false;
   private counter = 0;
@@ -143,7 +151,7 @@ export class ProtocolClient {
 
   /** Switches to a chat (or none) and asks for its snapshot. Pushes for any other chat are ignored. */
   open(chatId: ChatId | null): Promise<ResultMessage | ErrorMessage> {
-    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0 });
+    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null });
     const reply = this.request({ type: "lre.hello", chatId, ...(this.presetId !== undefined ? { presetId: this.presetId } : {}) });
     void reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
@@ -222,6 +230,9 @@ export class ProtocolClient {
           const update = payload as unknown as JobUpdate;
           for (const listener of this.jobListeners) listener(update);
         }
+        return;
+      case "lre.activity":
+        if (payload.chatId === this.state.chatId && (payload.activity === null || isActivity(payload.activity))) this.update({ ...this.state, activity: payload.activity });
         return;
       case "lre.draft.changed":
         if (typeof payload.worldId === "string" && typeof payload.version === "number" && typeof payload.stored === "boolean" && (typeof payload.base === "string" || payload.base === null)) {

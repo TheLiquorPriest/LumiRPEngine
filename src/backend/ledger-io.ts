@@ -18,6 +18,8 @@ import { emptyJournal, LedgerCore, type LedgerEnv } from "../engine/ledger/journ
 import type { LedgerFold } from "../engine/ledger/fold";
 import type { ContextHandlerInput, HostGenerationType, HostMessage, HostPort } from "./host";
 import { setAside } from "./stored-json";
+import type { Diagnostics } from "./diagnostics";
+import { STEP_LABEL } from "../shared/diagnostics";
 
 /** Resolves a chat's ledger environment; null when the chat is not a world chat. */
 export type EnvResolver = (chatId: ChatId, userId: UserId) => Promise<LedgerEnv | null>;
@@ -319,6 +321,8 @@ export class LedgerService {
   /** Every operation failure, also logged to the host. */
   readonly errors: string[] = [];
   hooks: TurnHooks | null = null;
+  /** Where each turn's phases, failures and activity go (DESIGN §6.9); the runtime sets it. */
+  diag: Diagnostics | null = null;
   /** Per `user \0 chat`: why the chat's journal was replaced on opening (kept for the process's life). */
   private readonly resets = new Map<string, string>();
   /** Per `user \0 chat`: notices about records on its messages skipped as malformed (kept for the process's life). */
@@ -358,29 +362,40 @@ export class LedgerService {
       }),
       h.on("GENERATION_ENDED", (e, userId) => {
         this.generationEnded(e.generationId);
+        const at = userId ? { chatId: e.chatId, userId, turn: e.generationId } : null;
         return this.run(e.chatId, userId, async (core, observed) => {
           core.sync(observed);
           // A generation that ended in error commits as stopped: no auto-read, no
           // extraction; the reply's Retry read chip covers whatever text was saved.
           if (e.error) {
-            this.host.log("warn", `[LumiRPEngine] generation ${e.generationId.slice(0, 8)} ended with an error: ${e.error.slice(0, 200)}`, userId ?? undefined);
+            this.host.log("warn", `[LumiRPEngine] generation ${e.generationId.slice(0, 8)} ended with an error: ${e.error.slice(0, 200)}`, userId ?? undefined, e.generationId);
             core.stopped({ generationId: e.generationId, content: e.content }, observed);
+            if (at) this.diag?.end(at, { status: "failed", reason: `the reply's generation failed: ${e.error.slice(0, 300)}` });
             return;
           }
           const p = core.journal.pending[e.generationId];
           const swipeId = p?.swipeId ?? observed.find((m) => m.id === e.messageId)?.swipeId ?? 0;
           const turn = p && e.messageId && userId ? { chatId: e.chatId, userId, core, observed, generationId: e.generationId, messageId: e.messageId, swipeId, kind: p.kind } : null;
+          const diag = at && turn ? this.diag : null;
+          if (at && diag) diag.begin(at, STEP_LABEL.read);
           if (this.hooks && turn && p && p.kind !== "impersonate") {
+            const hooks = this.hooks;
             // A Continue reads only its suffix (L13): prepare that text.
             const text = p.kind === "continue" ? (p.captured && e.content.length >= p.captured.len ? e.content.slice(p.captured.len) : "") : e.content;
-            if (text !== "") await this.hooks.beforeCommit({ ...turn, content: text });
+            if (text !== "") await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
+            else if (at && diag) diag.skipped(at, "read", "read", "the reply had no new text to read");
           }
           core.ended({ generationId: e.generationId, ...(e.messageId ? { messageId: e.messageId } : {}), content: e.content }, observed);
-          if (this.hooks && turn) await this.hooks.afterCommit({ ...turn, content: e.content });
+          if (this.hooks && turn) {
+            const hooks = this.hooks;
+            await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: e.content })) : hooks.afterCommit({ ...turn, content: e.content }));
+          }
+          if (at && diag) diag.end(at);
         });
       }),
       h.on("GENERATION_STOPPED", (e, userId) => {
         this.generationEnded(e.generationId);
+        if (userId) this.diag?.end({ chatId: e.chatId, userId, turn: e.generationId }, { status: "skipped", reason: "the reply was stopped" });
         return this.run(e.chatId, userId, (core, observed) => {
           core.sync(observed);
           core.stopped({ generationId: e.generationId, content: e.content }, observed);
@@ -431,13 +446,26 @@ export class LedgerService {
         const pending = Object.values(core.journal.pending)
           .filter((p) => !p.planned && (p.kind === KIND[input.generationType] || (p.kind === "renarrate" && (input.generationType === "swipe" || input.generationType === "regenerate"))))
           .at(-1);
-        if (!pending && !input.dryRun) return;
-        if (this.hooks) await this.hooks.beforePlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending?.generationId ?? null, dryRun: input.dryRun, connectionId: input.connectionId, signal: steps });
+        const diag = this.diag;
+        if (!pending && !input.dryRun) {
+          diag?.skipped({ chatId: input.chatId, userId: input.userId, turn: null }, "plan", "plan", `no generation of kind ${input.generationType} waits for a plan, so this reply runs without the engine`);
+          return;
+        }
+        const at = pending && !input.dryRun && diag ? { chatId: input.chatId, userId: input.userId, turn: pending.generationId } : null;
+        // Times a phase when this is a turn (a dry run isn't one).
+        const phase = <T>(name: "pre" | "plan" | "prose", fn: () => Promise<T>): Promise<T> => (at && diag ? diag.step(at, name, name, fn) : fn());
+        if (at && diag) diag.begin(at);
+        const hooks = this.hooks;
+        if (hooks) await phase("pre", () => hooks.beforePlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending?.generationId ?? null, dryRun: input.dryRun, connectionId: input.connectionId, signal: steps }));
         // The host gave up on the handler: no plan, so the turn commits degraded.
-        if (signal.aborted) return;
-        core.plan(pending?.generationId ?? "", observed, input.dryRun);
+        if (signal.aborted) {
+          if (at && diag) diag.failed(at, "plan", "plan", `the host stopped waiting for the plan after ${Math.round(this.contextTimeout / 1000)} s (timed out): this reply runs without it`);
+          return;
+        }
+        await phase("plan", async () => core.plan(pending?.generationId ?? "", observed, input.dryRun));
         // Prose steps about the plan (brief, outline) run once it exists, inside the same handler.
-        if (this.hooks && pending && !input.dryRun) await this.hooks.afterPlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending.generationId, signal: steps });
+        if (hooks && pending && !input.dryRun) await phase("prose", () => hooks.afterPlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending.generationId, signal: steps }));
+        if (at && diag) diag.rest(at, STEP_LABEL.reply ?? "Waiting for the reply…");
       });
     } finally {
       // The host's chain may still be running other extensions' handlers after this one returns (a dry
@@ -611,6 +639,7 @@ export class LedgerService {
           const text = `[LumiRPEngine] ledger ${chatId}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`;
           this.errors.push(text);
           this.host.log("error", text, slot.userId);
+          this.diag?.error({ chatId, userId: slot.userId, turn: null }, "ledger", error);
         });
       await slot.queue;
       slot.ops--;

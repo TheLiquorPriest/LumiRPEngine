@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { FixTarget, HudView, StateView } from "../shared/state-view";
 import { useApp, useView } from "./app";
 import { Badge, Button, Empty, IconButton, List, ListRow, useBusy } from "./components";
+import { ActivityLine } from "./diagnostics";
 import { FixEditor } from "./fix-editor";
 import { formatCents, formatMinutes, humanize } from "./format";
 import { Icon } from "./icons";
@@ -40,6 +41,7 @@ export function Hud(props: { resize(size: HudSize): void }) {
   const app = useApp();
   const view = useView();
   const viewport = useSelect(app.host.viewport, (vp) => vp);
+  const activity = useSelect(app.sync, (state) => state.activity);
   const [open, setOpen] = useState(false);
   const pill = useRef<HTMLDivElement>(null);
   const pop = useRef<HTMLDivElement>(null);
@@ -61,7 +63,7 @@ export function Hud(props: { resize(size: HudSize): void }) {
     const observer = new ResizeObserver(measure);
     observer.observe(target);
     return () => observer.disconnect();
-  }, [open, mode, viewport.width, viewport.height, hud]);
+  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label]);
 
   // Closing the details hands focus back to the pill instead of dropping it on the page. When they
   // closed for Map or Actions, that opens now, from the pill, so closing it returns focus there.
@@ -139,7 +141,7 @@ export function Hud(props: { resize(size: HudSize): void }) {
           <Icon name="chevron-down" size={16} />
         </button>
       )}
-      {view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
+      {activity ? <ActivityLine compact={mode !== "full"} /> : view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
       {view.status === "paused" ? <Badge tone="warn">Paused</Badge> : null}
     </div>
   );
@@ -320,6 +322,7 @@ export function StatusLine() {
   const view = useView();
   const mobile = useSelect(app.host.viewport, (vp) => isMobile(vp));
   const hud = view?.hud ?? null;
+  const activity = useSelect(app.sync, (state) => state.activity);
   if (!mobile || !view || !hud || view.status === "not_world") return null;
   const cash = cashText(hud.cash);
   const said = [clockText(hud), hud.clock.paused ? "clock paused" : null, hud.place?.name ?? null, cash, view.status === "paused" ? "paused" : view.status === "in_flight" ? "a turn is in progress" : null].filter((part) => part !== null);
@@ -346,9 +349,10 @@ export function StatusLine() {
             </>
           ) : null}
         </span>
-        {view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
+        {activity?.state === "running" ? <ActivityLine /> : view.status === "in_flight" ? <span class="lre-chat-pulse" role="img" aria-label="A turn is in progress" title="A turn is in progress" /> : null}
         {view.status === "paused" ? <Badge tone="warn">Paused</Badge> : null}
       </button>
+      {activity?.state === "failed" ? <ActivityLine compact /> : null}
       <Button variant="primary" size="sm" icon="bolt" title="Actions" onClick={() => void app.overlays.openPalette("actions")}>
         Act
       </Button>

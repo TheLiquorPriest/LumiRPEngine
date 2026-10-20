@@ -3,6 +3,7 @@
 // frontend's delta/resync path runs exactly as against the real backend.
 
 import { CLASS_TRAITS, type AccountView, type FinanceView, type JournalLine } from "../../src/shared/finance";
+import type { DiagCall, DiagRecord } from "../../src/shared/diagnostics";
 import type { JsonObject, JsonValue } from "../../src/shared/json";
 import { hasOwn, isRecord } from "../../src/shared/json";
 import type { DeltaOp, EditOp, FrontendToBackend, JobProposal, JobSummary, JobUpdate, LintIssue, LoreDrift, PresetCard, ResultBodies, StudioOfferView } from "../../src/shared/protocol";
@@ -45,6 +46,8 @@ export interface MockOptions {
   studio?: StudioCase;
   /** `?draft=elsewhere`: this long after Build first loads a draft, another window changes it (`changeDraftElsewhere`). */
   draftElsewhereMs?: number;
+  /** `?activity=`: the engine mid-turn (`busy`), or its last turn failed (`failed`). */
+  activity?: "busy" | "failed";
   closeDrawer(): void;
 }
 
@@ -392,6 +395,7 @@ export class MockBackend {
         if (this.options.scenario === "sheet") this.view.panels["sheets.you"] = modernSheetFixture();
         this.result(reqId, "lre.hello", { accepted: true, agentApi: AGENT_API });
         setTimeout(() => this.snapshot(), 50);
+        if (this.options.activity) setTimeout(() => this.activity(this.options.activity === "busy" ? { state: "running", label: "Asking 3 minds…", since: Date.now() - 12_000 } : { state: "failed", label: "Failed: Planning", since: Date.now() - 60_000 }), 80);
         return;
       case "lre.state.resync":
         this.result(reqId, "lre.state.resync", { accepted: true });
@@ -434,6 +438,9 @@ export class MockBackend {
         this.mutate((view) => {
           view.status = "in_flight";
         }, 40);
+        // The activity line through a turn's steps, as the backend pushes it.
+        for (const [label, ms] of [["Planning…", 40], ["Reading your action…", 250], ["Asking 3 minds…", 450], ["Filling the prompt…", 700]] as const) setTimeout(() => this.activity({ state: "running", label, since: Date.now() - ms }), ms);
+        setTimeout(() => this.activity(null), 900);
         this.mutate((view) => {
           view.status = "idle";
           if (view.hud) {
@@ -692,6 +699,34 @@ export class MockBackend {
         if (message.op === "add") this.presetCard = { ...this.presetCard, blocks: this.presetCard.blocks.map((block) => (block.state === "missing" ? { ...block, state: "empty" } : block)) };
         return this.result(reqId, "lre.preset", { card: structuredClone(this.presetCard) });
       }
+      case "lre.diag":
+        if (message.op === "dismiss") this.activity(null);
+        return this.result(reqId, "lre.diag", { records: message.op === "clear" ? [] : diagnosticsFixture(), activity: null });
     }
   }
+
+  /** Pushes the chat's activity line (`lre.activity`). */
+  private activity(activity: { state: "running" | "failed"; label: string; since: number } | null): void {
+    const chatId = this.view?.chatId;
+    if (chatId) this.emit({ lre: 1, type: "lre.activity", chatId, activity: activity ? { chatId, turn: "gen-preview", ...activity } : null });
+  }
+}
+
+/** Two turns as the backend records them: the newer one's outline cut off at max tokens, the older one clean; and a slow view. */
+function diagnosticsFixture(): DiagRecord[] {
+  const t = Date.now() - 120_000;
+  const call = (purpose: string, tokensOut: number, finishReason: string, ms: number): DiagCall => ({ purpose, via: "helper", connection: "active", model: "deepseek-v4-flash", tokensIn: 6200, tokensOut, finishReason, maxTokens: 2000, ms, ok: true });
+  const step = (seq: number, turn: string, phase: DiagRecord["phase"], name: string, start: number, ms: number, more: Partial<DiagRecord> = {}): DiagRecord => ({ seq, kind: "step", level: "info", turn, phase, step: name, status: "ok", start: t + start, end: t + start + ms, ms, ...more });
+  return [
+    step(1, "gen-a1b2c3d4", "pre", "pre", 0, 4100, { calls: [call("interpret", 180, "stop", 2100), call("mind", 420, "stop", 3900), call("mind", 380, "stop", 3600), call("mind", 510, "stop", 4000)] }),
+    step(2, "gen-a1b2c3d4", "plan", "plan", 4100, 90),
+    step(3, "gen-a1b2c3d4", "prose", "prose", 4190, 5200, { status: "failed", level: "warn", calls: [call("outline", 2000, "length", 5200)], reason: "outline answer cut off at 2000 tokens (finish_reason length)", fix: "The model's answer was cut off at 2000 max tokens: raise Max tokens for outline in Settings → Steps and connections (a reasoning model spends tokens thinking first)." }),
+    { seq: 4, kind: "interceptor", level: "info", turn: "gen-a1b2c3d4", phase: "sections", step: "interceptor", status: "ok", start: t + 9400, end: t + 9430, ms: 30, path: "normal turn, preset loom-1", reason: "4 of 6 section(s) filled, 4 of them at the preset's outlets", sections: [{ slot: "scene", outlet: "lre_scene", filled: true }, { slot: "people", outlet: "lre_people", filled: true }, { slot: "outcome", outlet: "lre_outcome", filled: true }, { slot: "minds", outlet: "lre_minds", filled: true }, { slot: "outline", outlet: "lre_outline", filled: false }, { slot: "montage", outlet: null, filled: false }] },
+    step(5, "gen-a1b2c3d4", "read", "read", 31_000, 2600, { calls: [call("extract", 240, "stop", 2500)] }),
+    { seq: 6, kind: "turn", level: "warn", turn: "gen-a1b2c3d4", phase: null, step: "turn", status: "failed", start: t, end: t + 34_000, ms: 34_000, reason: "step prose/prose failed" },
+    { seq: 7, kind: "slow", level: "warn", turn: null, phase: "request", step: "state view", status: "ok", start: t + 40_000, end: t + 44_200, ms: 4200, reason: "state view took 4.2 s" },
+    step(8, "gen-e5f6a7b8", "pre", "pre", 60_000, 2300, { calls: [call("interpret", 150, "stop", 2200)] }),
+    step(9, "gen-e5f6a7b8", "plan", "plan", 62_300, 70),
+    { seq: 10, kind: "turn", level: "info", turn: "gen-e5f6a7b8", phase: null, step: "turn", status: "ok", start: t + 60_000, end: t + 80_000, ms: 20_000 },
+  ];
 }

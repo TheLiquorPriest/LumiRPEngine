@@ -235,6 +235,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 | `lre.fix` | `chatId, entity, field, value` | `{pending}`; checked as a `set` against the field's definition (locked fields refused), stored as one `fix` post entry |
 | `lre.edit` | `chatId, ops`: 1–64 `EditOp`s (`set`, `add`, `link`, `unlink`, `move`, `put`, `adjust`, `stage`, `entity`, `classify`, `life`, `spawn`, `despawn`, `restore`, `effect`) | `{pending}`; all or none, one `fix` post entry; locked fields writable; `effect` runs only a pack effect registered with `gm` (literal arguments) |
 | `lre.gm` | `chatId` | `GmView`, built from the head's state when asked; never part of a snapshot or delta |
+| `lre.diag` | `chatId`, `op`: `get` \| `clear` \| `dismiss` | `{records, activity}`: `get` returns the chat's diagnostics ring (DESIGN §6.9, oldest first), GM-level and never part of a push; `clear` forgets it; `dismiss` clears a failure from the activity line |
 | `lre.map` | `chatId`, then `display` (`knowledge` \| `fog`) \| `op: "walk", x, y` | `{display}`; stored in the chat's `prefs.json`, and the next snapshot's `space.map` panel is built for it. `walk`: `{walk: {minutes, disabled?}}`, Walk here to that cell of the grid the POV stands on, judged as the `step` action on the real ground |
 | `lre.marker` | `chatId`, then `resolve{domain, scope, to}` \| `time{control, scope, to}` \| `adjudicate{to}` \| `migrate{to, merge?}`; `preview` writes nothing | `{pending}`; with `preview`: `{preview}`, whose `upgrade` lists a migrate's definition changes with their default picks |
 | `lre.keep` | `chatId`, then `keep{messageId}` \| `discard{messageId}` \| `convert{messageId, parentPath, refs}` | `{pending}` |
@@ -251,6 +252,7 @@ Transport: `ctx.sendToBackend` / `spindle.sendToFrontend(payload, userId, {front
 - After a change it sends `lre.state.delta {chatId, base, rev, ops}`, where ops set or delete values at paths.
 - A frontend whose `rev` ≠ `base` discards the delta and sends `lre.state.resync`.
 - Pushes are coalesced per chat.
+- `lre.activity {chatId, activity}` is the chat's activity line (DESIGN §6.9): pushed as a turn's steps and model calls start and end, and after each hello; `activity` is `{chatId, turn, state: running | failed, label, since}` or null when idle.
 
 **Errors.** `lre.error {reqId | null, code, message, lint?}`. Codes:
 - `bad_request`, `not_found`, `not_world_chat`;

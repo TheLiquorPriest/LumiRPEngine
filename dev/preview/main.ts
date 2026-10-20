@@ -1,5 +1,6 @@
 // Preview harness boot: a mock host plus a mock backend, then the real frontend `setup`.
 // URL: ?scenario=play|paused|not_world|fresh|combat|sheet&drawer=open|closed&theme=dark|light (default dark)&map=ring|manor|square&heads=on|off (default off)
+//   &activity=busy|failed: the engine mid-turn ("Asking 3 minds…"), or its last turn failed (Diagnostics has the records)
 //   &draft=elsewhere[&draftDelay=<seconds>, default 10]: that long after Build first loads a draft, another window
 //     renames the world and changes Rosie's mood (`lre.draft.changed`); a form holding edits over either shows
 //     Build's "changed elsewhere" notice. `__lre.backend.changeDraftElsewhere()` changes it again at any time.
@@ -33,7 +34,9 @@ const draftElsewhereMs = params.get("draft") === "elsewhere" ? (Number.isFinite(
 const host = createMockHost({ drawerOpen: params.get("drawer") !== "closed", heads: params.get("heads") === "on" });
 const starter = STARTER_MAPS[params.get("map") ?? ""];
 const money = params.get("money") ?? "";
-const backend = new MockBackend((payload) => host.deliver(payload), { scenario, studio, ...(starter ? { map: starter } : {}), ...(money ? { money } : {}), ...(draftElsewhereMs !== undefined ? { draftElsewhereMs } : {}), closeDrawer: () => host.setDrawer(false) });
+const activityParam = params.get("activity");
+const activity = activityParam === "busy" || activityParam === "failed" ? activityParam : undefined;
+const backend = new MockBackend((payload) => host.deliver(payload), { scenario, studio, ...(starter ? { map: starter } : {}), ...(money ? { money } : {}), ...(draftElsewhereMs !== undefined ? { draftElsewhereMs } : {}), ...(activity ? { activity } : {}), closeDrawer: () => host.setDrawer(false) });
 host.onSend = (payload) => backend.receive(payload as FrontendToBackend);
 const teardown = setup(host.ctx);
 // As the Studio's frontend does when it has a world waiting (DESIGN §15).
