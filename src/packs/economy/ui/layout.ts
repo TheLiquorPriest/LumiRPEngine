@@ -86,6 +86,39 @@ export function accountGroups(accounts: readonly AccountView[]): { group: Accoun
   return order.map((group) => ({ group, label: GROUP_LABELS[group], accounts: accounts.filter((a) => groupOf(a) === group) })).filter((g) => g.accounts.length > 0);
 }
 
+/**
+ * Every account the party's view holds: its own (`accounts`), then those of a business it runs
+ * that it holds no role on itself (`BusinessView.managed`), which it manages for the business. An
+ * account's page, its cards and where a standing payment or an autopay pays from look in all of
+ * them; the Accounts section lists only the party's own, and the business's page its own.
+ */
+export function viewAccounts(view: FinanceView): AccountView[] {
+  const out = [...view.accounts];
+  for (const b of view.businesses) for (const a of b.managed) if (!out.some((x) => x.id === a.id)) out.push(a);
+  return out;
+}
+
+export function findAccount(view: FinanceView, id: string | undefined): AccountView | null {
+  return viewAccounts(view).find((a) => a.id === id) ?? null;
+}
+
+/**
+ * A business's accounts as its page lists them, in the business's order: each one the view holds
+ * (by the party's own role on it, or managed for the business), and the ids of the rest, which the
+ * party neither holds nor manages, so its view doesn't show them.
+ */
+export function businessAccounts(view: FinanceView, business: BusinessView): { shown: AccountView[]; others: EntityId[] } {
+  const all = viewAccounts(view);
+  const shown: AccountView[] = [];
+  const others: EntityId[] = [];
+  for (const id of business.accounts) {
+    const a = all.find((x) => x.id === id);
+    if (a) shown.push(a);
+    else others.push(id);
+  }
+  return { shown, others };
+}
+
 /** What the viewing party's role lets it do with an account, a business or a property; no role (the GM looking at it) is no right. */
 function rights(role: OwnerRole | null): RoleRights {
   return role ? ROLE_RIGHTS[role] : { spend: false, worth: false, sees: false, manage: false };
@@ -95,18 +128,21 @@ export type AccountControl = "pay" | "transfer" | "autopay" | "withdraw" | "depo
 
 /**
  * The player's controls on one account, in the order the account card shows them:
- * - `pay`: something owed on a card, a line or a loan, from an account they may pay from;
+ * - `pay`: something owed on a card, a line or a loan they hold, from an account they may pay from
+ *   (a business's loan they only manage is the business's to pay, from its own account by autopay);
  * - `transfer`: money out of an account they may spend from, to another of theirs (cash moves by
  *   Withdraw and Deposit instead, which at the top level need a machine or a branch);
  * - `autopay`: where the view offers autopay (credit accounts, at the level that runs it) and they manage the account (by their role on it, or on the business that holds it);
  * - `withdraw` and `deposit`: cash out of and into a bank account they may spend from, when they hold cash.
+ * Spending (`pay`, `transfer`, `withdraw`, `deposit`) follows their own role on the account;
+ * managing one for a business gives none of it.
  */
 export function accountControls(view: FinanceView, account: AccountView): AccountControl[] {
   if (view.level < 2 || account.status === "closed" || account.status === "charged_off" || account.status === "paid_off") return [];
   const t = CLASS_TRAITS[account.class];
   const r = rights(account.role);
   const out: AccountControl[] = [];
-  if ((t.revolving || t.installment) && account.cents < 0 && paySources(view).some((a) => a.id !== account.id)) out.push("pay");
+  if ((t.revolving || t.installment) && account.role !== null && account.cents < 0 && paySources(view).some((a) => a.id !== account.id)) out.push("pay");
   if (r.spend && account.status === "open" && moveSources(view).some((a) => a.id === account.id) && transferTargets(view, account.id).length > 0) out.push("transfer");
   if (account.autopay !== null && account.manages) out.push("autopay");
   const holdsCash = view.accounts.some((a) => CLASS_TRAITS[a.class].cash && rights(a.role).spend);
@@ -135,10 +171,9 @@ export function transferTargets(view: FinanceView, from: EntityId): AccountView[
   return view.accounts.filter((a) => a.id !== from && CLASS_TRAITS[a.class].asset && !CLASS_TRAITS[a.class].cash && a.status === "open" && rights(a.role).sees);
 }
 
-/** The card changes the player may make: on a card they hold, or on one on an account they manage. */
+/** The card changes the player may make: on a card they hold, or on one on an account they manage (a business's, for its owner). */
 export function cardControls(view: FinanceView, card: CardView): CardChange[] {
-  const account = view.accounts.find((a) => a.id === card.account);
-  if (card.holderId !== view.party && account?.manages !== true) return [];
+  if (card.holderId !== view.party && findAccount(view, card.account)?.manages !== true) return [];
   return cardChanges(card.state);
 }
 
@@ -222,14 +257,30 @@ export function endableLeases(view: FinanceView, property: PropertyView): string
 }
 
 /**
- * Where a new standing payment can come from: a non-cash account the party may pay from and
- * manages, by their role on it or on the business that holds it (flows never draw on wallet cash;
- * an authorized user spends on a card but sets up no standing payments).
+ * Where a new standing payment can come from: a non-cash account that pays and that the party
+ * manages, by their role on it or on the business that holds it, a business's own account they
+ * hold no role on included: the business pays it. Flows never draw on wallet cash, and an
+ * authorized user spends on a card but sets up no standing payments.
  */
 export function flowSources(view: FinanceView): { id: string; label: string }[] {
-  return paySources(view)
-    .filter((a) => !CLASS_TRAITS[a.class].cash && a.manages)
+  return viewAccounts(view)
+    .filter((a) => {
+      const t = CLASS_TRAITS[a.class];
+      return t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && a.manages;
+    })
     .map((a) => ({ id: a.id, label: a.name }));
+}
+
+/**
+ * Where a credit account's autopay can pay from: another open, non-cash account that pays and that
+ * the party may spend from or manages (the business's own account, for a loan of the business
+ * they run).
+ */
+export function autopaySources(view: FinanceView, account: AccountView): AccountView[] {
+  return viewAccounts(view).filter((a) => {
+    const t = CLASS_TRAITS[a.class];
+    return a.id !== account.id && t.pays && t.asset && !t.locked && !t.cash && a.status === "open" && (rights(a.role).spend || a.manages);
+  });
 }
 
 /** The people the player may name (a payee, a tenant, a hire): the palette's Pay targets, which list only people the POV knows. */
@@ -313,7 +364,7 @@ export function overviewBlocks(view: FinanceView): OverviewBlocks {
 }
 
 export interface AccountBlocks {
-  /** What can be spent now, beside the balance: credit left, holds, overdraft room. */
+  /** What can be spent now, beside the balance: credit left, holds, overdraft room. A loan has none to spend: what's left on it shows as owed. */
   available: boolean;
   terms: boolean;
   statements: boolean;
@@ -329,7 +380,7 @@ export interface AccountBlocks {
 export function accountBlocks(view: FinanceView, account: AccountView): AccountBlocks {
   const t = CLASS_TRAITS[account.class];
   return {
-    available: account.available !== null && (t.revolving || shows(view, "holds") || shows(view, "overdraft")),
+    available: account.available !== null && !t.installment && (t.revolving || shows(view, "holds") || shows(view, "overdraft")),
     terms: view.detail && account.terms.length > 0,
     statements: shows(view, "statements") && account.statements.length > 0,
     pending: shows(view, "holds") && account.pending.length > 0,

@@ -7,8 +7,9 @@
 
 import { describe, expect, test } from "bun:test";
 import type { FinanceView, HoldingView } from "../../src/shared/finance";
-import { businessControls, endableLeases, flowControls, holdingControls, hubTabs, invoiceControls, jobControls, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets } from "../../src/packs/economy/ui/layout";
+import { accountControls, autopaySources, businessAccounts, businessControls, endableLeases, findAccount, flowControls, holdingControls, hubTabs, invoiceControls, jobControls, knownPeople, moveSources, propertyControls, ROUTE_ELSEWHERE, routePick, transferTargets, viewAccounts } from "../../src/packs/economy/ui/layout";
 import {
+  autopayAction,
   distributeAction,
   drawAction,
   exerciseAction,
@@ -41,6 +42,8 @@ const BROKERAGE = "acct_pov_brokerage";
 const JOB = "job_pov_mechanic";
 const SHOP = "alder_automotive_co";
 const SHOP_ACCOUNT = "acct_marcus_shop";
+/** The shop's lift loan, the shop's alone: no one holds a role on it but the shop. */
+const LIFT_LOAN = "acct_alder_lift_loan";
 const MARCUS = "marcus_delgado";
 const MARCUS_CHECKING = "acct_marcus_checking";
 const MARCUS_MORTGAGE = "acct_marcus_mortgage";
@@ -228,6 +231,38 @@ describe("Play → Money → Jobs and Businesses: each control plays as the play
     expect(account(paid, CHECKING).cents).toBe(account(view, CHECKING).cents - 18000);
     expect(paid.flows.some((f) => f.link?.id === invoice)).toBe(false);
     expect(find(find(paid.businesses, SHOP).invoices, invoice).state).toBe("paid");
+  });
+});
+
+describe("A business's own accounts on its page, for whoever runs it", () => {
+  test("Marcus sees the shop's checking and its lift loan and sets the loan's autopay from its page; an employee sees none", async () => {
+    const owner = await MoneyChat.start({ pov: MARCUS });
+    const view = await owner.hub();
+    const shop = find(view.businesses, SHOP);
+    // He holds the shop's checking as an authorized user; the lift loan he only runs, as the shop's owner, so it isn't among his own accounts.
+    const listed = businessAccounts(view, shop);
+    expect(listed.shown.map((a) => a.id).sort()).toEqual([LIFT_LOAN, SHOP_ACCOUNT].sort());
+    expect(listed.others).toEqual([]);
+    expect(view.accounts.map((a) => a.id)).not.toContain(LIFT_LOAN);
+    const loan = find(listed.shown, LIFT_LOAN);
+    expect(loan).toMatchObject({ name: "Lift loan", role: null, manages: true, loan: { payment: 119956 }, autopay: { mode: "fixed", from: SHOP_ACCOUNT } });
+    expect(loan.cents).toBeLessThan(0);
+    // Its page offers the autopay row and nothing to spend; the autopay page pays from the shop's checking.
+    expect(accountControls(view, loan)).toEqual(["autopay"]);
+    expect(autopaySources(view, loan).map((a) => a.id)).toContain(SHOP_ACCOUNT);
+    expect(await owner.play(autopayAction(LIFT_LOAN, "minimum", SHOP_ACCOUNT, null))).toContain("done");
+    const after = await owner.hub();
+    expect(findAccount(after, LIFT_LOAN)?.autopay).toMatchObject({ mode: "minimum", from: SHOP_ACCOUNT });
+    // The GM's Money tab draws his business page the same way.
+    const gm = await owner.party(MARCUS);
+    expect(businessAccounts(gm, find(gm.businesses, SHOP)).shown.map((a) => a.id)).toContain(LIFT_LOAN);
+
+    // Jordan works at the shop but holds no role on it: no business page, and none of its accounts.
+    const employee = await MoneyChat.start();
+    const theirs = await employee.hub();
+    expect(theirs.businesses).toEqual([]);
+    expect(viewAccounts(theirs).map((a) => a.id)).not.toContain(LIFT_LOAN);
+    expect(viewAccounts(theirs).map((a) => a.id)).not.toContain(SHOP_ACCOUNT);
   });
 });
 

@@ -8,7 +8,7 @@ import { assetPages } from "./assets";
 import { creditPages } from "./credit";
 import { flowPages } from "./flows";
 import type { SectionProps } from "./hub";
-import { possessive, SECTION_LABELS, type HubSection } from "./layout";
+import { findAccount, possessive, SECTION_LABELS, viewAccounts, type HubSection } from "./layout";
 import { Gone, type HubPage, type HubPages } from "./nav";
 import { workPages } from "./work";
 
@@ -47,9 +47,9 @@ export function pageLabel(view: FinanceView, page: HubPage): string | null {
   if (page.type !== "detail") return null;
   switch (head) {
     case "account":
-      return view.accounts.find((a) => a.id === id)?.name ?? null;
+      return findAccount(view, id)?.name ?? null;
     case "card":
-      return [...view.cards, ...view.accounts.flatMap((a) => a.cards)].find((c) => c.id === id)?.name ?? null;
+      return [...view.cards, ...viewAccounts(view).flatMap((a) => a.cards)].find((c) => c.id === id)?.name ?? null;
     case "flow":
       return [...view.flows, ...view.properties.flatMap((p) => p.costs), ...(view.household?.flows ?? [])].find((f) => f.id === id)?.label ?? null;
     case "job": {
