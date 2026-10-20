@@ -5534,7 +5534,7 @@ var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
 var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
 var DEFAULT_MINDS_MEMORY = Object.freeze({
   witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 1200 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
   notes: { show: 8, keep: 24 },
   commitments: { show: 8 },
   salience: { halfLifeDays: 7, floor: 0.5 },
@@ -5553,7 +5553,7 @@ var MINDS_RANGES = {
   threshold: [0, 1000],
   show: [0, 64],
   keep: [1, 64],
-  recallTokens: [0, 8000],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
   halfLifeDays: [0.1, 3650],
   floor: [0, 5],
   periodDays: [0.1, 365]
@@ -5657,9 +5657,9 @@ function worldMindTemplate(world, purpose) {
   return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
 }
 var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
   return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
@@ -5711,7 +5711,7 @@ function mindsSettingsOf(raw, base = MINDS_DEFAULTS) {
     farRefreshMinutes: limitIn(m.farRefreshMinutes, 1, 525600, base.farRefreshMinutes),
     refreshLimit: limitIn(m.refreshLimit, 0, 64, base.refreshLimit),
     memoryLevels: levels,
-    tokens: typeof m.tokens === "number" && Number.isInteger(m.tokens) && m.tokens >= 0 && m.tokens <= 1e5 ? m.tokens : base.tokens,
+    tokens: typeof m.tokens === "number" && Number.isSafeInteger(m.tokens) && m.tokens >= 0 ? m.tokens : base.tokens,
     memory: isRecord(m.memory) ? memoryOverridesOf(m.memory) : structuredClone(base.memory),
     prompts: isRecord(m.prompts) ? prompts : { ...base.prompts },
     skip: { maxBeats: limitIn(skip.maxBeats, 0, 200, base.skip.maxBeats), maxMindsPerBeat: limitIn(skip.maxMindsPerBeat, 0, 64, base.skip.maxMindsPerBeat) }
@@ -5808,17 +5808,37 @@ var MIND_ANSWER_FORMATS = Object.freeze({
 });
 
 // src/shared/settings.ts
+var REASONING_CHOICES = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
+var HELPER_MAX_TOKENS = 8192;
+var SAMPLING_PARAMS = [
+  { key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.05, integer: false, fallback: 1 },
+  { key: "top_p", label: "Top P", min: 0, max: 1, step: 0.01, integer: false, fallback: 1 },
+  { key: "top_k", label: "Top K", min: 0, max: 1000, step: 1, integer: true, fallback: 40 },
+  { key: "frequency_penalty", label: "Frequency penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 },
+  { key: "presence_penalty", label: "Presence penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 }
+];
+var DEFAULT_HELPER = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
+function helperCallOf(config, helper) {
+  const route = config?.route;
+  const own = route?.connectionId ?? null;
+  return {
+    connectionId: own ?? helper.connectionId,
+    model: own !== null ? route?.model ?? null : helper.model,
+    effort: route?.effort ?? helper.effort,
+    maxTokens: config?.maxTokens ?? helper.maxTokens,
+    params: { ...helper.params, ...route?.params }
+  };
+}
 var LORE_POLICIES = ["none", "prefetch", "lookup", "prefetch+lookup"];
 var LORE_TRANSPORTS = ["auto", "tools", "need"];
-var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 300 });
+var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
 function stepLoreOf(config) {
   return config?.lore ?? DEFAULT_STEP_LORE;
 }
-var HELPER_MAX_TOKENS = 2000;
 function stepConfigOf(steps, purpose) {
   const saved = steps[purpose];
   if (isMindPurpose(purpose))
-    return saved ?? { enabled: purpose !== "skip", signals: [], maxTokens: HELPER_MAX_TOKENS };
+    return saved ?? { enabled: purpose !== "skip", signals: [] };
   if (purpose !== "puzzle.answer")
     return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
@@ -5849,6 +5869,7 @@ var EXTRACTION_LEARNING = Object.freeze({
   window: 30,
   demoteUndoRate: 0.1
 });
+var SETTINGS_DEFAULTS_REV = 2;
 
 // src/engine/time-limits.ts
 var TIME_LIMITS = Object.freeze({
@@ -53941,7 +53962,7 @@ function outline(reg, world, state, input, rng, max = MAX_BEATS) {
   for (const r of input.resolutions ?? []) {
     const label = own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     if (!r.ok)
-      lines.push(`${label} doesn't happen: ${r.failed?.reason ?? "not possible"}.`);
+      lines.push(`${label} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
     else if (r.check || r.adjudged)
       lines.push(`${label}: the result is decided \u2014 ${r.outcome}.`);
     else
@@ -56763,6 +56784,57 @@ async function setAside(host, path, userId, what, why) {
   }
 }
 
+// src/shared/diagnostics.ts
+var DIAG_PHASES = ["pre", "plan", "prose", "sections", "reply", "read", "memory", "skip", "request"];
+var DIAG_RING = 400;
+var SLOW_MS = 1000;
+var STEP_LABEL = {
+  pre: "Planning\u2026",
+  interpret: "Reading your action\u2026",
+  judge: "Judging the approach\u2026",
+  "puzzle.answer": "Judging the answer\u2026",
+  "npc.choose": "Choosing what people do\u2026",
+  mind: "Asking minds\u2026",
+  skip: "Running the time skip\u2026",
+  plan: "Planning\u2026",
+  prose: "Writing the outline\u2026",
+  brief: "Writing the outline\u2026",
+  outline: "Writing the outline\u2026",
+  sections: "Filling the prompt\u2026",
+  reply: "Waiting for the reply\u2026",
+  read: "Reading the reply\u2026",
+  extract: "Reading the reply\u2026",
+  contradiction: "Checking the reply\u2026",
+  choices: "Writing choices\u2026",
+  memory: "Updating memory\u2026",
+  consolidate: "Updating memory\u2026"
+};
+function callLabel(purpose, count) {
+  if (purpose === "mind")
+    return `Asking ${count} mind${count === 1 ? "" : "s"}\u2026`;
+  return STEP_LABEL[purpose] ?? "Asking the model\u2026";
+}
+function suggestFix(reason, call) {
+  const r = reason.toLowerCase();
+  if (call?.finishReason === "length" || /cut off|max.?tokens|finish_reason length/.test(r))
+    return `The model's answer was cut off at ${call?.maxTokens ?? "its"} max tokens: raise Max tokens for ${call?.purpose ?? "this step"} in Settings \u2192 Steps and connections (a reasoning model spends tokens thinking first).`;
+  if (/abort|timed? ?out|timeout|wall clock/.test(r))
+    return "The step ran out of time: raise the before-the-reply wall clock in Settings \u2192 Model use, or pick a faster model in Settings \u2192 Steps and connections.";
+  if (/401|403|unauthori[sz]ed|api key|forbidden/.test(r))
+    return "The connection refused the call: check its API key in Lumiverse's connections, or route the step to another in Settings \u2192 Steps and connections.";
+  if (/429|rate.?limit/.test(r))
+    return "The provider is rate-limiting: wait, lower Model use in Settings, or route steps to another connection.";
+  if (/empty|no answer|nothing/.test(r))
+    return "The model answered nothing usable: check the step's connection and model in Settings \u2192 Steps and connections, and its Max tokens.";
+  if (/json/.test(r))
+    return "The model didn't answer in JSON: pick a model that follows instructions for this step in Settings \u2192 Steps and connections.";
+  if (/outlet|no section|unfilled/.test(r))
+    return "Nothing reached the reply's prompt: check that your preset's {{outlet::lre_\u2026}} blocks are enabled in Settings \u2192 Preset.";
+  if (/not loaded|unavailable|no world/.test(r))
+    return "The chat's world revision isn't loaded: reopen the chat; if it stays, check the world in Build.";
+  return;
+}
+
 // src/backend/ledger-io.ts
 var KIND = {
   normal: "normal",
@@ -56992,6 +57064,7 @@ class LedgerService {
   outstanding = 0;
   errors = [];
   hooks = null;
+  diag = null;
   resets = new Map;
   damaged = new Map;
   preReply = new Map;
@@ -57014,27 +57087,42 @@ class LedgerService {
       });
     }), h.on("GENERATION_ENDED", (e, userId) => {
       this.generationEnded(e.generationId);
+      const at = userId ? { chatId: e.chatId, userId, turn: e.generationId } : null;
       return this.run(e.chatId, userId, async (core, observed) => {
         core.sync(observed);
         if (e.error) {
-          this.host.log("warn", `[LumiRPEngine] generation ${e.generationId.slice(0, 8)} ended with an error: ${e.error.slice(0, 200)}`, userId ?? undefined);
+          this.host.log("warn", `[LumiRPEngine] generation ${e.generationId.slice(0, 8)} ended with an error: ${e.error.slice(0, 200)}`, userId ?? undefined, e.generationId);
           core.stopped({ generationId: e.generationId, content: e.content }, observed);
+          if (at)
+            this.diag?.end(at, { status: "failed", reason: `the reply's generation failed: ${e.error.slice(0, 300)}` });
           return;
         }
         const p = core.journal.pending[e.generationId];
         const swipeId = p?.swipeId ?? observed.find((m) => m.id === e.messageId)?.swipeId ?? 0;
         const turn = p && e.messageId && userId ? { chatId: e.chatId, userId, core, observed, generationId: e.generationId, messageId: e.messageId, swipeId, kind: p.kind } : null;
+        const diag = at && turn ? this.diag : null;
+        if (at && diag)
+          diag.begin(at, STEP_LABEL.read);
         if (this.hooks && turn && p && p.kind !== "impersonate") {
+          const hooks = this.hooks;
           const text = p.kind === "continue" ? p.captured && e.content.length >= p.captured.len ? e.content.slice(p.captured.len) : "" : e.content;
           if (text !== "")
-            await this.hooks.beforeCommit({ ...turn, content: text });
+            await (at && diag ? diag.step(at, "read", "read", () => hooks.beforeCommit({ ...turn, content: text })) : hooks.beforeCommit({ ...turn, content: text }));
+          else if (at && diag)
+            diag.skipped(at, "read", "read", "the reply had no new text to read");
         }
         core.ended({ generationId: e.generationId, ...e.messageId ? { messageId: e.messageId } : {}, content: e.content }, observed);
-        if (this.hooks && turn)
-          await this.hooks.afterCommit({ ...turn, content: e.content });
+        if (this.hooks && turn) {
+          const hooks = this.hooks;
+          await (at && diag ? diag.step(at, "memory", "memory", () => hooks.afterCommit({ ...turn, content: e.content })) : hooks.afterCommit({ ...turn, content: e.content }));
+        }
+        if (at && diag)
+          diag.end(at);
       });
     }), h.on("GENERATION_STOPPED", (e, userId) => {
       this.generationEnded(e.generationId);
+      if (userId)
+        this.diag?.end({ chatId: e.chatId, userId, turn: e.generationId }, { status: "skipped", reason: "the reply was stopped" });
       return this.run(e.chatId, userId, (core, observed) => {
         core.sync(observed);
         core.stopped({ generationId: e.generationId, content: e.content }, observed);
@@ -57066,15 +57154,28 @@ class LedgerService {
       await this.run(input.chatId, input.userId, async (core, observed) => {
         core.sync(observed);
         const pending = Object.values(core.journal.pending).filter((p) => !p.planned && (p.kind === KIND[input.generationType] || p.kind === "renarrate" && (input.generationType === "swipe" || input.generationType === "regenerate"))).at(-1);
-        if (!pending && !input.dryRun)
+        const diag = this.diag;
+        if (!pending && !input.dryRun) {
+          diag?.skipped({ chatId: input.chatId, userId: input.userId, turn: null }, "plan", "plan", `no generation of kind ${input.generationType} waits for a plan, so this reply runs without the engine`);
           return;
-        if (this.hooks)
-          await this.hooks.beforePlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending?.generationId ?? null, dryRun: input.dryRun, connectionId: input.connectionId, signal: steps });
-        if (signal.aborted)
+        }
+        const at = pending && !input.dryRun && diag ? { chatId: input.chatId, userId: input.userId, turn: pending.generationId } : null;
+        const phase = (name, fn) => at && diag ? diag.step(at, name, name, fn) : fn();
+        if (at && diag)
+          diag.begin(at);
+        const hooks = this.hooks;
+        if (hooks)
+          await phase("pre", () => hooks.beforePlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending?.generationId ?? null, dryRun: input.dryRun, connectionId: input.connectionId, signal: steps }));
+        if (signal.aborted) {
+          if (at && diag)
+            diag.failed(at, "plan", "plan", `the host stopped waiting for the plan after ${Math.round(this.contextTimeout / 1000)} s (timed out): this reply runs without it`);
           return;
-        core.plan(pending?.generationId ?? "", observed, input.dryRun);
-        if (this.hooks && pending && !input.dryRun)
-          await this.hooks.afterPlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending.generationId, signal: steps });
+        }
+        await phase("plan", async () => core.plan(pending?.generationId ?? "", observed, input.dryRun));
+        if (hooks && pending && !input.dryRun)
+          await phase("prose", () => hooks.afterPlan({ chatId: input.chatId, userId: input.userId, core, observed, generationId: pending.generationId, signal: steps }));
+        if (at && diag)
+          diag.rest(at, STEP_LABEL.reply ?? "Waiting for the reply\u2026");
       });
     } finally {
       this.handling--;
@@ -57223,6 +57324,7 @@ class LedgerService {
         const text = `[LumiRPEngine] ledger ${chatId}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`;
         this.errors.push(text);
         this.host.log("error", text, slot.userId);
+        this.diag?.error({ chatId, userId: slot.userId, turn: null }, "ledger", error);
       });
       await slot.queue;
       slot.ops--;
@@ -57293,7 +57395,7 @@ var IMPORT_MAX_CALLS = 12;
 var ENTRY_MAX_CHARS = 1500;
 var PROPOSALS_PER_CALL = 15;
 var PROPOSALS_MAX = 120;
-var PROPOSAL_MAX_TOKENS = 6000;
+var PROPOSAL_MAX_TOKENS = 16384;
 var COLLECTIONS2 = { entities: "entities", places: "places", routes: "routes" };
 var TRAVEL_MODES = ["walk", "road", "offroad", "water"];
 var PROPOSAL_STRICT_RULES = [
@@ -60780,32 +60882,44 @@ var GUIDANCE_LEAD = "Style and rules from the player's preset. Follow them where
 class Steps {
   host;
   meter;
-  constructor(host, meter) {
+  helperOf;
+  onCall = null;
+  onCallStart = null;
+  constructor(host, meter, helperOf = async () => DEFAULT_HELPER) {
     this.host = host;
     this.meter = meter;
+    this.helperOf = helperOf;
   }
   async quiet(purpose, request, userId, signal, o) {
     const t0 = performance.now();
     const lookup = o.lookup ? { lookup: true } : {};
+    const route = { purpose, via: "helper", connection: request.connectionId ?? "active", maxTokens: request.maxTokens, ...lookup };
+    this.onCallStart?.(userId, purpose);
     try {
       const r = await this.host.models.quiet(request, userId, signal);
-      this.meter.record({ purpose, via: "helper", ok: true, ms: performance.now() - t0, tokens: r.tokens, ...lookup }, userId);
+      const ms = performance.now() - t0;
+      this.meter.record({ purpose, via: "helper", ok: true, ms, tokens: r.tokens, ...lookup }, userId);
+      const answered = r.content.trim() !== "" || (r.toolCalls?.length ?? 0) > 0;
+      this.onCall?.(userId, { ...route, model: r.model ?? request.model ?? "default", tokensIn: r.tokensIn ?? null, tokensOut: answered ? r.tokensOut ?? null : 0, finishReason: r.finishReason, ms, ok: true });
       if (r.finishReason === "length")
         this.host.log("warn", `[LumiRPEngine] ${purpose} helper reply was cut off at ${request.maxTokens} tokens (${r.content.length} characters)`, userId);
       return r;
     } catch (error) {
-      this.meter.record({ purpose, via: "helper", ok: false, ms: performance.now() - t0, tokens: 0, ...lookup }, userId);
+      const ms = performance.now() - t0;
+      this.meter.record({ purpose, via: "helper", ok: false, ms, tokens: 0, ...lookup }, userId);
+      this.onCall?.(userId, { ...route, model: request.model ?? "default", tokensIn: null, tokensOut: null, finishReason: "", ms, ok: false, error: signal.aborted ? `aborted: the step's time ran out (${error instanceof Error ? error.message : String(error)})` : error instanceof Error ? error.message : String(error) });
       const again = o.retry && !signal.aborted && transientFailure(error);
       this.host.log("warn", `[LumiRPEngine] ${purpose} helper call failed${again ? ", asking once more" : ""}: ${error instanceof Error ? error.message : String(error)}`, userId);
       return again ? this.quiet(purpose, request, userId, signal, { ...o, retry: false }) : error instanceof Error ? error : new Error(String(error));
     }
   }
   async helperJson(purpose, system, user, config, userId, signal, options = {}) {
-    const base = { maxTokens: Math.max(config?.maxTokens ?? HELPER_MAX_TOKENS, 1500), connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null };
     const lore = options.lore ?? null;
     const guidance = options.guidance ? `${GUIDANCE_LEAD}
 ${options.guidance}` : "";
     let offer = lore?.offer() ?? null;
+    const call = helperCallOf(config, await this.helperOf(userId));
+    const base = { ...call, maxTokens: Math.max(call.maxTokens, 1500) };
     const opening = () => [{ role: "system", content: [system, guidance, lore?.block() ?? "", offer && lore ? lore.instructions(offer) : ""].filter((s) => s !== "").join(`
 
 `) }, { role: "user", content: user }];
@@ -60868,6 +60982,7 @@ ${end}` }];
     if (!offer)
       return;
     lore.spend();
+    const helper = helperCallOf(null, await this.helperOf(userId));
     const ask = (transport) => {
       const contract = transport === "need" ? 'Output JSON only: {"need": ["a short query", \u2026]}, or {"need": []} when the notes given are enough.' : 'Call the lore tools for what you need; when the notes given are enough, reply "none".';
       const system = ["You get a decision ready. Read the state and the questions and say what world lore would help answer them; don't answer them.", lore.block(), lore.instructions(transport), contract].filter((s) => s !== "").join(`
@@ -60880,7 +60995,7 @@ Questions:
 ${questionLines(questions).join(`
 `)}` }
       ];
-      return this.quiet(purpose, { messages, maxTokens: HELPER_MAX_TOKENS, json: transport === "need", connectionId: null, model: null, ...transport === "tools" ? { tools: [...lore.tools] } : {} }, userId, signal, { retry: false, lookup: true });
+      return this.quiet(purpose, { messages, json: transport === "need", ...helper, ...transport === "tools" ? { tools: [...lore.tools] } : {} }, userId, signal, { retry: false, lookup: true });
     };
     let reply = await ask(offer);
     if (reply instanceof Error && offer === "tools" && !signal.aborted && !transientFailure(reply)) {
@@ -60905,13 +61020,20 @@ ${questionLines(questions).join(`
       const extra = { ...notes.length > 0 ? { lore: notes } : {}, ...guidance !== "" ? { rules: guidance } : {} };
       const asked = Object.keys(extra).length === 0 ? state : isRecord(state) ? { ...state, ...extra } : { state, ...extra };
       const t0 = performance.now();
+      const route = { purpose, via: "decision", connection: config?.route?.connectionId ?? "active", maxTokens: null, finishReason: "", tokensIn: null };
+      this.onCallStart?.(userId, purpose);
       try {
         const r = await this.host.models.decide({ state: asked, questions, connectionId: config?.route?.connectionId ?? null, model: config?.route?.model ?? null }, userId, signal);
-        this.meter.record({ purpose, via: "decision", ok: true, ms: performance.now() - t0, tokens: r.tokens }, userId);
-        if (Object.keys(r.answers).length > 0)
+        const ms = performance.now() - t0;
+        this.meter.record({ purpose, via: "decision", ok: true, ms, tokens: r.tokens }, userId);
+        const answered = Object.keys(r.answers).length > 0;
+        this.onCall?.(userId, { ...route, model: r.model, tokensOut: answered ? r.tokens : 0, ms, ok: true });
+        if (answered)
           return { answers: r.answers, via: "decision" };
       } catch (error) {
-        this.meter.record({ purpose, via: "decision", ok: false, ms: performance.now() - t0, tokens: 0 }, userId);
+        const ms = performance.now() - t0;
+        this.meter.record({ purpose, via: "decision", ok: false, ms, tokens: 0 }, userId);
+        this.onCall?.(userId, { ...route, model: config?.route?.model ?? "default", tokensOut: null, ms, ok: false, error: error instanceof Error ? error.message : String(error) });
         this.host.log("warn", `[LumiRPEngine] ${purpose} decision failed, using the helper: ${error instanceof Error ? error.message : String(error)}`, userId);
       }
     }
@@ -60921,7 +61043,7 @@ ${questionLines(questions).join(`
     const raw = await this.helperJson(purpose, system, `State: ${JSON.stringify(state)}
 Questions:
 ${questionLines(questions).join(`
-`)}`, viaHelper && config ? config : { enabled: true, signals: [], maxTokens: config?.maxTokens ?? HELPER_MAX_TOKENS }, userId, signal, { lore, guidance });
+`)}`, viaHelper && config ? config : { enabled: true, signals: [], ...config?.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {} }, userId, signal, { lore, guidance });
     if (!isRecord(raw))
       return null;
     const answers = {};
@@ -62918,56 +63040,119 @@ function capAll(level) {
 var DECISION = { provider: "decision", connectionId: null, model: null };
 var HELPER = { provider: "helper", connectionId: null, model: null };
 function step(enabled, signals, route, lore) {
-  return { enabled, signals, ...route ? { route: { ...route } } : {}, maxTokens: HELPER_MAX_TOKENS, ...lore ? { lore: { ...lore } } : {} };
+  return { enabled, signals, ...route ? { route: { ...route } } : {}, ...lore ? { lore: { ...lore } } : {} };
 }
 var lore = (policy, tokens) => ({ policy, tokens });
 var NO_LOOKUPS = { calls: 0, ms: 0 };
 var MODEL_USE_PRESETS = {
   lean: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER, lore("prefetch", 200)),
-      extract: step(true, ["reply"], HELPER, lore("prefetch", 200)),
-      "npc.choose": step(false, [], DECISION, lore("prefetch", 200)),
-      judge: step(false, ["always"], HELPER, lore("prefetch", 200))
+      interpret: step(true, ["classifier"], HELPER, lore("prefetch", 800)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch", 800)),
+      "npc.choose": step(false, [], DECISION, lore("prefetch", 800)),
+      judge: step(false, ["always"], HELPER, lore("prefetch", 800))
     },
     budgets: { pre: { calls: 1, ms: 20000, lookup: { ...NO_LOOKUPS } }, post: { calls: 1, ms: 30000, lookup: { ...NO_LOOKUPS } } },
-    tokens: { sections: 300 }
+    tokens: { sections: 2000 }
   },
   standard: {
     steps: {
-      interpret: step(true, ["classifier"], HELPER, lore("prefetch+lookup", 400)),
-      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 400)),
-      "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 400)),
-      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 400)),
-      mind: step(true, ["always"], HELPER, lore("prefetch", 400)),
+      interpret: step(true, ["classifier"], HELPER, lore("prefetch+lookup", 1600)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 1600)),
+      "npc.choose": step(true, ["tie_zone", "invitation"], DECISION, lore("prefetch+lookup", 1600)),
+      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 1600)),
+      mind: step(true, ["always"], HELPER, lore("prefetch", 1600)),
       memory: step(true, ["reply"], HELPER, lore("none", 0)),
-      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 300)),
+      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 1200)),
       consolidate: step(true, ["reply"], HELPER, lore("none", 0))
     },
-    budgets: { pre: { calls: 2, ms: 30000, lookup: { calls: 2, ms: 15000 } }, post: { calls: 2, ms: 45000, lookup: { calls: 1, ms: 20000 } } },
-    tokens: { sections: 600 }
+    budgets: { pre: { calls: 2, ms: 30000, lookup: { calls: 4, ms: 15000 } }, post: { calls: 2, ms: 45000, lookup: { calls: 3, ms: 20000 } } },
+    tokens: { sections: 4000 }
   },
   full: {
     steps: {
-      interpret: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
-      brief: step(true, ["always"], HELPER, lore("prefetch", 400)),
-      outline: step(true, ["always"], HELPER, lore("prefetch", 400)),
-      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
-      contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 600)),
-      "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 600)),
-      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 600)),
-      mind: step(true, ["always"], HELPER, lore("prefetch", 600)),
+      interpret: step(true, ["always"], HELPER, lore("prefetch+lookup", 2400)),
+      brief: step(true, ["always"], HELPER, lore("prefetch", 1600)),
+      outline: step(true, ["always"], HELPER, lore("prefetch", 1600)),
+      extract: step(true, ["reply"], HELPER, lore("prefetch+lookup", 2400)),
+      contradiction: step(true, ["reply"], HELPER, lore("prefetch+lookup", 2400)),
+      "npc.choose": step(true, ["present", "offscreen"], DECISION, lore("prefetch+lookup", 2400)),
+      judge: step(true, ["always"], HELPER, lore("prefetch+lookup", 2400)),
+      mind: step(true, ["always"], HELPER, lore("prefetch", 2400)),
       memory: step(true, ["reply"], HELPER, lore("none", 0)),
-      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 400)),
+      skip: step(false, ["timelapse"], HELPER, lore("prefetch", 1600)),
       consolidate: step(true, ["reply"], HELPER, lore("none", 0))
     },
-    budgets: { pre: { calls: 8, ms: 60000, lookup: { calls: 3, ms: 30000 } }, post: { calls: 4, ms: 60000, lookup: { calls: 2, ms: 30000 } } },
-    tokens: { sections: 1000 }
+    budgets: { pre: { calls: 8, ms: 60000, lookup: { calls: 6, ms: 30000 } }, post: { calls: 4, ms: 60000, lookup: { calls: 4, ms: 30000 } } },
+    tokens: { sections: 8000 }
   }
 };
+var LIFTED = {
+  maxTokens: 2000,
+  loreTokens: new Map([
+    [200, 800],
+    [300, 1200],
+    [400, 1600],
+    [600, 2400]
+  ]),
+  lookups: {
+    pre: [
+      { preset: "standard", was: "2|15000" },
+      { preset: "full", was: "3|30000" }
+    ],
+    post: [
+      { preset: "standard", was: "1|20000" },
+      { preset: "full", was: "2|30000" }
+    ]
+  },
+  sections: new Map([
+    [300, MODEL_USE_PRESETS.lean.tokens.sections],
+    [600, MODEL_USE_PRESETS.standard.tokens.sections],
+    [1000, MODEL_USE_PRESETS.full.tokens.sections]
+  ]),
+  minds: new Map([
+    [300, MINDS_PRESETS.lean.tokens],
+    [600, MINDS_PRESETS.standard.tokens],
+    [1000, MINDS_PRESETS.full.tokens]
+  ])
+};
+function lifted(raw) {
+  const out = JSON.parse(JSON.stringify(raw));
+  if (out.defaults === SETTINGS_DEFAULTS_REV)
+    return out;
+  const lift = (map, n) => map.get(n) ?? n;
+  const mu = isRecord(out.modelUse) ? out.modelUse : null;
+  if (mu && isRecord(mu.steps)) {
+    for (const s of Object.values(mu.steps)) {
+      if (!isRecord(s))
+        continue;
+      if (s.maxTokens === LIFTED.maxTokens)
+        delete s.maxTokens;
+      if (isRecord(s.lore) && typeof s.lore.tokens === "number")
+        s.lore.tokens = lift(LIFTED.loreTokens, s.lore.tokens);
+    }
+  }
+  if (mu && isRecord(mu.budgets)) {
+    for (const phase of ["pre", "post"]) {
+      const b = mu.budgets[phase];
+      const l = isRecord(b) && isRecord(b.lookup) ? b.lookup : null;
+      const old = l ? LIFTED.lookups[phase].find((x) => x.was === `${String(l.calls)}|${String(l.ms)}`) : undefined;
+      if (l && old)
+        l.calls = MODEL_USE_PRESETS[old.preset].budgets[phase].lookup?.calls ?? l.calls;
+    }
+  }
+  if (mu && isRecord(mu.tokens) && typeof mu.tokens.sections === "number")
+    mu.tokens.sections = lift(LIFTED.sections, mu.tokens.sections);
+  if (isRecord(out.minds) && typeof out.minds.tokens === "number")
+    out.minds.tokens = lift(LIFTED.minds, out.minds.tokens);
+  out.defaults = SETTINGS_DEFAULTS_REV;
+  return out;
+}
 function defaultSettings() {
   return {
     v: 1,
+    defaults: SETTINGS_DEFAULTS_REV,
+    helper: { ...DEFAULT_HELPER, params: {} },
     modelUse: { preset: "standard", ...structuredClone(MODEL_USE_PRESETS.standard) },
     realism: { preset: "story", ...structuredClone(REALISM_PRESETS2.story) },
     time: {
@@ -63010,12 +63195,13 @@ function normalize(raw) {
     fill.modelUse = { preset, ...structuredClone(MODEL_USE_PRESETS[preset]) };
     fill.minds = defaultMindsSettings(preset);
   }
-  const merged = mergePatch(JSON.parse(JSON.stringify(fill)), JSON.parse(JSON.stringify(raw)));
+  const merged = mergePatch(JSON.parse(JSON.stringify(fill)), lifted(raw));
   return isRecord(merged) && merged.v === 1 ? conform(merged, fill) : defaultSettings();
 }
 var STEP_PURPOSES = ["interpret", "npc.choose", "contradiction", "puzzle.answer", "brief", "outline", "extract", "choices", "judge", "mind", "memory", "skip", "consolidate"];
 var MAX_PHASE_MS = 600000;
 var int = (v, lo, hi) => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : undefined;
+var atLeast = (v, lo) => int(v, lo, Number.MAX_SAFE_INTEGER);
 var real = (v, lo, hi) => typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : undefined;
 var oneOf2 = (v, values) => values.find((x) => x === v);
 var LEVELS = [0, 1, 2, 3, 4];
@@ -63041,20 +63227,38 @@ function entries2(v, max, entry) {
   }
   return out;
 }
+var text4 = (x) => typeof x === "string" && x !== "" ? x.slice(0, 200) : null;
+function paramsOf(v) {
+  const out = {};
+  if (!isRecord(v))
+    return out;
+  for (const p of SAMPLING_PARAMS) {
+    const x = real(v[p.key], p.min, p.max);
+    if (x !== undefined)
+      out[p.key] = p.integer ? Math.round(x) : x;
+  }
+  return out;
+}
 function routeOf2(v) {
   if (!isRecord(v))
     return;
   const provider = oneOf2(v.provider, ["decision", "helper"]);
   if (!provider)
     return;
-  const text = (x) => typeof x === "string" && x !== "" ? x.slice(0, 200) : null;
-  return { provider, connectionId: text(v.connectionId), model: text(v.model) };
+  const effort = oneOf2(v.effort, REASONING_CHOICES);
+  const params = paramsOf(v.params);
+  return { provider, connectionId: text4(v.connectionId), model: text4(v.model), ...effort ? { effort } : {}, ...Object.keys(params).length > 0 ? { params } : {} };
+}
+function helperOf(v, d) {
+  if (!isRecord(v))
+    return { ...d, params: { ...d.params } };
+  return { connectionId: text4(v.connectionId), model: text4(v.model), effort: oneOf2(v.effort, REASONING_CHOICES) ?? d.effort, maxTokens: atLeast(v.maxTokens, 1) ?? d.maxTokens, params: paramsOf(v.params) };
 }
 function loreOf(v) {
   if (!isRecord(v))
     return;
   const policy = oneOf2(v.policy, LORE_POLICIES);
-  const tokens = int(v.tokens, 0, 8000);
+  const tokens = atLeast(v.tokens, 0);
   const transport = oneOf2(v.transport, LORE_TRANSPORTS);
   return policy && tokens !== undefined ? { policy, tokens, ...transport ? { transport } : {} } : undefined;
 }
@@ -63062,7 +63266,7 @@ function stepOf(v, base) {
   if (!isRecord(v))
     return base;
   const route = routeOf2(v.route);
-  const maxTokens = int(v.maxTokens, 1, 65536);
+  const maxTokens = atLeast(v.maxTokens, 1);
   const lore = loreOf(v.lore) ?? base?.lore;
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : base?.enabled ?? false,
@@ -63080,8 +63284,8 @@ function conform(v, d) {
     if (!isRecord(x))
       return b;
     const l = isRecord(x.lookup) ? x.lookup : null;
-    const lookup = l ? { calls: int(l.calls, 0, 32) ?? b.lookup?.calls ?? 0, ms: int(l.ms, 0, MAX_PHASE_MS) ?? b.lookup?.ms ?? 0 } : b.lookup;
-    return { calls: int(x.calls, 0, 32) ?? b.calls, ms: Math.min(max, int(x.ms, 0, MAX_PHASE_MS) ?? b.ms), ...lookup ? { lookup: { ...lookup } } : {} };
+    const lookup = l ? { calls: atLeast(l.calls, 0) ?? b.lookup?.calls ?? 0, ms: int(l.ms, 0, MAX_PHASE_MS) ?? b.lookup?.ms ?? 0 } : b.lookup;
+    return { calls: atLeast(x.calls, 0) ?? b.calls, ms: Math.min(max, int(x.ms, 0, MAX_PHASE_MS) ?? b.ms), ...lookup ? { lookup: { ...lookup } } : {} };
   };
   const rawSteps = isRecord(mu.steps) ? mu.steps : {};
   const steps = {};
@@ -63095,7 +63299,7 @@ function conform(v, d) {
     preset: oneOf2(mu.preset, ["lean", "standard", "full", "custom"]) ?? d.modelUse.preset,
     steps,
     budgets: { pre: phase(budgets.pre, d.modelUse.budgets.pre, PRE_REPLY_MAX_MS), post: phase(budgets.post, d.modelUse.budgets.post, MAX_PHASE_MS) },
-    tokens: { sections: int(tokens.sections, 0, 1e5) ?? d.modelUse.tokens.sections }
+    tokens: { sections: atLeast(tokens.sections, 0) ?? d.modelUse.tokens.sections }
   };
   const re = isRecord(v.realism) ? v.realism : {};
   const rawLevels = isRecord(re.levels) ? re.levels : {};
@@ -63147,6 +63351,8 @@ function conform(v, d) {
   }
   return {
     v: 1,
+    defaults: SETTINGS_DEFAULTS_REV,
+    helper: helperOf(v.helper, d.helper),
     modelUse,
     realism,
     time,
@@ -63264,6 +63470,7 @@ class SettingsStore {
   loaded;
   settings = new Map;
   learning = new Map;
+  revisions = new Map;
   constructor(host, loaded = () => {
     return;
   }) {
@@ -63287,8 +63494,12 @@ class SettingsStore {
     await this.host.storage.write(`${SETTINGS_PATH}.tmp`, JSON.stringify(next), userId);
     await this.host.storage.move(`${SETTINGS_PATH}.tmp`, SETTINGS_PATH, userId);
     this.settings.set(userId, next);
+    this.revisions.set(userId, this.revision(userId) + 1);
     this.loaded(userId, next);
     return next;
+  }
+  revision(userId) {
+    return this.revisions.get(userId) ?? 0;
   }
   known(userId) {
     return this.settings.get(userId);
@@ -63307,7 +63518,7 @@ class SettingsStore {
     await this.host.storage.write(`${LEARNING_PATH}.tmp`, JSON.stringify(learning), userId);
     await this.host.storage.move(`${LEARNING_PATH}.tmp`, LEARNING_PATH, userId);
   }
-  async result(userId, connection, caveats) {
+  async result(userId, connection) {
     const settings = await this.get(userId);
     const learning = await this.learningOf(userId);
     const extraction = {};
@@ -63316,7 +63527,7 @@ class SettingsStore {
       const stats = connection ? statsOf2(learning, connection.id, type) : undefined;
       extraction[type] = { mode, source, connection, accepted: stats?.accepted ?? 0, rejected: stats?.rejected ?? 0 };
     }
-    return { settings, extraction, caveats };
+    return { settings, extraction };
   }
   async stepConfig(userId, purpose) {
     const settings = await this.get(userId);
@@ -64643,11 +64854,307 @@ class StudioBridge {
   }
 }
 
+// src/backend/diagnostics.ts
+var FORMAT2 = 1;
+var STATUSES = ["ok", "skipped", "failed"];
+var LEVELS3 = ["debug", "info", "warn", "error"];
+var KINDS = ["step", "error", "interceptor", "slow", "turn"];
+function isDiagRecord(raw) {
+  if (!isRecord(raw))
+    return false;
+  return typeof raw.seq === "number" && KINDS.some((k) => k === raw.kind) && LEVELS3.some((l) => l === raw.level) && STATUSES.some((s) => s === raw.status) && (raw.turn === null || typeof raw.turn === "string") && (raw.phase === null || DIAG_PHASES.some((p) => p === raw.phase)) && typeof raw.step === "string" && typeof raw.start === "number" && typeof raw.end === "number" && typeof raw.ms === "number";
+}
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function callFailure(calls) {
+  const last = calls.at(-1);
+  if (!last)
+    return null;
+  let reason = null;
+  if (!last.ok)
+    reason = `${last.purpose} call failed: ${last.error ?? "no reason given"}`;
+  else if (last.finishReason === "length")
+    reason = `${last.purpose} answer cut off at ${last.maxTokens ?? "max"} tokens (finish_reason length)`;
+  else if (last.tokensOut === 0)
+    reason = `${last.purpose} answer was empty`;
+  if (reason === null)
+    return null;
+  const fix = suggestFix(reason, last);
+  return { reason, ...fix ? { fix } : {} };
+}
+
+class Diagnostics {
+  host;
+  options;
+  chats = new Map;
+  writes = new Map;
+  timers = new Map;
+  open = new Map;
+  turns = new Map;
+  activities = new Map;
+  inflight = new Map;
+  seq;
+  constructor(host, options = {}) {
+    this.host = host;
+    this.options = options;
+    this.seq = this.now();
+  }
+  now() {
+    return this.options.now?.() ?? Date.now();
+  }
+  path(chatId) {
+    return `${runDir(chatId)}diagnostics.json`;
+  }
+  chat(chatId, userId) {
+    const known = this.chats.get(chatId);
+    if (known?.userId === userId)
+      return known;
+    const chat = { userId, records: [], loaded: Promise.resolve() };
+    chat.loaded = (async () => {
+      await this.writes.get(chatId);
+      const raw = await readStoredJson(this.host, this.path(chatId), userId, "diagnostics", (r) => isRecord(r) && r.v === FORMAT2 && Array.isArray(r.records)).catch(() => null);
+      const stored = isRecord(raw) && Array.isArray(raw.records) ? raw.records.filter(isDiagRecord) : [];
+      chat.records = [...stored, ...chat.records].slice(-this.ring());
+    })();
+    this.chats.delete(chatId);
+    this.chats.set(chatId, chat);
+    if (this.chats.size > 128)
+      this.chats.delete(this.chats.keys().next().value ?? "");
+    return chat;
+  }
+  ring() {
+    return this.options.ring ?? DIAG_RING;
+  }
+  async records(chatId, userId) {
+    const chat = this.chat(chatId, userId);
+    await chat.loaded;
+    return [...chat.records];
+  }
+  async clear(chatId, userId) {
+    const chat = this.chat(chatId, userId);
+    await chat.loaded;
+    chat.records = [];
+    this.save(chatId);
+  }
+  add(at, record) {
+    const full = { seq: ++this.seq, ...record };
+    const where = `${record.phase ? `${record.phase}/` : ""}${record.step}`;
+    const calls = record.calls && record.calls.length > 0 ? `, ${record.calls.length} call(s) ${record.calls.map((c) => `${c.model} ${c.tokensIn ?? "?"}\u2192${c.tokensOut ?? "?"} ${c.finishReason || "-"}`).join("; ")}` : "";
+    this.host.log(record.level === "debug" ? "debug" : record.level, `[LumiRPEngine] ${at.chatId ? `chat ${at.chatId} ` : ""}${record.kind} ${where} ${record.status} in ${Math.round(record.ms)} ms${record.reason ? `: ${record.reason}` : ""}${calls}`, at.userId, at.turn ?? undefined);
+    if (!at.chatId)
+      return full;
+    const chat = this.chat(at.chatId, at.userId);
+    chat.records.push(full);
+    if (chat.records.length > this.ring())
+      chat.records.splice(0, chat.records.length - this.ring());
+    if (record.status === "failed" && at.turn) {
+      const turn = this.turns.get(at.chatId);
+      if (turn && turn.at.turn === at.turn && turn.failed === null)
+        turn.failed = where;
+    }
+    this.schedule(at.chatId);
+    return full;
+  }
+  begin(at, label = STEP_LABEL.pre ?? "Working\u2026") {
+    const prior = this.turns.get(at.chatId);
+    if (prior && prior.at.turn !== at.turn)
+      this.end(prior.at, { status: "skipped", reason: "a new turn started before it ended" });
+    if (prior?.at.turn === at.turn)
+      return;
+    this.turns.set(at.chatId, { at, start: this.now(), failed: null, rest: label });
+    this.publish(at.chatId, at.userId);
+  }
+  rest(at, label) {
+    const turn = this.turns.get(at.chatId);
+    if (!turn)
+      return;
+    turn.rest = label;
+    this.publish(at.chatId, at.userId);
+  }
+  end(at, outcome = null) {
+    const turn = this.turns.get(at.chatId);
+    if (!turn || turn.at.turn !== at.turn)
+      return;
+    this.turns.delete(at.chatId);
+    const end = this.now();
+    const failed = outcome?.status === "failed" ? outcome.reason ?? "failed" : turn.failed;
+    const status = failed !== null ? "failed" : outcome?.status ?? "ok";
+    const reason = failed !== null ? outcome?.status === "failed" ? outcome.reason : `step ${failed} failed` : outcome?.reason;
+    this.add(at, { kind: "turn", level: status === "failed" ? "warn" : "info", turn: at.turn, phase: null, step: "turn", status, start: turn.start, end, ms: end - turn.start, ...reason ? { reason } : {}, ...outcome?.fix ? { fix: outcome.fix } : {} });
+    if (failed !== null)
+      this.activities.set(at.chatId, { chatId: at.chatId, turn: at.turn, state: "failed", label: `Failed: ${STEP_LABEL[failed.split("/").at(-1) ?? ""]?.replace("\u2026", "") ?? failed}`, since: end });
+    else
+      this.activities.delete(at.chatId);
+    this.send(at.chatId, at.userId);
+  }
+  async step(at, phase, step, fn, judge) {
+    const open = { at, phase, step, start: this.now(), calls: [], label: STEP_LABEL[step] ?? STEP_LABEL[phase] ?? "Working\u2026" };
+    const stack = this.open.get(at.userId) ?? [];
+    stack.push(open);
+    this.open.set(at.userId, stack);
+    this.publish(at.chatId, at.userId);
+    try {
+      const value = await fn();
+      this.close(open, judge?.(value) ?? null);
+      return value;
+    } catch (error) {
+      const reason = messageOf(error);
+      const fix = suggestFix(reason, open.calls.at(-1));
+      this.close(open, { status: "failed", reason, ...fix ? { fix } : {} });
+      throw error;
+    }
+  }
+  close(open, verdict) {
+    const stack = this.open.get(open.at.userId) ?? [];
+    const i = stack.lastIndexOf(open);
+    if (i >= 0)
+      stack.splice(i, 1);
+    if (stack.length === 0)
+      this.open.delete(open.at.userId);
+    const end = this.now();
+    const fromCalls = verdict ? null : callFailure(open.calls);
+    const status = verdict?.status ?? (fromCalls ? "failed" : "ok");
+    const reason = verdict?.reason ?? fromCalls?.reason;
+    const fix = verdict?.fix ?? (verdict?.status === "failed" ? suggestFix(verdict.reason, open.calls.at(-1)) : fromCalls?.fix);
+    const level = status === "failed" ? "warn" : open.calls.some((c) => !c.ok || c.finishReason === "length") ? "warn" : "info";
+    this.add(open.at, { kind: "step", level, turn: open.at.turn, phase: open.phase, step: open.step, status, start: open.start, end, ms: end - open.start, ...reason ? { reason } : {}, ...fix ? { fix } : {}, ...open.calls.length > 0 ? { calls: open.calls } : {} });
+    this.publish(open.at.chatId, open.at.userId);
+  }
+  skipped(at, phase, step, reason) {
+    const t = this.now();
+    this.add(at, { kind: "step", level: "info", turn: at.turn, phase, step, status: "skipped", start: t, end: t, ms: 0, reason });
+  }
+  failed(at, phase, step, reason, fix) {
+    const t = this.now();
+    const hint = fix ?? suggestFix(reason);
+    this.add(at, { kind: "step", level: "warn", turn: at.turn, phase, step, status: "failed", start: t, end: t, ms: 0, reason, ...hint ? { fix: hint } : {} });
+  }
+  error(at, where, error, context) {
+    const t = this.now();
+    const reason = `${messageOf(error)}${context ? ` (${context})` : ""}`;
+    const fix = suggestFix(reason);
+    this.add(at, { kind: "error", level: "error", turn: at.turn, phase: null, step: where, status: "failed", start: t, end: t, ms: 0, reason, ...fix ? { fix } : {} });
+  }
+  callStart(userId, purpose) {
+    const list = this.inflight.get(userId) ?? [];
+    list.push(purpose);
+    this.inflight.set(userId, list);
+    this.publishUser(userId);
+  }
+  call(userId, call) {
+    const list = this.inflight.get(userId);
+    const i = list?.lastIndexOf(call.purpose) ?? -1;
+    if (list && i >= 0)
+      list.splice(i, 1);
+    if (list?.length === 0)
+      this.inflight.delete(userId);
+    const open = this.open.get(userId)?.at(-1);
+    if (open) {
+      open.calls.push(call);
+      this.publishUser(userId);
+      return;
+    }
+    const t = this.now();
+    const failure = callFailure([call]);
+    this.add({ chatId: null, userId, turn: null }, { kind: "step", level: failure ? "warn" : "debug", turn: null, phase: null, step: call.purpose, status: failure ? "failed" : "ok", start: t - call.ms, end: t, ms: call.ms, calls: [call], ...failure ? { reason: failure.reason } : {} });
+  }
+  interceptor(at, path, sections, start) {
+    const end = this.now();
+    const filled = sections.filter((s) => s.filled).length;
+    const routed = sections.filter((s) => s.outlet !== null);
+    const status = sections.length === 0 ? "skipped" : filled === 0 ? "failed" : "ok";
+    const reason = sections.length === 0 ? "the world has no sections" : filled === 0 ? `no section had text to send, so every outlet (${routed.length} the preset holds) stays empty` : `${filled} of ${sections.length} section(s) filled, ${routed.filter((s) => s.filled).length} of them at the preset's outlets`;
+    const fix = status === "failed" ? suggestFix("outlet") : undefined;
+    this.add(at, { kind: "interceptor", level: status === "failed" ? "warn" : "info", turn: at.turn, phase: "sections", step: "interceptor", status, start, end, ms: end - start, path, sections: [...sections], reason, ...fix ? { fix } : {} });
+  }
+  slow(userId, chatId, what, ms) {
+    if (ms <= SLOW_MS)
+      return;
+    const end = this.now();
+    this.add({ chatId, userId, turn: null }, { kind: "slow", level: "warn", turn: null, phase: "request", step: what, status: "ok", start: end - ms, end, ms, reason: `${what} took ${(ms / 1000).toFixed(1)} s` });
+  }
+  async timed(userId, chatId, what, fn) {
+    const t0 = performance.now();
+    try {
+      return await fn();
+    } catch (error) {
+      if (chatId)
+        this.error({ chatId, userId, turn: null }, what, error);
+      throw error;
+    } finally {
+      this.slow(userId, chatId, what, performance.now() - t0);
+    }
+  }
+  activityOf(chatId) {
+    const turn = this.turns.get(chatId);
+    if (turn) {
+      const open = [...this.open.get(turn.at.userId) ?? []].reverse().find((s) => s.at.chatId === chatId);
+      const asking = open ? this.inflight.get(turn.at.userId)?.at(-1) : undefined;
+      const label = asking !== undefined ? callLabel(asking, this.inflight.get(turn.at.userId)?.filter((p) => p === asking).length ?? 1) : open?.label ?? turn.rest;
+      return { chatId, turn: turn.at.turn, state: "running", label, since: turn.start };
+    }
+    return this.activities.get(chatId) ?? null;
+  }
+  publishUser(userId) {
+    for (const [chatId, turn] of this.turns)
+      if (turn.at.userId === userId)
+        this.send(chatId, userId);
+  }
+  dismiss(chatId, userId) {
+    if (this.activities.get(chatId)?.state !== "failed")
+      return;
+    this.activities.delete(chatId);
+    this.send(chatId, userId);
+  }
+  publish(chatId, userId) {
+    if (this.turns.has(chatId))
+      this.send(chatId, userId);
+  }
+  send(chatId, userId) {
+    this.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId, activity: this.activityOf(chatId) }, userId);
+  }
+  schedule(chatId) {
+    if (this.timers.has(chatId))
+      return;
+    this.timers.set(chatId, setTimeout(() => {
+      this.timers.delete(chatId);
+      this.save(chatId);
+    }, this.options.flushMs ?? 500));
+  }
+  save(chatId) {
+    const chat = this.chats.get(chatId);
+    if (!chat)
+      return;
+    const path = this.path(chatId);
+    const write = (this.writes.get(chatId) ?? Promise.resolve()).then(async () => {
+      await chat.loaded;
+      await this.host.storage.write(`${path}.tmp`, JSON.stringify({ v: FORMAT2, records: chat.records }), chat.userId);
+      await this.host.storage.move(`${path}.tmp`, path, chat.userId);
+    }).catch((error) => this.host.log("warn", `[LumiRPEngine] chat ${chatId}: diagnostics weren't saved (${messageOf(error)})`, chat.userId));
+    this.writes.set(chatId, write);
+    write.finally(() => {
+      if (this.writes.get(chatId) === write)
+        this.writes.delete(chatId);
+    });
+  }
+  async settle() {
+    for (const [chatId, timer] of this.timers) {
+      clearTimeout(timer);
+      this.timers.delete(chatId);
+      this.save(chatId);
+    }
+    while (this.writes.size > 0)
+      await Promise.all([...this.writes.values()]);
+  }
+}
+
 // src/backend/runtime.ts
 var ACTIVE_CONNECTION = "active";
 var READ_CHIP_KINDS = new Set(["undo", "confirm", "decline", "choice", "contradiction"]);
 var TURN_ONLY_SLOTS = { outcome: true, montage: true, outline: true };
 var TOKEN_COUNT_CAP = 4;
+var CAVEATS_WAIT_MS = 20000;
 function readRun(meta) {
   const raw = meta[LEDGER_NAMESPACE];
   if (!isRecord(raw) || raw.v !== 1 || typeof raw.worldId !== "string" || typeof raw.revision !== "string" || typeof raw.runSeed !== "string")
@@ -64925,6 +65432,7 @@ class Runtime {
   jsonHiding;
   presets;
   push;
+  diag;
   studio;
   templates;
   templateInfo;
@@ -64935,6 +65443,7 @@ class Runtime {
   tokenCounts = new Map;
   lastWorldChat = new Map;
   presetWarnings = new Map;
+  caveatRuns = new Map;
   routedLast = new Map;
   outletMisses = new Map;
   pins = new Map;
@@ -64962,22 +65471,40 @@ class Runtime {
     this.jsonHiding = new JsonHiding(this.host, async (userId) => (await this.settings.get(userId)).hideJsonBlocks, async (worldId, userId) => await this.worlds.index(worldId, userId) !== null);
     this.presets = new PresetBinding(this.host);
     this.meter = new CallMeter(this.host);
-    this.steps = new Steps(this.host, this.meter);
+    this.steps = new Steps(this.host, this.meter, async (userId) => (await this.settings.get(userId)).helper);
+    this.diag = new Diagnostics(this.host);
+    this.steps.onCall = (userId, call) => this.diag.call(userId, call);
+    this.steps.onCallStart = (userId, purpose) => this.diag.callStart(userId, purpose);
     this.toolSupport = new ToolSupport(this.host);
     this.minds = { host: this.host, registry: this.registry, steps: this.steps, settings: this.settings, presets: this.presets };
-    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792489461" }));
+    this.ledger = new LedgerService(this.host, (chatId, userId) => this.resolveEnv(chatId, userId), new LedgerFold(this.registry, { fingerprint: "1792514098" }));
     this.studio = new StudioBridge(this.host, this.worlds);
     this.worlds.onChange = (worldId, userId) => this.studio.worldChanged(worldId, userId);
     this.push = new StatePush(this.host, async (chatId, userId) => {
-      const view = await this.view(chatId, userId);
+      const view = await this.diag.timed(userId, chatId, "state view", () => this.view(chatId, userId));
       this.studio.seen(userId, view);
       return view;
     });
   }
   start() {
     this.ledger.hooks = this;
+    this.ledger.diag = this.diag;
     this.ledger.attach();
-    this.host.registerInterceptor((input) => this.intercept(input), 50);
+    this.host.registerInterceptor(async (input) => {
+      const at = { chatId: input.chatId, userId: input.userId, turn: null };
+      this.diag.rest(at, STEP_LABEL.sections ?? "Filling the prompt\u2026");
+      try {
+        const result = await this.intercept(input);
+        if (!result && this.runs.get(`${input.userId}\x00${input.chatId}`))
+          this.diag.failed(at, "sections", "interceptor", "the chat's world revision isn't loaded, so no section reached the prompt (every outlet is empty)");
+        return result;
+      } catch (error) {
+        this.diag.error(at, "interceptor", error, "no section reached the prompt");
+        throw error;
+      } finally {
+        this.diag.rest(at, STEP_LABEL.reply ?? "Waiting for the reply\u2026");
+      }
+    }, 50);
     this.host.on("MESSAGE_SENT", (e, userId) => {
       if (e.message.isUser && userId)
         this.lapse(e.chatId, userId);
@@ -65586,7 +66113,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
       this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: dropped ${known.length - proposals.length} proposal(s) carrying an unrevealed secret`, userId);
     this.host.log("info", `[LumiRPEngine] read ${messageId.slice(0, 8)}: ${proposals.length} proposal(s), ${decisions.length} npc decision(s), contradiction ${contradicted ? "yes" : "no"}, ${choices.flat().length} choice(s), ${budget.spent} post call(s)`, userId);
     const learning = await this.settings.learningOf(input.userId);
-    const connection = extractRun?.config.route?.connectionId ?? pre?.connectionId ?? await this.activeConnectionId(userId);
+    const connection = helperCallOf(extractRun?.config, (await this.settings.get(userId)).helper).connectionId ?? pre?.connectionId ?? await this.activeConnectionId(userId);
     const auto = [];
     const confirm = [];
     const regard = regardBudget();
@@ -65908,6 +66435,7 @@ ${pre?.text ?? ""}`, links: this.sceneLinks(context.world, context.state) };
     ]);
   }
   async intercept(input) {
+    const started = Date.now();
     const run = await this.runOf(input.chatId, input.userId);
     if (!run)
       return null;
@@ -66065,6 +66593,11 @@ ${rules}` });
     if (plan) {
       await this.inspector.add(input.chatId, input.userId, record);
       this.push.changed(input.chatId, input.userId);
+      const sent = new Set(record.sections.filter((s) => !s.clipped).map((s) => s.slot));
+      const at = { chatId: input.chatId, userId: input.userId, turn: plan.generationId };
+      this.diag.interceptor(at, `${plan.kind} turn, ${preset.preset ? `preset ${preset.preset.id}` : "no preset"}`, sectionsOf(world).map((s) => ({ slot: s.id, outlet: preset.outlets.has(outletOf(s.id)) ? outletOf(s.id) : null, filled: sent.has(s.id) })), started);
+      for (const warning of record.warnings ?? [])
+        this.diag.failed(at, "sections", "book", warning);
     }
     return result;
   }
@@ -66135,16 +66668,29 @@ ${rules}` });
       this.host.log("warn", `[LumiRPEngine] JSON-hiding regex scripts: ${error instanceof Error ? error.message : String(error)}`, userId);
     }
   }
-  async presetCaveats(userId) {
+  async presetCaveats(userId, waitMs = CAVEATS_WAIT_MS) {
     const open = await this.host.chats.active(userId).catch(() => null);
     const chatId = open && await this.runOf(open, userId) ? open : this.lastWorldChat.get(userId);
     if (!chatId)
       return [];
+    const preset = (await this.presets.current(chatId, userId)).preset;
+    const key = `${userId}\x00${chatId}\x00${preset?.id ?? ""}\x00${preset?.revision ?? ""}\x00${this.settings.revision(userId)}`;
+    let run = this.caveatRuns.get(key);
+    if (!run) {
+      run = this.host.dryRun(chatId, userId).then((assembly) => this.lintOf(chatId, assembly, userId)).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.host.log("warn", `[LumiRPEngine] preset lint: ${message}`, userId);
+        this.caveatRuns.delete(key);
+        return [{ code: "preset_lint_failed", message: `The preset check couldn't build a test prompt for this chat (${message.slice(0, 200)}), so its warnings aren't known. Open Caveats again to retry.` }];
+      });
+      lruSet(this.caveatRuns, key, run, 64);
+    }
+    const pending = Promise.withResolvers();
+    const timer = setTimeout(() => pending.resolve([{ code: "preset_lint_pending", message: "The preset check is still building a test prompt for this chat, which takes a while on a long chat. Open Caveats again in a moment." }]), waitMs);
     try {
-      return await this.lintOf(chatId, await this.host.dryRun(chatId, userId), userId);
-    } catch (error) {
-      this.host.log("warn", `[LumiRPEngine] preset lint: ${error instanceof Error ? error.message : String(error)}`, userId);
-      return [];
+      return await Promise.race([run, pending.promise]);
+    } finally {
+      clearTimeout(timer);
     }
   }
   async lintOf(chatId, assembly, userId) {
@@ -66897,15 +67443,22 @@ class Dispatcher {
     const noted = (worldId, draft) => {
       drafts.set(worldId, { lre: PROTOCOL_VERSION, type: "lre.draft.changed", worldId, version: draft.version, stored: draft.stored, base: draft.base });
     };
+    const chatId = isRecord(raw) && typeof raw.chatId === "string" ? raw.chatId : null;
+    const what = `${raw.type}${isRecord(raw) && typeof raw.op === "string" ? ` ${raw.op}` : ""}`;
+    const t0 = performance.now();
     try {
       await this.rt.studio.serve(userId);
       await this.route(raw, userId, session, reply, noted);
     } catch (error) {
       const e = error instanceof RequestError ? error : error instanceof WorldError ? new RequestError(error.code, error.message, error.lint) : error instanceof JobError ? new RequestError(error.code, error.message) : new RequestError("internal", error instanceof Error ? error.message : String(error));
       if (e.code === "internal")
-        this.rt.host.log("error", `[LumiRPEngine] ${raw.type}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+        this.rt.host.log("error", `[LumiRPEngine] ${raw.type}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`, userId);
+      if (chatId && (e.code === "internal" || e.code === "unavailable"))
+        this.rt.diag.error({ chatId, userId, turn: null }, what, error);
       this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.error", reqId: raw.reqId, code: e.code, message: e.message, ...e.lint ? { lint: e.lint } : {} }, userId, session);
       announce();
+    } finally {
+      this.rt.diag.slow(userId, chatId, what, performance.now() - t0);
     }
   }
   nextId() {
@@ -66958,6 +67511,7 @@ class Dispatcher {
             this.rt.jsonHiding.seen(r.chatId, run.worldId, userId);
           }
           await this.rt.push.snapshot(r.chatId, userId, session);
+          this.rt.host.frontend.send({ lre: PROTOCOL_VERSION, type: "lre.activity", chatId: r.chatId, activity: this.rt.diag.activityOf(r.chatId) }, userId, session);
         }
         return;
       }
@@ -67045,6 +67599,14 @@ class Dispatcher {
         reply("lre.gm", view);
         return;
       }
+      case "lre.diag": {
+        if (r.op === "clear")
+          await this.rt.diag.clear(r.chatId, userId);
+        if (r.op === "dismiss")
+          this.rt.diag.dismiss(r.chatId, userId);
+        reply("lre.diag", { records: r.op === "get" ? await this.rt.diag.records(r.chatId, userId) : [], activity: this.rt.diag.activityOf(r.chatId) });
+        return;
+      }
       case "lre.marker": {
         const body = validMarkerBody(r.kind === "resolve" ? { kind: "resolve", domain: r.domain, scope: r.scope, to: r.to } : r.kind === "time" ? { kind: "time", control: r.control, scope: r.scope, to: r.to } : r.kind === "adjudicate" ? { kind: "adjudicate", to: r.to } : { kind: "migrate", to: r.to, merge: r.merge });
         if (!body || body.kind === "time" && !TIME_CONTROLS.some((c) => c === body.control))
@@ -67077,10 +67639,14 @@ class Dispatcher {
             await this.rt.hidingChanged(userId, hides);
         }
         const settings = await this.rt.settings.get(userId);
-        const routed = settings.modelUse.steps.extract?.route?.connectionId ?? null;
+        const routed = helperCallOf(settings.modelUse.steps.extract, settings.helper).connectionId;
         const active = routed ? null : await this.rt.host.connections.active(userId).catch(() => null);
         const id = routed ?? active?.id ?? ACTIVE_CONNECTION;
-        reply(r.type, await this.rt.settings.result(userId, { id, name: active?.name ?? (id === ACTIVE_CONNECTION ? "Active connection" : id) }, await this.rt.presetCaveats(userId)));
+        reply(r.type, await this.rt.settings.result(userId, { id, name: active?.name ?? (id === ACTIVE_CONNECTION ? "Active connection" : id) }));
+        return;
+      }
+      case "lre.settings.caveats": {
+        reply("lre.settings.caveats", { caveats: await this.rt.presetCaveats(userId) });
         return;
       }
       case "lre.editor": {
@@ -67924,6 +68490,11 @@ function entryInput(entry) {
 }
 var DIAGNOSTICS_LOG = "diagnostics/backend.log";
 var USER_DIAGNOSTICS_LOG = "diagnostics.log";
+function reasoningOverride(effort) {
+  if (effort === undefined || effort === "inherit")
+    return;
+  return effort === "off" ? { source: "off" } : { source: "custom", apiReasoning: true, effort };
+}
 var TOKEN_COUNT_MS = 1000;
 
 class DiagnosticsLog {
@@ -67931,12 +68502,12 @@ class DiagnosticsLog {
   users = new Map;
   dirty = new Set;
   timer = null;
-  add(level, message, userId) {
-    const line = `${new Date().toISOString()} ${level} ${message}`;
+  add(level, message, userId, turn) {
+    const line = `${new Date().toISOString()} ${level.toUpperCase().padEnd(5)} ${turn ? `[turn ${turn.slice(0, 8)}] ` : ""}${message}`;
     const list = userId ? this.users.get(userId) ?? [] : this.lines;
     list.push(line);
-    if (list.length > 400)
-      list.splice(0, list.length - 400);
+    if (list.length > 1000)
+      list.splice(0, list.length - 1000);
     if (userId) {
       this.users.set(userId, list);
       if (this.users.size > 256)
@@ -68105,23 +68676,29 @@ function createSpindleHost() {
     },
     models: {
       async quiet(request, userId, signal) {
-        const parameters = { max_tokens: request.maxTokens };
+        const parameters = { ...request.params, max_tokens: request.maxTokens };
         if (request.json)
           parameters.response_format = { type: "json_object" };
         if (request.model)
           parameters.model = request.model;
+        const reasoning = reasoningOverride(request.effort);
         const raw = await spindle.generate.quiet({
           type: "quiet",
           messages: request.messages,
           parameters,
           ...request.connectionId ? { connection_id: request.connectionId } : {},
           ...request.tools && request.tools.length > 0 ? { tools: request.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) } : {},
+          ...reasoning ? { reasoning } : {},
           userId,
           signal
         });
         const calls = isRecord(raw) && Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
         const toolCalls = calls.flatMap((c, i) => isRecord(c) && typeof c.name === "string" ? [{ name: c.name, args: toJsonObject(c.args), callId: str16(c, "call_id") ?? `call_${i}` }] : []);
-        return { content: str16(raw, "content") ?? "", finishReason: str16(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...toolCalls.length > 0 ? { toolCalls } : {} };
+        const usage = isRecord(raw) && isRecord(raw.usage) ? raw.usage : null;
+        const tokensIn = usage ? num6(usage, "input_tokens") ?? num6(usage, "prompt_tokens") : undefined;
+        const tokensOut = usage ? num6(usage, "output_tokens") ?? num6(usage, "completion_tokens") : undefined;
+        const model = str16(raw, "model");
+        return { content: str16(raw, "content") ?? "", finishReason: str16(raw, "finish_reason") ?? "", tokens: usageTokens(raw), ...tokensIn !== undefined ? { tokensIn } : {}, ...tokensOut !== undefined ? { tokensOut } : {}, ...model ? { model } : {}, ...toolCalls.length > 0 ? { toolCalls } : {} };
       },
       async decide(request, userId, signal) {
         const s = request.state;
@@ -68306,14 +68883,14 @@ function createSpindleHost() {
       unregister: (channel) => spindle.rpcPool.unregister(channel),
       read: (endpoint) => spindle.rpcPool.read(endpoint)
     },
-    log(level, message, userId) {
+    log(level, message, userId, turn) {
       if (level === "error")
         spindle.log.error(message);
       else if (level === "warn")
         spindle.log.warn(message);
-      else
+      else if (level === "info")
         spindle.log.info(message);
-      diagnostics.add(level, message, userId);
+      diagnostics.add(level, message, userId, turn);
     }
   };
 }

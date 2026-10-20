@@ -1199,7 +1199,7 @@ var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
 var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
 var DEFAULT_MINDS_MEMORY = Object.freeze({
   witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 1200 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
   notes: { show: 8, keep: 24 },
   commitments: { show: 8 },
   salience: { halfLifeDays: 7, floor: 0.5 },
@@ -1218,7 +1218,7 @@ var MINDS_RANGES = {
   threshold: [0, 1000],
   show: [0, 64],
   keep: [1, 64],
-  recallTokens: [0, 8000],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
   halfLifeDays: [0.1, 3650],
   floor: [0, 5],
   periodDays: [0.1, 365]
@@ -1319,9 +1319,9 @@ function worldMindTemplate(world, purpose) {
   return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
 }
 var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
   return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
@@ -1409,7 +1409,9 @@ var MIND_ANSWER_FORMATS = Object.freeze({
 });
 
 // src/shared/settings.ts
-var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 300 });
+var HELPER_MAX_TOKENS = 8192;
+var DEFAULT_HELPER = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
+var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
 var CONTEXT_HANDLER_MAX_MS = 120000;
 var PLAN_MARGIN_MS = 15000;
 var PRE_REPLY_MAX_MS = CONTEXT_HANDLER_MAX_MS - PLAN_MARGIN_MS;
@@ -8539,7 +8541,7 @@ function outline(reg, world, state, input, rng, max = MAX_BEATS) {
   for (const r of input.resolutions ?? []) {
     const label = own(world.actions, r.action)?.label ?? reg.actions.get(r.action)?.label ?? r.action;
     if (!r.ok)
-      lines.push(`${label} doesn't happen: ${r.failed?.reason ?? "not possible"}.`);
+      lines.push(`${label} doesn't happen: ${r.failed && r.failed.code !== "requirement" ? r.failed.reason : "not possible here and now"}.`);
     else if (r.check || r.adjudged)
       lines.push(`${label}: the result is decided \u2014 ${r.outcome}.`);
     else

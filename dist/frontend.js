@@ -1,4 +1,4 @@
-// node_modules/preact/dist/preact.mjs
+// ../../LumiRPEngine/node_modules/preact/dist/preact.mjs
 var n;
 var t;
 var i;
@@ -347,7 +347,7 @@ n = { __e: function(n, t, i, r) {
   return n.__v.__b - t.__v.__b;
 }, e = Symbol(), l = /(PointerCapture)$|Capture$/i, c = 0, a = {}, s = 0;
 
-// node_modules/preact/hooks/dist/hooks.mjs
+// ../../LumiRPEngine/node_modules/preact/hooks/dist/hooks.mjs
 var t2;
 var r2;
 var u2;
@@ -1050,7 +1050,7 @@ function humanize(id) {
   const words = id.replace(/[_.]+/g, " ").trim();
   return words.length === 0 ? id : words[0]?.toUpperCase() + words.slice(1);
 }
-// node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
+// ../../LumiRPEngine/node_modules/preact/jsx-runtime/dist/jsxRuntime.mjs
 var o3 = 0;
 function u3(t, e, n2, f, u, i) {
   e || (e = {});
@@ -10737,7 +10737,7 @@ var DEFAULT_FIDELITY_WEIGHTS = Object.freeze({
 var DEFAULT_FIDELITY_THRESHOLDS = Object.freeze({ live: 60, near: 35, far: 15 });
 var DEFAULT_MINDS_MEMORY = Object.freeze({
   witness: { show: 8 },
-  recall: { recent: 4, relevant: 4, tokens: 1200 },
+  recall: { recent: 4, relevant: 4, tokens: 4000 },
   notes: { show: 8, keep: 24 },
   commitments: { show: 8 },
   salience: { halfLifeDays: 7, floor: 0.5 },
@@ -10756,7 +10756,7 @@ var MINDS_RANGES = {
   threshold: [0, 1000],
   show: [0, 64],
   keep: [1, 64],
-  recallTokens: [0, 8000],
+  recallTokens: [0, Number.MAX_SAFE_INTEGER],
   halfLifeDays: [0.1, 3650],
   floor: [0, 5],
   periodDays: [0.1, 365]
@@ -10857,9 +10857,9 @@ function worldMindTemplate(world, purpose) {
   return Object.values(world.steps).filter((t) => t.purpose === purpose && t.template.trim() !== "").sort((a, b) => a.id.localeCompare(b.id))[0];
 }
 var MINDS_PRESETS = Object.freeze({
-  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 300, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
-  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 600, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
-  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 1000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
+  lean: { enabled: false, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 1, memoryLevels: [], tokens: 1200, skip: { maxBeats: 4, maxMindsPerBeat: 2 } },
+  standard: { enabled: true, liveLimit: 3, nearRefresh: { scene: true, mention: true, turns: 6, minutes: 120 }, farRefreshMinutes: 1440, refreshLimit: 2, memoryLevels: ["live"], tokens: 2400, skip: { maxBeats: 6, maxMindsPerBeat: 3 } },
+  full: { enabled: true, liveLimit: "none", nearRefresh: { scene: true, mention: true, turns: 4, minutes: 60 }, farRefreshMinutes: 720, refreshLimit: "none", memoryLevels: ["live", "near"], tokens: 4000, skip: { maxBeats: "none", maxMindsPerBeat: "none" } }
 });
 function defaultMindsSettings(preset = "standard") {
   return { ...structuredClone(MINDS_PRESETS[preset]), memory: {}, prompts: {} };
@@ -10931,16 +10931,36 @@ var MIND_ANSWER_FORMATS = Object.freeze({
 });
 
 // src/shared/settings.ts
+var REASONING_CHOICES = ["inherit", "off", "auto", "minimal", "low", "medium", "high", "max", "xhigh"];
+var HELPER_MAX_TOKENS = 8192;
+var SAMPLING_PARAMS = [
+  { key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.05, integer: false, fallback: 1 },
+  { key: "top_p", label: "Top P", min: 0, max: 1, step: 0.01, integer: false, fallback: 1 },
+  { key: "top_k", label: "Top K", min: 0, max: 1000, step: 1, integer: true, fallback: 40 },
+  { key: "frequency_penalty", label: "Frequency penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 },
+  { key: "presence_penalty", label: "Presence penalty", min: -2, max: 2, step: 0.05, integer: false, fallback: 0 }
+];
+var DEFAULT_HELPER = Object.freeze({ connectionId: null, model: null, effort: "inherit", maxTokens: HELPER_MAX_TOKENS, params: Object.freeze({}) });
+function helperCallOf(config, helper) {
+  const route = config?.route;
+  const own = route?.connectionId ?? null;
+  return {
+    connectionId: own ?? helper.connectionId,
+    model: own !== null ? route?.model ?? null : helper.model,
+    effort: route?.effort ?? helper.effort,
+    maxTokens: config?.maxTokens ?? helper.maxTokens,
+    params: { ...helper.params, ...route?.params }
+  };
+}
 var LORE_POLICIES = ["none", "prefetch", "lookup", "prefetch+lookup"];
-var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 300 });
+var DEFAULT_STEP_LORE = Object.freeze({ policy: "prefetch", tokens: 1200 });
 function stepLoreOf(config) {
   return config?.lore ?? DEFAULT_STEP_LORE;
 }
-var HELPER_MAX_TOKENS = 2000;
 function stepConfigOf(steps, purpose) {
   const saved = steps[purpose];
   if (isMindPurpose(purpose))
-    return saved ?? { enabled: purpose !== "skip", signals: [], maxTokens: HELPER_MAX_TOKENS };
+    return saved ?? { enabled: purpose !== "skip", signals: [] };
   if (purpose !== "puzzle.answer")
     return saved ?? { enabled: false, signals: [] };
   const signals = ["always"];
@@ -10987,8 +11007,8 @@ var PRESET_PLAIN = {
 };
 var PRESET_NOTE = {
   lean: "Narrator + up to 2 model steps a turn, and no lore lookups: helpers get the lore their inputs find. The floor: it doesn't meet “a model decides” on its own. The call meter shows each turn's real count.",
-  standard: "Narrator + up to 4 model steps a turn, plus up to 3 lore lookups. The call meter shows each turn's real count.",
-  full: "Narrator + up to 9 model steps a turn, plus up to 5 lore lookups. The call meter shows each turn's real count.",
+  standard: "Narrator + up to 4 model steps a turn, plus up to 7 lore lookups. The call meter shows each turn's real count.",
+  full: "Narrator + up to 9 model steps a turn, plus up to 10 lore lookups. The call meter shows each turn's real count.",
   custom: "Your own steps, signals, providers, lore and budgets. The count depends on the steps you enable; the call meter shows it live."
 };
 var LORE_POLICY = [
@@ -11035,6 +11055,8 @@ var STEP_PLAIN = {
 var PHASES = ["pre", "post"];
 var PHASE_LABEL = { pre: "Before the reply", post: "After the reply" };
 var WALL_CLOCK_MAX = { pre: PRE_REPLY_MAX_MS, post: 120000 };
+var LOW_TOKENS = 4096;
+var EFFORT_LABEL = { inherit: "Connection's own", off: "Off", auto: "Auto", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", max: "Max", xhigh: "Extra high" };
 function PresetCards(props) {
   return /* @__PURE__ */ u3("div", {
     class: "lre-set-presets",
@@ -11133,7 +11155,6 @@ function ModelUseSection(props) {
                   label: "Calls",
                   value: modelUse.budgets[phase].calls,
                   min: 0,
-                  max: 20,
                   integer: true,
                   disabled: props.busy,
                   onChange: (calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { calls } } } })
@@ -11161,7 +11182,6 @@ function ModelUseSection(props) {
                   label: "Lore lookups",
                   value: modelUse.budgets[phase].lookup?.calls ?? 0,
                   min: 0,
-                  max: 10,
                   integer: true,
                   disabled: props.busy,
                   onChange: (calls) => props.patch({ modelUse: { preset: "custom", budgets: { [phase]: { lookup: { calls, ms: modelUse.budgets[phase].lookup?.ms ?? 0 } } } } })
@@ -11194,8 +11214,7 @@ function ModelUseSection(props) {
                   label: "Sections",
                   value: modelUse.tokens.sections,
                   min: 100,
-                  max: 8000,
-                  step: 50,
+                  step: 100,
                   integer: true,
                   disabled: props.busy,
                   onChange: (sections) => props.patch({ modelUse: { preset: "custom", tokens: { sections } } })
@@ -11297,23 +11316,226 @@ function CallMeter(props) {
   }, undefined, true, undefined, this);
 }
 function stepUpdatePatch(purpose, config) {
-  const out = { enabled: config.enabled, signals: [...config.signals] };
-  if (config.route)
-    out.route = { provider: config.route.provider, connectionId: config.route.connectionId, model: config.route.model };
+  const out = { enabled: config.enabled, signals: [...config.signals], maxTokens: config.maxTokens ?? null };
+  if (config.route) {
+    const params = {};
+    for (const p of SAMPLING_PARAMS)
+      params[p.key] = config.route.params?.[p.key] ?? null;
+    out.route = { provider: config.route.provider, connectionId: config.route.connectionId, model: config.route.model, effort: config.route.effort ?? null, params };
+  }
   if (config.template !== undefined)
     out.template = config.template;
-  if (config.maxTokens !== undefined)
-    out.maxTokens = config.maxTokens;
   if (config.lore)
     out.lore = { policy: config.lore.policy, tokens: config.lore.tokens, ...config.lore.transport ? { transport: config.lore.transport } : {} };
   return { modelUse: { preset: "custom", steps: { [purpose]: out } } };
 }
-function StepsSection(props) {
+function useConnections() {
   const app = useApp();
   const [connections, setConnections] = d2([]);
   A(() => {
     app.host.connections().then(setConnections);
   }, []);
+  return connections;
+}
+function placeOf2(call, connections) {
+  if (!call.connectionId)
+    return "Lumiverse's default connection";
+  const c = connections.find((x) => x.id === call.connectionId);
+  const model = call.model ?? c?.model ?? null;
+  return `${c?.name ?? call.connectionId}${model ? ` · ${model}` : ""}`;
+}
+function paramsSummary(call) {
+  const set = SAMPLING_PARAMS.flatMap((p) => call.params[p.key] !== undefined ? [`${p.label.toLowerCase()} ${String(call.params[p.key])}`] : []);
+  return [`effort ${EFFORT_LABEL[call.effort].toLowerCase()}`, `${call.maxTokens.toLocaleString("en-US")} max tokens`, ...set].join(" · ");
+}
+function helperSummary(helper, connections = []) {
+  return `${placeOf2(helper, connections)} · ${paramsSummary(helper)}`;
+}
+function EffortSelect(props) {
+  return /* @__PURE__ */ u3("label", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: props.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        value: props.value,
+        disabled: props.disabled,
+        onChange: (event) => props.onChange(REASONING_CHOICES.find((c) => c === event.currentTarget.value) ?? ""),
+        children: [
+          props.inheritLabel !== undefined ? /* @__PURE__ */ u3("option", {
+            value: "",
+            children: props.inheritLabel
+          }, undefined, false, undefined, this) : null,
+          REASONING_CHOICES.map((c) => /* @__PURE__ */ u3("option", {
+            value: c,
+            children: EFFORT_LABEL[c]
+          }, c, false, undefined, this))
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function OptionalNumber(props) {
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-minds-limit",
+    children: [
+      /* @__PURE__ */ u3(HostSwitch, {
+        label: `${props.label}: ${props.otherLabel}`,
+        checked: props.value === undefined,
+        disabled: props.disabled,
+        onChange: (other) => props.onChange(other ? undefined : props.fallback)
+      }, undefined, false, undefined, this),
+      props.value === undefined ? null : /* @__PURE__ */ u3(NumberStepper, {
+        label: props.label,
+        value: props.value,
+        min: props.min,
+        max: props.max,
+        step: props.step,
+        integer: props.integer,
+        disabled: props.disabled,
+        onChange: props.onChange
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ConnectionSelect(props) {
+  return /* @__PURE__ */ u3("label", {
+    class: "lre-field",
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "label",
+        children: "Connection"
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("select", {
+        class: "lre-input",
+        value: props.value ?? "",
+        disabled: props.disabled,
+        onChange: (event) => props.onChange(event.currentTarget.value || null),
+        children: [
+          /* @__PURE__ */ u3("option", {
+            value: "",
+            children: props.firstLabel
+          }, undefined, false, undefined, this),
+          props.connections.map((c) => /* @__PURE__ */ u3("option", {
+            value: c.id,
+            children: [
+              c.name,
+              c.model ? ` — ${c.model}` : ""
+            ]
+          }, c.id, true, undefined, this))
+        ]
+      }, undefined, true, undefined, this),
+      props.help ? /* @__PURE__ */ u3("span", {
+        class: "lre-field-help",
+        children: props.help
+      }, undefined, false, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function HelperSection(props) {
+  const { helper, busy } = props;
+  const connections = useConnections();
+  const set = (next) => props.patch({ helper: next });
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack",
+    "data-lre-settings-page": "helper",
+    children: [
+      /* @__PURE__ */ u3("p", {
+        class: "lre-set-lead",
+        children: "Every call the engine makes to a model for itself (reading your actions and the reply, deciding for people, judging, minds and their memory, time skips, lore lookups) runs on the helper model, unless its card in Steps and connections sets its own. Picking a preset never changes it."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Connection and model",
+        children: [
+          /* @__PURE__ */ u3(ConnectionSelect, {
+            value: helper.connectionId,
+            connections,
+            firstLabel: "None: Lumiverse's default connection",
+            help: "None runs each call on the connection Lumiverse marks as your default, with that connection's model and settings.",
+            disabled: busy,
+            onChange: (connectionId) => set({ connectionId, model: null })
+          }, undefined, false, undefined, this),
+          helper.connectionId ? /* @__PURE__ */ u3(M, {
+            children: [
+              /* @__PURE__ */ u3(HostModelPicker, {
+                connectionId: helper.connectionId,
+                value: helper.model ?? "",
+                label: "Model",
+                onChange: (model) => set({ model: model || null })
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                class: "lre-field-help",
+                children: "Pick from the connection's models, or type one. Empty uses the connection's own model."
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null
+        ]
+      }, undefined, true, undefined, this),
+      /* @__PURE__ */ u3(Section, {
+        title: "Parameters",
+        children: [
+          /* @__PURE__ */ u3(EffortSelect, {
+            label: "Reasoning effort",
+            value: helper.effort,
+            disabled: busy,
+            onChange: (effort) => set({ effort: effort === "" ? "inherit" : effort })
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: "Sent as Lumiverse's reasoning setting, which it turns into the provider's own (DeepSeek reads Low to High as High, Max and Extra high as Max). Connection's own leaves the connection's reasoning setting as it is."
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(NumberStepper, {
+            label: "Max tokens",
+            value: helper.maxTokens,
+            min: 64,
+            step: 512,
+            integer: true,
+            disabled: busy,
+            onChange: (maxTokens) => set({ maxTokens })
+          }, undefined, false, undefined, this),
+          helper.maxTokens < LOW_TOKENS ? /* @__PURE__ */ u3("div", {
+            class: "lre-set-warn",
+            role: "note",
+            children: [
+              /* @__PURE__ */ u3(Icon, {
+                name: "alert",
+                size: 16
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3("span", {
+                children: [
+                  "Reasoning models think before they answer; below ",
+                  LOW_TOKENS.toLocaleString("en-US"),
+                  ", calls can come back empty."
+                ]
+              }, undefined, true, undefined, this)
+            ]
+          }, undefined, true, undefined, this) : null,
+          SAMPLING_PARAMS.map((p) => /* @__PURE__ */ u3(OptionalNumber, {
+            label: p.label,
+            otherLabel: "the connection's own",
+            value: helper.params[p.key],
+            min: p.min,
+            max: p.max,
+            step: p.step,
+            integer: p.integer,
+            fallback: p.fallback,
+            disabled: busy,
+            onChange: (value) => set({ params: { [p.key]: value ?? null } })
+          }, p.key, false, undefined, this)),
+          /* @__PURE__ */ u3("span", {
+            class: "lre-field-help",
+            children: "A parameter left to the connection takes its preset's value. Lumiverse passes each one set here to the provider, which uses those it supports (Anthropic, for one, has no penalties). The Decisions API takes none of these: steps on it run with their connection's own settings."
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function StepsSection(props) {
+  const connections = useConnections();
   const update = (purpose, next) => props.patch(stepUpdatePatch(purpose, next));
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack",
@@ -11321,11 +11543,21 @@ function StepsSection(props) {
     children: [
       /* @__PURE__ */ u3("p", {
         class: "lre-set-lead",
-        children: "Each step is one small job a model can do, on the connection and model you choose. Changing a step makes your model use Custom."
+        children: "Each step is one small job a model can do. A helper step runs on the helper model, unless you set its own connection, model or parameters here. Changing a step makes your model use Custom."
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(List, {
+        children: /* @__PURE__ */ u3(ListRow, {
+          icon: "sliders",
+          title: "Helper model",
+          subtitle: helperSummary(props.helper, connections),
+          chevron: true,
+          onClick: props.openHelper
+        }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
       Object.keys(STEP_LABEL).map((purpose) => /* @__PURE__ */ u3(StepCard, {
         purpose,
         config: stepConfigOf(props.modelUse.steps, purpose),
+        helper: props.helper,
         connections,
         busy: props.busy,
         update: (next) => update(purpose, next)
@@ -11336,10 +11568,19 @@ function StepsSection(props) {
 function StepCard(props) {
   const { purpose, config, busy, update } = props;
   const route = config.route ?? { provider: purpose === "npc.choose" ? "decision" : "helper", connectionId: null, model: null };
-  const lowTokens = config.maxTokens !== undefined && config.maxTokens < 1500;
+  const call = helperCallOf({ ...config, route }, props.helper);
+  const lowTokens = route.provider === "helper" && call.maxTokens < LOW_TOKENS;
   const lore = stepLoreOf(config);
-  const connection = route.connectionId ? props.connections.find((c) => c.id === route.connectionId)?.name ?? route.connectionId : "default connection";
-  const summary = config.enabled ? `${route.provider === "decision" ? "Decision" : "Helper"} · ${connection}${route.model ? ` · ${route.model}` : ""}` : "Off";
+  const where = route.provider === "decision" ? `Decision · ${route.connectionId ? placeOf2(route, props.connections) : "the Decisions API's default"}` : `Helper · ${placeOf2(call, props.connections)} · ${paramsSummary(call)}`;
+  const summary = config.enabled ? where : "Off";
+  const setParam = (key, value) => {
+    const params = { ...route.params };
+    if (value === undefined)
+      delete params[key];
+    else
+      params[key] = value;
+    update({ ...config, route: { ...route, params } });
+  };
   return /* @__PURE__ */ u3("div", {
     class: "lre-card lre-set-step",
     "data-lre-step": purpose,
@@ -11389,7 +11630,7 @@ function StepCard(props) {
         }, undefined, false, undefined, this),
         /* @__PURE__ */ u3(Field, {
           label: "Provider",
-          help: route.provider === "decision" ? "Lumiverse's Decisions API; falls back to the helper if a call fails." : "A small JSON call on the connection below.",
+          help: route.provider === "decision" ? "Lumiverse's Decisions API, which takes no reasoning effort, max tokens or sampling parameters; if a call fails, the helper model answers instead." : "A small JSON call, on the helper model unless you set this step's own below.",
           children: /* @__PURE__ */ u3(Seg, {
             label: "Provider",
             value: route.provider,
@@ -11401,60 +11642,70 @@ function StepCard(props) {
             onChange: (provider) => update({ ...config, route: { ...route, provider } })
           }, undefined, false, undefined, this)
         }, undefined, false, undefined, this),
-        /* @__PURE__ */ u3("label", {
-          class: "lre-field",
-          children: [
-            /* @__PURE__ */ u3("span", {
-              class: "label",
-              children: "Connection"
-            }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("select", {
-              class: "lre-input",
-              value: route.connectionId ?? "",
-              disabled: busy,
-              onChange: (event) => update({ ...config, route: { ...route, connectionId: event.currentTarget.value || null, model: null } }),
-              children: [
-                /* @__PURE__ */ u3("option", {
-                  value: "",
-                  children: "Default (the chat's helper)"
-                }, undefined, false, undefined, this),
-                props.connections.map((c) => /* @__PURE__ */ u3("option", {
-                  value: c.id,
-                  children: [
-                    c.name,
-                    c.model ? ` — ${c.model}` : ""
-                  ]
-                }, c.id, true, undefined, this))
-              ]
-            }, undefined, true, undefined, this)
-          ]
-        }, undefined, true, undefined, this),
+        /* @__PURE__ */ u3(ConnectionSelect, {
+          value: route.connectionId,
+          connections: props.connections,
+          firstLabel: route.provider === "decision" ? "The Decisions API's default" : `Use helper default (${placeOf2(props.helper, props.connections)})`,
+          disabled: busy,
+          onChange: (connectionId) => update({ ...config, route: { ...route, connectionId, model: null } })
+        }, undefined, false, undefined, this),
         route.connectionId ? /* @__PURE__ */ u3(HostModelPicker, {
           connectionId: route.connectionId,
           value: route.model ?? "",
           label: "Model",
           onChange: (model) => update({ ...config, route: { ...route, model: model || null } })
         }, undefined, false, undefined, this) : null,
-        /* @__PURE__ */ u3(NumberStepper, {
-          label: "Max tokens",
-          value: config.maxTokens ?? null,
-          min: 64,
-          max: 32000,
-          step: 100,
-          integer: true,
-          disabled: busy,
-          onChange: (maxTokens) => update({ ...config, maxTokens })
-        }, undefined, false, undefined, this),
-        lowTokens ? /* @__PURE__ */ u3("div", {
-          class: "lre-set-warn",
-          role: "note",
+        route.provider === "helper" ? /* @__PURE__ */ u3(M, {
           children: [
-            /* @__PURE__ */ u3(Icon, {
-              name: "alert",
-              size: 16
+            /* @__PURE__ */ u3(EffortSelect, {
+              label: "Reasoning effort",
+              value: route.effort ?? "",
+              inheritLabel: `Use helper default (${EFFORT_LABEL[props.helper.effort]})`,
+              disabled: busy,
+              onChange: (effort) => update({ ...config, route: { ...route, effort: effort === "" ? undefined : effort } })
             }, undefined, false, undefined, this),
-            /* @__PURE__ */ u3("span", {
-              children: "Reasoning models need about 1,500 or more; below that, calls can come back empty."
+            /* @__PURE__ */ u3(OptionalNumber, {
+              label: "Max tokens",
+              otherLabel: `use helper default (${props.helper.maxTokens.toLocaleString("en-US")})`,
+              value: config.maxTokens,
+              min: 64,
+              step: 512,
+              integer: true,
+              fallback: props.helper.maxTokens,
+              disabled: busy,
+              onChange: (maxTokens) => update({ ...config, maxTokens })
+            }, undefined, false, undefined, this),
+            lowTokens ? /* @__PURE__ */ u3("div", {
+              class: "lre-set-warn",
+              role: "note",
+              children: [
+                /* @__PURE__ */ u3(Icon, {
+                  name: "alert",
+                  size: 16
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ u3("span", {
+                  children: [
+                    "Reasoning models think before they answer and need several thousand; below ",
+                    LOW_TOKENS.toLocaleString("en-US"),
+                    ", calls can come back empty."
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this) : null,
+            /* @__PURE__ */ u3(Disclosure, {
+              summary: "Sampling parameters",
+              children: SAMPLING_PARAMS.map((p) => /* @__PURE__ */ u3(OptionalNumber, {
+                label: p.label,
+                otherLabel: `use helper default (${String(props.helper.params[p.key] ?? "the connection's own")})`,
+                value: route.params?.[p.key],
+                min: p.min,
+                max: p.max,
+                step: p.step,
+                integer: p.integer,
+                fallback: props.helper.params[p.key] ?? p.fallback,
+                disabled: busy,
+                onChange: (value) => setParam(p.key, value)
+              }, p.key, false, undefined, this))
             }, undefined, false, undefined, this)
           ]
         }, undefined, true, undefined, this) : null,
@@ -11497,8 +11748,7 @@ function StepCard(props) {
               label: "Lore tokens",
               value: lore.tokens,
               min: 0,
-              max: 8000,
-              step: 50,
+              step: 100,
               integer: true,
               disabled: busy,
               onChange: (tokens) => update({ ...config, lore: { ...lore, tokens } })
@@ -17743,6 +17993,409 @@ function SchemaPartView(props) {
   }, undefined, true, undefined, this);
 }
 
+// src/frontend/diagnostics.tsx
+var OPEN_DIAGNOSTICS_EVENT = "lre:open-diagnostics";
+function openDiagnostics() {
+  window.dispatchEvent(new CustomEvent(OPEN_DIAGNOSTICS_EVENT));
+}
+function elapsedText(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} m ${String(s % 60).padStart(2, "0")} s`;
+}
+function useActivity() {
+  const app = useApp();
+  const activity = useSelect(app.sync, (state) => state.activity);
+  const [now, setNow] = d2(() => Date.now());
+  const running = activity?.state === "running";
+  A(() => {
+    if (!running)
+      return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  return { activity, now };
+}
+function ActivityLine(props) {
+  const { activity, now } = useActivity();
+  if (!activity)
+    return null;
+  if (activity.state === "failed")
+    return /* @__PURE__ */ u3("button", {
+      type: "button",
+      class: "lre-activity failed",
+      "data-lre-activity": "failed",
+      onClick: openDiagnostics,
+      "aria-label": `${activity.label}. Open Diagnostics`,
+      title: "Open Diagnostics",
+      children: [
+        /* @__PURE__ */ u3(Icon, {
+          name: "alert",
+          size: 16
+        }, undefined, false, undefined, this),
+        props.compact ? null : /* @__PURE__ */ u3("span", {
+          class: "lre-activity-label",
+          children: activity.label
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  const elapsed = elapsedText(now - activity.since);
+  return /* @__PURE__ */ u3("span", {
+    class: "lre-activity",
+    "data-lre-activity": "running",
+    role: "status",
+    "aria-live": "polite",
+    "aria-label": `${activity.label} ${elapsed}`,
+    children: [
+      /* @__PURE__ */ u3("span", {
+        class: "lre-chat-pulse",
+        "aria-hidden": "true"
+      }, undefined, false, undefined, this),
+      props.compact ? null : /* @__PURE__ */ u3("span", {
+        class: "lre-activity-label",
+        children: activity.label
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3("span", {
+        class: "lre-num lre-activity-time",
+        children: elapsed
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
+function ActivityBanner() {
+  const app = useApp();
+  const chatId = useSelect(app.sync, (state) => state.chatId);
+  const onPage = useSelect(app.ui, (ui) => ui.mode === "settings" && ui.settings.page === "diagnostics");
+  const { activity, now } = useActivity();
+  if (onPage && activity?.state === "failed")
+    return null;
+  if (!activity || !chatId)
+    return null;
+  if (activity.state === "running")
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-activity-bar",
+      "data-lre-activity-bar": "running",
+      role: "status",
+      "aria-live": "polite",
+      children: [
+        /* @__PURE__ */ u3("span", {
+          class: "lre-chat-pulse",
+          "aria-hidden": "true"
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-activity-label",
+          children: activity.label
+        }, undefined, false, undefined, this),
+        /* @__PURE__ */ u3("span", {
+          class: "lre-num lre-activity-time",
+          children: elapsedText(now - activity.since)
+        }, undefined, false, undefined, this)
+      ]
+    }, undefined, true, undefined, this);
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-activity-banner",
+    "data-lre-activity-bar": "failed",
+    children: /* @__PURE__ */ u3(Banner, {
+      tone: "neg",
+      title: activity.label,
+      actions: /* @__PURE__ */ u3(M, {
+        children: [
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "secondary",
+            icon: "list",
+            onClick: openDiagnostics,
+            children: "Diagnostics"
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3(Button, {
+            size: "sm",
+            variant: "ghost",
+            onClick: () => void app.request({ type: "lre.diag", chatId, op: "dismiss" }),
+            children: "Dismiss"
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      children: "The engine didn't finish its work for the last reply. Diagnostics says which step failed and what to change."
+    }, undefined, false, undefined, this)
+  }, undefined, false, undefined, this);
+}
+var FILTERS = [
+  { value: "all", label: "All" },
+  { value: "problems", label: "Problems" },
+  { value: "calls", label: "Model calls" },
+  { value: "slow", label: "Slow" }
+];
+function filterRecords(records, filter) {
+  if (filter === "problems")
+    return records.filter((r) => r.status === "failed" || r.level === "warn" || r.level === "error");
+  if (filter === "calls")
+    return records.filter((r) => (r.calls?.length ?? 0) > 0);
+  if (filter === "slow")
+    return records.filter((r) => r.kind === "slow");
+  return [...records];
+}
+function groupByTurn(records) {
+  const groups = [];
+  const byTurn = new Map;
+  for (const r of records) {
+    const known = r.turn !== null ? byTurn.get(r.turn) : undefined;
+    if (known) {
+      known.records.push(r);
+      known.start = Math.min(known.start, r.start);
+      continue;
+    }
+    const group = { turn: r.turn, records: [r], start: r.start };
+    groups.push(group);
+    if (r.turn !== null)
+      byTurn.set(r.turn, group);
+  }
+  for (const g of groups)
+    g.records.sort((a, b) => Number(a.kind === "turn") - Number(b.kind === "turn") || a.start - b.start || a.seq - b.seq);
+  return groups.sort((a, b) => b.start - a.start);
+}
+function callText(r) {
+  return (r.calls ?? []).map((c) => `    call ${c.purpose} via ${c.via} on ${c.connection} / ${c.model}: ${c.ok ? "ok" : "failed"}, ${c.tokensIn ?? "?"} in, ${c.tokensOut ?? "?"} out${c.maxTokens !== null ? ` of ${c.maxTokens}` : ""}, finish ${c.finishReason || "-"}, ${Math.round(c.ms)} ms${c.error ? `: ${c.error}` : ""}`);
+}
+function diagText(records) {
+  return records.flatMap((r) => [
+    `${new Date(r.start).toISOString()} ${r.level.toUpperCase().padEnd(5)} ${r.turn ? `[turn ${r.turn.slice(0, 8)}] ` : ""}${r.kind} ${r.phase ? `${r.phase}/` : ""}${r.step} ${r.status} ${Math.round(r.ms)} ms${r.reason ? `: ${r.reason}` : ""}`,
+    ...r.fix ? [`    fix: ${r.fix}`] : [],
+    ...r.path ? [`    path: ${r.path}`] : [],
+    ...(r.sections ?? []).map((s) => `    section ${s.slot}${s.outlet ? ` → ${s.outlet}` : ""}: ${s.filled ? "filled" : "empty"}`),
+    ...callText(r)
+  ]).join(`
+`);
+}
+var STATUS_TONE = { ok: "pos", failed: "neg", skipped: "neutral" };
+function msText(ms) {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
+}
+function titleOf(r) {
+  if (r.kind === "turn")
+    return "The turn";
+  return r.phase && r.phase !== r.step && r.phase !== "request" ? `${r.phase} · ${r.step}` : r.step;
+}
+function RecordRow(props) {
+  const r = props.record;
+  const calls = r.calls ?? [];
+  const tokens = calls.reduce((n, c) => n + (c.tokensOut ?? 0), 0);
+  const subtitle = [r.reason, calls.length > 0 ? `${calls.length} call${calls.length === 1 ? "" : "s"}, ${tokens} tokens out` : null].filter((s) => s).join(" · ");
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-diag-row",
+    "data-lre-diag-status": r.status,
+    "data-lre-diag-kind": r.kind,
+    children: [
+      /* @__PURE__ */ u3(ListRow, {
+        icon: r.status === "failed" ? "alert" : r.status === "skipped" ? "minus" : r.kind === "slow" ? "hourglass" : "check",
+        title: titleOf(r),
+        subtitle: subtitle || undefined,
+        value: msText(r.ms),
+        valueTone: r.status === "failed" ? "neg" : "muted",
+        badge: r.kind === "slow" ? /* @__PURE__ */ u3(Badge, {
+          tone: "warn",
+          children: "slow"
+        }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Badge, {
+          tone: STATUS_TONE[r.status],
+          children: r.status
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      r.fix ? /* @__PURE__ */ u3("p", {
+        class: "lre-diag-fix",
+        children: [
+          "Fix: ",
+          r.fix
+        ]
+      }, undefined, true, undefined, this) : null,
+      calls.length > 0 || (r.sections?.length ?? 0) > 0 ? /* @__PURE__ */ u3("ul", {
+        class: "lre-diag-calls",
+        children: [
+          calls.map((c, i) => /* @__PURE__ */ u3("li", {
+            "data-lre-diag-call": c.ok && c.finishReason !== "length" ? "ok" : "bad",
+            children: [
+              /* @__PURE__ */ u3("span", {
+                class: "lre-num",
+                children: c.purpose
+              }, undefined, false, undefined, this),
+              " · ",
+              c.model,
+              " on ",
+              c.connection,
+              " · ",
+              c.tokensIn ?? "?",
+              " in / ",
+              c.tokensOut ?? "?",
+              " out",
+              c.maxTokens !== null ? ` of ${c.maxTokens}` : "",
+              " · ",
+              c.finishReason || "no finish reason",
+              " · ",
+              msText(c.ms),
+              c.error ? ` · ${c.error}` : ""
+            ]
+          }, i, true, undefined, this)),
+          (r.sections ?? []).map((s) => /* @__PURE__ */ u3("li", {
+            "data-lre-diag-call": s.filled ? "ok" : "bad",
+            children: [
+              s.slot,
+              s.outlet ? ` → ${s.outlet}` : " (world placement)",
+              ": ",
+              s.filled ? "filled" : "empty"
+            ]
+          }, s.slot, true, undefined, this))
+        ]
+      }, undefined, true, undefined, this) : null
+    ]
+  }, undefined, true, undefined, this);
+}
+function DiagnosticsPage() {
+  const app = useApp();
+  const chatId = useSelect(app.sync, (state) => state.chatId);
+  const [revealed, setRevealed] = d2(false);
+  const [records, setRecords] = d2(null);
+  const [filter, setFilter] = d2("all");
+  const [busy, run] = useBusy();
+  const load = () => run(async () => {
+    if (!chatId)
+      return;
+    const result = await app.request({ type: "lre.diag", chatId, op: "get" });
+    setRecords(result ? result.records : []);
+  });
+  A(() => {
+    setRevealed(false);
+    setRecords(null);
+  }, [chatId]);
+  A(() => {
+    if (revealed)
+      load();
+  }, [revealed]);
+  if (!chatId)
+    return /* @__PURE__ */ u3(Empty, {
+      icon: "list",
+      children: "Open a chat to see what the engine did in it."
+    }, undefined, false, undefined, this);
+  if (!revealed)
+    return /* @__PURE__ */ u3("div", {
+      class: "lre-stack",
+      "data-lre-settings-page": "diagnostics",
+      children: /* @__PURE__ */ u3(Banner, {
+        tone: "gm",
+        title: "GM detail",
+        actions: /* @__PURE__ */ u3(Button, {
+          icon: "eye",
+          onClick: () => setRevealed(true),
+          children: "Show diagnostics"
+        }, undefined, false, undefined, this),
+        children: "Diagnostics show each step the engine ran for this chat, its model calls and why one failed. A reason can name someone or something your character hasn't met yet."
+      }, undefined, false, undefined, this)
+    }, undefined, false, undefined, this);
+  const shown = records ? filterRecords(records, filter) : [];
+  const problems = (records ?? []).filter((r) => r.status === "failed" && (r.kind !== "turn" || !(records ?? []).some((s) => s !== r && s.turn === r.turn && s.status === "failed"))).slice(-20).reverse();
+  return /* @__PURE__ */ u3("div", {
+    class: "lre-stack lre-diag",
+    "data-lre-settings-page": "diagnostics",
+    children: [
+      /* @__PURE__ */ u3("div", {
+        class: "lre-diag-tools",
+        children: [
+          /* @__PURE__ */ u3(Seg, {
+            label: "Show",
+            value: filter,
+            options: FILTERS,
+            onChange: setFilter
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ u3("div", {
+            class: "lre-diag-actions",
+            children: [
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "refresh",
+                busy,
+                onClick: load,
+                children: "Refresh"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "copy",
+                disabled: !records || records.length === 0,
+                onClick: () => void navigator.clipboard.writeText(diagText(shown)).then(() => app.toast("Diagnostics copied"), () => app.toast("The clipboard refused the copy; use Download", "error")),
+                children: "Copy"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "secondary",
+                icon: "download",
+                disabled: !records || records.length === 0,
+                onClick: () => app.host.download(`lre-diagnostics-${chatId}.json`, JSON.stringify({ chatId, at: new Date().toISOString(), records }, null, 2)),
+                children: "Download"
+              }, undefined, false, undefined, this),
+              /* @__PURE__ */ u3(Button, {
+                size: "sm",
+                variant: "ghost",
+                icon: "trash",
+                disabled: !records || records.length === 0,
+                onClick: () => run(async () => {
+                  await app.request({ type: "lre.diag", chatId, op: "clear" });
+                  setRecords([]);
+                }),
+                children: "Clear"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      problems.length > 0 ? /* @__PURE__ */ u3(Section, {
+        title: "Errors",
+        flush: true,
+        children: /* @__PURE__ */ u3("div", {
+          class: "lre-stack lre-diag-errors",
+          children: problems.map((r) => /* @__PURE__ */ u3(Banner, {
+            tone: "neg",
+            title: `${titleOf(r)}${r.turn ? ` · turn ${r.turn.slice(0, 8)}` : ""}`,
+            children: [
+              /* @__PURE__ */ u3("p", {
+                class: "lre-diag-fix",
+                children: r.reason ?? "failed"
+              }, undefined, false, undefined, this),
+              r.fix ? /* @__PURE__ */ u3("p", {
+                class: "lre-diag-fix",
+                children: [
+                  "Fix: ",
+                  r.fix
+                ]
+              }, undefined, true, undefined, this) : null
+            ]
+          }, r.seq, true, undefined, this))
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this) : null,
+      records === null ? /* @__PURE__ */ u3(Empty, {
+        icon: "hourglass",
+        children: "Reading diagnostics…"
+      }, undefined, false, undefined, this) : shown.length === 0 ? /* @__PURE__ */ u3(Empty, {
+        icon: "check",
+        children: records.length === 0 ? "Nothing recorded for this chat yet: the next turn's steps show here." : "Nothing matches this filter."
+      }, undefined, false, undefined, this) : groupByTurn(shown).map((group) => {
+        const failed = group.records.some((r) => r.status === "failed");
+        const slow = group.records.some((r) => r.kind === "slow");
+        return /* @__PURE__ */ u3(Section, {
+          title: group.turn ? `Turn ${group.turn.slice(0, 8)} · ${new Date(group.start).toLocaleTimeString()}` : `Outside a turn · ${new Date(group.start).toLocaleTimeString()}`,
+          aside: /* @__PURE__ */ u3(Badge, {
+            tone: failed ? "neg" : slow ? "warn" : "pos",
+            children: failed ? "failed" : slow ? "slow" : "ok"
+          }, undefined, false, undefined, this),
+          flush: true,
+          children: /* @__PURE__ */ u3(List, {
+            children: group.records.map((r) => /* @__PURE__ */ u3(RecordRow, {
+              record: r
+            }, r.seq, false, undefined, this))
+          }, undefined, false, undefined, this)
+        }, `${group.turn ?? "none"}-${group.start}`, false, undefined, this);
+      })
+    ]
+  }, undefined, true, undefined, this);
+}
+
 // src/frontend/settings/adjudication.tsx
 function AdjudicationSeed(props) {
   const mine = props.settings.overrideWorldAdjudication;
@@ -19397,7 +20050,6 @@ function MindsSection(props) {
                       label: "Minds section budget (tokens)",
                       value: minds.tokens,
                       min: 0,
-                      max: 1e5,
                       step: 100,
                       integer: true,
                       disabled: busy,
@@ -19769,6 +20421,7 @@ function SwipesPage(props) {
 
 // src/frontend/settings/settings.tsx
 var PAGE2 = {
+  helper: { title: "Helper model", subtitle: "What the engine's model calls run on", icon: "sliders" },
   model: { title: "Model use", subtitle: "How much the engine asks a model", icon: "bolt" },
   steps: { title: "Steps and connections", subtitle: "Which model runs each step", icon: "branch" },
   minds: { title: "Minds", subtitle: "How characters think and remember", icon: "sparkle" },
@@ -19779,15 +20432,16 @@ var PAGE2 = {
   swipes: { title: "Swipes", subtitle: "What a swipe does", icon: "refresh" },
   preset: { title: "Preset", subtitle: "Your Lumiverse preset and LumiRPEngine", icon: "scroll" },
   display: { title: "Display", subtitle: "How LumiRPEngine looks on this device", icon: "eye" },
-  caveats: { title: "Caveats", subtitle: "What to know", icon: "info" }
+  caveats: { title: "Caveats", subtitle: "What to know", icon: "info" },
+  diagnostics: { title: "Diagnostics", subtitle: "What the engine did each turn, and what failed", icon: "list" }
 };
 var GROUPS3 = [
-  { title: "Getting started", pages: ["model", "steps", "minds"] },
+  { title: "Getting started", pages: ["helper", "model", "steps", "minds"] },
   { title: "Defaults for new chats", pages: ["realism", "checks", "time"] },
   { title: "Replies", pages: ["extraction", "swipes"] },
   { title: "Your preset", pages: ["preset"] },
   { title: "Display", pages: ["display"] },
-  { title: "About", pages: ["caveats"] }
+  { title: "About", pages: ["caveats", "diagnostics"] }
 ];
 var PRESET_LABEL2 = { narrative: "Narrative-first", balanced: "Balanced", crunchy: "Crunchy", custom: "Custom" };
 var STATIC_CAVEATS = [
@@ -19795,9 +20449,11 @@ var STATIC_CAVEATS = [
   "Realism, checks and time settings seed new chats only, after a world's own defaults unless you turn on Use my settings. Change a running chat in GM → This chat.",
   "Undo covers the latest reply; earlier changes go through Keep or Discard."
 ];
-function summaryOf(page, data, showIds) {
+function summaryOf(page, data, caveats, showIds, connections) {
   const { settings } = data;
   switch (page) {
+    case "helper":
+      return { subtitle: helperSummary(settings.helper, connections) };
     case "model":
       return { subtitle: `${humanize(settings.modelUse.preset)} preset` };
     case "minds":
@@ -19823,15 +20479,22 @@ function summaryOf(page, data, showIds) {
       return { subtitle: settings.hideJsonBlocks ? "JSON blocks hidden in world chats" : "JSON blocks shown" };
     case "display":
       return { subtitle: "Show ids", value: showIds ? "On" : "Off" };
-    case "caveats":
-      return data.caveats.length > 0 ? { subtitle: "Warnings and what to know", badge: /* @__PURE__ */ u3(Badge, {
+    case "caveats": {
+      const found = caveats?.filter((c) => c.code !== "preset_lint_pending") ?? [];
+      if (caveats === null || found.length === 0 && caveats.length > 0)
+        return { subtitle: "Checking your preset…" };
+      return found.length > 0 ? { subtitle: "Warnings and what to know", badge: /* @__PURE__ */ u3(Badge, {
         tone: "warn",
-        children: `${data.caveats.length} active`
+        children: `${found.length} active`
       }, undefined, false, undefined, this) } : { subtitle: "What to know" };
+    }
+    case "diagnostics":
+      return { subtitle: "Each turn's steps, model calls and errors" };
   }
 }
 function Home(props) {
   const showIds = useShowIds();
+  const connections = useConnections();
   return /* @__PURE__ */ u3("div", {
     class: "lre-stack lre-set-home",
     "data-lre-settings-page": "home",
@@ -19845,7 +20508,7 @@ function Home(props) {
         flush: true,
         children: /* @__PURE__ */ u3(List, {
           children: group.pages.map((page) => {
-            const summary = summaryOf(page, props.data, showIds);
+            const summary = summaryOf(page, props.data, props.caveats, showIds, connections);
             return /* @__PURE__ */ u3("div", {
               class: "lre-set-home-row",
               "data-lre-settings": page,
@@ -19896,10 +20559,12 @@ function CaveatsPage(props) {
     class: "lre-stack",
     "data-lre-settings-page": "caveats",
     children: [
-      props.data.caveats.length > 0 ? /* @__PURE__ */ u3("div", {
+      props.caveats === null ? /* @__PURE__ */ u3(Empty, {
+        children: "Checking your preset against this chat…"
+      }, undefined, false, undefined, this) : props.caveats.length > 0 ? /* @__PURE__ */ u3("div", {
         class: "lre-stack",
-        children: props.data.caveats.map((caveat) => /* @__PURE__ */ u3(Banner, {
-          tone: "warn",
+        children: props.caveats.map((caveat) => /* @__PURE__ */ u3(Banner, {
+          tone: caveat.code === "preset_lint_pending" ? "info" : "warn",
           children: caveat.message
         }, caveat.code, false, undefined, this))
       }, undefined, false, undefined, this) : /* @__PURE__ */ u3(Empty, {
@@ -19928,6 +20593,8 @@ function Settings() {
   const page = useUi((ui) => ui.settings.page);
   const [data, setData] = d2(null);
   const [failed, setFailed] = d2(false);
+  const [caveats, setCaveats] = d2(null);
+  const caveatsAsked = T2(0);
   const [busy, run] = useBusy();
   const root = T2(null);
   const opener = T2(null);
@@ -19939,6 +20606,17 @@ function Settings() {
         setFailed(true);
     });
   }, []);
+  A(() => {
+    if (page !== "home" && page !== "caveats")
+      return;
+    const asked = caveatsAsked.current += 1;
+    setCaveats(null);
+    app.request({ type: "lre.settings.caveats" }).then((result) => {
+      if (asked !== caveatsAsked.current)
+        return;
+      setCaveats(result ? result.caveats : [{ code: "preset_lint_failed", message: "The preset check didn't answer, so its warnings aren't known. Open Caveats again to retry." }]);
+    });
+  }, [page]);
   A(() => {
     const el = root.current;
     if (!el || !data)
@@ -19969,6 +20647,7 @@ function Settings() {
       "data-lre-section": "settings",
       children: /* @__PURE__ */ u3(Home, {
         data,
+        caveats,
         open: (next) => {
           opener.current = next;
           go(next);
@@ -19977,14 +20656,20 @@ function Settings() {
     }, undefined, false, undefined, this);
   }
   const { settings } = data;
-  const body = page === "model" ? /* @__PURE__ */ u3(ModelUseSection, {
+  const body = page === "helper" ? /* @__PURE__ */ u3(HelperSection, {
+    helper: settings.helper,
+    patch,
+    busy
+  }, undefined, false, undefined, this) : page === "model" ? /* @__PURE__ */ u3(ModelUseSection, {
     modelUse: settings.modelUse,
     meter: view?.meter ?? null,
     patch,
     busy
   }, undefined, false, undefined, this) : page === "steps" ? /* @__PURE__ */ u3(StepsSection, {
     modelUse: settings.modelUse,
+    helper: settings.helper,
     patch,
+    openHelper: () => go("helper"),
     busy
   }, undefined, false, undefined, this) : page === "minds" ? /* @__PURE__ */ u3(MindsSection, {
     minds: settings.minds,
@@ -20014,8 +20699,8 @@ function Settings() {
     hideJsonBlocks: settings.hideJsonBlocks,
     patch,
     busy
-  }, undefined, false, undefined, this) : page === "display" ? /* @__PURE__ */ u3(DisplayPage, {}, undefined, false, undefined, this) : /* @__PURE__ */ u3(CaveatsPage, {
-    data
+  }, undefined, false, undefined, this) : page === "display" ? /* @__PURE__ */ u3(DisplayPage, {}, undefined, false, undefined, this) : page === "diagnostics" ? /* @__PURE__ */ u3(DiagnosticsPage, {}, undefined, false, undefined, this) : /* @__PURE__ */ u3(CaveatsPage, {
+    caveats
   }, undefined, false, undefined, this);
   return /* @__PURE__ */ u3("div", {
     ref: root,
@@ -20154,6 +20839,7 @@ function Drawer(props) {
           }, entry.id, true, undefined, this))
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
+      /* @__PURE__ */ u3(ActivityBanner, {}, undefined, false, undefined, this),
       /* @__PURE__ */ u3("div", {
         class: "lre-mode-body",
         id: bodyId,
@@ -20266,6 +20952,7 @@ function Hud(props) {
   const app = useApp();
   const view = useView();
   const viewport = useSelect(app.host.viewport, (vp) => vp);
+  const activity = useSelect(app.sync, (state) => state.activity);
   const [open, setOpen] = d2(false);
   const pill = T2(null);
   const pop = T2(null);
@@ -20286,7 +20973,7 @@ function Hud(props) {
     const observer = new ResizeObserver(measure);
     observer.observe(target);
     return () => observer.disconnect();
-  }, [open, mode, viewport.width, viewport.height, hud]);
+  }, [open, mode, viewport.width, viewport.height, hud, activity?.state, activity?.label]);
   A(() => {
     if (open || !(refocus.current || then.current))
       return;
@@ -20422,7 +21109,9 @@ function Hud(props) {
           size: 16
         }, undefined, false, undefined, this)
       }, undefined, false, undefined, this),
-      view.status === "in_flight" ? /* @__PURE__ */ u3("span", {
+      activity ? /* @__PURE__ */ u3(ActivityLine, {
+        compact: mode !== "full"
+      }, undefined, false, undefined, this) : view.status === "in_flight" ? /* @__PURE__ */ u3("span", {
         class: "lre-chat-pulse",
         role: "img",
         "aria-label": "A turn is in progress",
@@ -20661,6 +21350,7 @@ function StatusLine() {
   const view = useView();
   const mobile = useSelect(app.host.viewport, (vp) => isMobile(vp));
   const hud = view?.hud ?? null;
+  const activity = useSelect(app.sync, (state) => state.activity);
   if (!mobile || !view || !hud || view.status === "not_world")
     return null;
   const cash = cashText(hud.cash);
@@ -20717,7 +21407,7 @@ function StatusLine() {
               }, undefined, true, undefined, this) : null
             ]
           }, undefined, true, undefined, this),
-          view.status === "in_flight" ? /* @__PURE__ */ u3("span", {
+          activity?.state === "running" ? /* @__PURE__ */ u3(ActivityLine, {}, undefined, false, undefined, this) : view.status === "in_flight" ? /* @__PURE__ */ u3("span", {
             class: "lre-chat-pulse",
             role: "img",
             "aria-label": "A turn is in progress",
@@ -20729,6 +21419,9 @@ function StatusLine() {
           }, undefined, false, undefined, this) : null
         ]
       }, undefined, true, undefined, this),
+      activity?.state === "failed" ? /* @__PURE__ */ u3(ActivityLine, {
+        compact: true
+      }, undefined, false, undefined, this) : null,
       /* @__PURE__ */ u3(Button, {
         variant: "primary",
         size: "sm",
@@ -41825,6 +42518,9 @@ function applyDelta(root, ops) {
 }
 
 // src/frontend/protocol-client.ts
+function isActivity(value) {
+  return isRecord(value) && typeof value.chatId === "string" && (value.state === "running" || value.state === "failed") && typeof value.label === "string" && typeof value.since === "number" && (value.turn === null || typeof value.turn === "string");
+}
 var REQUEST_TYPES = {
   "lre.hello": true,
   "lre.state.resync": true,
@@ -41838,6 +42534,7 @@ var REQUEST_TYPES = {
   "lre.keep": true,
   "lre.settings.get": true,
   "lre.settings.set": true,
+  "lre.settings.caveats": true,
   "lre.editor": true,
   "lre.world": true,
   "lre.ui": true,
@@ -41845,7 +42542,8 @@ var REQUEST_TYPES = {
   "lre.job": true,
   "lre.lore": true,
   "lre.studio": true,
-  "lre.preset": true
+  "lre.preset": true,
+  "lre.diag": true
 };
 function isRequestType(value) {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(REQUEST_TYPES, value);
@@ -41870,7 +42568,7 @@ class ProtocolClient {
   newReqId;
   schedule;
   timers;
-  state = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0 };
+  state = { chatId: null, rev: null, view: null, status: "closed", resyncs: 0, activity: null };
   notifyQueued = false;
   disposed = false;
   counter = 0;
@@ -41904,7 +42602,7 @@ class ProtocolClient {
   }
   presetId = undefined;
   open(chatId) {
-    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0 });
+    this.update({ chatId, rev: null, view: null, status: chatId === null ? "closed" : "syncing", resyncs: 0, activity: null });
     const reply = this.request({ type: "lre.hello", chatId, ...this.presetId !== undefined ? { presetId: this.presetId } : {} });
     reply.then((message) => {
       if (message.type === "lre.error" && this.state.chatId === chatId) {
@@ -41983,6 +42681,10 @@ class ProtocolClient {
           for (const listener of this.jobListeners)
             listener(update);
         }
+        return;
+      case "lre.activity":
+        if (payload.chatId === this.state.chatId && (payload.activity === null || isActivity(payload.activity)))
+          this.update({ ...this.state, activity: payload.activity });
         return;
       case "lre.draft.changed":
         if (typeof payload.worldId === "string" && typeof payload.version === "number" && typeof payload.stored === "boolean" && (typeof payload.base === "string" || payload.base === null)) {
@@ -42513,6 +43215,38 @@ select.lre-input{appearance:auto}
 .lre-bottomnav>button>.lre-dot{position:absolute;top:5px;left:calc(50% + 7px)}
 .lre-bottomnav>button:focus-visible{outline-offset:-2px}
 .lre-savebar{position:sticky;bottom:0;z-index:4;display:flex;gap:var(--lre-s2);align-items:center;flex-wrap:wrap;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r,0px))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l,0px)));padding:var(--lre-s2) calc(var(--lre-s3) + var(--lre-gutter-r,0px)) calc(var(--lre-s2) + env(safe-area-inset-bottom,0px)) calc(var(--lre-s3) + var(--lre-gutter-l,0px));border-top:1px solid var(--lre-hairline);background:var(--lre-bar-bg)}
+`;
+
+// src/frontend/styles/diagnostics.ts
+var DIAGNOSTICS_CSS = `
+/* The activity line: a pulse, the step's label and the time it has taken; a failure in the danger tone */
+.lre .lre-activity{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%;color:var(--lre-fg);font-size:var(--lre-fs-sm);white-space:nowrap}
+.lre .lre-activity-label{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.lre .lre-activity-time{flex:none;color:var(--lre-muted)}
+.lre .lre-hud>.lre-activity{margin:0 var(--lre-s2);flex:none}
+.lre .lre-activity.failed{min-height:var(--lre-tap);min-width:var(--lre-tap);justify-content:center;padding:0 var(--lre-s2);border:1px solid color-mix(in srgb,var(--lre-danger) 40%,transparent);border-radius:var(--lre-r-pill);background:var(--lre-neg-soft);color:var(--lre-neg);font-weight:600}
+.lre .lre-activity.failed>.lre-icon{color:var(--lre-neg)}
+.lre .lre-hud>.lre-activity.failed{border-color:transparent}
+.lre .lre-chat-status>.lre-activity.failed{flex:none}
+.lre .lre-chat-status-line>.lre-activity{flex:none;max-width:62%}
+
+/* The drawer's bar under the mode bar, sticky with it */
+.lre-activity-bar{position:sticky;top:var(--lre-modebar-h,0px);z-index:5;display:flex;align-items:center;gap:var(--lre-s2);min-height:36px;margin:0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-r))) 0 calc(-1 * (var(--lre-s3) + var(--lre-gutter-l)));padding:var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-r)) var(--lre-s1) calc(var(--lre-s3) + var(--lre-gutter-l));background:var(--lre-accent-soft);border-bottom:1px solid var(--lre-hairline);font-size:var(--lre-fs-sm);color:var(--lre-fg)}
+.lre-activity-bar>.lre-activity-label{flex:1}
+.lre-activity-banner{margin-top:var(--lre-s3)}
+
+/* Settings → Diagnostics */
+.lre-diag-tools{display:flex;flex-direction:column;gap:var(--lre-s2);min-width:0}
+.lre-diag-actions{display:flex;flex-wrap:wrap;gap:var(--lre-s2)}
+.lre-diag-errors{gap:var(--lre-s2)}
+.lre-diag-fix{margin:0;font-size:var(--lre-fs-sm);line-height:1.4;color:var(--lre-fg);overflow-wrap:anywhere}
+.lre-diag-row{display:flex;flex-direction:column;min-width:0}
+.lre-diag-row+.lre-diag-row{border-top:1px solid var(--lre-hairline)}
+.lre-diag-row>.lre-diag-fix{padding:0 var(--lre-s3) var(--lre-s2) calc(var(--lre-s3) + 28px)}
+.lre-diag-row[data-lre-diag-status=failed] .lre-listrow-title{color:var(--lre-neg)}
+.lre-diag-calls{margin:0;padding:0 var(--lre-s3) var(--lre-s2) calc(var(--lre-s3) + 28px);list-style:none;display:flex;flex-direction:column;gap:2px;font-size:var(--lre-fs-xs);line-height:1.4;color:var(--lre-muted);overflow-wrap:anywhere}
+.lre-diag-calls>li[data-lre-diag-call=bad]{color:var(--lre-neg)}
+@container (min-width:640px){.lre-diag-tools{flex-direction:row;align-items:center;justify-content:space-between}}
 `;
 
 // src/frontend/styles/forms.ts
@@ -43365,7 +44099,7 @@ var VISUAL_EDITORS_CSS = `
 `;
 
 // src/frontend/styles.ts
-var CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, VISUAL_EDITORS_CSS].join(`
+var CSS = [TOKENS_CSS, COMPONENTS_CSS, SHELL_CSS, CHAT_CSS, PLAY_CSS, PACKS_ME_CSS, PACKS_MONEY_CSS, PACKS_WORLD_CSS, GM_CSS, MINDS_CSS, SETTINGS_CSS, BUILD_CSS, FORMS_CSS, VISUAL_EDITORS_CSS, DIAGNOSTICS_CSS].join(`
 `);
 
 // src/frontend/ui-registry.ts
@@ -43567,6 +44301,12 @@ function setup(ctx) {
   };
   window.addEventListener(STUDIO_OFFER_EVENT, reviewOffer);
   cleanups.push(() => window.removeEventListener(STUDIO_OFFER_EVENT, reviewOffer));
+  const showDiagnostics = () => {
+    ui.update((state) => ({ ...state, mode: "settings", settings: { page: "diagnostics" } }));
+    tab.activate();
+  };
+  window.addEventListener(OPEN_DIAGNOSTICS_EVENT, showDiagnostics);
+  cleanups.push(() => window.removeEventListener(OPEN_DIAGNOSTICS_EVENT, showDiagnostics));
   const statusLines = createStore(0);
   const hud = new HudFloat({
     viewport: () => host.viewport.get(),
