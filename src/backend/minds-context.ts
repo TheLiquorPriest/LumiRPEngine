@@ -7,9 +7,11 @@
 
 import type { EntityId, MessageId, PlaceId } from "../shared/ids";
 import type { MindMoment, MindsCharacter, MindsMemoryConfig } from "../shared/minds";
-import type { WorldDoc } from "../shared/world";
+import { loreIsSecret } from "../shared/lore";
+import type { LoreEntryDef, WorldDoc } from "../shared/world";
 import { calendarOf, dateAt, dayPartAt, formatClock, formatHHMM, holidaysOn } from "../engine/calendar";
-import { loreSearch } from "../engine/lore";
+import { cuesOf } from "../engine/cues";
+import { loreHeldBy, loreSearch } from "../engine/lore";
 import { optionalQuery, own } from "../engine/pack-kit";
 import type { Registry } from "../engine/registry-impl";
 import { fieldDef, isGone, kindIs, placeOfEntity } from "../engine/scope";
@@ -201,6 +203,34 @@ function sheetLines(scope: MindScope): string[] {
   return out;
 }
 
+/**
+ * Their own secrets, whole (DESIGN §24.5): the truths of every track they own and of every track a
+ * cue of theirs stands for, and the secret lore that is theirs (`loreHeldBy`), whatever the player has
+ * found out. A character knows their own secret, revealed or not.
+ */
+function secretLines(scope: Pick<MindScope, "world" | "who">): string[] {
+  const { world, who } = scope;
+  const named = new Set(cuesOf(world, who).flatMap((c) => (c.secret.kind === "track" ? [c.secret.id] : [])));
+  const out: string[] = [];
+  for (const [id, t] of Object.entries(world.tracks).sort(([a], [b]) => a.localeCompare(b))) {
+    if (t.owner !== who && !named.has(id)) continue;
+    const truths = Object.values(t.stages).flatMap((s) => (s.truth ? [s.truth] : []));
+    if (truths.length > 0) out.push(`- Your secret, ${t.label}: ${clip(truths.join(" "), RECALL_SIDE)}`);
+  }
+  for (const l of heldLore(world, who)) out.push(`- Your secret, ${l.title}: ${clip(l.content, RECALL_SIDE)}`);
+  return out;
+}
+
+/** The secret lore entries that are `who`'s own, in id order. */
+function heldLore(world: WorldDoc, who: EntityId): LoreEntryDef[] {
+  return Object.keys(world.lore)
+    .sort()
+    .flatMap((id) => {
+      const l = own(world.lore, id);
+      return l && loreIsSecret(l) && loreHeldBy(world, l, who) ? [l] : [];
+    });
+}
+
 function lifeLines(scope: MindScope, c: MindsCharacter): string[] {
   const { reg, world, state, who } = scope;
   const ctx = reg.context(world, state);
@@ -212,10 +242,8 @@ function lifeLines(scope: MindScope, c: MindsCharacter): string[] {
   } catch {
     // A world without a working day planner (no Cast life) has no day to tell.
   }
-  for (const a of agendaFor(world, state, who)) {
-    const truth = own(own(world.tracks, a.track)?.stages ?? {}, a.stage)?.truth;
-    out.push(`- Your aim, ${a.label}: ${a.stageLabel}${truth ? ` (the truth of it: ${truth})` : ""}`);
-  }
+  for (const a of agendaFor(world, state, who)) out.push(`- Your aim, ${a.label}: ${a.stageLabel}`);
+  out.push(...secretLines(scope));
   for (const x of openCommitments(c).slice(0, scope.memory.commitments.show)) out.push(`- Commitment (${x.kind}${x.with.length > 0 ? ` with ${x.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}): ${x.text}${x.due !== null ? `, due ${formatClock(cal, x.due)}` : ""}`);
   for (const p of openPlans(c).slice(0, 8)) out.push(`- Plan (${p.kind}): ${p.what}, ${formatClock(cal, p.when.from)} to ${formatHHMM(dateAt(cal, p.when.to).minuteOfDay)}${p.where ? ` at ${nameOf(scope, p.where)}` : ""}${p.with.length > 0 ? ` with ${p.with.map((id) => nameOf(scope, id)).join(", ")}` : ""}`);
   return out;
@@ -254,11 +282,12 @@ function memoryLines(scope: MindScope, c: MindsCharacter): string[] {
   return out;
 }
 
-/** Lore read as the character (DESIGN §24.5): public entries, what they know, and their own secrets. */
+/** Lore read as the character (DESIGN §24.5): public entries and what they know; their own secrets are among their own life's lines already. */
 function loreLines(scope: MindScope, place: PlaceId | null): string[] {
   if (scope.loreTokens <= 0) return [];
   const { reg, world, state, who, moment } = scope;
-  const result = loreSearch({ reg, world, state, tokens: sectionTokens }, { query: `${moment.user}\n${moment.reply}\n${moment.reason}`, links: [who, ...(place ? [place] : [])], purpose: "mind", as: who, limit: 6, tokenBudget: scope.loreTokens });
+  const skip = new Set(heldLore(world, who).map((l) => l.id));
+  const result = loreSearch({ reg, world, state, tokens: sectionTokens }, { query: `${moment.user}\n${moment.reply}\n${moment.reason}`, links: [who, ...(place ? [place] : [])], purpose: "mind", as: who, limit: 6, tokenBudget: scope.loreTokens, skip });
   return result.hits.map((h) => `- ${h.snippet}`);
 }
 

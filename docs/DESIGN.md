@@ -1234,7 +1234,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
   - their summary, notes, commitments, plans, witness log and last mind;
   - the scene as they perceive it: who they can see, and how they stand toward each;
   - the occasion: clock, day part, holidays, weather;
-  - their own life: a plain money summary (`economy.summary`), the day's schedule, and their agendas, the truth of their own secrets included;
+  - their own life: a plain money summary (`economy.summary`), the day's schedule, their agendas, and their own secrets whole, whatever the player has found out: the truths of every track they own (an agenda's included) and of every track a cue of theirs stands for, and the secret lore that is theirs;
   - lore read as them: public entries, `known_by` entries by what they know, and of the secret entries only their own, whether or not the gate holds: the entry's `holders` name them, or a cue of theirs stands for it (the cue mapping Stance reads, §6.6). An entry's `links` say what it is about, so linking them doesn't make it theirs, and the POV uncovering a secret tells no other mind of it;
   - recall by presence, told to ignore narration of other people's private thoughts;
   - the moment: what the POV just said and did if they are with the POV, after how the story's last reply ended (its last 1,600 characters) when they heard that turn (someone the POV met only at its end, or who came in since, isn't told); else a note that they aren't.

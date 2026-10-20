@@ -333,6 +333,45 @@ describe("minds around a turn", () => {
 });
 
 describe("a mind's context", () => {
+  test("a character's own secrets are in their context: the tracks they own, and the secret a cue of theirs stands for", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const worldId = await rig.newWorld("Alder", "modern_slice_of_life");
+    const put = async (collection: string, id: string, value: JsonObject) => rig.body(await rig.send({ type: "lre.editor", op: "put", worldId, base: null, collection, id, value }));
+    await put("tracks", "s_till", { id: "s_till", kind: "secret", label: "The till", owner: "danny_okafor", start: "hidden", visibility: "secret", stages: { hidden: { label: "Hidden", next: [], truth: "TILL-TRUTH: Danny skims the till every Friday." } } });
+    await put("tracks", "s_boat", { id: "s_boat", kind: "secret", label: "The boat", start: "hidden", visibility: "secret", stages: { hidden: { label: "Hidden", next: [], truth: "BOAT-TRUTH: Priya sold the club's boat." } } });
+    const { draft } = rig.body(await rig.send({ type: "lre.editor", op: "get", worldId })) as { draft: { entities: Record<string, JsonObject> } };
+    await put("entities", "priya_nair", { ...draft.entities.priya_nair, cues: [{ text: "Changes the subject when boats come up", track: "s_boat" }] });
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: [...PEOPLE] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: PEOPLE.map((entity) => ({ op: "move", entity, to: here })) }));
+    await rig.turn(chatId, "Hello.", "They look up.");
+    const contextOf = (name: string) => mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === name)?.messages[1]?.content ?? "";
+    expect(contextOf("Danny Okafor")).toContain("- Your secret, The till: TILL-TRUTH: Danny skims the till every Friday.");
+    expect(contextOf("Danny Okafor")).not.toContain("BOAT-TRUTH");
+    expect(contextOf("Priya Nair")).toContain("- Your secret, The boat: BOAT-TRUTH: Priya sold the club's boat.");
+    expect(contextOf("Priya Nair")).not.toContain("TILL-TRUTH");
+  });
+
+  test("the Mystery Manor's culprit thinks as the culprit", async () => {
+    const rig = new Rig({ shipped: true });
+    fakeModels(rig);
+    const worldId = await rig.newWorld("Manor", "mystery_manor");
+    rig.body(await rig.send({ type: "lre.editor", op: "set", worldId, base: null, part: "minds", value: { thresholds: { live: 900, near: 900, far: 900 }, always: { ids: ["julian_ashcombe"] } } }));
+    rig.body(await rig.send({ type: "lre.world", op: "commit", worldId, base: null }));
+    const chatId = rig.host.createChat("Morning.");
+    rig.body(await rig.send({ type: "lre.world", op: "attach", worldId, chatId }));
+    const here = placeOfEntity((await stateOf(rig, chatId)).state, "pov") ?? "";
+    rig.body(await rig.send({ type: "lre.edit", chatId, ops: [{ op: "move", entity: "julian_ashcombe", to: here }] }));
+    await rig.turn(chatId, "Good morning.", "He nods.");
+    const julian = mindCalls(rig).find((c) => MIND.exec(c.messages[0]?.content ?? "")?.[1] === "Julian Ashcombe")?.messages[1]?.content ?? "";
+    expect(julian).toContain("- Your secret, Julian's agenda: Julian has taken");
+    expect(julian).toContain("a lethal dose of digitalis tincture");
+  });
+
   test("who they are includes their list fields, such as traits, as words", async () => {
     const rig = new Rig({ shipped: true });
     fakeModels(rig);
