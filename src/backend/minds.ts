@@ -17,7 +17,7 @@ import type { CommitmentKind, Fidelity, MindCallTrace, MindCommitment, MindEvent
 import { COMMITMENT_KINDS, effectiveMemory, MIND_ANSWER_FORMATS, MIND_PROMPT_DEFAULTS, MIND_TEXT_CAPS, MINDS_EVENTS, PLAN_KINDS, PLAN_PRIORITY, worldMindsOf } from "../shared/minds";
 import type { ModelUseSettings, StepConfig } from "../shared/settings";
 import type { WorldDoc } from "../shared/world";
-import { calendarOf, clockOfLocal, formatClock, nextTimeOfDay, parseHHMM } from "../engine/calendar";
+import { calendarOf, clockOfStamp, formatClock, nextTimeOfDay } from "../engine/calendar";
 import { own } from "../engine/pack-kit";
 import { hiddenNameCheck, playerKnows, witnessLines } from "../engine/player-events";
 import type { Registry } from "../engine/registry-impl";
@@ -106,17 +106,20 @@ function varsFor(world: WorldDoc, state: Readonly<WorldState>, who: EntityId): R
 
 const str = (v: JsonValue | undefined): string => (typeof v === "string" ? v : "");
 
-/** A local time a model wrote ("2026-10-19 18:30", "2026-10-19", "18:30" for the next such time) as game minutes; null when it isn't one. */
+/**
+ * A local time a model wrote ("2026-10-19 18:30", "2026-10-19" for its midnight, "18:30" for the next
+ * such time) as game minutes; null unless it is a day the calendar has at a time from 00:00 to 23:59
+ * (`clockOfStamp`), never a guess at what was meant.
+ */
 export function localTime(world: WorldDoc, now: number, text: string): number | null {
-  const t = text.trim().replace(" ", "T");
+  const t = text.trim();
   const cal = calendarOf(world);
-  try {
-    if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(t)) return clockOfLocal(cal, t);
-    if (/^\d{1,2}:\d{2}$/.test(t)) return nextTimeOfDay(cal, now - 1, parseHHMM(t.padStart(5, "0")));
-  } catch {
-    return null;
-  }
-  return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return clockOfStamp(cal, `${t} 00:00`);
+  const hm = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (!hm) return clockOfStamp(cal, t);
+  const hours = Number(hm[1]);
+  const minutes = Number(hm[2]);
+  return hours <= 23 && minutes <= 59 ? nextTimeOfDay(cal, now - 1, hours * 60 + minutes) : null;
 }
 
 /** A person named by a model: by id, whole name, or a word of their name that is no one else's. */

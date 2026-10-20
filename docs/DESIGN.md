@@ -1243,7 +1243,7 @@ Four layers, each tunable (the world's defaults, then the user's overrides):
 - **Never in it:** the GM view, another character's mind, or a turn they weren't present for.
 - **The answer:** JSON `{monologue, depiction, intent, reactions[], plans[{what, kind, when{from, to}, where?, with?[], priority}], mood?, interrupt?{reason}}`.
   - Lengths are capped.
-  - Plans resolve to place and people ids and game minutes, and one with no time, or wholly past, is dropped.
+  - Plans resolve to place and people ids and game minutes, and one with no time, or wholly past, is dropped. A time is read strictly: a local `YYYY-MM-DD HH:MM`, a day (its midnight) or an `HH:MM` (the next such time), on a day the calendar has and from 00:00 to 23:59 (`clockOfStamp`); anything else is no time.
   - `interrupt` counts only at a time-skip beat.
   - An answer that isn't JSON gets one repair call. One that says nothing records no mind.
 - **Prompts:** the steps are `mind`, `memory`, `skip` and `consolidate`. Each has built-in instructions (`MIND_PROMPT_DEFAULTS`).

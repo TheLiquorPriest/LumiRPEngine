@@ -10,7 +10,10 @@ import { DEFAULT_MINDS_MEMORY } from "../../src/shared/minds";
 import type { WorldDoc } from "../../src/shared/world";
 import { toChain } from "../../src/backend/ledger-io";
 import type { QuietRequest } from "../../src/backend/host";
+import { localTime } from "../../src/backend/minds";
 import { presentTurns, recallFor } from "../../src/backend/minds-context";
+import { calendarOf, clockOfStamp } from "../../src/engine/calendar";
+import { modernUsWorld } from "../packs/riverton";
 import { playtestStart, playtestTurn } from "../../src/engine/authoring";
 import type { WorldState } from "../../src/engine/state";
 import { planTurn, postTurn } from "../../src/engine/turn";
@@ -329,6 +332,19 @@ describe("minds around a turn", () => {
     expect(rounds).toEqual([]);
     const { state } = await stateOf(rig, chatId);
     expect(rig.rt.registry.context((await stateOf(rig, chatId)).world, state).query("minds.on")(rig.rt.registry.context((await stateOf(rig, chatId)).world, state))).toBe(false);
+  });
+});
+
+describe("plan times a mind writes", () => {
+  test("read strictly: a day the calendar lacks, or a time past 23:59, is no time at all", () => {
+    const world = modernUsWorld("t", "R");
+    const cal = calendarOf(world);
+    const now = clockOfStamp(cal, "2026-10-19 09:00") ?? 0;
+    expect(localTime(world, now, "2026-10-19 18:30")).toBe(clockOfStamp(cal, "2026-10-19 18:30"));
+    expect(localTime(world, now, "2026-10-20")).toBe(clockOfStamp(cal, "2026-10-20 00:00"));
+    expect(localTime(world, now, "18:30")).toBe(clockOfStamp(cal, "2026-10-19 18:30"));
+    expect(localTime(world, now, "08:30")).toBe(clockOfStamp(cal, "2026-10-20 08:30"));
+    for (const bad of ["2026-13-01 10:00", "2026-02-30 10:00", "2026-10-19 25:30", "2026-02-30", "25:30", "24:00", "18:75", "tomorrow"]) expect(localTime(world, now, bad)).toBeNull();
   });
 });
 
