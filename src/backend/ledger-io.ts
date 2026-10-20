@@ -304,6 +304,9 @@ export interface TurnContext {
   content: string;
 }
 
+/** What the pre phase leaves the engine run: nothing to say, or a question the chat now asks, on which the run waits (a claim under Ask first, DESIGN §9.4). */
+export type PreOutcome = { waiting: string };
+
 /**
  * Async work around the core's synchronous steps (DESIGN §5.1): the engine run's pre phase, plan
  * phase and sections, and `extract` before the commit, run here inside the chat's queue, so the
@@ -316,7 +319,7 @@ export interface TurnHooks {
    * the same turn after a failed one may keep what that one got right while they, and whatever else
    * that part depends on, are unchanged.
    */
-  beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; runKey: string; signal: AbortSignal }): Promise<void>;
+  beforePlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; connectionId: string | null; runKey: string; signal: AbortSignal }): Promise<PreOutcome | undefined>;
   /** After the plan, before the reply: the plan-phase prose steps (DESIGN §5.2 brief, prose outline). */
   afterPlan(input: { chatId: ChatId; userId: UserId; core: LedgerCore; observed: ChainMessage[]; generationId: string; signal: AbortSignal }): Promise<void>;
   /** The engine run's last step (DESIGN §6.4): the prepared turn's sections written into the world's book, switched on. */
@@ -920,7 +923,14 @@ export class LedgerService {
         // Lumiverse starts only the last reply again, so a reply for an earlier message (Edit and Send
         // in place, a swipe of an earlier reply) is refused before any model call, never sent to the last one.
         if (halt.target !== null && observed.at(-1)?.id !== target?.id) throw new EngineFailure("target", NOT_LAST_REPLY);
-        await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\u0000${epoch}`, signal }));
+        const pre = await step("pre", () => hooks.beforePlan({ chatId, userId, core, observed, generationId: halt.id, connectionId: halt.connectionId, runKey: `${stamp}\u0000${epoch}`, signal }));
+        // The chat now asks the player something (a claim under Ask first, DESIGN §9.4): the run waits
+        // on the answer, with nothing generated and no restart; the answer's Regenerate runs it again.
+        if (pre) {
+          core.take(halt.id);
+          this.diag?.end(at, { status: "skipped", reason: pre.waiting });
+          return;
+        }
         await step("plan", async () => core.plan(halt.id, observed, false));
         await step("prose", () => hooks.afterPlan({ chatId, userId, core, observed, generationId: halt.id, signal }));
         this.failedStep(at);

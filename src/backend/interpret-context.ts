@@ -98,9 +98,11 @@ function paramWords(ctx: ReadContext, action: ActionDef, name: string, def: Para
     if (def.ref === "place") return places > 0 ? `${head} (a place id from Places)` : def.optional ? `${head} (no place you know of)` : null;
     if (def.optional) return `${head} (${kindWords(reg, world, def)}: an id named above${label})`;
     const ids = paramCandidates(reg, world, state, action, name).filter(mayKnow);
-    if (ids.length === 0) return null;
+    // A param a claim may fill (DESIGN §9.4) keeps its action for a thing the player says they have that nothing lists.
+    const claimed = def.claim ? "one nothing lists, in the input's own words" : null;
+    if (ids.length === 0) return claimed ? `${head} (${kindWords(reg, world, def)}: ${claimed})` : null;
     for (const id of ids) named.add(id);
-    return `${head} (${kindWords(reg, world, def)}: ${ids.join(" | ")})`;
+    return `${head} (${kindWords(reg, world, def)}: ${ids.join(" | ")}${claimed ? `, or ${claimed}` : ""})`;
   }
   if (def.table !== undefined) return `${head} (one of: ${tableChoices(own(world.tables, def.table)).map((c) => c.key).join(" | ")})`;
   if (action.id === "attempt" && name === "stat" && def.type === "text") {

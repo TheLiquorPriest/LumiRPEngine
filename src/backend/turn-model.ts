@@ -3,6 +3,7 @@
 // and then runs the post steps. Model calls happen before, in the ledger's async hooks; this
 // bridge only consumes their results, so the core stays synchronous and deterministic.
 
+import type { ActionId } from "../shared/ids";
 import { hashParts } from "../shared/hash";
 import type { JsonObject } from "../shared/json";
 import { hasOwn } from "../shared/json";
@@ -14,7 +15,7 @@ import type { ReadContext, Rejection } from "../engine/registry";
 import type { Registry } from "../engine/registry-impl";
 import { createRng } from "../engine/rng";
 import type { WorldState } from "../engine/state";
-import type { InterpretOutput, PostTurnInput, TurnPlanInput } from "../engine/steps";
+import type { InterpretOutput, PostTurnInput, QueuedAction, TurnPlanInput } from "../engine/steps";
 import { applyTimeAdvance, type SkipRecord } from "../engine/time";
 import type { EngineTurnPlan } from "../engine/turn";
 import { Working } from "../engine/working";
@@ -113,6 +114,23 @@ export interface UnfitAction {
   reason: string;
 }
 
+/** One action of a typed message's read (DESIGN §9.4): it plays, with any claim, unless it waits on the player's answer (`ask`). */
+export interface ReadStep extends QueuedAction {
+  ask?: { question: string; detail: string };
+}
+
+/** A typed message's read as `interpret` gave it and the engine judged it: what leads, its actions in order, and those dropped. */
+export interface HeldRead {
+  lead: ActionId | null;
+  params: JsonObject;
+  probabilities: Record<string, number>;
+  /** Whether the read named an action at all: with none left to play, the turn is plain roleplay. */
+  chosen: boolean;
+  then?: JsonObject;
+  steps: ReadStep[];
+  dropped: UnfitAction[];
+}
+
 export class TurnBridge implements TurnModel {
   /** `interpret` results keyed by the turn's last user text. */
   private readonly intents = new Map<string, InterpretOutput | null>();
@@ -140,6 +158,8 @@ export class TurnBridge implements TurnModel {
   private readonly offers = new Map<string, TimelapseTarget>();
   /** A timelapse turn's time skip as its pre phase ran it (DESIGN §24.7), keyed like `intents`: the plan replays it. */
   private readonly skips = new Map<string, SkipRecord>();
+  /** Typed messages whose read waits on the player's answer to a claim (Ask first, DESIGN §9.4), keyed like `intents`; none of it plays until each is answered. */
+  private readonly held = new Map<string, HeldRead>();
 
   constructor(
     private readonly registry: Registry,
@@ -152,6 +172,7 @@ export class TurnBridge implements TurnModel {
     trim(this.intents);
     this.unread.delete(userText);
     this.unfit.delete(userText);
+    this.held.delete(userText);
     if (interpreted && intent) this.interpreted.add(userText);
     else this.interpreted.delete(userText);
     if (this.interpreted.size > 64) this.interpreted.delete(this.interpreted.values().next().value ?? "");
@@ -171,6 +192,7 @@ export class TurnBridge implements TurnModel {
     this.intents.delete(userText);
     this.interpreted.delete(userText);
     this.unfit.delete(userText);
+    this.held.delete(userText);
     this.unread.add(userText);
     if (this.unread.size > 64) this.unread.delete(this.unread.values().next().value ?? "");
   }
@@ -194,6 +216,52 @@ export class TurnBridge implements TurnModel {
   /** The actions this text's turn dropped, in order, when `interpret` read ones whose params name nothing that fits; empty otherwise. */
   unfitOf(userText: string): readonly UnfitAction[] {
     return this.unfit.get(userText) ?? [];
+  }
+
+  /**
+   * A typed message's read (DESIGN §9.4, §11): the first action that plays leads, with the read's
+   * confidence, and the others queue behind it. While a claim in it waits on the player's answer,
+   * none of it is the turn's intent yet: it is held until each is answered (`answerClaim`).
+   */
+  setRead(userText: string, read: HeldRead): void {
+    if (read.steps.some((s) => s.ask)) {
+      this.intents.delete(userText);
+      this.interpreted.delete(userText);
+      this.unfit.delete(userText);
+      this.unread.delete(userText);
+      this.held.set(userText, read);
+      trim(this.held);
+      return;
+    }
+    this.held.delete(userText);
+    const [first, ...queue] = read.steps.map(({ ask: _ask, ...step }): QueuedAction => step);
+    const confidence = read.lead ? (read.probabilities[read.lead] ?? 1) : 1;
+    const probabilities = !first || first.action === read.lead ? read.probabilities : { [first.action]: confidence, none: 1 - confidence };
+    const intent: InterpretOutput | null = read.chosen && !first ? null : { action: first?.action ?? read.lead, params: first?.params ?? read.params, probabilities, ...(first?.claim ? { claim: first.claim } : {}), ...(read.then ? { then: read.then } : {}), ...(queue.length > 0 ? { queue } : {}) };
+    if (read.dropped.length > 0) this.setUnfit(userText, read.dropped, intent);
+    else this.setIntent(userText, intent, true);
+  }
+
+  /** Whether this text's read waits on the player's answer to a claim. */
+  isHeld(userText: string): boolean {
+    return this.held.has(userText);
+  }
+
+  /** The first claim this text's read waits on: its place in the read, and the question the chat asks. */
+  askOf(userText: string): { index: number; question: string; detail: string } | null {
+    const steps = this.held.get(userText)?.steps ?? [];
+    const index = steps.findIndex((s) => s.ask);
+    const ask = steps[index]?.ask;
+    return ask ? { index, ...ask } : null;
+  }
+
+  /** The player's answer to a claim's question: Add makes it real as read, Not an action drops that action. False when nothing waits there. */
+  answerClaim(userText: string, index: number, add: boolean): boolean {
+    const read = this.held.get(userText);
+    if (!read?.steps[index]?.ask) return false;
+    const steps = add ? read.steps.map((s, i): ReadStep => (i === index ? { action: s.action, params: s.params, text: s.text, ...(s.claim ? { claim: s.claim } : {}) } : s)) : read.steps.filter((_, i) => i !== index);
+    this.setRead(userText, { ...read, steps });
+    return true;
   }
 
   /** Whether this text's intent came from `interpret` (not a palette or chip action). */

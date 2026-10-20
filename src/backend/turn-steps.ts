@@ -125,8 +125,9 @@ export function planFacts(world: WorldDoc, before: PlanStart, after: Readonly<Wo
   };
 }
 
-/** A ref param of `interpret`'s read that names nothing that fits (`unfitRef`): its definition and what it held. */
+/** A ref param of `interpret`'s read that names nothing that fits (`unfitRef`): its name, its definition and what it held. */
 export interface UnfitRef {
+  param: string;
   def: ParamDef;
   value: JsonValue | undefined;
 }
@@ -140,21 +141,22 @@ export interface UnfitRef {
  * a guessed id of a hidden thing must read as one nothing has, or the outcome would tell the player
  * it exists.
  */
-export function unfitRef(registry: Registry, action: ActionDef, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, mayKnow: (id: EntityId) => boolean): UnfitRef | null {
+export function unfitRef(registry: Registry, action: ActionDef, params: JsonObject, world: WorldDoc, state: Readonly<WorldState>, mayKnow: (id: EntityId) => boolean, skip?: string): UnfitRef | null {
   for (const [name, def] of Object.entries(action.params)) {
-    if (def.type !== "ref") continue;
+    // `skip`: a param a claim fills (DESIGN §9.4), so only the action's others are judged.
+    if (def.type !== "ref" || name === skip) continue;
     const value = params[name];
     if (value === undefined || value === null || value === "") {
-      if (!def.optional) return { def, value };
+      if (!def.optional) return { param: name, def, value };
       continue;
     }
-    if (!safeKey(value)) return { def, value };
+    if (!safeKey(value)) return { param: name, def, value };
     const entity = hasOwn(state.entities, value) ? state.entities[value] : undefined;
     if (entity) {
-      if (!mayKnow(value) || (def.ref && !kindIs(registry, world, entity.kind, def.ref))) return { def, value };
+      if (!mayKnow(value) || (def.ref && !kindIs(registry, world, entity.kind, def.ref))) return { param: name, def, value };
       continue;
     }
-    if (!hasOwn(world.places, value) || (def.ref !== undefined && def.ref !== "place")) return { def, value };
+    if (!hasOwn(world.places, value) || (def.ref !== undefined && def.ref !== "place")) return { param: name, def, value };
   }
   return null;
 }
