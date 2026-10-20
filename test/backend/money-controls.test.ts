@@ -724,6 +724,12 @@ describe("a manager runs a business's money for the business, never for themselv
     expect(account(shop, LIFT_LOAN).autopay).toMatchObject({ mode: "minimum", from: SHOP });
   });
 
+  test("a payee typed as the manager's own name or id is them: Jordan, owning the shop, can't pay \"Jordan Ellis\" or \" POV \" from its checking, though he may pay another name", async () => {
+    const chat = await MoneyChat.start({ entities: { ...shopOnly, [BUSINESS]: { owners: [{ party: "pov", role: "owner" }] } } });
+    for (const to of ["Jordan Ellis", " POV "]) expect(await chat.play({ action: "flow_create", params: { label: "To me", from: SHOP, to, ...once } })).toContain("not for Jordan Ellis");
+    expect(await chat.play({ action: "flow_create", params: { label: "Parts", from: SHOP, to: "Harbor Parts", ...once } })).toContain("done");
+  });
+
   test("a C corporation's owner, who takes no draws, can't pay himself from its account by a standing payment or his mortgage's autopay", async () => {
     const chat = await MoneyChat.start({ pov: "marcus_delgado", entities: { ...shopOnly, [BUSINESS]: { structure: "c_corp" } } });
     expect(await chat.play({ action: "owner_draw", params: { business: BUSINESS, amount: 100_000 } })).toContain("didn't happen");

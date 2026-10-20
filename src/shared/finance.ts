@@ -426,6 +426,16 @@ export interface FlowShare {
   from?: EntityId;
 }
 
+/**
+ * The key an outside payer's or payee's name is kept by (`economy.external:<key>`): the name
+ * lowercased, each run of anything but letters, digits and ":" one "_", none at either end. Names
+ * with one key are one payee, so the backend and the hub read a typed name alike: a manager can't
+ * pay their own name from money they only manage (DESIGN §25.1).
+ */
+export function payeeKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9:]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
 /** One scheduled or one-off movement of money, read from a `flow` entity or derived by a module from its records. */
 export interface Flow {
   id: string;
