@@ -664,7 +664,7 @@ Detail on demand: `money` (version 2).
 
 ### Lint codes
 
-`economy.accounts`, `economy.assets`, `economy.business`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.
+`economy.accounts`, `economy.assets`, `economy.business`, `economy.claim_cap`, `economy.holdings`, `economy.property`, `economy.unpriced_cap`.
 
 ## Gear & containers pack (`gear`)
 
@@ -749,16 +749,16 @@ Extends `container`.
 
 | Action | Label | Description | Parameters | Check | Outcomes | Minutes | Lexicon |
 |---|---|---|---|---|---|---|---|
-| `drop` | Drop | Put down something you carry, here. | `item: ref → item` |  | `default` | `1` | drop, put down, leave |
-| `give` | Give | Hand something you carry to someone here, for keeps. | `item: ref → item`, `to: ref → person` |  | `default` | `1` | give, hand, pass |
+| `drop` | Drop | Put down something you carry, here. | `item: ref → item, claim: held` |  | `default` | `1` | drop, put down, leave |
+| `give` | Give | Hand something you carry to someone here, for keeps. | `item: ref → item, claim: held`, `to: ref → person` |  | `default` | `1` | give, hand, pass |
 | `lend` | Lend | Lend something of yours to someone, for some days or until a time. | `item: ref → item`, `to: ref → person`, `days?: number`, `until?: text` |  | `default` | `2` | lend, loan, let borrow |
 | `lose` | Lose something | Something you own or carry is lost or gone, whereabouts unknown. | `item: ref → item` |  | `default` | `1` | lost my, lose, can't find my, is gone, is missing |
 | `reclaim` | Take back | Take back something of yours that you lent out. | `item: ref → item` |  | `default` | `5` | take back, get back, reclaim |
 | `remove` | Take off | Take off something you wear or have equipped. | `item: ref → item` |  | `default` | `2` | take off, remove, unequip |
-| `take` | Take | Pick up something that is here. | `item: ref → item` |  | `default` | `1` | take, pick up, grab |
+| `take` | Take | Pick up something that is here. | `item: ref → item, claim: here` |  | `default` | `1` | take, pick up, grab |
 | `take_piece` | Take from a kit | Take one piece, such as a tool or a part, out of a kit. | `kit: ref → kit`, `piece: text` |  | `default` | `1` | take the, grab a, get a |
-| `use` | Use | Use an item you carry or can reach. | `item: ref → item` |  | `default` | `5` | use, apply |
-| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item` |  | `default` | `2` | wear, put on, equip |
+| `use` | Use | Use an item you carry or can reach. | `item: ref → item, claim: held` |  | `default` | `5` | use, apply |
+| `wear` | Wear or equip | Put on or equip clothing, armor or gear. | `item: ref → item, claim: held` |  | `default` | `2` | wear, put on, equip |
 
 ### Proposals
 

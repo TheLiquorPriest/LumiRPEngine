@@ -113,6 +113,7 @@
       "description": "The economy pack's config (DESIGN §25): the world's account products, its Custom money feature toggles and its assets; other keys (a module's, such as taxes) are allowed.",
       "properties": {
         "unpricedCap": { "type": "number", "description": "The most a narrated price nothing else prices is charged, in minor units." },
+        "claimCap": { "type": "integer", "minimum": 1, "description": "The most a thing the player says they have may cost before a capped Make it real asks first, in minor units; absent, about the price of a meal." },
         "products": { "type": "object", "description": "Account products by id: a class, and the terms that differ from its defaults.", "additionalProperties": { "type": "object", "required": ["class"], "properties": { "class": { "enum": ["cash", "checking", "business_checking", "savings", "money_market", "cd", "trust", "escrow", "credit_card", "charge_card", "line_of_credit", "loan", "mortgage", "brokerage", "retirement"] }, "label": { "type": "string" }, "institution": { "type": "string" } } } },
         "features": { "type": "object", "description": "Custom toggles: a money feature switched on from its floor up, or off.", "additionalProperties": { "type": "boolean" } },
         "assets": { "type": "object", "description": "Assets the holdings module prices, by id.", "additionalProperties": { "type": "object" } }
@@ -477,7 +478,7 @@
       "type": "object",
       "required": ["type"],
       "additionalProperties": false,
-      "properties": { "type": { "$ref": "#/$defs/fieldType" }, "label": { "type": "string" }, "ref": { "$ref": "#/$defs/id" }, "optional": { "type": "boolean" }, "of": { "$ref": "#/$defs/selector" }, "table": { "$ref": "#/$defs/id", "description": "a text param naming a row of this data table (a skill, a save)" } }
+      "properties": { "type": { "$ref": "#/$defs/fieldType" }, "label": { "type": "string" }, "ref": { "$ref": "#/$defs/id" }, "optional": { "type": "boolean" }, "of": { "$ref": "#/$defs/selector" }, "table": { "$ref": "#/$defs/id", "description": "a text param naming a row of this data table (a skill, a save)" }, "claim": { "enum": ["held", "here"], "description": "a ref param a thing the player says they have may fill: it appears in the actor's hands (held) or where the actor is (here)" } }
     },
     "check": {
       "title": "a check",
@@ -769,6 +770,13 @@
           "required": ["principal", "supporting", "background"],
           "additionalProperties": false,
           "properties": { "principal": { "$ref": "#/$defs/domainLevels" }, "supporting": { "$ref": "#/$defs/domainLevels" }, "background": { "$ref": "#/$defs/domainLevels" } }
+        },
+        "claims": {
+          "type": "object",
+          "description": "What a typed action's thing the world doesn't have becomes in new chats; absent, the player's own setting.",
+          "required": ["mode"],
+          "additionalProperties": false,
+          "properties": { "mode": { "enum": ["real", "ask", "hold"] }, "capped": { "type": "boolean", "description": "Under real, a thing priced above the claim cap asks first." } }
         }
       }
     },

@@ -44,6 +44,7 @@ import {
   balance,
   canSpend,
   classOf,
+  derivedClaimCap,
   derivedUnpricedCap,
   external,
   hasLedger,
@@ -617,6 +618,16 @@ function registerRest(r: CoreRegistry, hooks: FinanceHooks): void {
       // The engine reads a fraction rounded and anything else not above zero as unset (`unpricedCap`).
       const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedUnpricedCap(world), world.currency)}`;
       return [{ severity: "warning" as const, code: "economy.unpriced_cap", message: `The narrated-price cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; narrated prices are capped at ${fallback}.`, path: "packs.economy.config.unpricedCap" }];
+    },
+  });
+  r.lint({
+    code: "economy.claim_cap",
+    check(world) {
+      const cap = world.packs.economy?.config.claimCap;
+      if (cap === undefined || (typeof cap === "number" && Number.isSafeInteger(cap) && cap > 0)) return [];
+      // As with the narrated-price cap, the engine reads a fraction rounded and anything else not above zero as unset (`claimCap`).
+      const fallback = typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? `${formatMoney(Math.round(cap), world.currency)}, rounded` : `the default, ${formatMoney(derivedClaimCap(world), world.currency)}`;
+      return [{ severity: "warning" as const, code: "economy.claim_cap", message: `The claim cap should be a whole number of ${minorUnitPlural(world.currency)} above zero; a capped Make it real asks first above ${fallback}.`, path: "packs.economy.config.claimCap" }];
     },
   });
 }

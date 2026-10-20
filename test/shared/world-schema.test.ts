@@ -67,6 +67,18 @@ describe("world schema", () => {
     expect(problems(withValue(world, ["ruleset", "magic"], {}))).toEqual(['ruleset.magic: "magic" isn\'t a field here']);
   });
 
+  test("player claims: a world's default policy, a claim param's place and the claim cap", () => {
+    expect(problems(withValue(world, ["realism", "claims"], { mode: "ask", capped: true }))).toEqual([]);
+    expect(problems(withValue(world, ["realism", "claims"], { mode: "maybe" }))).toEqual(['realism.claims.mode: should be "real", "ask" or "hold"']);
+    expect(problems(withValue(world, ["realism", "claims"], { capped: true }))).toEqual(['realism.claims: needs "mode"']);
+    const action: JsonValue = { id: "light", label: "Light up", params: { lighter: { type: "ref", ref: "item", claim: "held" } }, requires: [], outcomes: { default: [] }, duration: "1" };
+    const lit = withValue(world, ["actions", "light"], action) as WorldDoc;
+    expect(problems(lit)).toEqual([]);
+    expect(problems(withValue(lit, ["actions", "light", "params", "lighter", "claim"], "pocket"))).toEqual(['actions.light.params.lighter.claim: should be "held" or "here"']);
+    expect(problems(withValue(world, ["packs", "economy", "config", "claimCap"], 2500))).toEqual([]);
+    expect(problems(withValue(world, ["packs", "economy", "config", "claimCap"], 0)).map((p) => p.split(": ")[0])).toEqual(["packs.economy.config.claimCap"]);
+  });
+
   test("lore may be Known by, read once the POV knows what it links; no other reader is a value", () => {
     expect(problems(withValue(world, ["lore", "harbor_history", "visibility"], "known_by"))).toEqual([]);
     expect(problems(withValue(world, ["lore", "harbor_history", "visibility"], "public"))).toEqual([]);

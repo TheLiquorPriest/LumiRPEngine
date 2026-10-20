@@ -1,10 +1,12 @@
 // DESIGN §13 lint coverage in the engine and packs: refs, types, cycles, unreachable stages,
-// expressions, unbalanced postings, frozen predicates and double-booked commitments.
+// expressions, unbalanced postings, frozen predicates, double-booked commitments and player claims.
 import { describe, expect, test } from "bun:test";
 import { calendarOf, clockOfLocal } from "../../src/engine/calendar";
 import { createRegistry } from "../../src/engine/registry-impl";
 import { lintStructure } from "../../src/engine/world-lint";
 import { ALL_PACKS } from "../../src/packs/index";
+import { derivedClaimCap } from "../../src/packs/economy/core/model";
+import { formatMoney } from "../../src/shared/world";
 import { modernUsWorld } from "./riverton";
 
 const reg = createRegistry(ALL_PACKS);
@@ -49,5 +51,30 @@ describe("§13 lint", () => {
     ];
     const messages = reg.lints.filter((l) => l.code === "castlife.double_booking").flatMap((l) => l.check(w)).map((i) => i.message);
     expect(messages).toEqual(expect.arrayContaining(["Maya Chen is double-booked: Dentist and Bank overlap.", "Maya Chen is double-booked: Dentist falls in maya_shift.", "Maya Chen is double-booked: Bank falls in maya_shift."]));
+  });
+
+  test("player claims: a claim param's place, the world's default policy and the claim cap are checked where they sit", () => {
+    const w = modernUsWorld("w", "R");
+    const at = (code: string): string[] => lintStructure(w, reg).filter((i) => i.code === code).map((i) => `${i.severity} ${i.path}`).sort();
+    const capLint = (): string[] => reg.lints.filter((l) => l.code === "economy.claim_cap").flatMap((l) => l.check(w)).map((i) => `${i.severity} ${i.path}: ${i.message}`);
+    w.actions.light = { id: "light", label: "Light up", params: { lighter: { type: "ref", ref: "item", claim: "held" }, smoke: { type: "ref", ref: "item", claim: "here" } }, requires: [], outcomes: { default: [] }, duration: "1" };
+    w.realism.claims = { mode: "ask", capped: true };
+    w.packs.economy = { ...w.packs.economy, config: { ...(w.packs.economy?.config ?? {}), claimCap: 2500 } };
+    expect([at("claims"), capLint()]).toEqual([[], []]);
+    // Read from outside data, a document can say anything; lint names each wrong value.
+    const light = w.actions.light;
+    Object.assign(light.params.lighter ?? {}, { claim: "pocket" });
+    light.params.note = { type: "text", claim: "held" };
+    Object.assign(w.realism, { claims: { mode: "maybe", capped: true } });
+    expect(at("claims")).toEqual(["error actions.light.params.lighter.claim", "error realism.claims", "warning actions.light.params.note.claim"]);
+    Object.assign(w.realism, { claims: { mode: "real", capped: "yes" } });
+    expect(at("claims")).toEqual(["error actions.light.params.lighter.claim", "warning actions.light.params.note.claim", "warning realism.claims.capped"]);
+    const fallback = formatMoney(derivedClaimCap(w), w.currency);
+    for (const bad of [0, -100, "25"]) {
+      w.packs.economy!.config.claimCap = bad;
+      expect(capLint()).toEqual([`warning packs.economy.config.claimCap: The claim cap should be a whole number of cents above zero; a capped Make it real asks first above the default, ${fallback}.`]);
+    }
+    w.packs.economy!.config.claimCap = 2499.6;
+    expect(capLint()[0]).toEndWith(`asks first above ${formatMoney(2500, w.currency)}, rounded.`);
   });
 });
